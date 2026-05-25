@@ -326,7 +326,7 @@ function ptv4_save_card_state(PDO $pdo, int $attemptId, int $itemId, int $userId
 
 function ptv4_default_clarification_text(): string
 {
-    return 'I may not have heard that correctly. Please answer again in English.';
+    return 'I may not have heard that clearly. Please try answering again.';
 }
 
 function ptv4_word_count(string $text): int
@@ -359,8 +359,58 @@ function ptv4_clarification_eligible(string $answer, array $eval): bool
 
 function ptv4_is_english_retry_eval(array $eval): bool
 {
-    return in_array('English-only answer required', $eval['missing_concepts'] ?? [], true)
-        || stripos((string)($eval['feedback_for_student'] ?? ''), 'again in English') !== false;
+    return in_array('English-only answer required', $eval['missing_concepts'] ?? [], true);
+}
+
+function ptv4_whisper_prompt_for_kind(string $kind): string
+{
+    if ($kind === 'yesno') return 'The student answers yes or no only.';
+    if ($kind === 'mcq') return 'The student states their multiple choice answer.';
+    return '';
+}
+
+function ptv4_load_item_kind(PDO $pdo, int $attemptId, int $itemId): string
+{
+    try {
+        $st = $pdo->prepare("SELECT kind FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
+        $st->execute([$itemId, $attemptId]);
+        return trim((string)$st->fetchColumn());
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
+function ptv4_yesno_typed_fallback_allowed(PDO $pdo, int $attemptId, int $itemId): bool
+{
+    $responses = ptv4_load_responses($pdo, $attemptId);
+    $response = $responses[$itemId] ?? null;
+    if ($response && !empty($response['evaluated_at'])) {
+        return false;
+    }
+    if ($response && trim((string)($response['clarification_question_text'] ?? '')) !== '') {
+        return true;
+    }
+
+    $cards = ptv4_load_card_sessions($pdo, $attemptId);
+    $card = $cards[$itemId] ?? null;
+    if ($card) {
+        $state = (string)($card['card_state'] ?? '');
+        if ($state === 'clarification' || !empty($card['clarification_used'])) {
+            return true;
+        }
+    }
+
+    if (ptv4_answer_chunk_count($pdo, $attemptId, $itemId) <= 0) {
+        return false;
+    }
+
+    try {
+        $st = $pdo->prepare("SELECT transcript_text FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
+        $st->execute([$itemId, $attemptId]);
+        return trim((string)$st->fetchColumn()) === '';
+    } catch (Throwable $e) {
+        return true;
+    }
 }
 
 function ptv4_is_likely_non_english(string $text): bool
@@ -754,7 +804,7 @@ function ptv4_persist_item_answer_audio(PDO $pdo, int $attemptId, int $itemId, s
     }
 }
 
-function ptv4_transcribe_audio_file(string $path): string
+function ptv4_transcribe_audio_file(string $path, string $prompt = ''): string
 {
     if (!is_file($path) || filesize($path) <= 0) return '';
     $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
@@ -764,6 +814,10 @@ function ptv4_transcribe_audio_file(string $path): string
         'language' => 'en',
         'response_format' => 'json',
     ];
+    $prompt = trim($prompt);
+    if ($prompt !== '') {
+        $post['prompt'] = $prompt;
+    }
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . cw_openai_key()],
@@ -867,8 +921,12 @@ function ptv4_clean_final_transcript(string $text): string
     return trim($text);
 }
 
-function ptv4_ensure_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): void
+function ptv4_ensure_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId, string $itemKind = ''): void
 {
+    if ($itemKind === '') {
+        $itemKind = ptv4_load_item_kind($pdo, $attemptId, $itemId);
+    }
+    $prompt = ptv4_whisper_prompt_for_kind($itemKind);
     $st = $pdo->prepare("
         SELECT chunk_index, storage_path, transcript_text
         FROM progress_test_v4_answer_chunks
@@ -885,7 +943,7 @@ function ptv4_ensure_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): v
         $path = (string)($row['storage_path'] ?? '');
         if (!is_file($path) || filesize($path) <= 0) continue;
         if (trim((string)($row['transcript_text'] ?? '')) !== '') continue;
-        $transcript = ptv4_transcribe_audio_file($path);
+        $transcript = ptv4_transcribe_audio_file($path, $prompt);
         if ($transcript !== '') {
             $up->execute([$transcript, $attemptId, $itemId, (int)$row['chunk_index']]);
         }
@@ -946,20 +1004,32 @@ function ptv4_touch_answer_chunk_count(PDO $pdo, int $attemptId, int $itemId): v
 
 function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, int $recordingMs = 0, string $cookieHeader = ''): array
 {
+    $itemKind = ptv4_load_item_kind($pdo, $attemptId, $itemId);
+    $whisperPrompt = ptv4_whisper_prompt_for_kind($itemKind);
     $chunkCount = ptv4_answer_chunk_count($pdo, $attemptId, $itemId);
     $audioReceived = $chunkCount > 0;
     $audioPath = null;
+    $mergedBytes = 0;
 
     if ($audioReceived) {
         $audioPath = ptv4_persist_item_answer_audio($pdo, $attemptId, $itemId, $cookieHeader);
-        ptv4_ensure_chunk_transcripts($pdo, $attemptId, $itemId);
+        ptv4_ensure_chunk_transcripts($pdo, $attemptId, $itemId, $itemKind);
     }
 
     $mergedPath = $audioReceived ? ptv4_merge_chunk_audio_files($pdo, $attemptId, $itemId) : null;
-    $mergedTranscript = $mergedPath ? ptv4_transcribe_audio_file($mergedPath) : '';
+    if ($mergedPath && is_file($mergedPath)) {
+        $mergedBytes = (int)filesize($mergedPath);
+    }
+    $mergedTranscript = $mergedPath ? ptv4_transcribe_audio_file($mergedPath, $whisperPrompt) : '';
     $chunkMerged = $audioReceived ? ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId) : '';
     $final = ptv4_clean_final_transcript($mergedTranscript !== '' ? $mergedTranscript : $chunkMerged);
     $hasAudio = ptv4_answer_has_usable_audio($pdo, $attemptId, $itemId, $recordingMs);
+    if ($final === '' && $itemKind === 'yesno' && $mergedPath && $hasAudio) {
+        $retryTranscript = ptv4_transcribe_audio_file($mergedPath, 'yes, no, yeah, nope, true, false');
+        if ($retryTranscript !== '') {
+            $final = ptv4_clean_final_transcript($retryTranscript);
+        }
+    }
     $usable = $final !== '' && !ptv4_transcript_looks_corrupted($final);
 
     return [
@@ -967,6 +1037,9 @@ function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, int $re
         'has_audio' => $hasAudio,
         'audio_received' => $audioReceived,
         'chunk_count' => $chunkCount,
+        'merged_bytes' => $mergedBytes,
+        'recording_ms' => $recordingMs,
+        'item_kind' => $itemKind,
         'audio_path' => $audioPath,
         'transcript_usable' => $usable,
         'transcription_failed' => $hasAudio && !$usable,
@@ -1182,6 +1255,7 @@ function ptv4_evaluation_response(PDO $pdo, array $u, array $attempt, array $ite
             'evaluation' => $eval,
             'clarification_allowed' => true,
             'clarification_question' => $clarificationText,
+            'show_typed_yesno_fallback' => (string)($item['kind'] ?? '') === 'yesno',
             'next_action' => 'clarify',
             'is_complete' => false,
             'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId)),

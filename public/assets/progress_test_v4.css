@@ -497,8 +497,42 @@
   color: #9a3412;
 }
 
+.ptv4-yesno-fallback {
+  display: none;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+  border-radius: 12px;
+  background: rgba(255, 193, 7, 0.08);
+}
+
+.ptv4-yesno-fallback.is-visible {
+  display: block;
+}
+
+.ptv4-yesno-fallback-label {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.ptv4-yesno-fallback-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ptv4-yesno-fallback-actions .app-btn {
+  min-width: 96px;
+}
+
 .ptv4-hint.is-visible,
-.ptv4-hint-warn.is-visible,
+.ptv4-hint-warn.is-visible {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .ptv4-feedback.is-visible {
   visibility: visible;
   opacity: 1;

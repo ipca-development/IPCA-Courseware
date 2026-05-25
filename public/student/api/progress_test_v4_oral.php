@@ -316,16 +316,58 @@ try {
                     'result' => 'clarify',
                     'missing_concepts' => ['Transcript unavailable'],
                     'clarification_question' => ptv4_default_clarification_text(),
-                    'feedback_for_student' => 'I may not have heard that correctly. Please answer again in English.',
+                    'feedback_for_student' => ptv4_default_clarification_text(),
                     'safety_critical_issue' => false,
                 ]);
-                ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $answer, $clarificationUsed));
+                $response = ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $answer, $clarificationUsed);
+                if ((string)($item['kind'] ?? '') === 'yesno') {
+                    $response['show_typed_yesno_fallback'] = true;
+                }
+                ptv4_json($response);
             }
             ptv4_json(['ok' => false, 'error' => 'No answer captured'], 400);
         }
 
         $eval = ptv4_grade_item($pdo, $item, $answer);
         ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $answer, $clarificationUsed));
+    }
+
+    if ($action === 'submit_typed_answer') {
+        $itemId = (int)($data['item_id'] ?? 0);
+        $typed = strtolower(trim((string)($data['student_answer_text'] ?? '')));
+        if ($itemId <= 0) ptv4_json(['ok' => false, 'error' => 'item_id required'], 400);
+
+        $itemSt = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
+        $itemSt->execute([$itemId, $attemptId]);
+        $item = $itemSt->fetch(PDO::FETCH_ASSOC);
+        if (!$item) ptv4_json(['ok' => false, 'error' => 'Question item not found'], 404);
+        if ((string)($item['kind'] ?? '') !== 'yesno') {
+            ptv4_json(['ok' => false, 'error' => 'Typed fallback is only available for yes/no questions'], 400);
+        }
+
+        if (!in_array($typed, ['yes', 'no', 'yeah', 'yep', 'nope', 'true', 'false'], true)) {
+            ptv4_json(['ok' => false, 'error' => 'Answer must be yes or no'], 400);
+        }
+        $normalized = in_array($typed, ['no', 'nope', 'false'], true) ? 'no' : 'yes';
+
+        if (!ptv4_yesno_typed_fallback_allowed($pdo, $attemptId, $itemId)) {
+            ptv4_json(['ok' => false, 'error' => 'Typed fallback is not available for this question yet'], 403);
+        }
+
+        ptv4_log_debug_event(
+            $pdo,
+            (int)$attempt['user_id'],
+            'typed_yesno_fallback',
+            $normalized,
+            ['item_id' => $itemId, 'answer_source' => 'typed_fallback'],
+            $attemptId,
+            $itemId,
+            (int)$attempt['cohort_id'],
+            (int)$attempt['lesson_id']
+        );
+        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'evaluating', $normalized);
+        $eval = ptv4_grade_item($pdo, $item, $normalized);
+        ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $normalized, false));
     }
 
     if ($action === 'advance_item') {

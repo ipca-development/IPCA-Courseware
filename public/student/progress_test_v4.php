@@ -318,6 +318,14 @@ cw_header('Progress Test');
         <div class="ptv4-feedback" data-ptv4-feedback aria-hidden="true"></div>
       </div>
 
+      <div class="ptv4-yesno-fallback" data-ptv4-yesno-fallback hidden aria-hidden="true">
+        <p class="ptv4-yesno-fallback-label">If recording is not working, tap your answer:</p>
+        <div class="ptv4-yesno-fallback-actions">
+          <button class="app-btn app-btn-secondary" type="button" data-ptv4-yesno-value="yes">Yes</button>
+          <button class="app-btn app-btn-secondary" type="button" data-ptv4-yesno-value="no">No</button>
+        </div>
+      </div>
+
       <div class="ptv4-card-actions" aria-label="Progress test controls">
         <button class="app-btn app-btn-primary ptv4-action-primary" type="button" data-ptv4-primary-action disabled>Ready</button>
         <button class="app-btn app-btn-secondary ptv4-action-next ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
@@ -437,5 +445,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=32"></script>
+<script src="/assets/progress_test_v4.js?v=33"></script>
 <?php cw_footer(); ?>

@@ -6,6 +6,7 @@
   var START_ANSWER_MS = 30000;
   var RECORDING_MS = 45000;
   var CHUNK_MS = 1500;
+  var SHORT_CHUNK_MS = 500;
   var MIN_RECORDING_MS = 2500;
   var TRANSCRIPT = {
     preidle: 'Your spoken answer will appear here after you stop recording.',
@@ -89,7 +90,9 @@
     debugLog: $('[data-ptv4-debug-log]'),
     debugPinView: $('[data-ptv4-debug-pin-view]'),
     bugReport: $('[data-ptv4-bug-report]'),
-    bugSent: $('[data-ptv4-bug-sent]')
+    bugSent: $('[data-ptv4-bug-sent]'),
+    yesnoFallback: $('[data-ptv4-yesno-fallback]'),
+    yesnoButtons: $all('[data-ptv4-yesno-value]')
   };
 
   var state = null;
@@ -115,6 +118,8 @@
   var chunkUploadChain = Promise.resolve();
   var chunksReceived = 0;
   var chunksUploaded = 0;
+  var yesnoAudioFailed = false;
+  var yesnoFallbackItemId = 0;
   var pendingEvalOpts = null;
   var pc = null;
   var dc = null;
@@ -615,6 +620,7 @@
       setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
       restoreAnswerTimerIfAny();
       setHintContent(reason || 'Your answer was not submitted. Tap <strong>Start Answer</strong> when you are ready.', true);
+      markYesNoAudioFailed();
       logEvent('recording_cancelled', reason || 'too_short');
       syncButtons();
     });
@@ -844,6 +850,95 @@
     return Math.max(0, Date.now() - recordingStartedAt);
   }
 
+  function itemKind(item) {
+    return item && String(item.kind || '');
+  }
+
+  function isShortAnswerKind(item) {
+    var kind = itemKind(item);
+    return kind === 'yesno' || kind === 'mcq';
+  }
+
+  function minRecordingMsForItem(item) {
+    return isShortAnswerKind(item) ? 0 : MIN_RECORDING_MS;
+  }
+
+  function chunkMsForItem(item) {
+    return isShortAnswerKind(item) ? SHORT_CHUNK_MS : CHUNK_MS;
+  }
+
+  function answerHintForItem(item) {
+    if (itemKind(item) === 'yesno') {
+      return 'Say <strong>yes</strong> or <strong>no</strong> clearly, then tap <strong>Stop Answer</strong>.';
+    }
+    if (itemKind(item) === 'mcq') {
+      return 'State your choice clearly, then tap <strong>Stop Answer</strong>.';
+    }
+    return 'Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.';
+  }
+
+  function resetYesNoFallbackState() {
+    yesnoAudioFailed = false;
+    yesnoFallbackItemId = 0;
+    hideYesNoFallback();
+  }
+
+  function markYesNoAudioFailed() {
+    if (!currentItem || itemKind(currentItem) !== 'yesno') return;
+    yesnoAudioFailed = true;
+    yesnoFallbackItemId = parseInt(currentItem.id, 10) || 0;
+    showYesNoFallback();
+  }
+
+  function canShowYesNoFallback() {
+    if (!yesnoAudioFailed || !currentItem || itemKind(currentItem) !== 'yesno') return false;
+    if ((parseInt(currentItem.id, 10) || 0) !== yesnoFallbackItemId) return false;
+    if (currentItem.evaluated || cardState === CARD.LISTENING || cardState === CARD.EVALUATING) return false;
+    if (awaitingNextQuestion && cardState === CARD.COMPLETE) return false;
+    return cardState === CARD.READY || cardState === CARD.CLARIFICATION;
+  }
+
+  function showYesNoFallback() {
+    if (!els.yesnoFallback || !canShowYesNoFallback()) return;
+    els.yesnoFallback.hidden = false;
+    els.yesnoFallback.classList.add('is-visible');
+    els.yesnoFallback.setAttribute('aria-hidden', 'false');
+    syncButtons();
+  }
+
+  function hideYesNoFallback() {
+    if (!els.yesnoFallback) return;
+    els.yesnoFallback.hidden = true;
+    els.yesnoFallback.classList.remove('is-visible');
+    els.yesnoFallback.setAttribute('aria-hidden', 'true');
+    syncButtons();
+  }
+
+  function submitTypedYesNo(value) {
+    if (!currentItem || itemKind(currentItem) !== 'yesno' || !attemptId) return;
+    if (!canShowYesNoFallback()) return;
+    hideYesNoFallback();
+    hideRetry();
+    setCardState(CARD.EVALUATING);
+    startProcessingProgress('Processing your answer');
+    setStatus('Processing your answer...');
+    logEvent('typed_yesno_fallback', value, { item_id: currentItem.id });
+    apiJson('submit_typed_answer', {
+      item_id: currentItem.id,
+      student_answer_text: value
+    }).then(function (out) {
+      liveTranscript = value;
+      setTranscriptDisplay('final', value);
+      return handleEvaluationResult(out);
+    }).catch(function (err) {
+      finishProcessingProgress('Processing your answer');
+      markYesNoAudioFailed();
+      setHintContent('Could not submit your tap answer. Please try again or record your answer.<br><span style="font-size:12px;opacity:.85">' + (err.message || '') + '</span>', true);
+      setCardState(CARD.READY);
+      setStatus('Could not submit tap answer.');
+    });
+  }
+
   function courseReturnUrl() {
     if (cfg.courseReturnUrl) return cfg.courseReturnUrl;
     var cohortId = parseInt(cfg.cohortId || 0, 10) || 0;
@@ -993,6 +1088,12 @@
     var actions = page.querySelector('.ptv4-card-actions');
     if (actions) {
       actions.classList.toggle('is-session-active', !!testStarted);
+    }
+    if (els.yesnoButtons && els.yesnoButtons.length) {
+      var fallbackEnabled = canShowYesNoFallback() && !isRecording && !mayaSpeaking && cardState !== CARD.EVALUATING;
+      els.yesnoButtons.forEach(function (btn) {
+        btn.disabled = !fallbackEnabled;
+      });
     }
   }
 
@@ -1305,7 +1406,10 @@
     stopMayaBarMotion();
     setCardState(CARD.READY);
     setStatus('Tap Start Answer within 30 seconds.');
-    setHintContent('Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.', true);
+    setHintContent(answerHintForItem(currentItem), true);
+    if (!options.keepFallback) {
+      resetYesNoFallbackState();
+    }
     if (!options.keepTimer) {
       startStartAnswerTimer();
     }
@@ -1369,7 +1473,10 @@
     clarificationMode = false;
     hideFeedbackPanel();
     setRecordHintVisible(false);
-    setHintContent('Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.', true);
+    setHintContent(answerHintForItem(currentItem), true);
+    if (!isReplay) {
+      resetYesNoFallbackState();
+    }
     if (!currentItem) return;
 
     if (cardState !== CARD.COMPLETE) {
@@ -1580,6 +1687,7 @@
     pauseAnswerTimerIfRunning();
     stopTimer();
     stopRecordStream();
+    hideYesNoFallback();
     clarificationMode = cardState === CARD.CLARIFICATION || clarificationPending;
     if (!clarificationMode) {
       originalAnswer = '';
@@ -1619,6 +1727,7 @@
     });
 
     var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    var chunkMs = chunkMsForItem(currentItem);
     mediaRecorder = new MediaRecorder(recordStream, { mimeType: mime });
     mediaRecorder.ondataavailable = function (ev) {
       if (ev.data && ev.data.size > 0) {
@@ -1629,8 +1738,8 @@
     mediaRecorder.onerror = function (ev) {
       dbg('MediaRecorder error', ev.error || ev);
     };
-    mediaRecorder.start(CHUNK_MS);
-    dbg('recorder started', { mime: mime, chunkMs: CHUNK_MS, attemptId: attemptId, itemId: currentItem.id });
+    mediaRecorder.start(chunkMs);
+    dbg('recorder started', { mime: mime, chunkMs: chunkMs, attemptId: attemptId, itemId: currentItem.id });
     setStatus(clarificationMode ? 'Recording clarification in English.' : 'Recording your answer.');
     syncButtons();
   }
@@ -1638,6 +1747,7 @@
   function handleUploadFailure(err, opts) {
     pendingEvalOpts = opts || pendingEvalOpts;
     var msg = String(err && err.message ? err.message : err || '');
+    markYesNoAudioFailed();
     if (msg.indexOf('No audio received') >= 0 || msg === 'AUDIO_NOT_RECEIVED') {
       setTranscriptDisplay('noAudio');
       showRetry('answer', TRANSCRIPT.noAudio);
@@ -1695,6 +1805,7 @@
         } else if (tr.transcription_failed) {
           liveTranscript = '';
           setTranscriptDisplay('failed');
+          markYesNoAudioFailed();
         } else {
           liveTranscript = '';
         }
@@ -1741,7 +1852,7 @@
   }
 
   function stopAnswerCapture(timedOutRecording) {
-    if (!timedOutRecording && recordingStartedAt > 0 && getRecordingMs() < MIN_RECORDING_MS) {
+    if (!timedOutRecording && recordingStartedAt > 0 && getRecordingMs() < minRecordingMsForItem(currentItem)) {
       cancelAnswerCapture('Please speak for at least a few seconds before stopping. Your answer was not submitted.');
       return;
     }
@@ -1779,8 +1890,9 @@
       hideFeedbackPanel();
       setTranscriptDisplay('idle');
       finishProcessingProgress('Processing your answer');
+      markYesNoAudioFailed();
       playMayaServerSpeech('Please answer this question again in English.', 'retry_english', function () {
-        onQuestionFinished();
+        onQuestionFinished({ keepFallback: true });
       });
       return;
     }
@@ -1797,13 +1909,21 @@
       setTranscriptDisplay('idle');
       finishProcessingProgress('Processing your answer');
       pausedAnswerTimer = null;
+      if (out.show_typed_yesno_fallback) {
+        markYesNoAudioFailed();
+      }
       playMayaServerSpeech(clarificationQuestion, 'clarification', function () {
         setCardState(CARD.CLARIFICATION);
         setStatus('One clarification allowed. Tap Start Answer.');
+        if (out.show_typed_yesno_fallback) {
+          showYesNoFallback();
+        }
         startStartAnswerTimer();
       });
       return;
     }
+
+    resetYesNoFallbackState();
 
     clarificationPending = false;
     var scoreLine = 'You scored ' + scorePct + ' percent for this question.';
@@ -2392,6 +2512,13 @@
       if (els.bugSent) els.bugSent.hidden = false;
     });
   });
+  if (els.yesnoButtons && els.yesnoButtons.length) {
+    els.yesnoButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        submitTypedYesNo(String(btn.getAttribute('data-ptv4-yesno-value') || '').trim());
+      });
+    });
+  }
   if (els.retry) els.retry.addEventListener('click', function () {
     var kind = els.retry.dataset.retryKind || 'evaluation';
     hideRetry();
