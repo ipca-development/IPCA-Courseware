@@ -341,6 +341,18 @@ trait CoursewareProgressionV2RemoteTrait
             ];
         }
 
+        if ($auth && in_array((string)$auth['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
+            return [
+                'mode' => 'remote_auth_pending',
+                'label' => 'Check your email',
+                'button_class' => 'remote',
+                'disabled' => true,
+                'show_code_modal' => false,
+                'progress_test_url' => $ptUrl,
+                'message' => 'Open the authentication link in your email to receive your Progress Test Code.',
+            ];
+        }
+
         return [
             'mode' => 'remote_request',
             'label' => 'Request Progress Test',

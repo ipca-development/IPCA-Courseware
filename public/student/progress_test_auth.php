@@ -236,6 +236,13 @@ cw_header('Remote Progress Test Authentication');
         if (video.srcObject) {
           video.srcObject.getTracks().forEach(function (t) { t.stop(); });
         }
+        try {
+          sessionStorage.setItem('pt_remote_code_open', JSON.stringify({
+            cohort_id: <?= (int)$cohortId ?>,
+            lesson_id: <?= (int)$lessonId ?>,
+            ts: Date.now()
+          }));
+        } catch (e) {}
         if (window.opener && !window.opener.closed) {
           try {
             window.opener.postMessage({ type: 'remote_progress_test_authenticated', cohort_id: <?= (int)$cohortId ?>, lesson_id: <?= (int)$lessonId ?> }, window.location.origin);

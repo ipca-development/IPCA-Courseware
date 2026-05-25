@@ -152,6 +152,9 @@
   var responseInProgress = false;
   var mayaTurnPurpose = '';
   var mayaExpectedText = '';
+  var mayaActiveResponseId = '';
+  var scriptedResponsePending = false;
+  var mayaTranscriptDone = false;
   var mayaAudioEndsAt = 0;
   var mayaSpeechStartedAt = 0;
   var mayaTurnTailTimer = null;
@@ -300,10 +303,17 @@
     return false;
   }
 
+  function mayaResponseEventKey(msg) {
+    return String((msg && msg.response && msg.response.id) || msg.response_id || '').trim();
+  }
+
   function finishSpeechTurn(onDone) {
     stopMayaTurnTimers();
     clearMayaAudioEnd();
     stopMayaBarMotion();
+    mayaActiveResponseId = '';
+    scriptedResponsePending = false;
+    mayaTranscriptDone = false;
     if (typeof onDone === 'function') onDone();
   }
 
@@ -355,6 +365,9 @@
     stopMayaTurnTimers();
     clearMayaAudioEnd();
     mayaTurnPurpose = '';
+    mayaActiveResponseId = '';
+    scriptedResponsePending = false;
+    mayaTranscriptDone = false;
     responseInProgress = false;
     if (dc) {
       try { dc.close(); } catch (e) {}
@@ -473,6 +486,9 @@
     stopMayaBarMotion();
     stopWordReveal();
     mayaTurnPurpose = '';
+    mayaActiveResponseId = '';
+    scriptedResponsePending = false;
+    mayaTranscriptDone = false;
     responseInProgress = false;
     if (dc && dc.readyState === 'open') {
       try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
@@ -1325,7 +1341,9 @@
       .then(function (out) {
         if (!out.audio_data_url) throw new Error('Missing synthesized audio');
         if (hooks.onAudioReady) hooks.onAudioReady();
-        updateProcessingProgress('Preparing Maya feedback', 97);
+        if (logPurpose === 'feedback') {
+          updateProcessingProgress('Preparing Maya feedback', 97);
+        }
         return playPreparedAudio(out.audio_data_url, function () {
           finish('audio');
         }, hooks.onAudioStart);
@@ -1405,6 +1423,9 @@
       prepareRealtimeForScriptedSpeech();
       mayaTurnPurpose = purpose || '';
       mayaExpectedText = script;
+      mayaActiveResponseId = '';
+      mayaTranscriptDone = false;
+      scriptedResponsePending = true;
       responseInProgress = true;
       scheduleMayaAudioEnd(script, true);
       if (purpose === 'greeting') {
@@ -1506,19 +1527,25 @@
     }
 
     if (type === 'response.created') {
-      if (!mayaTurnPurpose) {
-        if (dc && dc.readyState === 'open') {
-          try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+      var responseId = mayaResponseEventKey(msg);
+      if (!mayaTurnPurpose && !scriptedResponsePending) {
+        if (dc && dc.readyState === 'open' && responseId && responseId !== mayaActiveResponseId) {
+          try { dc.send(JSON.stringify({ type: 'response.cancel', response_id: responseId })); } catch (e) {}
         }
         return;
       }
+      if (responseId) mayaActiveResponseId = responseId;
+      scriptedResponsePending = false;
       responseInProgress = true;
       scheduleMayaAudioEnd(mayaExpectedText, true);
-      startMayaBarMotion();
+      if (mayaTurnPurpose !== 'greeting') {
+        startMayaBarMotion();
+      }
       return;
     }
 
     if (type === 'response.output_audio_transcript.done' && msg.transcript && mayaTurnPurpose) {
+      mayaTranscriptDone = true;
       scheduleMayaAudioEnd(mayaExpectedText || String(msg.transcript || ''));
       if (mayaTurnPurpose === 'greeting') {
         finishWordReveal(mayaExpectedText || String(msg.transcript || ''));
@@ -1821,12 +1848,19 @@
     startMayaBarMotion();
     logEvent('greeting_start');
 
-    function finishGreeting() {
+    var greetingFinished = false;
+    var greetingFallbackTimer = null;
+
+    function finishGreeting(reason) {
+      if (greetingFinished) return;
+      greetingFinished = true;
+      if (greetingFallbackTimer) clearTimeout(greetingFallbackTimer);
+      stopMayaBarMotion();
       finishWordReveal(greeting);
       greetingReady = true;
       setCardState(CARD.READY);
       setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
-      logEvent('greeting_complete');
+      logEvent('greeting_complete', reason || 'done');
       syncButtons();
       ensureOralSessionStarted().catch(function (err) {
         logEvent('oral_session_start_failed', err.message || 'start failed');
@@ -1836,6 +1870,7 @@
     }
 
     function failGreeting(err) {
+      if (greetingFallbackTimer) clearTimeout(greetingFallbackTimer);
       stopWordReveal(greeting);
       stopMayaBarMotion();
       testStarted = false;
@@ -1846,8 +1881,22 @@
       syncButtons();
     }
 
-    return ensureVoiceConnected()
-      .then(function () { return speakScript(greeting, 'greeting', finishGreeting); })
+    greetingFallbackTimer = window.setTimeout(function () {
+      finishGreeting('timeout');
+    }, estimateMayaSpeechMs(greeting) + 8000);
+
+    return apiJson('synthesize_feedback_speech', { speech_text: greeting })
+      .then(function (out) {
+        if (!out || !out.audio_data_url) {
+          throw new Error('Missing greeting audio');
+        }
+        logEvent('greeting_audio_start', 'server_tts');
+        return playPreparedAudio(out.audio_data_url, function () {
+          finishGreeting('audio');
+        }, function () {
+          startWordReveal(greeting, questionAudio);
+        });
+      })
       .catch(failGreeting);
   }
 
