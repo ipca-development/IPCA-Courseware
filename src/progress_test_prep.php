@@ -147,7 +147,7 @@ function pt_prep_has_canonical_pass(PDO $pdo, int $userId, int $cohortId, int $l
 }
 
 /**
- * Idempotent background prep scheduler. Safe to call from summary acceptance or V4 page load.
+ * Idempotent background prep scheduler. Safe to call from the course page (Prepare / remote code verify).
  * Uses canonical progression engine to create attempts; never throws to callers.
  */
 function pt_prep_schedule_progress_test(

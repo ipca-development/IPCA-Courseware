@@ -2262,7 +2262,8 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
           if (!j || !j.ok) {
             throw new Error((j && j.error) ? j.error : 'Verification failed.');
           }
-          window.location.href = j.redirect_url || ('/student/progress_test_v4.php?cohort_id=' + activeCohortId + '&lesson_id=' + activeLessonId);
+          closeRemoteModal();
+          window.location.href = j.redirect_url || ('/student/course.php?cohort_id=' + activeCohortId + '#progress-test-lesson-' + activeLessonId);
         })
         .catch(function (e) {
           codeSubmit.disabled = false;

@@ -44,7 +44,10 @@ $hasRemotePermission = $progressionEngine->hasRemoteTestingPermission($studentCo
 $trustedSchoolNetwork = cw_progress_test_is_trusted_school_network($pdo, $studentContextId, $cohortId);
 $skipLegacyPinGate = $trustedSchoolNetwork || in_array((string)($pageAccess['mode'] ?? ''), ['active_attempt', 'prepared_attempt', 'trusted_ip'], true);
 
-if ($role === 'student' && ($pageAccess['mode'] ?? '') === 'remote_required') {
+if ($role === 'student' && in_array((string)($pageAccess['mode'] ?? ''), ['remote_required', 'preparing_on_course'], true)) {
+    $gateTitle = ($pageAccess['mode'] ?? '') === 'preparing_on_course'
+        ? 'Progress Test Not Ready Yet'
+        : 'Remote Authorization Required';
     cw_header('Progress Test Access');
     ?>
     <style>
@@ -57,7 +60,7 @@ if ($role === 'student' && ($pageAccess['mode'] ?? '') === 'remote_required') {
     </style>
     <div class="gate-wrap">
       <div class="gate-card">
-        <div class="gate-title">Remote Authorization Required</div>
+        <div class="gate-title"><?= h($gateTitle) ?></div>
         <div class="gate-text"><?= h((string)($pageAccess['message'] ?? 'Complete remote progress test authorization on the course page before starting the test.')) ?></div>
         <a class="gate-btn" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>#progress-test-lesson-<?= (int)$lessonId ?>">Return to course page</a>
       </div>
@@ -166,20 +169,15 @@ if ($role === 'student') {
         $courseReturnUrl
     );
     if (empty($prepStatus['prepared'])) {
-        $allowRemotePreparingPage = $hasRemotePermission
-            && !empty($prepStatus['attempt_id'])
-            && !empty($prepStatus['preparing']);
-        if (!$allowRemotePreparingPage) {
-            $prepBlocked = true;
-            if (!empty($prepStatus['preparing'])) {
-                $prepBlockedMode = 'preparing';
-                $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
-            } elseif (!empty($prepStatus['show_prepare_button'])) {
-                $prepBlockedMode = 'manual';
-                $prepBlockedLabel = 'Not prepared yet';
-            } else {
-                $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Not ready');
-            }
+        $prepBlocked = true;
+        if (!empty($prepStatus['preparing'])) {
+            $prepBlockedMode = 'preparing';
+            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
+        } elseif (!empty($prepStatus['show_prepare_button'])) {
+            $prepBlockedMode = 'manual';
+            $prepBlockedLabel = 'Not prepared yet';
+        } else {
+            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Not ready');
         }
     }
 }

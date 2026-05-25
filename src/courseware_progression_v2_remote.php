@@ -298,6 +298,21 @@ trait CoursewareProgressionV2RemoteTrait
             ];
         }
 
+        if ($open && !pt_prep_attempt_is_prepared($open, $this->pdo)) {
+            return [
+                'mode' => 'remote_preparing',
+                'label' => 'Start Progress Test',
+                'button_class' => 'primary',
+                'disabled' => true,
+                'show_bar' => true,
+                'preparing' => true,
+                'prep' => $prep,
+                'show_code_modal' => false,
+                'progress_test_url' => $ptUrl,
+                'attempt_id' => (int)$open['id'],
+            ];
+        }
+
         $auth = $this->ptr_get_active_remote_auth($studentId, $cohortId, $lessonId);
         if ($auth && (string)$auth['status'] === 'AUTHENTICATED' && !empty($auth['verification_code_hash'])) {
             return [
@@ -679,10 +694,13 @@ trait CoursewareProgressionV2RemoteTrait
             'legal_note' => 'Official progress_tests_v2 attempt created only after remote code verification.',
         ]);
 
+        $courseUrl = '/student/course.php?cohort_id=' . $cohortId . '#progress-test-lesson-' . $lessonId;
+
         return [
             'ok' => true,
             'test_id' => $testId,
-            'redirect_url' => '/student/progress_test_v4.php?cohort_id=' . $cohortId . '&lesson_id=' . $lessonId,
+            'preparing' => true,
+            'redirect_url' => $courseUrl,
         ];
     }
 
@@ -757,8 +775,15 @@ trait CoursewareProgressionV2RemoteTrait
                 return ['allowed' => true, 'mode' => 'active_attempt'];
             }
             $open = $this->ptr_get_open_attempt($studentId, $cohortId, $lessonId);
-            if ($open && in_array((string)$open['status'], ['ready', 'preparing'], true)) {
+            if ($open && pt_prep_attempt_is_prepared($open, $this->pdo)) {
                 return ['allowed' => true, 'mode' => 'prepared_attempt'];
+            }
+            if ($open && !pt_prep_attempt_is_prepared($open, $this->pdo)) {
+                return [
+                    'allowed' => false,
+                    'mode' => 'preparing_on_course',
+                    'message' => 'Your progress test is being prepared on the course page. Return there and click Start Progress Test once preparation is complete.',
+                ];
             }
             return [
                 'allowed' => false,

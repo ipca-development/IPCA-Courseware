@@ -1068,18 +1068,13 @@ function ptv4_ensure_prepared_attempt(PDO $pdo, array $u, int $cohortId, int $le
     $prepared = pt_prep_attempt_is_prepared($attempt, $pdo);
 
     if (!$prepared) {
-        pt_prep_schedule_progress_test(
-            $pdo,
-            $studentUserId,
-            $cohortId,
-            $lessonId,
-            'v4_ensure_prepared',
-            $cookieHeader,
-            'student',
-            $studentUserId
-        );
-        $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
-        return ['ok' => true, 'preparing' => true, 'attempt_id' => $attemptId, 'state' => ptv4_state_payload($pdo, $attempt)];
+        return [
+            'ok' => false,
+            'blocked' => true,
+            'reason' => 'not_prepared',
+            'preparing' => in_array((string)($attempt['status'] ?? ''), ['preparing', 'ready'], true),
+            'attempt_id' => $attemptId,
+        ];
     }
 
     if ((string)$attempt['status'] === 'preparing') {
