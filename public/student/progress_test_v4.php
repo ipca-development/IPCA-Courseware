@@ -319,7 +319,7 @@ cw_header('Progress Test');
       </div>
 
       <div class="ptv4-yesno-fallback" data-ptv4-yesno-fallback hidden aria-hidden="true">
-        <p class="ptv4-yesno-fallback-label">If recording is not working, tap your answer:</p>
+        <p class="ptv4-yesno-fallback-label">Or tap your answer:</p>
         <div class="ptv4-yesno-fallback-actions">
           <button class="app-btn app-btn-secondary" type="button" data-ptv4-yesno-value="yes">Yes</button>
           <button class="app-btn app-btn-secondary" type="button" data-ptv4-yesno-value="no">No</button>
@@ -445,5 +445,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=34"></script>
+<script src="/assets/progress_test_v4.js?v=35"></script>
 <?php cw_footer(); ?>

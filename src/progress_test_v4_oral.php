@@ -108,8 +108,14 @@ function ptv4_yesno_lead_text(string $answer): string
     return implode(' ', array_slice($words, 0, 15));
 }
 
+function ptv4_is_timeout_answer(string $answer): bool
+{
+    return (bool)preg_match('/^\[timeout:/i', trim($answer));
+}
+
 function ptv4_parse_yesno_direction(string $answer): ?bool
 {
+    if (ptv4_is_timeout_answer($answer)) return null;
     $t = ptv4_normalize_text(ptv4_yesno_lead_text($answer));
     if ($t === '') return null;
     if (preg_match('/^(no|nope|false)\b/u', $t)) return false;
@@ -338,6 +344,7 @@ function ptv4_word_count(string $text): int
 
 function ptv4_transcript_looks_corrupted(string $answer): bool
 {
+    if (ptv4_is_timeout_answer($answer)) return false;
     if (trim($answer) === '') return true;
     if (preg_match('/\b(inaudible|unintelligible|static|background noise|\[timeout)\b/i', $answer)) return true;
     if (preg_match('/^[\[\(]/', trim($answer))) return true;
@@ -346,6 +353,7 @@ function ptv4_transcript_looks_corrupted(string $answer): bool
 
 function ptv4_clarification_eligible(string $answer, array $eval): bool
 {
+    if (ptv4_is_timeout_answer($answer)) return false;
     if (($eval['result'] ?? '') === 'clarify') return true;
     if (ptv4_transcript_looks_corrupted($answer)) return true;
     if (ptv4_word_count($answer) <= 3 && (int)($eval['score_pct'] ?? 0) < 70) return true;
@@ -387,30 +395,7 @@ function ptv4_yesno_typed_fallback_allowed(PDO $pdo, int $attemptId, int $itemId
     if ($response && !empty($response['evaluated_at'])) {
         return false;
     }
-    if ($response && trim((string)($response['clarification_question_text'] ?? '')) !== '') {
-        return true;
-    }
-
-    $cards = ptv4_load_card_sessions($pdo, $attemptId);
-    $card = $cards[$itemId] ?? null;
-    if ($card) {
-        $state = (string)($card['card_state'] ?? '');
-        if ($state === 'clarification' || !empty($card['clarification_used'])) {
-            return true;
-        }
-    }
-
-    if (ptv4_answer_chunk_count($pdo, $attemptId, $itemId) <= 0) {
-        return false;
-    }
-
-    try {
-        $st = $pdo->prepare("SELECT transcript_text FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
-        $st->execute([$itemId, $attemptId]);
-        return trim((string)$st->fetchColumn()) === '';
-    } catch (Throwable $e) {
-        return true;
-    }
+    return true;
 }
 
 function ptv4_is_likely_non_english(string $text): bool
@@ -482,6 +467,17 @@ function ptv4_grade_item(PDO $pdo, array $item, string $answer, string $clarific
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
     $options = json_decode((string)($item['options_json'] ?? '[]'), true) ?: [];
     $evaluatedAnswer = trim($answer . ($clarificationAnswer !== '' ? "\n\nClarification: " . $clarificationAnswer : ''));
+
+    if (ptv4_is_timeout_answer($evaluatedAnswer)) {
+        return ptv4_validate_evaluator_json([
+            'score_pct' => 0,
+            'result' => 'fail',
+            'missing_concepts' => ['No answer started in time'],
+            'clarification_question' => '',
+            'feedback_for_student' => 'No answer was started in time.',
+            'safety_critical_issue' => false,
+        ]);
+    }
 
     if (trim($evaluatedAnswer) === '') {
         return ptv4_validate_evaluator_json([

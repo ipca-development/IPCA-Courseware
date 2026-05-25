@@ -291,7 +291,29 @@ try {
         $timedOutStart = !empty($data['timed_out_start']);
 
         if ($timedOutStart && $answer === '') {
-            $answer = '[timeout: no answer started within 30 seconds]';
+            ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'ready', null);
+            $isYesNo = (string)($item['kind'] ?? '') === 'yesno';
+            ptv4_log_debug_event(
+                $pdo,
+                (int)$attempt['user_id'],
+                'start_answer_timeout',
+                'No answer started within 30 seconds',
+                ['item_id' => $itemId, 'item_kind' => (string)($item['kind'] ?? '')],
+                $attemptId,
+                $itemId,
+                (int)$attempt['cohort_id'],
+                (int)$attempt['lesson_id']
+            );
+            ptv4_json([
+                'ok' => true,
+                'item_id' => $itemId,
+                'next_action' => 'retry_start',
+                'feedback_for_student' => $isYesNo
+                    ? 'You did not start your answer in time. Tap Start Answer, or tap Yes or No below.'
+                    : 'You did not start your answer in time. Tap Start Answer when you are ready.',
+                'show_typed_yesno_fallback' => $isYesNo,
+                'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId)),
+            ]);
         }
 
         if (!$audioReceived && !$timedOutStart && $clarificationAnswer === '') {

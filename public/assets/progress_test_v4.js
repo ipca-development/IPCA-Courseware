@@ -899,7 +899,7 @@
 
   function answerHintForItem(item) {
     if (itemKind(item) === 'yesno') {
-      return 'Say <strong>yes</strong> or <strong>no</strong> clearly, then tap <strong>Stop Answer</strong>.';
+      return 'Tap <strong>Start Answer</strong> and say <strong>yes</strong> or <strong>no</strong>, or tap <strong>Yes</strong> / <strong>No</strong> below.';
     }
     if (itemKind(item) === 'mcq') {
       return 'State your choice clearly, then tap <strong>Stop Answer</strong>.';
@@ -921,11 +921,11 @@
   }
 
   function canShowYesNoFallback() {
-    if (!yesnoAudioFailed || !currentItem || itemKind(currentItem) !== 'yesno') return false;
-    if ((parseInt(currentItem.id, 10) || 0) !== yesnoFallbackItemId) return false;
+    if (!currentItem || itemKind(currentItem) !== 'yesno') return false;
     if (currentItem.evaluated || cardState === CARD.LISTENING || cardState === CARD.EVALUATING) return false;
     if (awaitingNextQuestion && cardState === CARD.COMPLETE) return false;
-    return cardState === CARD.READY || cardState === CARD.CLARIFICATION;
+    if (cardState === CARD.READY || cardState === CARD.CLARIFICATION) return true;
+    return yesnoAudioFailed && (parseInt(currentItem.id, 10) || 0) === yesnoFallbackItemId;
   }
 
   function showYesNoFallback() {
@@ -1455,9 +1455,9 @@
     if (!options.keepFallback) {
       resetYesNoFallbackState();
     }
-    var hasActiveStartTimer = timerMode === 'start' && timerDeadline > Date.now();
-    if (!options.keepTimer || !hasActiveStartTimer) {
-      startStartAnswerTimer();
+    startStartAnswerTimer();
+    if (currentItem && itemKind(currentItem) === 'yesno') {
+      showYesNoFallback();
     }
   }
 
@@ -1511,9 +1511,7 @@
 
   function playQuestionAudio(isReplay) {
     if (!currentItem || currentItem.evaluated || cardState === CARD.COMPLETE || awaitingNextQuestion) return;
-    if (!isReplay) {
-      stopTimer();
-    }
+    stopTimer();
     hideRetry();
     clarificationPending = false;
     clarificationMode = false;
@@ -1540,7 +1538,7 @@
     function doneAsking() {
       stopMayaBarMotion();
       logEvent('question_audio_end', isReplay ? 'replay' : 'initial');
-      onQuestionFinished({ keepTimer: !!isReplay });
+      onQuestionFinished();
     }
 
     if (!currentItem.question_audio_url) {
@@ -1926,6 +1924,26 @@
     var scorePct = Math.round(out.score_pct || ev.score_pct || 0);
     if (liveTranscript) setTranscriptDisplay('final', liveTranscript);
     logEvent('evaluation_complete', feedback.slice(0, 120), { score_pct: scorePct });
+
+    if (out.next_action === 'retry_start') {
+      awaitingNextQuestion = false;
+      feedbackSpeechDone = true;
+      clarificationPending = false;
+      clarificationMode = false;
+      liveTranscript = '';
+      hideFeedbackPanel();
+      setTranscriptDisplay('idle');
+      finishProcessingProgress('Processing your answer');
+      setHintContent(out.feedback_for_student || 'Tap <strong>Start Answer</strong> when you are ready.', true);
+      logEvent('start_answer_timeout_retry');
+      setCardState(CARD.READY);
+      startStartAnswerTimer();
+      if (out.show_typed_yesno_fallback) {
+        showYesNoFallback();
+      }
+      syncButtons();
+      return;
+    }
 
     if (out.next_action === 'retry_english') {
       awaitingNextQuestion = false;
