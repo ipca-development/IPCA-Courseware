@@ -170,6 +170,7 @@
   var debugSentCount = 0;
   var debugFlushTimer = null;
   var debugFlushInFlight = false;
+  var feedbackSpeechWatchdog = null;
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -558,9 +559,38 @@
   }
 
   function isMayaSpeaking() {
-    return !!mayaBarTimer
-      || cardState === CARD.ASKING
-      || (questionAudio && !questionAudio.paused && !questionAudio.ended && questionAudio.currentTime > 0);
+    if (questionAudio && !questionAudio.paused && !questionAudio.ended && questionAudio.currentTime > 0) {
+      return true;
+    }
+    if (cardState === CARD.ASKING) {
+      return !!mayaBarTimer;
+    }
+    if (awaitingNextQuestion && cardState === CARD.COMPLETE && !feedbackSpeechDone) {
+      return !!mayaBarTimer;
+    }
+    return false;
+  }
+
+  function clearFeedbackSpeechWatchdog() {
+    if (feedbackSpeechWatchdog) clearTimeout(feedbackSpeechWatchdog);
+    feedbackSpeechWatchdog = null;
+  }
+
+  function recoverPendingFeedbackSpeech(reason) {
+    if (!awaitingNextQuestion || feedbackSpeechDone || cardState !== CARD.COMPLETE) return;
+    logEvent('feedback_speech_recovery', reason || 'watchdog');
+    clearFeedbackSpeechWatchdog();
+    stopMayaBarMotion();
+    finishProcessingProgress('Processing your answer');
+    feedbackSpeechDone = true;
+    syncButtons();
+  }
+
+  function scheduleFeedbackSpeechWatchdog(speechText) {
+    clearFeedbackSpeechWatchdog();
+    feedbackSpeechWatchdog = window.setTimeout(function () {
+      recoverPendingFeedbackSpeech('watchdog');
+    }, estimateMayaSpeechMs(speechText) + 8000);
   }
 
   function pauseAnswerTimerIfRunning() {
@@ -1374,6 +1404,17 @@
     setHintContent('Welcome back. Tap <strong>Ready</strong> to begin Question 1.', true);
   }
 
+  function resumeCardStateForItem(item) {
+    if (item.evaluated) return CARD.COMPLETE;
+    var cs = String(item.card_state || '').toLowerCase();
+    if (cs === CARD.CLARIFICATION || item.clarification_question_text) return CARD.CLARIFICATION;
+    // Interrupted sessions can leave asking/evaluating/listening in DB while the item is still unanswered.
+    if (cs === CARD.ASKING || cs === CARD.EVALUATING || cs === CARD.LISTENING) return CARD.READY;
+    if (cs === CARD.COMPLETE) return CARD.READY;
+    if (cs && cs !== CARD.COMPLETE) return cs;
+    return CARD.READY;
+  }
+
   function renderCard(item) {
     displayItem = item;
     text(els.qnum, formatQuestionNum(item.idx, state.total_questions || '?'));
@@ -1395,10 +1436,14 @@
         setFeedbackVisible(false);
       }
     }
-    if (item.evaluated) setCardState(CARD.COMPLETE);
-    else if (item.card_state === CARD.CLARIFICATION) setCardState(CARD.CLARIFICATION);
-    else if (item.card_state && item.card_state !== CARD.COMPLETE) setCardState(item.card_state);
-    else if (testStarted) setCardState(CARD.READY);
+    if (awaitingNextQuestion) return;
+    var transientStates = [CARD.ASKING, CARD.LISTENING, CARD.EVALUATING];
+    if (transientStates.indexOf(cardState) >= 0 && !item.evaluated) return;
+    var nextCardState = resumeCardStateForItem(item);
+    if (nextCardState !== cardState) {
+      if (nextCardState === CARD.READY) stopMayaBarMotion();
+      setCardState(nextCardState);
+    }
   }
 
   function onQuestionFinished(options) {
@@ -1410,7 +1455,8 @@
     if (!options.keepFallback) {
       resetYesNoFallbackState();
     }
-    if (!options.keepTimer) {
+    var hasActiveStartTimer = timerMode === 'start' && timerDeadline > Date.now();
+    if (!options.keepTimer || !hasActiveStartTimer) {
       startStartAnswerTimer();
     }
   }
@@ -1932,7 +1978,9 @@
     stopTimer();
     beginFeedbackProcessingProgress();
     syncButtons();
+    scheduleFeedbackSpeechWatchdog(feedbackSpeech);
     playMayaFeedbackSpeech(feedbackSpeech, function () {
+      clearFeedbackSpeechWatchdog();
       setCardState(CARD.COMPLETE);
       feedbackSpeechDone = true;
       syncButtons();
@@ -2115,6 +2163,8 @@
 
   function nextQuestion() {
     if (!state || !currentItem || !feedbackSpeechDone) return;
+    clearFeedbackSpeechWatchdog();
+    stopMayaBarMotion();
     awaitingNextQuestion = false;
     feedbackSpeechDone = false;
     hideFeedbackPanel();

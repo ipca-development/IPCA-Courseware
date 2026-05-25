@@ -445,5 +445,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=33"></script>
+<script src="/assets/progress_test_v4.js?v=34"></script>
 <?php cw_footer(); ?>
