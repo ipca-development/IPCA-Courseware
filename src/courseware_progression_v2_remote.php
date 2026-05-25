@@ -590,7 +590,7 @@ trait CoursewareProgressionV2RemoteTrait
     public function verifyRemoteProgressTestCodeAndStartAttempt(int $studentId, int $cohortId, int $lessonId, string $code, string $cookieHeader = ''): array
     {
         ptr_ensure_tables($this->pdo);
-        $code = trim($code);
+        $code = preg_replace('/\D+/', '', trim($code));
         if ($code === '') {
             throw new RuntimeException('Enter your Progress Test Code.');
         }
@@ -611,7 +611,7 @@ trait CoursewareProgressionV2RemoteTrait
                 'ok' => true,
                 'already_active' => true,
                 'test_id' => $open ? (int)$open['id'] : null,
-                'redirect_url' => '/student/progress_test_v4.php?cohort_id=' . $cohortId . '&lesson_id=' . $lessonId,
+                'redirect_url' => '/student/course.php?cohort_id=' . $cohortId . '#progress-test-lesson-' . $lessonId,
             ];
         }
 

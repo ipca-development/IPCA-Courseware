@@ -1556,7 +1556,7 @@ cw_header('Course');
   }
 
   .course-remote-modal-overlay{
-    display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;align-items:center;justify-content:center;padding:16px;
+    display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1200;align-items:center;justify-content:center;padding:16px;
   }
   .course-remote-modal-overlay.open{display:flex;}
   .course-remote-modal{
@@ -1570,6 +1570,8 @@ cw_header('Course');
   .course-remote-modal-actions{display:flex;gap:10px;margin-top:14px;}
   .course-remote-modal-actions .action-btn{flex:1;min-height:38px;font-size:12px;}
   .course-remote-modal-error{margin-top:10px;color:#b91c1c;font-weight:800;font-size:12px;display:none;}
+  .course-remote-modal-error.show{display:block;}
+  .course-remote-modal-actions .action-btn.is-loading{opacity:.7;pointer-events:none;}
 
   @media (max-width: 1320px){
     .hero-grid{grid-template-columns:1fr}
@@ -2211,30 +2213,124 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   });
 
   var overlay = document.getElementById('courseRemoteCodeModal');
+  var modalPanel = overlay ? overlay.querySelector('.course-remote-modal') : null;
   var codeInput = document.getElementById('courseRemoteCodeInput');
   var codeError = document.getElementById('courseRemoteCodeError');
   var codeSubmit = document.getElementById('courseRemoteCodeSubmit');
   var activeCohortId = 0;
   var activeLessonId = 0;
 
+  function showCodeError(message) {
+    if (!codeError) return;
+    codeError.textContent = message || 'Verification failed.';
+    codeError.classList.add('show');
+    codeError.style.display = 'block';
+  }
+
+  function clearCodeError() {
+    if (!codeError) return;
+    codeError.textContent = '';
+    codeError.classList.remove('show');
+    codeError.style.display = 'none';
+  }
+
+  function setCodeSubmitLoading(isLoading) {
+    if (!codeSubmit) return;
+    codeSubmit.disabled = !!isLoading;
+    codeSubmit.classList.toggle('is-loading', !!isLoading);
+    codeSubmit.textContent = isLoading ? 'Preparing…' : 'Verify & prepare';
+  }
+
+  function readActiveLessonContext() {
+    var cohortId = activeCohortId;
+    var lessonId = activeLessonId;
+    if (overlay) {
+      cohortId = parseInt(overlay.getAttribute('data-cohort-id') || String(cohortId), 10) || cohortId;
+      lessonId = parseInt(overlay.getAttribute('data-lesson-id') || String(lessonId), 10) || lessonId;
+    }
+    return { cohortId: cohortId, lessonId: lessonId };
+  }
+
   function closeRemoteModal() {
     if (!overlay) return;
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
+    overlay.removeAttribute('data-cohort-id');
+    overlay.removeAttribute('data-lesson-id');
     activeCohortId = 0;
     activeLessonId = 0;
     if (codeInput) codeInput.value = '';
-    if (codeError) { codeError.style.display = 'none'; codeError.textContent = ''; }
+    clearCodeError();
+    setCodeSubmitLoading(false);
+  }
+
+  function openRemoteCodeModal(cohortId, lessonId) {
+    if (!overlay || cohortId <= 0 || lessonId <= 0) return;
+    activeCohortId = cohortId;
+    activeLessonId = lessonId;
+    overlay.setAttribute('data-cohort-id', String(cohortId));
+    overlay.setAttribute('data-lesson-id', String(lessonId));
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    clearCodeError();
+    setCodeSubmitLoading(false);
+    if (codeInput) {
+      codeInput.value = '';
+      codeInput.focus();
+    }
+  }
+
+  function submitRemoteCode() {
+    var ctx = readActiveLessonContext();
+    var code = codeInput ? String(codeInput.value || '').replace(/\D+/g, '') : '';
+    if (codeInput) codeInput.value = code;
+    if (!code) {
+      showCodeError('Enter your six-digit Progress Test Code.');
+      return;
+    }
+    if (ctx.cohortId <= 0 || ctx.lessonId <= 0) {
+      showCodeError('Close this dialog and click Enter Progress Test Code on the lesson row again.');
+      return;
+    }
+    clearCodeError();
+    setCodeSubmitLoading(true);
+
+    fetch('/student/api/progress_test_remote_verify_code.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ cohort_id: ctx.cohortId, lesson_id: ctx.lessonId, code: code })
+    })
+      .then(function (res) {
+        return res.text().then(function (txt) {
+          var payload = null;
+          try {
+            payload = txt ? JSON.parse(txt) : null;
+          } catch (e) {
+            throw new Error('Verification failed (unexpected server response).');
+          }
+          if (!res.ok || !payload || !payload.ok) {
+            throw new Error((payload && payload.error) ? payload.error : 'Verification failed.');
+          }
+          return payload;
+        });
+      })
+      .then(function (j) {
+        closeRemoteModal();
+        window.location.href = j.redirect_url || ('/student/course.php?cohort_id=' + ctx.cohortId + '#progress-test-lesson-' + ctx.lessonId);
+      })
+      .catch(function (e) {
+        setCodeSubmitLoading(false);
+        showCodeError(e && e.message ? e.message : 'Verification failed.');
+      });
   }
 
   document.querySelectorAll('.pt-remote-code-open').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      activeCohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
-      activeLessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
-      if (!overlay || activeCohortId <= 0 || activeLessonId <= 0) return;
-      overlay.classList.add('open');
-      overlay.setAttribute('aria-hidden', 'false');
-      if (codeInput) codeInput.focus();
+      openRemoteCodeModal(
+        parseInt(btn.getAttribute('data-cohort-id') || '0', 10),
+        parseInt(btn.getAttribute('data-lesson-id') || '0', 10)
+      );
     });
   });
 
@@ -2242,38 +2338,30 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     el.addEventListener('click', closeRemoteModal);
   });
 
+  if (overlay) {
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeRemoteModal();
+    });
+  }
+  if (modalPanel) {
+    modalPanel.addEventListener('click', function (e) {
+      e.stopPropagation();
+    });
+  }
+
   if (codeSubmit) {
-    codeSubmit.addEventListener('click', function () {
-      var code = codeInput ? String(codeInput.value || '').trim() : '';
-      if (!code || activeCohortId <= 0 || activeLessonId <= 0) {
-        if (codeError) {
-          codeError.style.display = 'block';
-          codeError.textContent = 'Enter your Progress Test Code.';
-        }
-        return;
+    codeSubmit.addEventListener('click', function (e) {
+      e.preventDefault();
+      submitRemoteCode();
+    });
+  }
+
+  if (codeInput) {
+    codeInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitRemoteCode();
       }
-      codeSubmit.disabled = true;
-      fetch('/student/api/progress_test_remote_verify_code.php', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cohort_id: activeCohortId, lesson_id: activeLessonId, code: code })
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (j) {
-          if (!j || !j.ok) {
-            throw new Error((j && j.error) ? j.error : 'Verification failed.');
-          }
-          closeRemoteModal();
-          window.location.href = j.redirect_url || ('/student/course.php?cohort_id=' + activeCohortId + '#progress-test-lesson-' + activeLessonId);
-        })
-        .catch(function (e) {
-          codeSubmit.disabled = false;
-          if (codeError) {
-            codeError.style.display = 'block';
-            codeError.textContent = e.message || 'Verification failed.';
-          }
-        });
     });
   }
 })();

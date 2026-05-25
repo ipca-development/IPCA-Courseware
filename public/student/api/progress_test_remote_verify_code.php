@@ -35,11 +35,14 @@ try {
     $cohortId = (int)($data['cohort_id'] ?? 0);
     $lessonId = (int)($data['lesson_id'] ?? 0);
     $code = trim((string)($data['code'] ?? ''));
+    $code = preg_replace('/\D+/', '', $code);
     if ($cohortId <= 0 || $lessonId <= 0) {
         ptr_verify_json(['ok' => false, 'error' => 'Missing cohort_id or lesson_id'], 400);
     }
 
-    $userId = $role === 'admin' ? (int)($data['user_id'] ?? $u['id']) : (int)$u['id'];
+    $userId = $role === 'admin'
+        ? (int)($data['user_id'] ?? cw_student_view_user_id($pdo, $u))
+        : (int)cw_student_view_user_id($pdo, $u);
     if ($userId <= 0) {
         ptr_verify_json(['ok' => false, 'error' => 'Invalid user'], 403);
     }
