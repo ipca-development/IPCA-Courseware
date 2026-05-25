@@ -815,6 +815,45 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     }).then(function (r) { return r.json(); });
   }
 
+  function consumePtBankSseStream(resp) {
+    if (!resp.ok || !resp.body) throw new Error('SSE failed');
+    var reader = resp.body.getReader();
+    var dec = new TextDecoder();
+    var buf = '';
+    function pump() {
+      return reader.read().then(function (chunk) {
+        if (chunk.done) return;
+        buf += dec.decode(chunk.value, { stream: true });
+        var parts = buf.split('\n\n');
+        buf = parts.pop() || '';
+        parts.forEach(function (block) {
+          var evName = 'message';
+          var dataLine = '';
+          block.split('\n').forEach(function (line) {
+            if (line.indexOf('event:') === 0) evName = line.slice(6).trim();
+            if (line.indexOf('data:') === 0) dataLine = line.slice(5).trim();
+          });
+          if (!dataLine) return;
+          try {
+            var data = JSON.parse(dataLine);
+            if (evName === 'batch_info') {
+              appendLog('[PT] Batch: ' + (data.lessons_in_batch || 0) + ' lesson(s) (scope total ' + (data.full_scope_lessons || '?') + ')');
+            }
+            if (evName === 'step') appendLog('[PT] ' + (data.message || JSON.stringify(data)));
+            if (evName === 'lesson_done') appendLog('[PT] Lesson ' + data.lesson_id + ': +' + (data.added || 0) + ' (active ' + (data.active_count || 0) + ')');
+            if (evName === 'lesson_error') appendLog('[PT] Lesson ' + data.lesson_id + ' error: ' + (data.message || ''));
+            if (evName === 'run_error') appendLog('[PT] Error: ' + (data.message || ''));
+            if (evName === 'run_done') {
+              appendLog('[PT] Batch done — processed ' + (data.processed || 0) + ', added ' + (data.questions_added || 0));
+            }
+          } catch (e) {}
+        });
+        return pump();
+      });
+    }
+    return pump();
+  }
+
   function runPtBankSSE(forceRebuild) {
     if (state.programId <= 0 && state.courseId <= 0) {
       alert('Select a program or course first.');
@@ -823,46 +862,53 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     setHidden('becRunPanel', false);
     setRun(true, 'Building progress test banks…');
     appendLog('PT bank run start…');
-    var fd = new FormData();
-    if (state.programId > 0) fd.append('program_id', String(state.programId));
-    if (state.courseId > 0) fd.append('course_id', String(state.courseId));
-    if (state.lessonId > 0) fd.append('lesson_id', String(state.lessonId));
-    fd.append('batch_offset', '0');
-    fd.append('batch_size', '5');
-    if (forceRebuild) fd.append('force_rebuild', '1');
+    var batchSize = Math.max(1, Math.min(20, parseInt(el('becBatchSize').value, 10) || 5));
 
-    return fetch('/admin/api/progress_test_bank_run_sse.php', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function (resp) {
-        if (!resp.ok || !resp.body) throw new Error('SSE failed');
-        var reader = resp.body.getReader();
-        var dec = new TextDecoder();
-        var buf = '';
-        function pump() {
-          return reader.read().then(function (chunk) {
-            if (chunk.done) { setRun(false, 'Bank build finished.'); loadPtBankLessons(); return; }
-            buf += dec.decode(chunk.value, { stream: true });
-            var parts = buf.split('\n\n');
-            buf = parts.pop() || '';
-            parts.forEach(function (block) {
-              var evName = 'message';
-              var dataLine = '';
-              block.split('\n').forEach(function (line) {
-                if (line.indexOf('event:') === 0) evName = line.slice(6).trim();
-                if (line.indexOf('data:') === 0) dataLine = line.slice(5).trim();
-              });
-              if (!dataLine) return;
-              try {
-                var data = JSON.parse(dataLine);
-                if (evName === 'step') appendLog('[PT] ' + (data.message || JSON.stringify(data)));
-                if (evName === 'lesson_done') appendLog('[PT] Lesson ' + data.lesson_id + ': +' + (data.added || 0) + ' (active ' + (data.active_count || 0) + ')');
-                if (evName === 'lesson_error') appendLog('[PT] Lesson ' + data.lesson_id + ' error: ' + (data.message || ''));
-                if (evName === 'run_error') appendLog('[PT] Error: ' + (data.message || ''));
-              } catch (e) {}
-            });
-            return pump();
-          });
+    return fetch(ptBankLessonsUrl(), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) throw new Error((data && data.error) || 'Lesson list failed');
+        var n = (data.lessons || []).length;
+        if (n <= 0) {
+          appendLog('[PT] No lessons in scope.');
+          setRun(false, 'No lessons in scope.');
+          loadPtBankLessons();
+          return;
         }
-        return pump();
+        var batches = Math.ceil(n / batchSize);
+        appendLog('[PT] ' + n + ' lesson(s) in ' + batches + ' batch(es) (batch size ' + batchSize + ').');
+
+        function runBatch(i) {
+          if (state.abortRun) {
+            appendLog('[PT] Aborted by user.');
+            setRun(false, 'Aborted.');
+            return Promise.resolve();
+          }
+          if (i >= batches) {
+            setRun(false, 'Bank build finished.');
+            loadPtBankLessons();
+            return Promise.resolve();
+          }
+          appendLog('[PT] Batch ' + (i + 1) + '/' + batches + '…');
+          var fd = new FormData();
+          if (state.programId > 0) fd.append('program_id', String(state.programId));
+          if (state.courseId > 0) fd.append('course_id', String(state.courseId));
+          if (state.lessonId > 0) fd.append('lesson_id', String(state.lessonId));
+          fd.append('batch_offset', String(i * batchSize));
+          fd.append('batch_size', String(Math.min(batchSize, n - i * batchSize)));
+          if (forceRebuild) fd.append('force_rebuild', '1');
+
+          return fetch('/admin/api/progress_test_bank_run_sse.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(consumePtBankSseStream)
+            .then(function () { return runBatch(i + 1); });
+        }
+
+        return runBatch(0);
+      })
+      .catch(function (e) {
+        appendLog('[PT] Failed: ' + (e && e.message ? e.message : String(e)));
+        setRun(false, 'Bank build failed.');
+        throw e;
       });
   }
 
