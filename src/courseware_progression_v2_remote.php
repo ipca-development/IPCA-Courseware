@@ -165,8 +165,33 @@ trait CoursewareProgressionV2RemoteTrait
         return (bool)$st->fetchColumn();
     }
 
-    private function ptr_prepare_blocked_reason(int $studentId, int $cohortId, int $lessonId): ?array
+    private function ptr_prepare_blocked_reason(int $studentId, int $cohortId, int $lessonId, array $courseCtx = []): ?array
     {
+        if ($courseCtx) {
+            if (!empty($courseCtx['test_passed'])) {
+                return ['blocked' => true, 'reason' => 'passed', 'message' => 'This lesson progress test is already passed.'];
+            }
+            if (!empty($courseCtx['training_suspended'])) {
+                return ['blocked' => true, 'reason' => 'training_suspended', 'message' => 'Training is currently suspended for this lesson.'];
+            }
+            if (!empty($courseCtx['pending_deadline_reason'])) {
+                return ['blocked' => true, 'reason' => 'deadline', 'message' => 'A deadline-related action is required before you can prepare a progress test.'];
+            }
+            if (!empty($courseCtx['deadline_passed'])) {
+                return ['blocked' => true, 'reason' => 'deadline', 'message' => 'The effective deadline for this lesson has passed.'];
+            }
+            if (!empty($courseCtx['pending_instructor_approval']) || !empty($courseCtx['one_on_one_required'])) {
+                return ['blocked' => true, 'reason' => 'instructor_required', 'message' => 'Instructor approval is required before another attempt can begin.'];
+            }
+            if (!empty($courseCtx['pending_remediation'])) {
+                return ['blocked' => true, 'reason' => 'remediation_required', 'message' => 'Remediation is required before another attempt can begin.'];
+            }
+            if (empty($courseCtx['summary_ok'])) {
+                return ['blocked' => true, 'reason' => 'summary_required', 'message' => 'An acceptable lesson summary is required before this progress test can be prepared.'];
+            }
+            return null;
+        }
+
         $start = $this->prepareStartDecision($studentId, $cohortId, $lessonId);
         $decision = (array)($start['decision'] ?? []);
         if (!empty($decision['training_suspended'])) {
@@ -190,12 +215,17 @@ trait CoursewareProgressionV2RemoteTrait
         return null;
     }
 
-    public function getProgressTestButtonState(int $studentId, int $cohortId, int $lessonId, string $cookieHeader = ''): array
+    public function getProgressTestButtonState(int $studentId, int $cohortId, int $lessonId, string $cookieHeader = '', array $courseCtx = []): array
     {
+        static $trustedNetworkCache = [];
+        static $remotePermissionCache = [];
+
         ptr_ensure_tables($this->pdo);
         $ptUrl = '/student/progress_test_v4.php?cohort_id=' . $cohortId . '&lesson_id=' . $lessonId;
+        $passiveCoursePage = $courseCtx !== [];
+        $allowBackgroundRetry = !$passiveCoursePage;
 
-        $blocked = $this->ptr_prepare_blocked_reason($studentId, $cohortId, $lessonId);
+        $blocked = $this->ptr_prepare_blocked_reason($studentId, $cohortId, $lessonId, $courseCtx);
         if ($blocked) {
             return array_merge([
                 'mode' => 'blocked',
@@ -221,8 +251,21 @@ trait CoursewareProgressionV2RemoteTrait
             ];
         }
 
-        $trusted = cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId);
-        $prep = pt_prep_course_status($this->pdo, $studentId, $cohortId, $lessonId, $cookieHeader, $ptUrl);
+        $trustedKey = $studentId . ':' . $cohortId;
+        if (!array_key_exists($trustedKey, $trustedNetworkCache)) {
+            $trustedNetworkCache[$trustedKey] = cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId);
+        }
+        $trusted = (bool)$trustedNetworkCache[$trustedKey];
+
+        $prep = pt_prep_course_status(
+            $this->pdo,
+            $studentId,
+            $cohortId,
+            $lessonId,
+            $cookieHeader,
+            $ptUrl,
+            $allowBackgroundRetry
+        );
 
         if ($trusted) {
             if (!empty($prep['show_prepare_button'])) {
@@ -271,7 +314,10 @@ trait CoursewareProgressionV2RemoteTrait
             ];
         }
 
-        if (!$this->hasRemoteTestingPermission($studentId, $cohortId)) {
+        if (!array_key_exists($trustedKey, $remotePermissionCache)) {
+            $remotePermissionCache[$trustedKey] = $this->hasRemoteTestingPermission($studentId, $cohortId);
+        }
+        if (!$remotePermissionCache[$trustedKey]) {
             return [
                 'mode' => 'blocked',
                 'label' => 'Start Progress Test',

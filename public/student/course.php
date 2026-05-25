@@ -51,8 +51,7 @@ if ($cohortTimezone === '') {
     $cohortTimezone = 'UTC';
 }
 
-$engine = new CoursewareProgressionV2($pdo);
-$policy = $engine->getAllPolicies(['cohort_id' => $cohortId]);
+$policy = $progression->getAllPolicies(['cohort_id' => $cohortId]);
 
 $completedRemediationByLesson = [];
 
@@ -196,16 +195,8 @@ function summary_quality_meta(array $summaryState) {
     return ['label' => 'Draft saved', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44];
 }
 
-function progress_test_prep_meta(
-    PDO $pdo,
-    int $userId,
-    int $cohortId,
-    int $lessonId,
-    bool $summaryOk,
-    bool $canTest,
-    string $cookieHeader,
-    string $progressTestUrl
-): array {
+function progress_test_prep_meta_from_button(array $ptButtonState, string $progressTestUrl, bool $summaryOk, bool $canTest): array
+{
     $empty = [
         'show_bar' => false,
         'show_button' => false,
@@ -219,11 +210,36 @@ function progress_test_prep_meta(
         'sub' => 'Progress Test',
         'class' => 'neutral',
         'pct' => 0,
+        'attempt_id' => null,
     ];
     if (!$summaryOk || !$canTest) {
         return $empty;
     }
-    return pt_prep_course_status($pdo, $userId, $cohortId, $lessonId, $cookieHeader, $progressTestUrl);
+
+    $prep = (array)($ptButtonState['prep'] ?? []);
+    if ($prep) {
+        return array_merge($empty, $prep);
+    }
+
+    if (!empty($ptButtonState['show_prepare_button'])) {
+        return array_merge($empty, [
+            'show_prepare_button' => true,
+            'label' => 'Not prepared yet',
+            'sub' => 'Progress Test',
+        ]);
+    }
+
+    if (!empty($ptButtonState['href'])) {
+        return array_merge($empty, [
+            'show_button' => true,
+            'button_href' => (string)$ptButtonState['href'],
+            'button_label' => (string)($ptButtonState['label'] ?: 'Start Progress Test'),
+            'prepared' => true,
+            'attempt_id' => $ptButtonState['attempt_id'] ?? null,
+        ]);
+    }
+
+    return $empty;
 }
 
 
@@ -888,23 +904,39 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $hasActiveProgressTest = $openAttempt && in_array((string)($openAttempt['status'] ?? ''), ['preparing', 'ready', 'in_progress', 'processing'], true);
 
     $ptUrlV4 = '/student/progress_test_v4.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
+    $ptCourseCtx = [
+        'summary_ok' => $summaryOk,
+        'test_passed' => $testPassed,
+        'training_suspended' => !empty($instructorDecision['training_suspended']),
+        'deadline_passed' => !empty($effectiveDeadlineState['deadline_passed']),
+        'pending_deadline_reason' => $pendingDeadlineReason,
+        'pending_remediation' => $pendingRemediation,
+        'pending_instructor_approval' => $pendingInstructorApproval,
+        'one_on_one_required' => !empty($instructorDecision['one_on_one_required']) && empty($instructorDecision['one_on_one_completed']),
+    ];
+    if ($role === 'admin') {
+        $ptCourseCtx = [
+            'summary_ok' => true,
+            'test_passed' => false,
+            'training_suspended' => false,
+            'deadline_passed' => false,
+            'pending_deadline_reason' => false,
+            'pending_remediation' => false,
+            'pending_instructor_approval' => false,
+            'one_on_one_required' => false,
+        ];
+    }
     $ptButtonState = $progression->getProgressTestButtonState(
         (int)$userId,
         (int)$cohortId,
         $lessonId,
-        (string)($_SERVER['HTTP_COOKIE'] ?? '')
+        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
+        $ptCourseCtx
     );
     $canTest = ($ptButtonState['mode'] ?? 'blocked') !== 'blocked';
-    $ptPrepMeta = progress_test_prep_meta(
-        $pdo,
-        (int)$userId,
-        (int)$cohortId,
-        $lessonId,
-        $summaryOk,
-        $canTest,
-        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
-        $ptUrlV4
-    );
+    $ptPrepMeta = ($role === 'admin')
+        ? progress_test_prep_meta_from_button(['mode' => 'blocked'], $ptUrlV4, true, false)
+        : progress_test_prep_meta_from_button($ptButtonState, $ptUrlV4, $summaryOk, $canTest);
     if (($ptButtonState['mode'] ?? '') === 'remote_code_entry') {
         $ptPrepMeta['show_bar'] = false;
         $ptPrepMeta['preparing'] = false;

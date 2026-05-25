@@ -306,7 +306,8 @@ function pt_prep_course_status(
     int $cohortId,
     int $lessonId,
     string $cookieHeader = '',
-    string $progressTestUrl = ''
+    string $progressTestUrl = '',
+    bool $allowBackgroundRetry = false
 ): array {
     $empty = [
         'show_bar' => false,
@@ -370,11 +371,11 @@ function pt_prep_course_status(
         ];
     }
 
-    if ((string)($attempt['status'] ?? '') === 'preparing' && (int)($attempt['progress_pct'] ?? 0) < 5) {
+    if ($allowBackgroundRetry && (string)($attempt['status'] ?? '') === 'preparing' && (int)($attempt['progress_pct'] ?? 0) < 5) {
         pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'course_page_retry', $cookieHeader);
         $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId) ?: $attempt;
         $meta = pt_prep_progress_label($attempt, $pdo);
-    } elseif ((string)($attempt['status'] ?? '') === 'preparing') {
+    } elseif ($allowBackgroundRetry && (string)($attempt['status'] ?? '') === 'preparing') {
         $updatedAt = strtotime((string)($attempt['updated_at'] ?? ''));
         if ($updatedAt > 0 && (time() - $updatedAt) >= 90) {
             pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'course_page_stale', $cookieHeader);
