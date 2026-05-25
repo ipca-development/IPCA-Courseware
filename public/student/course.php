@@ -894,27 +894,22 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         $lessonId,
         (string)($_SERVER['HTTP_COOKIE'] ?? '')
     );
-    $ptPrepMeta = (array)($ptButtonState['prep'] ?? []);
-    if (!empty($ptButtonState['show_bar']) && !empty($ptPrepMeta)) {
-        $ptPrepMeta['show_bar'] = true;
-    } elseif (!empty($ptButtonState['show_bar'])) {
-        $ptPrepMeta = array_merge([
-            'show_bar' => true,
-            'show_button' => false,
-            'show_prepare_button' => false,
-            'button_href' => '',
-            'button_label' => 'Start Progress Test',
-            'prepared' => false,
-            'preparing' => true,
-            'resume' => false,
-            'label' => '',
-            'sub' => 'Preparing',
-            'class' => 'info',
-            'pct' => 0,
-            'attempt_id' => (int)($ptButtonState['attempt_id'] ?? 0),
-        ], $ptPrepMeta);
-    } else {
+    $canTest = ($ptButtonState['mode'] ?? 'blocked') !== 'blocked';
+    $ptPrepMeta = progress_test_prep_meta(
+        $pdo,
+        (int)$userId,
+        (int)$cohortId,
+        $lessonId,
+        $summaryOk,
+        $canTest,
+        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
+        $ptUrlV4
+    );
+    if (($ptButtonState['mode'] ?? '') === 'remote_code_entry') {
         $ptPrepMeta['show_bar'] = false;
+        $ptPrepMeta['preparing'] = false;
+        $ptPrepMeta['show_button'] = false;
+        $ptPrepMeta['show_prepare_button'] = false;
     }
     if (($ptButtonState['mode'] ?? '') === 'continue' || !empty($ptButtonState['attempt_id'])) {
         $hasActiveProgressTest = true;
@@ -922,7 +917,6 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     if (!empty($ptPrepMeta['resume'])) {
         $hasActiveProgressTest = true;
     }
-    $canTest = ($ptButtonState['mode'] ?? 'blocked') !== 'blocked';
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
     if ($bestScore !== null) {
@@ -1929,7 +1923,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $ptBtnDisabled = !empty($ptBtn['disabled']);
     $showPrepareButton = !empty($ptBtn['show_prepare_button']);
     $showRemoteRequestButton = ($ptBtnMode === 'remote_request');
-    $showCodeModalButton = !empty($ptBtn['show_code_modal']);
+    $showCodeModalButton = !empty($ptBtn['show_code_modal']) || ($ptBtnMode === 'remote_code_entry');
     $testHref = (string)($ptBtn['href'] ?? ($lx['progress_test_url'] ?? ''));
 } else {
     $testLabel = (string)($ptBtn['label'] ?? 'Start Progress Test');
@@ -2049,6 +2043,14 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 })();
 
 (function () {
+  window.addEventListener('message', function (ev) {
+    if (!ev || !ev.data || ev.data.type !== 'remote_progress_test_authenticated') return;
+    if (ev.origin !== window.location.origin) return;
+    window.location.reload();
+  });
+})();
+
+(function () {
   var nodes = document.querySelectorAll('.pt-prep-status[data-test-id]');
   if (!nodes.length) return;
 
@@ -2115,12 +2117,12 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 <div id="courseRemoteCodeModal" class="course-remote-modal-overlay" aria-hidden="true">
   <div class="course-remote-modal" role="dialog" aria-modal="true" aria-labelledby="courseRemoteCodeTitle">
     <h3 id="courseRemoteCodeTitle">Enter Progress Test Code</h3>
-    <p>Enter the six-digit code shown on the remote authentication page. Your official progress test attempt starts only after this code is verified.</p>
+    <p>Enter the six-digit code from the remote authentication page. After verification, questions and audio are prepared on <strong>this course page</strong> — the same flow as on-site <strong>Prepare Progress Test</strong>. You open the test only once preparation finishes.</p>
     <input id="courseRemoteCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
     <div id="courseRemoteCodeError" class="course-remote-modal-error"></div>
     <div class="course-remote-modal-actions">
       <button type="button" class="action-btn" data-close-remote-modal>Cancel</button>
-      <button type="button" class="action-btn primary" id="courseRemoteCodeSubmit">Verify &amp; Start</button>
+      <button type="button" class="action-btn primary" id="courseRemoteCodeSubmit">Verify &amp; prepare</button>
     </div>
   </div>
 </div>

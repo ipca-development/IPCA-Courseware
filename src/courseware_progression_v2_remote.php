@@ -316,8 +316,8 @@ trait CoursewareProgressionV2RemoteTrait
         $auth = $this->ptr_get_active_remote_auth($studentId, $cohortId, $lessonId);
         if ($auth && (string)$auth['status'] === 'AUTHENTICATED' && !empty($auth['verification_code_hash'])) {
             return [
-                'mode' => 'remote_start',
-                'label' => 'Start Progress Test',
+                'mode' => 'remote_code_entry',
+                'label' => 'Enter Progress Test Code',
                 'button_class' => 'primary',
                 'disabled' => false,
                 'show_code_modal' => true,
@@ -360,7 +360,7 @@ trait CoursewareProgressionV2RemoteTrait
         $existing = $this->ptr_get_active_remote_auth($studentId, $cohortId, $lessonId);
         if ($existing) {
             if ((string)$existing['status'] === 'AUTHENTICATED') {
-                throw new RuntimeException('You already completed remote authentication. Click Start Progress Test and enter your code.');
+                throw new RuntimeException('You already completed remote authentication. Click Enter Progress Test Code on the course page.');
             }
             if ((string)$existing['status'] === 'EMAIL_SENT') {
                 return [

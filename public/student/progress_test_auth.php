@@ -53,7 +53,7 @@ if (!$auth) {
     }
 
     if ($pageError === '' && (string)$auth['status'] === 'AUTHENTICATED' && !empty($auth['verification_code_hash'])) {
-        $pageInfo = 'You already completed authentication for this request. Return to your course page and click Start Progress Test to enter your code.';
+        $pageInfo = 'Authentication complete. Copy your Progress Test Code from this page if you still have it open, otherwise request a new authorization from the course page.';
     } elseif ($pageError === '') {
         $engine->logProgressionEvent([
             'user_id' => $studentId,
@@ -108,6 +108,8 @@ cw_header('Remote Progress Test Authentication');
   .ptr-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
   .ptr-actions a,.ptr-actions button{flex:1;min-width:140px;text-align:center;text-decoration:none;}
   .ptr-muted{font-size:12px;color:#64748b;margin-top:10px;line-height:1.5;}
+  .ptr-warn{margin-top:14px;padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;font-size:13px;line-height:1.55;font-weight:700;}
+  .ptr-copy-ok{margin-top:10px;color:#166534;font-weight:800;font-size:13px;display:none;}
 </style>
 
 <div class="ptr-wrap">
@@ -129,9 +131,7 @@ cw_header('Remote Progress Test Authentication');
       </div>
     <?php elseif ($pageInfo !== ''): ?>
       <div class="ptr-info"><?= h($pageInfo) ?></div>
-      <div class="ptr-actions">
-        <a class="ptr-btn primary" href="<?= h($courseReturnUrl) ?>">Return to course page</a>
-      </div>
+      <div class="ptr-muted">Switch back to your <strong>existing course page tab</strong>, click <strong>Enter Progress Test Code</strong>, and type the code you copied. You can close this window.</div>
     <?php else: ?>
       <div id="ptrFormBlock">
         <label class="ptr-label" for="ptrPassword">Account password</label>
@@ -148,15 +148,20 @@ cw_header('Remote Progress Test Authentication');
       </div>
 
       <div id="ptrCodeBlock" style="display:none;">
+        <div class="ptr-warn">
+          Copy your Progress Test Code now. It is shown <strong>only once</strong> and cannot be retrieved later.
+          Switch back to your <strong>existing course page tab</strong> (do not open a new one), click
+          <strong>Enter Progress Test Code</strong>, paste the code, then wait on the course page while your test is prepared.
+        </div>
         <div class="ptr-code-box">
           <div class="ptr-muted" style="margin-top:0;">Your Progress Test Code</div>
           <div class="ptr-code" id="ptrCodeValue"></div>
-          <div class="ptr-muted">Enter this code on your course page when you click Start Progress Test. It is shown only once.</div>
         </div>
         <div class="ptr-actions">
-          <button type="button" class="ptr-btn" id="ptrCopyBtn">Copy code</button>
-          <a class="ptr-btn primary" href="<?= h($courseReturnUrl) ?>">Return to course page</a>
+          <button type="button" class="ptr-btn primary" id="ptrCopyBtn">Copy code</button>
         </div>
+        <div class="ptr-copy-ok" id="ptrCopyOk">Code copied. You can close this window and return to your course page tab.</div>
+        <div class="ptr-muted">Question generation starts only after you enter this code on the course page — the same preparation flow as on-site <strong>Prepare Progress Test</strong>.</div>
       </div>
     <?php endif; ?>
   </div>
@@ -231,6 +236,11 @@ cw_header('Remote Progress Test Authentication');
         if (video.srcObject) {
           video.srcObject.getTracks().forEach(function (t) { t.stop(); });
         }
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.postMessage({ type: 'remote_progress_test_authenticated', cohort_id: <?= (int)$cohortId ?>, lesson_id: <?= (int)$lessonId ?> }, window.location.origin);
+          } catch (e) {}
+        }
       })
       .catch(function (e) {
         submitBtn.disabled = false;
@@ -238,12 +248,50 @@ cw_header('Remote Progress Test Authentication');
       });
   });
 
-  document.getElementById('ptrCopyBtn').addEventListener('click', function () {
-    var code = document.getElementById('ptrCodeValue').textContent || '';
-    if (!code) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(code);
+  function copyProgressTestCode(code) {
+    if (!code) return Promise.reject(new Error('No code'));
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(code);
     }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = code;
+      ta.setAttribute('readonly', 'readonly');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        if (!document.execCommand('copy')) {
+          reject(new Error('Copy failed'));
+        } else {
+          resolve();
+        }
+      } catch (err) {
+        reject(err);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    });
+  }
+
+  document.getElementById('ptrCopyBtn').addEventListener('click', function () {
+    var btn = this;
+    var ok = document.getElementById('ptrCopyOk');
+    var code = document.getElementById('ptrCodeValue').textContent || '';
+    copyProgressTestCode(code)
+      .then(function () {
+        if (ok) ok.style.display = 'block';
+        btn.textContent = 'Copied!';
+        window.setTimeout(function () { btn.textContent = 'Copy code'; }, 2500);
+      })
+      .catch(function () {
+        if (ok) {
+          ok.style.display = 'block';
+          ok.textContent = 'Automatic copy failed — select the code above and copy it manually (Cmd/Ctrl+C).';
+          ok.style.color = '#b45309';
+        }
+      });
   });
 })();
 </script>
