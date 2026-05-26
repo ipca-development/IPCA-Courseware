@@ -1,12 +1,12 @@
 /**
- * HeyGen Live Avatar presenter — text-repeat mode only.
- * OpenAI (server) decides maya_text; HeyGen lip-syncs and speaks it.
- * Does NOT use HeyGen voice chat / knowledge base.
+ * LiveAvatar presenter — text repeat mode only.
+ * OpenAI (server) decides maya_text; LiveAvatar lip-syncs and speaks it.
+ * Does NOT use voice chat or avatar knowledge base.
  */
 (function (global) {
   'use strict';
 
-  var avatar = null;
+  var session = null;
   var sdk = null;
   var ready = false;
   var videoEl = null;
@@ -14,31 +14,14 @@
 
   function loadSdk() {
     if (sdk) return Promise.resolve(sdk);
-    if (global.HeyGenStreamingAvatar) {
-      sdk = global.HeyGenStreamingAvatar;
+    if (global.LiveAvatarSdk) {
+      sdk = global.LiveAvatarSdk;
       return Promise.resolve(sdk);
     }
-    return import('https://esm.sh/@heygen/streaming-avatar@2.1.0').then(function (mod) {
-      sdk = {
-        StreamingAvatar: mod.default,
-        AvatarQuality: mod.AvatarQuality,
-        StreamingEvents: mod.StreamingEvents,
-        TaskType: mod.TaskType,
-        TaskMode: mod.TaskMode,
-      };
+    return import('https://esm.sh/@heygen/liveavatar-web-sdk@0.0.18').then(function (mod) {
+      sdk = mod;
       return sdk;
     });
-  }
-
-  function attachStream(stream) {
-    if (!videoEl || !stream) return;
-    videoEl.srcObject = stream;
-    videoEl.muted = false;
-    videoEl.hidden = false;
-    var play = videoEl.play();
-    if (play && typeof play.catch === 'function') {
-      play.catch(function () {});
-    }
   }
 
   global.MoeHeyGenPresenter = {
@@ -50,53 +33,45 @@
       opts = opts || {};
       if (initPromise) return initPromise;
 
-      if (!opts.token || !opts.avatarId) {
-        return Promise.reject(new Error('HeyGen token and avatar ID are required.'));
+      if (!opts.token) {
+        return Promise.reject(new Error('LiveAvatar session token is required.'));
       }
 
       videoEl = opts.videoEl || null;
-      var activityIdle = parseInt(opts.activityIdleTimeoutSec, 10) || 600;
-      activityIdle = Math.max(120, Math.min(3600, activityIdle));
 
       initPromise = loadSdk().then(function (loaded) {
-        var StreamingAvatar = loaded.StreamingAvatar;
-        var AvatarQuality = loaded.AvatarQuality;
-        var StreamingEvents = loaded.StreamingEvents;
+        var LiveAvatarSession = loaded.LiveAvatarSession;
+        var SessionEvent = loaded.SessionEvent;
 
-        avatar = new StreamingAvatar({ token: opts.token });
+        session = new LiveAvatarSession(opts.token, {
+          voiceChat: false,
+        });
 
         var streamReady = new Promise(function (resolve, reject) {
           var timeout = setTimeout(function () {
-            reject(new Error('HeyGen stream timed out.'));
+            reject(new Error('LiveAvatar stream timed out.'));
           }, 45000);
 
-          avatar.on(StreamingEvents.STREAM_READY, function (ev) {
+          session.on(SessionEvent.SESSION_STREAM_READY, function () {
             clearTimeout(timeout);
-            attachStream(ev.detail || ev);
+            if (videoEl && session.attach) {
+              session.attach(videoEl);
+              videoEl.hidden = false;
+              videoEl.muted = false;
+              var play = videoEl.play();
+              if (play && typeof play.catch === 'function') {
+                play.catch(function () {});
+              }
+            }
             resolve(true);
           });
 
-          avatar.on(StreamingEvents.ERROR, function (ev) {
-            clearTimeout(timeout);
-            reject(new Error((ev && ev.message) || 'HeyGen stream error.'));
+          session.on(SessionEvent.SESSION_DISCONNECTED, function () {
+            ready = false;
           });
         });
 
-        var voice = { rate: 1.05 };
-        if (opts.voiceId) voice.voiceId = opts.voiceId;
-
-        var startOpts = {
-          quality: AvatarQuality.High,
-          avatarName: opts.avatarId,
-          voice: voice,
-          activityIdleTimeout: activityIdle,
-          language: 'en',
-        };
-
-        return avatar.createStartAvatar(startOpts).then(function (sessionInfo) {
-          if (sessionInfo && sessionInfo.stream) {
-            attachStream(sessionInfo.stream);
-          }
+        return session.start().then(function () {
           return streamReady;
         }).then(function () {
           ready = true;
@@ -114,26 +89,56 @@
     speak: function (text) {
       text = String(text || '').trim();
       if (!text) return Promise.resolve(false);
-      if (!ready || !avatar || !sdk) {
-        return Promise.reject(new Error('HeyGen avatar not ready.'));
+      if (!ready || !session || !sdk) {
+        return Promise.reject(new Error('LiveAvatar session not ready.'));
       }
 
-      var TaskType = sdk.TaskType;
-      var TaskMode = sdk.TaskMode;
-      var speakOpts = { text: text };
-      if (TaskType && TaskType.REPEAT) speakOpts.taskType = TaskType.REPEAT;
-      if (TaskMode && TaskMode.SYNC) speakOpts.taskMode = TaskMode.SYNC;
+      var AgentEventsEnum = sdk.AgentEventsEnum;
 
-      return avatar.speak(speakOpts).then(function () {
-        return true;
+      return new Promise(function (resolve, reject) {
+        var timeout = setTimeout(function () {
+          cleanup();
+          reject(new Error('LiveAvatar speak timed out.'));
+        }, 120000);
+
+        function cleanup() {
+          clearTimeout(timeout);
+          if (AgentEventsEnum) {
+            session.off(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
+            session.off(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
+          }
+        }
+
+        function onStarted() {
+          clearTimeout(timeout);
+          timeout = setTimeout(function () {
+            cleanup();
+            resolve(true);
+          }, 120000);
+        }
+
+        function onEnded() {
+          cleanup();
+          resolve(true);
+        }
+
+        session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
+        session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
+
+        try {
+          session.repeat(text);
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
       });
     },
 
     stop: function () {
       ready = false;
       initPromise = null;
-      var stopper = avatar && avatar.stopAvatar ? avatar.stopAvatar() : Promise.resolve();
-      avatar = null;
+      var stopper = session && session.stop ? session.stop() : Promise.resolve();
+      session = null;
       if (videoEl) {
         try {
           videoEl.srcObject = null;

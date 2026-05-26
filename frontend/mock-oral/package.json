@@ -2,9 +2,10 @@
   "name": "ipca-mock-oral-heygen",
   "private": true,
   "scripts": {
-    "build": "esbuild heygen_entry.js --bundle --format=iife --global-name=HeyGenStreamingAvatar --outfile=../../public/assets/vendor/heygen-streaming-avatar.bundle.js --platform=browser"
+    "build": "bash build_heygen_bundle.sh"
   },
   "dependencies": {
+    "@heygen/liveavatar-web-sdk": "^0.0.18",
     "@heygen/streaming-avatar": "^2.1.0"
   },
   "devDependencies": {

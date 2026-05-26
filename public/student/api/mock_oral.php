@@ -107,14 +107,14 @@ try {
                 $token = $heygen->mintSessionToken($sessionId, $userId);
                 if (($token['presentation_mode'] ?? '') === 'heygen' && !empty($token['token'])) {
                     $pdo->prepare('UPDATE mock_oral_sessions SET heygen_token_issued_at = UTC_TIMESTAMP(), heygen_session_id = ? WHERE id = ?')
-                        ->execute([(string)$token['token'], $sessionId]);
+                        ->execute([(string)($token['liveavatar_session_id'] ?? $token['token']), $sessionId]);
                 }
                 $result['heygen'] = $token;
             } catch (Throwable $heygenError) {
                 $result['heygen'] = [
                     'ok' => true,
                     'presentation_mode' => 'fallback',
-                    'message' => 'HeyGen unavailable; browser TTS fallback active.',
+                    'message' => 'LiveAvatar unavailable; AI voice fallback active.',
                 ];
             }
             mo_api_out(['ok' => true] + $result);

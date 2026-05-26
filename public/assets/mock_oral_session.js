@@ -212,7 +212,7 @@
     var voiceChain = Promise.resolve(false);
     if (heygenReady && window.MoeHeyGenPresenter && MoeHeyGenPresenter.isReady()) {
       voiceChain = MoeHeyGenPresenter.speak(text).then(function () {
-        setVoiceBanner('heygen', 'Maya Live Avatar · HeyGen');
+        setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
         return true;
       }).catch(function () {
         heygenReady = false;
@@ -381,7 +381,7 @@
   }
 
   function initHeyGenAvatar(heygen) {
-    if (!heygen || heygen.presentation_mode !== 'heygen' || !heygen.token || !heygen.avatar_id) {
+    if (!heygen || heygen.presentation_mode !== 'heygen' || !heygen.token) {
       return Promise.resolve(false);
     }
     if (!window.MoeHeyGenPresenter) {
@@ -389,12 +389,13 @@
     }
 
     setMayaState('connecting', 'Starting Maya live avatar…');
-    setStudentState('Connecting HeyGen stream…');
+    setStudentState('Connecting live avatar stream…');
 
     return MoeHeyGenPresenter.init({
       token: heygen.token,
       avatarId: heygen.avatar_id,
       voiceId: heygen.voice_id || '',
+      quality: heygen.quality || 'high',
       videoEl: heygenVideoEl,
       activityIdleTimeoutSec: heygen.activity_idle_timeout_sec || 600,
     }).then(function () {
@@ -404,7 +405,7 @@
         heygenVideoEl.muted = false;
       }
       if (mayaAvatarEl) mayaAvatarEl.hidden = true;
-      setVoiceBanner('heygen', 'Maya Live Avatar · HeyGen');
+      setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
       return true;
     });
   }

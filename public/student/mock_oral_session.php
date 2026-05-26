@@ -133,11 +133,14 @@ window.MOCK_ORAL_SESSION = {
 };
 </script>
 <?php
-$heygenBundlePath = dirname(__DIR__) . '/assets/vendor/heygen-streaming-avatar.bundle.js';
-if (is_readable($heygenBundlePath)): ?>
+$liveAvatarBundlePath = dirname(__DIR__) . '/assets/vendor/liveavatar-web-sdk.bundle.js';
+$legacyBundlePath = dirname(__DIR__) . '/assets/vendor/heygen-streaming-avatar.bundle.js';
+if (is_readable($liveAvatarBundlePath)): ?>
+<script src="/assets/vendor/liveavatar-web-sdk.bundle.js?v=1"></script>
+<?php elseif (is_readable($legacyBundlePath)): ?>
 <script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=1"></script>
 <?php endif; ?>
-<script src="/assets/mock_oral_heygen_presenter.js?v=1"></script>
+<script src="/assets/mock_oral_heygen_presenter.js?v=2"></script>
 <script src="/assets/mock_oral_session.js?v=5"></script>
 
 <?php cw_footer(); ?>
