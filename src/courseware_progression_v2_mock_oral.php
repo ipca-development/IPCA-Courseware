@@ -634,7 +634,9 @@ trait CoursewareProgressionV2MockOralTrait
     {
         $st = $this->pdo->prepare('
             SELECT COUNT(*) FROM mock_oral_remote_authorizations
-            WHERE student_id = ? AND cohort_id = ? AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)
+            WHERE student_id = ? AND cohort_id = ?
+              AND status IN (\'REQUESTED\', \'EMAIL_SENT\')
+              AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)
         ');
         $st->execute([$studentId, $cohortId]);
         return (int)$st->fetchColumn();
