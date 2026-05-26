@@ -7,6 +7,10 @@ require_once __DIR__ . '/../remote_session_auth/remote_session_auth_constants.ph
 final class HeyGenLiveAvatarService
 {
     private const LIVEAVATAR_API = 'https://api.liveavatar.com';
+    /** IPCA Maya custom LiveAvatar (override with CW_HEYGEN_AVATAR_ID). */
+    private const DEFAULT_MAYA_AVATAR_ID = '8de43fb8-8c57-4fba-9c30-295574b4749c';
+    /** Maya voice on LiveAvatar (override with CW_HEYGEN_VOICE_ID). */
+    private const DEFAULT_MAYA_VOICE_ID = '3607df3c-9de0-4274-b0be-7e035775ead5';
 
     public function mintSessionToken(int $sessionId, int $userId): array
     {
@@ -28,16 +32,16 @@ final class HeyGenLiveAvatarService
         }
 
         if ($avatarId === '') {
-            return $base + [
-                'presentation_mode' => 'fallback',
-                'message' => 'LiveAvatar not configured (CW_HEYGEN_AVATAR_ID). Using AI voice until your custom Maya avatar is ready.',
-            ];
+            $avatarId = self::DEFAULT_MAYA_AVATAR_ID;
+        }
+        if ($voiceId === '') {
+            $voiceId = self::DEFAULT_MAYA_VOICE_ID;
         }
 
-        $persona = ['language' => 'en'];
-        if ($voiceId !== '') {
-            $persona['voice_id'] = $voiceId;
-        }
+        $persona = [
+            'language' => 'en',
+            'voice_id' => $voiceId,
+        ];
 
         $payload = [
             'mode' => 'LITE',

@@ -29,7 +29,7 @@ if ($view === 'debrief' && $session) {
     $debriefPayload = $sessionSvc->getDebriefPayload($sessionId);
     cw_header('Mock Oral Debrief');
     ?>
-    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=5">
+    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=6">
     <div class="moe-page">
       <section class="moe-debrief-hero">
         <div class="hero-overline">Mock Oral Debrief</div>
@@ -81,7 +81,7 @@ function mo_sh(?string $v): string
 
 cw_header('Mock Oral Exam');
 ?>
-<link rel="stylesheet" href="/assets/mock_oral_session.css?v=5">
+<link rel="stylesheet" href="/assets/mock_oral_session.css?v=6">
 
 <div class="moe-page moe-live-page" id="moeLivePage">
   <section class="moe-live-hero">
@@ -136,11 +136,11 @@ window.MOCK_ORAL_SESSION = {
 $liveAvatarBundlePath = dirname(__DIR__) . '/assets/vendor/liveavatar-web-sdk.bundle.js';
 $legacyBundlePath = dirname(__DIR__) . '/assets/vendor/heygen-streaming-avatar.bundle.js';
 if (is_readable($liveAvatarBundlePath)): ?>
-<script src="/assets/vendor/liveavatar-web-sdk.bundle.js?v=1"></script>
+<script src="/assets/vendor/liveavatar-web-sdk.bundle.js?v=2"></script>
 <?php elseif (is_readable($legacyBundlePath)): ?>
-<script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=1"></script>
+<script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=2"></script>
 <?php endif; ?>
-<script src="/assets/mock_oral_heygen_presenter.js?v=2"></script>
-<script src="/assets/mock_oral_session.js?v=5"></script>
+<script src="/assets/mock_oral_heygen_presenter.js?v=3"></script>
+<script src="/assets/mock_oral_session.js?v=6"></script>
 
 <?php cw_footer(); ?>

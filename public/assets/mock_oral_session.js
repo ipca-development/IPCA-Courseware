@@ -18,6 +18,9 @@
   var voiceMode = 'connecting';
   var currentAudio = null;
   var heygenReady = false;
+  var pendingSpeakText = '';
+  var audioUnlockNeeded = false;
+  var mayaStageEl = null;
 
   var transcriptEl = document.getElementById('moeTranscript');
   var timerEl = document.getElementById('moeTimer');
@@ -30,6 +33,7 @@
   var voiceBannerEl = document.getElementById('moeVoiceBanner');
   var mayaAvatarEl = document.getElementById('moeMayaAvatar');
   var heygenVideoEl = document.getElementById('moeHeygenVideo');
+  mayaStageEl = document.querySelector('.moe-maya-stage');
 
   if (!sessionId || !transcriptEl) {
     return;
@@ -161,6 +165,31 @@
     }
   }
 
+  function showAudioUnlockPrompt(text) {
+    pendingSpeakText = String(text || pendingSpeakText || '').trim();
+    audioUnlockNeeded = pendingSpeakText !== '';
+    if (mayaStageEl) {
+      mayaStageEl.classList.toggle('is-audio-blocked', audioUnlockNeeded);
+    }
+    if (audioUnlockNeeded) {
+      setVoiceBanner('prompt', 'Tap Maya\'s avatar to hear her question.');
+      setStudentState('Tap the avatar once to enable audio.');
+    }
+  }
+
+  function clearAudioUnlockPrompt() {
+    audioUnlockNeeded = false;
+    pendingSpeakText = '';
+    if (mayaStageEl) mayaStageEl.classList.remove('is-audio-blocked');
+  }
+
+  function replayPendingSpeak() {
+    if (!pendingSpeakText) return Promise.resolve(false);
+    var text = pendingSpeakText;
+    clearAudioUnlockPrompt();
+    return speakMaya(text, { append: false, skipUnlockPrompt: true });
+  }
+
   function speakBrowserFallback(text) {
     return new Promise(function (resolve) {
       if (!('speechSynthesis' in window)) {
@@ -169,7 +198,10 @@
       }
       var u = new SpeechSynthesisUtterance(text);
       u.rate = 1;
-      u.onend = function () { resolve(true); };
+      u.onend = function () {
+        setVoiceBanner('fallback', 'Browser Voice Mode Active');
+        resolve(true);
+      };
       u.onerror = function () { resolve(false); };
       window.speechSynthesis.speak(u);
     });
@@ -186,14 +218,36 @@
       })
       .then(function (blob) {
         if (!blob || blob.size < 32) throw new Error('Empty TTS');
-        setVoiceBanner('openai', 'Maya AI Voice');
         return new Promise(function (resolve) {
           currentAudio = new Audio(URL.createObjectURL(blob));
           currentAudio.onended = function () { resolve(true); };
           currentAudio.onerror = function () { resolve(false); };
-          currentAudio.play().catch(function () { resolve(false); });
+          var play = currentAudio.play();
+          if (play && typeof play.then === 'function') {
+            play.then(function () {
+              setVoiceBanner('openai', 'Maya AI Voice');
+              resolve(true);
+            }).catch(function () { resolve(false); });
+          } else {
+            setVoiceBanner('openai', 'Maya AI Voice');
+            resolve(true);
+          }
         });
-      });
+      })
+      .catch(function () { return false; });
+  }
+
+  function speakViaHeygen(text) {
+    if (!heygenReady || !window.MoeHeyGenPresenter || !MoeHeyGenPresenter.isReady()) {
+      return Promise.resolve(false);
+    }
+    return MoeHeyGenPresenter.speak(text).then(function () {
+      setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
+      return true;
+    }).catch(function () {
+      heygenReady = false;
+      return false;
+    });
   }
 
   function speakMaya(text, opts) {
@@ -206,32 +260,56 @@
     setStudentState('Listen to Maya…');
     isSpeaking = true;
     answerBtn.disabled = true;
+    clearAudioUnlockPrompt();
 
     stopCurrentAudio();
 
-    var voiceChain = Promise.resolve(false);
-    if (heygenReady && window.MoeHeyGenPresenter && MoeHeyGenPresenter.isReady()) {
-      voiceChain = MoeHeyGenPresenter.speak(text).then(function () {
-        setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
-        return true;
-      }).catch(function () {
-        heygenReady = false;
-        return false;
+    return speakViaHeygen(text)
+      .then(function (usedHeygen) {
+        if (usedHeygen) return true;
+        return speakOpenAiTts(text);
+      })
+      .then(function (spoken) {
+        if (spoken) return true;
+        return speakBrowserFallback(text);
+      })
+      .then(function (spoken) {
+        if (!spoken && !opts.skipUnlockPrompt) {
+          showAudioUnlockPrompt(text);
+        }
+        return spoken;
+      })
+      .then(function () {
+        isSpeaking = false;
+        setMayaState('listening', 'Maya is listening');
+        if (audioUnlockNeeded) {
+          setStudentState('Tap the avatar once to hear Maya, then answer.');
+          if (sessionActive) answerBtn.disabled = false;
+          return;
+        }
+        setStudentState('Tap to Answer when you are ready.');
+        if (sessionActive) answerBtn.disabled = false;
       });
-    }
+  }
 
-    return voiceChain.then(function (usedHeygen) {
-      if (usedHeygen) return true;
-      return speakOpenAiTts(text);
-    }).catch(function () {
-      setVoiceBanner('fallback', 'Fallback Voice Mode Active');
-      return speakBrowserFallback(text);
-    }).then(function () {
-      isSpeaking = false;
-      setMayaState('listening', 'Maya is listening');
-      setStudentState('Tap to Answer when you are ready.');
-      if (sessionActive) answerBtn.disabled = false;
+  function latestMayaText(rows) {
+    var text = '';
+    (rows || []).forEach(function (row) {
+      if ((row.role || '') === 'maya') {
+        text = String(row.transcript_text || row.text || '');
+      }
     });
+    return text.trim();
+  }
+
+  function mayaPromptToSpeak(res) {
+    if (res.opening && res.opening.maya_text && !res.resumed) {
+      return String(res.opening.maya_text);
+    }
+    if (res.resumed && Array.isArray(res.transcript) && res.transcript.length) {
+      return latestMayaText(res.transcript);
+    }
+    return '';
   }
 
   function setControlsEnabled(on) {
@@ -432,17 +510,19 @@
         endBtn.disabled = false;
 
         return initHeyGenAvatar(heygen).catch(function (e) {
-          if (heygen.message) {
+          if (heygen.message && heygen.presentation_mode === 'fallback') {
             appendTurn('system', heygen.message);
           } else if (e && e.message) {
             appendTurn('system', e.message);
           }
-          appendTurn('system', 'Using Maya AI voice until HeyGen is available.');
           return false;
         }).then(function () {
-          if (res.opening && res.opening.maya_text && !res.resumed) {
+          var promptText = mayaPromptToSpeak(res);
+          if (promptText) {
             turnIndex = res.next_turn_index != null ? parseInt(res.next_turn_index, 10) : 0;
-            return speakMaya(res.opening.maya_text, { append: false });
+            var alreadyInTranscript = (Array.isArray(res.transcript) && res.transcript.length > 0)
+              || (res.opening && res.opening.maya_text && !res.resumed);
+            return speakMaya(promptText, { append: !alreadyInTranscript });
           }
 
           setMayaState('listening', 'Maya is listening');
@@ -458,6 +538,13 @@
   }
 
   answerBtn.addEventListener('click', toggleRecording);
+  if (mayaStageEl) {
+    mayaStageEl.addEventListener('click', function () {
+      if (audioUnlockNeeded && pendingSpeakText) {
+        replayPendingSpeak();
+      }
+    });
+  }
   submitTypedBtn.addEventListener('click', function () {
     submitAnswer(String(typedEl.value || '').trim());
   });

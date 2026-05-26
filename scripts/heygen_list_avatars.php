@@ -142,6 +142,6 @@ if ($custom === []) {
     }
 }
 
-echo "\nSuggested test env (Ann Therapist):\n";
-echo "CW_HEYGEN_AVATAR_ID=513fd1b7-7ef9-466d-9af2-344e51eeb833\n";
-echo "CW_HEYGEN_VOICE_ID=de5574fc-009e-4a01-a881-9919ef8f5a0c\n";
+echo "\nDefault Maya avatar + voice (used when env vars are unset):\n";
+echo "CW_HEYGEN_AVATAR_ID=8de43fb8-8c57-4fba-9c30-295574b4749c\n";
+echo "CW_HEYGEN_VOICE_ID=3607df3c-9de0-4274-b0be-7e035775ead5\n";

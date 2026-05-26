@@ -15,11 +15,20 @@
   function loadSdk() {
     if (sdk) return Promise.resolve(sdk);
     if (global.LiveAvatarSdk) {
-      sdk = global.LiveAvatarSdk;
+      var mod = global.LiveAvatarSdk;
+      sdk = {
+        LiveAvatarSession: mod.LiveAvatarSession,
+        SessionEvent: mod.SessionEvent,
+        AgentEventsEnum: mod.AgentEventsEnum,
+      };
       return Promise.resolve(sdk);
     }
     return import('https://esm.sh/@heygen/liveavatar-web-sdk@0.0.18').then(function (mod) {
-      sdk = mod;
+      sdk = {
+        LiveAvatarSession: mod.LiveAvatarSession,
+        SessionEvent: mod.SessionEvent,
+        AgentEventsEnum: mod.AgentEventsEnum,
+      };
       return sdk;
     });
   }
