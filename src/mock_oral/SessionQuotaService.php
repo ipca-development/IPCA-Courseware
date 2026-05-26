@@ -57,11 +57,27 @@ final class SessionQuotaService
         return $st->fetch(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function canStartSession(int $userId, int $cohortId): array
+    public function countStartedSessionsThisWeek(int $userId, int $cohortId): int
     {
-        $quota = $this->getOrCreateCurrentPeriod($userId, $cohortId);
-        $allowed = (int)($quota['sessions_allowed'] ?? 3);
-        $used = (int)($quota['sessions_used'] ?? 0);
+        $periodStart = gmdate('Y-m-d', strtotime('monday this week UTC'));
+        $periodEnd = gmdate('Y-m-d', strtotime('sunday this week UTC'));
+
+        $st = $this->pdo->prepare("
+            SELECT COUNT(*) FROM mock_oral_sessions
+            WHERE user_id = ? AND cohort_id = ?
+              AND started_at IS NOT NULL
+              AND started_at >= ?
+              AND started_at < DATE_ADD(?, INTERVAL 1 DAY)
+        ");
+        $st->execute([$userId, $cohortId, $periodStart . ' 00:00:00', $periodEnd]);
+
+        return (int)$st->fetchColumn();
+    }
+
+    public function canPrepareSession(int $userId, int $cohortId): array
+    {
+        $allowed = $this->sessionsAllowedPerWeek($userId, $cohortId);
+        $used = $this->countStartedSessionsThisWeek($userId, $cohortId);
         if ($used >= $allowed) {
             return [
                 'allowed' => false,
@@ -73,7 +89,34 @@ final class SessionQuotaService
         }
 
         $active = $this->getActiveSession($userId, $cohortId);
-        if ($active) {
+        if ($active && in_array((string)$active['status'], ['in_progress', 'turn_evaluating'], true)) {
+            return [
+                'allowed' => false,
+                'reason' => 'active_session',
+                'message' => 'You already have an active mock oral session.',
+                'session_id' => (int)$active['id'],
+            ];
+        }
+
+        return ['allowed' => true, 'sessions_allowed' => $allowed, 'sessions_used' => $used];
+    }
+
+    public function canStartSession(int $userId, int $cohortId): array
+    {
+        $allowed = $this->sessionsAllowedPerWeek($userId, $cohortId);
+        $used = $this->countStartedSessionsThisWeek($userId, $cohortId);
+        if ($used >= $allowed) {
+            return [
+                'allowed' => false,
+                'reason' => 'weekly_quota',
+                'message' => 'You have used all mock oral sessions for this week.',
+                'sessions_allowed' => $allowed,
+                'sessions_used' => $used,
+            ];
+        }
+
+        $active = $this->getActiveSession($userId, $cohortId);
+        if ($active && in_array((string)$active['status'], ['in_progress', 'turn_evaluating'], true)) {
             return [
                 'allowed' => false,
                 'reason' => 'active_session',
@@ -88,11 +131,12 @@ final class SessionQuotaService
     public function consumeSession(int $userId, int $cohortId): void
     {
         $quota = $this->getOrCreateCurrentPeriod($userId, $cohortId);
+        $used = $this->countStartedSessionsThisWeek($userId, $cohortId);
         $this->pdo->prepare('
             UPDATE mock_oral_usage_quotas
-            SET sessions_used = sessions_used + 1, updated_at = UTC_TIMESTAMP()
+            SET sessions_used = ?, updated_at = UTC_TIMESTAMP()
             WHERE id = ?
-        ')->execute([(int)$quota['id']]);
+        ')->execute([max(0, $used), (int)$quota['id']]);
     }
 
     public function recordHeygenMinutes(int $userId, int $cohortId, float $minutes): void

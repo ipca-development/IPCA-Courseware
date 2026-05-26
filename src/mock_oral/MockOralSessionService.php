@@ -57,11 +57,19 @@ final class MockOralSessionService
             throw new RuntimeException('Session blueprint is missing.');
         }
 
+        $quotaSvc = new SessionQuotaService($this->pdo);
+        $quotaCheck = $quotaSvc->canStartSession($userId, (int)$session['cohort_id']);
+        if (empty($quotaCheck['allowed'])) {
+            throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
+        }
+
         $this->pdo->prepare("
             UPDATE mock_oral_sessions
             SET status = 'in_progress', started_at = UTC_TIMESTAMP(), last_heartbeat_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
             WHERE id = ?
         ")->execute([$sessionId]);
+
+        $quotaSvc->consumeSession($userId, (int)$session['cohort_id']);
 
         $opening = $orchestrator->nextMayaTurn($session, $blueprint, 0);
         $orchestrator->logTranscriptEvent($sessionId, 'maya', 0, (string)$opening['maya_text'], 'opening');

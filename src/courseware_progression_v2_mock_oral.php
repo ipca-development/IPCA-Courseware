@@ -496,7 +496,7 @@ trait CoursewareProgressionV2MockOralTrait
         }
 
         $quotaSvc = new SessionQuotaService($this->pdo);
-        $quotaCheck = $quotaSvc->canStartSession($studentId, $cohortId);
+        $quotaCheck = $quotaSvc->canPrepareSession($studentId, $cohortId);
         if (empty($quotaCheck['allowed'])) {
             throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
         }
@@ -527,7 +527,6 @@ trait CoursewareProgressionV2MockOralTrait
             ]);
             $sessionId = (int)$this->pdo->lastInsertId();
 
-            $quotaSvc->consumeSession($studentId, $cohortId);
             $this->pdo->commit();
         } catch (Throwable $e) {
             $this->pdo->rollBack();
@@ -589,8 +588,6 @@ trait CoursewareProgressionV2MockOralTrait
             ]);
             $sessionId = (int)$this->pdo->lastInsertId();
 
-            $quotaSvc = new SessionQuotaService($this->pdo);
-            $quotaSvc->consumeSession($studentId, $cohortId);
             $this->pdo->commit();
         } catch (Throwable $e) {
             $this->pdo->rollBack();
