@@ -1980,6 +1980,12 @@ public function hasCanonicalPassProgressTest(int $userId, int $cohortId, int $le
     return $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId) !== null;
 }
 
+public function getCanonicalPassProgressTestAttemptId(int $userId, int $cohortId, int $lessonId): ?int
+{
+    $row = $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId);
+    return $row ? (int)$row['id'] : null;
+}
+
 private function lessonHasCanonicalPass(int $userId, int $cohortId, int $lessonId): bool
 {
     return $this->hasCanonicalPassProgressTest($userId, $cohortId, $lessonId);

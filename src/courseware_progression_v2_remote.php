@@ -225,6 +225,24 @@ trait CoursewareProgressionV2RemoteTrait
         $passiveCoursePage = $courseCtx !== [];
         $allowBackgroundRetry = !$passiveCoursePage;
 
+        $passAttemptId = null;
+        if ($courseCtx && !empty($courseCtx['test_passed'])) {
+            $passAttemptId = $this->getCanonicalPassProgressTestAttemptId($studentId, $cohortId, $lessonId);
+        } elseif (!$courseCtx && $this->hasCanonicalPassProgressTest($studentId, $cohortId, $lessonId)) {
+            $passAttemptId = $this->getCanonicalPassProgressTestAttemptId($studentId, $cohortId, $lessonId);
+        }
+        if ($passAttemptId !== null) {
+            return [
+                'mode' => 'show_report',
+                'label' => 'Show Report',
+                'button_class' => 'success',
+                'disabled' => false,
+                'show_code_modal' => false,
+                'progress_test_url' => $ptUrl,
+                'attempt_id' => $passAttemptId,
+            ];
+        }
+
         $blocked = $this->ptr_prepare_blocked_reason($studentId, $cohortId, $lessonId, $courseCtx);
         if ($blocked) {
             return array_merge([

@@ -1529,6 +1529,8 @@ cw_header('Course');
     letter-spacing:.01em;
   }
   .action-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
+  .action-btn.success{background:#15803d;color:#fff;border-color:#15803d}
+  .action-btn.success:hover{background:#166534;border-color:#166534}
   .action-btn.remote{background:#f59e0b;color:#fff;border-color:#f59e0b}
   .action-btn.remote:hover{background:#d97706;border-color:#d97706}
   .action-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}
@@ -1949,6 +1951,7 @@ $testBtnClass = 'primary';
 $showPrepareButton = false;
 $showRemoteRequestButton = false;
 $showCodeModalButton = false;
+$showReportButton = false;
 $ptBtnDisabled = false;
 $ptBtnMessage = '';
 
@@ -1967,6 +1970,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $testLabel = (string)($ptBtn['label'] ?? 'Start Progress Test');
     $testBtnClass = (string)($ptBtn['button_class'] ?? 'primary');
     $ptBtnDisabled = !empty($ptBtn['disabled']);
+    $showReportButton = ($ptBtnMode === 'show_report');
     $showPrepareButton = !empty($ptBtn['show_prepare_button']);
     $showRemoteRequestButton = ($ptBtnMode === 'remote_request');
     $lxPrep = (array)($lx['progress_test_prep'] ?? []);
@@ -2040,7 +2044,12 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                           </div>
                         <?php else: ?>
                         <div class="cell-action">
-                          <?php if ($showPrepareButton): ?>
+                          <?php if ($showReportButton): ?>
+                            <button type="button" class="action-btn success pt-show-report"
+                              data-attempt-id="<?= (int)($ptBtn['attempt_id'] ?? 0) ?>"
+                              data-cohort-id="<?= (int)$cohortId ?>"
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
+                          <?php elseif ($showPrepareButton): ?>
                             <a href="#" class="action-btn primary pt-prep-trigger"
                               data-cohort-id="<?= (int)$cohortId ?>"
                               data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></a>
@@ -2562,5 +2571,48 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   maybeAutoOpenRemoteCodeModal();
 })();
 </script>
+
+<?php if ($role === 'student'): ?>
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=30">
+<?php
+$copilotBadgeImage = '/assets/badges/06_mayas_copilot.png';
+require __DIR__ . '/partials/progress_test_v4_report_modal.php';
+$coursePtPassPct = (int)$progression->getPolicy('progress_test_pass_pct', ['cohort_id' => $cohortId]);
+if ($coursePtPassPct <= 0) {
+    $coursePtPassPct = 70;
+}
+?>
+<script>
+window.IPCAProgressTestV4ReportConfig = {
+  progressTestPassPct: <?= (int)$coursePtPassPct ?>
+};
+</script>
+<script src="/assets/progress_test_v4_report.js?v=1"></script>
+<script>
+(function () {
+  var cfg = window.IPCAProgressTestV4ReportConfig || {};
+  var reportCtrl = window.IPCAProgressTestV4Report && window.IPCAProgressTestV4Report.create({
+    root: document,
+    cfg: cfg
+  });
+  if (!reportCtrl) return;
+  reportCtrl.initFeedbackForm();
+  reportCtrl.bindEvents();
+  document.querySelectorAll('.pt-show-report').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var attemptId = parseInt(btn.getAttribute('data-attempt-id') || '0', 10);
+      if (attemptId <= 0) return;
+      btn.disabled = true;
+      reportCtrl.setAttemptId(attemptId);
+      reportCtrl.fetchAndShowReport().catch(function (err) {
+        alert((err && err.message) ? err.message : 'Could not load the progress test report.');
+      }).finally(function () {
+        btn.disabled = false;
+      });
+    });
+  });
+})();
+</script>
+<?php endif; ?>
 
 <?php cw_footer(); ?>
