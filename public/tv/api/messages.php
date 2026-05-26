@@ -36,6 +36,7 @@ try {
             display_duration_seconds,
             announce_audio_enabled,
             voice_text,
+            voice,
             audio_url,
             status,
             updated_at
@@ -75,6 +76,7 @@ try {
             'display_duration_seconds' => max(5, (int)$row['display_duration_seconds']),
             'announce_audio_enabled' => (bool)$row['announce_audio_enabled'],
             'voice_text' => (string)($row['voice_text'] ?? ''),
+            'voice' => (string)($row['voice'] ?? ''),
             'audio_url' => (string)($row['audio_url'] ?? ''),
             'status' => (string)$row['status'],
             'updated_at' => (string)$row['updated_at'],
