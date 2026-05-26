@@ -13,6 +13,11 @@ final class SessionQuotaService
 
     public function sessionsAllowedPerWeek(int $userId, int $cohortId): int
     {
+        $envLimit = (int)(getenv('CW_MOCK_ORAL_SESSIONS_PER_WEEK') ?: 0);
+        if ($envLimit > 0) {
+            return $envLimit;
+        }
+
         try {
             $st = $this->pdo->prepare("
                 SELECT value_int FROM system_policy_values
@@ -23,10 +28,16 @@ final class SessionQuotaService
             ");
             $st->execute([$cohortId]);
             $v = (int)$st->fetchColumn();
-            return $v > 0 ? $v : 3;
+            return $v > 0 ? $v : 10;
         } catch (Throwable $e) {
-            return 3;
+            return 10;
         }
+    }
+
+    private function allowedSessionsThisWeek(int $userId, int $cohortId): int
+    {
+        $quota = $this->getOrCreateCurrentPeriod($userId, $cohortId);
+        return max(1, (int)($quota['sessions_allowed'] ?? $this->sessionsAllowedPerWeek($userId, $cohortId)));
     }
 
     public function getOrCreateCurrentPeriod(int $userId, int $cohortId): array
@@ -76,7 +87,7 @@ final class SessionQuotaService
 
     public function canPrepareSession(int $userId, int $cohortId): array
     {
-        $allowed = $this->sessionsAllowedPerWeek($userId, $cohortId);
+        $allowed = $this->allowedSessionsThisWeek($userId, $cohortId);
         $used = $this->countStartedSessionsThisWeek($userId, $cohortId);
         if ($used >= $allowed) {
             return [
@@ -103,7 +114,7 @@ final class SessionQuotaService
 
     public function canStartSession(int $userId, int $cohortId): array
     {
-        $allowed = $this->sessionsAllowedPerWeek($userId, $cohortId);
+        $allowed = $this->allowedSessionsThisWeek($userId, $cohortId);
         $used = $this->countStartedSessionsThisWeek($userId, $cohortId);
         if ($used >= $allowed) {
             return [
