@@ -2113,6 +2113,21 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             $currentStmt->execute([':id' => $progressTestId]);
             $currentRow = $currentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
+            if ((string)($currentRow['status'] ?? '') === 'completed') {
+                $this->pdo->rollBack();
+                return [
+                    'ok' => true,
+                    'already_finalized' => true,
+                    'classification' => $classification,
+                    'summary_state' => $summaryState,
+                    'activity_state' => $context['activity_state'],
+                    'queued_email_ids' => [],
+                    'remediation_triggered' => !empty($decision['remediation_required']),
+                    'instructor_escalation_triggered' => !empty($decision['instructor_required']),
+                    'automation_result' => null,
+                ];
+            }
+
             $this->logProgressionEvent([
                 'user_id'          => $userId,
                 'cohort_id'        => $cohortId,
@@ -2323,15 +2338,38 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         $automationResult = null;
 
 		if (!empty($eventKey)) {
-    	$automationResult = $this->dispatchAutomationEventIfAvailable(
-        $eventKey,
-        $automationEventContext,
-        $userId,
-        $cohortId,
-        $lessonId,
-        $progressTestId
-    );
-}
+            try {
+                $automationResult = $this->dispatchAutomationEventIfAvailable(
+                    $eventKey,
+                    $automationEventContext,
+                    $userId,
+                    $cohortId,
+                    $lessonId,
+                    $progressTestId
+                );
+            } catch (Throwable $automationEx) {
+                $automationResult = [
+                    'ok' => false,
+                    'error' => $automationEx->getMessage(),
+                ];
+                $this->logProgressionEvent([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'event_type' => 'automation',
+                    'event_code' => 'automation_dispatch_failed',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => [
+                        'event_key' => $eventKey,
+                        'error' => $automationEx->getMessage(),
+                    ],
+                ]);
+            }
+        }
 
         return [
             'ok' => true,

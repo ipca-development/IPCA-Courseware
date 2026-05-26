@@ -1865,6 +1865,13 @@
   function handleUploadFailure(err, opts) {
     pendingEvalOpts = opts || pendingEvalOpts;
     var msg = String(err && err.message ? err.message : err || '');
+    if (msg.indexOf('attempt_terminal_state_at_finalize') >= 0 || msg.indexOf('terminal state') >= 0) {
+      recoverTestCompletionAfterError(err).catch(function () {
+        setHintContent('This attempt is already finished. Tap <strong>My Report</strong> or return to your course.', true);
+        syncButtons();
+      });
+      return;
+    }
     markYesNoAudioFailed();
     if (msg.indexOf('No audio received') >= 0 || msg === 'AUDIO_NOT_RECEIVED') {
       setTranscriptDisplay('noAudio');
@@ -1986,6 +1993,41 @@
     });
   }
 
+  function applyTestCompletion(done) {
+    done = done || {};
+    lastReport = done.report || lastReport;
+    testCompleteReady = true;
+    awaitingNextQuestion = false;
+    feedbackSpeechDone = true;
+    pendingEvalOpts = null;
+    hideRetry();
+    stopTimer();
+    if (done.state) updateProgress(done.state);
+    setHintContent('Progress test complete. Open <strong>My Report</strong> when you are ready.', true);
+    if (els.next) els.next.hidden = true;
+    if (els.myReport) els.myReport.hidden = false;
+    syncButtons();
+  }
+
+  function recoverTestCompletionAfterError(err) {
+    logEvent('complete_test_failed', String(err && err.message ? err.message : err));
+    return apiJson('get_state', {}).then(function (stateOut) {
+      if (!stateOut || !stateOut.state || String(stateOut.state.status || '') !== 'completed') {
+        throw err;
+      }
+      return apiJson('get_report', {}).then(function (reportOut) {
+        applyTestCompletion({ state: stateOut.state, report: reportOut.report });
+      });
+    });
+  }
+
+  function finalizeProgressTestCompletion() {
+    return apiJson('complete_test', {}).then(function (done) {
+      logEvent('complete_test_ok', '', { score_pct: done.score_pct });
+      applyTestCompletion(done);
+    }).catch(recoverTestCompletionAfterError);
+  }
+
   function handleEvaluationResult(out) {
     pendingEvalOpts = null;
     hideRetry();
@@ -2071,29 +2113,24 @@
     beginFeedbackProcessingProgress();
     syncButtons();
     scheduleFeedbackSpeechWatchdog(feedbackSpeech);
+    var needsCompleteTest = out.next_action === 'complete_test';
     playMayaFeedbackSpeech(feedbackSpeech, function () {
       clearFeedbackSpeechWatchdog();
       setCardState(CARD.COMPLETE);
       feedbackSpeechDone = true;
       syncButtons();
+      if (needsCompleteTest) {
+        finalizeProgressTestCompletion().catch(function () {
+          setHintContent('Your answers are saved. Tap <strong>My Report</strong> or refresh if the report does not appear.', true);
+          syncButtons();
+        });
+      }
     }, {
       onAudioStart: function () {
         finishProcessingProgress('Processing your answer');
         setFeedbackPanel(scorePct, feedback);
       }
     });
-
-    if (out.next_action === 'complete_test') {
-      return apiJson('complete_test', {}).then(function (done) {
-        lastReport = done.report || null;
-        testCompleteReady = true;
-        updateProgress(done.state);
-        setStatus('Progress test complete. Open My Report when you are ready.');
-        if (els.next) els.next.hidden = true;
-        if (els.myReport) els.myReport.hidden = false;
-        syncButtons();
-      });
-    }
     syncButtons();
   }
 
@@ -2183,6 +2220,11 @@
         return;
       }
       if (prepTimer) clearTimeout(prepTimer);
+      if (isAttemptClosed(out.state) && String(out.state.status || '') === 'completed') {
+        updateProgress(out.state);
+        startCamera();
+        return recoverTestCompletionAfterError(new Error('resume_completed_attempt'));
+      }
       if (shouldResumeOralSession(out.state)) {
         return resumeOralSession();
       }
@@ -2681,6 +2723,10 @@
       return;
     }
     if (pendingEvalOpts) {
+      if (isAttemptClosed(state) && String(state.status || '') === 'completed') {
+        finalizeProgressTestCompletion();
+        return;
+      }
       submitAnswerEvaluation(pendingEvalOpts);
       return;
     }

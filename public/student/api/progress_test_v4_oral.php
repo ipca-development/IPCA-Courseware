@@ -433,8 +433,14 @@ try {
     }
 
     if ($action === 'complete_test') {
+        $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
         $state = ptv4_state_payload($pdo, $attempt);
-        if ((int)$state['total_questions'] <= 0 || (int)$state['evaluated_count'] < (int)$state['total_questions']) {
+        if ((int)$state['total_questions'] <= 0) {
+            ptv4_json(['ok' => false, 'error' => 'Progress test has no questions.'], 409);
+        }
+
+        $alreadyCompleted = (string)($attempt['status'] ?? '') === 'completed';
+        if (!$alreadyCompleted && (int)$state['evaluated_count'] < (int)$state['total_questions']) {
             ptv4_json(['ok' => false, 'error' => 'All items must be evaluated before completion.'], 409);
         }
 
@@ -456,31 +462,52 @@ try {
         $weakText = $weak ? implode(', ', array_slice($weak, 0, 5)) : 'No major weak areas identified.';
         $strongText = $strong ? implode(', ', array_slice($strong, 0, 4)) : 'You handled several concepts adequately.';
 
-        $engine = new CoursewareProgressionV2($pdo);
-        $finalize = $engine->finalizeAssessedProgressTest($attemptId, [
-            'score_pct' => $scorePct,
-            'ai_summary' => 'Answered via oral progress test V4. Score: ' . $scorePct . '%. Weak areas: ' . $weakText,
-            'weak_areas' => $weakText,
-            'debrief_spoken' => 'Your oral progress test score is ' . $scorePct . ' percent.',
-            'summary_quality' => 'Not reassessed in oral V4 mode.',
-            'summary_issues' => '',
-            'summary_corrections' => '',
-            'confirmed_misunderstandings' => $weakText,
-            'completed_at' => gmdate('Y-m-d H:i:s'),
-        ]);
+        if (!$alreadyCompleted) {
+            $engine = new CoursewareProgressionV2($pdo);
+            try {
+                $engine->finalizeAssessedProgressTest($attemptId, [
+                    'score_pct' => $scorePct,
+                    'ai_summary' => 'Answered via oral progress test V4. Score: ' . $scorePct . '%. Weak areas: ' . $weakText,
+                    'weak_areas' => $weakText,
+                    'debrief_spoken' => 'Your oral progress test score is ' . $scorePct . ' percent.',
+                    'summary_quality' => 'Not reassessed in oral V4 mode.',
+                    'summary_issues' => '',
+                    'summary_corrections' => '',
+                    'confirmed_misunderstandings' => $weakText,
+                    'completed_at' => gmdate('Y-m-d H:i:s'),
+                ]);
+            } catch (Throwable $e) {
+                $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
+                if ((string)($attempt['status'] ?? '') !== 'completed') {
+                    throw $e;
+                }
+            }
+        }
+
         $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
         $passed = !empty($attempt['pass_gate_met']);
         $summary = $passed
             ? 'You passed with ' . $scorePct . '%. Strongest areas: ' . $strongText . '. Review ' . $weakText . ' before moving on.'
             : 'You did not pass this attempt. Main weak areas: ' . $weakText . '. Study those before re-attempting.';
 
-        ptv4_generate_integrity_review($pdo, $attempt);
-        $newlyEarnedBadges = ptv4_evaluate_and_award_badges($pdo, $attempt);
+        try {
+            ptv4_generate_integrity_review($pdo, $attempt);
+        } catch (Throwable $e) {
+            error_log('ptv4_generate_integrity_review failed for attempt ' . $attemptId . ': ' . $e->getMessage());
+        }
+
+        $newlyEarnedBadges = [];
+        try {
+            $newlyEarnedBadges = ptv4_evaluate_and_award_badges($pdo, $attempt);
+        } catch (Throwable $e) {
+            error_log('ptv4_evaluate_and_award_badges failed for attempt ' . $attemptId . ': ' . $e->getMessage());
+        }
+
         $report = ptv4_report_payload($pdo, $attempt, $u, $newlyEarnedBadges);
 
         ptv4_json([
             'ok' => true,
-            'score_pct' => $scorePct,
+            'score_pct' => (int)($attempt['score_pct'] ?? $scorePct),
             'pass_gate_met' => $passed ? 1 : 0,
             'formal_result_label' => (string)($attempt['formal_result_label'] ?? ''),
             'strongest_areas' => $strong,
@@ -488,7 +515,7 @@ try {
             'summary' => $summary,
             'report' => $report,
             'state' => ptv4_state_payload($pdo, $attempt),
-            'automation_result' => $finalize['automation_result'] ?? null,
+            'automation_result' => null,
         ]);
     }
 
