@@ -579,6 +579,7 @@ if (!function_exists('aue_tabs')) {
             'profile' => 'Profile',
             'emergency' => 'Emergency',
             'billing' => 'Billing',
+            'exams_endorsements' => 'Exams & Endorsements',
             'integrations' => 'Integrations',
             'vault' => 'Credentials Vault',
             'security' => 'Security',
@@ -1221,6 +1222,183 @@ if (!function_exists('aue_update_billing_tab')) {
         ));
 
         aue_recalculate_profile_requirements_status($pdo, $userId);
+    }
+}
+
+if (!function_exists('aue_load_exams_endorsements_context')) {
+    function aue_load_exams_endorsements_context(PDO $pdo, int $userId): array
+    {
+        require_once __DIR__ . '/mock_oral/mock_oral_bootstrap.php';
+        require_once __DIR__ . '/mock_oral/FaaKnowledgeTestParserService.php';
+        mo_ensure_tables($pdo);
+
+        $cohorts = [];
+        $st = $pdo->prepare("
+            SELECT cs.cohort_id, co.name AS cohort_name
+            FROM cohort_students cs
+            INNER JOIN cohorts co ON co.id = cs.cohort_id
+            WHERE cs.user_id = ? AND cs.status = 'active'
+            ORDER BY co.name ASC
+        ");
+        $st->execute([$userId]);
+        $cohorts = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $catalogId = mo_default_catalog_id($pdo);
+        $areas = [];
+        if ($catalogId > 0) {
+            $ast = $pdo->prepare('SELECT id, area_code, title FROM mock_oral_acs_areas WHERE catalog_id = ? AND is_active = 1 ORDER BY sort_order ASC');
+            $ast->execute([$catalogId]);
+            $areas = $ast->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        $permissions = [];
+        if ($catalogId > 0) {
+            $pst = $pdo->prepare('SELECT * FROM student_mock_oral_permissions WHERE student_id = ? AND catalog_id = ?');
+            $pst->execute([$userId, $catalogId]);
+            foreach ($pst->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $permissions[(int)$row['cohort_id']] = $row;
+            }
+        }
+
+        $parser = new FaaKnowledgeTestParserService($pdo);
+        $reports = $parser->listReportsForUser($userId);
+
+        $selectedCohortId = (int)($_GET['cohort_id'] ?? ($cohorts[0]['cohort_id'] ?? 0));
+        $deficiencies = [];
+        if (!empty($_GET['report_id'])) {
+            $deficiencies = $parser->listDeficienciesForReport((int)$_GET['report_id']);
+        }
+
+        $sessions = [];
+        if ($selectedCohortId > 0) {
+            $sst = $pdo->prepare("
+                SELECT s.id, s.status, s.score_pct, s.started_at, s.ended_at, a.title AS area_title, a.area_code
+                FROM mock_oral_sessions s
+                INNER JOIN mock_oral_acs_areas a ON a.id = s.area_id
+                WHERE s.user_id = ? AND s.cohort_id = ?
+                ORDER BY s.id DESC
+                LIMIT 20
+            ");
+            $sst->execute([$userId, $selectedCohortId]);
+            $sessions = $sst->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        $lessonMaps = [];
+        if ($catalogId > 0) {
+            $lst = $pdo->prepare('
+                SELECT m.id, m.area_id, m.lesson_id, m.weight, l.title AS lesson_title, a.title AS area_title, a.area_code
+                FROM mock_oral_acs_area_lesson_map m
+                INNER JOIN mock_oral_acs_areas a ON a.id = m.area_id
+                INNER JOIN lessons l ON l.id = m.lesson_id
+                WHERE a.catalog_id = ?
+                ORDER BY a.sort_order ASC, m.weight DESC
+            ');
+            $lst->execute([$catalogId]);
+            $lessonMaps = $lst->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        return [
+            'cohorts' => $cohorts,
+            'catalog_id' => $catalogId,
+            'areas' => $areas,
+            'permissions' => $permissions,
+            'reports' => $reports,
+            'selected_cohort_id' => $selectedCohortId,
+            'deficiencies' => $deficiencies,
+            'sessions' => $sessions,
+            'lesson_maps' => $lessonMaps,
+        ];
+    }
+}
+
+if (!function_exists('aue_update_exams_endorsements_tab')) {
+    function aue_update_exams_endorsements_tab(PDO $pdo, int $userId, int $actorId): void
+    {
+        require_once __DIR__ . '/courseware_progression_v2.php';
+        require_once __DIR__ . '/mock_oral/FaaKnowledgeTestParserService.php';
+        require_once __DIR__ . '/mock_oral/mock_oral_bootstrap.php';
+        mo_ensure_tables($pdo);
+
+        $action = strtolower(trim((string)($_POST['exams_action'] ?? '')));
+        $engine = new CoursewareProgressionV2($pdo);
+        $catalogId = mo_default_catalog_id($pdo);
+
+        if ($action === 'set_mock_oral_permission') {
+            $cohortId = (int)($_POST['cohort_id'] ?? 0);
+            $enabled = (int)($_POST['mock_oral_enabled'] ?? 0) === 1;
+            $notes = trim((string)($_POST['mock_oral_notes'] ?? ''));
+            if ($cohortId <= 0) {
+                throw new RuntimeException('Select a cohort.');
+            }
+            $engine->setMockOralPermission($userId, $cohortId, $enabled, $actorId, $notes !== '' ? $notes : null, $catalogId ?: null);
+            return;
+        }
+
+        if ($action === 'upload_faa_report') {
+            $cohortId = (int)($_POST['cohort_id'] ?? 0);
+            if ($cohortId <= 0) {
+                throw new RuntimeException('Select a cohort.');
+            }
+            if (empty($_FILES['faa_report_pdf'])) {
+                throw new RuntimeException('Choose a PSI/CATS PDF report.');
+            }
+            $parser = new FaaKnowledgeTestParserService($pdo);
+            $result = $parser->storeUpload($userId, $cohortId, $catalogId, $actorId, $_FILES['faa_report_pdf']);
+            try {
+                $parser->parseReport((int)$result['report_id']);
+            } catch (Throwable $e) {
+                throw new RuntimeException('Report uploaded but parsing failed: ' . $e->getMessage());
+            }
+            return;
+        }
+
+        if ($action === 'review_deficiency') {
+            $deficiencyId = (int)($_POST['deficiency_id'] ?? 0);
+            $reviewStatus = strtolower(trim((string)($_POST['review_status'] ?? '')));
+            $areaId = (int)($_POST['area_id'] ?? 0);
+            if ($deficiencyId <= 0) {
+                throw new RuntimeException('Missing deficiency.');
+            }
+            $parser = new FaaKnowledgeTestParserService($pdo);
+            $parser->reviewDeficiency($deficiencyId, $reviewStatus, $areaId ?: null, $actorId);
+            return;
+        }
+
+        if ($action === 'parse_faa_report') {
+            $reportId = (int)($_POST['report_id'] ?? 0);
+            if ($reportId <= 0) {
+                throw new RuntimeException('Missing report.');
+            }
+            $parser = new FaaKnowledgeTestParserService($pdo);
+            $parser->parseReport($reportId);
+            return;
+        }
+
+        if ($action === 'save_area_lesson_map') {
+            $areaId = (int)($_POST['map_area_id'] ?? 0);
+            $lessonId = (int)($_POST['map_lesson_id'] ?? 0);
+            $weight = (float)($_POST['map_weight'] ?? 1);
+            if ($areaId <= 0 || $lessonId <= 0) {
+                throw new RuntimeException('Area and lesson are required.');
+            }
+            $pdo->prepare('
+                INSERT INTO mock_oral_acs_area_lesson_map (area_id, lesson_id, weight, created_at, updated_at)
+                VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+                ON DUPLICATE KEY UPDATE weight = VALUES(weight), updated_at = UTC_TIMESTAMP()
+            ')->execute([$areaId, $lessonId, $weight]);
+            return;
+        }
+
+        if ($action === 'delete_area_lesson_map') {
+            $mapId = (int)($_POST['map_id'] ?? 0);
+            if ($mapId <= 0) {
+                throw new RuntimeException('Missing mapping row.');
+            }
+            $pdo->prepare('DELETE FROM mock_oral_acs_area_lesson_map WHERE id = ?')->execute([$mapId]);
+            return;
+        }
+
+        throw new RuntimeException('Unknown exams action.');
     }
 }
 

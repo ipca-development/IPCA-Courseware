@@ -205,6 +205,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msgType = 'success';
         }
     }
+
+    if ($action === 'set_mock_oral_permission') {
+        $uid = (int)($_POST['user_id'] ?? 0);
+        $enabled = (int)($_POST['enabled'] ?? 0) === 1;
+        $notes = trim((string)($_POST['notes'] ?? ''));
+        if ($uid <= 0) {
+            $msg = 'Missing student.';
+            $msgType = 'error';
+        } else {
+            $engine = new CoursewareProgressionV2($pdo);
+            $engine->setMockOralPermission($uid, $cohortId, $enabled, (int)($u['id'] ?? 0), $notes !== '' ? $notes : null);
+            $msg = $enabled
+                ? 'Mock Oral Exam preparation enabled for this student.'
+                : 'Mock Oral Exam preparation disabled for this student.';
+            $msgType = 'success';
+        }
+    }
 }
 
 $userSearchSql = "
@@ -276,6 +293,28 @@ if ($students) {
     $permStmt->execute(array_merge(array($cohortId), $uids));
     foreach ($permStmt->fetchAll(PDO::FETCH_ASSOC) as $permRow) {
         $remotePermByUser[(int)$permRow['student_id']] = (int)$permRow['remote_testing_enabled'] === 1;
+    }
+}
+
+$mockOralPermByUser = array();
+if ($students) {
+    require_once __DIR__ . '/../../src/mock_oral/mock_oral_bootstrap.php';
+    $catalogId = mo_default_catalog_id($pdo);
+    if ($catalogId > 0) {
+        $uids = array();
+        foreach ($students as $s) {
+            $uids[] = (int)$s['user_id'];
+        }
+        $ph = implode(',', array_fill(0, count($uids), '?'));
+        $moPermStmt = $pdo->prepare("
+            SELECT student_id, mock_oral_enabled
+            FROM student_mock_oral_permissions
+            WHERE cohort_id = ? AND catalog_id = ? AND student_id IN ($ph)
+        ");
+        $moPermStmt->execute(array_merge(array($cohortId, $catalogId), $uids));
+        foreach ($moPermStmt->fetchAll(PDO::FETCH_ASSOC) as $permRow) {
+            $mockOralPermByUser[(int)$permRow['student_id']] = (int)$permRow['mock_oral_enabled'] === 1;
+        }
     }
 }
 
@@ -637,6 +676,7 @@ cw_header('Theory Training');
                             </div>
 
                             <?php $remoteEnabled = !empty($remotePermByUser[$uid]); ?>
+                            <?php $mockOralEnabled = !empty($mockOralPermByUser[$uid]); ?>
                             <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(15,23,42,.06);">
                                 <form method="post" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;">
                                     <input type="hidden" name="action" value="set_remote_testing_permission">
@@ -650,6 +690,21 @@ cw_header('Theory Training');
                                 </form>
                                 <div style="margin-top:6px;font-size:12px;color:#64748b;line-height:1.5;">
                                     Off-site students with this permission use email authentication, photo verification, and a progress test code before an attempt is created.
+                                </div>
+                            </div>
+                            <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(15,23,42,.06);">
+                                <form method="post" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;">
+                                    <input type="hidden" name="action" value="set_mock_oral_permission">
+                                    <input type="hidden" name="user_id" value="<?php echo $uid; ?>">
+                                    <input type="hidden" name="enabled" value="0">
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#334155;cursor:pointer;">
+                                        <input type="checkbox" name="enabled" value="1" <?php echo $mockOralEnabled ? 'checked' : ''; ?>>
+                                        Allow Mock Oral Exam Preparation
+                                    </label>
+                                    <button class="cs-btn cs-btn-secondary" type="submit">Save</button>
+                                </form>
+                                <div style="margin-top:6px;font-size:12px;color:#64748b;line-height:1.5;">
+                                    Requires completed theory training. Students authenticate remotely before ACS mock oral sessions begin.
                                 </div>
                             </div>
                         </div>

@@ -1,0 +1,30 @@
+.moe-page .app-section-hero{margin-bottom:20px;}
+.moe-hero-title{margin:0;font-size:34px;line-height:1.05;font-weight:760;color:#fff;letter-spacing:-0.04em;}
+.moe-hero-sub{margin:12px 0 0;color:rgba(255,255,255,.86);max-width:760px;line-height:1.6;}
+.moe-card{padding:22px 24px;}
+.moe-gate{padding:18px;border-radius:16px;background:#fbfcfe;border:1px solid var(--border-soft);color:var(--text-muted);line-height:1.6;}
+.moe-meta{margin-bottom:16px;color:var(--text-muted);font-size:13px;}
+.modules-stack{display:flex;flex-direction:column;gap:14px;}
+.module-header-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;padding:18px 20px;border:1px solid var(--border-soft);border-radius:18px;background:#fff;}
+.module-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-weight:700;}
+.module-title{margin:6px 0 0;font-size:20px;font-weight:740;color:var(--text-strong);}
+.module-header-actions{display:flex;gap:10px;align-items:center;}
+.moe-module-note{width:100%;font-size:13px;color:var(--text-muted);line-height:1.5;}
+.moe-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:1200;}
+.moe-modal-overlay.is-open{display:flex;}
+.moe-modal{width:100%;max-width:460px;background:#fff;border-radius:20px;padding:24px;box-shadow:var(--card-shadow);}
+.moe-modal h3{margin:0 0 8px;font-size:22px;}
+.moe-modal p{margin:0 0 16px;color:var(--text-muted);line-height:1.5;}
+.moe-modal-actions{display:flex;gap:10px;margin-top:16px;}
+.moe-error{color:#b91c1c;font-weight:700;margin-top:12px;}
+.moe-session-layout{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;}
+.moe-panel{padding:20px;border:1px solid var(--border-soft);border-radius:18px;background:#fff;}
+.moe-timer{font-size:14px;font-weight:700;color:#1e3c72;}
+.moe-transcript{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+.moe-turn{padding:12px 14px;border-radius:14px;line-height:1.55;font-size:14px;}
+.moe-turn.maya{background:#eff6ff;border:1px solid #bfdbfe;}
+.moe-turn.student{background:#f8fafc;border:1px solid #e2e8f0;}
+.moe-turn.system{background:#fff7ed;border:1px solid #fed7aa;font-size:13px;color:#9a3412;}
+.moe-controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+.moe-debrief-hero{padding:22px;border-radius:18px;background:linear-gradient(180deg,#122b4a 0%,#1a3a63 100%);color:#fff;margin-bottom:18px;}
+@media (max-width:900px){.moe-session-layout{grid-template-columns:1fr;}}

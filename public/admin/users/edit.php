@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/admin_user_edit_helpers.php';
+require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
@@ -59,6 +60,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'billing':
                 aue_update_billing_tab($pdo, $userId);
                 aue_flash_redirect($userId, 'billing', 'success', 'Billing details updated.');
+                break;
+
+            case 'exams_endorsements':
+                aue_update_exams_endorsements_tab($pdo, $userId, $actorId);
+                aue_flash_redirect($userId, 'exams_endorsements', 'success', 'Exams & endorsements updated.');
                 break;
 
             case 'activate_user':
@@ -444,6 +450,10 @@ cw_header('User Workspace');
                 <?php echo aue_svg('billing'); ?><span>Billing</span>
             </a>
 
+            <a class="app-tab-pill ue-tab<?php echo $activeTab === 'exams_endorsements' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'exams_endorsements'); ?>">
+                <?php echo aue_svg('shield'); ?><span>Exams &amp; Endorsements</span>
+            </a>
+
             <a class="app-tab-pill ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;">
                 <?php echo aue_svg('mail'); ?><span>Integrations</span>
             </a>
@@ -470,6 +480,7 @@ cw_header('User Workspace');
                 'profile' => __DIR__ . '/partials/profile_tab.php',
                 'emergency' => __DIR__ . '/partials/emergency_tab.php',
                 'billing' => __DIR__ . '/partials/billing_tab.php',
+                'exams_endorsements' => __DIR__ . '/partials/exams_endorsements_tab.php',
             );
 
             $partialFile = $partialMap[$activeTab] ?? $partialMap['account'];

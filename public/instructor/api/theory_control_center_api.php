@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 require_once __DIR__ . '/../../../src/theory_ai_training_report_job.php';
+require_once __DIR__ . '/../../../src/mock_oral/mock_oral_bootstrap.php';
 
 cw_require_login();
 
@@ -569,6 +570,31 @@ function tcc_student_attempt_stats(PDO $pdo, int $cohortId, int $userId): array 
         'avg_score' => $row['avg_score'] === null ? null : round((float)$row['avg_score'], 1),
         'last_completed_at' => (string)($row['last_completed_at'] ?? ''),
     ];
+}
+
+function tcc_mock_oral_sessions_for_student(PDO $pdo, int $cohortId, int $userId, int $limit = 10): array
+{
+    mo_ensure_tables($pdo);
+    try {
+        $st = $pdo->prepare("
+            SELECT s.id, s.status, s.score_pct, s.started_at, s.ended_at,
+                   a.area_code, a.title AS area_title,
+                   LEFT(d.written_debrief_text, 240) AS debrief_excerpt
+            FROM mock_oral_sessions s
+            INNER JOIN mock_oral_acs_areas a ON a.id = s.area_id
+            LEFT JOIN mock_oral_debriefs d ON d.session_id = s.id
+            WHERE s.user_id = ? AND s.cohort_id = ?
+            ORDER BY s.id DESC
+            LIMIT ?
+        ");
+        $st->bindValue(1, $userId, PDO::PARAM_INT);
+        $st->bindValue(2, $cohortId, PDO::PARAM_INT);
+        $st->bindValue(3, $limit, PDO::PARAM_INT);
+        $st->execute();
+        return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
 }
 
 /**
@@ -2920,6 +2946,7 @@ foreach ($pending as $p) {
         }
 
         $name = tcc_student_name($student);
+        $mockOralSessions = tcc_mock_oral_sessions_for_student($pdo, $cohortId, $studentId, 8);
 
         tcc_json([
             'ok' => true,
@@ -2953,6 +2980,23 @@ foreach ($pending as $p) {
             'pending_action_count' => count($pending),
             'completed_intervention_count' => count($completedActions),
             'system_issue_count' => count($systemIssues),
+            'mock_oral_sessions' => $mockOralSessions,
+        ]);
+    }
+
+    if ($action === 'mock_oral_sessions') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        if ($cohortId <= 0 || $studentId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_cohort_or_student_id'], 400);
+        }
+        $sessions = tcc_mock_oral_sessions_for_student($pdo, $cohortId, $studentId, 25);
+        tcc_json([
+            'ok' => true,
+            'action' => 'mock_oral_sessions',
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+            'sessions' => $sessions,
         ]);
     }
 

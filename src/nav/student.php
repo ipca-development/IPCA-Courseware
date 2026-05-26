@@ -48,6 +48,17 @@ return [
                     '/student/export_lesson_summaries_pdf.php',
                 ],
             ],
+            [
+                'key' => 'mock_oral',
+                'label' => 'Mock Oral Prep',
+                'icon' => 'training',
+                'href' => '/student/mock_oral.php',
+                'match_paths' => [
+                    '/student/mock_oral.php',
+                    '/student/mock_oral_session.php',
+                    '/student/mock_oral_auth.php',
+                ],
+            ],
         ],
     ],
     [

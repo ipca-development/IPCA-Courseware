@@ -2,10 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/courseware_progression_v2_remote.php';
+require_once __DIR__ . '/courseware_progression_v2_mock_oral.php';
 
 final class CoursewareProgressionV2
 {
     use CoursewareProgressionV2RemoteTrait;
+    use CoursewareProgressionV2MockOralTrait;
 
     public const LOGIC_VERSION = 'v2.0';
     public const NOTIFICATION_CHANNEL_EMAIL = 'email';
