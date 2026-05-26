@@ -50,17 +50,18 @@ final class SessionBlueprintService
                     'type' => 'array',
                     'items' => [
                         'type' => 'object',
+                        'additionalProperties' => false,
                         'properties' => [
                             'turn' => ['type' => 'integer'],
                             'maya_prompt' => ['type' => 'string'],
                             'acs_refs' => ['type' => 'array', 'items' => ['type' => 'string']],
                             'targets_weakness' => ['type' => 'string'],
                         ],
-                        'required' => ['turn', 'maya_prompt', 'acs_refs'],
+                        'required' => ['turn', 'maya_prompt', 'acs_refs', 'targets_weakness'],
                     ],
                 ],
             ],
-            'required' => ['opening_scenario', 'cross_country_context', 'required_acs_tasks', 'weakness_priorities', 'follow_up_focus', 'planned_turns'],
+            'required' => ['opening_scenario', 'cross_country_context', 'required_acs_tasks', 'weakness_priorities', 'follow_up_focus', 'difficulty_curve', 'planned_turns'],
         ];
 
         $result = $this->aiJson($systemPrompt, (string)$userPrompt, $schema, 'mock_oral_blueprint');

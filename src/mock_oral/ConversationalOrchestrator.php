@@ -65,12 +65,13 @@ final class ConversationalOrchestrator
                 'feedback_for_student' => ['type' => 'string'],
                 'follow_up' => [
                     'type' => 'object',
+                    'additionalProperties' => false,
                     'properties' => [
                         'needed' => ['type' => 'boolean'],
                         'maya_text' => ['type' => 'string'],
                         'reason' => ['type' => 'string'],
                     ],
-                    'required' => ['needed'],
+                    'required' => ['needed', 'maya_text', 'reason'],
                 ],
                 'advance_to_next_planned_turn' => ['type' => 'boolean'],
             ],

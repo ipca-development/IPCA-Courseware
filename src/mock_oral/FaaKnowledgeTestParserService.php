@@ -83,6 +83,7 @@ final class FaaKnowledgeTestParserService
                     'type' => 'array',
                     'items' => [
                         'type' => 'object',
+                        'additionalProperties' => false,
                         'properties' => [
                             'deficiency_code' => ['type' => 'string'],
                             'deficiency_label' => ['type' => 'string'],
@@ -91,7 +92,7 @@ final class FaaKnowledgeTestParserService
                             'confidence' => ['type' => 'number'],
                             'source_page' => ['type' => 'integer'],
                         ],
-                        'required' => ['deficiency_label'],
+                        'required' => ['deficiency_code', 'deficiency_label', 'question_topic', 'acs_task_code', 'confidence', 'source_page'],
                     ],
                 ],
             ],

@@ -38,6 +38,17 @@ final class MockOralDebriefService
             'remediation_context' => $remediationContext,
         ];
 
+        $refItemSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'ref_type' => ['type' => 'string'],
+                'ref_code' => ['type' => 'string'],
+                'ref_title' => ['type' => 'string'],
+            ],
+            'required' => ['ref_type', 'ref_code', 'ref_title'],
+        ];
+
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
@@ -47,22 +58,49 @@ final class MockOralDebriefService
                     'type' => 'array',
                     'items' => [
                         'type' => 'object',
+                        'additionalProperties' => false,
                         'properties' => [
                             'concept' => ['type' => 'string'],
                             'acs_task_code' => ['type' => 'string'],
                             'confidence_gap' => ['type' => 'string'],
                         ],
+                        'required' => ['concept', 'acs_task_code', 'confidence_gap'],
                     ],
                 ],
                 'remediation' => [
                     'type' => 'object',
+                    'additionalProperties' => false,
                     'properties' => [
-                        'far_aim_refs' => ['type' => 'array', 'items' => ['type' => 'object']],
-                        'phak_afh_refs' => ['type' => 'array', 'items' => ['type' => 'object']],
-                        'ipca_lessons' => ['type' => 'array', 'items' => ['type' => 'object']],
-                        'theory_summary_additions' => ['type' => 'array', 'items' => ['type' => 'object']],
+                        'far_aim_refs' => ['type' => 'array', 'items' => $refItemSchema],
+                        'phak_afh_refs' => ['type' => 'array', 'items' => $refItemSchema],
+                        'ipca_lessons' => [
+                            'type' => 'array',
+                            'items' => [
+                                'type' => 'object',
+                                'additionalProperties' => false,
+                                'properties' => [
+                                    'lesson_id' => ['type' => 'integer'],
+                                    'slide_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                                    'note' => ['type' => 'string'],
+                                ],
+                                'required' => ['lesson_id', 'slide_ids', 'note'],
+                            ],
+                        ],
+                        'theory_summary_additions' => [
+                            'type' => 'array',
+                            'items' => [
+                                'type' => 'object',
+                                'additionalProperties' => false,
+                                'properties' => [
+                                    'lesson_id' => ['type' => 'integer'],
+                                    'addition' => ['type' => 'string'],
+                                ],
+                                'required' => ['lesson_id', 'addition'],
+                            ],
+                        ],
                         'recommended_actions' => ['type' => 'array', 'items' => ['type' => 'string']],
                     ],
+                    'required' => ['far_aim_refs', 'phak_afh_refs', 'ipca_lessons', 'theory_summary_additions', 'recommended_actions'],
                 ],
             ],
             'required' => ['written_debrief_text', 'weak_areas', 'remediation'],
