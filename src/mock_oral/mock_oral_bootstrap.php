@@ -75,9 +75,12 @@ function mo_area_by_id(PDO $pdo, int $areaId): ?array
     return $row ?: null;
 }
 
-function mo_json_decode(?string $json): array
+function mo_json_decode(mixed $json): array
 {
-    if ($json === null || trim($json) === '') {
+    if (is_array($json)) {
+        return $json;
+    }
+    if ($json === null || !is_string($json) || trim($json) === '') {
         return [];
     }
     $decoded = json_decode($json, true);

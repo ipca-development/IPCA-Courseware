@@ -31,7 +31,8 @@ final class MockOralSessionService
         if ((string)$session['status'] !== 'ready') {
             throw new RuntimeException('Session is not ready to start.');
         }
-        if (trim((string)($session['blueprint_json'] ?? '')) === '') {
+        $blueprintRaw = $session['blueprint_json'] ?? null;
+        if ($blueprintRaw === null || $blueprintRaw === '' || (is_array($blueprintRaw) && $blueprintRaw === [])) {
             throw new RuntimeException('Session blueprint is missing.');
         }
 
@@ -41,7 +42,7 @@ final class MockOralSessionService
             WHERE id = ?
         ")->execute([$sessionId]);
 
-        $blueprint = mo_json_decode((string)$session['blueprint_json']);
+        $blueprint = mo_json_decode($blueprintRaw);
         $orchestrator = new ConversationalOrchestrator($this->pdo);
         $opening = $orchestrator->nextMayaTurn($session, $blueprint, 0);
         $orchestrator->logTranscriptEvent($sessionId, 'maya', 0, (string)$opening['maya_text'], 'opening');
@@ -110,7 +111,7 @@ final class MockOralSessionService
         $this->pdo->prepare("UPDATE mock_oral_sessions SET status = 'turn_evaluating', updated_at = UTC_TIMESTAMP() WHERE id = ?")
             ->execute([$sessionId]);
 
-        $blueprint = mo_json_decode((string)$session['blueprint_json']);
+        $blueprint = mo_json_decode($session['blueprint_json'] ?? null);
         $orchestrator = new ConversationalOrchestrator($this->pdo);
         $orchestrator->logTranscriptEvent($sessionId, 'student', $turnIndex, $studentText);
         $transcript = $orchestrator->loadTranscript($sessionId);

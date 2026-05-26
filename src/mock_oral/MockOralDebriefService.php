@@ -122,9 +122,8 @@ final class MockOralDebriefService
         ];
 
         $resp = cw_openai_responses($payload);
-        $text = cw_openai_extract_json_text($resp);
-        $decoded = json_decode($text, true);
-        if (!is_array($decoded)) {
+        $decoded = cw_openai_extract_json_text($resp);
+        if ($decoded === []) {
             throw new RuntimeException('Debrief generation returned invalid JSON.');
         }
 
