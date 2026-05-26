@@ -15,6 +15,7 @@
       display_duration_seconds: 12,
       announce_audio_enabled: false,
       voice_text: '',
+      voice: 'marin',
       audio_url: ''
     }
   ];
@@ -76,7 +77,7 @@
     return JSON.stringify((messages || []).map(function (m) {
       return [
         m.id, m.message_type, m.title, m.body, m.priority, m.status,
-        m.audio_url, m.voice_text, m.announce_audio_enabled
+        m.audio_url, m.voice_text, m.voice, m.announce_audio_enabled
       ];
     }));
   }
@@ -284,6 +285,89 @@
     return new Promise(function (resolve) { window.setTimeout(resolve, 1700); });
   };
 
+  BoardAudio.prototype.playOpenAiMp3 = function (url) {
+    var self = this;
+    if (!this.armed || !this.ctx || !this.master || !url) {
+      return Promise.resolve(false);
+    }
+
+    return fetch(url, { credentials: 'same-origin', cache: 'force-cache' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('missing audio');
+        return res.arrayBuffer();
+      })
+      .then(function (buf) {
+        return self.ctx.decodeAudioData(buf);
+      })
+      .then(function (decoded) {
+        return new Promise(function (resolve) {
+          var source = self.ctx.createBufferSource();
+          var gain = self.ctx.createGain();
+          source.buffer = decoded;
+          gain.gain.value = 0.92;
+          source.connect(gain);
+          gain.connect(self.master);
+          source.onended = function () { resolve(true); };
+          source.start();
+        });
+      })
+      .catch(function () {
+        return false;
+      });
+  };
+
+  BoardAudio.prototype.playMp3 = function (url) {
+    var self = this;
+    if (!url) return Promise.resolve(false);
+    if (url.indexOf('/tv/api/announcement.php') === 0) {
+      return this.playOpenAiMp3(url);
+    }
+
+    if (!this.armed || !this.ctx || !this.master) {
+      return Promise.resolve(false);
+    }
+
+    return fetch(url, { credentials: 'same-origin', cache: 'force-cache' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('missing audio');
+        return res.arrayBuffer();
+      })
+      .then(function (buf) {
+        return self.ctx.decodeAudioData(buf);
+      })
+      .then(function (decoded) {
+        return new Promise(function (resolve) {
+          var source = self.ctx.createBufferSource();
+          var gain = self.ctx.createGain();
+          source.buffer = decoded;
+          gain.gain.value = 0.92;
+          source.connect(gain);
+          gain.connect(self.master);
+          source.onended = function () { resolve(true); };
+          source.start();
+        });
+      })
+      .catch(function () {
+        return false;
+      });
+  };
+
+  BoardAudio.prototype.announcementUrl = function (message) {
+    var direct = String(message.audio_url || '').trim();
+    if (direct) return direct;
+
+    var messageId = parseInt(message.id, 10);
+    if (!messageId) return '';
+
+    var hasScript = String(message.voice_text || '').trim() !== ''
+      || String(message.title || '').trim() !== ''
+      || String(message.body || '').trim() !== '';
+    if (!hasScript) return '';
+
+    var version = encodeURIComponent(String(message.updated_at || messageId));
+    return '/tv/api/announcement.php?message_id=' + messageId + '&v=' + version;
+  };
+
   BoardAudio.prototype.playAnnouncement = function (message) {
     var self = this;
     if (!this.armed) return Promise.resolve();
@@ -292,15 +376,9 @@
         return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
       })
       .then(function () {
-        var url = String(message.audio_url || '').trim();
+        var url = self.announcementUrl(message);
         if (!url) return;
-        return new Promise(function (resolve) {
-          var audio = new Audio(url);
-          audio.onended = resolve;
-          audio.onerror = resolve;
-          audio.volume = 0.9;
-          audio.play().catch(resolve);
-        });
+        return self.playMp3(url);
       });
   };
 
@@ -579,6 +657,16 @@
     }
   };
 
+  FlipBoard.prototype.prefetchAnnouncements = function (messages) {
+    var self = this;
+    (messages || []).forEach(function (message) {
+      if (!message || !message.announce_audio_enabled) return;
+      var url = self.audio.announcementUrl(message);
+      if (!url || url.indexOf('/tv/api/announcement.php') !== 0) return;
+      fetch(url + '&prefetch=1', { credentials: 'same-origin' }).catch(function () {});
+    });
+  };
+
   FlipBoard.prototype.poll = function () {
     var self = this;
     fetch(this.apiUrl + '?screen_key=' + encodeURIComponent(this.screenKey), {
@@ -597,6 +685,7 @@
         if (nextHash === self.messageHash) return;
         self.messageHash = nextHash;
         self.messages = incoming;
+        self.prefetchAnnouncements(incoming);
         self.activeIndex = 0;
         self.renderCurrent(false);
       })

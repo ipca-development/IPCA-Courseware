@@ -29,7 +29,7 @@ if ($view === 'debrief' && $session) {
     $debriefPayload = $sessionSvc->getDebriefPayload($sessionId);
     cw_header('Mock Oral Debrief');
     ?>
-    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=2">
+    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=4">
     <div class="moe-page">
       <section class="moe-debrief-hero">
         <div class="hero-overline">Mock Oral Debrief</div>
@@ -81,7 +81,7 @@ function mo_sh(?string $v): string
 
 cw_header('Mock Oral Exam');
 ?>
-<link rel="stylesheet" href="/assets/mock_oral_session.css?v=2">
+<link rel="stylesheet" href="/assets/mock_oral_session.css?v=4">
 
 <div class="moe-page moe-live-page" id="moeLivePage">
   <section class="moe-live-hero">
@@ -132,6 +132,6 @@ window.MOCK_ORAL_SESSION = {
   apiBase: '/student/api'
 };
 </script>
-<script src="/assets/mock_oral_session.js?v=2"></script>
+<script src="/assets/mock_oral_session.js?v=4"></script>
 
 <?php cw_footer(); ?>

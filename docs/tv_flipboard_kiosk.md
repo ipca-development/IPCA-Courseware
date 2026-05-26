@@ -33,7 +33,13 @@ The board uses Web Audio API synthesis for mechanical flap clicks, randomized ra
 - `/public/tv/assets/audio/flaps/settle-01.mp3`
 - `/public/tv/assets/audio/chimes/airport-chime.mp3`
 
-Announcement MP3 files should be referenced by `audio_url` in the admin UI. The `voice_text` field stores the future OpenAI TTS input text, but kiosk playback intentionally uses pre-generated MP3 URLs instead of browser speech synthesis.
+PA announcements use **OpenAI TTS only** (no browser speech synthesis). Each message can select an airport PA voice in admin. When `audio_url` is empty, the kiosk requests `/tv/api/announcement.php`, which synthesizes speech from `voice_text` (or title/body fallback), caches MP3s under `storage/tv_announcements/`, and plays them through the same Web Audio graph as the chime.
+
+Apply the voice migration after the base TV table:
+
+```bash
+mysql "$CW_DB_NAME" < scripts/sql/2026_05_30_tv_screen_pa_voice.sql
+```
 
 Chrome requires a user gesture before audio playback on many configurations. The kiosk route includes an `Enable Airport PA Audio` control; for unattended Mac Mini deployment, configure Chrome autoplay policy as shown below.
 

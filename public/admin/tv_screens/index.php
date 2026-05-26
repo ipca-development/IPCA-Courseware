@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
+require_once __DIR__ . '/../../../src/tv_screen_pa.php';
 
 cw_require_admin();
 
@@ -47,6 +48,16 @@ function tv_messages_table_ready(PDO $pdo): bool
 {
     try {
         $stmt = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function tv_voice_column_ready(PDO $pdo): bool
+{
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'voice'");
         return $stmt !== false && $stmt->fetchColumn() !== false;
     } catch (Throwable $e) {
         return false;
@@ -104,6 +115,7 @@ $defaults = array(
     'display_duration_seconds' => 12,
     'announce_audio_enabled' => 0,
     'voice_text' => '',
+    'voice' => tv_pa_default_voice(),
     'audio_url' => '',
     'status' => 'draft',
 );
@@ -114,6 +126,7 @@ $settingsDefaults = array(
     'audio_enabled' => 1,
     'night_mode' => 0,
     'poll_ms' => 7000,
+    'default_pa_voice' => tv_pa_default_voice(),
     'kiosk_notes' => '',
 );
 
@@ -125,6 +138,8 @@ $settings = array_merge($settingsDefaults, $_SESSION['tv_screen_settings']);
 $notice = '';
 $error = '';
 $tableReady = tv_messages_table_ready($pdo);
+$voiceColumnReady = $tableReady && tv_voice_column_ready($pdo);
+$paVoices = tv_pa_voices();
 $openModal = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -138,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'audio_enabled' => isset($_POST['audio_enabled']) ? 1 : 0,
                 'night_mode' => isset($_POST['night_mode']) ? 1 : 0,
                 'poll_ms' => max(5000, min(10000, (int)($_POST['poll_ms'] ?? 7000))),
+                'default_pa_voice' => tv_pa_voice_or_default((string)($_POST['default_pa_voice'] ?? '')),
                 'kiosk_notes' => trim((string)($_POST['kiosk_notes'] ?? '')),
             );
             redirect('/admin/tv_screens/index.php?settings=1');
@@ -181,6 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $endsAt = tv_dt_or_null((string)($_POST['ends_at'] ?? ''));
             $announce = isset($_POST['announce_audio_enabled']) ? 1 : 0;
             $voiceText = trim((string)($_POST['voice_text'] ?? ''));
+            $voice = tv_pa_voice_or_default((string)($_POST['voice'] ?? ($settings['default_pa_voice'] ?? '')));
             $audioUrl = trim((string)($_POST['audio_url'] ?? ''));
 
             if ($title === '' || $body === '') {
@@ -188,31 +205,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($id > 0) {
-                $stmt = $pdo->prepare("
-                    UPDATE tv_screen_messages
-                    SET screen_key = ?, message_type = ?, title = ?, body = ?, priority = ?,
-                        starts_at = ?, ends_at = ?, display_duration_seconds = ?,
-                        announce_audio_enabled = ?, voice_text = ?, audio_url = ?, status = ?
-                    WHERE id = ? LIMIT 1
-                ");
-                $stmt->execute([
-                    $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
-                    $announce, $voiceText !== '' ? $voiceText : null, $audioUrl !== '' ? $audioUrl : null,
-                    $status, $id,
-                ]);
+                if ($voiceColumnReady) {
+                    $stmt = $pdo->prepare("
+                        UPDATE tv_screen_messages
+                        SET screen_key = ?, message_type = ?, title = ?, body = ?, priority = ?,
+                            starts_at = ?, ends_at = ?, display_duration_seconds = ?,
+                            announce_audio_enabled = ?, voice_text = ?, voice = ?, audio_url = ?, status = ?
+                        WHERE id = ? LIMIT 1
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $voice, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $id,
+                    ]);
+                } else {
+                    $stmt = $pdo->prepare("
+                        UPDATE tv_screen_messages
+                        SET screen_key = ?, message_type = ?, title = ?, body = ?, priority = ?,
+                            starts_at = ?, ends_at = ?, display_duration_seconds = ?,
+                            announce_audio_enabled = ?, voice_text = ?, audio_url = ?, status = ?
+                        WHERE id = ? LIMIT 1
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $id,
+                    ]);
+                }
             } else {
-                $stmt = $pdo->prepare("
-                    INSERT INTO tv_screen_messages (
-                        screen_key, message_type, title, body, priority, starts_at, ends_at,
-                        display_duration_seconds, announce_audio_enabled, voice_text, audio_url,
-                        status, created_by
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ");
-                $stmt->execute([
-                    $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
-                    $announce, $voiceText !== '' ? $voiceText : null, $audioUrl !== '' ? $audioUrl : null,
-                    $status, $uid > 0 ? $uid : null,
-                ]);
+                if ($voiceColumnReady) {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO tv_screen_messages (
+                            screen_key, message_type, title, body, priority, starts_at, ends_at,
+                            display_duration_seconds, announce_audio_enabled, voice_text, voice, audio_url,
+                            status, created_by
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $voice, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $uid > 0 ? $uid : null,
+                    ]);
+                } else {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO tv_screen_messages (
+                            screen_key, message_type, title, body, priority, starts_at, ends_at,
+                            display_duration_seconds, announce_audio_enabled, voice_text, audio_url,
+                            status, created_by
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body, $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $uid > 0 ? $uid : null,
+                    ]);
+                }
             }
 
             redirect('/admin/tv_screens/index.php?updated=1');
@@ -242,6 +289,7 @@ if ($error !== '' && isset($_POST['action']) && $_POST['action'] === 'save') {
     $form = array_merge($defaults, $_POST);
     $form['id'] = (int)($_POST['id'] ?? 0);
     $form['announce_audio_enabled'] = isset($_POST['announce_audio_enabled']) ? 1 : 0;
+    $form['voice'] = tv_pa_voice_or_default((string)($_POST['voice'] ?? ''));
 }
 
 $messages = array();
@@ -321,8 +369,10 @@ cw_header('TV Flip Board');
 .tv-field{display:flex;flex-direction:column;gap:7px;min-width:0}
 .tv-field.span-2{grid-column:1/-1}
 .tv-field-label{font-size:12px;font-weight:670;color:var(--text-muted)}
+.tv-field-hint{margin:0;font-size:12px;line-height:1.5;color:#8a97ab}
 .tv-check-row{display:flex;align-items:center;gap:10px;min-height:44px}
 .tv-check-row input{width:auto}
+.tv-pa-preview-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .tv-modal-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:16px;border-top:1px solid rgba(15,23,42,.07)}
 @media(max-width:1100px){.tv-hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tv-msg-inner{grid-template-columns:1fr}.tv-badge-row,.tv-card-actions{justify-content:flex-start}}
 @media(max-width:700px){.tv-hero-head{flex-direction:column}.tv-hero-actions{justify-content:flex-start}.tv-form-grid{grid-template-columns:1fr}.tv-field.span-2{grid-column:auto}.tv-meta-grid{grid-template-columns:1fr}}
@@ -362,6 +412,8 @@ cw_header('TV Flip Board');
   <?php if ($error !== '' && $openModal === ''): ?><div class="tv-alert err"><?= h($error) ?></div><?php endif; ?>
   <?php if (!$tableReady): ?>
     <div class="tv-alert err">Apply <code>scripts/sql/2026_05_20_tv_screen_messages.sql</code> to enable TV screen messages.</div>
+  <?php elseif (!$voiceColumnReady): ?>
+    <div class="tv-alert err">Apply <code>scripts/sql/2026_05_30_tv_screen_pa_voice.sql</code> to enable OpenAI PA voice selection.</div>
   <?php endif; ?>
 
   <section class="card tv-list-head-card">
@@ -392,6 +444,7 @@ cw_header('TV Flip Board');
             'display_duration_seconds' => (int)$row['display_duration_seconds'],
             'announce_audio_enabled' => (int)$row['announce_audio_enabled'],
             'voice_text' => (string)($row['voice_text'] ?? ''),
+            'voice' => tv_pa_voice_or_default((string)($row['voice'] ?? '')),
             'audio_url' => (string)($row['audio_url'] ?? ''),
             'status' => (string)$row['status'],
           )), ENT_QUOTES, 'UTF-8');
@@ -406,6 +459,9 @@ cw_header('TV Flip Board');
                 <div><div class="tv-meta-label">Schedule</div><div class="tv-meta-value"><?= h(tv_label_dt($row['starts_at'] ?? null)) ?> → <?= h(tv_label_dt($row['ends_at'] ?? null)) ?></div></div>
                 <div><div class="tv-meta-label">Display</div><div class="tv-meta-value"><?= (int)$row['display_duration_seconds'] ?> seconds</div></div>
                 <div><div class="tv-meta-label">Priority</div><div class="tv-meta-value"><?= (int)$row['priority'] ?></div></div>
+                <?php if ((int)$row['announce_audio_enabled'] === 1): ?>
+                <div><div class="tv-meta-label">PA Voice</div><div class="tv-meta-value"><?= h(tv_pa_voice_or_default((string)($row['voice'] ?? ''))) ?></div></div>
+                <?php endif; ?>
               </div>
             </div>
             <div>
@@ -468,6 +524,14 @@ cw_header('TV Flip Board');
           <div class="tv-field tv-check-row">
             <input type="checkbox" id="set_audio_enabled" name="audio_enabled" value="1" <?= ((int)$settings['audio_enabled'] === 1) ? 'checked' : '' ?>>
             <label class="tv-field-label" for="set_audio_enabled">Enable mechanical audio on kiosk</label>
+          </div>
+          <div class="tv-field">
+            <label class="tv-field-label" for="set_default_pa_voice">Default OpenAI PA voice</label>
+            <select class="app-input" id="set_default_pa_voice" name="default_pa_voice">
+              <?php foreach ($paVoices as $voiceKey => $voiceLabel): ?>
+                <option value="<?= h($voiceKey) ?>" <?= tv_pa_voice_or_default((string)$settings['default_pa_voice']) === $voiceKey ? 'selected' : '' ?>><?= h($voiceLabel) ?></option>
+              <?php endforeach; ?>
+            </select>
           </div>
           <div class="tv-field tv-check-row">
             <input type="checkbox" id="set_night_mode" name="night_mode" value="1" <?= ((int)$settings['night_mode'] === 1) ? 'checked' : '' ?>>
@@ -552,11 +616,26 @@ cw_header('TV Flip Board');
           </div>
           <div class="tv-field tv-check-row span-2">
             <input type="checkbox" id="msg_announce_audio_enabled" name="announce_audio_enabled" value="1" <?= ((int)$form['announce_audio_enabled'] === 1) ? 'checked' : '' ?>>
-            <label class="tv-field-label" for="msg_announce_audio_enabled">Enable chime and PA announcement</label>
+            <label class="tv-field-label" for="msg_announce_audio_enabled">Enable chime and OpenAI PA announcement</label>
           </div>
+          <?php if ($voiceColumnReady): ?>
           <div class="tv-field span-2">
-            <label class="tv-field-label" for="msg_voice_text">Voice text</label>
-            <textarea class="app-textarea" id="msg_voice_text" name="voice_text" rows="3"><?= h((string)$form['voice_text']) ?></textarea>
+            <label class="tv-field-label" for="msg_voice">OpenAI PA voice</label>
+            <select class="app-input" id="msg_voice" name="voice">
+              <?php foreach ($paVoices as $voiceKey => $voiceLabel): ?>
+                <option value="<?= h($voiceKey) ?>" <?= tv_pa_voice_or_default((string)$form['voice']) === $voiceKey ? 'selected' : '' ?>><?= h($voiceLabel) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <?php endif; ?>
+          <div class="tv-field span-2">
+            <label class="tv-field-label" for="msg_voice_text">PA announcement script</label>
+            <textarea class="app-textarea" id="msg_voice_text" name="voice_text" rows="3" placeholder="Attention please. All students report to dispatch for briefing."><?= h((string)$form['voice_text']) ?></textarea>
+            <p class="tv-field-hint">Spoken after the airport chime using OpenAI TTS with the selected PA voice. Leave Audio URL empty unless you have a custom MP3.</p>
+          </div>
+          <div class="tv-field span-2 tv-pa-preview-row">
+            <button type="button" class="app-btn app-btn-secondary" id="tvPreviewPaVoice">Preview OpenAI PA voice</button>
+            <span class="tv-field-hint" id="tvPreviewPaStatus">Uses the script above, or a terminal check phrase if empty.</span>
           </div>
         </div>
         <?php if ($error !== '' && $openModal === 'message'): ?><div class="tv-alert err" style="margin-top:14px"><?= h($error) ?></div><?php endif; ?>
@@ -596,6 +675,9 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('tvOpenCreate')?.addEventListener('click', function () {
     document.getElementById('tvMessageForm').reset();
     document.getElementById('msg_id').value = '0';
+    var defaultVoice = <?= json_encode(tv_pa_voice_or_default((string)$settings['default_pa_voice'])) ?>;
+    var voiceSelect = document.getElementById('msg_voice');
+    if (voiceSelect) voiceSelect.value = defaultVoice;
     messageTitle.textContent = 'Add board message';
     openModal(messageModal);
   });
@@ -628,9 +710,44 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById('msg_status').value = data.status || 'draft';
       document.getElementById('msg_audio_url').value = data.audio_url || '';
       document.getElementById('msg_voice_text').value = data.voice_text || '';
+      var voiceSelect = document.getElementById('msg_voice');
+      if (voiceSelect) voiceSelect.value = data.voice || voiceSelect.value;
       document.getElementById('msg_announce_audio_enabled').checked = Number(data.announce_audio_enabled) === 1;
       messageTitle.textContent = 'Edit board message';
       openModal(messageModal);
+    });
+  });
+
+  var previewBtn = document.getElementById('tvPreviewPaVoice');
+  var previewStatus = document.getElementById('tvPreviewPaStatus');
+  var previewAudio = null;
+  previewBtn?.addEventListener('click', function () {
+    var voiceEl = document.getElementById('msg_voice');
+    var typeEl = document.getElementById('msg_message_type');
+    var textEl = document.getElementById('msg_voice_text');
+    var voice = voiceEl ? voiceEl.value : 'marin';
+    var messageType = typeEl ? typeEl.value : 'standard';
+    var text = textEl ? textEl.value.trim() : '';
+    var url = '/admin/tv_screens/preview_pa.php?voice=' + encodeURIComponent(voice)
+      + '&message_type=' + encodeURIComponent(messageType);
+    if (text !== '') url += '&text=' + encodeURIComponent(text);
+    if (previewStatus) previewStatus.textContent = 'Generating OpenAI PA preview…';
+    if (previewAudio) {
+      previewAudio.pause();
+      previewAudio = null;
+    }
+    previewAudio = new Audio(url);
+    previewAudio.onplaying = function () {
+      if (previewStatus) previewStatus.textContent = 'Playing OpenAI PA preview.';
+    };
+    previewAudio.onended = function () {
+      if (previewStatus) previewStatus.textContent = 'Preview complete.';
+    };
+    previewAudio.onerror = function () {
+      if (previewStatus) previewStatus.textContent = 'Preview failed. Check OpenAI API key and voice migration.';
+    };
+    previewAudio.play().catch(function () {
+      if (previewStatus) previewStatus.textContent = 'Click preview again if the browser blocked playback.';
     });
   });
 });
