@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/mock_oral_remote.php';
+
 /**
  * Production must apply SQL migrations explicitly:
  *   scripts/sql/2026_05_28_mock_oral_schema.sql
@@ -16,6 +18,8 @@ function mo_ensure_tables(PDO $pdo): void
         return;
     }
     $done = true;
+
+    mo_ensure_remote_email_automation($pdo);
 
     if (trim((string)getenv('MO_ALLOW_SCHEMA_BOOTSTRAP')) !== '1') {
         return;

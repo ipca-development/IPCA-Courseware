@@ -324,9 +324,26 @@ trait CoursewareProgressionV2MockOralTrait
             null
         );
 
-        if (!$this->mo_automation_email_sent(is_array($automationResult) ? $automationResult : null)) {
+        if (!mo_automation_email_sent(is_array($automationResult) ? $automationResult : null)) {
+            $failureReason = mo_automation_email_failure_reason(is_array($automationResult) ? $automationResult : null);
             $this->pdo->prepare('DELETE FROM mock_oral_remote_authorizations WHERE id = ?')->execute([$authId]);
-            throw new RuntimeException('Authentication email could not be sent. Please try again.');
+            $this->logProgressionEvent([
+                'user_id' => $studentId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => 0,
+                'event_type' => 'mock_oral',
+                'event_code' => 'MOCK_ORAL_AUTH_EMAIL_FAILED',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'payload' => [
+                    'authorization_id' => $authId,
+                    'area_id' => $areaId,
+                    'reason' => $failureReason,
+                    'automation_result' => $automationResult,
+                ],
+                'legal_note' => 'Mock oral authentication email could not be sent; authorization row removed so student can retry.',
+            ]);
+            throw new RuntimeException('Your request could not send the authentication email. Please try again in a moment or contact ' . mo_support_email() . '.');
         }
 
         $this->pdo->prepare("UPDATE mock_oral_remote_authorizations SET status = 'EMAIL_SENT', updated_at = UTC_TIMESTAMP() WHERE id = ?")
@@ -624,24 +641,5 @@ trait CoursewareProgressionV2MockOralTrait
         ');
         $st->execute([$studentId, $cohortId]);
         return (int)$st->fetchColumn();
-    }
-
-    private function mo_automation_email_sent(?array $automationResult): bool
-    {
-        if (!$automationResult || empty($automationResult['ok'])) {
-            return false;
-        }
-        foreach ((array)($automationResult['results'] ?? []) as $row) {
-            if (!is_array($row) || ($row['action_key'] ?? '') !== 'send_email') {
-                continue;
-            }
-            if (!empty($row['ok']) && empty($row['skipped'])) {
-                $send = (array)($row['result'] ?? []);
-                if (!empty($send['ok']) && empty($send['suppressed'])) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 }
