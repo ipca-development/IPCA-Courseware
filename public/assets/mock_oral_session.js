@@ -17,6 +17,7 @@
   var isSpeaking = false;
   var voiceMode = 'connecting';
   var currentAudio = null;
+  var heygenReady = false;
 
   var transcriptEl = document.getElementById('moeTranscript');
   var timerEl = document.getElementById('moeTimer');
@@ -174,19 +175,7 @@
     });
   }
 
-  function speakMaya(text, opts) {
-    opts = opts || {};
-    if (!text) return Promise.resolve();
-    if (opts.append !== false) {
-      appendTurn('maya', text);
-    }
-    setMayaState('speaking', 'Maya is speaking…');
-    setStudentState('Listen to Maya…');
-    isSpeaking = true;
-    answerBtn.disabled = true;
-
-    stopCurrentAudio();
-
+  function speakOpenAiTts(text) {
     var ttsUrl = apiBase + '/mock_oral_tts.php?session_id=' + encodeURIComponent(String(sessionId))
       + '&text=' + encodeURIComponent(text);
 
@@ -204,17 +193,45 @@
           currentAudio.onerror = function () { resolve(false); };
           currentAudio.play().catch(function () { resolve(false); });
         });
-      })
-      .catch(function () {
-        setVoiceBanner('fallback', 'Fallback Voice Mode Active');
-        return speakBrowserFallback(text);
-      })
-      .then(function () {
-        isSpeaking = false;
-        setMayaState('listening', 'Maya is listening');
-        setStudentState('Tap to Answer when you are ready.');
-        if (sessionActive) answerBtn.disabled = false;
       });
+  }
+
+  function speakMaya(text, opts) {
+    opts = opts || {};
+    if (!text) return Promise.resolve();
+    if (opts.append !== false) {
+      appendTurn('maya', text);
+    }
+    setMayaState('speaking', 'Maya is speaking…');
+    setStudentState('Listen to Maya…');
+    isSpeaking = true;
+    answerBtn.disabled = true;
+
+    stopCurrentAudio();
+
+    var voiceChain = Promise.resolve(false);
+    if (heygenReady && window.MoeHeyGenPresenter && MoeHeyGenPresenter.isReady()) {
+      voiceChain = MoeHeyGenPresenter.speak(text).then(function () {
+        setVoiceBanner('heygen', 'Maya Live Avatar · HeyGen');
+        return true;
+      }).catch(function () {
+        heygenReady = false;
+        return false;
+      });
+    }
+
+    return voiceChain.then(function (usedHeygen) {
+      if (usedHeygen) return true;
+      return speakOpenAiTts(text);
+    }).catch(function () {
+      setVoiceBanner('fallback', 'Fallback Voice Mode Active');
+      return speakBrowserFallback(text);
+    }).then(function () {
+      isSpeaking = false;
+      setMayaState('listening', 'Maya is listening');
+      setStudentState('Tap to Answer when you are ready.');
+      if (sessionActive) answerBtn.disabled = false;
+    });
   }
 
   function setControlsEnabled(on) {
@@ -338,6 +355,10 @@
     sessionActive = false;
     setControlsEnabled(false);
     stopCurrentAudio();
+    if (window.MoeHeyGenPresenter && MoeHeyGenPresenter.isReady()) {
+      MoeHeyGenPresenter.stop().catch(function () {});
+      heygenReady = false;
+    }
     if (isRecording) stopRecording();
     if (countdownTimer) clearInterval(countdownTimer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -359,6 +380,35 @@
     return lastStudent < lastMaya ? lastMaya : lastMaya + 1;
   }
 
+  function initHeyGenAvatar(heygen) {
+    if (!heygen || heygen.presentation_mode !== 'heygen' || !heygen.token || !heygen.avatar_id) {
+      return Promise.resolve(false);
+    }
+    if (!window.MoeHeyGenPresenter) {
+      return Promise.reject(new Error('HeyGen presenter script not loaded.'));
+    }
+
+    setMayaState('connecting', 'Starting Maya live avatar…');
+    setStudentState('Connecting HeyGen stream…');
+
+    return MoeHeyGenPresenter.init({
+      token: heygen.token,
+      avatarId: heygen.avatar_id,
+      voiceId: heygen.voice_id || '',
+      videoEl: heygenVideoEl,
+      activityIdleTimeoutSec: heygen.activity_idle_timeout_sec || 600,
+    }).then(function () {
+      heygenReady = true;
+      if (heygenVideoEl) {
+        heygenVideoEl.hidden = false;
+        heygenVideoEl.muted = false;
+      }
+      if (mayaAvatarEl) mayaAvatarEl.hidden = true;
+      setVoiceBanner('heygen', 'Maya Live Avatar · HeyGen');
+      return true;
+    });
+  }
+
   function bootSession() {
     setMayaState('connecting', 'Connecting…');
     setStudentState('Preparing your oral exam conversation…');
@@ -375,24 +425,29 @@
         }
 
         var heygen = res.heygen || {};
-        if (heygen.presentation_mode === 'heygen' && heygen.token) {
-          setVoiceBanner('heygen', 'Maya Avatar Voice');
-          if (heygenVideoEl) heygenVideoEl.hidden = false;
-          if (mayaAvatarEl) mayaAvatarEl.hidden = true;
-        }
 
         startCountdown();
         heartbeatTimer = setInterval(heartbeat, 30000);
         endBtn.disabled = false;
 
-        if (res.opening && res.opening.maya_text && !res.resumed) {
-          turnIndex = res.next_turn_index != null ? parseInt(res.next_turn_index, 10) : 0;
-          return speakMaya(res.opening.maya_text, { append: false });
-        }
+        return initHeyGenAvatar(heygen).catch(function (e) {
+          if (heygen.message) {
+            appendTurn('system', heygen.message);
+          } else if (e && e.message) {
+            appendTurn('system', e.message);
+          }
+          appendTurn('system', 'Using Maya AI voice until HeyGen is available.');
+          return false;
+        }).then(function () {
+          if (res.opening && res.opening.maya_text && !res.resumed) {
+            turnIndex = res.next_turn_index != null ? parseInt(res.next_turn_index, 10) : 0;
+            return speakMaya(res.opening.maya_text, { append: false });
+          }
 
-        setMayaState('listening', 'Maya is listening');
-        setStudentState('Tap to Answer when you are ready.');
-        setControlsEnabled(true);
+          setMayaState('listening', 'Maya is listening');
+          setStudentState('Tap to Answer when you are ready.');
+          setControlsEnabled(true);
+        });
       })
       .catch(function (e) {
         appendTurn('system', e.message || 'Unable to start session.');

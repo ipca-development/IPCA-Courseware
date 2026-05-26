@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../openai.php';
+require_once __DIR__ . '/../remote_session_auth/remote_session_auth_constants.php';
 
 final class HeyGenLiveAvatarService
 {
@@ -9,24 +10,37 @@ final class HeyGenLiveAvatarService
     {
         $apiKey = trim((string)(getenv('CW_HEYGEN_API_KEY') ?: getenv('HEYGEN_API_KEY') ?: ''));
         $avatarId = trim((string)(getenv('CW_HEYGEN_AVATAR_ID') ?: getenv('HEYGEN_AVATAR_ID') ?: ''));
+        $voiceId = trim((string)(getenv('CW_HEYGEN_VOICE_ID') ?: getenv('HEYGEN_VOICE_ID') ?: ''));
+        $quality = trim((string)(getenv('CW_HEYGEN_QUALITY') ?: 'high'));
+        if (!in_array($quality, ['low', 'medium', 'high'], true)) {
+            $quality = 'high';
+        }
+
+        $base = [
+            'ok' => true,
+            'session_id' => $sessionId,
+            'user_id' => $userId,
+        ];
 
         if ($apiKey === '') {
-            return [
-                'ok' => true,
+            return $base + [
                 'presentation_mode' => 'fallback',
-                'message' => 'HeyGen not configured; use browser TTS fallback.',
-                'session_id' => $sessionId,
+                'message' => 'HeyGen API key not configured (CW_HEYGEN_API_KEY).',
             ];
         }
 
-        $payload = [
-            'quality' => 'high',
-            'avatar_id' => $avatarId !== '' ? $avatarId : null,
-            'voice' => [
-                'voice_id' => getenv('CW_HEYGEN_VOICE_ID') ?: null,
-            ],
-        ];
-        $payload = array_filter($payload, static fn($v) => $v !== null);
+        if ($avatarId === '') {
+            return $base + [
+                'presentation_mode' => 'fallback',
+                'message' => 'HeyGen avatar not configured (CW_HEYGEN_AVATAR_ID). Using AI voice until your custom avatar is ready.',
+            ];
+        }
+
+        $payload = ['quality' => $quality];
+        $voicePayload = array_filter(['voice_id' => $voiceId !== '' ? $voiceId : null]);
+        if ($voicePayload !== []) {
+            $payload['voice'] = $voicePayload;
+        }
 
         $ch = curl_init('https://api.heygen.com/v1/streaming.create_token');
         curl_setopt_array($ch, [
@@ -45,31 +59,31 @@ final class HeyGenLiveAvatarService
         curl_close($ch);
 
         if ($errno !== 0 || $http < 200 || $http >= 300) {
-            return [
-                'ok' => true,
+            return $base + [
                 'presentation_mode' => 'fallback',
-                'message' => 'HeyGen token unavailable; using TTS fallback.',
-                'session_id' => $sessionId,
+                'message' => 'HeyGen token request failed (HTTP ' . $http . '). Using AI voice fallback.',
             ];
         }
 
         $decoded = json_decode((string)$raw, true);
         $token = (string)($decoded['data']['token'] ?? $decoded['token'] ?? '');
         if ($token === '') {
-            return [
-                'ok' => true,
+            return $base + [
                 'presentation_mode' => 'fallback',
-                'message' => 'HeyGen response missing token.',
-                'session_id' => $sessionId,
+                'message' => 'HeyGen response missing session token.',
             ];
         }
 
-        return [
-            'ok' => true,
+        $idleSec = min(3600, max(180, RSA_SESSION_MAX_DURATION_SEC + 180));
+
+        return $base + [
             'presentation_mode' => 'heygen',
             'token' => $token,
-            'session_id' => $sessionId,
-            'user_id' => $userId,
+            'avatar_id' => $avatarId,
+            'voice_id' => $voiceId,
+            'quality' => $quality,
+            'activity_idle_timeout_sec' => $idleSec,
+            'message' => 'HeyGen live avatar ready.',
         ];
     }
 }
