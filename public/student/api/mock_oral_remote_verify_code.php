@@ -29,7 +29,13 @@ try {
         throw new RuntimeException('Enter your 6-digit code.');
     }
     $engine = new CoursewareProgressionV2($pdo);
-    $result = $engine->verifyMockOralCodeAndPrepareSession($userId, $cohortId, $areaId, $code);
+    $result = $engine->verifyMockOralCodeAndPrepareSession(
+        $userId,
+        $cohortId,
+        $areaId,
+        $code,
+        (string)($_SERVER['HTTP_COOKIE'] ?? '')
+    );
     echo json_encode(['ok' => true] + $result, JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(400);

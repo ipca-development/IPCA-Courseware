@@ -42,7 +42,7 @@ if (!$auth) {
 } else {
     $cohortId = (int)$auth['cohort_id'];
     $areaId = (int)$auth['area_id'];
-    $hubUrl = '/student/mock_oral.php?cohort_id=' . $cohortId . '&mo_remote_auth=1';
+    $hubUrl = '/student/mock_oral.php?cohort_id=' . $cohortId . '&area_id=' . $areaId . '&mo_remote_auth=1';
     $area = mo_area_by_id($pdo, $areaId);
     if ($area) {
         $areaTitle = (string)$area['title'];
@@ -161,8 +161,26 @@ cw_header('Mock Oral Authentication');
         document.getElementById('ptrCodeBlock').style.display='block';
         document.getElementById('ptrCodeValue').textContent=String(j.verification_code||'');
         if (video.srcObject) video.srcObject.getTracks().forEach(function(t){ t.stop(); });
-        try { localStorage.setItem('mo_remote_auth_refresh', JSON.stringify({ ts: Date.now() })); } catch(e){}
-        try { new BroadcastChannel('ipca_mo_remote_auth').postMessage({ ts: Date.now() }); } catch(e){}
+        (function notifyMockOralHubAuthComplete() {
+          var payload = {
+            type: 'mock_oral_authenticated',
+            cohort_id: <?= (int)$cohortId ?>,
+            area_id: <?= (int)$areaId ?>,
+            ts: Date.now()
+          };
+          try { sessionStorage.setItem('mo_remote_code_open', JSON.stringify(payload)); } catch(e){}
+          try { localStorage.setItem('mo_remote_auth_refresh', JSON.stringify(payload)); } catch(e){}
+          try {
+            if (typeof BroadcastChannel !== 'undefined') {
+              var channel = new BroadcastChannel('ipca_mo_remote_auth');
+              channel.postMessage(payload);
+              channel.close();
+            }
+          } catch(e){}
+          if (window.opener && !window.opener.closed) {
+            try { window.opener.postMessage(payload, window.location.origin); } catch(e){}
+          }
+        })();
       })
       .catch(function(e){ submitBtn.disabled=false; showError(e.message); });
   });

@@ -43,7 +43,7 @@ function mo_h(?string $v): string
 
 cw_header('Mock Oral Exam Preparation');
 ?>
-<link rel="stylesheet" href="/assets/mock_oral_session.css?v=1">
+<link rel="stylesheet" href="/assets/mock_oral_session.css?v=3">
 
 <div class="moe-page">
   <section class="app-section-hero">
@@ -59,25 +59,41 @@ cw_header('Mock Oral Exam Preparation');
   <?php elseif (!$mockOralEnabled): ?>
     <section class="card moe-card"><div class="moe-gate">Mock Oral Exam access requires Head of Training approval. Contact your training manager.</div></section>
   <?php else: ?>
+    <div id="moRemoteRequestToast" class="mo-remote-toast" role="status" aria-live="polite"></div>
     <section class="card moe-card">
       <div class="moe-meta">Cohort: <strong><?= mo_h($cohortName) ?></strong></div>
       <div class="modules-stack" id="mockOralModules">
         <?php foreach ($areas as $area): ?>
-          <?php $state = $engine->getMockOralModuleButtonState($userId, $cohortId, (int)$area['id']); ?>
+          <?php
+            $state = $engine->getMockOralModuleButtonState($userId, $cohortId, (int)$area['id']);
+            $mode = (string)($state['mode'] ?? 'blocked');
+            $prep = (array)($state['prep'] ?? []);
+            $autoOpenCodeModal = ($mode === 'remote_code_entry' || !empty($state['show_code_modal']))
+              && empty($prep['show_bar'])
+              && !in_array($mode, ['remote_preparing', 'remote_start', 'continue'], true)
+              && !empty($_GET['mo_remote_auth'])
+              && (empty($_GET['area_id']) || (int)$_GET['area_id'] === (int)$area['id']);
+          ?>
           <article class="module-header-card" data-area-id="<?= (int)$area['id'] ?>">
             <div class="module-header-main">
               <div class="module-kicker">ACS Area <?= mo_h((string)$area['area_code']) ?></div>
               <h2 class="module-title"><?= mo_h((string)$area['title']) ?></h2>
             </div>
             <div class="module-header-actions">
-              <?php if (!empty($state['disabled'])): ?>
-                <button type="button" class="app-btn app-btn-secondary" disabled><?= mo_h((string)$state['label']) ?></button>
-              <?php elseif (($state['mode'] ?? '') === 'start_auth'): ?>
-                <button type="button" class="app-btn app-btn-primary moe-start-auth-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
-              <?php elseif (($state['mode'] ?? '') === 'enter_code'): ?>
-                <button type="button" class="app-btn app-btn-primary moe-code-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
-              <?php elseif (($state['mode'] ?? '') === 'continue' && !empty($state['href'])): ?>
-                <a class="app-btn app-btn-primary" href="<?= mo_h((string)$state['href']) ?>"><?= mo_h((string)$state['label']) ?></a>
+              <?php if (!empty($state['disabled']) && empty($state['show_bar'])): ?>
+                <span class="app-btn app-btn-secondary moe-btn-disabled" title="<?= mo_h((string)($state['message'] ?? '')) ?>"><?= mo_h((string)$state['label']) ?></span>
+              <?php elseif (!empty($state['show_bar'])): ?>
+                <div class="moe-prep-status" data-session-id="<?= (int)($state['session_id'] ?? $prep['session_id'] ?? 0) ?>">
+                  <div class="moe-prep-head"><?= mo_h((string)($prep['sub'] ?? 'Preparing Mock Oral')) ?></div>
+                  <div class="moe-prep-bar-shell">
+                    <div class="moe-prep-bar-fill <?= mo_h((string)($prep['class'] ?? 'info')) ?>" style="width:<?= (int)($prep['pct'] ?? 8) ?>%;"></div>
+                  </div>
+                  <div class="moe-prep-label <?= mo_h((string)($prep['class'] ?? 'info')) ?>"><?= mo_h((string)($prep['label'] ?? 'Preparing your Mock Oral Exam Session…')) ?></div>
+                </div>
+              <?php elseif ($mode === 'remote_request'): ?>
+                <button type="button" class="app-btn app-btn-secondary moe-remote-request-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
+              <?php elseif ($mode === 'remote_code_entry'): ?>
+                <button type="button" class="app-btn app-btn-primary moe-code-btn" data-area-id="<?= (int)$area['id'] ?>" data-auto-open-remote-code="<?= $autoOpenCodeModal ? '1' : '0' ?>"><?= mo_h((string)$state['label']) ?></button>
               <?php elseif (!empty($state['href'])): ?>
                 <a class="app-btn app-btn-primary" href="<?= mo_h((string)$state['href']) ?>"><?= mo_h((string)$state['label']) ?></a>
               <?php else: ?>
@@ -94,24 +110,15 @@ cw_header('Mock Oral Exam Preparation');
   <?php endif; ?>
 </div>
 
-<div id="mockOralPrepOverlay" class="moe-prep-overlay" aria-hidden="true">
-  <div class="moe-prep-card">
-    <div class="moe-prep-title">Preparing your Mock Oral Exam</div>
-    <div class="moe-prep-step" id="mockOralPrepStep">Preparing your Mock Oral Exam Session…</div>
-    <div class="moe-prep-bar-track"><div class="moe-prep-bar-fill" id="mockOralPrepBar"></div></div>
-    <div class="moe-prep-note">This usually takes 15–30 seconds while we build your personalized ACS oral exam.</div>
-  </div>
-</div>
-
 <div id="mockOralCodeModal" class="moe-modal-overlay" aria-hidden="true">
   <div class="moe-modal">
     <h3>Enter Mock Oral Code</h3>
-    <p>Paste the 6-digit code from your authentication email.</p>
-    <input class="app-input" id="mockOralCodeInput" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+    <p>Enter the six-digit code from the authentication page. After verification, your personalized mock oral exam is prepared on <strong>this page</strong>. You start the interactive session only once preparation finishes.</p>
+    <input class="app-input" id="mockOralCodeInput" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000">
     <input type="hidden" id="mockOralCodeAreaId" value="">
     <div class="moe-modal-actions">
       <button type="button" class="app-btn app-btn-secondary" id="mockOralCodeCancel">Cancel</button>
-      <button type="button" class="app-btn app-btn-primary" id="mockOralCodeSubmit">Verify Code</button>
+      <button type="button" class="app-btn app-btn-primary" id="mockOralCodeSubmit">Verify &amp; prepare</button>
     </div>
     <div class="moe-error" id="mockOralCodeError" style="display:none;"></div>
   </div>
@@ -123,6 +130,6 @@ window.MOCK_ORAL_HUB = {
   apiBase: '/student/api'
 };
 </script>
-<script src="/assets/mock_oral_hub.js?v=2"></script>
+<script src="/assets/mock_oral_hub.js?v=3"></script>
 
 <?php cw_footer(); ?>

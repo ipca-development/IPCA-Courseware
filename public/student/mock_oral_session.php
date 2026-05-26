@@ -61,6 +61,17 @@ if ((string)$session['status'] === 'completed') {
     redirect('/student/mock_oral_session.php?cohort_id=' . $cohortId . '&area_id=' . $areaId . '&session_id=' . $sessionId . '&view=debrief');
 }
 
+if ((string)$session['status'] === 'blueprint_generating') {
+    redirect('/student/mock_oral.php?cohort_id=' . $cohortId . '&area_id=' . $areaId);
+}
+
+if ((string)$session['status'] !== 'ready' && (string)$session['status'] !== 'in_progress' && (string)$session['status'] !== 'turn_evaluating') {
+    cw_header('Mock Oral Session');
+    echo '<section class="card moe-card"><div class="moe-gate">This session is not available to start yet.</div></section>';
+    cw_footer();
+    exit;
+}
+
 $blueprint = mo_json_decode($session['blueprint_json'] ?? null);
 
 function mo_sh(?string $v): string

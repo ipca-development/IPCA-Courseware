@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/mock_oral/mock_oral_engine.php';
+require_once __DIR__ . '/mock_oral/mock_oral_prep.php';
 
 trait CoursewareProgressionV2MockOralTrait
 {
@@ -143,57 +144,77 @@ trait CoursewareProgressionV2MockOralTrait
 
         $quotaSvc = new SessionQuotaService($this->pdo);
         $quotaSvc->expireStaleSessions($studentId, $cohortId);
-        $activeSession = $quotaSvc->getActiveSession($studentId, $cohortId);
-        if ($activeSession && (int)$activeSession['area_id'] === $areaId) {
+
+        $open = mo_prep_get_open_session($this->pdo, $studentId, $cohortId, $areaId);
+        if ($open && in_array((string)$open['status'], ['in_progress', 'turn_evaluating'], true)) {
             return [
                 'mode' => 'continue',
                 'label' => 'Resume Mock Oral',
                 'disabled' => false,
-                'href' => $sessionUrl . '&session_id=' . (int)$activeSession['id'],
-                'session_id' => (int)$activeSession['id'],
+                'href' => $sessionUrl . '&session_id=' . (int)$open['id'],
+                'session_id' => (int)$open['id'],
+            ];
+        }
+
+        if ($open && mo_prep_session_is_ready($open)) {
+            return [
+                'mode' => 'remote_start',
+                'label' => 'Start Mock Oral Exam',
+                'button_class' => 'primary',
+                'disabled' => false,
+                'href' => $sessionUrl . '&session_id=' . (int)$open['id'],
+                'session_id' => (int)$open['id'],
+            ];
+        }
+
+        if ($open && (string)$open['status'] === 'blueprint_generating') {
+            $prep = mo_prep_meta_from_button([], $sessionUrl);
+            $prep = array_merge($prep, mo_prep_progress_label($open), [
+                'show_bar' => true,
+                'preparing' => true,
+                'session_id' => (int)$open['id'],
+            ]);
+            return [
+                'mode' => 'remote_preparing',
+                'label' => 'Start Mock Oral Exam',
+                'button_class' => 'primary',
+                'disabled' => true,
+                'show_bar' => true,
+                'preparing' => true,
+                'prep' => $prep,
+                'session_id' => (int)$open['id'],
             ];
         }
 
         $auth = $this->mo_get_active_remote_auth($studentId, $cohortId, $areaId);
-        if ($auth) {
-            if ((string)$auth['status'] === 'AUTHENTICATED') {
-                return [
-                    'mode' => 'enter_code',
-                    'label' => 'Enter Mock Oral Code',
-                    'disabled' => false,
-                    'show_code_modal' => true,
-                    'area_id' => $areaId,
-                    'hub_url' => $hubUrl,
-                ];
-            }
-            if (in_array((string)$auth['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
-                return [
-                    'mode' => 'auth_pending',
-                    'label' => 'Check Your Email',
-                    'disabled' => true,
-                    'message' => 'An authentication email was sent. Complete photo verification, then enter your code.',
-                ];
-            }
+        if ($auth && (string)$auth['status'] === 'AUTHENTICATED' && !empty($auth['verification_code_hash'])) {
+            return [
+                'mode' => 'remote_code_entry',
+                'label' => 'Enter Mock Oral Code',
+                'button_class' => 'primary',
+                'disabled' => false,
+                'show_code_modal' => true,
+                'area_id' => $areaId,
+                'hub_url' => $hubUrl,
+            ];
         }
 
-        if (!cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId)) {
+        if ($auth && in_array((string)$auth['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
             return [
-                'mode' => 'start_auth',
-                'label' => 'Start Mock Oral Exam',
-                'disabled' => false,
+                'mode' => 'remote_auth_pending',
+                'label' => 'Check your email',
                 'button_class' => 'remote',
-                'area_id' => $areaId,
-                'network' => 'remote',
+                'disabled' => true,
+                'message' => 'Open the authentication link in your email to receive your Mock Oral Code.',
             ];
         }
 
         return [
-            'mode' => 'start_auth',
-            'label' => 'Start Mock Oral Exam',
-            'disabled' => false,
+            'mode' => 'remote_request',
+            'label' => 'Request Mock Oral',
             'button_class' => 'remote',
+            'disabled' => false,
             'area_id' => $areaId,
-            'network' => 'trusted',
         ];
     }
 
@@ -214,33 +235,18 @@ trait CoursewareProgressionV2MockOralTrait
             throw new RuntimeException('Mock Oral Exam access is not enabled for your account.');
         }
 
-        $trustedNetwork = cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId);
-
-        $quotaSvc = new SessionQuotaService($this->pdo);
-        $quotaCheck = $quotaSvc->canStartSession($studentId, $cohortId);
-        if (empty($quotaCheck['allowed'])) {
-            throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
-        }
-
         $existing = $this->mo_get_active_remote_auth($studentId, $cohortId, $areaId);
         if ($existing) {
             if ((string)$existing['status'] === 'AUTHENTICATED') {
-                throw new RuntimeException('Complete authentication by entering your code on the mock oral page.');
+                throw new RuntimeException('You already completed authentication. Click Enter Mock Oral Code on the mock oral page.');
             }
             if (in_array((string)$existing['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
-                if ($trustedNetwork) {
-                    $rawToken = $this->mo_reissue_auth_token((int)$existing['id']);
-                    if ($rawToken !== '') {
-                        return [
-                            'ok' => true,
-                            'reused' => true,
-                            'trusted_network' => true,
-                            'auth_url' => mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken),
-                            'message' => 'Continue identity verification to start your mock oral exam.',
-                        ];
-                    }
-                }
-                return ['ok' => true, 'reused' => true, 'message' => 'Check your email for the authentication link.'];
+                return [
+                    'ok' => true,
+                    'reused' => true,
+                    'authorization_id' => (int)$existing['id'],
+                    'message' => 'An active authentication request already exists. Check your email for the link.',
+                ];
             }
             $this->pdo->prepare('DELETE FROM mock_oral_remote_authorizations WHERE id = ?')->execute([(int)$existing['id']]);
         }
@@ -272,32 +278,6 @@ trait CoursewareProgressionV2MockOralTrait
         ]);
         $authId = (int)$this->pdo->lastInsertId();
         $authLink = mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken);
-
-        if ($trustedNetwork) {
-            $this->pdo->prepare("UPDATE mock_oral_remote_authorizations SET status = 'EMAIL_SENT', updated_at = UTC_TIMESTAMP() WHERE id = ?")
-                ->execute([$authId]);
-
-            $this->logProgressionEvent([
-                'user_id' => $studentId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => 0,
-                'event_type' => 'mock_oral',
-                'event_code' => 'MOCK_ORAL_AUTH_REQUESTED_TRUSTED',
-                'event_status' => 'info',
-                'actor_type' => 'student',
-                'actor_user_id' => $studentId,
-                'payload' => ['authorization_id' => $authId, 'area_id' => $areaId, 'trusted_network' => 1],
-                'legal_note' => 'Student started mock oral authentication on trusted network (email skipped).',
-            ]);
-
-            return [
-                'ok' => true,
-                'authorization_id' => $authId,
-                'trusted_network' => true,
-                'auth_url' => $authLink,
-                'message' => 'Continue to identity verification.',
-            ];
-        }
 
         $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
         $stUser->execute([$studentId]);
@@ -352,7 +332,7 @@ trait CoursewareProgressionV2MockOralTrait
         $this->pdo->prepare("UPDATE mock_oral_remote_authorizations SET status = 'EMAIL_SENT', updated_at = UTC_TIMESTAMP() WHERE id = ?")
             ->execute([$authId]);
 
-        return ['ok' => true, 'authorization_id' => $authId, 'message' => 'Check your email for the authentication link.'];
+        return ['ok' => true, 'authorization_id' => $authId, 'message' => 'Your mock oral request was received. Check your email for the authentication link in a few moments.'];
     }
 
     public function loadMockOralAuthorizationByToken(string $rawToken): ?array
@@ -408,7 +388,7 @@ trait CoursewareProgressionV2MockOralTrait
         );
     }
 
-    public function verifyMockOralCodeAndPrepareSession(int $studentId, int $cohortId, int $areaId, string $code): array
+    public function verifyMockOralCodeAndPrepareSession(int $studentId, int $cohortId, int $areaId, string $code, string $cookieHeader = ''): array
     {
         mo_ensure_tables($this->pdo);
         $auth = $this->mo_get_active_remote_auth($studentId, $cohortId, $areaId);
@@ -416,52 +396,128 @@ trait CoursewareProgressionV2MockOralTrait
             throw new RuntimeException('No authenticated mock oral authorization found.');
         }
 
+        $authId = (int)$auth['id'];
+        $idempotencyKey = 'remote_auth_' . $authId;
+
+        $existingSt = $this->pdo->prepare('SELECT id, status FROM mock_oral_sessions WHERE idempotency_key = ? LIMIT 1');
+        $existingSt->execute([$idempotencyKey]);
+        $existingRow = $existingSt->fetch(PDO::FETCH_ASSOC);
+        if ($existingRow) {
+            $sessionId = (int)$existingRow['id'];
+            if ((string)$existingRow['status'] === 'blueprint_generating') {
+                mo_prep_schedule_mock_oral($this->pdo, $studentId, $cohortId, $areaId, $sessionId, 'code_verified_retry', $cookieHeader);
+            }
+            return [
+                'ok' => true,
+                'session_id' => $sessionId,
+                'preparing' => true,
+                'redirect_url' => '/student/mock_oral.php?cohort_id=' . $cohortId . '&area_id=' . $areaId . '&mo_code_verified=1',
+            ];
+        }
+
         $result = RemoteSessionAuthService::verifyCode(
             $auth,
             $studentId,
             $code,
-            function (int $authId): int {
+            function (int $verifyAuthId): int {
                 $st = $this->pdo->prepare('SELECT failed_code_attempts FROM mock_oral_remote_authorizations WHERE id = ? LIMIT 1');
-                $st->execute([$authId]);
+                $st->execute([$verifyAuthId]);
                 $failures = (int)$st->fetchColumn() + 1;
                 $status = $failures >= RSA_MAX_CODE_FAILURES ? 'FAILED' : 'AUTHENTICATED';
                 $this->pdo->prepare('
                     UPDATE mock_oral_remote_authorizations
                     SET failed_code_attempts = ?, status = ?, updated_at = UTC_TIMESTAMP()
                     WHERE id = ?
-                ')->execute([$failures, $status, $authId]);
+                ')->execute([$failures, $status, $verifyAuthId]);
                 return $failures;
             },
-            function (int $authId) use ($studentId, $cohortId, $areaId, $auth): array {
-                $this->pdo->beginTransaction();
-                try {
-                    $session = $this->mo_create_session_with_blueprint(
-                        $studentId,
-                        $cohortId,
-                        $areaId,
-                        $authId,
-                        'remote_auth_' . $authId
-                    );
-                    $this->pdo->prepare("
-                        UPDATE mock_oral_remote_authorizations
-                        SET status = 'USED', session_id = ?, used_at = UTC_TIMESTAMP(), code_verified_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
-                        WHERE id = ?
-                    ")->execute([(int)$session['session_id'], $authId]);
-                    $this->pdo->commit();
-                    return $session;
-                } catch (Throwable $e) {
-                    $this->pdo->rollBack();
-                    throw $e;
-                }
+            function (int $verifyAuthId) use ($studentId, $cohortId, $areaId, $authId, $idempotencyKey, $cookieHeader): array {
+                $session = $this->mo_create_preparing_session($studentId, $cohortId, $areaId, $authId, $idempotencyKey);
+
+                $this->pdo->prepare("
+                    UPDATE mock_oral_remote_authorizations
+                    SET status = 'USED',
+                        session_id = ?,
+                        code_verified_at = UTC_TIMESTAMP(),
+                        used_at = UTC_TIMESTAMP(),
+                        updated_at = UTC_TIMESTAMP()
+                    WHERE id = ?
+                ")->execute([(int)$session['session_id'], $verifyAuthId]);
+
+                mo_prep_schedule_mock_oral(
+                    $this->pdo,
+                    $studentId,
+                    $cohortId,
+                    $areaId,
+                    (int)$session['session_id'],
+                    'code_verified',
+                    $cookieHeader
+                );
+
+                return $session;
             }
         );
 
-        return $result;
+        return [
+            'ok' => true,
+            'session_id' => (int)($result['session_id'] ?? 0),
+            'preparing' => true,
+            'redirect_url' => '/student/mock_oral.php?cohort_id=' . $cohortId . '&area_id=' . $areaId . '&mo_code_verified=1',
+        ] + $result;
     }
 
     public function startOnSiteMockOralSession(int $studentId, int $cohortId, int $areaId): array
     {
         throw new RuntimeException('Use the standard mock oral authentication flow.');
+    }
+
+    public function mo_create_preparing_session(int $studentId, int $cohortId, int $areaId, ?int $authId, string $idempotencyKey): array
+    {
+        $area = mo_area_by_id($this->pdo, $areaId);
+        if (!$area) {
+            throw new RuntimeException('Module not found.');
+        }
+
+        $quotaSvc = new SessionQuotaService($this->pdo);
+        $quotaCheck = $quotaSvc->canStartSession($studentId, $cohortId);
+        if (empty($quotaCheck['allowed'])) {
+            throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
+        }
+
+        $existing = $this->pdo->prepare('SELECT id, status FROM mock_oral_sessions WHERE idempotency_key = ? LIMIT 1');
+        $existing->execute([$idempotencyKey]);
+        $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
+        if ($existingRow) {
+            return ['session_id' => (int)$existingRow['id'], 'status' => (string)$existingRow['status'], 'idempotent_reuse' => true];
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $ins = $this->pdo->prepare("
+                INSERT INTO mock_oral_sessions
+                  (user_id, cohort_id, catalog_id, area_id, authorization_id, status,
+                   max_duration_sec, idempotency_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'blueprint_generating', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            ");
+            $ins->execute([
+                $studentId,
+                $cohortId,
+                (int)$area['catalog_id'],
+                $areaId,
+                $authId,
+                RSA_SESSION_MAX_DURATION_SEC,
+                $idempotencyKey,
+            ]);
+            $sessionId = (int)$this->pdo->lastInsertId();
+
+            $quotaSvc->consumeSession($studentId, $cohortId);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+
+        return ['session_id' => $sessionId, 'status' => 'blueprint_generating'];
     }
 
     public function mo_create_session_with_blueprint(int $studentId, int $cohortId, int $areaId, ?int $authId, string $idempotencyKey): array
