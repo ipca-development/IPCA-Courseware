@@ -28,11 +28,32 @@ final class MockOralSessionService
         if (!$session) {
             throw new RuntimeException('Session not found.');
         }
-        if ((string)$session['status'] !== 'ready') {
+
+        $status = (string)$session['status'];
+        $orchestrator = new ConversationalOrchestrator($this->pdo);
+        $blueprint = mo_json_decode($session['blueprint_json'] ?? null);
+
+        if ($status === 'in_progress') {
+            $transcript = $orchestrator->loadTranscript($sessionId);
+            $nextTurn = $this->inferNextStudentTurnIndex($transcript);
+            return [
+                'session_id' => $sessionId,
+                'status' => 'in_progress',
+                'resumed' => true,
+                'max_duration_sec' => (int)$session['max_duration_sec'],
+                'transcript' => $transcript,
+                'next_turn_index' => $nextTurn,
+                'blueprint_summary' => [
+                    'area_title' => (string)($blueprint['area_title'] ?? ''),
+                    'cross_country_context' => (string)($blueprint['cross_country_context'] ?? ''),
+                ],
+            ];
+        }
+
+        if ($status !== 'ready') {
             throw new RuntimeException('Session is not ready to start.');
         }
-        $blueprintRaw = $session['blueprint_json'] ?? null;
-        if ($blueprintRaw === null || $blueprintRaw === '' || (is_array($blueprintRaw) && $blueprintRaw === [])) {
+        if ($blueprint === []) {
             throw new RuntimeException('Session blueprint is missing.');
         }
 
@@ -42,8 +63,6 @@ final class MockOralSessionService
             WHERE id = ?
         ")->execute([$sessionId]);
 
-        $blueprint = mo_json_decode($blueprintRaw);
-        $orchestrator = new ConversationalOrchestrator($this->pdo);
         $opening = $orchestrator->nextMayaTurn($session, $blueprint, 0);
         $orchestrator->logTranscriptEvent($sessionId, 'maya', 0, (string)$opening['maya_text'], 'opening');
 
@@ -52,11 +71,33 @@ final class MockOralSessionService
             'status' => 'in_progress',
             'max_duration_sec' => (int)$session['max_duration_sec'],
             'opening' => $opening,
+            'next_turn_index' => 0,
+            'transcript' => $orchestrator->loadTranscript($sessionId),
             'blueprint_summary' => [
                 'area_title' => (string)($blueprint['area_title'] ?? ''),
                 'cross_country_context' => (string)($blueprint['cross_country_context'] ?? ''),
             ],
         ];
+    }
+
+    /** @param list<array<string,mixed>> $transcript */
+    private function inferNextStudentTurnIndex(array $transcript): int
+    {
+        $lastMayaTurn = 0;
+        $lastStudentTurn = -1;
+        foreach ($transcript as $row) {
+            $turn = (int)($row['turn_index'] ?? 0);
+            if (($row['role'] ?? '') === 'maya') {
+                $lastMayaTurn = max($lastMayaTurn, $turn);
+            }
+            if (($row['role'] ?? '') === 'student') {
+                $lastStudentTurn = max($lastStudentTurn, $turn);
+            }
+        }
+        if ($lastStudentTurn < $lastMayaTurn) {
+            return $lastMayaTurn;
+        }
+        return $lastMayaTurn + 1;
     }
 
     public function heartbeat(int $sessionId, int $userId): array

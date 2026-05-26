@@ -178,20 +178,22 @@ trait CoursewareProgressionV2MockOralTrait
 
         if (!cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId)) {
             return [
-                'mode' => 'remote_request',
-                'label' => 'Request Mock Oral Session',
+                'mode' => 'start_auth',
+                'label' => 'Start Mock Oral Exam',
                 'disabled' => false,
                 'button_class' => 'remote',
                 'area_id' => $areaId,
+                'network' => 'remote',
             ];
         }
 
         return [
-            'mode' => 'on_site_start',
-            'label' => 'Start Mock Oral Session',
+            'mode' => 'start_auth',
+            'label' => 'Start Mock Oral Exam',
             'disabled' => false,
-            'show_code_modal' => false,
+            'button_class' => 'remote',
             'area_id' => $areaId,
+            'network' => 'trusted',
         ];
     }
 
@@ -211,9 +213,8 @@ trait CoursewareProgressionV2MockOralTrait
         if (!$this->hasMockOralPermission($studentId, $cohortId, (int)$area['catalog_id'])) {
             throw new RuntimeException('Mock Oral Exam access is not enabled for your account.');
         }
-        if (cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId)) {
-            throw new RuntimeException('You are on an approved school network. Start the session directly.');
-        }
+
+        $trustedNetwork = cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId);
 
         $quotaSvc = new SessionQuotaService($this->pdo);
         $quotaCheck = $quotaSvc->canStartSession($studentId, $cohortId);
@@ -226,7 +227,19 @@ trait CoursewareProgressionV2MockOralTrait
             if ((string)$existing['status'] === 'AUTHENTICATED') {
                 throw new RuntimeException('Complete authentication by entering your code on the mock oral page.');
             }
-            if ((string)$existing['status'] === 'EMAIL_SENT') {
+            if (in_array((string)$existing['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
+                if ($trustedNetwork) {
+                    $rawToken = $this->mo_reissue_auth_token((int)$existing['id']);
+                    if ($rawToken !== '') {
+                        return [
+                            'ok' => true,
+                            'reused' => true,
+                            'trusted_network' => true,
+                            'auth_url' => mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken),
+                            'message' => 'Continue identity verification to start your mock oral exam.',
+                        ];
+                    }
+                }
                 return ['ok' => true, 'reused' => true, 'message' => 'Check your email for the authentication link.'];
             }
             $this->pdo->prepare('DELETE FROM mock_oral_remote_authorizations WHERE id = ?')->execute([(int)$existing['id']]);
@@ -259,6 +272,32 @@ trait CoursewareProgressionV2MockOralTrait
         ]);
         $authId = (int)$this->pdo->lastInsertId();
         $authLink = mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken);
+
+        if ($trustedNetwork) {
+            $this->pdo->prepare("UPDATE mock_oral_remote_authorizations SET status = 'EMAIL_SENT', updated_at = UTC_TIMESTAMP() WHERE id = ?")
+                ->execute([$authId]);
+
+            $this->logProgressionEvent([
+                'user_id' => $studentId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => 0,
+                'event_type' => 'mock_oral',
+                'event_code' => 'MOCK_ORAL_AUTH_REQUESTED_TRUSTED',
+                'event_status' => 'info',
+                'actor_type' => 'student',
+                'actor_user_id' => $studentId,
+                'payload' => ['authorization_id' => $authId, 'area_id' => $areaId, 'trusted_network' => 1],
+                'legal_note' => 'Student started mock oral authentication on trusted network (email skipped).',
+            ]);
+
+            return [
+                'ok' => true,
+                'authorization_id' => $authId,
+                'trusted_network' => true,
+                'auth_url' => $authLink,
+                'message' => 'Continue to identity verification.',
+            ];
+        }
 
         $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
         $stUser->execute([$studentId]);
@@ -422,22 +461,7 @@ trait CoursewareProgressionV2MockOralTrait
 
     public function startOnSiteMockOralSession(int $studentId, int $cohortId, int $areaId): array
     {
-        mo_ensure_tables($this->pdo);
-        if (!cw_progress_test_is_trusted_school_network($this->pdo, $studentId, $cohortId)) {
-            throw new RuntimeException('On-site start requires school network or completed remote auth.');
-        }
-        $quotaSvc = new SessionQuotaService($this->pdo);
-        $quotaCheck = $quotaSvc->canStartSession($studentId, $cohortId);
-        if (empty($quotaCheck['allowed'])) {
-            throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
-        }
-        return $this->mo_create_session_with_blueprint(
-            $studentId,
-            $cohortId,
-            $areaId,
-            null,
-            'onsite_' . $studentId . '_' . $areaId . '_' . time()
-        );
+        throw new RuntimeException('Use the standard mock oral authentication flow.');
     }
 
     public function mo_create_session_with_blueprint(int $studentId, int $cohortId, int $areaId, ?int $authId, string $idempotencyKey): array
@@ -501,6 +525,18 @@ trait CoursewareProgressionV2MockOralTrait
         }
 
         return ['session_id' => $sessionId, 'status' => 'ready'];
+    }
+
+    private function mo_reissue_auth_token(int $authId): string
+    {
+        $rawToken = rsa_generate_token();
+        $this->pdo->prepare('
+            UPDATE mock_oral_remote_authorizations
+            SET request_token_hash = ?, status = \'EMAIL_SENT\', updated_at = UTC_TIMESTAMP()
+            WHERE id = ?
+        ')->execute([rsa_hash($rawToken), $authId]);
+
+        return $rawToken;
     }
 
     private function mo_student_enrolled(int $studentId, int $cohortId): bool

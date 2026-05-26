@@ -75,6 +75,8 @@ function mo_area_by_id(PDO $pdo, int $areaId): ?array
     return $row ?: null;
 }
 
+require_once __DIR__ . '/../openai.php';
+
 function mo_json_decode(mixed $json): array
 {
     if (is_array($json)) {
@@ -85,6 +87,44 @@ function mo_json_decode(mixed $json): array
     }
     $decoded = json_decode($json, true);
     return is_array($decoded) ? $decoded : [];
+}
+
+function mo_synthesize_speech_mp3(string $text): string
+{
+    $text = trim($text);
+    if ($text === '') {
+        return '';
+    }
+
+    $model = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
+    $voice = getenv('CW_OPENAI_TTS_VOICE') ?: (getenv('CW_OPENAI_REALTIME_VOICE') ?: 'marin');
+    $payload = json_encode([
+        'model' => $model,
+        'voice' => $voice,
+        'format' => 'mp3',
+        'input' => $text,
+    ], JSON_UNESCAPED_UNICODE);
+
+    $ch = curl_init('https://api.openai.com/v1/audio/speech');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . cw_openai_key(),
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_TIMEOUT => 120,
+    ]);
+    $audio = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($audio === false || $code < 200 || $code >= 300) {
+        return '';
+    }
+
+    return (string)$audio;
 }
 
 function mo_json_encode(mixed $value): string

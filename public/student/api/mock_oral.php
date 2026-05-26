@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 require_once __DIR__ . '/../../../src/mock_oral/mock_oral_bootstrap.php';
 require_once __DIR__ . '/../../../src/mock_oral/MockOralSessionService.php';
+require_once __DIR__ . '/../../../src/mock_oral/ConversationalOrchestrator.php';
 require_once __DIR__ . '/../../../src/mock_oral/HeyGenLiveAvatarService.php';
 require_once __DIR__ . '/../../../src/mock_oral/SessionQuotaService.php';
 
@@ -84,6 +85,20 @@ try {
             ]);
             break;
 
+        case 'get_transcript':
+            $sessionId = (int)($_GET['session_id'] ?? $body['session_id'] ?? 0);
+            $session = $sessionSvc->loadSessionForUser($sessionId, $userId);
+            if (!$session) {
+                throw new RuntimeException('Session not found.');
+            }
+            $orchestrator = new ConversationalOrchestrator($pdo);
+            mo_api_out([
+                'ok' => true,
+                'transcript' => $orchestrator->loadTranscript($sessionId),
+                'status' => (string)$session['status'],
+            ]);
+            break;
+
         case 'start_session':
             $sessionId = (int)($body['session_id'] ?? 0);
             $result = $sessionSvc->startSession($sessionId, $userId);
@@ -141,11 +156,7 @@ try {
             break;
 
         case 'start_on_site':
-            $cohortId = (int)($body['cohort_id'] ?? 0);
-            $areaId = (int)($body['area_id'] ?? 0);
-            $result = $engine->startOnSiteMockOralSession($userId, $cohortId, $areaId);
-            mo_api_out(['ok' => true] + $result);
-            break;
+            throw new RuntimeException('Use Start Mock Oral Exam to begin the standard authentication flow.');
 
         default:
             throw new RuntimeException('Unknown action.');

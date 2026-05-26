@@ -72,14 +72,12 @@ cw_header('Mock Oral Exam Preparation');
             <div class="module-header-actions">
               <?php if (!empty($state['disabled'])): ?>
                 <button type="button" class="app-btn app-btn-secondary" disabled><?= mo_h((string)$state['label']) ?></button>
-              <?php elseif (($state['mode'] ?? '') === 'remote_request'): ?>
-                <button type="button" class="app-btn app-btn-primary moe-request-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
+              <?php elseif (($state['mode'] ?? '') === 'start_auth'): ?>
+                <button type="button" class="app-btn app-btn-primary moe-start-auth-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
               <?php elseif (($state['mode'] ?? '') === 'enter_code'): ?>
                 <button type="button" class="app-btn app-btn-primary moe-code-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
               <?php elseif (($state['mode'] ?? '') === 'continue' && !empty($state['href'])): ?>
                 <a class="app-btn app-btn-primary" href="<?= mo_h((string)$state['href']) ?>"><?= mo_h((string)$state['label']) ?></a>
-              <?php elseif (($state['mode'] ?? '') === 'on_site_start'): ?>
-                <button type="button" class="app-btn app-btn-primary moe-onsite-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
               <?php elseif (!empty($state['href'])): ?>
                 <a class="app-btn app-btn-primary" href="<?= mo_h((string)$state['href']) ?>"><?= mo_h((string)$state['label']) ?></a>
               <?php else: ?>
@@ -94,6 +92,15 @@ cw_header('Mock Oral Exam Preparation');
       </div>
     </section>
   <?php endif; ?>
+</div>
+
+<div id="mockOralPrepOverlay" class="moe-prep-overlay" aria-hidden="true">
+  <div class="moe-prep-card">
+    <div class="moe-prep-title">Preparing your Mock Oral Exam</div>
+    <div class="moe-prep-step" id="mockOralPrepStep">Preparing your Mock Oral Exam Session…</div>
+    <div class="moe-prep-bar-track"><div class="moe-prep-bar-fill" id="mockOralPrepBar"></div></div>
+    <div class="moe-prep-note">This usually takes 15–30 seconds while we build your personalized ACS oral exam.</div>
+  </div>
 </div>
 
 <div id="mockOralCodeModal" class="moe-modal-overlay" aria-hidden="true">
@@ -116,6 +123,6 @@ window.MOCK_ORAL_HUB = {
   apiBase: '/student/api'
 };
 </script>
-<script src="/assets/mock_oral_hub.js?v=1"></script>
+<script src="/assets/mock_oral_hub.js?v=2"></script>
 
 <?php cw_footer(); ?>

@@ -29,7 +29,7 @@ if ($view === 'debrief' && $session) {
     $debriefPayload = $sessionSvc->getDebriefPayload($sessionId);
     cw_header('Mock Oral Debrief');
     ?>
-    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=1">
+    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=2">
     <div class="moe-page">
       <section class="moe-debrief-hero">
         <div class="hero-overline">Mock Oral Debrief</div>
@@ -61,44 +61,53 @@ if ((string)$session['status'] === 'completed') {
     redirect('/student/mock_oral_session.php?cohort_id=' . $cohortId . '&area_id=' . $areaId . '&session_id=' . $sessionId . '&view=debrief');
 }
 
-$blueprint = mo_json_decode((string)($session['blueprint_json'] ?? ''));
+$blueprint = mo_json_decode($session['blueprint_json'] ?? null);
 
 function mo_sh(?string $v): string
 {
     return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
-cw_header('Mock Oral Session');
+cw_header('Mock Oral Exam');
 ?>
-<link rel="stylesheet" href="/assets/mock_oral_session.css?v=1">
+<link rel="stylesheet" href="/assets/mock_oral_session.css?v=2">
 
-<div class="moe-page">
-  <section class="app-section-hero">
+<div class="moe-page moe-live-page" id="moeLivePage">
+  <section class="moe-live-hero">
     <div class="hero-overline">Mock Oral Exam · ACS Area <?= mo_sh((string)($area['area_code'] ?? '')) ?></div>
     <h1 class="moe-hero-title"><?= mo_sh((string)($area['title'] ?? 'Oral Session')) ?></h1>
-    <p class="moe-hero-sub"><?= mo_sh((string)($blueprint['cross_country_context'] ?? 'Scenario-driven DPE-style oral exam with Maya.')) ?></p>
+    <p class="moe-scenario-line"><?= mo_sh((string)($blueprint['cross_country_context'] ?? 'Scenario-driven DPE-style oral exam with Maya.')) ?></p>
   </section>
 
-  <div class="moe-session-layout">
-    <section class="moe-panel">
+  <div id="moeVoiceBanner" class="moe-voice-banner" hidden></div>
+
+  <div class="moe-conversation-shell">
+    <div class="moe-stage-panel">
+      <div class="moe-maya-stage">
+        <video id="moeHeygenVideo" class="moe-heygen-video" playsinline autoplay muted hidden></video>
+        <div class="moe-maya-avatar-fallback" id="moeMayaAvatar">M</div>
+        <div class="moe-maya-status" id="moeMayaStatus">Connecting…</div>
+      </div>
       <div class="moe-timer" id="moeTimer">Time remaining: 05:00</div>
+      <div class="moe-student-status" id="moeStudentStatus">Preparing your oral exam conversation…</div>
+    </div>
+
+    <div class="moe-transcript-panel">
+      <div class="moe-transcript-head">Conversation</div>
       <div class="moe-transcript" id="moeTranscript"></div>
-      <div class="moe-controls">
-        <button type="button" class="app-btn app-btn-primary" id="moeStartBtn">Start Session</button>
-        <button type="button" class="app-btn app-btn-secondary" id="moeListenBtn" disabled>Hold to Answer</button>
-        <button type="button" class="app-btn app-btn-secondary" id="moeEndBtn" disabled>End Session</button>
-      </div>
-      <textarea class="app-textarea" id="moeTypedAnswer" rows="3" placeholder="Or type your answer here..." style="margin-top:12px;width:100%;"></textarea>
-      <button type="button" class="app-btn app-btn-primary" id="moeSubmitTyped" style="margin-top:10px;" disabled>Submit Answer</button>
-    </section>
-    <aside class="moe-panel">
-      <h3 style="margin:0 0 10px;font-size:18px;">Focus Areas</h3>
-      <ul id="moeFocusList" style="margin:0;padding-left:18px;line-height:1.6;color:var(--text-muted);"></ul>
-      <div style="margin-top:18px;font-size:13px;color:var(--text-muted);line-height:1.55;">
-        Maya follows a pre-generated session blueprint. Your answers adapt follow-ups toward weak knowledge areas.
-      </div>
-    </aside>
+    </div>
   </div>
+
+  <div class="moe-live-controls">
+    <button type="button" class="app-btn app-btn-primary moe-answer-btn" id="moeAnswerBtn" disabled>Tap to Answer</button>
+    <button type="button" class="app-btn app-btn-secondary" id="moeEndBtn" disabled>End Oral Exam</button>
+  </div>
+
+  <details class="moe-typed-fallback">
+    <summary>Type an answer instead</summary>
+    <textarea class="app-textarea" id="moeTypedAnswer" rows="3" placeholder="Type your answer here…"></textarea>
+    <button type="button" class="app-btn app-btn-secondary" id="moeSubmitTyped" disabled>Submit Typed Answer</button>
+  </details>
 </div>
 
 <script>
@@ -108,10 +117,10 @@ window.MOCK_ORAL_SESSION = {
   sessionId: <?= (int)$sessionId ?>,
   maxDurationSec: <?= (int)($session['max_duration_sec'] ?? 300) ?>,
   status: <?= json_encode((string)$session['status'], JSON_UNESCAPED_UNICODE) ?>,
-  focusAreas: <?= json_encode(array_slice((array)($blueprint['weakness_priorities'] ?? []), 0, 5), JSON_UNESCAPED_UNICODE) ?>,
+  scenario: <?= json_encode((string)($blueprint['opening_scenario'] ?? ''), JSON_UNESCAPED_UNICODE) ?>,
   apiBase: '/student/api'
 };
 </script>
-<script src="/assets/mock_oral_session.js?v=1"></script>
+<script src="/assets/mock_oral_session.js?v=2"></script>
 
 <?php cw_footer(); ?>

@@ -162,6 +162,7 @@ cw_header('Mock Oral Authentication');
         document.getElementById('ptrCodeValue').textContent=String(j.verification_code||'');
         if (video.srcObject) video.srcObject.getTracks().forEach(function(t){ t.stop(); });
         try { localStorage.setItem('mo_remote_auth_refresh', JSON.stringify({ ts: Date.now() })); } catch(e){}
+        try { new BroadcastChannel('ipca_mo_remote_auth').postMessage({ ts: Date.now() }); } catch(e){}
       })
       .catch(function(e){ submitBtn.disabled=false; showError(e.message); });
   });
