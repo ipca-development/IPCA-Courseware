@@ -875,6 +875,67 @@
     setTimerNoteVisible(false);
   }
 
+  function shouldResumeOralSession(nextState) {
+    nextState = nextState || state;
+    if (!nextState || !nextState.prepared) return false;
+    var st = String(nextState.status || '');
+    return st === 'in_progress' || st === 'processing';
+  }
+
+  function renderResumeLayout() {
+    if (!currentItem) {
+      renderIdleLayout();
+      return;
+    }
+    renderCard(currentItem);
+    text(els.qnum, formatQuestionNum(currentItem.idx, state.total_questions || '?'));
+    text(els.question, formatQuestionText(currentItem));
+    setTranscriptDisplay('idle');
+    stopMayaBarMotion();
+    setCardState(resumeCardStateForItem(currentItem));
+    setRecordHintVisible(false);
+    hideFeedbackPanel();
+    hideRetry();
+    if (els.timer) els.timer.setAttribute('data-active', '0');
+    text(els.timerLabel, '\u00a0');
+    setTimerNoteVisible(false);
+    var resumeHint = 'Welcome back at Question ' + currentItem.idx + ' of ' + (state.total_questions || '?')
+      + '. Tap <strong>Start Answer</strong> when you are ready.';
+    if (itemKind(currentItem) === 'yesno') {
+      resumeHint = 'Welcome back at Question ' + currentItem.idx + ' of ' + (state.total_questions || '?')
+        + '. Tap <strong>Start Answer</strong>, or tap <strong>Yes</strong> / <strong>No</strong> below.';
+    }
+    setHintContent(resumeHint, true);
+    if (itemKind(currentItem) === 'yesno') {
+      showYesNoFallback();
+    }
+  }
+
+  function resumeOralSession() {
+    applyLoadedSessionState();
+    renderResumeLayout();
+    sessionConnecting = true;
+    syncButtons();
+    logEvent('oral_session_resume');
+    voiceConnectPromise = connectVoice().catch(function (err) {
+      logEvent('voice_connect_failed', err.message || 'connect failed');
+      voiceConnectPromise = null;
+      throw err;
+    });
+    return Promise.all([startCamera(), voiceConnectPromise.catch(function () { return null; })])
+      .then(function () {
+        sessionConnecting = false;
+        startStartAnswerTimer();
+        syncButtons();
+      })
+      .catch(function (err) {
+        sessionConnecting = false;
+        setHintContent('Could not reconnect Maya and your microphone. Refresh the page and allow microphone access.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Connection failed') + '</span>', true);
+        logEvent('oral_session_resume_failed', err.message || 'resume failed');
+        syncButtons();
+      });
+  }
+
   function getRecordingMs() {
     if (!recordingStartedAt) return 0;
     return Math.max(0, Date.now() - recordingStartedAt);
@@ -1062,7 +1123,7 @@
       }
       var canAnswer = oralQuestionsStarted
         && (cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible)
-        && !isRecording && !mayaSpeaking;
+        && !isRecording && !mayaSpeaking && !sessionConnecting;
       var canStop = isRecording;
       var primaryEnabled = false;
       var primaryLabel = 'Ready';
@@ -1078,6 +1139,8 @@
       } else if (testStarted && !oralQuestionsStarted) {
         primaryEnabled = true;
         primaryLabel = greetingReady ? 'Ready' : 'Ready';
+      } else if (testStarted && oralQuestionsStarted && sessionConnecting) {
+        primaryLabel = 'Connecting...';
       } else if (oralQuestionsStarted) {
         primaryLabel = 'Start Answer';
       }
@@ -1390,18 +1453,11 @@
 
   function applyLoadedSessionState() {
     if (!state || !state.prepared) return;
-    var st = String(state.status || '');
-    var evaluated = parseInt(state.evaluated_count || 0, 10) || 0;
-    if (st !== 'in_progress' && st !== 'processing') return;
+    if (!shouldResumeOralSession(state)) return;
     oralSessionStarted = true;
     testStarted = true;
     greetingReady = true;
-    if (evaluated > 0) {
-      oralQuestionsStarted = true;
-      return;
-    }
-    oralQuestionsStarted = false;
-    setHintContent('Welcome back. Tap <strong>Ready</strong> to begin Question 1.', true);
+    oralQuestionsStarted = true;
   }
 
   function resumeCardStateForItem(item) {
@@ -1722,8 +1778,26 @@
     });
   }
 
-  function startAnswerCapture() {
-    if (!currentItem || !micStream) return;
+  function startAnswerCapture(micRetry) {
+    if (!currentItem) return;
+    if (!micStream) {
+      if (micRetry) {
+        setHintContent('Microphone unavailable. Allow microphone access and tap <strong>Start Answer</strong> again.', true);
+        logEvent('recording_blocked', 'microphone still unavailable after reconnect');
+        syncButtons();
+        return Promise.resolve();
+      }
+      logEvent('recording_blocked', 'microphone not connected');
+      setHintContent('Connecting your microphone...', true);
+      syncButtons();
+      return ensureVoiceConnected().then(function () {
+        return startAnswerCapture(true);
+      }).catch(function (err) {
+        setHintContent('Microphone unavailable. Allow microphone access and tap <strong>Start Answer</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || '') + '</span>', true);
+        logEvent('recording_blocked', err.message || 'microphone unavailable');
+        syncButtons();
+      });
+    }
     if (cardState === CARD.LISTENING || cardState === CARD.EVALUATING) return;
     if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
     if (isMayaSpeaking()) return;
@@ -2109,6 +2183,9 @@
         return;
       }
       if (prepTimer) clearTimeout(prepTimer);
+      if (shouldResumeOralSession(out.state)) {
+        return resumeOralSession();
+      }
       startCamera();
       renderIdleLayout();
       syncButtons();
