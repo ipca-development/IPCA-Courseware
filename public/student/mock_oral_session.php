@@ -141,6 +141,6 @@ if (is_readable($liveAvatarBundlePath)): ?>
 <script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=2"></script>
 <?php endif; ?>
 <script src="/assets/mock_oral_heygen_presenter.js?v=3"></script>
-<script src="/assets/mock_oral_session.js?v=6"></script>
+<script src="/assets/mock_oral_session.js?v=7"></script>
 
 <?php cw_footer(); ?>

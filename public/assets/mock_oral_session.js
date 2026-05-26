@@ -271,10 +271,14 @@
       })
       .then(function (spoken) {
         if (spoken) return true;
+        if (!opts.skipUnlockPrompt) {
+          showAudioUnlockPrompt(text);
+          return true;
+        }
         return speakBrowserFallback(text);
       })
       .then(function (spoken) {
-        if (!spoken && !opts.skipUnlockPrompt) {
+        if (!spoken && opts.skipUnlockPrompt) {
           showAudioUnlockPrompt(text);
         }
         return spoken;
@@ -512,8 +516,10 @@
         return initHeyGenAvatar(heygen).catch(function (e) {
           if (heygen.message && heygen.presentation_mode === 'fallback') {
             appendTurn('system', heygen.message);
+            setVoiceBanner('warn', heygen.message);
           } else if (e && e.message) {
             appendTurn('system', e.message);
+            setVoiceBanner('warn', e.message);
           }
           return false;
         }).then(function () {
