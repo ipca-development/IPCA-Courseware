@@ -170,7 +170,7 @@ if (is_readable($liveAvatarBundlePath)): ?>
 <?php elseif (is_readable($legacyBundlePath)): ?>
 <script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=2"></script>
 <?php endif; ?>
-<script src="/assets/mock_oral_heygen_presenter.js?v=7"></script>
-<script src="/assets/mock_oral_session.js?v=12"></script>
+<script src="/assets/mock_oral_heygen_presenter.js?v=8"></script>
+<script src="/assets/mock_oral_session.js?v=13"></script>
 
 <?php cw_footer(); ?>

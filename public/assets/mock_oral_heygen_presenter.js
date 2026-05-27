@@ -1,6 +1,5 @@
 /**
  * LiveAvatar presenter — LITE mode lip-sync via base64 PCM on WebSocket.
- * Audio must be base64-encoded agent.speak chunks (see LiveKit liveavatar plugin).
  */
 (function (global) {
   'use strict';
@@ -11,9 +10,11 @@
   var videoEl = null;
   var initPromise = null;
   var ttsUrlFn = null;
+  var streamAttached = false;
+  var keepAliveTimer = null;
 
-  var FIRST_CHUNK_BYTES = 19200; // 400 ms @ 24 kHz mono 16-bit
-  var SUB_CHUNK_BYTES = 48000; // 1 s
+  var FIRST_CHUNK_BYTES = 19200;
+  var SUB_CHUNK_BYTES = 48000;
 
   function loadSdk() {
     if (sdk) return Promise.resolve(sdk);
@@ -48,20 +49,20 @@
   }
 
   function pcmDurationMs(pcmLen) {
-    return Math.max(2500, Math.ceil(pcmLen / 48) + 500);
+    return Math.max(1500, Math.ceil(pcmLen / 48) + 300);
   }
 
   function pcmBinaryToBase64(pcm) {
     var len = pcm.length;
-    var chunkSize = 0x8000;
-    var binary = '';
-    for (var i = 0; i < len; i += chunkSize) {
-      var slice = pcm.substring(i, i + chunkSize);
-      for (var j = 0; j < slice.length; j++) {
-        binary += String.fromCharCode(slice.charCodeAt(j) & 0xff);
+    var step = 0x8000;
+    var bin = '';
+    for (var i = 0; i < len; i += step) {
+      var end = Math.min(i + step, len);
+      for (var j = i; j < end; j++) {
+        bin += String.fromCharCode(pcm.charCodeAt(j) & 0xff);
       }
     }
-    return btoa(binary);
+    return btoa(bin);
   }
 
   function splitPcmChunks(pcm) {
@@ -74,12 +75,22 @@
     return chunks;
   }
 
+  function wsSend(msg) {
+    var ws = session && session._sessionEventSocket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(msg));
+    return true;
+  }
+
   function attachAvatarStream() {
     if (!videoEl || !session) return;
-    if (typeof session.attach === 'function') {
-      session.attach(videoEl);
-    } else if (session._remoteVideoTrack) {
-      session._remoteVideoTrack.attach(videoEl);
+    if (!streamAttached) {
+      if (typeof session.attach === 'function') {
+        session.attach(videoEl);
+      } else if (session._remoteVideoTrack && session._remoteVideoTrack.attach) {
+        session._remoteVideoTrack.attach(videoEl);
+      }
+      streamAttached = true;
     }
     videoEl.hidden = false;
     videoEl.muted = false;
@@ -88,6 +99,46 @@
     if (play && typeof play.catch === 'function') {
       play.catch(function () {});
     }
+  }
+
+  function startKeepAlive() {
+    if (keepAliveTimer) return;
+    keepAliveTimer = setInterval(function () {
+      if (!session) return;
+      wsSend({ type: 'session.keep_alive', event_id: generateEventId() });
+      if (typeof session.keepAlive === 'function') {
+        session.keepAlive().catch(function () {});
+      }
+    }, 45000);
+  }
+
+  function stopKeepAlive() {
+    if (keepAliveTimer) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+  }
+
+  function waitForSpeakEnded(maxMs) {
+    var AgentEventsEnum = sdk && sdk.AgentEventsEnum;
+    if (!session || !AgentEventsEnum) {
+      return Promise.resolve(true);
+    }
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        session.off(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
+        resolve(true);
+      }
+      function onEnded() {
+        finish();
+      }
+      var timer = setTimeout(finish, maxMs);
+      session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
+    });
   }
 
   function sendPcmViaWebSocket(pcm) {
@@ -102,6 +153,7 @@
     }
 
     var eventId = generateEventId();
+    var durationMs = pcmDurationMs(pcm.length);
 
     return new Promise(function (resolve, reject) {
       var idx = 0;
@@ -110,11 +162,15 @@
         if (idx >= chunks.length) {
           try {
             ws.send(JSON.stringify({ type: 'agent.speak_end', event_id: eventId }));
+            wsSend({ type: 'agent.start_listening', event_id: generateEventId() });
           } catch (e) {
             reject(e);
             return;
           }
-          resolve(true);
+          waitForSpeakEnded(durationMs + 4000).then(function () {
+            attachAvatarStream();
+            resolve(true);
+          });
           return;
         }
 
@@ -130,8 +186,7 @@
         }
 
         idx += 1;
-        var delayMs = idx === 1 ? 400 : 1000;
-        setTimeout(sendNext, delayMs);
+        setTimeout(sendNext, 20);
       }
 
       sendNext();
@@ -186,6 +241,8 @@
     reset: function () {
       ready = false;
       initPromise = null;
+      streamAttached = false;
+      stopKeepAlive();
       var stopper = session && session.stop ? session.stop() : Promise.resolve();
       session = null;
       if (videoEl) {
@@ -210,6 +267,7 @@
 
       videoEl = opts.videoEl || null;
       ttsUrlFn = typeof opts.ttsUrl === 'function' ? opts.ttsUrl : null;
+      streamAttached = false;
 
       initPromise = loadSdk().then(function (loaded) {
         var LiveAvatarSession = loaded.LiveAvatarSession;
@@ -226,12 +284,14 @@
 
           session.on(SessionEvent.SESSION_STREAM_READY, function () {
             clearTimeout(timeout);
+            streamAttached = false;
             attachAvatarStream();
             resolve(true);
           });
 
           session.on(SessionEvent.SESSION_DISCONNECTED, function () {
             ready = false;
+            streamAttached = false;
           });
         });
 
@@ -239,20 +299,19 @@
           return streamReady;
         }).then(function () {
           ready = true;
+          startKeepAlive();
           return true;
         });
       }).catch(function (err) {
         initPromise = null;
         ready = false;
+        streamAttached = false;
         throw err;
       });
 
       return initPromise;
     },
 
-    /**
-     * Stream base64 PCM to LiveAvatar for lip-sync + avatar audio playback.
-     */
     speakLipSync: function (text) {
       text = String(text || '').trim();
       if (!text) return Promise.resolve(false);
@@ -266,13 +325,7 @@
         if (!pcm || pcm.length < 500) {
           throw new Error('PCM audio too short.');
         }
-        return sendPcmViaWebSocket(pcm).then(function () {
-          return new Promise(function (resolve) {
-            setTimeout(function () {
-              resolve(true);
-            }, pcmDurationMs(pcm.length));
-          });
-        });
+        return sendPcmViaWebSocket(pcm);
       });
     },
 

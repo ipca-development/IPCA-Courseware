@@ -332,6 +332,8 @@
     mayaMicSuppressed = on;
     if (on) {
       stopAnswerCapture();
+    } else if (examStarted && !userMicMuted && sessionActive && !isSubmitting) {
+      startContinuousListening();
     }
     updateMicUi();
   }
@@ -387,9 +389,6 @@
           return;
         }
         setStudentState('Speak naturally — your microphone is live.');
-        if (examStarted && !userMicMuted) {
-          startContinuousListening();
-        }
       });
   }
 
@@ -423,7 +422,9 @@
     if (!text || !sessionActive || isSubmitting) return Promise.resolve();
 
     isSubmitting = true;
+    mayaMicSuppressed = true;
     stopAnswerCapture();
+    stopContinuousListening();
     updateMicUi();
     appendTurn('student', text);
     setCurrentQuestion('');
@@ -456,7 +457,11 @@
       if (examStarted && !userMicMuted) startContinuousListening();
     }).then(function () {
       isSubmitting = false;
+      mayaMicSuppressed = false;
       updateMicUi();
+      if (sessionActive && !userMicMuted && !isSpeaking) {
+        startContinuousListening();
+      }
       if (sessionActive) setControlsEnabled(true);
       if (typedEl) typedEl.value = '';
     });
