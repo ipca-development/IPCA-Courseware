@@ -1,7 +1,6 @@
 /**
- * LiveAvatar presenter — text repeat mode only.
- * OpenAI (server) decides maya_text; LiveAvatar lip-syncs and speaks it.
- * Does NOT use voice chat or avatar knowledge base.
+ * LiveAvatar presenter — LITE mode lip-sync via repeatAudio + separate TTS audio.
+ * OpenAI (server) decides maya_text; we drive lip-sync with PCM audio chunks.
  */
 (function (global) {
   'use strict';
@@ -12,9 +11,6 @@
   var videoEl = null;
   var initPromise = null;
   var ttsUrlFn = null;
-
-  var LIVEKIT_COMMAND_TOPIC = 'agent-control';
-  var SPEAK_TEXT_EVENT = 'avatar.speak_text';
 
   function loadSdk() {
     if (sdk) return Promise.resolve(sdk);
@@ -39,40 +35,26 @@
     });
   }
 
-  function generateEventId() {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-      var r = (Math.random() * 16) | 0;
-      var v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
+  function pcmDurationMs(pcm) {
+    // 24 kHz mono 16-bit PCM: 960 bytes = 20 ms
+    return Math.max(2500, Math.ceil(String(pcm || '').length / 48) + 800);
   }
 
-  /**
-   * LITE sessions expose a WebSocket, but the SDK only sends speak-TEXT over LiveKit.
-   * session.repeat(text) is silently dropped when ws is open — route text via LiveKit.
-   */
-  function sendSpeakTextViaLivekit(text) {
-    if (!session || !session.room || session.room.state !== 'connected') {
-      return false;
+  function attachVideoOnly() {
+    if (!videoEl || !session) return;
+    var track = session._remoteVideoTrack;
+    if (track && typeof track.attach === 'function') {
+      track.attach(videoEl);
+    } else if (typeof session.attach === 'function') {
+      session.attach(videoEl);
+      videoEl.muted = true;
     }
-    var eventType = (sdk && sdk.CommandEventsEnum && sdk.CommandEventsEnum.AVATAR_SPEAK_TEXT)
-      ? sdk.CommandEventsEnum.AVATAR_SPEAK_TEXT
-      : SPEAK_TEXT_EVENT;
-    var payload = {
-      event_id: generateEventId(),
-      event_type: eventType,
-      text: String(text || '').trim(),
-    };
-    if (!payload.text) return false;
-    var data = new TextEncoder().encode(JSON.stringify(payload));
-    session.room.localParticipant.publishData(data, {
-      reliable: true,
-      topic: LIVEKIT_COMMAND_TOPIC,
-    });
-    return true;
+    videoEl.hidden = false;
+    videoEl.playsInline = true;
+    var play = videoEl.play();
+    if (play && typeof play.catch === 'function') {
+      play.catch(function () {});
+    }
   }
 
   function mp3BlobToPcm24k(blob) {
@@ -109,68 +91,10 @@
         if (!r.ok) throw new Error('TTS fetch failed');
         return r.blob();
       })
-      .then(mp3BlobToPcm24k);
-  }
-
-  function waitForAvatarSpeech(trigger) {
-    var AgentEventsEnum = sdk.AgentEventsEnum;
-
-    return new Promise(function (resolve, reject) {
-      var started = false;
-      var settled = false;
-      var startDeadline = null;
-      var hardTimeout = null;
-
-      function cleanup() {
-        clearTimeout(startDeadline);
-        clearTimeout(hardTimeout);
-        if (AgentEventsEnum) {
-          session.off(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
-          session.off(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
-        }
-      }
-
-      function finish(ok) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        if (ok) resolve(true);
-        else reject(new Error('Avatar did not speak.'));
-      }
-
-      function onStarted() {
-        started = true;
-        clearTimeout(startDeadline);
-      }
-
-      function onEnded() {
-        finish(true);
-      }
-
-      session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
-      session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
-
-      startDeadline = setTimeout(function () {
-        if (!started) finish(false);
-      }, 15000);
-
-      hardTimeout = setTimeout(function () {
-        finish(started);
-      }, 120000);
-
-      try {
-        var result = trigger();
-        if (result && typeof result.then === 'function') {
-          result.catch(function (err) {
-            finish(false);
-            reject(err);
-          });
-        }
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
-    });
+      .then(function (blob) {
+        if (!blob || blob.size < 32) throw new Error('Empty TTS audio');
+        return mp3BlobToPcm24k(blob);
+      });
   }
 
   global.MoeHeyGenPresenter = {
@@ -189,6 +113,22 @@
         } catch (e) {}
       }
       return Promise.resolve(stopper).catch(function () {});
+    },
+
+    unlockPlayback: function () {
+      if (!videoEl) return;
+      videoEl.muted = true;
+      var play = videoEl.play();
+      if (play && typeof play.catch === 'function') {
+        play.catch(function () {});
+      }
+      try {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) {
+          var ctx = new Ctx();
+          if (ctx.state === 'suspended') ctx.resume().catch(function () {});
+        }
+      } catch (e) {}
     },
 
     init: function (opts) {
@@ -217,15 +157,7 @@
 
           session.on(SessionEvent.SESSION_STREAM_READY, function () {
             clearTimeout(timeout);
-            if (videoEl && session.attach) {
-              session.attach(videoEl);
-              videoEl.hidden = false;
-              videoEl.muted = false;
-              var play = videoEl.play();
-              if (play && typeof play.catch === 'function') {
-                play.catch(function () {});
-              }
-            }
+            attachVideoOnly();
             resolve(true);
           });
 
@@ -249,48 +181,35 @@
       return initPromise;
     },
 
-    speak: function (text) {
+    /**
+     * LITE mode: text repeat is blocked on WebSocket. Send PCM via repeatAudio for lip-sync.
+     * Audio is played separately via OpenAI TTS in mock_oral_session.js.
+     */
+    speakLipSync: function (text) {
       text = String(text || '').trim();
       if (!text) return Promise.resolve(false);
       if (!ready || !session || !sdk) {
         return Promise.reject(new Error('LiveAvatar session not ready.'));
       }
-
-      function trySpeakText() {
-        return waitForAvatarSpeech(function () {
-          if (!sendSpeakTextViaLivekit(text)) {
-            throw new Error('LiveKit not connected for speak.');
-          }
-        });
+      if (!session._sessionEventSocket) {
+        return Promise.reject(new Error('LiveAvatar WebSocket required for LITE lip-sync.'));
       }
 
-      function trySpeakAudio() {
-        return fetchTtsPcm24k(text).then(function (pcm) {
-          if (!pcm || pcm.length < 500) {
-            throw new Error('Empty PCM audio.');
-          }
-          return waitForAvatarSpeech(function () {
-            session.repeatAudio(pcm);
-          });
+      return fetchTtsPcm24k(text).then(function (pcm) {
+        if (!pcm || pcm.length < 500) {
+          throw new Error('PCM audio too short.');
+        }
+        session.repeatAudio(pcm);
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(true);
+          }, pcmDurationMs(pcm));
         });
-      }
-
-      return trySpeakText().catch(function () {
-        return trySpeakAudio();
       });
     },
 
     stop: function () {
-      ready = false;
-      initPromise = null;
-      var stopper = session && session.stop ? session.stop() : Promise.resolve();
-      session = null;
-      if (videoEl) {
-        try {
-          videoEl.srcObject = null;
-        } catch (e) {}
-      }
-      return Promise.resolve(stopper).catch(function () {});
+      return this.reset();
     },
   };
 })(window);

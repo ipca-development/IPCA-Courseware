@@ -317,11 +317,12 @@
     if (!heygenReady || !window.MoeHeyGenPresenter || !MoeHeyGenPresenter.isReady()) {
       return Promise.resolve(false);
     }
-    return MoeHeyGenPresenter.speak(text).then(function () {
-      setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
+    var lipSync = (typeof MoeHeyGenPresenter.speakLipSync === 'function')
+      ? MoeHeyGenPresenter.speakLipSync(text)
+      : Promise.reject(new Error('Lip-sync unavailable'));
+    return lipSync.then(function () {
       return true;
     }).catch(function () {
-      heygenReady = false;
       return false;
     });
   }
@@ -333,6 +334,16 @@
       stopAnswerCapture();
     }
     updateMicUi();
+  }
+
+  function unlockExamAudio() {
+    if (window.MoeHeyGenPresenter && typeof MoeHeyGenPresenter.unlockPlayback === 'function') {
+      MoeHeyGenPresenter.unlockPlayback();
+    }
+    if (heygenVideoEl) {
+      heygenVideoEl.muted = false;
+      heygenVideoEl.play().catch(function () {});
+    }
   }
 
   function speakMaya(text, opts) {
@@ -347,16 +358,21 @@
     setMayaSpeaking(true);
     clearAudioUnlockPrompt();
     stopCurrentAudio();
+    unlockExamAudio();
 
-    return speakViaHeygen(text)
-      .then(function (usedHeygen) {
-        if (usedHeygen) return 'heygen';
-        if (heygenVideoEl) heygenVideoEl.muted = true;
-        return speakOpenAiTts(text).then(function (ok) { return ok ? 'openai' : false; });
-      })
-      .then(function (mode) {
-        if (heygenVideoEl && heygenReady && mode !== 'openai') heygenVideoEl.muted = false;
-        if (mode) return true;
+    var lipSyncPromise = speakViaHeygen(text).catch(function () { return false; });
+    var audioPromise = speakOpenAiTts(text).catch(function () { return false; });
+
+    return Promise.all([lipSyncPromise, audioPromise])
+      .then(function (results) {
+        var lipSyncOk = !!results[0];
+        var audioOk = !!results[1];
+        if (lipSyncOk) {
+          setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
+        } else if (audioOk) {
+          setVoiceBanner('openai', 'Maya AI Voice');
+        }
+        if (audioOk || lipSyncOk) return true;
         if (!opts.skipUnlockPrompt) {
           showAudioUnlockPrompt(text);
           return true;
@@ -617,9 +633,11 @@
       heygenReady = true;
       if (heygenVideoEl) {
         heygenVideoEl.hidden = false;
-        heygenVideoEl.muted = false;
       }
       if (mayaAvatarEl) mayaAvatarEl.hidden = true;
+      if (window.MoeHeyGenPresenter && typeof MoeHeyGenPresenter.unlockPlayback === 'function') {
+        MoeHeyGenPresenter.unlockPlayback();
+      }
       setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
       return true;
     }).catch(function (e) {
@@ -712,6 +730,7 @@
   function onStartExam() {
     if (!preflightData || startBtn.disabled) return;
     startBtn.disabled = true;
+    unlockExamAudio();
     setStudentState('Connecting Maya and starting your oral exam…');
     setMayaState('connecting', 'Connecting Maya…');
 
