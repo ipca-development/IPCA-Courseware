@@ -29,7 +29,7 @@ $pdfPdftotext = rl_pdf_pdftotext_probe();
         Monitor official PDF sources, detect changes, parse articles, and approve them for AI retrieval.
       </p>
     </div>
-    <button type="button" class="rl-hero-action" id="rlPdfAddBtn" style="flex-shrink:0;">+ Add PDF Source</button>
+    <button type="button" class="btn btn-primary" id="rlPdfAddBtn" style="flex-shrink:0;">+ Add PDF Source</button>
   </div>
 
   <div id="rlPdfGrid" class="rl-grid" aria-live="polite">

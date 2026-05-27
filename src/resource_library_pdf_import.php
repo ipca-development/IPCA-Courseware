@@ -7,25 +7,6 @@ require_once __DIR__ . '/resource_library_pdf.php';
 const RL_PDF_DIFF_EXCERPT_LEN = 600;
 
 /**
- * @return array{available: bool, path: ?string, version: ?string}
- */
-function rl_pdf_pdftotext_probe(): array
-{
-    $which = trim((string) shell_exec('command -v pdftotext 2>/dev/null') ?? '');
-    if ($which === '' || !is_executable($which)) {
-        return ['available' => false, 'path' => null, 'version' => null];
-    }
-    $ver = trim((string) shell_exec(escapeshellarg($which) . ' -v 2>&1') ?? '');
-
-    return ['available' => true, 'path' => $which, 'version' => $ver !== '' ? $ver : null];
-}
-
-function rl_pdf_pdftotext_required_error(): string
-{
-    return 'PDF text extraction requires pdftotext on the server (poppler-utils package). Install it and retry.';
-}
-
-/**
  * Extract plain text from a PDF file using pdftotext.
  */
 function rl_pdf_extract_text_from_file(string $pdfAbsolutePath): string
