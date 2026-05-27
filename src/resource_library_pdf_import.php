@@ -172,6 +172,53 @@ function rl_pdf_normalize_article_key(string $rawId, string $suffix = ''): strin
 }
 
 /**
+ * JUSTEL PDFs repeat "Art. …" in the TOC and cross-references; keep one row per key unless body differs.
+ *
+ * @param list<array<string, mixed>> $articles
+ * @return list<array<string, mixed>>
+ */
+function rl_pdf_dedupe_parsed_articles(array $articles): array
+{
+    /** @var array<string, array{hash: string, seq: int}> $seen */
+    $seen = [];
+    $out = [];
+
+    foreach ($articles as $a) {
+        if (!is_array($a)) {
+            continue;
+        }
+        $key = (string) ($a['article_key'] ?? '');
+        if ($key === '') {
+            continue;
+        }
+        $hash = (string) ($a['content_hash'] ?? '');
+
+        if (!isset($seen[$key])) {
+            $seen[$key] = ['hash' => $hash, 'seq' => 1];
+            $out[] = $a;
+            continue;
+        }
+
+        if ($hash !== '' && $hash === $seen[$key]['hash']) {
+            continue;
+        }
+
+        $seen[$key]['seq']++;
+        $suffix = '__' . $seen[$key]['seq'];
+        $unique = $key;
+        if (strlen($unique) + strlen($suffix) > 190) {
+            $unique = substr($unique, 0, 190 - strlen($suffix));
+        }
+        $unique .= $suffix;
+        $a['article_key'] = $unique;
+        $a['hierarchy_path'] = 'legal/' . $unique;
+        $out[] = $a;
+    }
+
+    return $out;
+}
+
+/**
  * Detect legal_state from article heading line and body.
  */
 function rl_pdf_detect_legal_state(string $headingLine, string $body): string
@@ -264,11 +311,15 @@ function rl_pdf_parse_justel_articles(string $rawText): array
         $start = $starts[$i]['offset'];
         $end = ($i + 1 < $count) ? $starts[$i + 1]['offset'] : strlen($main);
         $chunk = substr($main, $start, $end - $start);
-        $key = rl_pdf_normalize_article_key($starts[$i]['id'], $starts[$i]['suffix']);
         $split = rl_pdf_split_amendment_notes($chunk);
         $bodyRaw = rl_pdf_strip_page_noise($split['body']);
         $canonical = rl_pdf_normalize_ws($bodyRaw);
         if ($canonical === '') {
+            continue;
+        }
+        $key = rl_pdf_normalize_article_key($starts[$i]['id'], $starts[$i]['suffix']);
+        // TOC / index lines often match "Art. 325" with almost no body — skip pure-numeric stubs.
+        if (preg_match('/^\d+$/', $key) && strlen($canonical) < 120) {
             continue;
         }
         $legalState = rl_pdf_detect_legal_state($starts[$i]['heading'], $chunk);
@@ -293,7 +344,7 @@ function rl_pdf_parse_justel_articles(string $rawText): array
         throw new RuntimeException('Article markers matched but no non-empty article bodies were extracted');
     }
 
-    return $articles;
+    return rl_pdf_dedupe_parsed_articles($articles);
 }
 
 /**
@@ -308,15 +359,21 @@ function rl_pdf_insert_staging_articles(PDO $pdo, int $editionId, int $batchId, 
             content_hash, sort_order, page_start, page_end, legal_state, amendment_notes
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     ');
+    $articles = rl_pdf_dedupe_parsed_articles($articles);
+
     $n = 0;
     foreach ($articles as $a) {
         if (!is_array($a)) {
             continue;
         }
+        $key = (string) $a['article_key'];
+        if ($key === '') {
+            continue;
+        }
         $ins->execute([
             $batchId,
             $editionId,
-            (string) $a['article_key'],
+            $key,
             $a['article_title'],
             $a['hierarchy_path'],
             (string) $a['canonical_text'],
