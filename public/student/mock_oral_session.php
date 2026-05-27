@@ -128,7 +128,7 @@ cw_header('Mock Oral Exam');
           <li data-prep="session"><span class="moe-prep-icon">○</span> Session authorization</li>
           <li data-prep="camera"><span class="moe-prep-icon">○</span> Camera access</li>
           <li data-prep="mic"><span class="moe-prep-icon">○</span> Microphone access</li>
-          <li data-prep="avatar"><span class="moe-prep-icon">○</span> Maya live avatar</li>
+          <li data-prep="avatar"><span class="moe-prep-icon">○</span> Maya live avatar (connects on start)</li>
         </ul>
         <button type="button" class="app-btn app-btn-primary moe-start-btn" id="moeStartBtn" disabled>Start Oral Exam</button>
       </div>
@@ -170,7 +170,7 @@ if (is_readable($liveAvatarBundlePath)): ?>
 <?php elseif (is_readable($legacyBundlePath)): ?>
 <script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=2"></script>
 <?php endif; ?>
-<script src="/assets/mock_oral_heygen_presenter.js?v=3"></script>
-<script src="/assets/mock_oral_session.js?v=8"></script>
+<script src="/assets/mock_oral_heygen_presenter.js?v=4"></script>
+<script src="/assets/mock_oral_session.js?v=9"></script>
 
 <?php cw_footer(); ?>

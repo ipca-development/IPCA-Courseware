@@ -38,6 +38,19 @@
       return ready;
     },
 
+    reset: function () {
+      ready = false;
+      initPromise = null;
+      var stopper = session && session.stop ? session.stop() : Promise.resolve();
+      session = null;
+      if (videoEl) {
+        try {
+          videoEl.srcObject = null;
+        } catch (e) {}
+      }
+      return Promise.resolve(stopper).catch(function () {});
+    },
+
     init: function (opts) {
       opts = opts || {};
       if (initPromise) return initPromise;
@@ -104,14 +117,28 @@
 
       var AgentEventsEnum = sdk.AgentEventsEnum;
 
+      function estimateSpeakMs(message) {
+        var words = String(message || '').trim().split(/\s+/).filter(Boolean).length;
+        return Math.max(5000, Math.min(120000, words * 420));
+      }
+
       return new Promise(function (resolve, reject) {
-        var timeout = setTimeout(function () {
+        var settled = false;
+        var started = false;
+        var hardTimeout = null;
+        var fallbackTimeout = null;
+
+        function finish(ok) {
+          if (settled) return;
+          settled = true;
           cleanup();
-          reject(new Error('LiveAvatar speak timed out.'));
-        }, 120000);
+          if (ok) resolve(true);
+          else reject(new Error('LiveAvatar speak failed.'));
+        }
 
         function cleanup() {
-          clearTimeout(timeout);
+          clearTimeout(hardTimeout);
+          clearTimeout(fallbackTimeout);
           if (AgentEventsEnum) {
             session.off(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
             session.off(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
@@ -119,26 +146,31 @@
         }
 
         function onStarted() {
-          clearTimeout(timeout);
-          timeout = setTimeout(function () {
-            cleanup();
-            resolve(true);
-          }, 120000);
+          started = true;
+          clearTimeout(fallbackTimeout);
+          fallbackTimeout = setTimeout(function () {
+            finish(true);
+          }, estimateSpeakMs(text) + 3000);
         }
 
         function onEnded() {
-          cleanup();
-          resolve(true);
+          finish(true);
         }
+
+        hardTimeout = setTimeout(function () {
+          finish(started);
+        }, 120000);
 
         session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, onEnded);
         session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, onStarted);
 
         try {
           session.repeat(text);
+          fallbackTimeout = setTimeout(function () {
+            if (!started) finish(true);
+          }, estimateSpeakMs(text));
         } catch (err) {
-          cleanup();
-          reject(err);
+          finish(false);
         }
       });
     },

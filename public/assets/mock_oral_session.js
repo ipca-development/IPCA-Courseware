@@ -122,6 +122,9 @@
     }
     currentQuestionEl.hidden = false;
     currentQuestionBodyEl.textContent = text;
+    try {
+      currentQuestionEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (e) {}
   }
 
   function setPrepItem(key, state) {
@@ -348,9 +351,11 @@
     return speakViaHeygen(text)
       .then(function (usedHeygen) {
         if (usedHeygen) return true;
+        if (heygenVideoEl) heygenVideoEl.muted = true;
         return speakOpenAiTts(text);
       })
       .then(function (spoken) {
+        if (heygenVideoEl && heygenReady) heygenVideoEl.muted = false;
         if (spoken) return true;
         if (!opts.skipUnlockPrompt) {
           showAudioUnlockPrompt(text);
@@ -586,7 +591,6 @@
 
   function initHeyGenAvatar(heygen) {
     if (!heygen || heygen.presentation_mode !== 'heygen' || !heygen.token) {
-      setPrepItem('avatar', 'ok');
       if (heygen && heygen.message) {
         setVoiceBanner('warn', heygen.message);
       } else {
@@ -595,7 +599,6 @@
       return Promise.resolve(false);
     }
     if (!window.MoeHeyGenPresenter) {
-      setPrepItem('avatar', 'warn');
       return Promise.reject(new Error('Live avatar script not loaded.'));
     }
 
@@ -613,13 +616,25 @@
         heygenVideoEl.muted = false;
       }
       if (mayaAvatarEl) mayaAvatarEl.hidden = true;
-      setPrepItem('avatar', 'ok');
       setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
       return true;
     }).catch(function (e) {
-      setPrepItem('avatar', 'warn');
+      heygenReady = false;
       setVoiceBanner('warn', (e && e.message) ? e.message : 'Live avatar unavailable.');
       return false;
+    });
+  }
+
+  function connectMayaAvatar(heygen) {
+    setMayaState('connecting', 'Connecting Maya live avatar…');
+    var resetPromise = (window.MoeHeyGenPresenter && MoeHeyGenPresenter.reset)
+      ? MoeHeyGenPresenter.reset()
+      : Promise.resolve();
+    return resetPromise.then(function () {
+      heygenReady = false;
+      if (mayaAvatarEl) mayaAvatarEl.hidden = false;
+      if (heygenVideoEl) heygenVideoEl.hidden = true;
+      return initHeyGenAvatar(heygen || {});
     });
   }
 
@@ -693,16 +708,22 @@
   function onStartExam() {
     if (!preflightData || startBtn.disabled) return;
     startBtn.disabled = true;
-    setStudentState('Starting oral exam…');
+    setStudentState('Connecting Maya and starting your oral exam…');
+    setMayaState('connecting', 'Connecting Maya…');
 
-    var startPromise;
-    if (preflightData.resumed) {
-      startPromise = Promise.resolve(preflightData);
-    } else {
-      startPromise = postJson(apiBase + '/mock_oral.php', { action: 'start_session', session_id: sessionId });
-    }
-
-    startPromise
+    postJson(apiBase + '/mock_oral.php', { action: 'session_preflight', session_id: sessionId })
+      .then(function (pf) {
+        preflightData = pf;
+        if (pf.resumed) {
+          return pf;
+        }
+        return postJson(apiBase + '/mock_oral.php', { action: 'start_session', session_id: sessionId });
+      })
+      .then(function (res) {
+        return connectMayaAvatar(res.heygen || {}).then(function () {
+          return res;
+        });
+      })
       .then(function (res) {
         return beginLiveExam(res);
       })
@@ -715,8 +736,8 @@
   }
 
   function prepareExam() {
-    setMayaState('connecting', 'Preparing Maya…');
-    setStudentState('Loading camera, microphone, and live avatar…');
+    setMayaState('connecting', 'Preparing…');
+    setStudentState('Loading camera and microphone…');
     updateTimer();
     setPrepItem('session', 'loading');
     setPrepItem('camera', 'loading');
@@ -741,11 +762,13 @@
           setStudentState('Allow camera and microphone access, then reload this page.');
           return;
         }
-        var res = results[1];
-        return initHeyGenAvatar(res.heygen || {}).then(function () {
-          setMayaState('idle', 'Ready to begin');
-          setStudentState('Press Start Oral Exam when you are ready.');
-        });
+        if (window.MoeHeyGenPresenter && window.LiveAvatarSdk) {
+          setPrepItem('avatar', 'ok');
+        } else {
+          setPrepItem('avatar', 'warn');
+        }
+        setMayaState('idle', 'Ready to begin');
+        setStudentState('Press Start Oral Exam when you are ready.');
       })
       .catch(function (e) {
         appendTurn('system', e.message || 'Unable to prepare session.');
