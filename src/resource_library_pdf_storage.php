@@ -156,6 +156,29 @@ function rl_pdf_read_extracted_text(int $editionId, int $batchId): ?string
 }
 
 /**
+ * Drop invalid UTF-8 sequences (pdftotext / byte truncation can produce them).
+ */
+function rl_pdf_sanitize_utf8(string $text): string
+{
+    if ($text === '') {
+        return '';
+    }
+    if (function_exists('mb_convert_encoding')) {
+        $clean = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        if (is_string($clean)) {
+            $text = $clean;
+        }
+    } elseif (function_exists('iconv')) {
+        $clean = iconv('UTF-8', 'UTF-8//IGNORE', $text);
+        if ($clean !== false) {
+            $text = $clean;
+        }
+    }
+
+    return $text;
+}
+
+/**
  * @return array{available: bool, path: ?string, version: ?string}
  */
 function rl_pdf_pdftotext_probe(): array

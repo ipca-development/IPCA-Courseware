@@ -39,7 +39,7 @@ function rl_pdf_extract_text_from_file(string $pdfAbsolutePath): string
         throw new RuntimeException('pdftotext produced empty text — PDF may be scanned/image-only');
     }
 
-    return $text;
+    return rl_pdf_sanitize_utf8($text);
 }
 
 /**
@@ -142,7 +142,7 @@ function rl_pdf_normalize_ws(string $s): string
 {
     $s = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $s) ?? $s;
 
-    return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);
+    return rl_pdf_sanitize_utf8(trim(preg_replace('/\s+/u', ' ', $s) ?? $s));
 }
 
 function rl_pdf_strip_page_noise(string $text): string
@@ -342,7 +342,7 @@ function rl_pdf_parse_justel_articles(string $rawText): array
         $hash = hash('sha256', $canonical . "\n|\n" . $key . "\n|\n" . $legalState);
         $articles[] = [
             'article_key' => $key,
-            'article_title' => mb_substr($titleLine, 0, 500),
+            'article_title' => mb_substr(rl_pdf_sanitize_utf8($titleLine), 0, 500),
             'hierarchy_path' => 'legal/' . $key,
             'canonical_text' => $canonical,
             'content_hash' => $hash,
@@ -350,7 +350,7 @@ function rl_pdf_parse_justel_articles(string $rawText): array
             'page_start' => null,
             'page_end' => null,
             'legal_state' => $legalState,
-            'amendment_notes' => $split['notes'] !== '' ? mb_substr($split['notes'], 0, 65000) : null,
+            'amendment_notes' => $split['notes'] !== '' ? mb_substr(rl_pdf_sanitize_utf8($split['notes']), 0, 65000) : null,
         ];
         $sort++;
     }

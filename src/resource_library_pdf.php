@@ -230,15 +230,17 @@ function rl_pdf_list_sources(PDO $pdo): array
 
 function rl_pdf_excerpt(string $text, int $max = 480): string
 {
-    $t = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    $t = rl_pdf_sanitize_utf8(trim(preg_replace('/\s+/u', ' ', $text) ?? $text));
     if ($t === '') {
         return '';
     }
-    if (strlen($t) <= $max) {
+    $ellipsis = '…';
+    $maxChars = max(1, $max - mb_strlen($ellipsis, 'UTF-8'));
+    if (mb_strlen($t, 'UTF-8') <= $maxChars) {
         return $t;
     }
 
-    return substr($t, 0, $max) . '…';
+    return mb_substr($t, 0, $maxChars, 'UTF-8') . $ellipsis;
 }
 
 /**
