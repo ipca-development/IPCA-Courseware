@@ -99,6 +99,22 @@ try {
             ]);
             break;
 
+        case 'session_preflight':
+            $sessionId = (int)($body['session_id'] ?? 0);
+            $result = $sessionSvc->preflightSession($sessionId, $userId);
+            try {
+                $heygen = new HeyGenLiveAvatarService();
+                $result['heygen'] = $heygen->mintSessionToken($sessionId, $userId);
+            } catch (Throwable $heygenError) {
+                $result['heygen'] = [
+                    'ok' => true,
+                    'presentation_mode' => 'fallback',
+                    'message' => 'LiveAvatar unavailable; AI voice fallback active.',
+                ];
+            }
+            mo_api_out(['ok' => true] + $result);
+            break;
+
         case 'start_session':
             $sessionId = (int)($body['session_id'] ?? 0);
             $result = $sessionSvc->startSession($sessionId, $userId);

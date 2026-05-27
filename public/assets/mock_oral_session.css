@@ -73,48 +73,47 @@
 .moe-voice-fallback { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; }
 .moe-voice-warn { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; }
 .moe-voice-prompt { background: #fef9c3; border: 1px solid #fde047; color: #854d0e; cursor: pointer; }
-.moe-maya-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 12px 8px;
-  position: relative;
-  min-height: 160px;
-  width: 100%;
-}
-.moe-maya-stage.is-audio-blocked { cursor: pointer; }
-.moe-conversation-shell {
-  display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-}
-.moe-stage-panel,
-.moe-transcript-panel {
+
+.moe-live-stage {
   background: #fff;
   border: 1px solid var(--border-soft, #e2e8f0);
   border-radius: 18px;
-  padding: 20px;
+  padding: 0;
   box-shadow: 0 10px 28px rgba(15,23,42,.04);
+  overflow: hidden;
+  position: relative;
+}
+.moe-video-shell {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  overflow: hidden;
+}
+.moe-video-shell.is-audio-blocked { cursor: pointer; }
+.moe-heygen-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  position: relative;
+  z-index: 2;
 }
 .moe-maya-avatar-fallback {
-  width: 120px;
-  height: 120px;
-  border-radius: 999px;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 42px;
+  font-size: 72px;
   font-weight: 800;
   color: #fff;
   background: linear-gradient(180deg, #1a3a63 0%, #2563eb 100%);
-  box-shadow: 0 14px 30px rgba(37,99,235,.25);
-  transition: box-shadow .25s ease, transform .25s ease;
+  z-index: 1;
+  transition: opacity .25s ease;
 }
 .moe-maya-avatar-fallback.moe-state-speaking {
   animation: moePulse 1.4s ease-in-out infinite;
-  box-shadow: 0 14px 30px rgba(37,99,235,.4);
 }
 .moe-maya-avatar-fallback.moe-state-thinking {
   background: linear-gradient(180deg, #475569 0%, #64748b 100%);
@@ -122,52 +121,192 @@
 .moe-maya-avatar-fallback.moe-state-listening {
   background: linear-gradient(180deg, #0f766e 0%, #14b8a6 100%);
 }
-.moe-heygen-video {
+.moe-maya-avatar-fallback[hidden] { display: none !important; }
+.moe-user-pip {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 3px solid rgba(255,255,255,.95);
+  box-shadow: 0 10px 28px rgba(15,23,42,.35);
+  z-index: 5;
+  background: #334155;
+}
+.moe-user-video {
   width: 100%;
-  max-width: 320px;
-  border-radius: 16px;
-  background: #0f172a;
-  aspect-ratio: 16/10;
+  height: 100%;
   object-fit: cover;
-  position: relative;
-  z-index: 2;
+  transform: scaleX(-1);
 }
-.moe-maya-avatar-fallback[hidden] {
-  display: none !important;
+.moe-mic-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(15,23,42,.28);
+  transition: background .2s ease, transform .2s ease;
 }
+.moe-mic-btn svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+.moe-mic-btn.is-listening {
+  background: #16a34a;
+  color: #fff;
+}
+.moe-mic-btn.is-suppressed {
+  background: #64748b;
+  color: #fff;
+  cursor: default;
+}
+.moe-mic-btn.is-muted {
+  background: #fff;
+  color: #64748b;
+  border: 2px solid #cbd5e1;
+}
+.moe-mic-btn:not(.is-suppressed):hover { transform: scale(1.04); }
+
 .moe-maya-status {
+  padding: 14px 22px 0;
   font-size: 15px;
   font-weight: 800;
   color: #1e3c72;
   text-align: center;
 }
-.moe-timer {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid #e2e8f0;
-  font-size: 14px;
+.moe-current-question {
+  margin: 14px 22px 0;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+.moe-current-question-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #1d4ed8;
+  margin-bottom: 8px;
+}
+.moe-current-question-body {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #0f172a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.moe-timer-block {
+  padding: 16px 22px 0;
+}
+.moe-timer-bar-shell {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.moe-timer-bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1e3c72 0%, #2563eb 100%);
+  transition: width 1s linear;
+}
+.moe-timer-bar-fill.is-low {
+  background: linear-gradient(90deg, #c2410c 0%, #fb923c 100%);
+}
+.moe-timer-label {
+  margin-top: 8px;
+  font-size: 13px;
   font-weight: 700;
-  color: #1e3c72;
+  color: #475569;
   text-align: center;
 }
 .moe-student-status {
-  margin-top: 10px;
+  padding: 12px 22px 20px;
   font-size: 13px;
   line-height: 1.5;
   color: #64748b;
   text-align: center;
-  min-height: 40px;
+  min-height: 36px;
 }
-.moe-transcript-head {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  font-weight: 800;
+
+.moe-prep-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(6px);
+  border-radius: 18px;
+}
+.moe-prep-overlay.is-hidden { display: none; }
+.moe-prep-card {
+  width: min(100%, 420px);
+  text-align: center;
+}
+.moe-prep-card h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  color: #0f172a;
+}
+.moe-prep-lead {
+  margin: 0 0 18px;
   color: #64748b;
-  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.moe-prep-checklist {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  text-align: left;
+}
+.moe-prep-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+}
+.moe-prep-checklist li.is-loading { color: #1d4ed8; }
+.moe-prep-checklist li.is-ok { color: #166534; }
+.moe-prep-checklist li.is-warn { color: #9a3412; }
+.moe-prep-icon { width: 18px; text-align: center; font-weight: 800; }
+.moe-start-btn { width: 100%; min-height: 48px; }
+
+.moe-transcript-fold {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: #fbfcfe;
+}
+.moe-transcript-fold summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #475569;
 }
 .moe-transcript {
-  max-height: min(58vh, 520px);
+  margin-top: 12px;
+  max-height: 320px;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -214,14 +353,6 @@
   flex-wrap: wrap;
   margin-top: 18px;
 }
-.moe-answer-btn {
-  min-width: 180px;
-}
-.moe-answer-btn.is-recording {
-  background: #b91c1c !important;
-  border-color: #b91c1c !important;
-  animation: moePulse 1.2s ease-in-out infinite;
-}
 .moe-typed-fallback {
   margin-top: 18px;
   padding: 16px 18px;
@@ -239,10 +370,12 @@
 
 @keyframes moePulse {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.03); }
+  50% { transform: scale(1.02); }
 }
 
-@media (max-width: 900px) {
-  .moe-conversation-shell { grid-template-columns: 1fr; }
-  .moe-transcript { max-height: 42vh; }
+@media (max-width: 700px) {
+  .moe-user-pip { width: 72px; height: 72px; left: 12px; bottom: 12px; }
+  .moe-mic-btn { right: 12px; bottom: 12px; width: 46px; height: 46px; }
+  .moe-current-question { margin-left: 14px; margin-right: 14px; }
 }
+

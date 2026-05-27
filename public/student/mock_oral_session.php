@@ -29,7 +29,7 @@ if ($view === 'debrief' && $session) {
     $debriefPayload = $sessionSvc->getDebriefPayload($sessionId);
     cw_header('Mock Oral Debrief');
     ?>
-    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=6">
+    <link rel="stylesheet" href="/assets/mock_oral_session.css?v=8">
     <div class="moe-page">
       <section class="moe-debrief-hero">
         <div class="hero-overline">Mock Oral Debrief</div>
@@ -81,7 +81,7 @@ function mo_sh(?string $v): string
 
 cw_header('Mock Oral Exam');
 ?>
-<link rel="stylesheet" href="/assets/mock_oral_session.css?v=6">
+<link rel="stylesheet" href="/assets/mock_oral_session.css?v=8">
 
 <div class="moe-page moe-live-page" id="moeLivePage">
   <section class="moe-live-hero">
@@ -92,25 +92,55 @@ cw_header('Mock Oral Exam');
 
   <div id="moeVoiceBanner" class="moe-voice-banner" hidden></div>
 
-  <div class="moe-conversation-shell">
-    <div class="moe-stage-panel">
-      <div class="moe-maya-stage">
-        <video id="moeHeygenVideo" class="moe-heygen-video" playsinline autoplay hidden></video>
-        <div class="moe-maya-avatar-fallback" id="moeMayaAvatar">M</div>
-        <div class="moe-maya-status" id="moeMayaStatus">Connecting…</div>
+  <div class="moe-live-stage" id="moeLiveStage">
+    <div class="moe-video-shell" id="moeVideoShell">
+      <video id="moeHeygenVideo" class="moe-heygen-video" playsinline autoplay hidden></video>
+      <div class="moe-maya-avatar-fallback" id="moeMayaAvatar">M</div>
+      <div class="moe-user-pip" id="moeUserPip" hidden>
+        <video id="moeUserVideo" class="moe-user-video" playsinline autoplay muted></video>
       </div>
-      <div class="moe-timer" id="moeTimer">Time remaining: 05:00</div>
-      <div class="moe-student-status" id="moeStudentStatus">Preparing your oral exam conversation…</div>
+      <button type="button" class="moe-mic-btn is-muted" id="moeMicBtn" hidden title="Toggle microphone" aria-label="Toggle microphone">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-1.08A7 7 0 0 0 17 11z"/></svg>
+      </button>
     </div>
 
-    <div class="moe-transcript-panel">
-      <div class="moe-transcript-head">Conversation</div>
-      <div class="moe-transcript" id="moeTranscript"></div>
+    <div class="moe-maya-status" id="moeMayaStatus">Preparing…</div>
+
+    <div class="moe-current-question" id="moeCurrentQuestion" hidden>
+      <div class="moe-current-question-label">Maya asks</div>
+      <div class="moe-current-question-body" id="moeCurrentQuestionBody"></div>
+    </div>
+
+    <div class="moe-timer-block">
+      <div class="moe-timer-bar-shell">
+        <div class="moe-timer-bar-fill" id="moeTimerFill"></div>
+      </div>
+      <div class="moe-timer-label" id="moeTimerLabel">05:00 remaining</div>
+    </div>
+
+    <div class="moe-student-status" id="moeStudentStatus">Loading exam resources…</div>
+
+    <div class="moe-prep-overlay" id="moePrepOverlay">
+      <div class="moe-prep-card">
+        <h2>Preparing your oral exam</h2>
+        <p class="moe-prep-lead">Maya will begin when everything is ready. Press Start when the checklist is complete.</p>
+        <ul class="moe-prep-checklist" id="moePrepChecklist">
+          <li data-prep="session"><span class="moe-prep-icon">○</span> Session authorization</li>
+          <li data-prep="camera"><span class="moe-prep-icon">○</span> Camera access</li>
+          <li data-prep="mic"><span class="moe-prep-icon">○</span> Microphone access</li>
+          <li data-prep="avatar"><span class="moe-prep-icon">○</span> Maya live avatar</li>
+        </ul>
+        <button type="button" class="app-btn app-btn-primary moe-start-btn" id="moeStartBtn" disabled>Start Oral Exam</button>
+      </div>
     </div>
   </div>
 
+  <details class="moe-transcript-fold">
+    <summary>Full conversation history</summary>
+    <div class="moe-transcript" id="moeTranscript"></div>
+  </details>
+
   <div class="moe-live-controls">
-    <button type="button" class="app-btn app-btn-primary moe-answer-btn" id="moeAnswerBtn" disabled>Tap to Answer</button>
     <button type="button" class="app-btn app-btn-secondary" id="moeEndBtn" disabled>End Oral Exam</button>
   </div>
 
@@ -141,6 +171,6 @@ if (is_readable($liveAvatarBundlePath)): ?>
 <script src="/assets/vendor/heygen-streaming-avatar.bundle.js?v=2"></script>
 <?php endif; ?>
 <script src="/assets/mock_oral_heygen_presenter.js?v=3"></script>
-<script src="/assets/mock_oral_session.js?v=7"></script>
+<script src="/assets/mock_oral_session.js?v=8"></script>
 
 <?php cw_footer(); ?>

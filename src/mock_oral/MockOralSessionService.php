@@ -108,6 +108,47 @@ final class MockOralSessionService
         return $lastMayaTurn + 1;
     }
 
+    public function preflightSession(int $sessionId, int $userId): array
+    {
+        $session = $this->loadSessionForUser($sessionId, $userId);
+        if (!$session) {
+            throw new RuntimeException('Session not found.');
+        }
+
+        $status = (string)$session['status'];
+        if (!in_array($status, ['ready', 'in_progress', 'turn_evaluating'], true)) {
+            throw new RuntimeException('Session is not available.');
+        }
+
+        $resumed = in_array($status, ['in_progress', 'turn_evaluating'], true);
+        $blueprint = mo_json_decode($session['blueprint_json'] ?? null);
+        $result = [
+            'session_id' => $sessionId,
+            'status' => $status,
+            'resumed' => $resumed,
+            'max_duration_sec' => (int)$session['max_duration_sec'],
+            'blueprint_summary' => [
+                'area_title' => (string)($blueprint['area_title'] ?? ''),
+                'cross_country_context' => (string)($blueprint['cross_country_context'] ?? ''),
+            ],
+        ];
+
+        if ($resumed) {
+            $orchestrator = new ConversationalOrchestrator($this->pdo);
+            $transcript = $orchestrator->loadTranscript($sessionId);
+            $result['transcript'] = $transcript;
+            $result['next_turn_index'] = $this->inferNextStudentTurnIndex($transcript);
+        } else {
+            $quotaSvc = new SessionQuotaService($this->pdo);
+            $quotaCheck = $quotaSvc->canStartSession($userId, (int)$session['cohort_id']);
+            if (empty($quotaCheck['allowed'])) {
+                throw new RuntimeException((string)($quotaCheck['message'] ?? 'Cannot start session.'));
+            }
+        }
+
+        return $result;
+    }
+
     public function heartbeat(int $sessionId, int $userId): array
     {
         $session = $this->loadSessionForUser($sessionId, $userId);
