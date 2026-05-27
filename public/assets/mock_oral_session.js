@@ -350,13 +350,13 @@
 
     return speakViaHeygen(text)
       .then(function (usedHeygen) {
-        if (usedHeygen) return true;
+        if (usedHeygen) return 'heygen';
         if (heygenVideoEl) heygenVideoEl.muted = true;
-        return speakOpenAiTts(text);
+        return speakOpenAiTts(text).then(function (ok) { return ok ? 'openai' : false; });
       })
-      .then(function (spoken) {
-        if (heygenVideoEl && heygenReady) heygenVideoEl.muted = false;
-        if (spoken) return true;
+      .then(function (mode) {
+        if (heygenVideoEl && heygenReady && mode !== 'openai') heygenVideoEl.muted = false;
+        if (mode) return true;
         if (!opts.skipUnlockPrompt) {
           showAudioUnlockPrompt(text);
           return true;
@@ -609,6 +609,10 @@
       quality: heygen.quality || 'high',
       videoEl: heygenVideoEl,
       activityIdleTimeoutSec: heygen.activity_idle_timeout_sec || 600,
+      ttsUrl: function (text) {
+        return apiBase + '/mock_oral_tts.php?session_id=' + encodeURIComponent(String(sessionId))
+          + '&text=' + encodeURIComponent(text);
+      },
     }).then(function () {
       heygenReady = true;
       if (heygenVideoEl) {
