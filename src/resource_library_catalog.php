@@ -12,6 +12,9 @@ const RL_RESOURCE_CRAWLER = 'crawler';
 /** @var non-empty-string */
 const RL_RESOURCE_API = 'api';
 
+/** @var non-empty-string */
+const RL_RESOURCE_PDF_BOOK = 'pdf_book';
+
 require_once __DIR__ . '/resource_library_source_verify.php';
 
 function rl_catalog_has_resource_type_column(PDO $pdo): bool
@@ -34,7 +37,7 @@ function rl_catalog_has_resource_type_column(PDO $pdo): bool
 function rl_catalog_normalize_resource_type(?string $t): string
 {
     $t = strtolower(trim((string) $t));
-    if ($t === RL_RESOURCE_CRAWLER || $t === RL_RESOURCE_API) {
+    if ($t === RL_RESOURCE_CRAWLER || $t === RL_RESOURCE_API || $t === RL_RESOURCE_PDF_BOOK) {
         return $t;
     }
 
@@ -104,7 +107,7 @@ function rl_catalog_insert_edition(
         );
     }
     $rt = rl_catalog_normalize_resource_type($resourceType);
-    if ($rt !== RL_RESOURCE_JSON_BOOK && $rt !== RL_RESOURCE_CRAWLER && $rt !== RL_RESOURCE_API) {
+    if ($rt !== RL_RESOURCE_JSON_BOOK && $rt !== RL_RESOURCE_CRAWLER && $rt !== RL_RESOURCE_API && $rt !== RL_RESOURCE_PDF_BOOK) {
         throw new RuntimeException('Invalid resource_type for insert');
     }
     if (!in_array($status, ['draft', 'live', 'archived'], true)) {
@@ -217,8 +220,70 @@ function rl_catalog_creation_defaults(string $editionKind): array
                 'notes' => '',
             ],
         ],
+        'pdf_book' => [
+            'resource_type' => RL_RESOURCE_PDF_BOOK,
+            'title' => 'New official PDF source',
+            'revision_code' => '',
+            'revision_date' => null,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [
+                'source_authority' => '',
+                'jurisdiction' => '',
+                'language' => '',
+                'official_pdf_url' => '',
+                'source_verify_url' => '',
+                'source_verify_interval' => 'weekly',
+                'applicability_tags' => [],
+                'notes' => '',
+                'pdf_monitor_state' => [],
+            ],
+        ],
         default => throw new InvalidArgumentException('Unknown edition_kind for creation'),
     };
+}
+
+/**
+ * Flatten a pdf_book edition row for admin JS.
+ *
+ * @param array<string, mixed> $row
+ * @return array<string, mixed>
+ */
+function rl_catalog_pdf_row_as_source(array $row): array
+{
+    $extra = rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null);
+    $st = (string) ($row['status'] ?? 'draft');
+    if ($st === 'active') {
+        $st = 'live';
+    }
+    $svState = $extra['source_verify_state'] ?? [];
+    $monState = $extra['pdf_monitor_state'] ?? [];
+    $tags = $extra['applicability_tags'] ?? [];
+    if (!is_array($tags)) {
+        $tags = [];
+    }
+
+    return [
+        'id' => (int) ($row['id'] ?? 0),
+        'label' => (string) ($row['title'] ?? ''),
+        'source_authority' => (string) ($extra['source_authority'] ?? ''),
+        'jurisdiction' => (string) ($extra['jurisdiction'] ?? ''),
+        'language' => (string) ($extra['language'] ?? ''),
+        'official_pdf_url' => trim((string) ($extra['official_pdf_url'] ?? '')),
+        'change_number' => (string) ($row['revision_code'] ?? ''),
+        'effective_date' => $row['revision_date'] ?? null,
+        'status' => $st,
+        'notes' => (string) ($extra['notes'] ?? ''),
+        'thumbnail_path' => $row['thumbnail_path'] ?? null,
+        'resource_type' => RL_RESOURCE_PDF_BOOK,
+        'work_code' => (string) ($row['work_code'] ?? ''),
+        'source_verify_url' => trim((string) ($extra['source_verify_url'] ?? '')),
+        'source_verify_interval' => rl_source_verify_normalize_interval((string) ($extra['source_verify_interval'] ?? 'off')),
+        'source_verify_state' => is_array($svState) ? $svState : [],
+        'pdf_monitor_state' => is_array($monState) ? $monState : [],
+        'applicability_tags' => array_values(array_filter(array_map('strval', $tags))),
+        'published_file_sha256' => trim((string) ($extra['published_file_sha256'] ?? '')),
+    ];
 }
 
 /**

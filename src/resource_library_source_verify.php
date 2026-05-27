@@ -81,6 +81,12 @@ function rl_source_verify_resolve_url(array $extra, string $resourceType): strin
     if ($resourceType === RL_RESOURCE_API) {
         return trim((string) ($extra['api_base_url'] ?? ''));
     }
+    if ($resourceType === RL_RESOURCE_PDF_BOOK) {
+        $u = trim((string) ($extra['official_pdf_url'] ?? ''));
+        if ($u !== '') {
+            return $u;
+        }
+    }
 
     return '';
 }

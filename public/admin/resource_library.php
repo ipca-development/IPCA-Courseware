@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/resource_library_ingest.php';
 require_once __DIR__ . '/../../src/resource_library_catalog.php';
 require_once __DIR__ . '/../../src/resource_library_aim.php';
+require_once __DIR__ . '/../../src/resource_library_pdf.php';
 
 cw_require_admin();
 
@@ -137,7 +138,7 @@ $tableError = (!$result['ok']) ? ($result['error'] ?? 'Unknown error') : '';
 $blockCounts = $result['ok'] ? rl_block_counts_by_edition_map($pdo) : [];
 
 $rlTab = strtolower(trim((string)($_GET['tab'] ?? 'json')));
-if (!in_array($rlTab, ['json', 'crawlers', 'apis', 'easa'], true)) {
+if (!in_array($rlTab, ['json', 'crawlers', 'apis', 'easa', 'pdf'], true)) {
     $rlTab = 'json';
 }
 $rlCrawl = strtolower(trim((string)($_GET['crawl'] ?? 'aim')));
@@ -769,6 +770,7 @@ cw_header('Resource Library');
       <a class="tcc-tab <?= $rlTab === 'crawlers' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers">Data crawlers</a>
       <a class="tcc-tab <?= $rlTab === 'apis' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=apis">APIs</a>
       <a class="tcc-tab <?= $rlTab === 'easa' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a>
+      <a class="tcc-tab <?= $rlTab === 'pdf' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=pdf">Online PDF Crawler</a>
     </div>
   </section>
 
@@ -1110,6 +1112,8 @@ cw_header('Resource Library');
       }
       require __DIR__ . '/resource_library_easa_tab.inc.php';
     ?>
+  <?php elseif ($rlTab === 'pdf'): ?>
+    <?php require __DIR__ . '/resource_library_pdf_tab.inc.php'; ?>
   <?php endif; ?>
 </div>
 
