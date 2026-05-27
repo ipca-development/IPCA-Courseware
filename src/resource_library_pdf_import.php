@@ -256,12 +256,25 @@ function rl_pdf_split_amendment_notes(string $chunk): array
 }
 
 /**
+ * JUSTEL article id: WER books (Art. I.1), Easy Access (Art. L1122-10), numeric (Art. 54), N-articles (XII.N1).
+ */
+function rl_pdf_justel_article_id_pattern(): string
+{
+    return '(?:[IVXLC]{1,6}\.N\d+(?:\.\d+)?'
+        . '|[IVXLC]{1,6}\.\d+(?:\/\d+)?(?:ter|bis|quater)?'
+        . '|\d+[a-z]*(?:ter|bis|quater)?'
+        . '|[A-Z]?\d[\w\.\-]*'
+        . '|N\d+)';
+}
+
+/**
  * Locate main legal text (after "Tekst") for JUSTEL-style exports.
  */
 function rl_pdf_justel_main_text_slice(string $text): string
 {
     $text = str_replace("\r\n", "\n", $text);
-    if (preg_match('/\nTekst\n/iu', $text, $m, PREG_OFFSET_CAPTURE)) {
+    $tekstMarker = '/\n\s*Tekst\s*\n/iu';
+    if (preg_match($tekstMarker, $text, $m, PREG_OFFSET_CAPTURE)) {
         $pos = (int) ($m[0][1] ?? 0);
 
         return substr($text, $pos + strlen($m[0][0]));
@@ -269,7 +282,7 @@ function rl_pdf_justel_main_text_slice(string $text): string
     if (preg_match('/\nInhoudstafel\n/iu', $text, $m2, PREG_OFFSET_CAPTURE)) {
         $pos = (int) ($m2[0][1] ?? 0);
         $afterToc = substr($text, $pos);
-        if (preg_match('/\nTekst\n/iu', $afterToc, $m3, PREG_OFFSET_CAPTURE)) {
+        if (preg_match($tekstMarker, $afterToc, $m3, PREG_OFFSET_CAPTURE)) {
             $p2 = (int) ($m3[0][1] ?? 0);
 
             return substr($afterToc, $p2 + strlen($m3[0][0]));
@@ -289,7 +302,9 @@ function rl_pdf_parse_justel_articles(string $rawText): array
     $text = rl_pdf_strip_page_noise(str_replace("\r\n", "\n", $rawText));
     $main = rl_pdf_justel_main_text_slice($text);
 
-    $pattern = '/(?:^|\n)\s*(?:Art\.|Artikel)\s+([A-Z]?\d[\w\.\-]*|N\d+)(?:\s+(TOEKOMSTIG\s+RECHT|DUITSTALIGE[_\s]GEMEENSCHAP))?/iu';
+    $idPat = rl_pdf_justel_article_id_pattern();
+    // Line-anchored markers only (form feeds between pages); lowercase "art." in cross-refs is ignored.
+    $pattern = '/(?:^|\n|\f)\s*(?:Art\.|Artikel)\s+(' . $idPat . ')(?:\s+(TOEKOMSTIG\s+RECHT|DUITSTALIGE[_\s]GEMEENSCHAP))?/iu';
     if (!preg_match_all($pattern, $main, $matches, PREG_OFFSET_CAPTURE)) {
         throw new RuntimeException('No legal articles detected (expected Art. / Artikel markers after Tekst section)');
     }
@@ -318,8 +333,8 @@ function rl_pdf_parse_justel_articles(string $rawText): array
             continue;
         }
         $key = rl_pdf_normalize_article_key($starts[$i]['id'], $starts[$i]['suffix']);
-        // TOC / index lines often match "Art. 325" with almost no body — skip pure-numeric stubs.
-        if (preg_match('/^\d+$/', $key) && strlen($canonical) < 120) {
+        // TOC / index lines often match "Art. 325" or "Art. I.2" with almost no body — skip stubs.
+        if (strlen($canonical) < 120 && preg_match('/^(?:\d+|[IVXLC]+(?:_\d+)+)$/', $key)) {
             continue;
         }
         $legalState = rl_pdf_detect_legal_state($starts[$i]['heading'], $chunk);
