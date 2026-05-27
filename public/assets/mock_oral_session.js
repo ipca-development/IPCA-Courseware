@@ -360,28 +360,22 @@
     stopCurrentAudio();
     unlockExamAudio();
 
-    var lipSyncPromise = speakViaHeygen(text).catch(function () { return false; });
-    var audioPromise = speakOpenAiTts(text).catch(function () { return false; });
-
-    return Promise.all([lipSyncPromise, audioPromise])
-      .then(function (results) {
-        var lipSyncOk = !!results[0];
-        var audioOk = !!results[1];
-        if (lipSyncOk) {
+    return speakViaHeygen(text)
+      .then(function (lipOk) {
+        if (lipOk) {
           setVoiceBanner('heygen', 'Maya Live Avatar · LiveAvatar');
-        } else if (audioOk) {
-          setVoiceBanner('openai', 'Maya AI Voice');
+          return true;
         }
-        if (audioOk || lipSyncOk) return true;
-        if (!opts.skipUnlockPrompt) {
+        setVoiceBanner('openai', 'Maya AI Voice');
+        return speakOpenAiTts(text).catch(function () { return false; });
+      })
+      .then(function (spoken) {
+        if (!spoken && !opts.skipUnlockPrompt) {
           showAudioUnlockPrompt(text);
           return true;
         }
-        return speakBrowserFallback(text);
-      })
-      .then(function (spoken) {
         if (!spoken && opts.skipUnlockPrompt) {
-          showAudioUnlockPrompt(text);
+          return speakBrowserFallback(text);
         }
         return spoken;
       })
