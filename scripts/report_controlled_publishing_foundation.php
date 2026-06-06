@@ -121,6 +121,21 @@ print_rows($pdo->query("
     LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC));
 
+print_section('Book templates');
+print_rows($pdo->query("
+    SELECT
+      t.id,
+      t.template_key,
+      t.title,
+      t.manual_family,
+      t.status,
+      COUNT(ts.id) AS template_sections
+    FROM ipca_publishing_book_templates t
+    LEFT JOIN ipca_publishing_book_template_sections ts ON ts.template_id = t.id
+    GROUP BY t.id, t.template_key, t.title, t.manual_family, t.status
+    ORDER BY t.manual_family, t.template_key
+")->fetchAll(PDO::FETCH_ASSOC));
+
 print_section('Controlled books');
 print_rows($pdo->query("
     SELECT
@@ -143,16 +158,22 @@ print_rows($pdo->query("
       pb.book_key,
       bv.version_label,
       bv.lifecycle_status,
-      COUNT(vss.id) AS selected_source_sets,
+      bt.template_key,
+      COUNT(DISTINCT vss.id) AS selected_source_sets,
+      COUNT(DISTINCT bs.id) AS sections,
+      COUNT(DISTINCT bb.id) AS blocks,
       bv.source_baseline_id,
       sb.baseline_status,
       sb.baseline_hash
     FROM ipca_publishing_book_versions bv
     INNER JOIN ipca_publishing_books pb ON pb.id = bv.book_id
+    LEFT JOIN ipca_publishing_book_templates bt ON bt.id = bv.template_id
     LEFT JOIN ipca_publishing_book_version_source_sets vss ON vss.book_version_id = bv.id
+    LEFT JOIN ipca_publishing_book_sections bs ON bs.book_version_id = bv.id
+    LEFT JOIN ipca_publishing_book_blocks bb ON bb.book_version_id = bv.id
     LEFT JOIN ipca_publishing_source_baselines sb ON sb.id = bv.source_baseline_id
     GROUP BY
-      bv.id, pb.book_key, bv.version_label, bv.lifecycle_status,
+      bv.id, pb.book_key, bv.version_label, bv.lifecycle_status, bt.template_key,
       bv.source_baseline_id, sb.baseline_status, sb.baseline_hash
     ORDER BY pb.book_key, bv.version_label
 ")->fetchAll(PDO::FETCH_ASSOC));

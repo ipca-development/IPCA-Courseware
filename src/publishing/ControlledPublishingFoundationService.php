@@ -19,6 +19,39 @@ final class ControlledPublishingFoundationService
         ),
     );
 
+    /** @var array<string,array{template_key:string,title:string,manual_family:string}> */
+    private const TEMPLATE_REGISTRY = array(
+        'OM' => array(
+            'template_key' => 'OM_STANDARD',
+            'title' => 'Operations Manual — Standard Template',
+            'manual_family' => 'OM',
+        ),
+        'OMM' => array(
+            'template_key' => 'OMM_STANDARD',
+            'title' => 'Organization Management Manual — Standard Template',
+            'manual_family' => 'OMM',
+        ),
+    );
+
+    /**
+     * Mandatory controlled-manual sections in display order.
+     *
+     * @var list<array{section_key:string,title:string,section_type:string,is_system_managed:bool,is_generated:bool,allow_author_blocks:bool,sort_order:int}>
+     */
+    private const MANDATORY_SECTIONS = array(
+        array('section_key' => 'cover', 'title' => 'Cover Page', 'section_type' => 'cover', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => false, 'sort_order' => 10),
+        array('section_key' => 'toc', 'title' => 'Table of Contents', 'section_type' => 'toc', 'is_system_managed' => true, 'is_generated' => true, 'allow_author_blocks' => false, 'sort_order' => 20),
+        array('section_key' => 'lep', 'title' => 'List of Effective Parts + E-Signature', 'section_type' => 'lep', 'is_system_managed' => true, 'is_generated' => true, 'allow_author_blocks' => false, 'sort_order' => 30),
+        array('section_key' => 'revision_system', 'title' => 'Revision System', 'section_type' => 'revision_system', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 40),
+        array('section_key' => 'amendment_list', 'title' => 'Amendment List', 'section_type' => 'amendment_list', 'is_system_managed' => true, 'is_generated' => true, 'allow_author_blocks' => false, 'sort_order' => 50),
+        array('section_key' => 'distribution_list', 'title' => 'Distribution List', 'section_type' => 'distribution_list', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 60),
+        array('section_key' => 'abbreviations', 'title' => 'Abbreviations', 'section_type' => 'abbreviations', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 70),
+        array('section_key' => 'definitions', 'title' => 'Definitions', 'section_type' => 'definitions', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 80),
+        array('section_key' => 'highlights', 'title' => 'Highlight of Changes', 'section_type' => 'highlights', 'is_system_managed' => true, 'is_generated' => true, 'allow_author_blocks' => false, 'sort_order' => 90),
+        array('section_key' => 'main_content', 'title' => 'Main Content', 'section_type' => 'content', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 100),
+        array('section_key' => 'annexes', 'title' => 'Annexes', 'section_type' => 'annex', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 110),
+    );
+
     /** @var array<string,array{book_key:string,title:string,manual_code:string,version_label:string}> */
     private const BOOK_REGISTRY = array(
         'OM' => array(
@@ -450,19 +483,207 @@ final class ControlledPublishingFoundationService
     }
 
     /**
-     * Seed OM/OMM books, draft versions, and required source selections.
+     * @return array<string,int> manual_code => template_id
+     */
+    public function ensureTemplates(?int $actorUserId = null): array
+    {
+        $ids = array();
+        $allowedBlocks = json_encode(array(
+            'heading', 'paragraph', 'list', 'table', 'image', 'callout', 'reference', 'generated_placeholder',
+        ), JSON_THROW_ON_ERROR);
+
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_templates
+                (template_key, title, manual_family, status, allowed_block_types_json, created_by)
+            VALUES
+                (:template_key, :title, :manual_family, 'active', :allowed_blocks, :created_by)
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title),
+                manual_family = VALUES(manual_family),
+                status = 'active',
+                allowed_block_types_json = VALUES(allowed_block_types_json),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+
+        foreach (self::TEMPLATE_REGISTRY as $manualCode => $def) {
+            $stmt->execute(array(
+                ':template_key' => $def['template_key'],
+                ':title' => $def['title'],
+                ':manual_family' => $def['manual_family'],
+                ':allowed_blocks' => $allowedBlocks,
+                ':created_by' => $actorUserId,
+            ));
+            $templateId = $this->templateIdByKey($def['template_key']);
+            $this->ensureTemplateSections($templateId);
+            $ids[$manualCode] = $templateId;
+        }
+
+        return $ids;
+    }
+
+    public function attachTemplateToVersion(int $versionId, int $templateId): void
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_versions
+            SET template_id = :template_id, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :version_id
+        ");
+        $stmt->execute(array(
+            ':template_id' => $templateId,
+            ':version_id' => $versionId,
+        ));
+    }
+
+    /**
+     * Scaffold mandatory sections (and generated placeholders) from the version template.
+     *
+     * @return array{sections_created:int,blocks_created:int,sections_total:int}
+     */
+    public function scaffoldVersionSections(int $versionId, ?int $actorUserId = null): array
+    {
+        $version = $this->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if ((string)$version['lifecycle_status'] === 'released') {
+            throw new RuntimeException('Released versions cannot be re-scaffolded.');
+        }
+
+        $manualCode = (string)($version['manual_code'] ?? '');
+        $templateId = (int)($version['template_id'] ?? 0);
+        if ($templateId <= 0) {
+            $templates = $this->ensureTemplates($actorUserId);
+            if (!isset($templates[$manualCode])) {
+                throw new RuntimeException("No template mapping for manual {$manualCode}.");
+            }
+            $templateId = $templates[$manualCode];
+            $this->attachTemplateToVersion($versionId, $templateId);
+        }
+
+        $templateSections = $this->templateSections($templateId);
+        $sectionsCreated = 0;
+        $blocksCreated = 0;
+
+        $sectionIns = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_sections
+                (book_version_id, template_section_id, section_key, stable_anchor, title, section_type,
+                 is_system_managed, is_generated, sort_order, created_by)
+            VALUES
+                (:book_version_id, :template_section_id, :section_key, :stable_anchor, :title, :section_type,
+                 :is_system_managed, :is_generated, :sort_order, :created_by)
+            ON DUPLICATE KEY UPDATE
+                template_section_id = VALUES(template_section_id),
+                title = VALUES(title),
+                section_type = VALUES(section_type),
+                is_system_managed = VALUES(is_system_managed),
+                is_generated = VALUES(is_generated),
+                sort_order = VALUES(sort_order),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+
+        $blockIns = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_blocks
+                (book_version_id, section_id, block_key, stable_anchor, block_type, sort_order,
+                 payload_json, content_hash, is_system_managed, created_by, updated_by)
+            VALUES
+                (:book_version_id, :section_id, :block_key, :stable_anchor, 'generated_placeholder', 10,
+                 :payload_json, :content_hash, 1, :created_by, :created_by)
+            ON DUPLICATE KEY UPDATE
+                payload_json = VALUES(payload_json),
+                content_hash = VALUES(content_hash),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+
+        $bookKey = (string)$version['book_key'];
+        $versionLabel = (string)$version['version_label'];
+
+        foreach ($templateSections as $tplSection) {
+            $sectionKey = (string)$tplSection['section_key'];
+            $stableAnchor = $this->sectionAnchor($bookKey, $versionLabel, $sectionKey);
+            $sectionIns->execute(array(
+                ':book_version_id' => $versionId,
+                ':template_section_id' => (int)$tplSection['id'],
+                ':section_key' => $sectionKey,
+                ':stable_anchor' => $stableAnchor,
+                ':title' => (string)$tplSection['title'],
+                ':section_type' => (string)$tplSection['section_type'],
+                ':is_system_managed' => !empty($tplSection['is_system_managed']) ? 1 : 0,
+                ':is_generated' => !empty($tplSection['is_generated']) ? 1 : 0,
+                ':sort_order' => (int)$tplSection['sort_order'],
+                ':created_by' => $actorUserId,
+            ));
+
+            if ($sectionIns->rowCount() === 1) {
+                $sectionsCreated++;
+            }
+
+            $sectionId = $this->sectionIdByVersionAndKey($versionId, $sectionKey);
+
+            if (!empty($tplSection['is_generated'])) {
+                $payload = array(
+                    'status' => 'pending_generation',
+                    'section_type' => (string)$tplSection['section_type'],
+                    'message' => 'Generated section placeholder — content will be produced at publish time.',
+                );
+                $contentHash = hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+                $blockKey = $sectionKey . '_placeholder';
+                $blockAnchor = $stableAnchor . '-BLOCK-001';
+                $blockIns->execute(array(
+                    ':book_version_id' => $versionId,
+                    ':section_id' => $sectionId,
+                    ':block_key' => $blockKey,
+                    ':stable_anchor' => $blockAnchor,
+                    ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                    ':content_hash' => $contentHash,
+                    ':created_by' => $actorUserId,
+                ));
+                if ($blockIns->rowCount() === 1) {
+                    $blocksCreated++;
+                }
+            }
+        }
+
+        return array(
+            'sections_created' => $sectionsCreated,
+            'blocks_created' => $blocksCreated,
+            'sections_total' => count($this->listVersionSections($versionId)),
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listVersionSections(int $versionId): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT
+              s.*,
+              (SELECT COUNT(*) FROM ipca_publishing_book_blocks b WHERE b.section_id = s.id) AS block_count
+            FROM ipca_publishing_book_sections s
+            WHERE s.book_version_id = :version_id
+            ORDER BY s.sort_order, s.id
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /**
+     * Seed OM/OMM books, draft versions, source selections, templates, and sections.
      *
      * @return array<string,mixed>
      */
     public function seedOmOmmFoundation(?int $actorUserId = null): array
     {
         $bookIds = $this->ensureBookRegistry($actorUserId);
-        $result = array('books' => array(), 'versions' => array());
+        $templateIds = $this->ensureTemplates($actorUserId);
+        $result = array('books' => array(), 'versions' => array(), 'templates' => $templateIds, 'sections' => array());
 
         foreach (self::BOOK_REGISTRY as $key => $def) {
             $bookId = $bookIds[$def['book_key']];
             $versionId = $this->createDraftVersion($bookId, $def['version_label'], $actorUserId);
             $this->applyRequiredSourceSetsForVersion($versionId, $actorUserId);
+            $this->attachTemplateToVersion($versionId, $templateIds[$def['manual_code']]);
+            $result['sections'][$def['book_key']] = $this->scaffoldVersionSections($versionId, $actorUserId);
             $result['books'][$def['book_key']] = $bookId;
             $result['versions'][$def['book_key']] = $versionId;
         }
@@ -527,6 +748,87 @@ final class ControlledPublishingFoundationService
         $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    private function ensureTemplateSections(int $templateId): void
+    {
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_template_sections
+                (template_id, section_key, title, section_type, is_required, is_system_managed,
+                 is_generated, allow_author_blocks, sort_order)
+            VALUES
+                (:template_id, :section_key, :title, :section_type, 1, :is_system_managed,
+                 :is_generated, :allow_author_blocks, :sort_order)
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title),
+                section_type = VALUES(section_type),
+                is_required = 1,
+                is_system_managed = VALUES(is_system_managed),
+                is_generated = VALUES(is_generated),
+                allow_author_blocks = VALUES(allow_author_blocks),
+                sort_order = VALUES(sort_order),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+
+        foreach (self::MANDATORY_SECTIONS as $section) {
+            $stmt->execute(array(
+                ':template_id' => $templateId,
+                ':section_key' => $section['section_key'],
+                ':title' => $section['title'],
+                ':section_type' => $section['section_type'],
+                ':is_system_managed' => $section['is_system_managed'] ? 1 : 0,
+                ':is_generated' => $section['is_generated'] ? 1 : 0,
+                ':allow_author_blocks' => $section['allow_author_blocks'] ? 1 : 0,
+                ':sort_order' => $section['sort_order'],
+            ));
+        }
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function templateSections(int $templateId): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM ipca_publishing_book_template_sections
+            WHERE template_id = :template_id
+            ORDER BY sort_order, id
+        ");
+        $stmt->execute(array(':template_id' => $templateId));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    private function templateIdByKey(string $templateKey): int
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM ipca_publishing_book_templates WHERE template_key = :key LIMIT 1');
+        $stmt->execute(array(':key' => $templateKey));
+        $id = $stmt->fetchColumn();
+        if (!$id) {
+            throw new RuntimeException("Template {$templateKey} could not be resolved.");
+        }
+        return (int)$id;
+    }
+
+    private function sectionIdByVersionAndKey(int $versionId, string $sectionKey): int
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id AND section_key = :section_key
+            LIMIT 1
+        ");
+        $stmt->execute(array(':version_id' => $versionId, ':section_key' => $sectionKey));
+        $id = $stmt->fetchColumn();
+        if (!$id) {
+            throw new RuntimeException("Section {$sectionKey} could not be resolved for version {$versionId}.");
+        }
+        return (int)$id;
+    }
+
+    private function sectionAnchor(string $bookKey, string $versionLabel, string $sectionKey): string
+    {
+        $normVersion = str_replace('.', '_', $versionLabel);
+        $normSection = strtoupper(str_replace('_', '-', $sectionKey));
+        return strtoupper($bookKey) . '-' . $normVersion . '-' . $normSection;
     }
 
     private function bookIdByKey(string $bookKey): int

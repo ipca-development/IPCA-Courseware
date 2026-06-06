@@ -89,6 +89,8 @@ Expected:
 
 - books: `OM`, `OMM`
 - versions: `6.0`, `4.0`
+- templates: `OM_STANDARD`, `OMM_STANDARD` (11 mandatory sections each)
+- section scaffold: 11 sections per version with stable anchors
 - required source-set selections applied
 
 ### 3. Admin UI
@@ -104,8 +106,9 @@ Test path:
 1. Open Canonical Sources and confirm counts match the CLI report.
 2. Open Controlled Books and confirm OM 6.0 / OMM 4.0 draft versions exist.
 3. Open a version, click **Apply required source sets**.
-4. Click **Freeze Source Baseline** and confirm baseline hash appears.
-5. Re-run `php scripts/report_controlled_publishing_foundation.php` and confirm the version appears under **Book versions release-ready**.
+4. Click **Scaffold sections from template** and confirm 11 mandatory sections with stable anchors appear.
+5. Click **Freeze Source Baseline** and confirm baseline hash appears.
+6. Re-run `php scripts/report_controlled_publishing_foundation.php` and confirm templates, sections, and release-ready status.
 
 ### 4. Release gate check
 

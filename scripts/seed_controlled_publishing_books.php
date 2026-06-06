@@ -24,6 +24,8 @@ try {
     fwrite(STDOUT, "Controlled publishing foundation seed complete.\n");
     fwrite(STDOUT, 'Books: ' . json_encode($result['books'], JSON_UNESCAPED_SLASHES) . "\n");
     fwrite(STDOUT, 'Versions: ' . json_encode($result['versions'], JSON_UNESCAPED_SLASHES) . "\n");
+    fwrite(STDOUT, 'Templates: ' . json_encode($result['templates'], JSON_UNESCAPED_SLASHES) . "\n");
+    fwrite(STDOUT, 'Sections: ' . json_encode($result['sections'], JSON_UNESCAPED_SLASHES) . "\n");
 
     foreach ($result['versions'] as $bookKey => $versionId) {
         $validation = $svc->validateVersionReleaseFoundation((int)$versionId);

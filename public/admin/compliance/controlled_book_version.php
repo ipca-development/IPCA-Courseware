@@ -61,6 +61,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $versionId > 0) {
         } elseif ($action === 'freeze_baseline') {
             $baselineId = $svc->freezeSourceBaseline($versionId, $uid);
             cpv_flash('success', 'Source baseline frozen (#' . $baselineId . ').');
+        } elseif ($action === 'scaffold_sections') {
+            $scaffold = $svc->scaffoldVersionSections($versionId, $uid);
+            cpv_flash(
+                'success',
+                'Section scaffold complete: ' . (int)$scaffold['sections_total'] . ' sections (' .
+                (int)$scaffold['sections_created'] . ' new, ' . (int)$scaffold['blocks_created'] . ' placeholders).'
+            );
         }
     } catch (Throwable $e) {
         cpv_flash('error', $e->getMessage());
@@ -98,6 +105,7 @@ if ($version === null) {
 }
 
 $selections = $svc->getVersionSourceSelections($versionId);
+$sections = $svc->listVersionSections($versionId);
 $validation = $svc->validateVersionReleaseFoundation($versionId);
 $allSourceSets = $svc->listActiveSourceSets();
 $selectedIds = array();
@@ -119,6 +127,7 @@ compliance_page_open(array(
         array('label' => 'Lifecycle', 'value' => (string)$version['lifecycle_status']),
         array('label' => 'Foundation', 'value' => (string)$validation['status'], 'tone' => $validation['ok'] ? 'ok' : 'warn'),
         array('label' => 'Source sets', 'value' => (int)$validation['selected_count']),
+        array('label' => 'Sections', 'value' => count($sections)),
     ),
 ));
 
@@ -168,6 +177,48 @@ compliance_page_open(array(
       <button type="submit">Save source selections</button>
     </div>
   </form>
+</section>
+
+<section class="cmp-card" style="margin-top:16px;">
+  <h2 style="margin:0 0 12px;">Mandatory section scaffold</h2>
+  <p style="margin:0 0 12px;">Creates the governed manual skeleton (Cover, TOC, LEP, Amendment List, Main Content, Annexes, etc.) with stable anchors.</p>
+  <form method="post" style="margin-bottom:16px;">
+    <input type="hidden" name="action" value="scaffold_sections">
+    <button type="submit">Scaffold sections from template</button>
+  </form>
+
+  <?php if ($sections === array()): ?>
+    <p style="margin:0;color:#64748b;">No sections scaffolded yet.</p>
+  <?php else: ?>
+    <div style="overflow:auto;">
+      <table class="cmp-table" style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th align="left">Order</th>
+            <th align="left">Section</th>
+            <th align="left">Type</th>
+            <th align="left">Stable anchor</th>
+            <th align="center">System</th>
+            <th align="center">Generated</th>
+            <th align="right">Blocks</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($sections as $section): ?>
+            <tr>
+              <td><?= (int)$section['sort_order'] ?></td>
+              <td><?= h((string)$section['title']) ?></td>
+              <td><?= h((string)$section['section_type']) ?></td>
+              <td style="font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$section['stable_anchor']) ?></td>
+              <td align="center"><?= !empty($section['is_system_managed']) ? 'yes' : 'no' ?></td>
+              <td align="center"><?= !empty($section['is_generated']) ? 'yes' : 'no' ?></td>
+              <td align="right"><?= (int)$section['block_count'] ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
 </section>
 
 <section class="cmp-card" style="margin-top:16px;">
