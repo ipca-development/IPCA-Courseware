@@ -36,19 +36,20 @@
 .cpb-tree-scroll {
   flex: 1;
   overflow: auto;
-  padding: 8px 0 16px;
+  padding: 6px 0 14px;
 }
 
 .cpb-tree {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 12px 0 8px;
 }
 
 .cpb-tree ul {
   list-style: none;
   margin: 0;
-  padding-left: 14px;
+  padding: 0 0 0 16px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .cpb-tree-node {
@@ -57,26 +58,28 @@
 
 .cpb-tree-row {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px 4px 8px;
+  align-items: baseline;
+  gap: 2px;
+  padding: 3px 0;
+  min-height: 24px;
 }
 
 .cpb-tree-toggle {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border: none;
-  background: transparent;
+  background: none;
   color: #94a3b8;
   cursor: pointer;
-  border-radius: 4px;
   flex-shrink: 0;
-  font-size: 11px;
-  line-height: 1;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0;
+  text-align: center;
 }
 
 .cpb-tree-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
 }
 
 .cpb-tree-toggle.is-leaf {
@@ -87,43 +90,54 @@
   flex: 1;
   text-align: left;
   border: none;
-  background: transparent;
-  color: #e2e8f0;
+  background: none;
+  color: #cbd5e1;
   cursor: pointer;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 0;
   font-size: 13px;
-  line-height: 1.3;
+  line-height: 1.4;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 400;
 }
 
 .cpb-tree-link:hover {
-  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .cpb-tree-link.is-active {
-  background: #1e3c72;
   color: #fff;
   font-weight: 600;
+  text-decoration: none;
 }
 
 .cpb-tree-link.is-generated {
-  opacity: 0.75;
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .cpb-tree-actions {
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .cpb-tree-actions button {
   width: 100%;
-  border: 1px dashed rgba(255, 255, 255, 0.25);
-  background: transparent;
-  color: #cbd5e1;
-  border-radius: 8px;
-  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: #94a3b8;
+  padding: 4px 0;
   font-size: 12px;
   cursor: pointer;
+  text-align: left;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.cpb-tree-actions button:hover {
+  color: #e2e8f0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .cpb-workspace {

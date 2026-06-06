@@ -102,7 +102,8 @@
     var toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'cpb-tree-toggle' + (hasChildren ? '' : ' is-leaf');
-    toggle.textContent = state.expanded[nodeId] ? '▼' : '▶';
+    toggle.textContent = state.expanded[nodeId] ? '▾' : '▸';
+    toggle.setAttribute('aria-label', state.expanded[nodeId] ? 'Collapse section' : 'Expand section');
     toggle.addEventListener('click', function (e) {
       e.stopPropagation();
       state.expanded[nodeId] = !state.expanded[nodeId];
