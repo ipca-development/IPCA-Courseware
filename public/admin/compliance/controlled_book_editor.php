@@ -1,0 +1,134 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/layout.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
+
+$user = compliance_require_access($pdo);
+$foundation = new ControlledPublishingFoundationService($pdo);
+$sections = new ControlledPublishingSectionService($pdo);
+
+$versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
+$sectionId = isset($_GET['section_id']) ? (int)$_GET['section_id'] : 0;
+
+if ($versionId <= 0) {
+    cw_header('Compliance · Book Editor');
+    compliance_page_open(array(
+        'overline' => 'Compliance · Controlled publishing',
+        'title' => 'Book editor',
+        'back' => array('href' => '/admin/compliance/controlled_books.php', 'label' => 'All books'),
+    ));
+    echo '<section class="cmp-card"><p style="margin:0;">Provide ?version_id=...</p></section>';
+    compliance_page_close();
+    cw_footer();
+    return;
+}
+
+$version = $foundation->getVersion($versionId);
+if ($version === null) {
+    cw_header('Compliance · Book Editor');
+    compliance_page_open(array(
+        'overline' => 'Compliance · Controlled publishing',
+        'title' => 'Version not found',
+        'back' => array('href' => '/admin/compliance/controlled_books.php', 'label' => 'All books'),
+    ));
+    echo '<section class="cmp-card"><p style="margin:0;">No version for that id.</p></section>';
+    compliance_page_close();
+    cw_footer();
+    return;
+}
+
+if ($sectionId <= 0) {
+    foreach ($sections->listFlatSections($versionId) as $row) {
+        if ((string)$row['section_key'] === 'main_content') {
+            $sectionId = (int)$row['id'];
+            break;
+        }
+    }
+    if ($sectionId <= 0) {
+        $flat = $sections->listFlatSections($versionId);
+        $sectionId = $flat !== array() ? (int)$flat[0]['id'] : 0;
+    }
+}
+
+$cssPath = __DIR__ . '/../../../public/assets/controlled_book_editor.css';
+$jsPath = __DIR__ . '/../../../public/assets/controlled_book_editor.js';
+$cssVer = is_file($cssPath) ? (string)filemtime($cssPath) : '1';
+$jsVer = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
+
+cw_header('Compliance · ' . (string)$version['book_key'] . ' Editor');
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Controlled publishing',
+    'title' => (string)$version['book_key'] . ' ' . (string)$version['version_label'] . ' — Editor',
+    'description' => 'Document-style manual editor with section tree and governed content blocks.',
+    'back' => array(
+        'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
+        'label' => 'Version settings',
+    ),
+    'actions' => array(
+        array(
+            'label' => 'Governance',
+            'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
+            'variant' => 'secondary',
+        ),
+    ),
+));
+
+?>
+<link rel="stylesheet" href="/assets/controlled_book_editor.css?v=<?= h($cssVer) ?>">
+
+<section class="cmp-card cpb-editor-root" id="cpbEditorRoot"
+         data-version-id="<?= (int)$versionId ?>"
+         data-section-id="<?= (int)$sectionId ?>">
+  <div class="cpb-editor-shell">
+    <aside class="cpb-tree-panel">
+      <div class="cpb-tree-head">
+        <h2>Manual sections</h2>
+      </div>
+      <div class="cpb-tree-scroll" id="cpbSectionTree">
+        <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
+      </div>
+      <div class="cpb-tree-actions">
+        <button type="button" id="cpbAddSubsection" style="display:none;">+ Add subsection</button>
+      </div>
+    </aside>
+
+    <div class="cpb-workspace">
+      <div class="cpb-toolbar" id="cpbToolbar">
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold"><strong>B</strong></button>
+          <button type="button" class="cpb-tool-btn" data-cmd="italic" title="Italic"><em>I</em></button>
+          <button type="button" class="cpb-tool-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
+          <button type="button" class="cpb-tool-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" data-add-block="heading" title="Add heading">H</button>
+          <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
+          <button type="button" class="cpb-tool-btn" data-add-block="list" title="Add list">List</button>
+          <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
+          <button type="button" class="cpb-tool-btn" id="cpbPickImage" title="Insert image">Image</button>
+        </div>
+        <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
+      </div>
+
+      <div class="cpb-canvas-scroll" id="cpbCanvas">
+        <p style="text-align:center;color:#64748b;font-family:system-ui,sans-serif;">Loading document…</p>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>
+</section>
+
+<script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>
+<?php
+
+compliance_page_close();
+cw_footer();

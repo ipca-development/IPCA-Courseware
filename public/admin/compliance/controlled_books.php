@@ -49,7 +49,9 @@ compliance_page_open(array(
               <td><?= h((string)($row['baseline_status'] ?? 'none')) ?></td>
               <td>
                 <?php if (!empty($row['version_id'])): ?>
-                  <a href="/admin/compliance/controlled_book_version.php?id=<?= (int)$row['version_id'] ?>">Open</a>
+                  <a href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)$row['version_id'] ?>">Edit</a>
+                  ·
+                  <a href="/admin/compliance/controlled_book_version.php?id=<?= (int)$row['version_id'] ?>">Settings</a>
                 <?php else: ?>
                   —
                 <?php endif; ?>

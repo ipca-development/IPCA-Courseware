@@ -236,6 +236,7 @@ return [
                     '/admin/compliance/controlled_books.php',
                     '/admin/compliance/controlled_book_version.php',
                     '/admin/compliance/controlled_book_section_editor.php',
+                    '/admin/compliance/controlled_book_editor.php',
                 ],
             ],
             [

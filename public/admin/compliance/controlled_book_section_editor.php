@@ -1,6 +1,18 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Legacy URL — redirect to the document-style book editor.
+ */
+$versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
+$sectionId = isset($_GET['section_id']) ? (int)$_GET['section_id'] : 0;
+$q = 'version_id=' . $versionId;
+if ($sectionId > 0) {
+    $q .= '&section_id=' . $sectionId;
+}
+header('Location: /admin/compliance/controlled_book_editor.php?' . $q, true, 302);
+exit;
+
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';

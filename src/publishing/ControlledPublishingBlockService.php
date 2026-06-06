@@ -1,13 +1,15 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
+
 /**
- * Minimal controlled publishing block editor — heading and paragraph blocks only.
+ * Controlled publishing block CRUD for the document-style editor.
  */
 final class ControlledPublishingBlockService
 {
     /** @var list<string> */
-    private const MVP_BLOCK_TYPES = array('heading', 'paragraph');
+    private const AUTHOR_BLOCK_TYPES = array('heading', 'paragraph', 'list', 'table', 'image');
 
     public function __construct(private PDO $pdo)
     {
@@ -21,7 +23,7 @@ final class ControlledPublishingBlockService
         $stmt = $this->pdo->prepare("
             SELECT
               s.*,
-              COALESCE(ts.allow_author_blocks, 0) AS allow_author_blocks,
+              COALESCE(ts.allow_author_blocks, 1) AS allow_author_blocks,
               bv.lifecycle_status,
               b.book_key,
               bv.version_label
@@ -37,7 +39,13 @@ final class ControlledPublishingBlockService
             ':version_id' => $versionId,
         ));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return is_array($row) ? $row : null;
+        if (!is_array($row)) {
+            return null;
+        }
+        if (!empty($row['parent_section_id'])) {
+            $row['allow_author_blocks'] = 1;
+        }
+        return $row;
     }
 
     /**
@@ -55,6 +63,17 @@ final class ControlledPublishingBlockService
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
     }
 
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function getBlock(int $blockId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM ipca_publishing_book_blocks WHERE id = :id LIMIT 1');
+        $stmt->execute(array(':id' => $blockId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
     public function createBlock(
         int $versionId,
         int $sectionId,
@@ -64,7 +83,7 @@ final class ControlledPublishingBlockService
     ): int {
         $section = $this->requireEditableSection($versionId, $sectionId);
         $blockType = $this->normalizeBlockType($blockType);
-        $payload = $this->normalizePayload($blockType, $payload);
+        $payload = $this->normalizePayload($blockType, $payload, false);
         $contentHash = $this->contentHash($blockType, $payload);
 
         $sortOrder = $this->nextSortOrder($sectionId);
@@ -99,7 +118,7 @@ final class ControlledPublishingBlockService
     {
         $block = $this->requireEditableBlock($blockId);
         $blockType = (string)$block['block_type'];
-        $payload = $this->normalizePayload($blockType, $payload);
+        $payload = $this->normalizePayload($blockType, $payload, true);
         $contentHash = $this->contentHash($blockType, $payload);
 
         $stmt = $this->pdo->prepare("
@@ -127,6 +146,79 @@ final class ControlledPublishingBlockService
 
         $stmt = $this->pdo->prepare('DELETE FROM ipca_publishing_book_blocks WHERE id = :id');
         $stmt->execute(array(':id' => $blockId));
+    }
+
+    public function moveBlock(int $blockId, string $direction, ?int $actorUserId = null): void
+    {
+        $block = $this->requireEditableBlock($blockId);
+        $sectionId = (int)$block['section_id'];
+        $blocks = $this->listSectionBlocks($sectionId);
+        $ids = array();
+        foreach ($blocks as $row) {
+            $ids[] = (int)$row['id'];
+        }
+        $index = array_search($blockId, $ids, true);
+        if ($index === false) {
+            throw new RuntimeException('Block not found in section.');
+        }
+        if ($direction === 'up' && $index > 0) {
+            $tmp = $ids[$index - 1];
+            $ids[$index - 1] = $ids[$index];
+            $ids[$index] = $tmp;
+        } elseif ($direction === 'down' && $index < count($ids) - 1) {
+            $tmp = $ids[$index + 1];
+            $ids[$index + 1] = $ids[$index];
+            $ids[$index] = $tmp;
+        } else {
+            return;
+        }
+        $this->reorderBlocks($sectionId, $ids, $actorUserId);
+    }
+
+    /**
+     * @param list<int> $blockIds
+     */
+    public function reorderBlocks(int $sectionId, array $blockIds, ?int $actorUserId = null): void
+    {
+        if ($blockIds === array()) {
+            return;
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT b.id, b.book_version_id, bv.lifecycle_status
+            FROM ipca_publishing_book_blocks b
+            INNER JOIN ipca_publishing_book_versions bv ON bv.id = b.book_version_id
+            WHERE b.section_id = :section_id
+        ");
+        $stmt->execute(array(':section_id' => $sectionId));
+        $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $existingIds = array();
+        foreach ($existing as $row) {
+            if ((string)$row['lifecycle_status'] === 'released') {
+                throw new RuntimeException('Released versions cannot be edited.');
+            }
+            $existingIds[(int)$row['id']] = true;
+        }
+        foreach ($blockIds as $id) {
+            if (!isset($existingIds[(int)$id])) {
+                throw new RuntimeException('Invalid block order payload.');
+            }
+        }
+
+        $order = 10;
+        $upd = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_blocks
+            SET sort_order = :sort_order, updated_by = :updated_by, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND section_id = :section_id
+        ");
+        foreach ($blockIds as $id) {
+            $upd->execute(array(
+                ':sort_order' => $order,
+                ':updated_by' => $actorUserId,
+                ':id' => (int)$id,
+                ':section_id' => $sectionId,
+            ));
+            $order += 10;
+        }
     }
 
     /**
@@ -169,8 +261,9 @@ final class ControlledPublishingBlockService
             SELECT
               b.*,
               s.section_key,
+              s.parent_section_id,
               s.stable_anchor AS section_stable_anchor,
-              COALESCE(ts.allow_author_blocks, 0) AS allow_author_blocks,
+              COALESCE(ts.allow_author_blocks, 0) AS template_allow_blocks,
               bv.lifecycle_status
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
@@ -187,11 +280,12 @@ final class ControlledPublishingBlockService
         if ((string)$block['lifecycle_status'] === 'released') {
             throw new RuntimeException('Released versions cannot be edited.');
         }
-        if (empty($block['allow_author_blocks'])) {
+        $allow = !empty($block['template_allow_blocks']) || !empty($block['parent_section_id']);
+        if (!$allow) {
             throw new RuntimeException('This section does not allow author blocks.');
         }
-        if (!in_array((string)$block['block_type'], self::MVP_BLOCK_TYPES, true)) {
-            throw new RuntimeException('Only heading and paragraph blocks can be edited in this MVP.');
+        if (!in_array((string)$block['block_type'], self::AUTHOR_BLOCK_TYPES, true)) {
+            throw new RuntimeException('This block type cannot be edited.');
         }
         return $block;
     }
@@ -199,8 +293,8 @@ final class ControlledPublishingBlockService
     private function normalizeBlockType(string $blockType): string
     {
         $blockType = strtolower(trim($blockType));
-        if (!in_array($blockType, self::MVP_BLOCK_TYPES, true)) {
-            throw new RuntimeException('Unsupported block type. Use heading or paragraph.');
+        if (!in_array($blockType, self::AUTHOR_BLOCK_TYPES, true)) {
+            throw new RuntimeException('Unsupported block type.');
         }
         return $blockType;
     }
@@ -208,22 +302,117 @@ final class ControlledPublishingBlockService
     /**
      * @return array<string,mixed>
      */
-    private function normalizePayload(string $blockType, array $payload): array
+    private function normalizePayload(string $blockType, array $payload, bool $strict): array
+    {
+        return match ($blockType) {
+            'heading' => $this->normalizeHeadingPayload($payload, $strict),
+            'paragraph' => $this->normalizeParagraphPayload($payload, $strict),
+            'list' => $this->normalizeListPayload($payload, $strict),
+            'table' => $this->normalizeTablePayload($payload, $strict),
+            'image' => $this->normalizeImagePayload($payload, $strict),
+            default => throw new RuntimeException('Unsupported block type.'),
+        };
+    }
+
+    /**
+     * @return array{text:string,level:int}
+     */
+    private function normalizeHeadingPayload(array $payload, bool $strict): array
     {
         $text = trim((string)($payload['text'] ?? ''));
-        if ($text === '') {
-            throw new RuntimeException('Block text is required.');
+        if ($strict && $text === '') {
+            throw new RuntimeException('Heading text is required.');
         }
+        $level = (int)($payload['level'] ?? 2);
+        if ($level < 1 || $level > 6) {
+            $level = 2;
+        }
+        return array('text' => $text, 'level' => $level);
+    }
 
-        if ($blockType === 'heading') {
-            $level = (int)($payload['level'] ?? 2);
-            if ($level < 1 || $level > 6) {
-                throw new RuntimeException('Heading level must be between 1 and 6.');
+    /**
+     * @return array{html:string}
+     */
+    private function normalizeParagraphPayload(array $payload, bool $strict): array
+    {
+        $html = (string)($payload['html'] ?? '');
+        if ($html === '' && isset($payload['text'])) {
+            $html = nl2br(h((string)$payload['text']), false);
+        }
+        $html = ControlledPublishingHtmlSanitizer::sanitizeInline($html);
+        if ($strict && trim(strip_tags($html)) === '') {
+            throw new RuntimeException('Paragraph content is required.');
+        }
+        return array('html' => $html);
+    }
+
+    /**
+     * @return array{ordered:bool,items:list<string>}
+     */
+    private function normalizeListPayload(array $payload, bool $strict): array
+    {
+        $ordered = !empty($payload['ordered']);
+        $items = array();
+        if (is_array($payload['items'] ?? null)) {
+            foreach ($payload['items'] as $item) {
+                $t = trim((string)$item);
+                if ($t !== '') {
+                    $items[] = $t;
+                }
             }
-            return array('text' => $text, 'level' => $level);
         }
+        if ($strict && $items === array()) {
+            throw new RuntimeException('List must contain at least one item.');
+        }
+        if ($items === array()) {
+            $items = array('List item');
+        }
+        return array('ordered' => $ordered, 'items' => $items);
+    }
 
-        return array('text' => $text);
+    /**
+     * @return array{rows:list<list<string>>}
+     */
+    private function normalizeTablePayload(array $payload, bool $strict): array
+    {
+        $rows = array();
+        if (is_array($payload['rows'] ?? null)) {
+            foreach ($payload['rows'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $cell) {
+                    $line[] = trim((string)$cell);
+                }
+                if ($line !== array()) {
+                    $rows[] = $line;
+                }
+            }
+        }
+        if ($rows === array()) {
+            $rows = array(
+                array('Header 1', 'Header 2'),
+                array('', ''),
+            );
+        }
+        return array('rows' => $rows);
+    }
+
+    /**
+     * @return array{url:string,alt:string,width_pct:int}
+     */
+    private function normalizeImagePayload(array $payload, bool $strict): array
+    {
+        $url = trim((string)($payload['url'] ?? ''));
+        if ($strict && $url === '') {
+            throw new RuntimeException('Image URL is required.');
+        }
+        return array(
+            'url' => $url,
+            'alt' => trim((string)($payload['alt'] ?? '')),
+            'width_pct' => max(20, min(100, (int)($payload['width_pct'] ?? 100))),
+        );
     }
 
     /**
@@ -267,6 +456,6 @@ final class ControlledPublishingBlockService
 
     private function blockKey(string $sectionKey, string $blockType, int $sequence): string
     {
-        return $sectionKey . '_' . $blockType . '_' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT);
+        return substr($sectionKey . '_' . $blockType . '_' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT), 0, 128);
     }
 }

@@ -100,7 +100,7 @@ Under **Compliance → Manuals**:
 - `/admin/compliance/canonical_sources.php` — read-only canonical inventory and sync history
 - `/admin/compliance/controlled_books.php` — book registry and version list
 - `/admin/compliance/controlled_book_version.php?id=...` — source-set selector, section scaffold, and baseline freeze
-- `/admin/compliance/controlled_book_section_editor.php?version_id=...&section_id=...` — minimal block editor (heading / paragraph)
+- `/admin/compliance/controlled_book_editor.php?version_id=...` — document-style editor (section tree + WYSIWYG canvas)
 
 Test path:
 
@@ -108,7 +108,7 @@ Test path:
 2. Open Controlled Books and confirm OM 6.0 / OMM 4.0 draft versions exist.
 3. Open a version, click **Apply required source sets**.
 4. Click **Scaffold sections from template** and confirm 11 mandatory sections with stable anchors appear.
-5. Open **Edit blocks** on Main Content, add a heading and paragraph, save, and confirm stable block anchors.
+5. Open the **book editor**, use the left section tree, add heading/paragraph/table/image blocks on the document canvas, and confirm autosave.
 6. Click **Freeze Source Baseline** and confirm baseline hash appears.
 7. Re-run `php scripts/report_controlled_publishing_foundation.php` and confirm templates, sections, and release-ready status.
 

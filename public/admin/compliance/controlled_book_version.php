@@ -129,6 +129,13 @@ compliance_page_open(array(
         array('label' => 'Source sets', 'value' => (int)$validation['selected_count']),
         array('label' => 'Sections', 'value' => count($sections)),
     ),
+    'actions' => array(
+        array(
+            'label' => 'Open editor',
+            'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
+            'variant' => 'primary',
+        ),
+    ),
 ));
 
 ?>
@@ -215,11 +222,7 @@ compliance_page_open(array(
               <td align="center"><?= !empty($section['is_generated']) ? 'yes' : 'no' ?></td>
               <td align="right"><?= (int)$section['block_count'] ?></td>
               <td>
-                <?php if (!empty($section['allow_author_blocks'])): ?>
-                  <a href="/admin/compliance/controlled_book_section_editor.php?version_id=<?= $versionId ?>&amp;section_id=<?= (int)$section['id'] ?>">Edit blocks</a>
-                <?php else: ?>
-                  —
-                <?php endif; ?>
+                <a href="/admin/compliance/controlled_book_editor.php?version_id=<?= $versionId ?>&amp;section_id=<?= (int)$section['id'] ?>">Open</a>
               </td>
             </tr>
           <?php endforeach; ?>
