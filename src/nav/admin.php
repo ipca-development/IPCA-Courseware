@@ -222,6 +222,22 @@ return [
                 'href' => '/admin/compliance/procedures.php',
             ],
             [
+                'key' => 'compliance_canonical_sources',
+                'label' => 'Canonical Sources',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/canonical_sources.php',
+            ],
+            [
+                'key' => 'compliance_controlled_books',
+                'label' => 'Controlled Books',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/controlled_books.php',
+                'match_paths' => [
+                    '/admin/compliance/controlled_books.php',
+                    '/admin/compliance/controlled_book_version.php',
+                ],
+            ],
+            [
                 'key' => 'compliance_manual_drafts',
                 'label' => 'Draft Manuals',
                 'icon' => 'documents',

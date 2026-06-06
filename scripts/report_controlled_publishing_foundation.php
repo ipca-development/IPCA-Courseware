@@ -121,6 +121,42 @@ print_rows($pdo->query("
     LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC));
 
+print_section('Controlled books');
+print_rows($pdo->query("
+    SELECT
+      b.id,
+      b.book_key,
+      b.title,
+      b.manual_code,
+      b.status,
+      COUNT(bv.id) AS versions
+    FROM ipca_publishing_books b
+    LEFT JOIN ipca_publishing_book_versions bv ON bv.book_id = b.id
+    GROUP BY b.id, b.book_key, b.title, b.manual_code, b.status
+    ORDER BY b.book_key
+")->fetchAll(PDO::FETCH_ASSOC));
+
+print_section('Book versions');
+print_rows($pdo->query("
+    SELECT
+      bv.id,
+      pb.book_key,
+      bv.version_label,
+      bv.lifecycle_status,
+      COUNT(vss.id) AS selected_source_sets,
+      bv.source_baseline_id,
+      sb.baseline_status,
+      sb.baseline_hash
+    FROM ipca_publishing_book_versions bv
+    INNER JOIN ipca_publishing_books pb ON pb.id = bv.book_id
+    LEFT JOIN ipca_publishing_book_version_source_sets vss ON vss.book_version_id = bv.id
+    LEFT JOIN ipca_publishing_source_baselines sb ON sb.id = bv.source_baseline_id
+    GROUP BY
+      bv.id, pb.book_key, bv.version_label, bv.lifecycle_status,
+      bv.source_baseline_id, sb.baseline_status, sb.baseline_hash
+    ORDER BY pb.book_key, bv.version_label
+")->fetchAll(PDO::FETCH_ASSOC));
+
 print_section('Source baselines');
 print_rows($pdo->query("
     SELECT
@@ -151,17 +187,41 @@ print_rows($pdo->query("
       bv.lifecycle_status,
       COUNT(vss.id) AS selected_source_sets,
       bv.source_baseline_id,
+      sb.baseline_status,
       CASE
         WHEN COUNT(vss.id) = 0 THEN 'missing_source_set_selection'
         WHEN bv.source_baseline_id IS NULL THEN 'missing_source_baseline'
+        WHEN sb.baseline_status IS NULL OR sb.baseline_status NOT IN ('frozen', 'released') THEN 'baseline_not_frozen'
         ELSE 'ok'
       END AS release_foundation_status
     FROM ipca_publishing_book_versions bv
     INNER JOIN ipca_publishing_books pb ON pb.id = bv.book_id
     LEFT JOIN ipca_publishing_book_version_source_sets vss ON vss.book_version_id = bv.id
-    GROUP BY bv.id, pb.book_key, bv.version_label, bv.lifecycle_status, bv.source_baseline_id
+    LEFT JOIN ipca_publishing_source_baselines sb ON sb.id = bv.source_baseline_id
+    GROUP BY bv.id, pb.book_key, bv.version_label, bv.lifecycle_status, bv.source_baseline_id, sb.baseline_status
     HAVING release_foundation_status <> 'ok'
     ORDER BY bv.updated_at DESC
+")->fetchAll(PDO::FETCH_ASSOC));
+
+print_section('Book versions release-ready');
+print_rows($pdo->query("
+    SELECT
+      bv.id,
+      pb.book_key,
+      bv.version_label,
+      bv.lifecycle_status,
+      COUNT(vss.id) AS selected_source_sets,
+      sb.baseline_status,
+      sb.baseline_hash
+    FROM ipca_publishing_book_versions bv
+    INNER JOIN ipca_publishing_books pb ON pb.id = bv.book_id
+    INNER JOIN ipca_publishing_book_version_source_sets vss ON vss.book_version_id = bv.id
+    INNER JOIN ipca_publishing_source_baselines sb ON sb.id = bv.source_baseline_id
+    WHERE sb.baseline_status IN ('frozen', 'released')
+    GROUP BY
+      bv.id, pb.book_key, bv.version_label, bv.lifecycle_status,
+      sb.baseline_status, sb.baseline_hash
+    ORDER BY pb.book_key, bv.version_label
 ")->fetchAll(PDO::FETCH_ASSOC));
 
 /**

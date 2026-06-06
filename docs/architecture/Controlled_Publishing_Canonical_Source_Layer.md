@@ -48,3 +48,71 @@ Recommended linking model:
 - PDF export and e-reader rendering should resolve citations from canonical ids at render time, using locked book-version source baselines for reproducibility.
 
 This preserves SSOT discipline: the editor creates controlled publishing content, while MCCF/manual/regulatory data remains canonical source data with provenance and sync history.
+
+## Operator Test Guide
+
+### 1. Canonical layer (CLI)
+
+```sh
+export CW_DB_HOST=...
+export CW_DB_NAME=ipca_courseware
+export CW_DB_USER=...
+export CW_DB_PASS=...
+
+php scripts/report_controlled_publishing_foundation.php
+```
+
+Expected after successful legacy sync apply:
+
+- 4 canonical source sets
+- 254 requirements, 312 excerpts, 292 links
+- broken links: none
+
+Re-run sync dry-run only (no writes to canonical rows):
+
+```sh
+export LEGACY_COMPLIANCE_DB_HOST=...
+export LEGACY_COMPLIANCE_DB_USER=...
+export LEGACY_COMPLIANCE_DB_PASS=...
+php scripts/sync_legacy_compliance_canonical_sources.php
+```
+
+Expected: mostly `unchanged`, exit code 0.
+
+### 2. Publishing foundation seed (CLI)
+
+```sh
+php scripts/seed_controlled_publishing_books.php
+```
+
+Expected:
+
+- books: `OM`, `OMM`
+- versions: `6.0`, `4.0`
+- required source-set selections applied
+
+### 3. Admin UI
+
+Under **Compliance → Manuals**:
+
+- `/admin/compliance/canonical_sources.php` — read-only canonical inventory and sync history
+- `/admin/compliance/controlled_books.php` — book registry and version list
+- `/admin/compliance/controlled_book_version.php?id=...` — source-set selector and baseline freeze
+
+Test path:
+
+1. Open Canonical Sources and confirm counts match the CLI report.
+2. Open Controlled Books and confirm OM 6.0 / OMM 4.0 draft versions exist.
+3. Open a version, click **Apply required source sets**.
+4. Click **Freeze Source Baseline** and confirm baseline hash appears.
+5. Re-run `php scripts/report_controlled_publishing_foundation.php` and confirm the version appears under **Book versions release-ready**.
+
+### 4. Release gate check
+
+A book version cannot be considered release-ready until:
+
+- required source sets are selected
+- a frozen source baseline exists
+- baseline hash and snapshot metadata are stored
+
+The database enforces `lifecycle_status = released` only when `source_baseline_id` is set.
