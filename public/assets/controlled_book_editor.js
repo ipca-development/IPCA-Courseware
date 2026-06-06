@@ -99,25 +99,39 @@
     var row = document.createElement('div');
     row.className = 'cpb-tree-row';
 
-    var toggle = document.createElement('button');
-    toggle.type = 'button';
+    var toggle = document.createElement('span');
     toggle.className = 'cpb-tree-toggle' + (hasChildren ? '' : ' is-leaf');
     toggle.textContent = state.expanded[nodeId] ? '▾' : '▸';
+    toggle.setAttribute('role', 'button');
+    toggle.setAttribute('tabindex', hasChildren ? '0' : '-1');
     toggle.setAttribute('aria-label', state.expanded[nodeId] ? 'Collapse section' : 'Expand section');
     toggle.addEventListener('click', function (e) {
       e.stopPropagation();
       state.expanded[nodeId] = !state.expanded[nodeId];
       renderTree(state.sectionsTree, state.sectionId);
     });
+    toggle.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle.click();
+      }
+    });
 
-    var link = document.createElement('button');
-    link.type = 'button';
+    var link = document.createElement('span');
     link.className = 'cpb-tree-link'
       + (node.id === activeId ? ' is-active' : '')
       + (node.is_generated ? ' is-generated' : '');
     link.textContent = node.title;
+    link.setAttribute('role', 'button');
+    link.setAttribute('tabindex', '0');
     link.addEventListener('click', function () {
       loadSection(node.id);
+    });
+    link.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        link.click();
+      }
     });
 
     row.appendChild(toggle);
@@ -422,6 +436,12 @@
         else loadSection(state.sectionId);
         setStatus('Subsection created', 'saved');
       }).catch(showError);
+    });
+    addSubBtn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        addSubBtn.click();
+      }
     });
   }
 

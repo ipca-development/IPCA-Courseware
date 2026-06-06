@@ -94,7 +94,7 @@ compliance_page_open(array(
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
       </div>
       <div class="cpb-tree-actions">
-        <button type="button" id="cpbAddSubsection" style="display:none;">+ Add subsection</button>
+        <span id="cpbAddSubsection" class="cpb-tree-add" role="button" tabindex="0" style="display:none;">+ Add subsection</span>
       </div>
     </aside>
 

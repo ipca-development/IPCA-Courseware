@@ -64,18 +64,24 @@
   min-height: 24px;
 }
 
+/* Override global .cmp-page button pill styles inside the section tree. */
+.cmp-page .cpb-editor-root .cpb-tree-panel button {
+  all: unset;
+  font: inherit;
+  cursor: pointer;
+}
+
 .cpb-tree-toggle {
-  width: 16px;
-  height: 16px;
-  border: none;
-  background: none;
+  display: inline-block;
+  width: 14px;
+  flex-shrink: 0;
   color: #94a3b8;
   cursor: pointer;
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 11px;
+  line-height: 1.4;
   padding: 0;
   text-align: center;
+  user-select: none;
 }
 
 .cpb-tree-toggle:hover {
@@ -88,9 +94,7 @@
 
 .cpb-tree-link {
   flex: 1;
-  text-align: left;
-  border: none;
-  background: none;
+  display: inline;
   color: #cbd5e1;
   cursor: pointer;
   padding: 0;
@@ -98,6 +102,7 @@
   line-height: 1.4;
   font-family: system-ui, -apple-system, sans-serif;
   font-weight: 400;
+  user-select: none;
 }
 
 .cpb-tree-link:hover {
@@ -122,19 +127,17 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.cpb-tree-actions button {
-  width: 100%;
-  border: none;
-  background: none;
+.cpb-tree-add {
+  display: block;
   color: #94a3b8;
   padding: 4px 0;
   font-size: 12px;
   cursor: pointer;
-  text-align: left;
   font-family: system-ui, -apple-system, sans-serif;
+  user-select: none;
 }
 
-.cpb-tree-actions button:hover {
+.cpb-tree-add:hover {
   color: #e2e8f0;
   text-decoration: underline;
   text-underline-offset: 2px;
