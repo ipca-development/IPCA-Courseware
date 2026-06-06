@@ -658,8 +658,10 @@ final class ControlledPublishingFoundationService
         $stmt = $this->pdo->prepare("
             SELECT
               s.*,
+              COALESCE(ts.allow_author_blocks, 0) AS allow_author_blocks,
               (SELECT COUNT(*) FROM ipca_publishing_book_blocks b WHERE b.section_id = s.id) AS block_count
             FROM ipca_publishing_book_sections s
+            LEFT JOIN ipca_publishing_book_template_sections ts ON ts.id = s.template_section_id
             WHERE s.book_version_id = :version_id
             ORDER BY s.sort_order, s.id
         ");
