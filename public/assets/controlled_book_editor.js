@@ -588,8 +588,17 @@
       } else if (e.target.closest('.cpb-callout-title, .cpb-callout-text, .cpb-paragraph, .cpb-heading, .cpb-list')) {
         state.focusedTableCell = null;
       }
-      rememberStyleTarget();
+      requestAnimationFrame(function () {
+        rememberStyleTarget();
+      });
     });
+
+    canvasEl.addEventListener('pointerdown', function () {
+      requestAnimationFrame(function () {
+        saveSelectionRange();
+        rememberStyleTarget();
+      });
+    }, true);
 
     canvasEl.addEventListener('mouseup', function () {
       saveSelectionRange();
@@ -1135,6 +1144,79 @@
       && fields.text_color === (def.color || '#0f172a');
   }
 
+  function readElementTypographyFields(el) {
+    return {
+      font_family: el.getAttribute('data-font-family') || 'serif',
+      font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
+      text_color: el.getAttribute('data-text-color') || '#0f172a',
+    };
+  }
+
+  function fontFamilyKeyFromStack(stack) {
+    stack = String(stack || '').toLowerCase();
+    if (stack.indexOf('courier') >= 0 || stack.indexOf('mono') >= 0) return 'mono';
+    if (stack.indexOf('arial') >= 0) return 'arial';
+    if (stack.indexOf('georgia') >= 0 || stack.indexOf('times') >= 0) return 'serif';
+    if (stack.indexOf('system-ui') >= 0 || stack.indexOf('segoe') >= 0) return 'sans';
+    return '';
+  }
+
+  function readEffectiveTypographyForElement(el) {
+    var fields = readElementTypographyFields(el);
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !selectionInCanvas()) return fields;
+    var anchor = sel.anchorNode;
+    if (!anchor || !el.contains(anchor)) return fields;
+    var walker = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    while (walker && walker !== el) {
+      if (walker.style) {
+        if (walker.style.fontSize) {
+          fields.font_size = parseInt(walker.style.fontSize, 10) || fields.font_size;
+        }
+        if (walker.style.color) {
+          fields.text_color = walker.style.color || fields.text_color;
+        }
+        if (walker.style.fontFamily) {
+          var key = fontFamilyKeyFromStack(walker.style.fontFamily);
+          if (key) fields.font_family = key;
+        }
+      }
+      walker = walker.parentElement;
+    }
+    return fields;
+  }
+
+  function elementHasInlineTypographyOverrides(el) {
+    var found = false;
+    el.querySelectorAll('span, font').forEach(function (node) {
+      var s = node.style;
+      if (s && (s.fontFamily || s.fontSize || s.color)) found = true;
+    });
+    return found;
+  }
+
+  function elementHasCustomTypography(el) {
+    var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
+    var fields = readEffectiveTypographyForElement(el);
+    if (!typographyMatchesParagraphStyleDef(fields, styleKey)) return true;
+    return elementHasInlineTypographyOverrides(el);
+  }
+
+  function resolveParagraphStyleSelectValue(el) {
+    if (elementHasCustomTypography(el)) return 'custom';
+    return canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
+  }
+
+  function setParagraphStyleSelectValue(value) {
+    if (!paragraphStyleSelect) return;
+    paragraphStyleSelect.value = value;
+  }
+
+  function updateParagraphStyleSelectForElement(el) {
+    if (!el || !paragraphStyleSelect) return;
+    setParagraphStyleSelectValue(resolveParagraphStyleSelectValue(el));
+  }
+
   function unwrapElement(node) {
     if (!node || !node.parentNode) return;
     var parent = node.parentNode;
@@ -1152,6 +1234,26 @@
       if (style.fontFamily || style.fontSize || style.color || style.fontWeight || style.fontStyle) {
         unwrapElement(node);
       }
+    });
+  }
+
+  function clearInlineTypographyInSelection(rootEl) {
+    if (!hasTextSelectionInCanvas()) return;
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    if (!rootEl.contains(range.commonAncestorContainer)) return;
+    rootEl.querySelectorAll('span, font').forEach(function (node) {
+      var style = node.style;
+      if (!style || !(style.fontFamily || style.fontSize || style.color || style.fontWeight || style.fontStyle)) {
+        return;
+      }
+      try {
+        if (!range.intersectsNode(node)) return;
+      } catch (err) {
+        return;
+      }
+      unwrapElement(node);
     });
   }
 
@@ -1953,6 +2055,25 @@
     return null;
   }
 
+  function styleTargetFromRowChrome(block, row) {
+    if (!block || !row) return null;
+    var heading = row.querySelector('.cpb-heading');
+    var paragraph = row.querySelector('.cpb-paragraph');
+    if (heading) return { block: block, el: heading, type: 'heading' };
+    if (paragraph) return { block: block, el: paragraph, type: 'paragraph' };
+    return null;
+  }
+
+  function styleTargetFromNode(block, node, focused) {
+    if (!block || !node) return null;
+    var row = node.closest && node.closest('.cpb-paragraph-row, .cpb-heading-row');
+    if (row && node.closest && (node.closest('.cpb-regulatory-ref') || node.closest('.cpb-section-number'))) {
+      var fromChrome = styleTargetFromRowChrome(block, row);
+      if (fromChrome) return fromChrome;
+    }
+    return blockStyleTarget(block, node, focused);
+  }
+
   function blockStyleTarget(block, node, focused) {
     if (!block) return null;
     var calloutTitle = block.querySelector('.cpb-callout-title');
@@ -2001,14 +2122,14 @@
           if (tableBlock) return { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
         var block = node.closest('.cpb-block');
-        var styleTarget = blockStyleTarget(block, node, null);
+        var styleTarget = styleTargetFromNode(block, node, null);
         if (styleTarget) return styleTarget;
       }
     }
     var focused = document.activeElement;
     if (focused && focused.closest) {
       var blockEl = focused.closest('.cpb-block');
-      var focusedTarget = blockStyleTarget(blockEl, focused, focused);
+      var focusedTarget = styleTargetFromNode(blockEl, focused, focused);
       if (focusedTarget) return focusedTarget;
     }
     return null;
@@ -2021,18 +2142,17 @@
       var cellSize = parseInt(target.el.getAttribute('data-font-size') || '10', 10) || 10;
       if (fontSelect) fontSelect.value = cellFont;
       if (fontSizeSelect) fontSizeSelect.value = String(cellSize);
+      if (regulatoryRefInput) regulatoryRefInput.hidden = true;
       return;
     }
     if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       var ps = canonicalParagraphStyleKey(target.el.getAttribute('data-paragraph-style') || 'body');
-      var font = target.el.getAttribute('data-font-family') || 'serif';
-      var size = parseInt(target.el.getAttribute('data-font-size') || '11', 10) || 11;
-      var color = target.el.getAttribute('data-text-color') || '#0f172a';
+      var effective = readEffectiveTypographyForElement(target.el);
       var blockId = parseInt(target.block.getAttribute('data-block-id') || '0', 10);
-      if (paragraphStyleSelect) paragraphStyleSelect.value = ps;
-      if (fontSelect) fontSelect.value = font;
-      if (fontSizeSelect) fontSizeSelect.value = String(size);
-      if (textColorInput) textColorInput.value = color;
+      setParagraphStyleSelectValue(resolveParagraphStyleSelectValue(target.el));
+      if (fontSelect) fontSelect.value = effective.font_family;
+      if (fontSizeSelect) fontSizeSelect.value = String(effective.font_size);
+      if (textColorInput) textColorInput.value = effective.text_color;
       updateRegulatoryRefFieldVisibility(ps, target.el, blockId);
       return;
     }
@@ -2072,13 +2192,17 @@
   }
 
   function getActiveStyleTarget() {
+    var ae = document.activeElement;
+    var toolbarFocused = !!(toolbarEl && ae && toolbarEl.contains(ae));
+    if (toolbarFocused) {
+      restoreSelectionRange();
+    }
     var live = getActiveStyleTargetFromEditor();
     if (live) {
       state.lastStyleTarget = live;
       return live;
     }
-    var ae = document.activeElement;
-    if (toolbarEl && ae && toolbarEl.contains(ae) && isLiveStyleTarget(state.lastStyleTarget)) {
+    if (toolbarFocused && isLiveStyleTarget(state.lastStyleTarget)) {
       return state.lastStyleTarget;
     }
     return isLiveStyleTarget(state.lastStyleTarget) ? state.lastStyleTarget : null;
@@ -2099,6 +2223,15 @@
   function hasTextSelectionInCanvas() {
     var sel = window.getSelection();
     return !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && selectionInCanvas());
+  }
+
+  function selectionCoversElementText(el) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+    if (!el.contains(sel.anchorNode)) return false;
+    var selected = String(sel.toString()).replace(/\u00a0/g, ' ').trim();
+    var full = String(el.textContent || '').replace(/\u00a0/g, ' ').trim();
+    return selected !== '' && selected === full;
   }
 
   function applyInlineStyleToSelection(styles) {
@@ -2209,6 +2342,7 @@
 
   function applyParagraphStyle(styleKey) {
     styleKey = canonicalParagraphStyleKey(styleKey);
+    if (styleKey === 'custom' || styleKey === '') return;
     var target = getActiveStyleTarget();
     if (!isLiveStyleTarget(target) || target.type === 'table-cell') return;
     if (!isBlockTypographyTarget(target)) return;
@@ -2220,11 +2354,28 @@
       font_size: def.font_size || 11,
       color: def.color || '#0f172a',
     };
-    applyTypographyToElement(target.el, typo, styleKey);
+    var stack = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
+    target.el.focus();
+    restoreSelectionRange();
+    var applyWholeBlock = !hasTextSelectionInCanvas() || selectionCoversElementText(target.el);
+    if (applyWholeBlock) {
+      applyTypographyToElement(target.el, typo, styleKey);
+    } else {
+      PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
+      target.el.classList.add('cpb-ps-' + styleKey);
+      target.el.setAttribute('data-paragraph-style', styleKey);
+      clearInlineTypographyInSelection(target.el);
+      restoreSelectionRange();
+      applyInlineStyleToSelection({
+        fontFamily: stack,
+        fontSize: typo.font_size + 'pt',
+        color: typo.color,
+      });
+    }
     if (fontSelect) fontSelect.value = typo.font_family;
     if (fontSizeSelect) fontSizeSelect.value = String(typo.font_size);
     if (textColorInput) textColorInput.value = typo.color;
-    if (paragraphStyleSelect) paragraphStyleSelect.value = styleKey;
+    updateParagraphStyleSelectForElement(target.el);
     var blockId = parseInt(target.block.getAttribute('data-block-id') || '0', 10);
     updateRegulatoryRefFieldVisibility(styleKey, target.el, blockId);
     if (styleKey === 'regulatory_reference') {
@@ -2262,6 +2413,7 @@
         if (stack) target.el.style.fontFamily = stack;
         syncSectionNumberTypography(target.el);
       });
+      updateParagraphStyleSelectForElement(target.el);
     } else if (target.type === 'callout-title' || target.type === 'callout-text') {
       var calloutStack = FONT_STACKS[font];
       applyRichTextStyle(target, { fontFamily: calloutStack || '' }, function () {
@@ -2290,6 +2442,7 @@
         applyFontSizeToElement(target.el, size, true);
       });
       if (fontSizeSelect) fontSizeSelect.value = String(size);
+      updateParagraphStyleSelectForElement(target.el);
     } else if (target.type === 'callout-title' || target.type === 'callout-text') {
       applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
         target.el.style.fontSize = size + 'pt';
@@ -3029,10 +3182,9 @@
   }
 
   document.addEventListener('selectionchange', function () {
-    if (selectionInCanvas()) {
-      saveSelectionRange();
-      rememberStyleTarget();
-    }
+    if (!selectionInCanvas()) return;
+    saveSelectionRange();
+    rememberStyleTarget();
   });
 
   if (toolbarEl) {
@@ -3042,10 +3194,23 @@
     }, true);
   }
 
+  var paragraphStyleSelectValueOnFocus = '';
+
   if (paragraphStyleSelect) {
-    paragraphStyleSelect.addEventListener('focus', rememberStyleTarget);
+    paragraphStyleSelect.addEventListener('focus', function () {
+      paragraphStyleSelectValueOnFocus = paragraphStyleSelect.value;
+      rememberStyleTarget();
+    });
     paragraphStyleSelect.addEventListener('change', function () {
       applyParagraphStyle(paragraphStyleSelect.value);
+      paragraphStyleSelectValueOnFocus = paragraphStyleSelect.value;
+    });
+    paragraphStyleSelect.addEventListener('blur', function () {
+      var value = paragraphStyleSelect.value;
+      if (value === 'custom') return;
+      if (value === paragraphStyleSelectValueOnFocus) {
+        applyParagraphStyle(value);
+      }
     });
   }
 
@@ -3095,6 +3260,7 @@
             syncSectionNumberTypography(target.el);
           }
         });
+        updateParagraphStyleSelectForElement(target.el);
         scheduleSave(target.block);
         flushSave(target.block);
         return;
