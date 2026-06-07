@@ -412,7 +412,7 @@ final class ControlledPublishingBlockService
      */
     private function normalizeTablePayload(array $payload, bool $strict): array
     {
-        $title = trim((string)($payload['title'] ?? ''));
+        $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? '')));
         $hasTitleRow = !empty($payload['has_title_row']);
         $headers = array();
         $rows = array();
@@ -420,7 +420,7 @@ final class ControlledPublishingBlockService
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
-                $headers[] = trim((string)$cell);
+                $headers[] = $this->sanitizeTableCellValue(trim((string)$cell));
             }
         }
 
@@ -431,7 +431,7 @@ final class ControlledPublishingBlockService
                 }
                 $line = array();
                 foreach ($row as $cell) {
-                    $line[] = trim((string)$cell);
+                    $line[] = $this->sanitizeTableCellValue(trim((string)$cell));
                 }
                 if ($line !== array()) {
                     $rows[] = $line;
@@ -505,6 +505,7 @@ final class ControlledPublishingBlockService
         $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
         $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
         $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
+        $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), '');
 
         $headerAlign = array();
         if (is_array($payload['header_align'] ?? null)) {
@@ -513,6 +514,10 @@ final class ControlledPublishingBlockService
             }
         }
         $headerAlign = array_pad(array_slice($headerAlign, 0, $colCount), $colCount, 'left');
+
+        $headerFontFamily = $this->normalizeTableOptionalFontRow($payload, 'header_font_family', $colCount);
+        $headerFontSize = $this->normalizeTableOptionalFontSizeRow($payload, 'header_font_size', $colCount);
+        $headerTextColor = $this->normalizeTableOptionalColorRow($payload, 'header_text_color', $colCount);
 
         $cellAlign = array();
         if (is_array($payload['cell_align'] ?? null)) {
@@ -531,6 +536,10 @@ final class ControlledPublishingBlockService
             $cellAlign[] = array_fill(0, $colCount, 'left');
         }
 
+        $cellFontFamily = $this->normalizeTableOptionalFontGrid($payload, 'cell_font_family', count($normalizedRows), $colCount);
+        $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
+        $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
@@ -545,8 +554,15 @@ final class ControlledPublishingBlockService
             'title_align' => $titleAlign,
             'title_font_family' => $titleFontFamily,
             'title_font_size' => $titleFontSize,
+            'title_text_color' => $titleTextColor,
             'header_align' => $headerAlign,
+            'header_font_family' => $headerFontFamily,
+            'header_font_size' => $headerFontSize,
+            'header_text_color' => $headerTextColor,
             'cell_align' => $cellAlign,
+            'cell_font_family' => $cellFontFamily,
+            'cell_font_size' => $cellFontSize,
+            'cell_text_color' => $cellTextColor,
             'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
     }
@@ -571,6 +587,156 @@ final class ControlledPublishingBlockService
         return in_array($fontSize, $allowed, true) ? $fontSize : 11;
     }
 
+    private function normalizeTableCellFontOptional(string $font): string
+    {
+        $font = strtolower(trim($font));
+        if ($font === '') {
+            return '';
+        }
+        return $this->normalizeTableCellFont($font, '');
+    }
+
+    private function normalizeTableCellFontSizeOptional(mixed $size): int
+    {
+        $fontSize = (int)$size;
+        if ($fontSize <= 0) {
+            return 0;
+        }
+        return $this->normalizeTableCellFontSize($fontSize);
+    }
+
+    private function sanitizeTableCellValue(string $cell): string
+    {
+        $cell = trim($cell);
+        if ($cell === '' || str_starts_with($cell, '=')) {
+            return $cell;
+        }
+        if (str_contains($cell, '<')) {
+            return ControlledPublishingHtmlSanitizer::sanitizeInline($cell);
+        }
+        return $cell;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<string>
+     */
+    private function normalizeTableOptionalFontRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $font) {
+                $out[] = $this->normalizeTableCellFontOptional((string)$font);
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, '');
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<int>
+     */
+    private function normalizeTableOptionalFontSizeRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $size) {
+                $out[] = $this->normalizeTableCellFontSizeOptional($size);
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, 0);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<string>
+     */
+    private function normalizeTableOptionalColorRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $color) {
+                $out[] = $this->normalizeTableHexColor((string)$color, '');
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, '');
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<string>>
+     */
+    private function normalizeTableOptionalFontGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $font) {
+                    $line[] = $this->normalizeTableCellFontOptional((string)$font);
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, '');
+        }
+        return array_slice($grid, 0, $rowCount);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<int>>
+     */
+    private function normalizeTableOptionalFontSizeGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $size) {
+                    $line[] = $this->normalizeTableCellFontSizeOptional($size);
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, 0);
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, 0);
+        }
+        return array_slice($grid, 0, $rowCount);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<string>>
+     */
+    private function normalizeTableOptionalColorGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $color) {
+                    $line[] = $this->normalizeTableHexColor((string)$color, '');
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, '');
+        }
+        return array_slice($grid, 0, $rowCount);
+    }
+
     private function normalizeTableHexColor(string $color, string $fallback): string
     {
         $color = trim($color);
@@ -592,8 +758,8 @@ final class ControlledPublishingBlockService
         if (!in_array($type, array('warning', 'caution', 'info'), true)) {
             $type = 'warning';
         }
-        $title = trim((string)($payload['title'] ?? strtoupper($type)));
-        $text = trim((string)($payload['text'] ?? ''));
+        $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? strtoupper($type))));
+        $text = $this->sanitizeTableCellValue(trim((string)($payload['text'] ?? '')));
         if ($strict && $text === '') {
             throw new RuntimeException('Callout text is required.');
         }
@@ -601,6 +767,12 @@ final class ControlledPublishingBlockService
             'callout_type' => $type,
             'title' => $title !== '' ? $title : strtoupper($type),
             'text' => $text,
+            'title_font_family' => $this->normalizeTableCellFontOptional((string)($payload['title_font_family'] ?? '')),
+            'title_font_size' => $this->normalizeTableCellFontSizeOptional($payload['title_font_size'] ?? 0),
+            'title_text_color' => $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), ''),
+            'text_font_family' => $this->normalizeTableCellFontOptional((string)($payload['text_font_family'] ?? '')),
+            'text_font_size' => $this->normalizeTableCellFontSizeOptional($payload['text_font_size'] ?? 0),
+            'text_text_color' => $this->normalizeTableHexColor((string)($payload['text_text_color'] ?? ''), ''),
         );
     }
 

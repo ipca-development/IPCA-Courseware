@@ -1145,10 +1145,17 @@
   }
 
   function readElementTypographyFields(el) {
+    var fontFamily = el.getAttribute('data-font-family') || '';
+    var fontSize = parseInt(el.getAttribute('data-font-size') || '0', 10) || 0;
+    if (!fontFamily || !fontSize) {
+      var def = paragraphStyleDef('body');
+      if (!fontFamily) fontFamily = def.font_family || 'serif';
+      if (!fontSize) fontSize = def.font_size || 11;
+    }
     return {
-      font_family: el.getAttribute('data-font-family') || 'serif',
-      font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
-      text_color: el.getAttribute('data-text-color') || '#0f172a',
+      font_family: fontFamily,
+      font_size: fontSize,
+      text_color: el.getAttribute('data-text-color') || paragraphStyleDef('body').color || '#0f172a',
     };
   }
 
@@ -1203,8 +1210,16 @@
   }
 
   function resolveParagraphStyleSelectValue(el) {
-    if (elementHasCustomTypography(el)) return 'custom';
-    return canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
+    if (!el) return 'body';
+    var styleKey = el.getAttribute('data-paragraph-style');
+    if (styleKey) {
+      if (elementHasCustomTypography(el)) return 'custom';
+      return canonicalParagraphStyleKey(styleKey) || 'body';
+    }
+    var fields = readEffectiveTypographyForElement(el);
+    if (elementHasInlineTypographyOverrides(el)) return 'custom';
+    if (typographyMatchesParagraphStyleDef(fields, 'body')) return 'body';
+    return 'custom';
   }
 
   function setParagraphStyleSelectValue(value) {
@@ -1431,10 +1446,17 @@
       var titleEl = blockEl.querySelector('.cpb-callout-title');
       var textEl = blockEl.querySelector('.cpb-callout-text');
       var calloutRoot = blockEl.querySelector('.cpb-callout');
+      var calloutType = calloutRoot ? (calloutRoot.getAttribute('data-callout-type') || 'warning') : 'warning';
       return {
-        callout_type: calloutRoot ? (calloutRoot.getAttribute('data-callout-type') || 'warning') : 'warning',
-        title: titleEl ? titleEl.textContent.trim() : 'WARNING',
-        text: textEl ? textEl.textContent.trim() : '',
+        callout_type: calloutType,
+        title: titleEl ? stripEditorChromeFromHtml(titleEl.innerHTML) : calloutType.toUpperCase(),
+        text: textEl ? stripEditorChromeFromHtml(textEl.innerHTML) : '',
+        title_font_family: titleEl ? (titleEl.getAttribute('data-font-family') || '') : '',
+        title_font_size: titleEl && titleEl.getAttribute('data-font-size') ? parseInt(titleEl.getAttribute('data-font-size'), 10) : 0,
+        title_text_color: titleEl ? extractCellTextColor(titleEl) : '',
+        text_font_family: textEl ? (textEl.getAttribute('data-font-family') || '') : '',
+        text_font_size: textEl && textEl.getAttribute('data-font-size') ? parseInt(textEl.getAttribute('data-font-size'), 10) : 0,
+        text_text_color: textEl ? extractCellTextColor(textEl) : '',
       };
     }
     return {};
@@ -1533,11 +1555,25 @@
   }
 
   function extractCellFontFamily(cell) {
-    return cell.getAttribute('data-font-family') || 'serif';
+    return cell.getAttribute('data-font-family') || '';
   }
 
   function extractCellFontSize(cell) {
-    return parseInt(cell.getAttribute('data-font-size') || '11', 10) || 11;
+    var size = cell.getAttribute('data-font-size');
+    return size ? (parseInt(size, 10) || 0) : 0;
+  }
+
+  function extractCellTextColor(cell) {
+    return cell.getAttribute('data-text-color') || '';
+  }
+
+  function extractCellHtml(cell) {
+    if (!cell) return '';
+    if (cell.tagName === 'TH') {
+      var textEl = cell.querySelector('.cpb-th-text');
+      return stripEditorChromeFromHtml(textEl ? textEl.innerHTML : cell.innerHTML);
+    }
+    return stripEditorChromeFromHtml(cell.innerHTML);
   }
 
   function applyTableBlockAlign(blockEl, align) {
@@ -1562,7 +1598,6 @@
         cell.style.fontFamily = stack;
         cell.style.setProperty('font-family', stack, 'important');
       }
-      cell.style.removeProperty('color');
       cell.style.removeProperty('letter-spacing');
       cell.style.removeProperty('text-transform');
     }
@@ -1570,10 +1605,37 @@
       cell.style.fontSize = opts.size + 'pt';
       cell.setAttribute('data-font-size', String(opts.size));
     }
+    if (opts.color) {
+      cell.style.color = opts.color;
+      cell.setAttribute('data-text-color', opts.color);
+    }
     if (opts.align) {
       cell.style.textAlign = opts.align;
       cell.setAttribute('data-cell-align', opts.align);
     }
+  }
+
+  function applyTypographyToTableCell(cell, typo) {
+    if (!cell) return;
+    clearInlineTypographyInElement(cell);
+    applyStyleToTableCell(cell, {
+      font: typo.font_family,
+      size: typo.font_size,
+      color: typo.color,
+    });
+  }
+
+  function applyTypographyToCalloutElement(el, typo) {
+    if (!el) return;
+    clearInlineTypographyInElement(el);
+    FONT_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
+    el.classList.add('cpb-font-' + typo.font_family);
+    el.setAttribute('data-font-family', typo.font_family);
+    el.setAttribute('data-font-size', String(typo.font_size));
+    el.setAttribute('data-text-color', typo.color);
+    el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
+    el.style.fontSize = typo.font_size + 'pt';
+    el.style.color = typo.color;
   }
 
   function wireImageBlock(blockEl) {
@@ -1587,7 +1649,7 @@
     var table = blockEl.querySelector('table');
     var wrap = tableWrap(blockEl);
     var titleCell = blockEl.querySelector('tr[data-title-row] td');
-    var title = titleCell ? titleCell.textContent.trim() : '';
+    var title = '';
     var headers = [];
     var rows = [];
     var colWidths = [];
@@ -1595,9 +1657,16 @@
     var cellBg = [];
     var headerAlign = [];
     var cellAlign = [];
+    var headerFontFamily = [];
+    var headerFontSize = [];
+    var headerTextColor = [];
+    var cellFontFamily = [];
+    var cellFontSize = [];
+    var cellTextColor = [];
     var titleAlign = 'center';
-    var titleFontFamily = 'serif';
-    var titleFontSize = 11;
+    var titleFontFamily = '';
+    var titleFontSize = 0;
+    var titleTextColor = '';
     var tableBlock = blockEl.querySelector('.cpb-table-block');
     var tableAlign = tableBlock ? (tableBlock.getAttribute('data-table-align') || 'left') : 'left';
 
@@ -1605,30 +1674,43 @@
       var head = tableHeaderRow(blockEl);
       if (head) {
         head.querySelectorAll('th').forEach(function (th) {
-          var textEl = th.querySelector('.cpb-th-text');
-          headers.push((textEl ? textEl.textContent : th.textContent).trim());
+          headers.push(extractCellHtml(th));
           headerBg.push(extractCellBg(th));
           headerAlign.push(extractCellAlign(th));
+          headerFontFamily.push(extractCellFontFamily(th));
+          headerFontSize.push(extractCellFontSize(th));
+          headerTextColor.push(extractCellTextColor(th));
         });
       }
       if (titleCell) {
+        title = extractCellHtml(titleCell);
         titleAlign = extractCellAlign(titleCell);
         titleFontFamily = extractCellFontFamily(titleCell);
         titleFontSize = extractCellFontSize(titleCell);
+        titleTextColor = extractCellTextColor(titleCell);
       }
       table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
         var line = [];
         var bgLine = [];
         var alignLine = [];
+        var fontLine = [];
+        var sizeLine = [];
+        var colorLine = [];
         tr.querySelectorAll('td').forEach(function (td) {
-          line.push(td.textContent.trim());
+          line.push(extractCellHtml(td));
           bgLine.push(extractCellBg(td));
           alignLine.push(extractCellAlign(td));
+          fontLine.push(extractCellFontFamily(td));
+          sizeLine.push(extractCellFontSize(td));
+          colorLine.push(extractCellTextColor(td));
         });
         if (line.length) {
           rows.push(line);
           cellBg.push(bgLine);
           cellAlign.push(alignLine);
+          cellFontFamily.push(fontLine);
+          cellFontSize.push(sizeLine);
+          cellTextColor.push(colorLine);
         }
       });
       table.querySelectorAll('colgroup col').forEach(function (col) {
@@ -1651,8 +1733,15 @@
       title_align: titleAlign,
       title_font_family: titleFontFamily,
       title_font_size: titleFontSize,
+      title_text_color: titleTextColor,
       header_align: headerAlign,
+      header_font_family: headerFontFamily,
+      header_font_size: headerFontSize,
+      header_text_color: headerTextColor,
       cell_align: cellAlign,
+      cell_font_family: cellFontFamily,
+      cell_font_size: cellFontSize,
+      cell_text_color: cellTextColor,
       table_align: tableAlign,
     };
   }
@@ -2138,10 +2227,11 @@
   function syncToolbarFromTarget(target) {
     if (!target) return;
     if (target.type === 'table-cell') {
-      var cellFont = target.el.getAttribute('data-font-family') || 'serif';
-      var cellSize = parseInt(target.el.getAttribute('data-font-size') || '10', 10) || 10;
-      if (fontSelect) fontSelect.value = cellFont;
-      if (fontSizeSelect) fontSizeSelect.value = String(cellSize);
+      var cellEffective = readEffectiveTypographyForElement(target.el);
+      if (fontSelect) fontSelect.value = cellEffective.font_family;
+      if (fontSizeSelect) fontSizeSelect.value = String(cellEffective.font_size);
+      if (textColorInput) textColorInput.value = cellEffective.text_color;
+      updateParagraphStyleSelectForElement(target.el);
       if (regulatoryRefInput) regulatoryRefInput.hidden = true;
       return;
     }
@@ -2157,13 +2247,13 @@
       return;
     }
     if (target.type === 'callout-title' || target.type === 'callout-text') {
-      if (paragraphStyleSelect) paragraphStyleSelect.value = 'body';
-      if (fontSelect) fontSelect.value = 'sans';
-      if (fontSizeSelect) {
-        fontSizeSelect.value = target.type === 'callout-title' ? '11' : '10';
-      }
-      if (textColorInput) textColorInput.value = '#1e293b';
+      var calloutEffective = readEffectiveTypographyForElement(target.el);
+      setParagraphStyleSelectValue(resolveParagraphStyleSelectValue(target.el));
+      if (fontSelect) fontSelect.value = calloutEffective.font_family;
+      if (fontSizeSelect) fontSizeSelect.value = String(calloutEffective.font_size);
+      if (textColorInput) textColorInput.value = calloutEffective.text_color;
       if (regulatoryRefInput) regulatoryRefInput.hidden = true;
+      return;
     }
   }
 
@@ -2344,9 +2434,7 @@
     styleKey = canonicalParagraphStyleKey(styleKey);
     if (styleKey === 'custom' || styleKey === '') return;
     var target = getActiveStyleTarget();
-    if (!isLiveStyleTarget(target) || target.type === 'table-cell') return;
-    if (!isBlockTypographyTarget(target)) return;
-    pushUndo();
+    if (!isLiveStyleTarget(target)) return;
     var styles = state.bookStyles || defaultBookStyles();
     var def = (styles.paragraph_styles && styles.paragraph_styles[styleKey]) || styles.paragraph_styles.body;
     var typo = {
@@ -2355,6 +2443,46 @@
       color: def.color || '#0f172a',
     };
     var stack = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
+
+    if (target.type === 'table-cell' || target.type === 'callout-title' || target.type === 'callout-text') {
+      pushUndo();
+      target.el.focus();
+      restoreSelectionRange();
+      var applyWhole = !hasTextSelectionInCanvas() || selectionCoversElementText(target.el);
+      if (target.type === 'table-cell') {
+        if (applyWhole) {
+          applyTypographyToTableCell(target.el, typo);
+        } else {
+          clearInlineTypographyInSelection(target.el);
+          restoreSelectionRange();
+          applyInlineStyleToSelection({
+            fontFamily: stack,
+            fontSize: typo.font_size + 'pt',
+            color: typo.color,
+          });
+        }
+      } else if (applyWhole) {
+        applyTypographyToCalloutElement(target.el, typo);
+      } else {
+        clearInlineTypographyInSelection(target.el);
+        restoreSelectionRange();
+        applyInlineStyleToSelection({
+          fontFamily: stack,
+          fontSize: typo.font_size + 'pt',
+          color: typo.color,
+        });
+      }
+      if (fontSelect) fontSelect.value = typo.font_family;
+      if (fontSizeSelect) fontSizeSelect.value = String(typo.font_size);
+      if (textColorInput) textColorInput.value = typo.color;
+      updateParagraphStyleSelectForElement(target.el);
+      scheduleSave(target.block);
+      flushSave(target.block);
+      return;
+    }
+
+    if (!isBlockTypographyTarget(target)) return;
+    pushUndo();
     target.el.focus();
     restoreSelectionRange();
     var applyWholeBlock = !hasTextSelectionInCanvas() || selectionCoversElementText(target.el);
@@ -2404,6 +2532,7 @@
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { font: font });
+      updateParagraphStyleSelectForElement(target.el);
     } else if (isBlockTypographyTarget(target)) {
       var stack = FONT_STACKS[font];
       applyRichTextStyle(target, { fontFamily: stack || '' }, function () {
@@ -2417,8 +2546,12 @@
     } else if (target.type === 'callout-title' || target.type === 'callout-text') {
       var calloutStack = FONT_STACKS[font];
       applyRichTextStyle(target, { fontFamily: calloutStack || '' }, function () {
+        FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
+        target.el.classList.add('cpb-font-' + font);
+        target.el.setAttribute('data-font-family', font);
         if (calloutStack) target.el.style.fontFamily = calloutStack;
       });
+      updateParagraphStyleSelectForElement(target.el);
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -2437,6 +2570,7 @@
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { size: size });
+      updateParagraphStyleSelectForElement(target.el);
     } else if (isBlockTypographyTarget(target)) {
       applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
         applyFontSizeToElement(target.el, size, true);
@@ -2446,8 +2580,10 @@
     } else if (target.type === 'callout-title' || target.type === 'callout-text') {
       applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
         target.el.style.fontSize = size + 'pt';
+        target.el.setAttribute('data-font-size', String(size));
       });
       if (fontSizeSelect) fontSizeSelect.value = String(size);
+      updateParagraphStyleSelectForElement(target.el);
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -3251,7 +3387,28 @@
     textColorInput.addEventListener('input', function () {
       var target = getActiveStyleTarget();
       var color = textColorInput.value;
-      if (target && target.type !== 'table-cell' && isRichTextStyleTarget(target)) {
+      if (target && target.type === 'table-cell') {
+        pushUndo();
+        applyRichTextStyle(target, { color: color }, function () {
+          applyStyleToTableCell(target.el, { color: color });
+        });
+        updateParagraphStyleSelectForElement(target.el);
+        scheduleSave(target.block);
+        flushSave(target.block);
+        return;
+      }
+      if (target && (target.type === 'callout-title' || target.type === 'callout-text')) {
+        pushUndo();
+        applyRichTextStyle(target, { color: color }, function () {
+          target.el.style.color = color;
+          target.el.setAttribute('data-text-color', color);
+        });
+        updateParagraphStyleSelectForElement(target.el);
+        scheduleSave(target.block);
+        flushSave(target.block);
+        return;
+      }
+      if (target && isRichTextStyleTarget(target)) {
         pushUndo();
         applyRichTextStyle(target, { color: color }, function () {
           target.el.style.color = color;

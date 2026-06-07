@@ -481,8 +481,15 @@ final class ControlledPublishingBookRenderer
         $titleAlign = (string)$table['title_align'];
         $titleFontFamily = (string)$table['title_font_family'];
         $titleFontSize = (int)$table['title_font_size'];
+        $titleTextColor = (string)$table['title_text_color'];
         $headerAligns = $table['header_align'];
+        $headerFontFamilies = $table['header_font_family'];
+        $headerFontSizes = $table['header_font_size'];
+        $headerTextColors = $table['header_text_color'];
         $cellAligns = $table['cell_align'];
+        $cellFontFamilies = $table['cell_font_family'];
+        $cellFontSizes = $table['cell_font_size'];
+        $cellTextColors = $table['cell_text_color'];
         $hasTitleRow = !empty($table['has_title_row']);
         $tableAlign = (string)$table['table_align'];
         $colCount = count($headers);
@@ -503,10 +510,11 @@ final class ControlledPublishingBookRenderer
 
         $html .= '<thead>';
         if ($hasTitleRow) {
-            $titleRowClass = 'cpb-table-title-row' . ($title === '' ? ' is-empty' : '');
+            $titlePlain = trim(strip_tags($title));
+            $titleRowClass = 'cpb-table-title-row' . ($titlePlain === '' ? ' is-empty' : '');
             $titleEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-            $titleDisplay = $title !== '' ? h($title) : '';
-            $titleVisual = $this->tableCellVisualAttr($titleBg, $titleAlign, $titleFontFamily, $titleFontSize);
+            $titleDisplay = $this->renderTableCellInner($title, $edit, $rows);
+            $titleVisual = $this->tableCellVisualAttr($titleBg, $titleAlign, $titleFontFamily, $titleFontSize, $titleTextColor);
             $html .= '<tr class="' . $titleRowClass . '" data-title-row="1">';
             $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleVisual
                 . ' data-placeholder="Table title (spans all columns)">' . $titleDisplay . '</td>';
@@ -519,8 +527,11 @@ final class ControlledPublishingBookRenderer
             $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $headerBg = (string)($headerBgs[$colIndex] ?? '');
             $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
-            $html .= '<th' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign) . ' data-col-index="' . $colIndex . '">';
-            $html .= '<span class="cpb-th-text">' . h((string)$header) . '</span>';
+            $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
+            $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
+            $headerColor = (string)($headerTextColors[$colIndex] ?? '');
+            $html .= '<th' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign, $headerFont, $headerSize, $headerColor) . ' data-col-index="' . $colIndex . '">';
+            $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
             if ($edit) {
                 $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
             }
@@ -538,15 +549,15 @@ final class ControlledPublishingBookRenderer
                 $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
                 $bg = (string)($cellBgs[$rowIndex][$cellIndex] ?? '');
                 $align = (string)($cellAligns[$rowIndex][$cellIndex] ?? 'left');
+                $cellFont = (string)($cellFontFamilies[$rowIndex][$cellIndex] ?? '');
+                $cellSize = (int)($cellFontSizes[$rowIndex][$cellIndex] ?? 0);
+                $cellColor = (string)($cellTextColors[$rowIndex][$cellIndex] ?? '');
                 $rawCell = (string)$cell;
-                $displayCell = $edit
-                    ? $rawCell
-                    : ControlledPublishingTableFormula::displayValue($rawCell, $rows);
                 $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
                     ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
                     : '';
-                $html .= '<td' . $cellEdit . $this->tableCellVisualAttr($bg, $align) . $formulaAttr . '>'
-                    . h($displayCell) . '</td>';
+                $html .= '<td' . $cellEdit . $this->tableCellVisualAttr($bg, $align, $cellFont, $cellSize, $cellColor) . $formulaAttr . '>'
+                    . $this->renderTableCellInner($rawCell, $edit, $rows) . '</td>';
                 $cellIndex++;
             }
             $html .= '</tr>';
@@ -600,7 +611,7 @@ final class ControlledPublishingBookRenderer
      */
     private function normalizeTableShape(array $payload): array
     {
-        $title = trim((string)($payload['title'] ?? ''));
+        $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? '')));
         $hasTitleRow = !empty($payload['has_title_row']);
         $headers = array();
         $rows = array();
@@ -608,7 +619,7 @@ final class ControlledPublishingBookRenderer
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
-                $headers[] = trim((string)$cell);
+                $headers[] = $this->sanitizeTableCellValue(trim((string)$cell));
             }
         }
         if (is_array($payload['rows'] ?? null)) {
@@ -618,7 +629,7 @@ final class ControlledPublishingBookRenderer
                 }
                 $line = array();
                 foreach ($row as $cell) {
-                    $line[] = trim((string)$cell);
+                    $line[] = $this->sanitizeTableCellValue(trim((string)$cell));
                 }
                 $rows[] = $line;
             }
@@ -681,6 +692,7 @@ final class ControlledPublishingBookRenderer
         $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
         $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
         $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
+        $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), '');
 
         $headerAlign = array();
         if (is_array($payload['header_align'] ?? null)) {
@@ -689,6 +701,10 @@ final class ControlledPublishingBookRenderer
             }
         }
         $headerAlign = array_pad(array_slice($headerAlign, 0, $colCount), $colCount, 'left');
+
+        $headerFontFamily = $this->normalizeTableOptionalFontRow($payload, 'header_font_family', $colCount);
+        $headerFontSize = $this->normalizeTableOptionalFontSizeRow($payload, 'header_font_size', $colCount);
+        $headerTextColor = $this->normalizeTableOptionalColorRow($payload, 'header_text_color', $colCount);
 
         $cellAlign = array();
         if (is_array($payload['cell_align'] ?? null)) {
@@ -707,6 +723,10 @@ final class ControlledPublishingBookRenderer
             $cellAlign[] = array_fill(0, $colCount, 'left');
         }
 
+        $cellFontFamily = $this->normalizeTableOptionalFontGrid($payload, 'cell_font_family', count($normalizedRows), $colCount);
+        $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
+        $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
@@ -721,8 +741,15 @@ final class ControlledPublishingBookRenderer
             'title_align' => $titleAlign,
             'title_font_family' => $titleFontFamily,
             'title_font_size' => $titleFontSize,
+            'title_text_color' => $titleTextColor,
             'header_align' => $headerAlign,
+            'header_font_family' => $headerFontFamily,
+            'header_font_size' => $headerFontSize,
+            'header_text_color' => $headerTextColor,
             'cell_align' => $cellAlign,
+            'cell_font_family' => $cellFontFamily,
+            'cell_font_size' => $cellFontSize,
+            'cell_text_color' => $cellTextColor,
             'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
     }
@@ -763,7 +790,8 @@ final class ControlledPublishingBookRenderer
         string $bg = '',
         string $align = '',
         string $fontFamily = '',
-        int $fontSize = 0
+        int $fontSize = 0,
+        string $textColor = ''
     ): string {
         $styles = array();
         $attrs = array();
@@ -788,6 +816,10 @@ final class ControlledPublishingBookRenderer
             $styles[] = 'font-size:' . $fontSize . 'pt';
             $attrs['data-font-size'] = (string)$fontSize;
         }
+        if ($textColor !== '') {
+            $styles[] = 'color:' . $textColor;
+            $attrs['data-text-color'] = $textColor;
+        }
 
         $html = '';
         if ($styles !== array()) {
@@ -797,6 +829,171 @@ final class ControlledPublishingBookRenderer
             $html .= ' ' . $key . '="' . h((string)$value) . '"';
         }
         return $html;
+    }
+
+    private function sanitizeTableCellValue(string $cell): string
+    {
+        $cell = trim($cell);
+        if ($cell === '' || str_starts_with($cell, '=')) {
+            return $cell;
+        }
+        if (str_contains($cell, '<')) {
+            return ControlledPublishingHtmlSanitizer::sanitizeInline($cell);
+        }
+        return $cell;
+    }
+
+    /**
+     * @param list<list<string>> $allRows
+     */
+    private function renderTableCellInner(string $cell, bool $edit, array $allRows): string
+    {
+        $raw = (string)$cell;
+        if (!$edit && str_starts_with($raw, '=')) {
+            return h(ControlledPublishingTableFormula::displayValue($raw, $allRows));
+        }
+        if (str_contains($raw, '<')) {
+            return ControlledPublishingHtmlSanitizer::sanitizeInline($raw);
+        }
+        return h($raw);
+    }
+
+    private function normalizeTableCellFontOptional(string $font): string
+    {
+        $font = strtolower(trim($font));
+        if ($font === '') {
+            return '';
+        }
+        return $this->normalizeTableCellFont($font, '');
+    }
+
+    private function normalizeTableCellFontSizeOptional(mixed $size): int
+    {
+        $fontSize = (int)$size;
+        if ($fontSize <= 0) {
+            return 0;
+        }
+        return $this->normalizeTableCellFontSize($fontSize);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<string>
+     */
+    private function normalizeTableOptionalFontRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $font) {
+                $out[] = $this->normalizeTableCellFontOptional((string)$font);
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, '');
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<int>
+     */
+    private function normalizeTableOptionalFontSizeRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $size) {
+                $out[] = $this->normalizeTableCellFontSizeOptional($size);
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, 0);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<string>
+     */
+    private function normalizeTableOptionalColorRow(array $payload, string $key, int $colCount): array
+    {
+        $out = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $color) {
+                $out[] = $this->normalizeTableHexColor((string)$color, '');
+            }
+        }
+        return array_pad(array_slice($out, 0, $colCount), $colCount, '');
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<string>>
+     */
+    private function normalizeTableOptionalFontGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $font) {
+                    $line[] = $this->normalizeTableCellFontOptional((string)$font);
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, '');
+        }
+        return array_slice($grid, 0, $rowCount);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<int>>
+     */
+    private function normalizeTableOptionalFontSizeGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $size) {
+                    $line[] = $this->normalizeTableCellFontSizeOptional($size);
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, 0);
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, 0);
+        }
+        return array_slice($grid, 0, $rowCount);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<list<string>>
+     */
+    private function normalizeTableOptionalColorGrid(array $payload, string $key, int $rowCount, int $colCount): array
+    {
+        $grid = array();
+        if (is_array($payload[$key] ?? null)) {
+            foreach ($payload[$key] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $color) {
+                    $line[] = $this->normalizeTableHexColor((string)$color, '');
+                }
+                $grid[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, '');
+        }
+        return array_slice($grid, 0, $rowCount);
     }
 
     private function fontFamilyStack(string $fontFamily): string
@@ -862,15 +1059,25 @@ final class ControlledPublishingBookRenderer
         }
         $title = (string)($payload['title'] ?? strtoupper($type));
         $text = (string)($payload['text'] ?? '');
+        $titleFontFamily = (string)($payload['title_font_family'] ?? '');
+        $titleFontSize = (int)($payload['title_font_size'] ?? 0);
+        $titleTextColor = (string)($payload['title_text_color'] ?? '');
+        $textFontFamily = (string)($payload['text_font_family'] ?? '');
+        $textFontSize = (int)($payload['text_font_size'] ?? 0);
+        $textTextColor = (string)($payload['text_text_color'] ?? '');
         $edit = $mode === self::MODE_EDIT;
         $icon = $type;
         $titleEdit = $edit ? ' contenteditable="true" data-field="callout_title" spellcheck="true"' : '';
         $textEdit = $edit ? ' contenteditable="true" data-field="callout_text" spellcheck="true"' : '';
+        $titleVisual = $this->tableCellVisualAttr('', '', $titleFontFamily, $titleFontSize, $titleTextColor);
+        $textVisual = $this->tableCellVisualAttr('', '', $textFontFamily, $textFontSize, $textTextColor);
+        $titleHtml = $title !== '' ? $this->renderTableCellInner($title, $edit, array()) : h(strtoupper($type));
+        $textHtml = $text !== '' ? $this->renderTableCellInner($text, $edit, array()) : '';
         return '<div class="cpb-callout cpb-callout--' . h($type) . '" data-callout-type="' . h($type) . '">'
             . '<div class="cpb-callout-icon cpb-callout-icon--' . h($icon) . '" aria-hidden="true"></div>'
             . '<div class="cpb-callout-body">'
-            . '<div class="cpb-callout-title"' . $titleEdit . '>' . h($title) . '</div>'
-            . '<div class="cpb-callout-text"' . $textEdit . '>' . nl2br(h($text), false) . '</div>'
+            . '<div class="cpb-callout-title"' . $titleEdit . $titleVisual . '>' . $titleHtml . '</div>'
+            . '<div class="cpb-callout-text"' . $textEdit . $textVisual . '>' . $textHtml . '</div>'
             . '</div></div>';
     }
 
