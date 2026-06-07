@@ -515,11 +515,14 @@ final class ControlledPublishingBlockService
     }
 
     /**
-     * @return array{font_family:string,text_align:string}
+     * @return array{font_family:string,text_align:string,font_size:int}
      */
     private function normalizeStyleFields(array $payload): array
     {
-        $fonts = array('serif', 'sans', 'mono', 'arial');
+        $fonts = array(
+            'serif', 'sans', 'mono', 'arial',
+            'manuallabel', 'manualtitle', 'sectiontitle',
+        );
         $font = strtolower(trim((string)($payload['font_family'] ?? 'serif')));
         if (!in_array($font, $fonts, true)) {
             $font = 'serif';
@@ -528,7 +531,12 @@ final class ControlledPublishingBlockService
         if (!in_array($align, array('left', 'center', 'right'), true)) {
             $align = 'left';
         }
-        return array('font_family' => $font, 'text_align' => $align);
+        $allowedSizes = array(8, 9, 10, 11, 12, 14, 16, 18);
+        $fontSize = (int)($payload['font_size'] ?? 11);
+        if (!in_array($fontSize, $allowedSizes, true)) {
+            $fontSize = 11;
+        }
+        return array('font_family' => $font, 'text_align' => $align, 'font_size' => $fontSize);
     }
 
     /**

@@ -102,6 +102,7 @@ compliance_page_open(array(
       <div class="cpb-toolbar" id="cpbToolbar">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbUndo" title="Undo (Ctrl+Z)">↶</button>
+          <button type="button" class="cpb-tool-btn" id="cpbRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
         </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold"><strong>B</strong></button>
@@ -115,10 +116,23 @@ compliance_page_open(array(
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--style">
           <select id="cpbFontSelect" class="cpb-tool-select" title="Font family">
-            <option value="serif">Serif</option>
+            <option value="serif">Body</option>
             <option value="sans">Sans</option>
-            <option value="mono">Mono</option>
             <option value="arial">Arial</option>
+            <option value="mono">Mono</option>
+            <option value="manuallabel">Manual label</option>
+            <option value="manualtitle">Manual title</option>
+            <option value="sectiontitle">Section title</option>
+          </select>
+          <select id="cpbFontSizeSelect" class="cpb-tool-select cpb-tool-select--size" title="Font size">
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11" selected>11</option>
+            <option value="12">12</option>
+            <option value="14">14</option>
+            <option value="16">16</option>
+            <option value="18">18</option>
           </select>
           <input type="color" id="cpbTextColor" class="cpb-tool-color" value="#0f172a" title="Text color">
         </div>

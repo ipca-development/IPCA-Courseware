@@ -236,7 +236,8 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '">';
-        $html .= '<table class="cpb-table" data-field="table">';
+        $totalWidth = array_sum($colWidths);
+        $html .= '<table class="cpb-table" data-field="table" style="width:' . max(1, $totalWidth) . 'px">';
         $html .= '<colgroup>';
         foreach ($colWidths as $width) {
             $html .= '<col style="width:' . (int)$width . 'px">';
@@ -517,9 +518,14 @@ final class ControlledPublishingBookRenderer
         if (!in_array($align, array('left', 'center', 'right'), true)) {
             $align = 'left';
         }
-        return ' style="text-align:' . h($align) . '"'
+        $fontSize = (int)($payload['font_size'] ?? 11);
+        if ($fontSize < 8 || $fontSize > 18) {
+            $fontSize = 11;
+        }
+        return ' style="text-align:' . h($align) . ';font-size:' . $fontSize . 'pt"'
             . ' data-font-family="' . h((string)($payload['font_family'] ?? 'serif')) . '"'
-            . ' data-text-align="' . h($align) . '"';
+            . ' data-text-align="' . h($align) . '"'
+            . ' data-font-size="' . $fontSize . '"';
     }
 
     /**

@@ -15,13 +15,27 @@
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
   var undoBtn = document.getElementById('cpbUndo');
+  var redoBtn = document.getElementById('cpbRedo');
   var fontSelect = document.getElementById('cpbFontSelect');
+  var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
   var textColorInput = document.getElementById('cpbTextColor');
   var manageCalloutsBtn = document.getElementById('cpbManageCallouts');
   var syncHighlightsBtn = document.getElementById('cpbSyncHighlights');
 
-  var FONT_CLASSES = ['cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial'];
+  var FONT_CLASSES = [
+    'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
+    'cpb-font-manuallabel', 'cpb-font-manualtitle', 'cpb-font-sectiontitle',
+  ];
   var ALIGN_CLASSES = ['cpb-align-left', 'cpb-align-center', 'cpb-align-right'];
+  var FONT_PRESET_SIZES = {
+    serif: 11,
+    sans: 11,
+    mono: 11,
+    arial: 11,
+    manuallabel: 9,
+    manualtitle: 16,
+    sectiontitle: 14,
+  };
 
   var state = {
     versionId: versionId,
@@ -314,6 +328,20 @@
     setStatus('Undone', 'saved');
   }
 
+  function doRedo() {
+    var active = document.activeElement;
+    if (active && active.isContentEditable && document.queryCommandSupported('redo')) {
+      document.execCommand('redo');
+      var blockEl = active.closest('.cpb-block');
+      if (blockEl) scheduleSave(blockEl);
+      return;
+    }
+    if (state.redoStack.length === 0) return;
+    state.undoStack.push(captureUndoSnapshot());
+    restoreUndoSnapshot(state.redoStack.pop());
+    setStatus('Redone', 'saved');
+  }
+
   function extractLayout() {
     var sheet = canvasEl.querySelector('.cpb-sheet');
     if (!sheet) return {};
@@ -479,6 +507,46 @@
       setStatus('Copied', 'saved');
     });
 
+    canvasEl.addEventListener('mousedown', function (e) {
+      var handle = e.target.closest('.cpb-col-resize');
+      if (!handle || !state.editable) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var blockEl = handle.closest('.cpb-block--table');
+      if (!blockEl) return;
+      pushUndo();
+      var colIndex = parseInt(handle.getAttribute('data-col-index') || '0', 10);
+      var table = blockEl.querySelector('table');
+      if (!table) return;
+      var cols = table.querySelectorAll('colgroup col');
+      var col = cols[colIndex];
+      var startX = e.clientX;
+      var startW = colWidthPx(col);
+      var hint = ensureResizeHint();
+
+      function onMove(ev) {
+        var w = Math.max(60, Math.min(600, startW + (ev.clientX - startX)));
+        if (col) col.style.width = w + 'px';
+        syncTableWidth(blockEl);
+        hint.textContent = w + 'px';
+        hint.style.display = 'block';
+        hint.style.left = (ev.clientX + 12) + 'px';
+        hint.style.top = (ev.clientY + 12) + 'px';
+      }
+
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        hint.style.display = 'none';
+        syncTableWidth(blockEl);
+        scheduleSave(blockEl);
+        flushSave(blockEl);
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
     canvasEl.addEventListener('paste', function (e) {
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
       if (!cell || !cell.isContentEditable || !state.editable) return;
@@ -615,6 +683,7 @@
     return {
       font_family: el.getAttribute('data-font-family') || 'serif',
       text_align: el.getAttribute('data-text-align') || 'left',
+      font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
     };
   }
 
@@ -1065,6 +1134,24 @@
     td.focus();
   }
 
+  function colWidthPx(col) {
+    if (!col) return 140;
+    var w = parseInt(String(col.style.width || '140').replace('px', ''), 10);
+    return isNaN(w) ? 140 : w;
+  }
+
+  function syncTableWidth(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    var cols = table.querySelectorAll('colgroup col');
+    var total = 0;
+    cols.forEach(function (col) {
+      total += colWidthPx(col);
+    });
+    table.style.width = total + 'px';
+    table.style.minWidth = '0';
+  }
+
   function ensureResizeHint() {
     if (!state.resizeHintEl) {
       state.resizeHintEl = document.createElement('div');
@@ -1075,43 +1162,7 @@
   }
 
   function wireTableResize(blockEl) {
-    blockEl.querySelectorAll('.cpb-col-resize').forEach(function (handle) {
-      if (handle.getAttribute('data-wired') === '1') return;
-      handle.setAttribute('data-wired', '1');
-      handle.addEventListener('mousedown', function (e) {
-        e.preventDefault();
-        pushUndo();
-        var colIndex = parseInt(handle.getAttribute('data-col-index') || '0', 10);
-        var table = blockEl.querySelector('table');
-        if (!table) return;
-        var col = table.querySelectorAll('colgroup col')[colIndex];
-        var startX = e.clientX;
-        var startW = col ? parseInt((col.style.width || '140').replace('px', ''), 10) : 140;
-        if (isNaN(startW)) startW = 140;
-
-        var hint = ensureResizeHint();
-
-        function onMove(ev) {
-          var w = Math.max(60, Math.min(600, startW + (ev.clientX - startX)));
-          if (col) col.style.width = w + 'px';
-          hint.textContent = w + 'px';
-          hint.style.display = 'block';
-          hint.style.left = (ev.clientX + 12) + 'px';
-          hint.style.top = (ev.clientY + 12) + 'px';
-        }
-
-        function onUp() {
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          hint.style.display = 'none';
-          scheduleSave(blockEl);
-          flushSave(blockEl);
-        }
-
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-    });
+    syncTableWidth(blockEl);
   }
 
   function getActiveStyleTarget() {
@@ -1150,6 +1201,25 @@
     FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
     target.el.classList.add('cpb-font-' + font);
     target.el.setAttribute('data-font-family', font);
+    if (FONT_PRESET_SIZES[font]) {
+      applyFontSizeToElement(target.el, FONT_PRESET_SIZES[font], false);
+      if (fontSizeSelect) fontSizeSelect.value = String(FONT_PRESET_SIZES[font]);
+    }
+    scheduleSave(target.block);
+    flushSave(target.block);
+  }
+
+  function applyFontSizeToElement(el, size, updateSelect) {
+    el.style.fontSize = size + 'pt';
+    el.setAttribute('data-font-size', String(size));
+    if (updateSelect && fontSizeSelect) fontSizeSelect.value = String(size);
+  }
+
+  function applyFontSize(size) {
+    var target = getActiveStyleTarget();
+    if (!target) return;
+    pushUndo();
+    applyFontSizeToElement(target.el, size, true);
     scheduleSave(target.block);
     flushSave(target.block);
   }
@@ -1383,6 +1453,10 @@
         e.preventDefault();
         doUndo();
       }
+      if (e.target.closest('#cpbRedo')) {
+        e.preventDefault();
+        doRedo();
+      }
       if (e.target.closest('#cpbManageCallouts')) {
         e.preventDefault();
         openCalloutManager();
@@ -1400,6 +1474,12 @@
     });
   }
 
+  if (fontSizeSelect) {
+    fontSizeSelect.addEventListener('change', function () {
+      applyFontSize(parseInt(fontSizeSelect.value, 10) || 11);
+    });
+  }
+
   if (textColorInput) {
     textColorInput.addEventListener('input', function () {
       execFormat('foreColor', textColorInput.value);
@@ -1410,6 +1490,13 @@
     undoBtn.addEventListener('click', function (e) {
       e.preventDefault();
       doUndo();
+    });
+  }
+
+  if (redoBtn) {
+    redoBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      doRedo();
     });
   }
 
@@ -1428,12 +1515,17 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-      var inEditor = root.contains(document.activeElement);
-      if (inEditor) {
-        e.preventDefault();
-        doUndo();
-      }
+    var inEditor = root.contains(document.activeElement);
+    if (!inEditor) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+      e.preventDefault();
+      doRedo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      doUndo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      doRedo();
     }
   });
 
