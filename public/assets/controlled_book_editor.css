@@ -339,6 +339,232 @@ body.cpb-browser-fullscreen .cpb-workspace {
   margin-bottom: 28px;
 }
 
+.cpb-page-layout-toggle {
+  margin-bottom: 10px;
+  font-family: system-ui, sans-serif;
+  font-size: 9pt;
+  color: #64748b;
+}
+
+.cpb-page-header {
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+
+.cpb-page-header[contenteditable="false"]:hover {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  outline-offset: 2px;
+}
+
+.cpb-page-footer {
+  margin-top: 24px;
+  cursor: pointer;
+}
+
+.cpb-page-footer[contenteditable="false"]:hover {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  outline-offset: 2px;
+}
+
+.cpb-page-header-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #0f172a;
+  table-layout: fixed;
+}
+
+.cpb-page-footer-table {
+  margin-top: 0;
+}
+
+.cpb-page-header-table td {
+  border: 1px solid #0f172a;
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+.cpb-page-header-cell--left {
+  width: 30%;
+  text-align: left;
+}
+
+.cpb-page-header-cell--center {
+  width: 40%;
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: 11pt;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.cpb-page-header-cell--right {
+  width: 30%;
+  text-align: left;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: 10pt;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.cpb-page-header-logo {
+  max-height: 48px;
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.cpb-page-header-logo-placeholder {
+  display: inline-block;
+  font-family: system-ui, sans-serif;
+  font-size: 9pt;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.cpb-header-dialog {
+  max-width: 920px;
+}
+
+.cpb-header-section {
+  margin-bottom: 20px;
+}
+
+.cpb-header-section--footer {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+}
+
+.cpb-header-enable {
+  display: block;
+  margin-bottom: 12px;
+  font-family: system-ui, sans-serif;
+  font-size: 11pt;
+  font-weight: 600;
+  color: #334155;
+}
+
+.cpb-header-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+.cpb-header-grid--footer {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.cpb-header-col h4 {
+  margin: 0 0 8px;
+  font-family: system-ui, sans-serif;
+  font-size: 10pt;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cpb-header-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.cpb-header-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cpb-header-token {
+  padding: 3px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.cpb-header-token:hover {
+  background: #e0e7ff;
+  border-color: #93c5fd;
+}
+
+.cpb-header-logo-drop {
+  border: 2px dashed #cbd5e1;
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  background: #f8fafc;
+  margin-bottom: 10px;
+}
+
+.cpb-header-logo-drop--over {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.cpb-header-logo-preview {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.cpb-header-logo-preview img {
+  max-height: 48px;
+  max-width: 100%;
+}
+
+.cpb-header-logo-hint {
+  margin: 0;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.cpb-header-logo-clear {
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.cpb-header-preview-section {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+  margin-top: 8px;
+}
+
+.cpb-header-preview-section h4 {
+  margin: 0 0 10px;
+  font-family: system-ui, sans-serif;
+  font-size: 10pt;
+  color: #475569;
+}
+
+.cpb-header-preview {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
 .cpb-sheet-org {
   font-family: system-ui, sans-serif;
   font-size: 9pt;

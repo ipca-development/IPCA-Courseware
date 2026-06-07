@@ -5,6 +5,7 @@ require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 require_once __DIR__ . '/ControlledPublishingTableFormula.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
+require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -26,6 +27,8 @@ final class ControlledPublishingBookRenderer
     private ?ControlledPublishingBookStyleService $styleService = null;
 
     private ?ControlledPublishingSectionNumberService $sectionNumberService = null;
+
+    private ?ControlledPublishingPageHeaderService $pageHeaderService = null;
 
     /**
      * @param array<string,mixed> $styles
@@ -118,6 +121,11 @@ final class ControlledPublishingBookRenderer
         return $html;
     }
 
+    public function setPageHeaderService(?ControlledPublishingPageHeaderService $pageHeaderService): void
+    {
+        $this->pageHeaderService = $pageHeaderService;
+    }
+
     /**
      * @param array<string,mixed> $version
      * @param array<string,mixed> $section
@@ -127,67 +135,145 @@ final class ControlledPublishingBookRenderer
         array $section,
         string $blocksHtml,
         string $mode = self::MODE_READ,
-        ?array $pageLayout = null
+        ?array $pageLayout = null,
+        ?array $pageHeaderConfig = null
     ): string {
-        $bookKey = h((string)($version['book_key'] ?? ''));
-        $versionLabel = h((string)($version['version_label'] ?? ''));
-        $bookTitle = h((string)($version['book_title'] ?? $version['title'] ?? ''));
-        $sectionTitle = h((string)($section['title'] ?? ''));
         $editable = $mode === self::MODE_EDIT && !empty($section['allow_author_blocks']);
         $layout = is_array($pageLayout) ? $pageLayout : array();
-        $showRunning = !empty($layout['show_running_header_footer']);
+
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array(
+                'page_header' => array('enabled' => true),
+                'page_footer' => array('enabled' => true),
+            );
+
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageHeader = is_array($config['page_header'] ?? null)
+            ? $config['page_header']
+            : $defaults['page_header'];
+        $pageFooter = is_array($config['page_footer'] ?? null)
+            ? $config['page_footer']
+            : $defaults['page_footer'];
+
+        $showHeaderFooter = $headerSvc !== null
+            ? $headerSvc->shouldShowHeader($section, $pageHeader, $pageFooter, $layout)
+            : (!empty($pageHeader['enabled']) || !empty($pageFooter['enabled']));
+
+        $tokenContext = $headerSvc !== null
+            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
+            : array();
 
         $drop = $editable
             ? '<div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div>'
             : '';
 
-        $runningHeader = '';
-        $runningFooter = '';
-        if ($showRunning) {
-            $runningHeader = $this->renderRunningBand('header', $layout, $editable);
-            $runningFooter = $this->renderRunningBand('footer', $layout, $editable);
-        } elseif ($editable) {
-            $runningHeader = '<div class="cpb-running-band cpb-running-band--off" contenteditable="false">'
-                . '<label><input type="checkbox" data-layout-toggle="show_running_header_footer"> '
-                . 'Show running header/footer on this section</label></div>';
+        $headerHtml = '';
+        $footerHtml = '';
+        $layoutToggle = '';
+        if ($editable) {
+            $hideChecked = !empty($layout['hide_header_footer']) ? ' checked' : '';
+            $layoutToggle = '<div class="cpb-page-layout-toggle" contenteditable="false">'
+                . '<label><input type="checkbox" data-layout-toggle="hide_header_footer"' . $hideChecked . '> '
+                . 'Hide header/footer on this section</label></div>';
+        }
+
+        if ($showHeaderFooter) {
+            if (!empty($pageHeader['enabled'])) {
+                $headerHtml = $this->renderPageHeaderTable($pageHeader, $tokenContext, $editable, $headerSvc);
+            }
+            if (!empty($pageFooter['enabled'])) {
+                $footerHtml = $this->renderPageFooterTable($pageFooter, $tokenContext, $editable, $headerSvc);
+            }
         }
 
         return '<div class="cpb-sheet" data-section-id="' . (int)($section['id'] ?? 0) . '">'
-            . $runningHeader
-            . '<header class="cpb-sheet-header">'
-            . '<div class="cpb-sheet-org">IPCA · Controlled Manual</div>'
-            . '<div class="cpb-sheet-title">' . $bookTitle . '</div>'
-            . '<div class="cpb-sheet-meta">' . $bookKey . ' Rev ' . $versionLabel . '</div>'
-            . '<h1 class="cpb-section-title">' . $sectionTitle . '</h1>'
-            . '</header>'
+            . $layoutToggle
+            . $headerHtml
             . '<div class="cpb-sheet-body" data-blocks-root="1">' . $blocksHtml . '</div>'
             . $drop
-            . $runningFooter
+            . $footerHtml
             . '</div>';
     }
 
     /**
-     * @param array<string,mixed> $layout
+     * @param array<string,mixed> $pageHeader
+     * @param array<string,string> $tokenContext
      */
-    private function renderRunningBand(string $band, array $layout, bool $editable): string
-    {
-        $prefix = $band === 'footer' ? 'footer' : 'header';
-        $cells = array('left', 'center', 'right');
-        $html = '<div class="cpb-running-band cpb-running-band--' . h($band) . '" data-running-band="' . h($band) . '">';
-        if ($editable && $band === 'header') {
-            $html .= '<label class="cpb-running-toggle">'
-                . '<input type="checkbox" data-layout-toggle="show_running_header_footer" checked> Header/footer</label>';
+    private function renderPageHeaderTable(
+        array $pageHeader,
+        array $tokenContext,
+        bool $editable,
+        ?ControlledPublishingPageHeaderService $headerSvc
+    ): string {
+        $resolve = static function (string $template) use ($headerSvc, $tokenContext): string {
+            if ($headerSvc === null) {
+                return h($template);
+            }
+            return $headerSvc->resolveTokensToHtml($template, $tokenContext);
+        };
+
+        $logoUrl = trim((string)($pageHeader['logo_url'] ?? ''));
+        $logoAlt = h((string)($pageHeader['logo_alt'] ?? ''));
+        $leftCell = '';
+        if ($logoUrl !== '') {
+            $leftCell = '<img class="cpb-page-header-logo" src="' . h($logoUrl) . '" alt="' . $logoAlt . '">';
+        } elseif ($editable) {
+            $leftCell = '<span class="cpb-page-header-logo-placeholder">Logo</span>';
         }
-        $html .= '<div class="cpb-running-row">';
-        foreach ($cells as $cell) {
-            $key = $prefix . '_' . $cell;
-            $value = (string)($layout[$key] ?? '');
-            $edit = $editable ? ' contenteditable="true" spellcheck="true" data-layout-field="' . h($key) . '"' : '';
-            $html .= '<div class="cpb-running-cell cpb-running-cell--' . $cell . '"' . $edit . '>'
-                . h($value) . '</div>';
-        }
-        $html .= '</div></div>';
-        return $html;
+
+        $editAttr = $editable
+            ? ' data-open-header-editor="1" title="Click to edit page header"'
+            : '';
+
+        return '<header class="cpb-page-header"' . $editAttr . ' contenteditable="false">'
+            . '<table class="cpb-page-header-table" role="presentation">'
+            . '<tr>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--left">' . $leftCell . '</td>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center">'
+            . $resolve((string)($pageHeader['center_text'] ?? ''))
+            . '</td>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right">'
+            . $resolve((string)($pageHeader['right_text'] ?? ''))
+            . '</td>'
+            . '</tr></table></header>';
+    }
+
+    /**
+     * @param array<string,mixed> $pageFooter
+     * @param array<string,string> $tokenContext
+     */
+    private function renderPageFooterTable(
+        array $pageFooter,
+        array $tokenContext,
+        bool $editable,
+        ?ControlledPublishingPageHeaderService $headerSvc
+    ): string {
+        $resolve = static function (string $template) use ($headerSvc, $tokenContext): string {
+            if ($headerSvc === null) {
+                return h($template);
+            }
+            return $headerSvc->resolveTokensToHtml($template, $tokenContext);
+        };
+
+        $editAttr = $editable
+            ? ' data-open-header-editor="1" title="Click to edit page footer"'
+            : '';
+
+        return '<footer class="cpb-page-footer"' . $editAttr . ' contenteditable="false">'
+            . '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation">'
+            . '<tr>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--left">'
+            . $resolve((string)($pageFooter['left_text'] ?? ''))
+            . '</td>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center">'
+            . $resolve((string)($pageFooter['center_text'] ?? ''))
+            . '</td>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right">'
+            . $resolve((string)($pageFooter['right_text'] ?? ''))
+            . '</td>'
+            . '</tr></table></footer>';
     }
 
     /**
@@ -243,7 +329,7 @@ final class ControlledPublishingBookRenderer
      */
     private function renderSectionNumberPrefix(array $payload, int $blockId): string
     {
-        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $style = $this->canonicalParagraphStyle($payload);
         if (!isset(ControlledPublishingSectionNumberService::NUMBERED_STYLE_DEPTHS[$style])) {
             return '';
         }
@@ -260,7 +346,7 @@ final class ControlledPublishingBookRenderer
      */
     private function renderRegulatoryRefPrefix(array $payload, int $blockId): string
     {
-        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $style = $this->canonicalParagraphStyle($payload);
         if ($style !== 'regulatory_reference') {
             return '';
         }
@@ -709,13 +795,19 @@ final class ControlledPublishingBookRenderer
             . '</div></div>';
     }
 
+    private function canonicalParagraphStyle(array $payload): string
+    {
+        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        return ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+    }
+
     /**
      * @param array<string,mixed> $payload
      */
     private function styleClass(array $payload): string
     {
         $typography = $this->resolveTypography($payload);
-        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $paragraphStyle = $this->canonicalParagraphStyle($payload);
         $psClass = $paragraphStyle !== '' ? ' cpb-ps-' . preg_replace('/[^a-z0-9_]/', '', $paragraphStyle) : '';
         return ' cpb-font-' . preg_replace('/[^a-z]/', '', strtolower((string)$typography['font_family']))
             . ' cpb-align-' . preg_replace('/[^a-z]/', '', strtolower((string)$typography['text_align']))
@@ -728,7 +820,7 @@ final class ControlledPublishingBookRenderer
     private function styleAttr(array $payload): string
     {
         $typography = $this->resolveTypography($payload);
-        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $paragraphStyle = $this->canonicalParagraphStyle($payload);
         $fontStack = $this->fontFamilyStack((string)$typography['font_family']);
         $styles = array(
             'text-align:' . (string)$typography['text_align'],

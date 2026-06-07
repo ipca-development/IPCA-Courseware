@@ -118,11 +118,10 @@ compliance_page_open(array(
           <select id="cpbParagraphStyleSelect" class="cpb-tool-select cpb-tool-select--paragraph-style" title="Paragraph style">
             <option value="title">Title</option>
             <option value="subtitle_1">Subtitle 1</option>
-            <option value="heading_1">Heading 1</option>
-            <option value="heading_2">Heading 2</option>
+            <option value="subtitle_2">Subtitle 2</option>
             <option value="subtitle_3">Subtitle 3</option>
             <option value="subtitle_4">Subtitle 4</option>
-            <option value="regulatory_reference">Regulatory Ref</option>
+            <option value="regulatory_reference">Regulatory Reference</option>
             <option value="body" selected>Body</option>
             <option value="caption">Caption</option>
           </select>
@@ -160,6 +159,7 @@ compliance_page_open(array(
         </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Book style editor">Styles</button>
+          <button type="button" class="cpb-tool-btn" id="cpbOpenHeaderEditor" title="Page header editor">Header</button>
           <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
           <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
           <button type="button" class="cpb-tool-btn" id="cpbPickImage" title="Insert image">Image</button>
@@ -188,6 +188,7 @@ compliance_page_open(array(
     </div>
   </div>
   <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>
+  <input type="file" id="cpbHeaderLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
 </div>
 
 <script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>

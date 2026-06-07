@@ -1,13 +1,13 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
+
 /**
- * Per-section page header/footer layout stored in section metadata_json.
+ * Per-section page header/footer visibility stored in section metadata_json.
  */
 final class ControlledPublishingSectionLayoutService
 {
-    private const HIDE_HEADER_FOOTER_SECTIONS = array('cover');
-
     public function __construct(private PDO $pdo)
     {
     }
@@ -21,16 +21,10 @@ final class ControlledPublishingSectionLayoutService
         $meta = $this->decodeMeta($section);
         $layout = is_array($meta['page_layout'] ?? null) ? $meta['page_layout'] : array();
         $sectionKey = (string)($section['section_key'] ?? '');
-        $defaultShow = !in_array($sectionKey, self::HIDE_HEADER_FOOTER_SECTIONS, true);
+        $defaultHide = in_array($sectionKey, ControlledPublishingPageHeaderService::HIDE_HEADER_FOOTER_SECTIONS, true);
 
         return array(
-            'show_running_header_footer' => (bool)($layout['show_running_header_footer'] ?? $defaultShow),
-            'header_left' => (string)($layout['header_left'] ?? 'IPCA · Controlled Manual'),
-            'header_center' => (string)($layout['header_center'] ?? ''),
-            'header_right' => (string)($layout['header_right'] ?? ''),
-            'footer_left' => (string)($layout['footer_left'] ?? ''),
-            'footer_center' => (string)($layout['footer_center'] ?? 'Controlled copy — internal use'),
-            'footer_right' => (string)($layout['footer_right'] ?? ''),
+            'hide_header_footer' => (bool)($layout['hide_header_footer'] ?? $defaultHide),
         );
     }
 
@@ -42,13 +36,7 @@ final class ControlledPublishingSectionLayoutService
         $section = $this->requireSection($versionId, $sectionId);
         $meta = $this->decodeMeta($section);
         $meta['page_layout'] = array(
-            'show_running_header_footer' => !empty($layout['show_running_header_footer']),
-            'header_left' => trim((string)($layout['header_left'] ?? '')),
-            'header_center' => trim((string)($layout['header_center'] ?? '')),
-            'header_right' => trim((string)($layout['header_right'] ?? '')),
-            'footer_left' => trim((string)($layout['footer_left'] ?? '')),
-            'footer_center' => trim((string)($layout['footer_center'] ?? '')),
-            'footer_right' => trim((string)($layout['footer_right'] ?? '')),
+            'hide_header_footer' => !empty($layout['hide_header_footer']),
         );
 
         $stmt = $this->pdo->prepare("

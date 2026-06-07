@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
+require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 
 /**
  * Controlled publishing block CRUD for the document-style editor.
@@ -617,9 +618,12 @@ final class ControlledPublishingBlockService
             $font = 'serif';
         }
         $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        if ($paragraphStyle !== '') {
+            $paragraphStyle = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$paragraphStyle] ?? $paragraphStyle;
+        }
         $allowedStyles = array(
-            'title', 'subtitle_1', 'heading_1', 'heading_2',
-            'subtitle_3', 'subtitle_4', 'regulatory_reference', 'body', 'caption',
+            'title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4',
+            'regulatory_reference', 'body', 'caption',
         );
         if ($paragraphStyle !== '' && !in_array($paragraphStyle, $allowedStyles, true)) {
             $paragraphStyle = '';

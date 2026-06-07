@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionLayo
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingTocService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionNumberService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPageHeaderService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -34,6 +35,8 @@ $layoutSvc = new ControlledPublishingSectionLayoutService($pdo);
 $styleSvc = new ControlledPublishingBookStyleService($pdo);
 $tocSvc = new ControlledPublishingTocService($pdo, $blocks);
 $numberSvc = new ControlledPublishingSectionNumberService($pdo, $blocks);
+$pageHeaderSvc = new ControlledPublishingPageHeaderService($pdo);
+$renderer->setPageHeaderService($pageHeaderSvc);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -48,10 +51,10 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc);
             break;
         case 'recompute_section_numbers':
-            cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc);
+            cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc, $pageHeaderSvc);
             break;
         case 'get_book_styles':
             cp_editor_handle_get_book_styles($foundation, $styleSvc);
@@ -64,6 +67,15 @@ try {
             break;
         case 'save_section_layout':
             cp_editor_handle_save_section_layout($sections, $layoutSvc, $uid);
+            break;
+        case 'get_page_header':
+            cp_editor_handle_get_page_header($foundation, $pageHeaderSvc, $sections);
+            break;
+        case 'save_page_header':
+            cp_editor_handle_save_page_header($foundation, $pageHeaderSvc, $uid);
+            break;
+        case 'upload_header_logo':
+            cp_editor_handle_upload_header_logo($foundation, $pageHeaderSvc, $uid);
             break;
         case 'save_callout_presets':
             cp_editor_handle_save_callout_presets($foundation, $pdo, $uid);
@@ -145,6 +157,36 @@ function cp_editor_configure_renderer(
     return $numbering;
 }
 
+function cp_editor_page_header_config(
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    array $version,
+    array $section
+): array {
+    $meta = cp_editor_decode_version_meta($version);
+    $legacyLayout = null;
+    if (!is_array($meta['page_header'] ?? null)) {
+        $legacyLayout = cp_editor_legacy_section_layout($section);
+    }
+    return $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
+}
+
+/**
+ * @param array<string,mixed> $section
+ * @return array<string,mixed>|null
+ */
+function cp_editor_legacy_section_layout(array $section): ?array
+{
+    $meta = cp_editor_decode_version_meta($section);
+    $layout = is_array($meta['page_layout'] ?? null) ? $meta['page_layout'] : null;
+    if ($layout === null) {
+        return null;
+    }
+    if (isset($layout['header_left']) || isset($layout['header_center']) || isset($layout['show_running_header_footer'])) {
+        return $layout;
+    }
+    return null;
+}
+
 function cp_editor_handle_load(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
@@ -153,7 +195,8 @@ function cp_editor_handle_load(
     ControlledPublishingRevisionService $revision,
     ControlledPublishingSectionLayoutService $layoutSvc,
     ControlledPublishingBookStyleService $styleSvc,
-    ControlledPublishingSectionNumberService $numberSvc
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
     $sectionId = (int)($_GET['section_id'] ?? 0);
@@ -181,13 +224,16 @@ function cp_editor_handle_load(
     }
 
     $bookStyles = $styleSvc->resolveFromVersion($version);
+    $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+    $bookStyles['page_header'] = $pageHeaderConfig['page_header'];
+    $bookStyles['page_footer'] = $pageHeaderConfig['page_footer'];
     $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
     $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
     $pageLayout = $layoutSvc->resolveLayout($section);
     $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
     $mode = $editable ? ControlledPublishingBookRenderer::MODE_EDIT : ControlledPublishingBookRenderer::MODE_READ;
     $blocksHtml = $renderer->renderBlocks($sectionBlocks, $mode);
-    $pageHtml = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout);
+    $pageHtml = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout, $pageHeaderConfig);
     $prior = $revision->priorVersion($versionId);
 
     cp_editor_json(200, array(
@@ -208,6 +254,9 @@ function cp_editor_handle_load(
         'editable' => $editable,
         'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
         'book_styles' => $bookStyles,
+        'page_header' => $pageHeaderConfig['page_header'],
+        'page_footer' => $pageHeaderConfig['page_footer'],
+        'header_tokens' => $pageHeaderSvc->tokenCatalogForApi(),
         'section_numbers' => $numbering['section_numbers'],
         'section_number_display' => $numbering['section_number_display'],
         'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
@@ -223,7 +272,8 @@ function cp_editor_handle_recompute_section_numbers(
     ControlledPublishingSectionNumberService $numberSvc,
     ControlledPublishingSectionService $sections,
     ControlledPublishingRevisionService $revision,
-    ControlledPublishingSectionLayoutService $layoutSvc
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc
 ): void {
     $in = cp_editor_input();
     $versionId = (int)($in['version_id'] ?? 0);
@@ -255,7 +305,8 @@ function cp_editor_handle_recompute_section_numbers(
             $mode = $editable ? ControlledPublishingBookRenderer::MODE_EDIT : ControlledPublishingBookRenderer::MODE_READ;
             $blocksHtml = $renderer->renderBlocks($sectionBlocks, $mode);
             $pageLayout = $layoutSvc->resolveLayout($section);
-            $payload['page_html'] = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout);
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $payload['page_html'] = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout, $pageHeaderConfig);
         }
     }
     cp_editor_json(200, $payload);
@@ -327,6 +378,141 @@ function cp_editor_handle_save_section_layout(
         cp_editor_json(404, array('ok' => false, 'error' => 'Section not found'));
     }
     cp_editor_json(200, array('ok' => true, 'layout' => $layoutSvc->resolveLayout($section)));
+}
+
+function cp_editor_handle_get_page_header(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingSectionService $sections
+): void {
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    $sectionId = (int)($_GET['section_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    $legacyLayout = null;
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            $legacyLayout = cp_editor_legacy_section_layout($section);
+        }
+    }
+    $config = $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
+    cp_editor_json(200, array(
+        'ok' => true,
+        'page_header' => $config['page_header'],
+        'page_footer' => $config['page_footer'],
+        'header_tokens' => $pageHeaderSvc->tokenCatalogForApi(),
+    ));
+}
+
+function cp_editor_handle_save_page_header(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Released versions cannot change page header.'));
+    }
+    $payload = array();
+    if (is_array($in['page_header'] ?? null)) {
+        $payload['page_header'] = $in['page_header'];
+    }
+    if (is_array($in['page_footer'] ?? null)) {
+        $payload['page_footer'] = $in['page_footer'];
+    }
+    $saved = $pageHeaderSvc->saveForVersion($versionId, $payload, $uid);
+    cp_editor_json(200, array(
+        'ok' => true,
+        'page_header' => $saved['page_header'],
+        'page_footer' => $saved['page_footer'],
+    ));
+}
+
+function cp_editor_handle_upload_header_logo(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    int $uid
+): void {
+    $versionId = (int)($_POST['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'image file required'));
+    }
+    $file = $_FILES['image'];
+    $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($err !== UPLOAD_ERR_OK) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Upload failed (code ' . $err . ')'));
+    }
+    $tmp = (string)($file['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Invalid upload'));
+    }
+
+    $mime = (string)($file['type'] ?? '');
+    $ext = match ($mime) {
+        'image/jpeg', 'image/jpg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        default => '',
+    };
+    if ($ext === '') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Only JPG, PNG, or WEBP images are allowed'));
+    }
+
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    require_once __DIR__ . '/../../../src/spaces.php';
+    $bytes = file_get_contents($tmp);
+    if ($bytes === false) {
+        cp_editor_json(500, array('ok' => false, 'error' => 'Could not read upload'));
+    }
+
+    $bookKey = strtolower((string)$version['book_key']);
+    $versionLabel = str_replace('.', '_', (string)$version['version_label']);
+    $objectKey = 'publishing/' . $bookKey . '/' . $versionLabel . '/header_' . bin2hex(random_bytes(12)) . '.' . $ext;
+    $put = cw_spaces_put_object($objectKey, $bytes, $mime);
+    $url = (string)($put['cdn_url'] ?? '');
+    if ($url === '') {
+        cp_editor_json(500, array('ok' => false, 'error' => 'Upload succeeded but CDN URL missing'));
+    }
+
+    $alt = trim((string)($_POST['alt'] ?? 'EuroPilot Center'));
+    $existing = $pageHeaderSvc->resolveFromVersion($version);
+    $header = $existing['page_header'];
+    $header['logo_url'] = $url;
+    if ($alt !== '') {
+        $header['logo_alt'] = $alt;
+    }
+    $saved = $pageHeaderSvc->saveForVersion($versionId, array(
+        'page_header' => $header,
+        'page_footer' => $existing['page_footer'],
+    ), $uid);
+
+    cp_editor_json(200, array(
+        'ok' => true,
+        'url' => $url,
+        'page_header' => $saved['page_header'],
+        'page_footer' => $saved['page_footer'],
+    ));
 }
 
 function cp_editor_handle_save_callout_presets(

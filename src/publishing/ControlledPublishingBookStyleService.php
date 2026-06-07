@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
+
 /**
  * Book-level paragraph and table style definitions stored in version metadata_json.
  */
@@ -10,8 +12,7 @@ final class ControlledPublishingBookStyleService
     public const PARAGRAPH_STYLE_KEYS = array(
         'title',
         'subtitle_1',
-        'heading_1',
-        'heading_2',
+        'subtitle_2',
         'subtitle_3',
         'subtitle_4',
         'regulatory_reference',
@@ -23,10 +24,15 @@ final class ControlledPublishingBookStyleService
     public const TOC_PARAGRAPH_STYLE_KEYS = array(
         'title',
         'subtitle_1',
-        'heading_1',
-        'heading_2',
+        'subtitle_2',
         'subtitle_3',
         'subtitle_4',
+    );
+
+    /** @var array<string,string> */
+    public const LEGACY_PARAGRAPH_STYLE_ALIASES = array(
+        'heading_1' => 'subtitle_2',
+        'heading_2' => 'subtitle_3',
     );
 
     /** @var list<string> */
@@ -48,10 +54,9 @@ final class ControlledPublishingBookStyleService
             'paragraph_styles' => array(
                 'title' => array('font_family' => 'sans', 'font_size' => 24, 'color' => '#0f2744'),
                 'subtitle_1' => array('font_family' => 'sans', 'font_size' => 18, 'color' => '#0f2744'),
-                'heading_1' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744'),
-                'heading_2' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744'),
-                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155'),
-                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#475569'),
+                'subtitle_2' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744'),
+                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744'),
+                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155'),
                 'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a'),
                 'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a'),
                 'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b'),
@@ -102,7 +107,9 @@ final class ControlledPublishingBookStyleService
     public function resolveFromMetadata(array $metadata): array
     {
         $defaults = $this->defaultBookStyles();
-        $paragraph = is_array($metadata['paragraph_styles'] ?? null) ? $metadata['paragraph_styles'] : array();
+        $paragraph = $this->migrateLegacyParagraphStyles(
+            is_array($metadata['paragraph_styles'] ?? null) ? $metadata['paragraph_styles'] : array()
+        );
         $tables = is_array($metadata['table_styles'] ?? null) ? $metadata['table_styles'] : array();
         $callouts = is_array($metadata['callout_presets'] ?? null) ? $metadata['callout_presets'] : array();
 
@@ -113,6 +120,9 @@ final class ControlledPublishingBookStyleService
                 is_array($defaults['paragraph_styles'][$key] ?? null) ? $defaults['paragraph_styles'][$key] : array()
             );
         }
+
+        $pageHeaderSvc = new ControlledPublishingPageHeaderService($this->pdo);
+        $pageLayout = $pageHeaderSvc->resolveFromMetadata($metadata);
 
         return array(
             'paragraph_styles' => $resolvedParagraph,
@@ -127,6 +137,8 @@ final class ControlledPublishingBookStyleService
                 ),
             ),
             'callout_presets' => $this->normalizeCalloutPresets($callouts),
+            'page_header' => $pageLayout['page_header'],
+            'page_footer' => $pageLayout['page_footer'],
         );
     }
 
@@ -176,7 +188,7 @@ final class ControlledPublishingBookStyleService
      */
     public function resolveBlockTypography(array $payload, array $bookStyles): array
     {
-        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $paragraphStyle = $this->canonicalParagraphStyleKey((string)($payload['paragraph_style'] ?? ''));
         $paragraphDefs = is_array($bookStyles['paragraph_styles'] ?? null)
             ? $bookStyles['paragraph_styles']
             : array();
@@ -204,11 +216,11 @@ final class ControlledPublishingBookStyleService
 
     public function paragraphStyleLabel(string $key): string
     {
+        $key = $this->canonicalParagraphStyleKey($key);
         return match ($key) {
             'title' => 'Title',
             'subtitle_1' => 'Subtitle 1',
-            'heading_1' => 'Heading 1',
-            'heading_2' => 'Heading 2',
+            'subtitle_2' => 'Subtitle 2',
             'subtitle_3' => 'Subtitle 3',
             'subtitle_4' => 'Subtitle 4',
             'regulatory_reference' => 'Regulatory Reference',
@@ -216,6 +228,29 @@ final class ControlledPublishingBookStyleService
             'caption' => 'Caption',
             default => ucwords(str_replace('_', ' ', $key)),
         };
+    }
+
+    public function canonicalParagraphStyleKey(string $style): string
+    {
+        $style = strtolower(trim($style));
+        if ($style === '') {
+            return '';
+        }
+        return self::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+    }
+
+    /**
+     * @param array<string,mixed> $paragraph
+     * @return array<string,mixed>
+     */
+    private function migrateLegacyParagraphStyles(array $paragraph): array
+    {
+        foreach (self::LEGACY_PARAGRAPH_STYLE_ALIASES as $legacy => $modern) {
+            if (isset($paragraph[$legacy]) && !isset($paragraph[$modern])) {
+                $paragraph[$modern] = $paragraph[$legacy];
+            }
+        }
+        return $paragraph;
     }
 
     public function fontFamilyStack(string $fontFamily): string

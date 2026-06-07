@@ -21,6 +21,8 @@
   var fontSelect = document.getElementById('cpbFontSelect');
   var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
   var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
+  var openHeaderEditorBtn = document.getElementById('cpbOpenHeaderEditor');
+  var headerLogoInput = document.getElementById('cpbHeaderLogoInput');
   var calloutSelect = document.getElementById('cpbCalloutSelect');
   var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
@@ -35,32 +37,40 @@
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
   ];
   var PARAGRAPH_STYLE_CLASSES = [
-    'cpb-ps-title', 'cpb-ps-subtitle_1', 'cpb-ps-heading_1', 'cpb-ps-heading_2',
-    'cpb-ps-subtitle_3', 'cpb-ps-subtitle_4', 'cpb-ps-regulatory_reference', 'cpb-ps-body', 'cpb-ps-caption',
+    'cpb-ps-title', 'cpb-ps-subtitle_1', 'cpb-ps-subtitle_2', 'cpb-ps-subtitle_3', 'cpb-ps-subtitle_4',
+    'cpb-ps-regulatory_reference', 'cpb-ps-body', 'cpb-ps-caption',
+    'cpb-ps-heading_1', 'cpb-ps-heading_2',
   ];
   var PARAGRAPH_STYLE_KEYS = [
-    'title', 'subtitle_1', 'heading_1', 'heading_2', 'subtitle_3', 'subtitle_4',
+    'title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4',
     'regulatory_reference', 'body', 'caption',
   ];
+  var LEGACY_PARAGRAPH_STYLE_ALIASES = {
+    heading_1: 'subtitle_2',
+    heading_2: 'subtitle_3',
+  };
   var NUMBERED_PARAGRAPH_STYLES = {
     title: 1,
     subtitle_1: 2,
-    heading_1: 3,
-    heading_2: 4,
-    subtitle_3: 5,
-    subtitle_4: 6,
+    subtitle_2: 3,
+    subtitle_3: 4,
+    subtitle_4: 5,
   };
   var PARAGRAPH_STYLE_LABELS = {
     title: 'Title',
     subtitle_1: 'Subtitle 1',
-    heading_1: 'Heading 1',
-    heading_2: 'Heading 2',
+    subtitle_2: 'Subtitle 2',
     subtitle_3: 'Subtitle 3',
     subtitle_4: 'Subtitle 4',
     regulatory_reference: 'Regulatory Reference',
     body: 'Body',
     caption: 'Caption',
   };
+
+  function canonicalParagraphStyleKey(styleKey) {
+    styleKey = String(styleKey || '').toLowerCase();
+    return LEGACY_PARAGRAPH_STYLE_ALIASES[styleKey] || styleKey;
+  }
   var ALIGN_CLASSES = ['cpb-align-left', 'cpb-align-center', 'cpb-align-right'];
   var FONT_STACKS = {
     serif: "Georgia, 'Times New Roman', serif",
@@ -79,6 +89,11 @@
     pending: {},
     expanded: {},
     pageLayout: {},
+    pageHeader: null,
+    pageFooter: null,
+    headerTokens: [],
+    versionInfo: {},
+    sectionTitle: '',
     calloutPresets: [],
     bookStyles: null,
     sectionNumberDisplay: {},
@@ -281,6 +296,11 @@
       state.editable = !!res.editable;
       state.sectionsTree = res.sections_tree || [];
       state.pageLayout = res.page_layout || {};
+      state.pageHeader = res.page_header || defaultPageHeader();
+      state.pageFooter = res.page_footer || defaultPageFooter();
+      state.headerTokens = res.header_tokens || defaultHeaderTokens();
+      state.versionInfo = res.version || {};
+      state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.bookStyles = res.book_styles || defaultBookStyles();
       if (state.bookStyles.callout_presets) {
         state.calloutPresets = state.bookStyles.callout_presets;
@@ -442,36 +462,19 @@
   function extractLayout() {
     var sheet = canvasEl.querySelector('.cpb-sheet');
     if (!sheet) return {};
-    var cb = sheet.querySelector('[data-layout-toggle="show_running_header_footer"]');
-    var layout = {
-      show_running_header_footer: cb ? !!cb.checked : false,
-      header_left: '',
-      header_center: '',
-      header_right: '',
-      footer_left: '',
-      footer_center: '',
-      footer_right: '',
+    var cb = sheet.querySelector('[data-layout-toggle="hide_header_footer"]');
+    return {
+      hide_header_footer: cb ? !!cb.checked : false,
     };
-    sheet.querySelectorAll('[data-layout-field]').forEach(function (el) {
-      var key = el.getAttribute('data-layout-field');
-      if (key) layout[key] = el.textContent.trim();
-    });
-    return layout;
   }
 
   function applyLayoutToDom(layout) {
     var sheet = canvasEl.querySelector('.cpb-sheet');
     if (!sheet || !layout) return;
-    var cb = sheet.querySelector('[data-layout-toggle="show_running_header_footer"]');
-    if (cb && layout.show_running_header_footer !== undefined) {
-      cb.checked = !!layout.show_running_header_footer;
+    var cb = sheet.querySelector('[data-layout-toggle="hide_header_footer"]');
+    if (cb && layout.hide_header_footer !== undefined) {
+      cb.checked = !!layout.hide_header_footer;
     }
-    sheet.querySelectorAll('[data-layout-field]').forEach(function (el) {
-      var key = el.getAttribute('data-layout-field');
-      if (key && layout[key] !== undefined) {
-        el.textContent = layout[key];
-      }
-    });
   }
 
   function saveLayout() {
@@ -526,14 +529,13 @@
         }).catch(showError);
       });
     });
-    canvasEl.querySelectorAll('[data-layout-field]').forEach(function (el) {
-      if (el.getAttribute('data-layout-wired') === '1') return;
-      el.setAttribute('data-layout-wired', '1');
-      el.addEventListener('blur', function () {
-        scheduleLayoutSave();
-      });
-      el.addEventListener('input', function () {
-        setStatus('Editing header/footer…', 'saving');
+    canvasEl.querySelectorAll('[data-open-header-editor]').forEach(function (el) {
+      if (el.getAttribute('data-header-wired') === '1') return;
+      el.setAttribute('data-header-wired', '1');
+      el.addEventListener('click', function (e) {
+        if (!state.editable) return;
+        e.preventDefault();
+        openHeaderEditor();
       });
     });
   }
@@ -861,10 +863,9 @@
       paragraph_styles: {
         title: { font_family: 'sans', font_size: 24, color: '#0f2744' },
         subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744' },
-        heading_1: { font_family: 'sans', font_size: 16, color: '#0f2744' },
-        heading_2: { font_family: 'sans', font_size: 14, color: '#0f2744' },
-        subtitle_3: { font_family: 'sans', font_size: 12, color: '#334155' },
-        subtitle_4: { font_family: 'sans', font_size: 11, color: '#475569' },
+        subtitle_2: { font_family: 'sans', font_size: 16, color: '#0f2744' },
+        subtitle_3: { font_family: 'sans', font_size: 14, color: '#0f2744' },
+        subtitle_4: { font_family: 'sans', font_size: 12, color: '#334155' },
         regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a' },
         body: { font_family: 'serif', font_size: 11, color: '#0f172a' },
         caption: { font_family: 'sans', font_size: 9, color: '#64748b' },
@@ -878,7 +879,83 @@
         { callout_type: 'caution', title: 'CAUTION', text: '' },
         { callout_type: 'info', title: 'INFO', text: '' },
       ],
+      page_header: defaultPageHeader(),
+      page_footer: defaultPageFooter(),
     };
+  }
+
+  function defaultPageHeader() {
+    return {
+      enabled: true,
+      left_type: 'logo',
+      logo_url: '',
+      logo_alt: 'EuroPilot Center',
+      center_text: '{manual_code}\n{section_title}',
+      right_text: 'Page: {page}\nRevision: {revision}\nDate: {date}',
+    };
+  }
+
+  function defaultPageFooter() {
+    return {
+      enabled: true,
+      left_text: '',
+      center_text: 'Controlled copy — internal use',
+      right_text: '',
+    };
+  }
+
+  function defaultHeaderTokens() {
+    return [
+      { token: '{page}', label: 'Page number', description: 'Current page (adaptive in e-reader/PDF)' },
+      { token: '{page_total}', label: 'Total pages', description: 'Total page count' },
+      { token: '{revision}', label: 'Revision number', description: 'Manual version label' },
+      { token: '{date}', label: 'Publication date', description: 'Effective or release date' },
+      { token: '{manual_code}', label: 'Manual code', description: 'Short manual identifier (e.g. OM)' },
+      { token: '{book_title}', label: 'Manual title', description: 'Full manual title' },
+      { token: '{section_title}', label: 'Section title', description: 'Current section name' },
+    ];
+  }
+
+  function resolveHeaderTokensPreview(template) {
+    var v = state.versionInfo || {};
+    var manualCode = v.manual_code || v.book_key || '';
+    var text = String(template || '');
+    var map = {
+      '{page}': '—',
+      '{page_total}': '—',
+      '{revision}': String(v.version_label || ''),
+      '{date}': '—',
+      '{manual_code}': String(manualCode),
+      '{book_title}': String(v.book_title || ''),
+      '{section_title}': String(state.sectionTitle || ''),
+    };
+    Object.keys(map).forEach(function (token) {
+      text = text.split(token).join(map[token]);
+    });
+    return text;
+  }
+
+  function previewHeaderHtml(header, footer) {
+    var h = header || defaultPageHeader();
+    var f = footer || defaultPageFooter();
+    var logo = h.logo_url
+      ? '<img class="cpb-page-header-logo" src="' + escapeHtml(h.logo_url) + '" alt="' + escapeHtml(h.logo_alt || '') + '">'
+      : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
+    var center = escapeHtml(resolveHeaderTokensPreview(h.center_text)).replace(/\n/g, '<br>');
+    var right = escapeHtml(resolveHeaderTokensPreview(h.right_text)).replace(/\n/g, '<br>');
+    var footerLeft = escapeHtml(resolveHeaderTokensPreview(f.left_text)).replace(/\n/g, '<br>');
+    var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text)).replace(/\n/g, '<br>');
+    var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
+    return '<table class="cpb-page-header-table" role="presentation"><tr>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--left">' + logo + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--center">' + center + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--right">' + right + '</td>'
+      + '</tr></table>'
+      + (f.enabled ? '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--left">' + footerLeft + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--center">' + footerCenter + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--right">' + footerRight + '</td>'
+        + '</tr></table>' : '');
   }
 
   function defaultTableStyleDef() {
@@ -1705,7 +1782,7 @@
       return;
     }
     if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
-      var ps = target.el.getAttribute('data-paragraph-style') || 'body';
+      var ps = canonicalParagraphStyleKey(target.el.getAttribute('data-paragraph-style') || 'body');
       var font = target.el.getAttribute('data-font-family') || 'serif';
       var size = parseInt(target.el.getAttribute('data-font-size') || '11', 10) || 11;
       var color = target.el.getAttribute('data-text-color') || '#0f172a';
@@ -1856,6 +1933,7 @@
   }
 
   function applyParagraphStyle(styleKey) {
+    styleKey = canonicalParagraphStyleKey(styleKey);
     var target = getActiveStyleTarget();
     if (!isLiveStyleTarget(target) || target.type === 'table-cell') return;
     if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
@@ -2124,6 +2202,225 @@
     }).join('');
   }
 
+  function openHeaderEditor() {
+    var header = JSON.parse(JSON.stringify(state.pageHeader || defaultPageHeader()));
+    var footer = JSON.parse(JSON.stringify(state.pageFooter || defaultPageFooter()));
+    var tokens = state.headerTokens.length ? state.headerTokens : defaultHeaderTokens();
+    var overlay = document.createElement('div');
+    overlay.className = 'cpb-style-overlay cpb-header-overlay';
+
+    var tokenButtons = tokens.map(function (t) {
+      return '<button type="button" class="cpb-header-token" data-token="' + escapeHtml(t.token) + '" title="'
+        + escapeHtml(t.description || '') + '">' + escapeHtml(t.label || t.token) + '</button>';
+    }).join('');
+
+    overlay.innerHTML = ''
+      + '<div class="cpb-style-dialog cpb-header-dialog" role="dialog" aria-label="Page header editor">'
+      + '<h3>Page header editor</h3>'
+      + '<p class="cpb-style-lead">Configure the running header and footer for every page in this manual. '
+      + 'Use variables for dynamic content — page numbers are resolved automatically in the e-reader.</p>'
+      + '<section class="cpb-header-section">'
+      + '<label class="cpb-header-enable"><input type="checkbox" id="cpbHeaderEnabled"' + (header.enabled ? ' checked' : '') + '> Show page header</label>'
+      + '<div class="cpb-header-grid">'
+      + '<div class="cpb-header-col">'
+      + '<h4>Left — Logo</h4>'
+      + '<div class="cpb-header-logo-drop" id="cpbHeaderLogoDrop">'
+      + '<div class="cpb-header-logo-preview" id="cpbHeaderLogoPreview"></div>'
+      + '<p class="cpb-header-logo-hint">Drag &amp; drop logo image, or click to browse</p>'
+      + '<button type="button" class="cpb-header-logo-clear" id="cpbHeaderLogoClear">Remove logo</button>'
+      + '</div>'
+      + '<label>Alt text <input type="text" class="cpb-style-input" id="cpbHeaderLogoAlt" value="' + escapeHtml(header.logo_alt || '') + '"></label>'
+      + '</div>'
+      + '<div class="cpb-header-col">'
+      + '<h4>Center</h4>'
+      + '<textarea class="cpb-header-textarea" id="cpbHeaderCenter" rows="4">' + escapeHtml(header.center_text || '') + '</textarea>'
+      + '<div class="cpb-header-tokens" data-target="cpbHeaderCenter">' + tokenButtons + '</div>'
+      + '</div>'
+      + '<div class="cpb-header-col">'
+      + '<h4>Right</h4>'
+      + '<textarea class="cpb-header-textarea" id="cpbHeaderRight" rows="4">' + escapeHtml(header.right_text || '') + '</textarea>'
+      + '<div class="cpb-header-tokens" data-target="cpbHeaderRight">' + tokenButtons + '</div>'
+      + '</div>'
+      + '</div>'
+      + '</section>'
+      + '<section class="cpb-header-section cpb-header-section--footer">'
+      + '<label class="cpb-header-enable"><input type="checkbox" id="cpbFooterEnabled"' + (footer.enabled ? ' checked' : '') + '> Show page footer</label>'
+      + '<div class="cpb-header-grid cpb-header-grid--footer">'
+      + '<div class="cpb-header-col"><h4>Footer left</h4>'
+      + '<textarea class="cpb-header-textarea" id="cpbFooterLeft" rows="2">' + escapeHtml(footer.left_text || '') + '</textarea>'
+      + '<div class="cpb-header-tokens" data-target="cpbFooterLeft">' + tokenButtons + '</div></div>'
+      + '<div class="cpb-header-col"><h4>Footer center</h4>'
+      + '<textarea class="cpb-header-textarea" id="cpbFooterCenter" rows="2">' + escapeHtml(footer.center_text || '') + '</textarea>'
+      + '<div class="cpb-header-tokens" data-target="cpbFooterCenter">' + tokenButtons + '</div></div>'
+      + '<div class="cpb-header-col"><h4>Footer right</h4>'
+      + '<textarea class="cpb-header-textarea" id="cpbFooterRight" rows="2">' + escapeHtml(footer.right_text || '') + '</textarea>'
+      + '<div class="cpb-header-tokens" data-target="cpbFooterRight">' + tokenButtons + '</div></div>'
+      + '</div>'
+      + '</section>'
+      + '<section class="cpb-header-preview-section">'
+      + '<h4>Preview (current section)</h4>'
+      + '<div class="cpb-header-preview" id="cpbHeaderPreview"></div>'
+      + '</section>'
+      + '<div class="cpb-style-dialog-actions">'
+      + '<button type="button" class="cpb-style-cancel">Cancel</button>'
+      + '<button type="button" class="cpb-header-save">Save header</button>'
+      + '</div></div>';
+
+    var logoPreviewEl = overlay.querySelector('#cpbHeaderLogoPreview');
+    var logoDropEl = overlay.querySelector('#cpbHeaderLogoDrop');
+    var pendingLogoUrl = header.logo_url || '';
+
+    function renderLogoPreview() {
+      if (!logoPreviewEl) return;
+      if (pendingLogoUrl) {
+        logoPreviewEl.innerHTML = '<img src="' + escapeHtml(pendingLogoUrl) + '" alt="">';
+      } else {
+        logoPreviewEl.innerHTML = '<span class="cpb-header-logo-empty">No logo</span>';
+      }
+      refreshPreview();
+    }
+
+    function readDialogState() {
+      return {
+        header: {
+          enabled: !!overlay.querySelector('#cpbHeaderEnabled').checked,
+          left_type: 'logo',
+          logo_url: pendingLogoUrl,
+          logo_alt: overlay.querySelector('#cpbHeaderLogoAlt').value.trim() || 'EuroPilot Center',
+          center_text: overlay.querySelector('#cpbHeaderCenter').value,
+          right_text: overlay.querySelector('#cpbHeaderRight').value,
+        },
+        footer: {
+          enabled: !!overlay.querySelector('#cpbFooterEnabled').checked,
+          left_text: overlay.querySelector('#cpbFooterLeft').value,
+          center_text: overlay.querySelector('#cpbFooterCenter').value,
+          right_text: overlay.querySelector('#cpbFooterRight').value,
+        },
+      };
+    }
+
+    function refreshPreview() {
+      var st = readDialogState();
+      var previewEl = overlay.querySelector('#cpbHeaderPreview');
+      if (previewEl) {
+        previewEl.innerHTML = previewHeaderHtml(st.header, st.footer);
+      }
+    }
+
+    function insertTokenAt(targetId, token) {
+      var ta = overlay.querySelector('#' + targetId);
+      if (!ta) return;
+      var start = ta.selectionStart;
+      var end = ta.selectionEnd;
+      var val = ta.value;
+      ta.value = val.slice(0, start) + token + val.slice(end);
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + token.length;
+      refreshPreview();
+    }
+
+    function uploadLogoFile(file) {
+      if (!file || !file.type.match(/^image\/(jpeg|png|webp)$/)) {
+        alert('Only JPG, PNG, or WEBP images are allowed.');
+        return;
+      }
+      var fd = new FormData();
+      fd.append('action', 'upload_header_logo');
+      fd.append('version_id', String(state.versionId));
+      fd.append('image', file);
+      fd.append('alt', overlay.querySelector('#cpbHeaderLogoAlt').value.trim());
+      setStatus('Uploading logo…', 'saving');
+      fetch(apiBase, { method: 'POST', credentials: 'same-origin', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Upload failed');
+          pendingLogoUrl = res.url || (res.page_header && res.page_header.logo_url) || '';
+          if (res.page_header) {
+            state.pageHeader = res.page_header;
+            state.pageFooter = res.page_footer || state.pageFooter;
+          }
+          renderLogoPreview();
+          setStatus('Logo uploaded', 'saved');
+        })
+        .catch(showError);
+    }
+
+    renderLogoPreview();
+
+    overlay.querySelectorAll('.cpb-header-token').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.closest('.cpb-header-tokens').getAttribute('data-target');
+        insertTokenAt(target, btn.getAttribute('data-token'));
+      });
+    });
+
+    overlay.querySelectorAll('.cpb-header-textarea, #cpbHeaderLogoAlt').forEach(function (el) {
+      el.addEventListener('input', refreshPreview);
+    });
+    overlay.querySelector('#cpbHeaderEnabled').addEventListener('change', refreshPreview);
+    overlay.querySelector('#cpbFooterEnabled').addEventListener('change', refreshPreview);
+
+    logoDropEl.addEventListener('click', function () {
+      if (headerLogoInput) headerLogoInput.click();
+    });
+    logoDropEl.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      logoDropEl.classList.add('cpb-header-logo-drop--over');
+    });
+    logoDropEl.addEventListener('dragleave', function () {
+      logoDropEl.classList.remove('cpb-header-logo-drop--over');
+    });
+    logoDropEl.addEventListener('drop', function (e) {
+      e.preventDefault();
+      logoDropEl.classList.remove('cpb-header-logo-drop--over');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        uploadLogoFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    if (headerLogoInput) {
+      headerLogoInput.onchange = function () {
+        if (headerLogoInput.files && headerLogoInput.files[0]) {
+          uploadLogoFile(headerLogoInput.files[0]);
+        }
+        headerLogoInput.value = '';
+      };
+    }
+
+    overlay.querySelector('#cpbHeaderLogoClear').addEventListener('click', function () {
+      pendingLogoUrl = '';
+      renderLogoPreview();
+    });
+
+    function close() {
+      if (headerLogoInput) headerLogoInput.onchange = null;
+      overlay.remove();
+    }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.querySelector('.cpb-style-cancel').addEventListener('click', close);
+    overlay.querySelector('.cpb-header-save').addEventListener('click', function () {
+      var st = readDialogState();
+      setStatus('Saving header…', 'saving');
+      apiPost('save_page_header', {
+        version_id: state.versionId,
+        page_header: st.header,
+        page_footer: st.footer,
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Save failed');
+        state.pageHeader = res.page_header || st.header;
+        state.pageFooter = res.page_footer || st.footer;
+        if (state.bookStyles) {
+          state.bookStyles.page_header = state.pageHeader;
+          state.bookStyles.page_footer = state.pageFooter;
+        }
+        close();
+        setStatus('Page header saved', 'saved');
+        return loadSection(state.sectionId);
+      }).catch(showError);
+    });
+    document.body.appendChild(overlay);
+  }
+
   function openStyleEditor() {
     var styles = JSON.parse(JSON.stringify(state.bookStyles || defaultBookStyles()));
     var overlay = document.createElement('div');
@@ -2171,8 +2468,9 @@
     overlay.innerHTML = ''
       + '<div class="cpb-style-dialog" role="dialog" aria-label="Book style editor">'
       + '<h3>Book style editor</h3>'
-      + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering (1. / 1.1 / 1.1.1). '
-      + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived from the parent section number or entered manually in the toolbar.</p>'
+      + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering '
+      + '(Title 1. · Subtitle 1 1.1 · Subtitle 2 1.1.1 · …). '
+      + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived or entered manually in the toolbar.</p>'
       + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
       + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Sample</th></tr></thead><tbody>'
       + paragraphRows + '</tbody></table></section>'
@@ -2501,6 +2799,13 @@
     openStyleEditorBtn.addEventListener('click', function (e) {
       e.preventDefault();
       openStyleEditor();
+    });
+  }
+
+  if (openHeaderEditorBtn) {
+    openHeaderEditorBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      openHeaderEditor();
     });
   }
 

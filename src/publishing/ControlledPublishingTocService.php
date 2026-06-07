@@ -120,9 +120,10 @@ final class ControlledPublishingTocService
             $blockId = (int)($row['id'] ?? 0);
             $payload = $this->blocks->decodePayload($row);
             $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+            $style = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
             if ($style === '' && (string)($row['block_type'] ?? '') === 'heading') {
                 $level = max(1, min(6, (int)($payload['level'] ?? 2)));
-                $style = $level <= 1 ? 'heading_1' : ($level === 2 ? 'heading_2' : 'subtitle_3');
+                $style = $level <= 1 ? 'subtitle_2' : ($level === 2 ? 'subtitle_3' : 'subtitle_4');
             }
             if (!in_array($style, ControlledPublishingBookStyleService::TOC_PARAGRAPH_STYLE_KEYS, true)) {
                 continue;
@@ -168,13 +169,13 @@ final class ControlledPublishingTocService
 
     private function styleDepth(string $style): int
     {
+        $style = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
         return match ($style) {
             'title' => 0,
             'subtitle_1' => 1,
-            'heading_1' => 2,
-            'heading_2' => 3,
-            'subtitle_3' => 4,
-            'subtitle_4' => 5,
+            'subtitle_2' => 2,
+            'subtitle_3' => 3,
+            'subtitle_4' => 4,
             default => 0,
         };
     }

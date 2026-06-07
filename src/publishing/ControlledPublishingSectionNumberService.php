@@ -13,10 +13,9 @@ final class ControlledPublishingSectionNumberService
     public const NUMBERED_STYLE_DEPTHS = array(
         'title' => 1,
         'subtitle_1' => 2,
-        'heading_1' => 3,
-        'heading_2' => 4,
-        'subtitle_3' => 5,
-        'subtitle_4' => 6,
+        'subtitle_2' => 3,
+        'subtitle_3' => 4,
+        'subtitle_4' => 5,
     );
 
     public function __construct(
@@ -152,9 +151,10 @@ final class ControlledPublishingSectionNumberService
     private function resolveParagraphStyle(string $blockType, array $payload): string
     {
         $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $style = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
         if ($style === '' && $blockType === 'heading') {
             $level = max(1, min(6, (int)($payload['level'] ?? 2)));
-            return $level <= 1 ? 'heading_1' : ($level === 2 ? 'heading_2' : 'subtitle_3');
+            return $level <= 1 ? 'subtitle_2' : ($level === 2 ? 'subtitle_3' : 'subtitle_4');
         }
         return $style;
     }
