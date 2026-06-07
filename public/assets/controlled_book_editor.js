@@ -71,6 +71,7 @@
     resizeHintEl: null,
     tableClipboard: '',
     canvasZoom: 100,
+    lastStyleTarget: null,
   };
 
   var INDENT_STEP_PX = 24;
@@ -473,6 +474,7 @@
       if (cell && cell.isContentEditable) {
         state.focusedTableCell = cell;
       }
+      rememberStyleTarget();
     });
 
     canvasEl.addEventListener('click', function (e) {
@@ -668,7 +670,10 @@
         if (!blockEl) return;
         var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
         var action = btn.getAttribute('data-action');
-        if (action === 'delete') {
+        if (action === 'insert-paragraph') {
+          pushUndo();
+          createBlock('paragraph', { html: '<p>New paragraph</p>' }, blockEl).catch(showError);
+        } else if (action === 'delete') {
           if (!confirm('Delete this block?')) return;
           pushUndo();
           apiPost('delete_block', { block_id: blockId }).then(function (res) {
@@ -1446,7 +1451,14 @@
     return null;
   }
 
-  function getActiveStyleTarget() {
+  function selectionInCanvas() {
+    var sel = window.getSelection();
+    if (!sel || !sel.anchorNode) return false;
+    var node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    return !!(node && canvasEl.contains(node));
+  }
+
+  function getActiveStyleTargetFromEditor() {
     var tableTarget = getActiveTableCell();
     if (tableTarget) return tableTarget;
 
@@ -1473,6 +1485,62 @@
     return null;
   }
 
+  function rememberStyleTarget() {
+    if (!selectionInCanvas() && !(document.activeElement && canvasEl.contains(document.activeElement))) {
+      return;
+    }
+    var target = getActiveStyleTargetFromEditor();
+    if (target) state.lastStyleTarget = target;
+  }
+
+  function getActiveStyleTarget() {
+    var ae = document.activeElement;
+    if (toolbarEl && ae && toolbarEl.contains(ae) && state.lastStyleTarget) {
+      return state.lastStyleTarget;
+    }
+    return getActiveStyleTargetFromEditor();
+  }
+
+  function getFocusedBlock() {
+    var target = getActiveStyleTargetFromEditor();
+    if (target && target.block) return target.block;
+    if (state.lastStyleTarget && state.lastStyleTarget.block) return state.lastStyleTarget.block;
+    var ae = document.activeElement;
+    if (ae && ae.closest) {
+      var block = ae.closest('.cpb-block');
+      if (block) return block;
+    }
+    return null;
+  }
+
+  function hasTextSelectionInCanvas() {
+    var sel = window.getSelection();
+    return !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && selectionInCanvas());
+  }
+
+  function applyInlineStyleToSelection(styles) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+    var range = sel.getRangeAt(0);
+    if (!canvasEl.contains(range.commonAncestorContainer)) return false;
+    var span = document.createElement('span');
+    Object.keys(styles).forEach(function (key) {
+      if (styles[key]) span.style[key] = styles[key];
+    });
+    try {
+      range.surroundContents(span);
+    } catch (err) {
+      var extracted = range.extractContents();
+      span.appendChild(extracted);
+      range.insertNode(span);
+    }
+    sel.removeAllRanges();
+    var next = document.createRange();
+    next.selectNodeContents(span);
+    sel.addRange(next);
+    return true;
+  }
+
   function applyIndentToElement(el, level) {
     level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
     el.setAttribute('data-indent-level', String(level));
@@ -1488,8 +1556,13 @@
     if (!target || target.type === 'table-cell') return;
     if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
     pushUndo();
-    var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
-    applyIndentToElement(target.el, level + delta);
+    if (target.type === 'heading') {
+      var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
+      applyIndentToElement(target.el, level + delta);
+    } else {
+      target.el.focus();
+      document.execCommand(delta > 0 ? 'indent' : 'outdent', false, null);
+    }
     scheduleSave(target.block);
     flushSave(target.block);
   }
@@ -1508,24 +1581,32 @@
     }
   }
 
+  function applyBlockTypography(el, font, size) {
+    FONT_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
+    el.classList.add('cpb-font-' + font);
+    el.setAttribute('data-font-family', font);
+    var stack = FONT_STACKS[font];
+    if (stack) el.style.fontFamily = stack;
+    if (size) applyFontSizeToElement(el, size, false);
+  }
+
   function applyFontFamily(font) {
     var target = getActiveStyleTarget();
     if (!target) return;
     pushUndo();
+    var presetSize = FONT_PRESET_SIZES[font] || null;
     if (target.type === 'table-cell') {
-      var size = FONT_PRESET_SIZES[font] || null;
-      applyStyleToTableCell(target.el, { font: font, size: size });
-      if (size && fontSizeSelect) fontSizeSelect.value = String(size);
+      applyStyleToTableCell(target.el, { font: font, size: presetSize });
+      if (presetSize && fontSizeSelect) fontSizeSelect.value = String(presetSize);
     } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
-      FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
-      target.el.classList.add('cpb-font-' + font);
-      target.el.setAttribute('data-font-family', font);
       var stack = FONT_STACKS[font];
-      if (stack) target.el.style.fontFamily = stack;
-      if (FONT_PRESET_SIZES[font]) {
-        applyFontSizeToElement(target.el, FONT_PRESET_SIZES[font], false);
-        if (fontSizeSelect) fontSizeSelect.value = String(FONT_PRESET_SIZES[font]);
+      target.el.focus();
+      var inlineStyles = { fontFamily: stack || '' };
+      if (presetSize) inlineStyles.fontSize = presetSize + 'pt';
+      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection(inlineStyles)) {
+        applyBlockTypography(target.el, font, presetSize);
       }
+      if (presetSize && fontSizeSelect) fontSizeSelect.value = String(presetSize);
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -1544,7 +1625,12 @@
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { size: size });
     } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
-      applyFontSizeToElement(target.el, size, true);
+      target.el.focus();
+      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ fontSize: size + 'pt' })) {
+        applyFontSizeToElement(target.el, size, true);
+      } else if (fontSizeSelect) {
+        fontSizeSelect.value = String(size);
+      }
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -1566,24 +1652,44 @@
     flushSave(target.block);
   }
 
-  function createBlock(blockType, payload) {
+  function createBlock(blockType, payload, insertAfterBlockEl) {
     pushUndo();
     setStatus('Adding block…', 'saving');
-    return apiPost('create_block', {
+    var afterId = insertAfterBlockEl
+      ? parseInt(insertAfterBlockEl.getAttribute('data-block-id') || '0', 10)
+      : 0;
+    var focusedBlock = !insertAfterBlockEl ? getFocusedBlock() : null;
+    if (!afterId && focusedBlock) {
+      afterId = parseInt(focusedBlock.getAttribute('data-block-id') || '0', 10);
+    }
+    var req = {
       version_id: state.versionId,
       section_id: state.sectionId,
       block_type: blockType,
       payload: payload || {},
-    }).then(function (res) {
+    };
+    if (afterId > 0) req.insert_after_block_id = afterId;
+    return apiPost('create_block', req).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Create failed');
-      var body = canvasEl.querySelector('[data-blocks-root]');
-      if (body && res.block_html) {
-        body.insertAdjacentHTML('beforeend', res.block_html);
+      var anchor = insertAfterBlockEl || focusedBlock;
+      if (anchor && res.block_html) {
+        anchor.insertAdjacentHTML('afterend', res.block_html);
         wireCanvas();
-        var newBlock = body.querySelector('.cpb-block:last-child');
-        if (newBlock) {
+        var newBlock = anchor.nextElementSibling;
+        if (newBlock && newBlock.classList.contains('cpb-block')) {
           var field = newBlock.querySelector('[contenteditable="true"]');
           if (field) field.focus();
+        }
+      } else {
+        var body = canvasEl.querySelector('[data-blocks-root]');
+        if (body && res.block_html) {
+          body.insertAdjacentHTML('beforeend', res.block_html);
+          wireCanvas();
+          var lastBlock = body.querySelector('.cpb-block:last-child');
+          if (lastBlock) {
+            var field2 = lastBlock.querySelector('[contenteditable="true"]');
+            if (field2) field2.focus();
+          }
         }
       }
       setStatus('Added', 'saved');
@@ -1798,26 +1904,26 @@
     });
   }
 
-  function keepEditorFocusOnToolbarControl(e) {
-    e.preventDefault();
-  }
+  document.addEventListener('selectionchange', function () {
+    if (selectionInCanvas()) rememberStyleTarget();
+  });
 
   if (fontSelect) {
-    fontSelect.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
+    fontSelect.addEventListener('focus', rememberStyleTarget);
     fontSelect.addEventListener('change', function () {
       applyFontFamily(fontSelect.value);
     });
   }
 
   if (fontSizeSelect) {
-    fontSizeSelect.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
+    fontSizeSelect.addEventListener('focus', rememberStyleTarget);
     fontSizeSelect.addEventListener('change', function () {
       applyFontSize(parseInt(fontSizeSelect.value, 10) || 11);
     });
   }
 
   if (textColorInput) {
-    textColorInput.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
+    textColorInput.addEventListener('focus', rememberStyleTarget);
     textColorInput.addEventListener('input', function () {
       execFormat('foreColor', textColorInput.value);
     });

@@ -79,7 +79,8 @@ final class ControlledPublishingBlockService
         int $sectionId,
         string $blockType,
         array $payload,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        ?int $insertAfterBlockId = null
     ): int {
         $section = $this->requireEditableSection($versionId, $sectionId);
         $blockType = $this->normalizeBlockType($blockType);
@@ -111,7 +112,35 @@ final class ControlledPublishingBlockService
             ':actor_user_id' => $actorUserId,
         ));
 
-        return (int)$this->pdo->lastInsertId();
+        $newId = (int)$this->pdo->lastInsertId();
+        if ($insertAfterBlockId !== null && $insertAfterBlockId > 0) {
+            $this->insertBlockAfter($sectionId, $insertAfterBlockId, $newId, $actorUserId);
+        }
+
+        return $newId;
+    }
+
+    private function insertBlockAfter(
+        int $sectionId,
+        int $afterBlockId,
+        int $newBlockId,
+        ?int $actorUserId
+    ): void {
+        $blocks = $this->listSectionBlocks($sectionId);
+        $ids = array();
+        foreach ($blocks as $row) {
+            $ids[] = (int)$row['id'];
+        }
+        $ids = array_values(array_filter(
+            $ids,
+            static fn(int $id): bool => $id !== $newBlockId
+        ));
+        $index = array_search($afterBlockId, $ids, true);
+        if ($index === false) {
+            return;
+        }
+        array_splice($ids, $index + 1, 0, array($newBlockId));
+        $this->reorderBlocks($sectionId, $ids, $actorUserId);
     }
 
     public function updateBlock(int $blockId, array $payload, ?int $actorUserId = null): void

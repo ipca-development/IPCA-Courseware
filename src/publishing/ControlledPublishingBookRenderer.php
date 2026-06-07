@@ -40,6 +40,7 @@ final class ControlledPublishingBookRenderer
         $chrome = '';
         if ($mode === self::MODE_EDIT && !$system && $type !== 'generated_placeholder') {
             $chrome = '<div class="cpb-block-chrome" contenteditable="false">'
+                . '<button type="button" class="cpb-block-btn" data-action="insert-paragraph" title="Insert paragraph below">¶+</button>'
                 . '<button type="button" class="cpb-block-btn" data-action="move-up" title="Move up">↑</button>'
                 . '<button type="button" class="cpb-block-btn" data-action="move-down" title="Move down">↓</button>'
                 . '<button type="button" class="cpb-block-btn cpb-block-btn--danger" data-action="delete" title="Delete">×</button>'

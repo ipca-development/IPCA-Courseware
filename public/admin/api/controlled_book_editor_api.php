@@ -293,7 +293,15 @@ function cp_editor_handle_create_block(
         cp_editor_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
     }
 
-    $blockId = $blocks->createBlock($versionId, $sectionId, $blockType, $payload, $uid);
+    $insertAfterBlockId = (int)($in['insert_after_block_id'] ?? 0);
+    $blockId = $blocks->createBlock(
+        $versionId,
+        $sectionId,
+        $blockType,
+        $payload,
+        $uid,
+        $insertAfterBlockId > 0 ? $insertAfterBlockId : null
+    );
     $block = $blocks->getBlock($blockId);
     if ($block === null) {
         cp_editor_json(500, array('ok' => false, 'error' => 'Block create failed'));
