@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+
 /**
  * Book-level page header/footer templates stored in version metadata_json.
  */
@@ -34,8 +36,13 @@ final class ControlledPublishingPageHeaderService
             'left_type' => 'logo',
             'logo_url' => '',
             'logo_alt' => 'EuroPilot Center',
+            'logo_max_height' => 48,
             'center_text' => "{manual_code}\n{section_title}",
+            'center_font_family' => 'sans',
+            'center_font_size' => 11,
             'right_text' => "Page: {page}\nRevision: {revision}\nDate: {date}",
+            'right_font_family' => 'sans',
+            'right_font_size' => 10,
         );
     }
 
@@ -47,8 +54,14 @@ final class ControlledPublishingPageHeaderService
         return array(
             'enabled' => true,
             'left_text' => '',
+            'left_font_family' => 'sans',
+            'left_font_size' => 9,
             'center_text' => 'Controlled copy — internal use',
+            'center_font_family' => 'sans',
+            'center_font_size' => 9,
             'right_text' => '',
+            'right_font_family' => 'sans',
+            'right_font_size' => 9,
         );
     }
 
@@ -281,8 +294,13 @@ final class ControlledPublishingPageHeaderService
             'left_type' => (string)($raw['left_type'] ?? $defaults['left_type']) === 'logo' ? 'logo' : 'logo',
             'logo_url' => $logoUrl,
             'logo_alt' => $this->truncate(trim((string)($raw['logo_alt'] ?? $defaults['logo_alt'])), 200),
+            'logo_max_height' => $this->normalizeLogoMaxHeight($raw['logo_max_height'] ?? $defaults['logo_max_height']),
             'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
+            'center_font_family' => $this->normalizeFont((string)($raw['center_font_family'] ?? $defaults['center_font_family'])),
+            'center_font_size' => $this->normalizeFontSize($raw['center_font_size'] ?? $defaults['center_font_size']),
             'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
+            'right_font_family' => $this->normalizeFont((string)($raw['right_font_family'] ?? $defaults['right_font_family'])),
+            'right_font_size' => $this->normalizeFontSize($raw['right_font_size'] ?? $defaults['right_font_size']),
         );
     }
 
@@ -296,8 +314,14 @@ final class ControlledPublishingPageHeaderService
         return array(
             'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
             'left_text' => $this->truncate(trim((string)($raw['left_text'] ?? $defaults['left_text'])), 2000),
+            'left_font_family' => $this->normalizeFont((string)($raw['left_font_family'] ?? $defaults['left_font_family'])),
+            'left_font_size' => $this->normalizeFontSize($raw['left_font_size'] ?? $defaults['left_font_size']),
             'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
+            'center_font_family' => $this->normalizeFont((string)($raw['center_font_family'] ?? $defaults['center_font_family'])),
+            'center_font_size' => $this->normalizeFontSize($raw['center_font_size'] ?? $defaults['center_font_size']),
             'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
+            'right_font_family' => $this->normalizeFont((string)($raw['right_font_family'] ?? $defaults['right_font_family'])),
+            'right_font_size' => $this->normalizeFontSize($raw['right_font_size'] ?? $defaults['right_font_size']),
         );
     }
 
@@ -320,6 +344,28 @@ final class ControlledPublishingPageHeaderService
             return $value;
         }
         return substr($value, 0, $max);
+    }
+
+    private function normalizeFont(string $font): string
+    {
+        $font = strtolower(trim($font));
+        if (in_array($font, ControlledPublishingBookStyleService::FONT_KEYS, true)) {
+            return $font;
+        }
+        return 'sans';
+    }
+
+    private function normalizeFontSize(mixed $size): int
+    {
+        $allowed = array(8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24);
+        $size = (int)$size;
+        return in_array($size, $allowed, true) ? $size : 11;
+    }
+
+    private function normalizeLogoMaxHeight(mixed $height): int
+    {
+        $height = (int)$height;
+        return max(16, min(120, $height > 0 ? $height : 48));
     }
 
     /**

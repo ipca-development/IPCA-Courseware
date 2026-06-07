@@ -890,8 +890,13 @@
       left_type: 'logo',
       logo_url: '',
       logo_alt: 'EuroPilot Center',
+      logo_max_height: 48,
       center_text: '{manual_code}\n{section_title}',
+      center_font_family: 'sans',
+      center_font_size: 11,
       right_text: 'Page: {page}\nRevision: {revision}\nDate: {date}',
+      right_font_family: 'sans',
+      right_font_size: 10,
     };
   }
 
@@ -899,9 +904,36 @@
     return {
       enabled: true,
       left_text: '',
+      left_font_family: 'sans',
+      left_font_size: 9,
       center_text: 'Controlled copy — internal use',
+      center_font_family: 'sans',
+      center_font_size: 9,
       right_text: '',
+      right_font_family: 'sans',
+      right_font_size: 9,
     };
+  }
+
+  var HEADER_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24];
+  var HEADER_LOGO_HEIGHTS = [24, 32, 40, 48, 56, 64, 72, 80, 96, 120];
+
+  function headerFontSizeOptions(selected) {
+    return HEADER_FONT_SIZES.map(function (size) {
+      return '<option value="' + size + '"' + (size === selected ? ' selected' : '') + '>' + size + ' pt</option>';
+    }).join('');
+  }
+
+  function headerLogoHeightOptions(selected) {
+    return HEADER_LOGO_HEIGHTS.map(function (size) {
+      return '<option value="' + size + '"' + (size === selected ? ' selected' : '') + '>' + size + ' px</option>';
+    }).join('');
+  }
+
+  function headerCellStyleAttr(fontFamily, fontSize) {
+    var stack = FONT_STACKS[fontFamily] || FONT_STACKS.sans;
+    var size = parseInt(fontSize, 10) || 11;
+    return ' style="font-family:' + stack + ';font-size:' + size + 'pt;"';
   }
 
   function defaultHeaderTokens() {
@@ -938,8 +970,9 @@
   function previewHeaderHtml(header, footer) {
     var h = header || defaultPageHeader();
     var f = footer || defaultPageFooter();
+    var logoHeight = parseInt(h.logo_max_height, 10) || 48;
     var logo = h.logo_url
-      ? '<img class="cpb-page-header-logo" src="' + escapeHtml(h.logo_url) + '" alt="' + escapeHtml(h.logo_alt || '') + '">'
+      ? '<img class="cpb-page-header-logo" src="' + escapeHtml(h.logo_url) + '" alt="' + escapeHtml(h.logo_alt || '') + '" style="max-height:' + logoHeight + 'px;">'
       : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
     var center = escapeHtml(resolveHeaderTokensPreview(h.center_text)).replace(/\n/g, '<br>');
     var right = escapeHtml(resolveHeaderTokensPreview(h.right_text)).replace(/\n/g, '<br>');
@@ -948,13 +981,13 @@
     var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
     return '<table class="cpb-page-header-table" role="presentation"><tr>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--left">' + logo + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--center">' + center + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--right">' + right + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(h.center_font_family, h.center_font_size) + '>' + center + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(h.right_font_family, h.right_font_size) + '>' + right + '</td>'
       + '</tr></table>'
       + (f.enabled ? '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--left">' + footerLeft + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--center">' + footerCenter + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--right">' + footerRight + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerCellStyleAttr(f.left_font_family, f.left_font_size) + '>' + footerLeft + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(f.center_font_family, f.center_font_size) + '>' + footerCenter + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(f.right_font_family, f.right_font_size) + '>' + footerRight + '</td>'
         + '</tr></table>' : '');
   }
 
@@ -2202,6 +2235,15 @@
     }).join('');
   }
 
+  function headerTypographyControls(idPrefix, fontFamily, fontSize) {
+    return '<div class="cpb-header-typography">'
+      + '<label>Font <select class="cpb-style-input" id="' + idPrefix + 'Font">'
+      + styleEditorFontOptions(fontFamily || 'sans') + '</select></label>'
+      + '<label>Size <select class="cpb-style-input" id="' + idPrefix + 'Size">'
+      + headerFontSizeOptions(parseInt(fontSize, 10) || 11) + '</select></label>'
+      + '</div>';
+  }
+
   function openHeaderEditor() {
     var header = JSON.parse(JSON.stringify(state.pageHeader || defaultPageHeader()));
     var footer = JSON.parse(JSON.stringify(state.pageFooter || defaultPageFooter()));
@@ -2230,14 +2272,18 @@
       + '<button type="button" class="cpb-header-logo-clear" id="cpbHeaderLogoClear">Remove logo</button>'
       + '</div>'
       + '<label>Alt text <input type="text" class="cpb-style-input" id="cpbHeaderLogoAlt" value="' + escapeHtml(header.logo_alt || '') + '"></label>'
+      + '<label>Logo height <select class="cpb-style-input" id="cpbHeaderLogoHeight">'
+      + headerLogoHeightOptions(parseInt(header.logo_max_height, 10) || 48) + '</select></label>'
       + '</div>'
       + '<div class="cpb-header-col">'
       + '<h4>Center</h4>'
+      + headerTypographyControls('cpbHeaderCenter', header.center_font_family, header.center_font_size)
       + '<textarea class="cpb-header-textarea" id="cpbHeaderCenter" rows="4">' + escapeHtml(header.center_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbHeaderCenter">' + tokenButtons + '</div>'
       + '</div>'
       + '<div class="cpb-header-col">'
       + '<h4>Right</h4>'
+      + headerTypographyControls('cpbHeaderRight', header.right_font_family, header.right_font_size)
       + '<textarea class="cpb-header-textarea" id="cpbHeaderRight" rows="4">' + escapeHtml(header.right_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbHeaderRight">' + tokenButtons + '</div>'
       + '</div>'
@@ -2247,12 +2293,15 @@
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbFooterEnabled"' + (footer.enabled ? ' checked' : '') + '> Show page footer</label>'
       + '<div class="cpb-header-grid cpb-header-grid--footer">'
       + '<div class="cpb-header-col"><h4>Footer left</h4>'
+      + headerTypographyControls('cpbFooterLeft', footer.left_font_family, footer.left_font_size)
       + '<textarea class="cpb-header-textarea" id="cpbFooterLeft" rows="2">' + escapeHtml(footer.left_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterLeft">' + tokenButtons + '</div></div>'
       + '<div class="cpb-header-col"><h4>Footer center</h4>'
+      + headerTypographyControls('cpbFooterCenter', footer.center_font_family, footer.center_font_size)
       + '<textarea class="cpb-header-textarea" id="cpbFooterCenter" rows="2">' + escapeHtml(footer.center_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterCenter">' + tokenButtons + '</div></div>'
       + '<div class="cpb-header-col"><h4>Footer right</h4>'
+      + headerTypographyControls('cpbFooterRight', footer.right_font_family, footer.right_font_size)
       + '<textarea class="cpb-header-textarea" id="cpbFooterRight" rows="2">' + escapeHtml(footer.right_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterRight">' + tokenButtons + '</div></div>'
       + '</div>'
@@ -2272,8 +2321,9 @@
 
     function renderLogoPreview() {
       if (!logoPreviewEl) return;
+      var logoHeight = parseInt(overlay.querySelector('#cpbHeaderLogoHeight').value, 10) || 48;
       if (pendingLogoUrl) {
-        logoPreviewEl.innerHTML = '<img src="' + escapeHtml(pendingLogoUrl) + '" alt="">';
+        logoPreviewEl.innerHTML = '<img src="' + escapeHtml(pendingLogoUrl) + '" alt="" style="max-height:' + logoHeight + 'px;">';
       } else {
         logoPreviewEl.innerHTML = '<span class="cpb-header-logo-empty">No logo</span>';
       }
@@ -2287,14 +2337,25 @@
           left_type: 'logo',
           logo_url: pendingLogoUrl,
           logo_alt: overlay.querySelector('#cpbHeaderLogoAlt').value.trim() || 'EuroPilot Center',
+          logo_max_height: parseInt(overlay.querySelector('#cpbHeaderLogoHeight').value, 10) || 48,
           center_text: overlay.querySelector('#cpbHeaderCenter').value,
+          center_font_family: overlay.querySelector('#cpbHeaderCenterFont').value,
+          center_font_size: parseInt(overlay.querySelector('#cpbHeaderCenterSize').value, 10) || 11,
           right_text: overlay.querySelector('#cpbHeaderRight').value,
+          right_font_family: overlay.querySelector('#cpbHeaderRightFont').value,
+          right_font_size: parseInt(overlay.querySelector('#cpbHeaderRightSize').value, 10) || 10,
         },
         footer: {
           enabled: !!overlay.querySelector('#cpbFooterEnabled').checked,
           left_text: overlay.querySelector('#cpbFooterLeft').value,
+          left_font_family: overlay.querySelector('#cpbFooterLeftFont').value,
+          left_font_size: parseInt(overlay.querySelector('#cpbFooterLeftSize').value, 10) || 9,
           center_text: overlay.querySelector('#cpbFooterCenter').value,
+          center_font_family: overlay.querySelector('#cpbFooterCenterFont').value,
+          center_font_size: parseInt(overlay.querySelector('#cpbFooterCenterSize').value, 10) || 9,
           right_text: overlay.querySelector('#cpbFooterRight').value,
+          right_font_family: overlay.querySelector('#cpbFooterRightFont').value,
+          right_font_size: parseInt(overlay.querySelector('#cpbFooterRightSize').value, 10) || 9,
         },
       };
     }
@@ -2356,6 +2417,12 @@
 
     overlay.querySelectorAll('.cpb-header-textarea, #cpbHeaderLogoAlt').forEach(function (el) {
       el.addEventListener('input', refreshPreview);
+    });
+    overlay.querySelectorAll('.cpb-header-typography select, #cpbHeaderLogoHeight').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (el.id === 'cpbHeaderLogoHeight') renderLogoPreview();
+        else refreshPreview();
+      });
     });
     overlay.querySelector('#cpbHeaderEnabled').addEventListener('change', refreshPreview);
     overlay.querySelector('#cpbFooterEnabled').addEventListener('change', refreshPreview);

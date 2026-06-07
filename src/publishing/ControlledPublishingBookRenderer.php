@@ -216,12 +216,23 @@ final class ControlledPublishingBookRenderer
 
         $logoUrl = trim((string)($pageHeader['logo_url'] ?? ''));
         $logoAlt = h((string)($pageHeader['logo_alt'] ?? ''));
+        $logoMaxHeight = max(16, min(120, (int)($pageHeader['logo_max_height'] ?? 48)));
+        $logoStyle = ' style="max-height:' . $logoMaxHeight . 'px;"';
         $leftCell = '';
         if ($logoUrl !== '') {
-            $leftCell = '<img class="cpb-page-header-logo" src="' . h($logoUrl) . '" alt="' . $logoAlt . '">';
+            $leftCell = '<img class="cpb-page-header-logo" src="' . h($logoUrl) . '" alt="' . $logoAlt . '"' . $logoStyle . '>';
         } elseif ($editable) {
             $leftCell = '<span class="cpb-page-header-logo-placeholder">Logo</span>';
         }
+
+        $centerStyle = $this->pageBandCellStyleAttr(
+            (string)($pageHeader['center_font_family'] ?? 'sans'),
+            (int)($pageHeader['center_font_size'] ?? 11)
+        );
+        $rightStyle = $this->pageBandCellStyleAttr(
+            (string)($pageHeader['right_font_family'] ?? 'sans'),
+            (int)($pageHeader['right_font_size'] ?? 10)
+        );
 
         $editAttr = $editable
             ? ' data-open-header-editor="1" title="Click to edit page header"'
@@ -231,10 +242,10 @@ final class ControlledPublishingBookRenderer
             . '<table class="cpb-page-header-table" role="presentation">'
             . '<tr>'
             . '<td class="cpb-page-header-cell cpb-page-header-cell--left">' . $leftCell . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--center">'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center"' . $centerStyle . '>'
             . $resolve((string)($pageHeader['center_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--right">'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right"' . $rightStyle . '>'
             . $resolve((string)($pageHeader['right_text'] ?? ''))
             . '</td>'
             . '</tr></table></header>';
@@ -261,19 +272,42 @@ final class ControlledPublishingBookRenderer
             ? ' data-open-header-editor="1" title="Click to edit page footer"'
             : '';
 
+        $leftStyle = $this->pageBandCellStyleAttr(
+            (string)($pageFooter['left_font_family'] ?? 'sans'),
+            (int)($pageFooter['left_font_size'] ?? 9)
+        );
+        $centerStyle = $this->pageBandCellStyleAttr(
+            (string)($pageFooter['center_font_family'] ?? 'sans'),
+            (int)($pageFooter['center_font_size'] ?? 9)
+        );
+        $rightStyle = $this->pageBandCellStyleAttr(
+            (string)($pageFooter['right_font_family'] ?? 'sans'),
+            (int)($pageFooter['right_font_size'] ?? 9)
+        );
+
         return '<footer class="cpb-page-footer"' . $editAttr . ' contenteditable="false">'
             . '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation">'
             . '<tr>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--left">'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--left"' . $leftStyle . '>'
             . $resolve((string)($pageFooter['left_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--center">'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center"' . $centerStyle . '>'
             . $resolve((string)($pageFooter['center_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--right">'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right"' . $rightStyle . '>'
             . $resolve((string)($pageFooter['right_text'] ?? ''))
             . '</td>'
             . '</tr></table></footer>';
+    }
+
+    private function pageBandCellStyleAttr(string $fontFamily, int $fontSize): string
+    {
+        $stack = $this->fontFamilyStack($fontFamily);
+        if ($stack === '') {
+            return '';
+        }
+        $fontSize = max(8, min(24, $fontSize));
+        return ' style="font-family:' . h($stack) . ';font-size:' . $fontSize . 'pt;"';
     }
 
     /**
