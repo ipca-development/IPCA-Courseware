@@ -163,36 +163,129 @@ final class ControlledPublishingBookRenderer
      */
     private function renderTable(array $payload, string $mode): string
     {
-        $rows = is_array($payload['rows'] ?? null) ? $payload['rows'] : array();
-        if ($rows === array()) {
-            $rows = array(
-                array('Header 1', 'Header 2'),
-                array('', ''),
-            );
+        $table = $this->normalizeTableShape($payload);
+        $title = (string)$table['title'];
+        $headers = $table['headers'];
+        $rows = $table['rows'];
+        $colWidths = $table['col_widths'];
+        $hasTitleRow = !empty($table['has_title_row']) || $title !== '';
+        $colCount = count($headers);
+        $edit = $mode === self::MODE_EDIT;
+
+        $html = '<div class="cpb-table-block">';
+        $html .= '<div class="cpb-table-wrap"><table class="cpb-table" data-field="table">';
+        $html .= '<colgroup>';
+        foreach ($colWidths as $width) {
+            $html .= '<col style="width:' . (int)$width . 'px">';
         }
-        $html = '<div class="cpb-table-wrap"><table class="cpb-table" data-field="table">';
-        $rowIndex = 0;
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
+        $html .= '</colgroup>';
+
+        if ($hasTitleRow) {
+            $titleRowClass = 'cpb-table-title-row' . ($title === '' ? ' is-empty' : '');
+            $titleEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
+            $titleDisplay = $title !== '' ? h($title) : '';
+            $html .= '<tbody data-table-part="title"><tr class="' . $titleRowClass . '" data-title-row="1">';
+            $html .= '<td colspan="' . $colCount . '"' . $titleEdit
+                . ' data-placeholder="Table title (spans all columns)">' . $titleDisplay . '</td>';
+            $html .= '</tr></tbody>';
+        }
+
+        $html .= '<thead><tr>';
+        $colIndex = 0;
+        foreach ($headers as $header) {
+            $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
+            $html .= '<th' . $headerEdit . ' data-col-index="' . $colIndex . '">';
+            $html .= '<span class="cpb-th-text">' . h((string)$header) . '</span>';
+            if ($edit) {
+                $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
             }
+            $html .= '</th>';
+            $colIndex++;
+        }
+        $html .= '</tr></thead>';
+
+        $html .= '<tbody data-table-part="body">';
+        foreach ($rows as $row) {
             $html .= '<tr>';
             foreach ($row as $cell) {
-                $cellTag = $rowIndex === 0 ? 'th' : 'td';
-                $edit = $mode === self::MODE_EDIT ? ' contenteditable="true" spellcheck="true"' : '';
-                $html .= '<' . $cellTag . $edit . '>' . h((string)$cell) . '</' . $cellTag . '>';
+                $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
+                $html .= '<td' . $cellEdit . '>' . h((string)$cell) . '</td>';
             }
             $html .= '</tr>';
-            $rowIndex++;
         }
-        $html .= '</table></div>';
-        if ($mode === self::MODE_EDIT) {
+        $html .= '</tbody></table></div>';
+
+        if ($edit) {
             $html .= '<div class="cpb-table-tools" contenteditable="false">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-col">+ Column</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
+                . ($hasTitleRow ? 'Remove title row' : '+ Title row')
+                . '</button>'
                 . '</div>';
         }
+        $html .= '</div>';
         return $html;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array{title:string,has_title_row:bool,headers:list<string>,rows:list<list<string>>,col_widths:list<int>}
+     */
+    private function normalizeTableShape(array $payload): array
+    {
+        $title = trim((string)($payload['title'] ?? ''));
+        $hasTitleRow = !empty($payload['has_title_row']) || $title !== '';
+        $headers = array();
+        $rows = array();
+        $colWidths = array();
+
+        if (is_array($payload['headers'] ?? null)) {
+            foreach ($payload['headers'] as $cell) {
+                $headers[] = trim((string)$cell);
+            }
+        }
+        if (is_array($payload['rows'] ?? null)) {
+            foreach ($payload['rows'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $cell) {
+                    $line[] = trim((string)$cell);
+                }
+                $rows[] = $line;
+            }
+        }
+        if ($headers === array() && $rows !== array()) {
+            $headers = array_shift($rows) ?: array('Column 1', 'Column 2');
+        }
+        if ($headers === array()) {
+            $headers = array('Column 1', 'Column 2');
+        }
+        if ($rows === array()) {
+            $rows = array(array_fill(0, count($headers), ''));
+        }
+        $colCount = count($headers);
+        $headers = array_pad(array_slice($headers, 0, $colCount), $colCount, '');
+        $normalizedRows = array();
+        foreach ($rows as $row) {
+            $normalizedRows[] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        }
+        if (is_array($payload['col_widths'] ?? null)) {
+            foreach ($payload['col_widths'] as $width) {
+                $colWidths[] = max(60, min(600, (int)$width));
+            }
+        }
+        $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);
+
+        return array(
+            'title' => $title,
+            'has_title_row' => $hasTitleRow,
+            'headers' => $headers,
+            'rows' => $normalizedRows,
+            'col_widths' => $colWidths,
+        );
     }
 
     /**

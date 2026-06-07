@@ -82,9 +82,9 @@ compliance_page_open(array(
 ?>
 <link rel="stylesheet" href="/assets/controlled_book_editor.css?v=<?= h($cssVer) ?>">
 
-<section class="cmp-card cpb-editor-root" id="cpbEditorRoot"
-         data-version-id="<?= (int)$versionId ?>"
-         data-section-id="<?= (int)$sectionId ?>">
+<div class="cpb-editor-root cpb-editor-fullbleed" id="cpbEditorRoot"
+     data-version-id="<?= (int)$versionId ?>"
+     data-section-id="<?= (int)$sectionId ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
@@ -125,7 +125,7 @@ compliance_page_open(array(
     </div>
   </div>
   <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>
-</section>
+</div>
 
 <script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>
 <?php

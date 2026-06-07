@@ -198,30 +198,21 @@
       btn.addEventListener('click', function () {
         var blockEl = btn.closest('.cpb-block');
         if (!blockEl) return;
-        var table = blockEl.querySelector('table');
-        if (!table) return;
         var action = btn.getAttribute('data-table-action');
         if (action === 'add-row') {
-          var cols = table.rows[0] ? table.rows[0].cells.length : 2;
-          var tr = document.createElement('tr');
-          for (var i = 0; i < cols; i++) {
-            var td = document.createElement('td');
-            td.contentEditable = 'true';
-            td.textContent = '';
-            tr.appendChild(td);
-          }
-          table.appendChild(tr);
+          tableAddRow(blockEl);
         } else if (action === 'add-col') {
-          Array.prototype.forEach.call(table.rows, function (row, idx) {
-            var cell = document.createElement(idx === 0 ? 'th' : 'td');
-            cell.contentEditable = 'true';
-            cell.textContent = idx === 0 ? 'Header' : '';
-            row.appendChild(cell);
-          });
+          tableAddColumn(blockEl);
+        } else if (action === 'toggle-title') {
+          tableToggleTitle(blockEl);
         }
         scheduleSave(blockEl);
         flushSave(blockEl);
       });
+    });
+
+    canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
+      wireTableResize(blockEl);
     });
 
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
@@ -295,18 +286,7 @@
       return { ordered: ordered, items: items };
     }
     if (blockType === 'table') {
-      var table = blockEl.querySelector('table');
-      var rows = [];
-      if (table) {
-        Array.prototype.forEach.call(table.rows, function (row) {
-          var line = [];
-          Array.prototype.forEach.call(row.cells, function (cell) {
-            line.push(cell.textContent.trim());
-          });
-          rows.push(line);
-        });
-      }
-      return { rows: rows };
+      return extractTablePayload(blockEl);
     }
     if (blockType === 'image') {
       var img = blockEl.querySelector('img');
@@ -318,6 +298,164 @@
       };
     }
     return {};
+  }
+
+  function extractTablePayload(blockEl) {
+    var table = blockEl.querySelector('table');
+    var titleCell = blockEl.querySelector('[data-title-row] td');
+    var title = titleCell ? titleCell.textContent.trim() : '';
+    var headers = [];
+    var rows = [];
+    var colWidths = [];
+
+    if (table) {
+      table.querySelectorAll('thead th').forEach(function (th) {
+        var textEl = th.querySelector('.cpb-th-text');
+        headers.push((textEl ? textEl.textContent : th.textContent).trim());
+      });
+      table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
+        var line = [];
+        tr.querySelectorAll('td').forEach(function (td) {
+          line.push(td.textContent.trim());
+        });
+        if (line.length) rows.push(line);
+      });
+      table.querySelectorAll('colgroup col').forEach(function (col) {
+        var w = parseInt((col.style.width || '140').replace('px', ''), 10);
+        colWidths.push(isNaN(w) ? 140 : w);
+      });
+    }
+
+    return {
+      title: title,
+      has_title_row: !!blockEl.querySelector('[data-title-row]'),
+      headers: headers,
+      rows: rows,
+      col_widths: colWidths,
+    };
+  }
+
+  function tableBody(blockEl) {
+    var table = blockEl.querySelector('table');
+    return table ? table.querySelector('tbody[data-table-part="body"]') : null;
+  }
+
+  function tableColCount(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return 2;
+    var head = table.querySelector('thead tr');
+    return head ? head.cells.length : 2;
+  }
+
+  function tableAddRow(blockEl) {
+    var tbody = tableBody(blockEl);
+    if (!tbody) return;
+    var cols = tableColCount(blockEl);
+    var tr = document.createElement('tr');
+    for (var i = 0; i < cols; i++) {
+      var td = document.createElement('td');
+      td.contentEditable = 'true';
+      td.textContent = '';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  function tableAddColumn(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    var colgroup = table.querySelector('colgroup');
+    var cols = tableColCount(blockEl);
+
+    if (colgroup) {
+      var col = document.createElement('col');
+      col.style.width = '140px';
+      colgroup.appendChild(col);
+    }
+
+    var titleCell = blockEl.querySelector('[data-title-row] td');
+    if (titleCell) {
+      titleCell.colSpan = cols + 1;
+    }
+
+    var headRow = table.querySelector('thead tr');
+    if (headRow) {
+      var th = document.createElement('th');
+      th.contentEditable = 'true';
+      th.setAttribute('data-col-index', String(cols));
+      th.innerHTML = '<span class="cpb-th-text">Column ' + (cols + 1) + '</span>'
+        + '<span class="cpb-col-resize" data-col-index="' + cols + '" title="Resize column"></span>';
+      headRow.appendChild(th);
+    }
+
+    table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
+      var td = document.createElement('td');
+      td.contentEditable = 'true';
+      td.textContent = '';
+      tr.appendChild(td);
+    });
+
+    wireTableResize(blockEl);
+  }
+
+  function tableToggleTitle(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    var existing = table.querySelector('[data-title-row]');
+    var toggleBtn = blockEl.querySelector('[data-table-action="toggle-title"]');
+    if (existing) {
+      var tbody = existing.closest('tbody');
+      if (tbody) tbody.remove();
+      if (toggleBtn) toggleBtn.textContent = '+ Title row';
+      return;
+    }
+    var cols = tableColCount(blockEl);
+    var tbody = document.createElement('tbody');
+    tbody.setAttribute('data-table-part', 'title');
+    var tr = document.createElement('tr');
+    tr.className = 'cpb-table-title-row is-empty';
+    tr.setAttribute('data-title-row', '1');
+    var td = document.createElement('td');
+    td.colSpan = cols;
+    td.contentEditable = 'true';
+    td.setAttribute('data-placeholder', 'Table title (spans all columns)');
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    table.insertBefore(tbody, table.querySelector('thead'));
+    if (toggleBtn) toggleBtn.textContent = 'Remove title row';
+    td.focus();
+  }
+
+  function wireTableResize(blockEl) {
+    blockEl.querySelectorAll('.cpb-col-resize').forEach(function (handle) {
+      if (handle.getAttribute('data-wired') === '1') return;
+      handle.setAttribute('data-wired', '1');
+      handle.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        var colIndex = parseInt(handle.getAttribute('data-col-index') || '0', 10);
+        var table = blockEl.querySelector('table');
+        if (!table) return;
+        var col = table.querySelectorAll('colgroup col')[colIndex];
+        var startX = e.clientX;
+        var startW = col ? parseInt((col.style.width || '140').replace('px', ''), 10) : 140;
+        if (isNaN(startW)) startW = 140;
+
+        function onMove(ev) {
+          var w = Math.max(60, Math.min(600, startW + (ev.clientX - startX)));
+          if (col) col.style.width = w + 'px';
+        }
+
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          scheduleSave(blockEl);
+          flushSave(blockEl);
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
   }
 
   function createBlock(blockType, payload) {
@@ -399,7 +537,14 @@
         if (type === 'heading') payload = { text: 'New heading', level: 2 };
         if (type === 'paragraph') payload = { html: '<p>New paragraph</p>' };
         if (type === 'list') payload = { ordered: false, items: ['List item'] };
-        if (type === 'table') payload = { rows: [['Header 1', 'Header 2'], ['', '']] };
+        if (type === 'table') {
+          payload = {
+            title: '',
+            headers: ['Column 1', 'Column 2'],
+            rows: [['', '']],
+            col_widths: [140, 140],
+          };
+        }
         createBlock(type, payload).catch(showError);
         return;
       }

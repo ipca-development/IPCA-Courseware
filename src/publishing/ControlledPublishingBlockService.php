@@ -371,11 +371,22 @@ final class ControlledPublishingBlockService
     }
 
     /**
-     * @return array{rows:list<list<string>>}
+     * @return array{title:string,has_title_row:bool,headers:list<string>,rows:list<list<string>>,col_widths:list<int>}
      */
     private function normalizeTablePayload(array $payload, bool $strict): array
     {
+        $title = trim((string)($payload['title'] ?? ''));
+        $hasTitleRow = !empty($payload['has_title_row']) || $title !== '';
+        $headers = array();
         $rows = array();
+        $colWidths = array();
+
+        if (is_array($payload['headers'] ?? null)) {
+            foreach ($payload['headers'] as $cell) {
+                $headers[] = trim((string)$cell);
+            }
+        }
+
         if (is_array($payload['rows'] ?? null)) {
             foreach ($payload['rows'] as $row) {
                 if (!is_array($row)) {
@@ -390,13 +401,40 @@ final class ControlledPublishingBlockService
                 }
             }
         }
-        if ($rows === array()) {
-            $rows = array(
-                array('Header 1', 'Header 2'),
-                array('', ''),
-            );
+
+        // Legacy tables stored everything in rows[] with first row as header.
+        if ($headers === array() && $rows !== array()) {
+            $headers = array_shift($rows) ?: array();
         }
-        return array('rows' => $rows);
+
+        if ($headers === array()) {
+            $headers = array('Column 1', 'Column 2');
+        }
+        if ($rows === array()) {
+            $rows = array(array_fill(0, count($headers), ''));
+        }
+
+        $colCount = count($headers);
+        $headers = array_pad(array_slice($headers, 0, $colCount), $colCount, '');
+        $normalizedRows = array();
+        foreach ($rows as $row) {
+            $normalizedRows[] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        }
+
+        if (is_array($payload['col_widths'] ?? null)) {
+            foreach ($payload['col_widths'] as $width) {
+                $colWidths[] = max(60, min(600, (int)$width));
+            }
+        }
+        $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);
+
+        return array(
+            'title' => $title,
+            'has_title_row' => $hasTitleRow,
+            'headers' => $headers,
+            'rows' => $normalizedRows,
+            'col_widths' => $colWidths,
+        );
     }
 
     /**
