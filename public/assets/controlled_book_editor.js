@@ -890,33 +890,51 @@
       left_type: 'logo',
       logo_url: '',
       logo_alt: 'EuroPilot Center',
-      logo_max_height: 48,
+      logo_max_height: 40,
+      row_height: 32,
       center_text: '{manual_code}\n{section_title}',
       center_font_family: 'sans',
       center_font_size: 11,
+      center_font_bold: true,
+      center_font_italic: false,
+      center_font_underline: false,
       right_text: 'Page: {page}\nRevision: {revision}\nDate: {date}',
       right_font_family: 'sans',
       right_font_size: 10,
+      right_font_bold: true,
+      right_font_italic: false,
+      right_font_underline: false,
     };
   }
 
   function defaultPageFooter() {
     return {
       enabled: true,
+      row_height: 26,
       left_text: '',
       left_font_family: 'sans',
       left_font_size: 9,
+      left_font_bold: false,
+      left_font_italic: false,
+      left_font_underline: false,
       center_text: 'Controlled copy — internal use',
       center_font_family: 'sans',
       center_font_size: 9,
+      center_font_bold: false,
+      center_font_italic: false,
+      center_font_underline: false,
       right_text: '',
       right_font_family: 'sans',
       right_font_size: 9,
+      right_font_bold: false,
+      right_font_italic: false,
+      right_font_underline: false,
     };
   }
 
   var HEADER_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24];
   var HEADER_LOGO_HEIGHTS = [24, 32, 40, 48, 56, 64, 72, 80, 96, 120];
+  var HEADER_ROW_HEIGHTS = [24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 52, 56, 60, 64, 72];
 
   function headerFontSizeOptions(selected) {
     return HEADER_FONT_SIZES.map(function (size) {
@@ -930,10 +948,49 @@
     }).join('');
   }
 
-  function headerCellStyleAttr(fontFamily, fontSize) {
-    var stack = FONT_STACKS[fontFamily] || FONT_STACKS.sans;
-    var size = parseInt(fontSize, 10) || 11;
-    return ' style="font-family:' + stack + ';font-size:' + size + 'pt;"';
+  function headerRowHeightOptions(selected) {
+    return HEADER_ROW_HEIGHTS.map(function (size) {
+      return '<option value="' + size + '"' + (size === selected ? ' selected' : '') + '>' + size + ' px</option>';
+    }).join('');
+  }
+
+  function headerColumnFromBand(band, prefix) {
+    return {
+      font_family: band[prefix + '_font_family'] || 'sans',
+      font_size: band[prefix + '_font_size'] || 11,
+      font_bold: !!band[prefix + '_font_bold'],
+      font_italic: !!band[prefix + '_font_italic'],
+      font_underline: !!band[prefix + '_font_underline'],
+    };
+  }
+
+  function headerCellStyleAttr(column, rowHeight) {
+    var col = column || {};
+    var stack = FONT_STACKS[col.font_family] || FONT_STACKS.sans;
+    var size = parseInt(col.font_size, 10) || 11;
+    var row = parseInt(rowHeight, 10) || 32;
+    row = Math.max(20, Math.min(72, row));
+    var padY = Math.max(2, Math.round((row - 12) / 2));
+    var parts = [
+      'font-family:' + stack,
+      'font-size:' + size + 'pt',
+      'font-weight:' + (col.font_bold ? '700' : '400'),
+      'font-style:' + (col.font_italic ? 'italic' : 'normal'),
+      'text-decoration:' + (col.font_underline ? 'underline' : 'none'),
+      'padding:' + padY + 'px 8px',
+      'min-height:' + row + 'px',
+      'height:' + row + 'px',
+      'line-height:1.2',
+      'box-sizing:border-box',
+    ];
+    return ' style="' + parts.join(';') + '"';
+  }
+
+  function headerRowCellStyleAttr(rowHeight) {
+    var row = parseInt(rowHeight, 10) || 32;
+    row = Math.max(20, Math.min(72, row));
+    var padY = Math.max(2, Math.round((row - 12) / 2));
+    return ' style="padding:' + padY + 'px 8px;min-height:' + row + 'px;height:' + row + 'px;line-height:1.2;box-sizing:border-box;"';
   }
 
   function defaultHeaderTokens() {
@@ -970,7 +1027,9 @@
   function previewHeaderHtml(header, footer) {
     var h = header || defaultPageHeader();
     var f = footer || defaultPageFooter();
-    var logoHeight = parseInt(h.logo_max_height, 10) || 48;
+    var logoHeight = parseInt(h.logo_max_height, 10) || 40;
+    var headerRow = parseInt(h.row_height, 10) || 32;
+    var footerRow = parseInt(f.row_height, 10) || 26;
     var logo = h.logo_url
       ? '<img class="cpb-page-header-logo" src="' + escapeHtml(h.logo_url) + '" alt="' + escapeHtml(h.logo_alt || '') + '" style="max-height:' + logoHeight + 'px;">'
       : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
@@ -980,14 +1039,14 @@
     var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text)).replace(/\n/g, '<br>');
     var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
     return '<table class="cpb-page-header-table" role="presentation"><tr>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--left">' + logo + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(h.center_font_family, h.center_font_size) + '>' + center + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(h.right_font_family, h.right_font_size) + '>' + right + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerRowCellStyleAttr(headerRow) + '>' + logo + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(headerColumnFromBand(h, 'center'), headerRow) + '>' + center + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(headerColumnFromBand(h, 'right'), headerRow) + '>' + right + '</td>'
       + '</tr></table>'
       + (f.enabled ? '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerCellStyleAttr(f.left_font_family, f.left_font_size) + '>' + footerLeft + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(f.center_font_family, f.center_font_size) + '>' + footerCenter + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(f.right_font_family, f.right_font_size) + '>' + footerRight + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerCellStyleAttr(headerColumnFromBand(f, 'left'), footerRow) + '>' + footerLeft + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(headerColumnFromBand(f, 'center'), footerRow) + '>' + footerCenter + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(headerColumnFromBand(f, 'right'), footerRow) + '>' + footerRight + '</td>'
         + '</tr></table>' : '');
   }
 
@@ -2235,18 +2294,35 @@
     }).join('');
   }
 
-  function headerTypographyControls(idPrefix, fontFamily, fontSize) {
+  function headerTypographyControls(idPrefix, column) {
+    var col = column || {};
+    var boldChecked = col.font_bold ? ' checked' : '';
+    var italicChecked = col.font_italic ? ' checked' : '';
+    var underlineChecked = col.font_underline ? ' checked' : '';
     return '<div class="cpb-header-typography">'
       + '<label>Font <select class="cpb-style-input" id="' + idPrefix + 'Font">'
-      + styleEditorFontOptions(fontFamily || 'sans') + '</select></label>'
+      + styleEditorFontOptions(col.font_family || 'sans') + '</select></label>'
       + '<label>Size <select class="cpb-style-input" id="' + idPrefix + 'Size">'
-      + headerFontSizeOptions(parseInt(fontSize, 10) || 11) + '</select></label>'
-      + '</div>';
+      + headerFontSizeOptions(parseInt(col.font_size, 10) || 11) + '</select></label>'
+      + '<span class="cpb-header-font-style">'
+      + '<label title="Bold"><input type="checkbox" id="' + idPrefix + 'Bold"' + boldChecked + '> <strong>B</strong></label>'
+      + '<label title="Italic"><input type="checkbox" id="' + idPrefix + 'Italic"' + italicChecked + '> <em>I</em></label>'
+      + '<label title="Underline"><input type="checkbox" id="' + idPrefix + 'Underline"' + underlineChecked + '> <u>U</u></label>'
+      + '</span></div>';
+  }
+
+  function applyColumnTypographyToBand(band, prefix, column) {
+    band[prefix + '_font_family'] = column.font_family;
+    band[prefix + '_font_size'] = column.font_size;
+    band[prefix + '_font_bold'] = column.font_bold;
+    band[prefix + '_font_italic'] = column.font_italic;
+    band[prefix + '_font_underline'] = column.font_underline;
+    return band;
   }
 
   function openHeaderEditor() {
-    var header = JSON.parse(JSON.stringify(state.pageHeader || defaultPageHeader()));
-    var footer = JSON.parse(JSON.stringify(state.pageFooter || defaultPageFooter()));
+    var header = Object.assign({}, defaultPageHeader(), JSON.parse(JSON.stringify(state.pageHeader || {})));
+    var footer = Object.assign({}, defaultPageFooter(), JSON.parse(JSON.stringify(state.pageFooter || {})));
     var tokens = state.headerTokens.length ? state.headerTokens : defaultHeaderTokens();
     var overlay = document.createElement('div');
     overlay.className = 'cpb-style-overlay cpb-header-overlay';
@@ -2263,6 +2339,8 @@
       + 'Use variables for dynamic content — page numbers are resolved automatically in the e-reader.</p>'
       + '<section class="cpb-header-section">'
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbHeaderEnabled"' + (header.enabled ? ' checked' : '') + '> Show page header</label>'
+      + '<label class="cpb-header-row-height">Row height <select class="cpb-style-input" id="cpbHeaderRowHeight">'
+      + headerRowHeightOptions(parseInt(header.row_height, 10) || 32) + '</select></label>'
       + '<div class="cpb-header-grid">'
       + '<div class="cpb-header-col">'
       + '<h4>Left — Logo</h4>'
@@ -2277,13 +2355,13 @@
       + '</div>'
       + '<div class="cpb-header-col">'
       + '<h4>Center</h4>'
-      + headerTypographyControls('cpbHeaderCenter', header.center_font_family, header.center_font_size)
+      + headerTypographyControls('cpbHeaderCenter', headerColumnFromBand(header, 'center'))
       + '<textarea class="cpb-header-textarea" id="cpbHeaderCenter" rows="4">' + escapeHtml(header.center_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbHeaderCenter">' + tokenButtons + '</div>'
       + '</div>'
       + '<div class="cpb-header-col">'
       + '<h4>Right</h4>'
-      + headerTypographyControls('cpbHeaderRight', header.right_font_family, header.right_font_size)
+      + headerTypographyControls('cpbHeaderRight', headerColumnFromBand(header, 'right'))
       + '<textarea class="cpb-header-textarea" id="cpbHeaderRight" rows="4">' + escapeHtml(header.right_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbHeaderRight">' + tokenButtons + '</div>'
       + '</div>'
@@ -2291,17 +2369,19 @@
       + '</section>'
       + '<section class="cpb-header-section cpb-header-section--footer">'
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbFooterEnabled"' + (footer.enabled ? ' checked' : '') + '> Show page footer</label>'
+      + '<label class="cpb-header-row-height">Row height <select class="cpb-style-input" id="cpbFooterRowHeight">'
+      + headerRowHeightOptions(parseInt(footer.row_height, 10) || 26) + '</select></label>'
       + '<div class="cpb-header-grid cpb-header-grid--footer">'
       + '<div class="cpb-header-col"><h4>Footer left</h4>'
-      + headerTypographyControls('cpbFooterLeft', footer.left_font_family, footer.left_font_size)
+      + headerTypographyControls('cpbFooterLeft', headerColumnFromBand(footer, 'left'))
       + '<textarea class="cpb-header-textarea" id="cpbFooterLeft" rows="2">' + escapeHtml(footer.left_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterLeft">' + tokenButtons + '</div></div>'
       + '<div class="cpb-header-col"><h4>Footer center</h4>'
-      + headerTypographyControls('cpbFooterCenter', footer.center_font_family, footer.center_font_size)
+      + headerTypographyControls('cpbFooterCenter', headerColumnFromBand(footer, 'center'))
       + '<textarea class="cpb-header-textarea" id="cpbFooterCenter" rows="2">' + escapeHtml(footer.center_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterCenter">' + tokenButtons + '</div></div>'
       + '<div class="cpb-header-col"><h4>Footer right</h4>'
-      + headerTypographyControls('cpbFooterRight', footer.right_font_family, footer.right_font_size)
+      + headerTypographyControls('cpbFooterRight', headerColumnFromBand(footer, 'right'))
       + '<textarea class="cpb-header-textarea" id="cpbFooterRight" rows="2">' + escapeHtml(footer.right_text || '') + '</textarea>'
       + '<div class="cpb-header-tokens" data-target="cpbFooterRight">' + tokenButtons + '</div></div>'
       + '</div>'
@@ -2330,34 +2410,42 @@
       refreshPreview();
     }
 
-    function readDialogState() {
+    function readColumnFromDialog(idPrefix) {
       return {
-        header: {
-          enabled: !!overlay.querySelector('#cpbHeaderEnabled').checked,
-          left_type: 'logo',
-          logo_url: pendingLogoUrl,
-          logo_alt: overlay.querySelector('#cpbHeaderLogoAlt').value.trim() || 'EuroPilot Center',
-          logo_max_height: parseInt(overlay.querySelector('#cpbHeaderLogoHeight').value, 10) || 48,
-          center_text: overlay.querySelector('#cpbHeaderCenter').value,
-          center_font_family: overlay.querySelector('#cpbHeaderCenterFont').value,
-          center_font_size: parseInt(overlay.querySelector('#cpbHeaderCenterSize').value, 10) || 11,
-          right_text: overlay.querySelector('#cpbHeaderRight').value,
-          right_font_family: overlay.querySelector('#cpbHeaderRightFont').value,
-          right_font_size: parseInt(overlay.querySelector('#cpbHeaderRightSize').value, 10) || 10,
-        },
-        footer: {
-          enabled: !!overlay.querySelector('#cpbFooterEnabled').checked,
-          left_text: overlay.querySelector('#cpbFooterLeft').value,
-          left_font_family: overlay.querySelector('#cpbFooterLeftFont').value,
-          left_font_size: parseInt(overlay.querySelector('#cpbFooterLeftSize').value, 10) || 9,
-          center_text: overlay.querySelector('#cpbFooterCenter').value,
-          center_font_family: overlay.querySelector('#cpbFooterCenterFont').value,
-          center_font_size: parseInt(overlay.querySelector('#cpbFooterCenterSize').value, 10) || 9,
-          right_text: overlay.querySelector('#cpbFooterRight').value,
-          right_font_family: overlay.querySelector('#cpbFooterRightFont').value,
-          right_font_size: parseInt(overlay.querySelector('#cpbFooterRightSize').value, 10) || 9,
-        },
+        font_family: overlay.querySelector('#' + idPrefix + 'Font').value,
+        font_size: parseInt(overlay.querySelector('#' + idPrefix + 'Size').value, 10) || 11,
+        font_bold: !!overlay.querySelector('#' + idPrefix + 'Bold').checked,
+        font_italic: !!overlay.querySelector('#' + idPrefix + 'Italic').checked,
+        font_underline: !!overlay.querySelector('#' + idPrefix + 'Underline').checked,
       };
+    }
+
+    function readDialogState() {
+      var headerBand = {
+        enabled: !!overlay.querySelector('#cpbHeaderEnabled').checked,
+        left_type: 'logo',
+        logo_url: pendingLogoUrl,
+        logo_alt: overlay.querySelector('#cpbHeaderLogoAlt').value.trim() || 'EuroPilot Center',
+        logo_max_height: parseInt(overlay.querySelector('#cpbHeaderLogoHeight').value, 10) || 40,
+        row_height: parseInt(overlay.querySelector('#cpbHeaderRowHeight').value, 10) || 32,
+        center_text: overlay.querySelector('#cpbHeaderCenter').value,
+        right_text: overlay.querySelector('#cpbHeaderRight').value,
+      };
+      applyColumnTypographyToBand(headerBand, 'center', readColumnFromDialog('cpbHeaderCenter'));
+      applyColumnTypographyToBand(headerBand, 'right', readColumnFromDialog('cpbHeaderRight'));
+
+      var footerBand = {
+        enabled: !!overlay.querySelector('#cpbFooterEnabled').checked,
+        row_height: parseInt(overlay.querySelector('#cpbFooterRowHeight').value, 10) || 26,
+        left_text: overlay.querySelector('#cpbFooterLeft').value,
+        center_text: overlay.querySelector('#cpbFooterCenter').value,
+        right_text: overlay.querySelector('#cpbFooterRight').value,
+      };
+      applyColumnTypographyToBand(footerBand, 'left', readColumnFromDialog('cpbFooterLeft'));
+      applyColumnTypographyToBand(footerBand, 'center', readColumnFromDialog('cpbFooterCenter'));
+      applyColumnTypographyToBand(footerBand, 'right', readColumnFromDialog('cpbFooterRight'));
+
+      return { header: headerBand, footer: footerBand };
     }
 
     function refreshPreview() {
@@ -2418,11 +2506,14 @@
     overlay.querySelectorAll('.cpb-header-textarea, #cpbHeaderLogoAlt').forEach(function (el) {
       el.addEventListener('input', refreshPreview);
     });
-    overlay.querySelectorAll('.cpb-header-typography select, #cpbHeaderLogoHeight').forEach(function (el) {
+    overlay.querySelectorAll('.cpb-header-typography select, #cpbHeaderLogoHeight, #cpbHeaderRowHeight, #cpbFooterRowHeight').forEach(function (el) {
       el.addEventListener('change', function () {
         if (el.id === 'cpbHeaderLogoHeight') renderLogoPreview();
         else refreshPreview();
       });
+    });
+    overlay.querySelectorAll('.cpb-header-font-style input[type="checkbox"]').forEach(function (el) {
+      el.addEventListener('change', refreshPreview);
     });
     overlay.querySelector('#cpbHeaderEnabled').addEventListener('change', refreshPreview);
     overlay.querySelector('#cpbFooterEnabled').addEventListener('change', refreshPreview);

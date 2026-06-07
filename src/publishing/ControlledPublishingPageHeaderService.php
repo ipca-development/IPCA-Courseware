@@ -36,13 +36,20 @@ final class ControlledPublishingPageHeaderService
             'left_type' => 'logo',
             'logo_url' => '',
             'logo_alt' => 'EuroPilot Center',
-            'logo_max_height' => 48,
+            'logo_max_height' => 40,
+            'row_height' => 32,
             'center_text' => "{manual_code}\n{section_title}",
             'center_font_family' => 'sans',
             'center_font_size' => 11,
+            'center_font_bold' => true,
+            'center_font_italic' => false,
+            'center_font_underline' => false,
             'right_text' => "Page: {page}\nRevision: {revision}\nDate: {date}",
             'right_font_family' => 'sans',
             'right_font_size' => 10,
+            'right_font_bold' => true,
+            'right_font_italic' => false,
+            'right_font_underline' => false,
         );
     }
 
@@ -53,15 +60,25 @@ final class ControlledPublishingPageHeaderService
     {
         return array(
             'enabled' => true,
+            'row_height' => 26,
             'left_text' => '',
             'left_font_family' => 'sans',
             'left_font_size' => 9,
+            'left_font_bold' => false,
+            'left_font_italic' => false,
+            'left_font_underline' => false,
             'center_text' => 'Controlled copy — internal use',
             'center_font_family' => 'sans',
             'center_font_size' => 9,
+            'center_font_bold' => false,
+            'center_font_italic' => false,
+            'center_font_underline' => false,
             'right_text' => '',
             'right_font_family' => 'sans',
             'right_font_size' => 9,
+            'right_font_bold' => false,
+            'right_font_italic' => false,
+            'right_font_underline' => false,
         );
     }
 
@@ -289,18 +306,19 @@ final class ControlledPublishingPageHeaderService
             $logoUrl = '';
         }
 
-        return array(
-            'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
-            'left_type' => (string)($raw['left_type'] ?? $defaults['left_type']) === 'logo' ? 'logo' : 'logo',
-            'logo_url' => $logoUrl,
-            'logo_alt' => $this->truncate(trim((string)($raw['logo_alt'] ?? $defaults['logo_alt'])), 200),
-            'logo_max_height' => $this->normalizeLogoMaxHeight($raw['logo_max_height'] ?? $defaults['logo_max_height']),
-            'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
-            'center_font_family' => $this->normalizeFont((string)($raw['center_font_family'] ?? $defaults['center_font_family'])),
-            'center_font_size' => $this->normalizeFontSize($raw['center_font_size'] ?? $defaults['center_font_size']),
-            'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
-            'right_font_family' => $this->normalizeFont((string)($raw['right_font_family'] ?? $defaults['right_font_family'])),
-            'right_font_size' => $this->normalizeFontSize($raw['right_font_size'] ?? $defaults['right_font_size']),
+        return array_merge(
+            array(
+                'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
+                'left_type' => (string)($raw['left_type'] ?? $defaults['left_type']) === 'logo' ? 'logo' : 'logo',
+                'logo_url' => $logoUrl,
+                'logo_alt' => $this->truncate(trim((string)($raw['logo_alt'] ?? $defaults['logo_alt'])), 200),
+                'logo_max_height' => $this->normalizeLogoMaxHeight($raw['logo_max_height'] ?? $defaults['logo_max_height']),
+                'row_height' => $this->normalizeRowHeight($raw['row_height'] ?? $defaults['row_height']),
+                'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
+                'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
+            ),
+            $this->normalizeColumnTypography($raw, $defaults, 'center'),
+            $this->normalizeColumnTypography($raw, $defaults, 'right')
         );
     }
 
@@ -311,17 +329,17 @@ final class ControlledPublishingPageHeaderService
      */
     private function normalizePageFooter(array $raw, array $defaults): array
     {
-        return array(
-            'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
-            'left_text' => $this->truncate(trim((string)($raw['left_text'] ?? $defaults['left_text'])), 2000),
-            'left_font_family' => $this->normalizeFont((string)($raw['left_font_family'] ?? $defaults['left_font_family'])),
-            'left_font_size' => $this->normalizeFontSize($raw['left_font_size'] ?? $defaults['left_font_size']),
-            'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
-            'center_font_family' => $this->normalizeFont((string)($raw['center_font_family'] ?? $defaults['center_font_family'])),
-            'center_font_size' => $this->normalizeFontSize($raw['center_font_size'] ?? $defaults['center_font_size']),
-            'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
-            'right_font_family' => $this->normalizeFont((string)($raw['right_font_family'] ?? $defaults['right_font_family'])),
-            'right_font_size' => $this->normalizeFontSize($raw['right_font_size'] ?? $defaults['right_font_size']),
+        return array_merge(
+            array(
+                'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
+                'row_height' => $this->normalizeRowHeight($raw['row_height'] ?? $defaults['row_height']),
+                'left_text' => $this->truncate(trim((string)($raw['left_text'] ?? $defaults['left_text'])), 2000),
+                'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
+                'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
+            ),
+            $this->normalizeColumnTypography($raw, $defaults, 'left'),
+            $this->normalizeColumnTypography($raw, $defaults, 'center'),
+            $this->normalizeColumnTypography($raw, $defaults, 'right')
         );
     }
 
@@ -365,7 +383,49 @@ final class ControlledPublishingPageHeaderService
     private function normalizeLogoMaxHeight(mixed $height): int
     {
         $height = (int)$height;
-        return max(16, min(120, $height > 0 ? $height : 48));
+        return max(16, min(120, $height > 0 ? $height : 40));
+    }
+
+    private function normalizeRowHeight(mixed $height): int
+    {
+        $height = (int)$height;
+        return max(20, min(72, $height > 0 ? $height : 32));
+    }
+
+    private function normalizeBool(mixed $value, bool $default): bool
+    {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_string($value)) {
+            $lower = strtolower(trim($value));
+            if (in_array($lower, array('1', 'true', 'yes', 'on'), true)) {
+                return true;
+            }
+            if (in_array($lower, array('0', 'false', 'no', 'off', ''), true)) {
+                return false;
+            }
+        }
+        return !empty($value);
+    }
+
+    /**
+     * @param array<string,mixed> $raw
+     * @param array<string,mixed> $defaults
+     * @return array<string,mixed>
+     */
+    private function normalizeColumnTypography(array $raw, array $defaults, string $prefix): array
+    {
+        return array(
+            $prefix . '_font_family' => $this->normalizeFont((string)($raw[$prefix . '_font_family'] ?? $defaults[$prefix . '_font_family'] ?? 'sans')),
+            $prefix . '_font_size' => $this->normalizeFontSize($raw[$prefix . '_font_size'] ?? $defaults[$prefix . '_font_size'] ?? 11),
+            $prefix . '_font_bold' => $this->normalizeBool($raw[$prefix . '_font_bold'] ?? null, (bool)($defaults[$prefix . '_font_bold'] ?? false)),
+            $prefix . '_font_italic' => $this->normalizeBool($raw[$prefix . '_font_italic'] ?? null, (bool)($defaults[$prefix . '_font_italic'] ?? false)),
+            $prefix . '_font_underline' => $this->normalizeBool($raw[$prefix . '_font_underline'] ?? null, (bool)($defaults[$prefix . '_font_underline'] ?? false)),
+        );
     }
 
     /**
