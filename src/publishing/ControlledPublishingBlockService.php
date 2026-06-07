@@ -9,7 +9,7 @@ require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 final class ControlledPublishingBlockService
 {
     /** @var list<string> */
-    private const AUTHOR_BLOCK_TYPES = array('heading', 'paragraph', 'list', 'table', 'image');
+    private const AUTHOR_BLOCK_TYPES = array('heading', 'paragraph', 'list', 'table', 'image', 'callout');
 
     public function __construct(private PDO $pdo)
     {
@@ -310,6 +310,7 @@ final class ControlledPublishingBlockService
             'list' => $this->normalizeListPayload($payload, $strict),
             'table' => $this->normalizeTablePayload($payload, $strict),
             'image' => $this->normalizeImagePayload($payload, $strict),
+            'callout' => $this->normalizeCalloutPayload($payload, $strict),
             default => throw new RuntimeException('Unsupported block type.'),
         };
     }
@@ -327,7 +328,8 @@ final class ControlledPublishingBlockService
         if ($level < 1 || $level > 6) {
             $level = 2;
         }
-        return array('text' => $text, 'level' => $level);
+        $out = array('text' => $text, 'level' => $level);
+        return array_merge($out, $this->normalizeStyleFields($payload));
     }
 
     /**
@@ -343,7 +345,7 @@ final class ControlledPublishingBlockService
         if ($strict && trim(strip_tags($html)) === '') {
             throw new RuntimeException('Paragraph content is required.');
         }
-        return array('html' => $html);
+        return array_merge(array('html' => $html), $this->normalizeStyleFields($payload));
     }
 
     /**
@@ -435,6 +437,44 @@ final class ControlledPublishingBlockService
             'rows' => $normalizedRows,
             'col_widths' => $colWidths,
         );
+    }
+
+    /**
+     * @return array{callout_type:string,title:string,text:string}
+     */
+    private function normalizeCalloutPayload(array $payload, bool $strict): array
+    {
+        $type = strtolower(trim((string)($payload['callout_type'] ?? 'warning')));
+        if (!in_array($type, array('warning', 'caution'), true)) {
+            $type = 'warning';
+        }
+        $title = trim((string)($payload['title'] ?? strtoupper($type)));
+        $text = trim((string)($payload['text'] ?? ''));
+        if ($strict && $text === '') {
+            throw new RuntimeException('Callout text is required.');
+        }
+        return array(
+            'callout_type' => $type,
+            'title' => $title !== '' ? $title : strtoupper($type),
+            'text' => $text,
+        );
+    }
+
+    /**
+     * @return array{font_family:string,text_align:string}
+     */
+    private function normalizeStyleFields(array $payload): array
+    {
+        $fonts = array('serif', 'sans', 'mono', 'arial');
+        $font = strtolower(trim((string)($payload['font_family'] ?? 'serif')));
+        if (!in_array($font, $fonts, true)) {
+            $font = 'serif';
+        }
+        $align = strtolower(trim((string)($payload['text_align'] ?? 'left')));
+        if (!in_array($align, array('left', 'center', 'right'), true)) {
+            $align = 'left';
+        }
+        return array('font_family' => $font, 'text_align' => $align);
     }
 
     /**

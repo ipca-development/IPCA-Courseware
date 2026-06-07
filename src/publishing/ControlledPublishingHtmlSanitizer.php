@@ -7,7 +7,7 @@ declare(strict_types=1);
 final class ControlledPublishingHtmlSanitizer
 {
     /**
-     * Strip to b, strong, i, em, u, br, ul, ol, li — no attributes except on nothing.
+     * Strip to allowed inline tags; span may keep a governed color style.
      */
     public static function sanitizeInline(string $html): string
     {
@@ -16,7 +16,7 @@ final class ControlledPublishingHtmlSanitizer
             return '';
         }
 
-        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p');
+        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'span');
         $doc = new DOMDocument();
         $prev = libxml_use_internal_errors(true);
         $wrapped = '<?xml encoding="utf-8" ?><div>' . $html . '</div>';
@@ -56,8 +56,18 @@ final class ControlledPublishingHtmlSanitizer
                     $remove[] = $child;
                     continue;
                 }
+                $keepAttrs = array();
+                if ($tag === 'span') {
+                    $style = (string)$child->getAttribute('style');
+                    if (preg_match('/color\s*:\s*(#[0-9a-fA-F]{3,8})/', $style, $m) === 1) {
+                        $keepAttrs['style'] = 'color:' . strtolower($m[1]);
+                    }
+                }
                 while ($child->attributes->length > 0) {
                     $child->removeAttribute($child->attributes->item(0)->name);
+                }
+                foreach ($keepAttrs as $k => $v) {
+                    $child->setAttribute($k, $v);
                 }
                 self::sanitizeNode($child, $allowed);
             }

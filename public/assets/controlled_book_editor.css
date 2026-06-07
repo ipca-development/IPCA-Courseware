@@ -303,6 +303,21 @@
   transition: box-shadow 0.15s ease;
 }
 
+.cpb-block--changed {
+  padding-left: 10px;
+}
+
+.cpb-change-marker {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 4px;
+  background: #000;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .cpb-block:hover {
   box-shadow: 0 0 0 1px rgba(30, 60, 114, 0.15);
 }
@@ -367,6 +382,34 @@
   text-align: justify;
 }
 
+.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.cpb-align-left {
+  text-align: left;
+}
+
+.cpb-align-center {
+  text-align: center;
+}
+
+.cpb-align-right {
+  text-align: right;
+}
+
 .cpb-list {
   margin: 0.4em 0 0.4em 1.4em;
 }
@@ -398,6 +441,8 @@
   padding: 6px 8px;
   vertical-align: top;
   word-break: break-word;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .cpb-table thead th {
@@ -552,6 +597,241 @@
 .cpb-editor-readonly [contenteditable] {
   -webkit-user-modify: read-only;
   cursor: default;
+}
+
+.cpb-tool-select,
+.cpb-tool-color {
+  height: 22px;
+  border: 1px solid #d1dae6;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: system-ui, sans-serif;
+  background: #fff;
+  color: #334155;
+}
+
+.cpb-tool-select {
+  padding: 0 4px;
+  max-width: 72px;
+}
+
+.cpb-tool-color {
+  width: 28px;
+  padding: 1px;
+  cursor: pointer;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--warning {
+  color: #dc2626 !important;
+  border-color: #fca5a5 !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--caution {
+  color: #ca8a04 !important;
+  border-color: #fde047 !important;
+}
+
+.cpb-running-band {
+  border: 1px dashed #cbd5e1;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-family: system-ui, sans-serif;
+  font-size: 9pt;
+  color: #475569;
+  background: #f8fafc;
+}
+
+.cpb-running-band--footer {
+  margin-bottom: 0;
+  margin-top: 20px;
+}
+
+.cpb-running-band--off {
+  margin-bottom: 12px;
+  font-size: 10pt;
+}
+
+.cpb-running-toggle {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 9pt;
+  color: #64748b;
+}
+
+.cpb-running-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.cpb-running-cell {
+  min-height: 20px;
+  padding: 4px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.cpb-running-cell--center {
+  text-align: center;
+}
+
+.cpb-running-cell--right {
+  text-align: right;
+}
+
+.cpb-callout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  border: 2px solid;
+  border-radius: 4px;
+  font-family: system-ui, sans-serif;
+}
+
+.cpb-callout--warning {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.cpb-callout--caution {
+  border-color: #ca8a04;
+  background: #fffbeb;
+}
+
+.cpb-callout-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  clip-path: polygon(50% 4%, 6% 96%, 94% 96%);
+}
+
+.cpb-callout-icon--warning {
+  background: #dc2626;
+  color: #fff;
+}
+
+.cpb-callout-icon--warning::before {
+  content: '!';
+}
+
+.cpb-callout-icon--caution {
+  background: #eab308;
+  color: #000;
+  border: 2px solid #000;
+  box-sizing: border-box;
+}
+
+.cpb-callout-icon--caution::before {
+  content: '!';
+}
+
+.cpb-callout-title {
+  font-weight: 700;
+  font-size: 11pt;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cpb-callout--warning .cpb-callout-title {
+  color: #991b1b;
+}
+
+.cpb-callout--caution .cpb-callout-title {
+  color: #854d0e;
+}
+
+.cpb-callout-text {
+  font-size: 10pt;
+  line-height: 1.45;
+  color: #1e293b;
+}
+
+.cpb-callout-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+}
+
+.cpb-callout-dialog {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: min(480px, 92vw);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  font-family: system-ui, sans-serif;
+}
+
+.cpb-callout-dialog h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  color: #0f2744;
+}
+
+.cpb-callout-field {
+  margin-bottom: 12px;
+}
+
+.cpb-callout-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cpb-callout-field input,
+.cpb-callout-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1dae6;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.cpb-callout-field textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.cpb-callout-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.cpb-callout-dialog-actions button {
+  border: 1px solid #d1dae6;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.cpb-callout-dialog-actions button.cpb-callout-save {
+  background: #1e3c72;
+  border-color: #1e3c72;
+  color: #fff;
 }
 
 @media (max-width: 960px) {

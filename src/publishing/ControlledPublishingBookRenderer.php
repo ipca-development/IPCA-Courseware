@@ -23,10 +23,15 @@ final class ControlledPublishingBookRenderer
         $anchor = (string)($block['stable_anchor'] ?? '');
         $system = !empty($block['is_system_managed']);
 
-        $attrs = ' class="cpb-block cpb-block--' . h($type) . '"'
+        $change = (string)($block['change_status'] ?? '');
+        $changeClass = in_array($change, array('new', 'modified'), true) ? ' cpb-block--changed cpb-block--' . $change : '';
+        $attrs = ' class="cpb-block cpb-block--' . h($type) . $changeClass . '"'
             . ' data-block-id="' . $id . '"'
             . ' data-block-type="' . h($type) . '"'
             . ' data-stable-anchor="' . h($anchor) . '"';
+        if ($change !== '' && $change !== 'unchanged') {
+            $attrs .= ' data-change-status="' . h($change) . '"';
+        }
         if ($system) {
             $attrs .= ' data-system-managed="1"';
         }
@@ -46,11 +51,16 @@ final class ControlledPublishingBookRenderer
             'list' => $this->renderList($payload, $mode),
             'table' => $this->renderTable($payload, $mode),
             'image' => $this->renderImage($payload, $mode),
+            'callout' => $this->renderCallout($payload, $mode),
             'generated_placeholder' => $this->renderPlaceholder($payload),
             default => '<p class="cpb-unknown">Unsupported block: ' . h($type) . '</p>',
         };
 
-        return '<article' . $attrs . '>' . $chrome . $inner . '</article>';
+        $marker = in_array($change, array('new', 'modified'), true)
+            ? '<div class="cpb-change-marker" title="' . h(ucfirst($change) . ' since prior version') . '"></div>'
+            : '';
+
+        return '<article' . $attrs . '>' . $marker . $chrome . $inner . '</article>';
     }
 
     /**
@@ -76,19 +86,34 @@ final class ControlledPublishingBookRenderer
         array $version,
         array $section,
         string $blocksHtml,
-        string $mode = self::MODE_READ
+        string $mode = self::MODE_READ,
+        ?array $pageLayout = null
     ): string {
         $bookKey = h((string)($version['book_key'] ?? ''));
         $versionLabel = h((string)($version['version_label'] ?? ''));
         $bookTitle = h((string)($version['book_title'] ?? $version['title'] ?? ''));
         $sectionTitle = h((string)($section['title'] ?? ''));
         $editable = $mode === self::MODE_EDIT && !empty($section['allow_author_blocks']);
+        $layout = is_array($pageLayout) ? $pageLayout : array();
+        $showRunning = !empty($layout['show_running_header_footer']);
 
         $drop = $editable
             ? '<div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div>'
             : '';
 
+        $runningHeader = '';
+        $runningFooter = '';
+        if ($showRunning) {
+            $runningHeader = $this->renderRunningBand('header', $layout, $editable);
+            $runningFooter = $this->renderRunningBand('footer', $layout, $editable);
+        } elseif ($editable) {
+            $runningHeader = '<div class="cpb-running-band cpb-running-band--off" contenteditable="false">'
+                . '<label><input type="checkbox" data-layout-toggle="show_running_header_footer"> '
+                . 'Show running header/footer on this section</label></div>';
+        }
+
         return '<div class="cpb-sheet" data-section-id="' . (int)($section['id'] ?? 0) . '">'
+            . $runningHeader
             . '<header class="cpb-sheet-header">'
             . '<div class="cpb-sheet-org">IPCA · Controlled Manual</div>'
             . '<div class="cpb-sheet-title">' . $bookTitle . '</div>'
@@ -97,7 +122,32 @@ final class ControlledPublishingBookRenderer
             . '</header>'
             . '<div class="cpb-sheet-body" data-blocks-root="1">' . $blocksHtml . '</div>'
             . $drop
+            . $runningFooter
             . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $layout
+     */
+    private function renderRunningBand(string $band, array $layout, bool $editable): string
+    {
+        $prefix = $band === 'footer' ? 'footer' : 'header';
+        $cells = array('left', 'center', 'right');
+        $html = '<div class="cpb-running-band cpb-running-band--' . h($band) . '" data-running-band="' . h($band) . '">';
+        if ($editable && $band === 'header') {
+            $html .= '<label class="cpb-running-toggle">'
+                . '<input type="checkbox" data-layout-toggle="show_running_header_footer" checked> Header/footer</label>';
+        }
+        $html .= '<div class="cpb-running-row">';
+        foreach ($cells as $cell) {
+            $key = $prefix . '_' . $cell;
+            $value = (string)($layout[$key] ?? '');
+            $edit = $editable ? ' contenteditable="true" spellcheck="true" data-layout-field="' . h($key) . '"' : '';
+            $html .= '<div class="cpb-running-cell cpb-running-cell--' . $cell . '"' . $edit . '>'
+                . h($value) . '</div>';
+        }
+        $html .= '</div></div>';
+        return $html;
     }
 
     /**
@@ -114,7 +164,9 @@ final class ControlledPublishingBookRenderer
         $levelAttr = $mode === self::MODE_EDIT
             ? ' data-field="level" data-level="' . $level . '"'
             : '';
-        return '<' . $tag . ' class="cpb-heading cpb-heading--l' . $level . '"' . $levelAttr . $edit . '>'
+        $style = $this->styleAttr($payload);
+        return '<' . $tag . ' class="cpb-heading cpb-heading--l' . $level . $this->styleClass($payload) . '"'
+            . $levelAttr . $style . $edit . '>'
             . h($text) . '</' . $tag . '>';
     }
 
@@ -132,7 +184,8 @@ final class ControlledPublishingBookRenderer
         $edit = $mode === self::MODE_EDIT
             ? ' contenteditable="true" data-field="html" spellcheck="true"'
             : '';
-        return '<div class="cpb-paragraph"' . $edit . '>' . $html . '</div>';
+        $style = $this->styleAttr($payload);
+        return '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>' . $html . '</div>';
     }
 
     /**
@@ -218,7 +271,9 @@ final class ControlledPublishingBookRenderer
         if ($edit) {
             $html .= '<div class="cpb-table-tools" contenteditable="false">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="del-row">− Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-col">+ Column</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="del-col">− Column</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
                 . ($hasTitleRow ? 'Remove title row' : '+ Title row')
                 . '</button>'
@@ -318,6 +373,51 @@ final class ControlledPublishingBookRenderer
     {
         $message = (string)($payload['message'] ?? 'Generated section — content produced at publish time.');
         return '<div class="cpb-placeholder" contenteditable="false">' . h($message) . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function renderCallout(array $payload, string $mode): string
+    {
+        $type = (string)($payload['callout_type'] ?? 'warning');
+        $title = (string)($payload['title'] ?? strtoupper($type));
+        $text = (string)($payload['text'] ?? '');
+        $edit = $mode === self::MODE_EDIT;
+        $icon = $type === 'caution' ? 'caution' : 'warning';
+        $titleEdit = $edit ? ' contenteditable="true" data-field="callout_title" spellcheck="true"' : '';
+        $textEdit = $edit ? ' contenteditable="true" data-field="callout_text" spellcheck="true"' : '';
+        return '<div class="cpb-callout cpb-callout--' . h($type) . '" data-callout-type="' . h($type) . '">'
+            . '<div class="cpb-callout-icon cpb-callout-icon--' . h($icon) . '" aria-hidden="true"></div>'
+            . '<div class="cpb-callout-body">'
+            . '<div class="cpb-callout-title"' . $titleEdit . '>' . h($title) . '</div>'
+            . '<div class="cpb-callout-text"' . $textEdit . '>' . nl2br(h($text), false) . '</div>'
+            . '</div></div>';
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function styleClass(array $payload): string
+    {
+        $font = (string)($payload['font_family'] ?? 'serif');
+        $align = (string)($payload['text_align'] ?? 'left');
+        return ' cpb-font-' . preg_replace('/[^a-z]/', '', strtolower($font))
+            . ' cpb-align-' . preg_replace('/[^a-z]/', '', strtolower($align));
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function styleAttr(array $payload): string
+    {
+        $align = (string)($payload['text_align'] ?? 'left');
+        if (!in_array($align, array('left', 'center', 'right'), true)) {
+            $align = 'left';
+        }
+        return ' style="text-align:' . h($align) . '"'
+            . ' data-font-family="' . h((string)($payload['font_family'] ?? 'serif')) . '"'
+            . ' data-text-align="' . h($align) . '"';
     }
 
     /**

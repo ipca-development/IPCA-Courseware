@@ -7,6 +7,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationS
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookRenderer.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRevisionService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionLayoutService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,6 +26,8 @@ $foundation = new ControlledPublishingFoundationService($pdo);
 $blocks = new ControlledPublishingBlockService($pdo);
 $sections = new ControlledPublishingSectionService($pdo);
 $renderer = new ControlledPublishingBookRenderer();
+$revision = new ControlledPublishingRevisionService($pdo);
+$layoutSvc = new ControlledPublishingSectionLayoutService($pdo);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -38,7 +42,19 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc);
+            break;
+        case 'save_section_layout':
+            cp_editor_handle_save_section_layout($sections, $layoutSvc, $uid);
+            break;
+        case 'save_callout_presets':
+            cp_editor_handle_save_callout_presets($foundation, $pdo, $uid);
+            break;
+        case 'regenerate_highlights':
+            cp_editor_handle_regenerate_highlights($revision, $uid);
+            break;
+        case 'get_callout_presets':
+            cp_editor_handle_get_callout_presets($foundation);
             break;
         case 'create_block':
             cp_editor_handle_create_block($blocks, $renderer, $uid);
@@ -84,7 +100,9 @@ function cp_editor_handle_load(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
     ControlledPublishingBlockService $blocks,
-    ControlledPublishingBookRenderer $renderer
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
     $sectionId = (int)($_GET['section_id'] ?? 0);
@@ -111,11 +129,13 @@ function cp_editor_handle_load(
         $section['allow_author_blocks'] = 1;
     }
 
-    $sectionBlocks = $blocks->listSectionBlocks($sectionId);
+    $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+    $pageLayout = $layoutSvc->resolveLayout($section);
     $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
     $mode = $editable ? ControlledPublishingBookRenderer::MODE_EDIT : ControlledPublishingBookRenderer::MODE_READ;
     $blocksHtml = $renderer->renderBlocks($sectionBlocks, $mode);
-    $pageHtml = $renderer->renderPageShell($version, $section, $blocksHtml, $mode);
+    $pageHtml = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout);
+    $prior = $revision->priorVersion($versionId);
 
     cp_editor_json(200, array(
         'ok' => true,
@@ -131,8 +151,131 @@ function cp_editor_handle_load(
         'sections_tree' => $tree,
         'blocks' => $sectionBlocks,
         'page_html' => $pageHtml,
+        'page_layout' => $pageLayout,
         'editable' => $editable,
+        'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
     ));
+}
+
+function cp_editor_handle_save_section_layout(
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $layout = is_array($in['layout'] ?? null) ? $in['layout'] : array();
+    if ($versionId <= 0 || $sectionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+    }
+    $layoutSvc->saveLayout($versionId, $sectionId, $layout, $uid);
+    $section = $sections->getSection($versionId, $sectionId);
+    if ($section === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Section not found'));
+    }
+    cp_editor_json(200, array('ok' => true, 'layout' => $layoutSvc->resolveLayout($section)));
+}
+
+function cp_editor_handle_save_callout_presets(
+    ControlledPublishingFoundationService $foundation,
+    PDO $pdo,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $presets = is_array($in['presets'] ?? null) ? $in['presets'] : array();
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    $normalized = array();
+    foreach ($presets as $preset) {
+        if (!is_array($preset)) {
+            continue;
+        }
+        $type = strtolower(trim((string)($preset['callout_type'] ?? '')));
+        if (!in_array($type, array('warning', 'caution'), true)) {
+            continue;
+        }
+        $normalized[] = array(
+            'callout_type' => $type,
+            'title' => trim((string)($preset['title'] ?? strtoupper($type))),
+            'text' => trim((string)($preset['text'] ?? '')),
+        );
+    }
+    if ($normalized === array()) {
+        $normalized = cp_editor_default_callout_presets();
+    }
+
+    $meta = cp_editor_decode_version_meta($version);
+    $meta['callout_presets'] = $normalized;
+    $stmt = $pdo->prepare("
+        UPDATE ipca_publishing_book_versions
+        SET metadata_json = :metadata_json, updated_at = CURRENT_TIMESTAMP
+        WHERE id = :id
+    ");
+    $stmt->execute(array(
+        ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        ':id' => $versionId,
+    ));
+
+    cp_editor_json(200, array('ok' => true, 'presets' => $normalized));
+}
+
+function cp_editor_handle_regenerate_highlights(ControlledPublishingRevisionService $revision, int $uid): void
+{
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $result = $revision->regenerateHighlightsSection($versionId, $uid);
+    cp_editor_json(200, array('ok' => true, 'result' => $result));
+}
+
+function cp_editor_handle_get_callout_presets(ControlledPublishingFoundationService $foundation): void
+{
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    $meta = cp_editor_decode_version_meta($version);
+    $presets = is_array($meta['callout_presets'] ?? null) ? $meta['callout_presets'] : cp_editor_default_callout_presets();
+    cp_editor_json(200, array('ok' => true, 'presets' => $presets));
+}
+
+/**
+ * @return list<array<string,string>>
+ */
+function cp_editor_default_callout_presets(): array
+{
+    return array(
+        array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
+        array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
+    );
+}
+
+/**
+ * @param array<string,mixed> $version
+ * @return array<string,mixed>
+ */
+function cp_editor_decode_version_meta(array $version): array
+{
+    $raw = $version['metadata_json'] ?? '{}';
+    if (is_array($raw)) {
+        return $raw;
+    }
+    $decoded = json_decode((string)$raw, true);
+    return is_array($decoded) ? $decoded : array();
 }
 
 function cp_editor_handle_create_block(

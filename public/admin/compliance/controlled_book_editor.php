@@ -101,9 +101,26 @@ compliance_page_open(array(
     <div class="cpb-workspace">
       <div class="cpb-toolbar" id="cpbToolbar">
         <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbUndo" title="Undo (Ctrl+Z)">↶</button>
+        </div>
+        <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold"><strong>B</strong></button>
           <button type="button" class="cpb-tool-btn" data-cmd="italic" title="Italic"><em>I</em></button>
           <button type="button" class="cpb-tool-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" data-align="left" title="Align left">L</button>
+          <button type="button" class="cpb-tool-btn" data-align="center" title="Align center">C</button>
+          <button type="button" class="cpb-tool-btn" data-align="right" title="Align right">R</button>
+        </div>
+        <div class="cpb-toolbar-group cpb-toolbar-group--style">
+          <select id="cpbFontSelect" class="cpb-tool-select" title="Font family">
+            <option value="serif">Serif</option>
+            <option value="sans">Sans</option>
+            <option value="mono">Mono</option>
+            <option value="arial">Arial</option>
+          </select>
+          <input type="color" id="cpbTextColor" class="cpb-tool-color" value="#0f172a" title="Text color">
         </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
@@ -115,6 +132,14 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" data-add-block="list" title="Add list">List</button>
           <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
           <button type="button" class="cpb-tool-btn" id="cpbPickImage" title="Insert image">Image</button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--warning" data-add-callout="warning" title="Insert Warning">⚠</button>
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--caution" data-add-callout="caution" title="Insert Caution">⚡</button>
+          <button type="button" class="cpb-tool-btn" id="cpbManageCallouts" title="Manage callout presets">⋯</button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbSyncHighlights" title="Regenerate Highlight of Changes">Sync highlights</button>
         </div>
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
       </div>
