@@ -141,6 +141,15 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
         </div>
         <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbOutdent" title="Decrease indent (Shift+Tab)">⇤</button>
+          <button type="button" class="cpb-tool-btn" id="cpbIndent" title="Increase indent (Tab)">⇥</button>
+        </div>
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>
+          <span class="cpb-zoom-label" id="cpbZoomLabel">100%</span>
+          <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
+        </div>
+        <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-add-block="heading" title="Add heading">H</button>
           <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
           <button type="button" class="cpb-tool-btn" data-add-block="list" title="Add list">List</button>

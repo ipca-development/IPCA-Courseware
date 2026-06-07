@@ -369,7 +369,10 @@ final class ControlledPublishingBlockService
         if ($items === array()) {
             $items = array('List item');
         }
-        return array('ordered' => $ordered, 'items' => $items);
+        return array_merge(
+            array('ordered' => $ordered, 'items' => $items),
+            $this->normalizeStyleFields($payload)
+        );
     }
 
     /**
@@ -512,6 +515,7 @@ final class ControlledPublishingBlockService
             'title_font_size' => $titleFontSize,
             'header_align' => $headerAlign,
             'cell_align' => $cellAlign,
+            'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
     }
 
@@ -590,7 +594,13 @@ final class ControlledPublishingBlockService
         if (!in_array($fontSize, $allowedSizes, true)) {
             $fontSize = 11;
         }
-        return array('font_family' => $font, 'text_align' => $align, 'font_size' => $fontSize);
+        $indentLevel = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
+        return array(
+            'font_family' => $font,
+            'text_align' => $align,
+            'font_size' => $fontSize,
+            'indent_level' => $indentLevel,
+        );
     }
 
     /**

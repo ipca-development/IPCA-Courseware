@@ -200,7 +200,8 @@ final class ControlledPublishingBookRenderer
         $edit = $mode === self::MODE_EDIT
             ? ' contenteditable="true" data-field="items" spellcheck="true"'
             : '';
-        $html = '<' . $tag . ' class="cpb-list"' . $edit . '>';
+        $style = $this->styleAttr($payload);
+        $html = '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"' . $style . $edit . '>';
         if ($items === array() && $mode === self::MODE_EDIT) {
             $html .= '<li data-placeholder="1">List item</li>';
         } else {
@@ -233,10 +234,11 @@ final class ControlledPublishingBookRenderer
         $headerAligns = $table['header_align'];
         $cellAligns = $table['cell_align'];
         $hasTitleRow = !empty($table['has_title_row']);
+        $tableAlign = (string)$table['table_align'];
         $colCount = count($headers);
         $edit = $mode === self::MODE_EDIT;
 
-        $html = '<div class="cpb-table-block">';
+        $html = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '" data-table-align="' . h($tableAlign) . '">';
         $html .= '<div class="cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'
@@ -307,9 +309,9 @@ final class ControlledPublishingBookRenderer
                 . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
                 . '<span class="cpb-table-style-sep"></span>'
                 . '<span class="cpb-table-style-label">Align</span>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-left" title="Align left">L</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-center" title="Align center">C</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-right" title="Align right">R</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">L</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">C</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">R</button>'
                 . '<span class="cpb-table-style-sep"></span>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="del-row">− Row</button>'
@@ -471,6 +473,7 @@ final class ControlledPublishingBookRenderer
             'title_font_size' => $titleFontSize,
             'header_align' => $headerAlign,
             'cell_align' => $cellAlign,
+            'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
     }
 
@@ -528,7 +531,7 @@ final class ControlledPublishingBookRenderer
             $attrs['data-font-family'] = $fontFamily;
             $fontStack = $this->fontFamilyStack($fontFamily);
             if ($fontStack !== '') {
-                $styles[] = 'font-family:' . $fontStack;
+                $styles[] = 'font-family:' . $fontStack . ' !important';
             }
         }
         if ($fontSize > 0) {
@@ -642,10 +645,19 @@ final class ControlledPublishingBookRenderer
         if ($fontSize < 8 || $fontSize > 18) {
             $fontSize = 11;
         }
-        return ' style="text-align:' . h($align) . ';font-size:' . $fontSize . 'pt"'
+        $indentLevel = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
+        $styles = array(
+            'text-align:' . $align,
+            'font-size:' . $fontSize . 'pt',
+        );
+        if ($indentLevel > 0) {
+            $styles[] = 'margin-left:' . ($indentLevel * 24) . 'px';
+        }
+        return ' style="' . h(implode(';', $styles)) . '"'
             . ' data-font-family="' . h((string)($payload['font_family'] ?? 'serif')) . '"'
             . ' data-text-align="' . h($align) . '"'
-            . ' data-font-size="' . $fontSize . '"';
+            . ' data-font-size="' . $fontSize . '"'
+            . ' data-indent-level="' . $indentLevel . '"';
     }
 
     /**

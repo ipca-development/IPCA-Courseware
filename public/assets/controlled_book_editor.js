@@ -22,6 +22,11 @@
   var manageCalloutsBtn = document.getElementById('cpbManageCallouts');
   var syncHighlightsBtn = document.getElementById('cpbSyncHighlights');
   var fullscreenBtn = document.getElementById('cpbFullscreen');
+  var zoomInBtn = document.getElementById('cpbZoomIn');
+  var zoomOutBtn = document.getElementById('cpbZoomOut');
+  var zoomLabelEl = document.getElementById('cpbZoomLabel');
+  var indentBtn = document.getElementById('cpbIndent');
+  var outdentBtn = document.getElementById('cpbOutdent');
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
@@ -65,7 +70,14 @@
     canvasEventsWired: false,
     resizeHintEl: null,
     tableClipboard: '',
+    canvasZoom: 100,
   };
+
+  var INDENT_STEP_PX = 24;
+  var INDENT_MAX_LEVEL = 8;
+  var ZOOM_MIN = 50;
+  var ZOOM_MAX = 200;
+  var ZOOM_STEP = 10;
 
   function colLetter(index) {
     var n = index + 1;
@@ -208,6 +220,7 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      applyCanvasZoom(state.canvasZoom, false);
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
       updateAddSubsection(res.section);
       if (res.prior_version_label) {
@@ -455,6 +468,13 @@
     if (state.canvasEventsWired) return;
     state.canvasEventsWired = true;
 
+    canvasEl.addEventListener('focusin', function (e) {
+      var cell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (cell && cell.isContentEditable) {
+        state.focusedTableCell = cell;
+      }
+    });
+
     canvasEl.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-table-action]');
       if (!btn || !state.editable) return;
@@ -491,8 +511,8 @@
       else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
       else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
       else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
-      else if (action === 'cell-align-left' || action === 'cell-align-center' || action === 'cell-align-right') {
-        applyTableCellAlign(blockEl, action.replace('cell-align-', ''));
+      else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
+        applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
       }
       scheduleSave(blockEl);
       flushSave(blockEl);
@@ -744,11 +764,13 @@
     var el = null;
     if (blockType === 'heading') el = blockEl.querySelector('.cpb-heading');
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
+    else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
     return {
       font_family: el.getAttribute('data-font-family') || 'serif',
       text_align: el.getAttribute('data-text-align') || 'left',
       font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
+      indent_level: parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0,
     };
   }
 
@@ -776,7 +798,7 @@
           if (t) items.push(t);
         });
       }
-      return { ordered: ordered, items: items };
+      return Object.assign({ ordered: ordered, items: items }, extractStyleFields(blockEl, 'list'));
     }
     if (blockType === 'table') {
       return extractTablePayload(blockEl);
@@ -854,6 +876,11 @@
     });
     var borderColorInput = blockEl.querySelector('[data-table-action="border-color"]');
     if (borderColorInput) borderColorInput.value = color;
+    var tableBlock = blockEl.querySelector('.cpb-table-block');
+    var tableAlign = tableBlock ? (tableBlock.getAttribute('data-table-align') || 'left') : 'left';
+    blockEl.querySelectorAll('[data-table-action^="table-align-"]').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.getAttribute('data-table-action') === 'table-align-' + tableAlign);
+    });
   }
 
   function wireTableCellFocus(blockEl) {
@@ -871,6 +898,12 @@
         }
         if (fontSizeSelect && cell.getAttribute('data-font-size')) {
           fontSizeSelect.value = cell.getAttribute('data-font-size');
+        }
+      });
+      cell.addEventListener('input', function () {
+        var titleRow = cell.closest('[data-title-row]');
+        if (titleRow) {
+          titleRow.classList.toggle('is-empty', cell.textContent.trim() === '');
         }
       });
     });
@@ -892,14 +925,15 @@
     return parseInt(cell.getAttribute('data-font-size') || '11', 10) || 11;
   }
 
-  function applyTableCellAlign(blockEl, align) {
-    var cell = state.focusedTableCell;
-    if (!cell || !blockEl.contains(cell)) {
-      setStatus('Click a table cell first', 'error');
-      return;
-    }
-    cell.style.textAlign = align;
-    cell.setAttribute('data-cell-align', align);
+  function applyTableBlockAlign(blockEl, align) {
+    var tableBlock = blockEl.querySelector('.cpb-table-block');
+    if (!tableBlock) return;
+    tableBlock.classList.remove('cpb-table-block--align-left', 'cpb-table-block--align-center', 'cpb-table-block--align-right');
+    tableBlock.classList.add('cpb-table-block--align-' + align);
+    tableBlock.setAttribute('data-table-align', align);
+    blockEl.querySelectorAll('[data-table-action^="table-align-"]').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.getAttribute('data-table-action') === 'table-align-' + align);
+    });
   }
 
   function applyStyleToTableCell(cell, opts) {
@@ -909,7 +943,13 @@
       cell.classList.add('cpb-font-' + opts.font);
       cell.setAttribute('data-font-family', opts.font);
       var stack = FONT_STACKS[opts.font];
-      if (stack) cell.style.fontFamily = stack;
+      if (stack) {
+        cell.style.fontFamily = stack;
+        cell.style.setProperty('font-family', stack, 'important');
+      }
+      cell.style.removeProperty('color');
+      cell.style.removeProperty('letter-spacing');
+      cell.style.removeProperty('text-transform');
     }
     if (opts.size) {
       cell.style.fontSize = opts.size + 'pt';
@@ -943,6 +983,8 @@
     var titleAlign = 'center';
     var titleFontFamily = 'serif';
     var titleFontSize = 11;
+    var tableBlock = blockEl.querySelector('.cpb-table-block');
+    var tableAlign = tableBlock ? (tableBlock.getAttribute('data-table-align') || 'left') : 'left';
 
     if (table) {
       var head = tableHeaderRow(blockEl);
@@ -996,6 +1038,7 @@
       title_font_size: titleFontSize,
       header_align: headerAlign,
       cell_align: cellAlign,
+      table_align: tableAlign,
     };
   }
 
@@ -1274,6 +1317,8 @@
     td.classList.add('cpb-font-serif');
     td.style.textAlign = 'center';
     td.style.fontSize = '11pt';
+    td.style.fontFamily = FONT_STACKS.serif;
+    td.style.setProperty('font-family', FONT_STACKS.serif, 'important');
     tr.appendChild(td);
     thead.insertBefore(tr, tableHeaderRow(blockEl));
     if (toggleBtn) toggleBtn.textContent = 'Remove title row';
@@ -1371,12 +1416,34 @@
   }
 
   function getActiveTableCell() {
-    var focused = state.focusedTableCell || document.activeElement;
+    var cell = state.focusedTableCell;
+    if (cell && document.body.contains(cell) && cell.isContentEditable) {
+      var trackedBlock = cell.closest('.cpb-block');
+      if (trackedBlock) return { block: trackedBlock, el: cell, type: 'table-cell' };
+    }
+    var focused = document.activeElement;
     if (!focused || !focused.closest) return null;
-    var cell = focused.closest('.cpb-table th, .cpb-table td');
+    cell = focused.closest('.cpb-table th, .cpb-table td');
     if (!cell || !cell.isContentEditable) return null;
     var block = cell.closest('.cpb-block');
     return block ? { block: block, el: cell, type: 'table-cell' } : null;
+  }
+
+  function blockStyleTarget(block, node, focused) {
+    if (!block) return null;
+    var heading = block.querySelector('.cpb-heading');
+    var paragraph = block.querySelector('.cpb-paragraph');
+    var list = block.querySelector('.cpb-list');
+    if (heading && (heading.contains(node) || node === heading || (focused && focused.closest('.cpb-heading')))) {
+      return { block: block, el: heading, type: 'heading' };
+    }
+    if (paragraph && (paragraph.contains(node) || node === paragraph || (focused && focused.closest('.cpb-paragraph')))) {
+      return { block: block, el: paragraph, type: 'paragraph' };
+    }
+    if (list && (list.contains(node) || node === list || (focused && focused.closest('.cpb-list')))) {
+      return { block: block, el: list, type: 'list' };
+    }
+    return null;
   }
 
   function getActiveStyleTarget() {
@@ -1393,25 +1460,52 @@
           if (tableBlock) return { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
         var block = node.closest('.cpb-block');
-        if (block) {
-          var heading = block.querySelector('.cpb-heading');
-          var paragraph = block.querySelector('.cpb-paragraph');
-          if (heading && (heading.contains(node) || node === heading)) return { block: block, el: heading, type: 'heading' };
-          if (paragraph && (paragraph.contains(node) || node === paragraph)) return { block: block, el: paragraph, type: 'paragraph' };
-        }
+        var styleTarget = blockStyleTarget(block, node, null);
+        if (styleTarget) return styleTarget;
       }
     }
     var focused = document.activeElement;
     if (focused && focused.closest) {
       var blockEl = focused.closest('.cpb-block');
-      if (blockEl) {
-        var h2 = blockEl.querySelector('.cpb-heading');
-        var p2 = blockEl.querySelector('.cpb-paragraph');
-        if (h2 && focused.closest('.cpb-heading')) return { block: blockEl, el: h2, type: 'heading' };
-        if (p2 && focused.closest('.cpb-paragraph')) return { block: blockEl, el: p2, type: 'paragraph' };
-      }
+      var focusedTarget = blockStyleTarget(blockEl, focused, focused);
+      if (focusedTarget) return focusedTarget;
     }
     return null;
+  }
+
+  function applyIndentToElement(el, level) {
+    level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
+    el.setAttribute('data-indent-level', String(level));
+    if (level > 0) {
+      el.style.marginLeft = (level * INDENT_STEP_PX) + 'px';
+    } else {
+      el.style.marginLeft = '';
+    }
+  }
+
+  function applyIndentDelta(delta) {
+    var target = getActiveStyleTarget();
+    if (!target || target.type === 'table-cell') return;
+    if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
+    pushUndo();
+    var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
+    applyIndentToElement(target.el, level + delta);
+    scheduleSave(target.block);
+    flushSave(target.block);
+  }
+
+  function applyCanvasZoom(pct, persist) {
+    state.canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pct));
+    var sheet = canvasEl.querySelector('.cpb-sheet');
+    if (sheet) {
+      sheet.style.setProperty('--cpb-sheet-zoom', String(state.canvasZoom / 100));
+    }
+    if (zoomLabelEl) zoomLabelEl.textContent = state.canvasZoom + '%';
+    if (persist !== false) {
+      try {
+        sessionStorage.setItem('cpb_canvas_zoom', String(state.canvasZoom));
+      } catch (err) { /* ignore */ }
+    }
   }
 
   function applyFontFamily(font) {
@@ -1422,10 +1516,12 @@
       var size = FONT_PRESET_SIZES[font] || null;
       applyStyleToTableCell(target.el, { font: font, size: size });
       if (size && fontSizeSelect) fontSizeSelect.value = String(size);
-    } else {
+    } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
       target.el.classList.add('cpb-font-' + font);
       target.el.setAttribute('data-font-family', font);
+      var stack = FONT_STACKS[font];
+      if (stack) target.el.style.fontFamily = stack;
       if (FONT_PRESET_SIZES[font]) {
         applyFontSizeToElement(target.el, FONT_PRESET_SIZES[font], false);
         if (fontSizeSelect) fontSizeSelect.value = String(FONT_PRESET_SIZES[font]);
@@ -1447,7 +1543,7 @@
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { size: size });
-    } else {
+    } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       applyFontSizeToElement(target.el, size, true);
     }
     scheduleSave(target.block);
@@ -1460,7 +1556,7 @@
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { align: align });
-    } else {
+    } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       ALIGN_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
       target.el.classList.add('cpb-align-' + align);
       target.el.setAttribute('data-text-align', align);
@@ -1702,23 +1798,63 @@
     });
   }
 
+  function keepEditorFocusOnToolbarControl(e) {
+    e.preventDefault();
+  }
+
   if (fontSelect) {
+    fontSelect.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
     fontSelect.addEventListener('change', function () {
       applyFontFamily(fontSelect.value);
     });
   }
 
   if (fontSizeSelect) {
+    fontSizeSelect.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
     fontSizeSelect.addEventListener('change', function () {
       applyFontSize(parseInt(fontSizeSelect.value, 10) || 11);
     });
   }
 
   if (textColorInput) {
+    textColorInput.addEventListener('mousedown', keepEditorFocusOnToolbarControl);
     textColorInput.addEventListener('input', function () {
       execFormat('foreColor', textColorInput.value);
     });
   }
+
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      applyCanvasZoom(state.canvasZoom + ZOOM_STEP);
+    });
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      applyCanvasZoom(state.canvasZoom - ZOOM_STEP);
+    });
+  }
+
+  if (indentBtn) {
+    indentBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      applyIndentDelta(1);
+    });
+  }
+
+  if (outdentBtn) {
+    outdentBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      applyIndentDelta(-1);
+    });
+  }
+
+  try {
+    var savedZoom = parseInt(sessionStorage.getItem('cpb_canvas_zoom') || '100', 10);
+    if (!isNaN(savedZoom)) applyCanvasZoom(savedZoom, false);
+  } catch (err) { /* ignore */ }
 
   if (undoBtn) {
     undoBtn.addEventListener('click', function (e) {
@@ -1781,6 +1917,14 @@
     if (e.key === 'Escape' && isBrowserFullscreen()) {
       setBrowserFullscreen(false);
       return;
+    }
+    if (e.key === 'Tab' && root.contains(document.activeElement)) {
+      var indentTarget = getActiveStyleTarget();
+      if (indentTarget && indentTarget.type !== 'table-cell') {
+        e.preventDefault();
+        applyIndentDelta(e.shiftKey ? -1 : 1);
+        return;
+      }
     }
     var inEditor = root.contains(document.activeElement);
     if (!inEditor) return;
