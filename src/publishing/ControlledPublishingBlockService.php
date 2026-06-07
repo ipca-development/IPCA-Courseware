@@ -467,6 +467,35 @@ final class ControlledPublishingBlockService
             $cellBg[] = array_fill(0, $colCount, '');
         }
 
+        $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
+        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
+        $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
+
+        $headerAlign = array();
+        if (is_array($payload['header_align'] ?? null)) {
+            foreach ($payload['header_align'] as $align) {
+                $headerAlign[] = $this->normalizeTableCellAlign((string)$align, 'left');
+            }
+        }
+        $headerAlign = array_pad(array_slice($headerAlign, 0, $colCount), $colCount, 'left');
+
+        $cellAlign = array();
+        if (is_array($payload['cell_align'] ?? null)) {
+            foreach ($payload['cell_align'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $align) {
+                    $line[] = $this->normalizeTableCellAlign((string)$align, 'left');
+                }
+                $cellAlign[] = array_pad(array_slice($line, 0, $colCount), $colCount, 'left');
+            }
+        }
+        while (count($cellAlign) < count($normalizedRows)) {
+            $cellAlign[] = array_fill(0, $colCount, 'left');
+        }
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
@@ -478,7 +507,32 @@ final class ControlledPublishingBlockService
             'title_bg' => $titleBg,
             'header_bg' => $headerBg,
             'cell_bg' => $cellBg,
+            'title_align' => $titleAlign,
+            'title_font_family' => $titleFontFamily,
+            'title_font_size' => $titleFontSize,
+            'header_align' => $headerAlign,
+            'cell_align' => $cellAlign,
         );
+    }
+
+    private function normalizeTableCellAlign(string $align, string $default): string
+    {
+        $align = strtolower(trim($align));
+        return in_array($align, array('left', 'center', 'right'), true) ? $align : $default;
+    }
+
+    private function normalizeTableCellFont(string $font, string $default): string
+    {
+        $fonts = array('serif', 'sans', 'mono', 'arial', 'manuallabel', 'manualtitle', 'sectiontitle');
+        $font = strtolower(trim($font));
+        return in_array($font, $fonts, true) ? $font : $default;
+    }
+
+    private function normalizeTableCellFontSize(mixed $size): int
+    {
+        $allowed = array(8, 9, 10, 11, 12, 14, 16, 18);
+        $fontSize = (int)$size;
+        return in_array($fontSize, $allowed, true) ? $fontSize : 11;
     }
 
     private function normalizeTableHexColor(string $color, string $fallback): string

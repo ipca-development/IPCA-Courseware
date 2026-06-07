@@ -501,7 +501,7 @@
 .cpb-table thead tr.cpb-table-title-row td {
   background: #e8eef6;
   font-weight: 700;
-  text-align: center;
+  font-family: inherit;
   border-bottom: 2px solid #64748b;
 }
 
@@ -592,6 +592,16 @@
   color: #fff !important;
 }
 
+.cmp-page .cpb-editor-root .cpb-table-tools button.cpb-mini-btn--danger {
+  color: #b91c1c !important;
+  border-color: #fca5a5 !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-table-tools button.cpb-mini-btn--danger:hover {
+  background: #fef2f2 !important;
+  border-color: #f87171 !important;
+}
+
 .cmp-page .cpb-editor-root .cpb-table-tools button.cpb-mini-btn,
 .cmp-page .cpb-editor-root .cpb-block-chrome button.cpb-block-btn {
   all: unset;
@@ -633,14 +643,42 @@
 }
 
 .cpb-image {
-  margin: 0.8em 0;
+  margin: 0.8em auto;
   text-align: center;
+  max-width: 100%;
+}
+
+.cpb-image-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
 }
 
 .cpb-image img {
+  display: block;
+  width: 100%;
   max-width: 100%;
   height: auto;
   border-radius: 4px;
+}
+
+.cpb-image-resize {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #1e3c72;
+  border-radius: 2px;
+  background: #fff;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.cpb-image--editable .cpb-image-frame:hover .cpb-image-resize {
+  background: #eff6ff;
 }
 
 .cpb-image figcaption {
@@ -705,21 +743,28 @@
   align-items: center !important;
   justify-content: center !important;
   height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
   min-width: 46px !important;
   max-width: 52px !important;
   padding: 0 14px 0 5px !important;
   border: 1px solid #d1dae6 !important;
   border-radius: 4px !important;
-  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%2364748b' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E") no-repeat right 4px center !important;
+  background-color: #fff !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%2364748b' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 4px center !important;
   background-size: 8px 5px !important;
   color: #334155 !important;
   font-size: 11px !important;
   font-weight: 600 !important;
   font-family: system-ui, sans-serif !important;
-  line-height: 1 !important;
+  line-height: 22px !important;
   cursor: pointer !important;
   appearance: none !important;
   -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  box-shadow: none !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select:hover {

@@ -227,6 +227,11 @@ final class ControlledPublishingBookRenderer
         $titleBg = (string)$table['title_bg'];
         $headerBgs = $table['header_bg'];
         $cellBgs = $table['cell_bg'];
+        $titleAlign = (string)$table['title_align'];
+        $titleFontFamily = (string)$table['title_font_family'];
+        $titleFontSize = (int)$table['title_font_size'];
+        $headerAligns = $table['header_align'];
+        $cellAligns = $table['cell_align'];
         $hasTitleRow = !empty($table['has_title_row']);
         $colCount = count($headers);
         $edit = $mode === self::MODE_EDIT;
@@ -249,9 +254,9 @@ final class ControlledPublishingBookRenderer
             $titleRowClass = 'cpb-table-title-row' . ($title === '' ? ' is-empty' : '');
             $titleEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $titleDisplay = $title !== '' ? h($title) : '';
-            $titleBgAttr = $this->tableCellBgAttr($titleBg);
+            $titleVisual = $this->tableCellVisualAttr($titleBg, $titleAlign, $titleFontFamily, $titleFontSize);
             $html .= '<tr class="' . $titleRowClass . '" data-title-row="1">';
-            $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleBgAttr
+            $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleVisual
                 . ' data-placeholder="Table title (spans all columns)">' . $titleDisplay . '</td>';
             $html .= '</tr>';
         }
@@ -261,7 +266,8 @@ final class ControlledPublishingBookRenderer
         foreach ($headers as $header) {
             $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $headerBg = (string)($headerBgs[$colIndex] ?? '');
-            $html .= '<th' . $headerEdit . $this->tableCellBgAttr($headerBg) . ' data-col-index="' . $colIndex . '">';
+            $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
+            $html .= '<th' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign) . ' data-col-index="' . $colIndex . '">';
             $html .= '<span class="cpb-th-text">' . h((string)$header) . '</span>';
             if ($edit) {
                 $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
@@ -279,6 +285,7 @@ final class ControlledPublishingBookRenderer
             foreach ($row as $cell) {
                 $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
                 $bg = (string)($cellBgs[$rowIndex][$cellIndex] ?? '');
+                $align = (string)($cellAligns[$rowIndex][$cellIndex] ?? 'left');
                 $rawCell = (string)$cell;
                 $displayCell = $edit
                     ? $rawCell
@@ -286,7 +293,7 @@ final class ControlledPublishingBookRenderer
                 $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
                     ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
                     : '';
-                $html .= '<td' . $cellEdit . $this->tableCellBgAttr($bg) . $formulaAttr . '>'
+                $html .= '<td' . $cellEdit . $this->tableCellVisualAttr($bg, $align) . $formulaAttr . '>'
                     . h($displayCell) . '</td>';
                 $cellIndex++;
             }
@@ -297,6 +304,13 @@ final class ControlledPublishingBookRenderer
 
         if ($edit) {
             $html .= '<div class="cpb-table-tools" contenteditable="false">'
+                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<span class="cpb-table-style-label">Align</span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-left" title="Align left">L</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-center" title="Align center">C</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-right" title="Align right">R</button>'
+                . '<span class="cpb-table-style-sep"></span>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="del-row">− Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-col">+ Column</button>'
@@ -412,6 +426,35 @@ final class ControlledPublishingBookRenderer
             $cellBg[] = array_fill(0, $colCount, '');
         }
 
+        $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
+        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
+        $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
+
+        $headerAlign = array();
+        if (is_array($payload['header_align'] ?? null)) {
+            foreach ($payload['header_align'] as $align) {
+                $headerAlign[] = $this->normalizeTableCellAlign((string)$align, 'left');
+            }
+        }
+        $headerAlign = array_pad(array_slice($headerAlign, 0, $colCount), $colCount, 'left');
+
+        $cellAlign = array();
+        if (is_array($payload['cell_align'] ?? null)) {
+            foreach ($payload['cell_align'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $align) {
+                    $line[] = $this->normalizeTableCellAlign((string)$align, 'left');
+                }
+                $cellAlign[] = array_pad(array_slice($line, 0, $colCount), $colCount, 'left');
+            }
+        }
+        while (count($cellAlign) < count($normalizedRows)) {
+            $cellAlign[] = array_fill(0, $colCount, 'left');
+        }
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
@@ -423,7 +466,32 @@ final class ControlledPublishingBookRenderer
             'title_bg' => $titleBg,
             'header_bg' => $headerBg,
             'cell_bg' => $cellBg,
+            'title_align' => $titleAlign,
+            'title_font_family' => $titleFontFamily,
+            'title_font_size' => $titleFontSize,
+            'header_align' => $headerAlign,
+            'cell_align' => $cellAlign,
         );
+    }
+
+    private function normalizeTableCellAlign(string $align, string $default): string
+    {
+        $align = strtolower(trim($align));
+        return in_array($align, array('left', 'center', 'right'), true) ? $align : $default;
+    }
+
+    private function normalizeTableCellFont(string $font, string $default): string
+    {
+        $fonts = array('serif', 'sans', 'mono', 'arial', 'manuallabel', 'manualtitle', 'sectiontitle');
+        $font = strtolower(trim($font));
+        return in_array($font, $fonts, true) ? $font : $default;
+    }
+
+    private function normalizeTableCellFontSize(mixed $size): int
+    {
+        $allowed = array(8, 9, 10, 11, 12, 14, 16, 18);
+        $fontSize = (int)$size;
+        return in_array($fontSize, $allowed, true) ? $fontSize : 11;
     }
 
     private function normalizeTableHexColor(string $color, string $fallback): string
@@ -438,12 +506,40 @@ final class ControlledPublishingBookRenderer
         return $fallback;
     }
 
-    private function tableCellBgAttr(string $bg): string
-    {
-        if ($bg === '') {
-            return '';
+    private function tableCellVisualAttr(
+        string $bg = '',
+        string $align = '',
+        string $fontFamily = '',
+        int $fontSize = 0
+    ): string {
+        $styles = array();
+        $attrs = array();
+        if ($bg !== '') {
+            $styles[] = 'background-color:' . $bg;
+            $attrs['data-cell-bg'] = $bg;
         }
-        return ' data-cell-bg="' . h($bg) . '" style="background-color:' . h($bg) . '"';
+        if ($align !== '' && in_array($align, array('left', 'center', 'right'), true)) {
+            $styles[] = 'text-align:' . $align;
+            $attrs['data-cell-align'] = $align;
+        }
+        if ($fontFamily !== '') {
+            $fontKey = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
+            $attrs['class'] = 'cpb-font-' . $fontKey;
+            $attrs['data-font-family'] = $fontFamily;
+        }
+        if ($fontSize > 0) {
+            $styles[] = 'font-size:' . $fontSize . 'pt';
+            $attrs['data-font-size'] = (string)$fontSize;
+        }
+
+        $html = '';
+        if ($styles !== array()) {
+            $html .= ' style="' . h(implode(';', $styles)) . '"';
+        }
+        foreach ($attrs as $key => $value) {
+            $html .= ' ' . $key . '="' . h((string)$value) . '"';
+        }
+        return $html;
     }
 
     /**
@@ -460,9 +556,16 @@ final class ControlledPublishingBookRenderer
             }
             return '';
         }
+        $widthPct = max(20, min(100, (int)($payload['width_pct'] ?? 100)));
         $editClass = $mode === self::MODE_EDIT ? ' cpb-image--editable' : '';
-        return '<figure class="cpb-image' . $editClass . '" data-field="image">'
+        $resize = $mode === self::MODE_EDIT
+            ? '<span class="cpb-image-resize" title="Drag to resize"></span>'
+            : '';
+        return '<figure class="cpb-image' . $editClass . '" data-field="image" style="width:' . $widthPct . '%" data-width-pct="' . $widthPct . '">'
+            . '<div class="cpb-image-frame">'
             . '<img src="' . h($url) . '" alt="' . h($alt) . '" loading="lazy">'
+            . $resize
+            . '</div>'
             . ($mode === self::MODE_EDIT
                 ? '<figcaption contenteditable="true" data-field="alt" spellcheck="true">' . h($alt) . '</figcaption>'
                 : ($alt !== '' ? '<figcaption>' . h($alt) . '</figcaption>' : ''))
