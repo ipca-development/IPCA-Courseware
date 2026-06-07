@@ -378,7 +378,7 @@ final class ControlledPublishingBlockService
     private function normalizeTablePayload(array $payload, bool $strict): array
     {
         $title = trim((string)($payload['title'] ?? ''));
-        $hasTitleRow = !empty($payload['has_title_row']) || $title !== '';
+        $hasTitleRow = !empty($payload['has_title_row']);
         $headers = array();
         $rows = array();
         $colWidths = array();
@@ -430,13 +430,67 @@ final class ControlledPublishingBlockService
         }
         $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);
 
+        $borderWidth = strtolower(trim((string)($payload['border_width'] ?? 'medium')));
+        if (!in_array($borderWidth, array('thin', 'medium', 'thick'), true)) {
+            $borderWidth = 'medium';
+        }
+        $borderColor = $this->normalizeTableHexColor((string)($payload['border_color'] ?? ''), '#94a3b8');
+
+        $headerBg = array();
+        if (is_array($payload['header_bg'] ?? null)) {
+            foreach ($payload['header_bg'] as $color) {
+                $headerBg[] = $this->normalizeTableHexColor((string)$color, '');
+            }
+        }
+        $headerBg = array_pad(array_slice($headerBg, 0, $colCount), $colCount, '');
+
+        $titleBg = $this->normalizeTableHexColor((string)($payload['title_bg'] ?? ''), '');
+
+        $cellBg = array();
+        if (is_array($payload['cell_bg'] ?? null)) {
+            foreach ($payload['cell_bg'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $color) {
+                    $line[] = $this->normalizeTableHexColor((string)$color, '');
+                }
+                $cellBg[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        $cellBg = array_pad(array_slice($cellBg, 0, count($normalizedRows)), count($normalizedRows), array());
+        foreach ($cellBg as $idx => $row) {
+            $cellBg[$idx] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        }
+        while (count($cellBg) < count($normalizedRows)) {
+            $cellBg[] = array_fill(0, $colCount, '');
+        }
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
             'headers' => $headers,
             'rows' => $normalizedRows,
             'col_widths' => $colWidths,
+            'border_width' => $borderWidth,
+            'border_color' => $borderColor,
+            'title_bg' => $titleBg,
+            'header_bg' => $headerBg,
+            'cell_bg' => $cellBg,
         );
+    }
+
+    private function normalizeTableHexColor(string $color, string $fallback): string
+    {
+        $color = trim($color);
+        if ($color === '') {
+            return $fallback === '' ? '' : $fallback;
+        }
+        if (preg_match('/^#[0-9a-fA-F]{3,8}$/', $color) === 1) {
+            return strtolower($color);
+        }
+        return $fallback;
     }
 
     /**

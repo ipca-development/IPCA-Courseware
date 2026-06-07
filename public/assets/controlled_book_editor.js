@@ -37,7 +37,98 @@
     undoStack: [],
     redoStack: [],
     layoutTimer: null,
+    focusedTableCell: null,
+    canvasEventsWired: false,
+    resizeHintEl: null,
+    tableClipboard: '',
   };
+
+  function colLetter(index) {
+    var n = index + 1;
+    var s = '';
+    while (n > 0) {
+      var rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
+  function tableFormulaDisplay(raw, bodyRows) {
+    raw = (raw || '').trim();
+    if (!raw || raw.charAt(0) !== '=') return raw;
+    try {
+      return String(evaluateTableFormula(raw, bodyRows));
+    } catch (e) {
+      return '#ERR';
+    }
+  }
+
+  function parseCellRef(ref) {
+    var m = String(ref).toUpperCase().match(/^([A-Z]+)([0-9]+)$/);
+    if (!m) throw new Error('bad ref');
+    var col = 0;
+    for (var i = 0; i < m[1].length; i++) {
+      col = col * 26 + (m[1].charCodeAt(i) - 64);
+    }
+    return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+  }
+
+  function cellNumber(bodyRows, row, col) {
+    var raw = String((bodyRows[row] && bodyRows[row][col]) || '').trim();
+    if (!raw) return 0;
+    if (raw.charAt(0) === '=') {
+      var v = evaluateTableFormula(raw, bodyRows);
+      return isNaN(parseFloat(v)) ? 0 : parseFloat(v);
+    }
+    return isNaN(parseFloat(raw)) ? 0 : parseFloat(raw);
+  }
+
+  function evaluateTableFormula(formula, bodyRows) {
+    var expr = formula.trim().slice(1).trim();
+    var fnMatch = expr.match(/^(SUM|AVG|AVERAGE|MIN|MAX|COUNT)\((.+)\)$/i);
+    if (fnMatch) {
+      var args = parseFormulaArgs(fnMatch[2], bodyRows);
+      var fn = fnMatch[1].toUpperCase();
+      if (fn === 'SUM') return args.reduce(function (a, b) { return a + b; }, 0);
+      if (fn === 'AVG' || fn === 'AVERAGE') return args.length ? args.reduce(function (a, b) { return a + b; }, 0) / args.length : 0;
+      if (fn === 'MIN') return args.length ? Math.min.apply(null, args) : 0;
+      if (fn === 'MAX') return args.length ? Math.max.apply(null, args) : 0;
+      if (fn === 'COUNT') return args.length;
+    }
+    var replaced = expr.replace(/([A-Z]+[0-9]+)/gi, function (token) {
+      var ref = parseCellRef(token);
+      return String(cellNumber(bodyRows, ref.row, ref.col));
+    });
+    if (!/^[0-9+\-*/().\s]+$/.test(replaced)) throw new Error('bad expr');
+    return Function('"use strict";return (' + replaced + ')')();
+  }
+
+  function parseFormulaArgs(raw, bodyRows) {
+    return raw.split(',').map(function (part) {
+      part = part.trim();
+      if (!part) return 0;
+      if (part.indexOf(':') >= 0) {
+        var bits = part.split(':');
+        var a = parseCellRef(bits[0]);
+        var b = parseCellRef(bits[1]);
+        var vals = [];
+        for (var r = Math.min(a.row, b.row); r <= Math.max(a.row, b.row); r++) {
+          for (var c = Math.min(a.col, b.col); c <= Math.max(a.col, b.col); c++) {
+            vals.push(cellNumber(bodyRows, r, c));
+          }
+        }
+        return vals;
+      }
+      if (/^[A-Z]+[0-9]+$/i.test(part)) {
+        var ref = parseCellRef(part);
+        return [cellNumber(bodyRows, ref.row, ref.col)];
+      }
+      return [parseFloat(part) || 0];
+    }).reduce(function (acc, item) {
+      return acc.concat(item);
+    }, []);
+  }
 
   function setStatus(text, tone) {
     if (!saveStatusEl) return;
@@ -259,15 +350,17 @@
   }
 
   function saveLayout() {
-    if (!state.editable) return;
+    if (!state.editable) return Promise.resolve();
     var layout = extractLayout();
-    apiPost('save_section_layout', {
+    setStatus('Saving layout…', 'saving');
+    return apiPost('save_section_layout', {
       version_id: state.versionId,
       section_id: state.sectionId,
       layout: layout,
     }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Layout save failed');
       state.pageLayout = res.layout || layout;
+      setStatus('Layout saved', 'saved');
     }).catch(showError);
   }
 
@@ -301,7 +394,10 @@
           layout: extractLayout(),
         }).then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Layout save failed');
+          state.pageLayout = res.layout || extractLayout();
           return loadSection(state.sectionId);
+        }).then(function () {
+          setStatus('Layout saved', 'saved');
         }).catch(showError);
       });
     });
@@ -317,9 +413,94 @@
     });
   }
 
+  function initCanvasEvents() {
+    if (state.canvasEventsWired) return;
+    state.canvasEventsWired = true;
+
+    canvasEl.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-table-action]');
+      if (!btn || !state.editable) return;
+      e.preventDefault();
+      var blockEl = btn.closest('.cpb-block');
+      if (!blockEl) return;
+      var action = btn.getAttribute('data-table-action');
+      pushUndo();
+      if (action === 'add-row') tableAddRow(blockEl);
+      else if (action === 'del-row') tableDelRow(blockEl);
+      else if (action === 'add-col') tableAddColumn(blockEl);
+      else if (action === 'del-col') tableDelColumn(blockEl);
+      else if (action === 'toggle-title') tableToggleTitle(blockEl);
+      else if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
+        applyTableBorderWidth(blockEl, action.replace('border-', ''));
+      } else if (action === 'cell-bg-clear') {
+        if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+          setStatus('Click a table cell first', 'error');
+          return;
+        }
+        applyTableCellBg(blockEl, state.focusedTableCell, '');
+      } else if (action === 'copy-cells') copyTableCells(blockEl);
+      else if (action === 'paste-cells') pasteTableCells(blockEl);
+      else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
+      else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
+      else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
+      scheduleSave(blockEl);
+      flushSave(blockEl);
+    });
+
+    canvasEl.addEventListener('input', function (e) {
+      var input = e.target.closest('input[data-table-action="border-color"], input[data-table-action="cell-bg"]');
+      if (!input || !state.editable) return;
+      var blockEl = input.closest('.cpb-block');
+      if (!blockEl) return;
+      pushUndo();
+      var action = input.getAttribute('data-table-action');
+      if (action === 'border-color') applyTableBorderColor(blockEl, input.value);
+      else if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+        setStatus('Click a table cell first', 'error');
+        return;
+      } else applyTableCellBg(blockEl, state.focusedTableCell, input.value);
+      scheduleSave(blockEl);
+      flushSave(blockEl);
+    });
+
+    canvasEl.addEventListener('copy', function (e) {
+      var cell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (!cell || !cell.isContentEditable) return;
+      var blockEl = cell.closest('.cpb-block--table');
+      if (!blockEl) return;
+      var text = buildCopyText(blockEl, cell);
+      if (!text) return;
+      e.preventDefault();
+      state.tableClipboard = text;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () {});
+      }
+      e.clipboardData.setData('text/plain', text);
+      setStatus('Copied', 'saved');
+    });
+
+    canvasEl.addEventListener('paste', function (e) {
+      var cell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (!cell || !cell.isContentEditable || !state.editable) return;
+      var blockEl = cell.closest('.cpb-block--table');
+      if (!blockEl) return;
+      var text = (e.clipboardData && e.clipboardData.getData('text/plain')) || state.tableClipboard;
+      if (!text || (text.indexOf('\t') < 0 && text.indexOf('\n') < 0)) return;
+      e.preventDefault();
+      pushUndo();
+      pasteTableData(blockEl, cell, text);
+      scheduleSave(blockEl);
+      flushSave(blockEl);
+    });
+  }
+
   function wireCanvas() {
+    initCanvasEvents();
+
     canvasEl.querySelectorAll('.cpb-block').forEach(function (blockEl) {
       blockEl.querySelectorAll('[contenteditable="true"]').forEach(function (field) {
+        if (field.getAttribute('data-input-wired') === '1') return;
+        field.setAttribute('data-input-wired', '1');
         field.addEventListener('input', function () {
           scheduleSave(blockEl);
         });
@@ -330,6 +511,8 @@
     });
 
     canvasEl.querySelectorAll('.cpb-block-chrome [data-action]').forEach(function (btn) {
+      if (btn.getAttribute('data-chrome-wired') === '1') return;
+      btn.setAttribute('data-chrome-wired', '1');
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         var blockEl = btn.closest('.cpb-block');
@@ -363,36 +546,17 @@
       });
     });
 
-    canvasEl.querySelectorAll('[data-table-action]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var blockEl = btn.closest('.cpb-block');
-        if (!blockEl) return;
-        pushUndo();
-        var action = btn.getAttribute('data-table-action');
-        if (action === 'add-row') {
-          tableAddRow(blockEl);
-        } else if (action === 'del-row') {
-          tableDelRow(blockEl);
-        } else if (action === 'add-col') {
-          tableAddColumn(blockEl);
-        } else if (action === 'del-col') {
-          tableDelColumn(blockEl);
-        } else if (action === 'toggle-title') {
-          tableToggleTitle(blockEl);
-        }
-        scheduleSave(blockEl);
-        flushSave(blockEl);
-      });
-    });
-
     canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
       wireTableResize(blockEl);
+      wireTableCellFocus(blockEl);
+      syncTableStyleControls(blockEl);
     });
 
     wireLayout();
 
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
-    if (dropzone && state.editable) {
+    if (dropzone && state.editable && dropzone.getAttribute('data-drop-wired') !== '1') {
+      dropzone.setAttribute('data-drop-wired', '1');
       ['dragenter', 'dragover'].forEach(function (ev) {
         dropzone.addEventListener(ev, function (e) {
           e.preventDefault();
@@ -505,25 +669,107 @@
     return {};
   }
 
+  function tableWrap(blockEl) {
+    return blockEl.querySelector('.cpb-table-wrap');
+  }
+
+  function normalizeBorderWidth(value) {
+    return value === 'thin' || value === 'thick' ? value : 'medium';
+  }
+
+  function applyTableBorderWidth(blockEl, width) {
+    var wrap = tableWrap(blockEl);
+    if (!wrap) return;
+    width = normalizeBorderWidth(width);
+    wrap.classList.remove('cpb-table-border-thin', 'cpb-table-border-medium', 'cpb-table-border-thick');
+    wrap.classList.add('cpb-table-border-' + width);
+    wrap.setAttribute('data-border-width', width);
+    syncTableStyleControls(blockEl);
+  }
+
+  function applyTableBorderColor(blockEl, color) {
+    var wrap = tableWrap(blockEl);
+    if (!wrap || !color) return;
+    wrap.style.setProperty('--cpb-table-border-color', color);
+    wrap.setAttribute('data-border-color', color);
+    syncTableStyleControls(blockEl);
+  }
+
+  function applyTableCellBg(blockEl, cell, color) {
+    if (!cell || !blockEl.contains(cell)) return;
+    if (color) {
+      cell.style.backgroundColor = color;
+      cell.setAttribute('data-cell-bg', color);
+    } else {
+      cell.style.backgroundColor = '';
+      cell.removeAttribute('data-cell-bg');
+    }
+  }
+
+  function syncTableStyleControls(blockEl) {
+    var wrap = tableWrap(blockEl);
+    if (!wrap) return;
+    var width = normalizeBorderWidth(wrap.getAttribute('data-border-width') || 'medium');
+    var color = wrap.getAttribute('data-border-color') || '#94a3b8';
+    blockEl.querySelectorAll('[data-table-action^="border-"]').forEach(function (btn) {
+      var action = btn.getAttribute('data-table-action');
+      if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
+        btn.classList.toggle('is-active', action === 'border-' + width);
+      }
+    });
+    var borderColorInput = blockEl.querySelector('[data-table-action="border-color"]');
+    if (borderColorInput) borderColorInput.value = color;
+  }
+
+  function wireTableCellFocus(blockEl) {
+    blockEl.querySelectorAll('.cpb-table th, .cpb-table td').forEach(function (cell) {
+      if (cell.getAttribute('data-cell-focus-wired') === '1') return;
+      cell.setAttribute('data-cell-focus-wired', '1');
+      cell.addEventListener('focus', function () {
+        state.focusedTableCell = cell;
+        var bgInput = blockEl.querySelector('[data-table-action="cell-bg"]');
+        if (bgInput) {
+          bgInput.value = cell.getAttribute('data-cell-bg') || '#ffffff';
+        }
+      });
+    });
+  }
+
+  function extractCellBg(cell) {
+    return cell.getAttribute('data-cell-bg') || '';
+  }
+
   function extractTablePayload(blockEl) {
     var table = blockEl.querySelector('table');
-    var titleCell = blockEl.querySelector('[data-title-row] td');
+    var wrap = tableWrap(blockEl);
+    var titleCell = blockEl.querySelector('tr[data-title-row] td');
     var title = titleCell ? titleCell.textContent.trim() : '';
     var headers = [];
     var rows = [];
     var colWidths = [];
+    var headerBg = [];
+    var cellBg = [];
 
     if (table) {
-      table.querySelectorAll('thead th').forEach(function (th) {
-        var textEl = th.querySelector('.cpb-th-text');
-        headers.push((textEl ? textEl.textContent : th.textContent).trim());
-      });
+      var head = tableHeaderRow(blockEl);
+      if (head) {
+        head.querySelectorAll('th').forEach(function (th) {
+          var textEl = th.querySelector('.cpb-th-text');
+          headers.push((textEl ? textEl.textContent : th.textContent).trim());
+          headerBg.push(extractCellBg(th));
+        });
+      }
       table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
         var line = [];
+        var bgLine = [];
         tr.querySelectorAll('td').forEach(function (td) {
           line.push(td.textContent.trim());
+          bgLine.push(extractCellBg(td));
         });
-        if (line.length) rows.push(line);
+        if (line.length) {
+          rows.push(line);
+          cellBg.push(bgLine);
+        }
       });
       table.querySelectorAll('colgroup col').forEach(function (col) {
         var w = parseInt((col.style.width || '140').replace('px', ''), 10);
@@ -533,10 +779,15 @@
 
     return {
       title: title,
-      has_title_row: !!blockEl.querySelector('[data-title-row]'),
+      has_title_row: !!blockEl.querySelector('tr[data-title-row]'),
       headers: headers,
       rows: rows,
       col_widths: colWidths,
+      border_width: wrap ? normalizeBorderWidth(wrap.getAttribute('data-border-width') || 'medium') : 'medium',
+      border_color: wrap ? (wrap.getAttribute('data-border-color') || '#94a3b8') : '#94a3b8',
+      title_bg: titleCell ? extractCellBg(titleCell) : '',
+      header_bg: headerBg,
+      cell_bg: cellBg,
     };
   }
 
@@ -545,11 +796,153 @@
     return table ? table.querySelector('tbody[data-table-part="body"]') : null;
   }
 
-  function tableColCount(blockEl) {
+  function tableHeaderRow(blockEl) {
     var table = blockEl.querySelector('table');
-    if (!table) return 2;
-    var head = table.querySelector('thead tr');
+    return table ? table.querySelector('thead tr.cpb-table-header-row') : null;
+  }
+
+  function tableColCount(blockEl) {
+    var head = tableHeaderRow(blockEl);
     return head ? head.cells.length : 2;
+  }
+
+  function getTableCellCoords(blockEl, cell) {
+    if (!cell || cell.closest('[data-title-row]')) return null;
+    var table = blockEl.querySelector('table');
+    if (!table || !table.contains(cell)) return null;
+    if (cell.tagName === 'TH') {
+      var head = tableHeaderRow(blockEl);
+      if (!head || !head.contains(cell)) return null;
+      return { row: -1, col: cell.cellIndex, ref: colLetter(cell.cellIndex) + '0' };
+    }
+    var tbody = tableBody(blockEl);
+    if (!tbody || !tbody.contains(cell)) return null;
+    var tr = cell.parentElement;
+    var row = Array.prototype.indexOf.call(tbody.querySelectorAll('tr'), tr);
+    return { row: row, col: cell.cellIndex, ref: colLetter(cell.cellIndex) + String(row + 1) };
+  }
+
+  function buildCopyText(blockEl, anchorCell) {
+    var coords = getTableCellCoords(blockEl, anchorCell);
+    if (!coords) {
+      return anchorCell.textContent.trim();
+    }
+    var lines = [];
+    var table = blockEl.querySelector('table');
+    var tbody = tableBody(blockEl);
+    if (coords.row < 0) {
+      var head = tableHeaderRow(blockEl);
+      if (head) lines.push(head.cells[coords.col].textContent.trim());
+      if (tbody) {
+        tbody.querySelectorAll('tr').forEach(function (tr) {
+          if (tr.cells[coords.col]) lines.push(tr.cells[coords.col].textContent.trim());
+        });
+      }
+      return lines.join('\n');
+    }
+    if (tbody) {
+      var tr = tbody.querySelectorAll('tr')[coords.row];
+      if (tr) {
+        tr.querySelectorAll('td').forEach(function (td) {
+          lines.push(td.textContent.trim());
+        });
+        return lines.join('\t');
+      }
+    }
+    return anchorCell.textContent.trim();
+  }
+
+  function copyTableCells(blockEl) {
+    if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+      setStatus('Click a table cell first', 'error');
+      return;
+    }
+    var text = buildCopyText(blockEl, state.focusedTableCell);
+    state.tableClipboard = text;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        setStatus('Copied', 'saved');
+      }).catch(function () {
+        setStatus('Copied to editor clipboard', 'saved');
+      });
+    } else {
+      setStatus('Copied to editor clipboard', 'saved');
+    }
+  }
+
+  function pasteTableCells(blockEl) {
+    if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+      setStatus('Click a table cell first', 'error');
+      return;
+    }
+    if (!state.tableClipboard) {
+      setStatus('Nothing copied yet', 'error');
+      return;
+    }
+    pushUndo();
+    pasteTableData(blockEl, state.focusedTableCell, state.tableClipboard);
+    scheduleSave(blockEl);
+    flushSave(blockEl);
+  }
+
+  function pasteTableData(blockEl, anchorCell, text) {
+    var coords = getTableCellCoords(blockEl, anchorCell);
+    if (!coords) return;
+    var rows = text.replace(/\r/g, '').split('\n').map(function (line) {
+      return line.split('\t');
+    });
+    var tbody = tableBody(blockEl);
+    var head = tableHeaderRow(blockEl);
+    rows.forEach(function (cells, rIndex) {
+      var targetRow = coords.row + rIndex;
+      if (targetRow < 0 && head) {
+        cells.forEach(function (val, cIndex) {
+          var col = coords.col + cIndex;
+          if (head.cells[col]) {
+            var thText = head.cells[col].querySelector('.cpb-th-text');
+            if (thText) thText.textContent = val;
+            else head.cells[col].textContent = val;
+          }
+        });
+        return;
+      }
+      while (tbody && targetRow >= tbody.querySelectorAll('tr').length) {
+        tableAddRow(blockEl);
+      }
+      var tr = tbody ? tbody.querySelectorAll('tr')[targetRow] : null;
+      if (!tr) return;
+      cells.forEach(function (val, cIndex) {
+        var col = coords.col + cIndex;
+        while (col >= tableColCount(blockEl)) tableAddColumn(blockEl);
+        if (tr.cells[col]) tr.cells[col].textContent = val;
+      });
+    });
+    wireTableCellFocus(blockEl);
+    wireTableResize(blockEl);
+  }
+
+  function insertTableFormula(blockEl, kind) {
+    if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+      setStatus('Click a body cell first', 'error');
+      return;
+    }
+    var coords = getTableCellCoords(blockEl, state.focusedTableCell);
+    if (!coords || coords.row < 0) {
+      setStatus('Formulas apply to body cells', 'error');
+      return;
+    }
+    var formula = '';
+    if (kind === 'CUSTOM') {
+      formula = prompt('Enter formula (e.g. =SUM(A1:A3) or =A1+B1)', '=');
+      if (!formula) return;
+      if (formula.charAt(0) !== '=') formula = '=' + formula;
+    } else {
+      var start = colLetter(0) + '1';
+      var end = colLetter(Math.max(0, tableColCount(blockEl) - 1)) + String(coords.row + 1);
+      formula = '=' + kind + '(' + start + ':' + end + ')';
+    }
+    state.focusedTableCell.textContent = formula;
+    scheduleSave(blockEl);
   }
 
   function tableAddRow(blockEl) {
@@ -564,6 +957,7 @@
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
+    wireTableCellFocus(blockEl);
   }
 
   function tableDelRow(blockEl) {
@@ -571,7 +965,12 @@
     if (!tbody) return;
     var rows = tbody.querySelectorAll('tr');
     if (rows.length <= 1) return;
-    rows[rows.length - 1].remove();
+    var target = null;
+    if (state.focusedTableCell && tbody.contains(state.focusedTableCell)) {
+      target = state.focusedTableCell.closest('tr');
+    }
+    if (!target) target = rows[rows.length - 1];
+    target.remove();
   }
 
   function tableAddColumn(blockEl) {
@@ -586,12 +985,12 @@
       colgroup.appendChild(col);
     }
 
-    var titleCell = blockEl.querySelector('[data-title-row] td');
+    var titleCell = blockEl.querySelector('tr[data-title-row] td');
     if (titleCell) {
       titleCell.colSpan = cols + 1;
     }
 
-    var headRow = table.querySelector('thead tr');
+    var headRow = tableHeaderRow(blockEl);
     if (headRow) {
       var th = document.createElement('th');
       th.contentEditable = 'true';
@@ -609,6 +1008,7 @@
     });
 
     wireTableResize(blockEl);
+    wireTableCellFocus(blockEl);
   }
 
   function tableDelColumn(blockEl) {
@@ -623,7 +1023,7 @@
       colgroup.children[colIndex].remove();
     }
 
-    var headRow = table.querySelector('thead tr');
+    var headRow = tableHeaderRow(blockEl);
     if (headRow && headRow.cells[colIndex]) {
       headRow.cells[colIndex].remove();
     }
@@ -632,7 +1032,7 @@
       if (tr.cells[colIndex]) tr.cells[colIndex].remove();
     });
 
-    var titleCell = blockEl.querySelector('[data-title-row] td');
+    var titleCell = blockEl.querySelector('tr[data-title-row] td');
     if (titleCell) {
       titleCell.colSpan = cols - 1;
     }
@@ -641,17 +1041,16 @@
   function tableToggleTitle(blockEl) {
     var table = blockEl.querySelector('table');
     if (!table) return;
-    var existing = table.querySelector('[data-title-row]');
+    var thead = table.querySelector('thead');
+    if (!thead) return;
+    var existing = thead.querySelector('[data-title-row]');
     var toggleBtn = blockEl.querySelector('[data-table-action="toggle-title"]');
     if (existing) {
-      var tbody = existing.closest('tbody');
-      if (tbody) tbody.remove();
+      existing.remove();
       if (toggleBtn) toggleBtn.textContent = '+ Title row';
       return;
     }
     var cols = tableColCount(blockEl);
-    var tbody = document.createElement('tbody');
-    tbody.setAttribute('data-table-part', 'title');
     var tr = document.createElement('tr');
     tr.className = 'cpb-table-title-row is-empty';
     tr.setAttribute('data-title-row', '1');
@@ -660,10 +1059,19 @@
     td.contentEditable = 'true';
     td.setAttribute('data-placeholder', 'Table title (spans all columns)');
     tr.appendChild(td);
-    tbody.appendChild(tr);
-    table.insertBefore(tbody, table.querySelector('thead'));
+    thead.insertBefore(tr, tableHeaderRow(blockEl));
     if (toggleBtn) toggleBtn.textContent = 'Remove title row';
+    wireTableCellFocus(blockEl);
     td.focus();
+  }
+
+  function ensureResizeHint() {
+    if (!state.resizeHintEl) {
+      state.resizeHintEl = document.createElement('div');
+      state.resizeHintEl.className = 'cpb-col-resize-hint';
+      document.body.appendChild(state.resizeHintEl);
+    }
+    return state.resizeHintEl;
   }
 
   function wireTableResize(blockEl) {
@@ -681,14 +1089,21 @@
         var startW = col ? parseInt((col.style.width || '140').replace('px', ''), 10) : 140;
         if (isNaN(startW)) startW = 140;
 
+        var hint = ensureResizeHint();
+
         function onMove(ev) {
           var w = Math.max(60, Math.min(600, startW + (ev.clientX - startX)));
           if (col) col.style.width = w + 'px';
+          hint.textContent = w + 'px';
+          hint.style.display = 'block';
+          hint.style.left = (ev.clientX + 12) + 'px';
+          hint.style.top = (ev.clientY + 12) + 'px';
         }
 
         function onUp() {
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
+          hint.style.display = 'none';
           scheduleSave(blockEl);
           flushSave(blockEl);
         }
@@ -953,6 +1368,8 @@
             headers: ['Column 1', 'Column 2'],
             rows: [['', '']],
             col_widths: [140, 140],
+            border_width: 'medium',
+            border_color: '#94a3b8',
           };
         }
         createBlock(type, payload).catch(showError);

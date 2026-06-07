@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
+require_once __DIR__ . '/ControlledPublishingTableFormula.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -221,33 +222,45 @@ final class ControlledPublishingBookRenderer
         $headers = $table['headers'];
         $rows = $table['rows'];
         $colWidths = $table['col_widths'];
-        $hasTitleRow = !empty($table['has_title_row']) || $title !== '';
+        $borderWidth = (string)$table['border_width'];
+        $borderColor = (string)$table['border_color'];
+        $titleBg = (string)$table['title_bg'];
+        $headerBgs = $table['header_bg'];
+        $cellBgs = $table['cell_bg'];
+        $hasTitleRow = !empty($table['has_title_row']);
         $colCount = count($headers);
         $edit = $mode === self::MODE_EDIT;
 
         $html = '<div class="cpb-table-block">';
-        $html .= '<div class="cpb-table-wrap"><table class="cpb-table" data-field="table">';
+        $html .= '<div class="cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
+            . ' data-border-width="' . h($borderWidth) . '"'
+            . ' data-border-color="' . h($borderColor) . '"'
+            . ' style="--cpb-table-border-color:' . h($borderColor) . '">';
+        $html .= '<table class="cpb-table" data-field="table">';
         $html .= '<colgroup>';
         foreach ($colWidths as $width) {
             $html .= '<col style="width:' . (int)$width . 'px">';
         }
         $html .= '</colgroup>';
 
+        $html .= '<thead>';
         if ($hasTitleRow) {
             $titleRowClass = 'cpb-table-title-row' . ($title === '' ? ' is-empty' : '');
             $titleEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $titleDisplay = $title !== '' ? h($title) : '';
-            $html .= '<tbody data-table-part="title"><tr class="' . $titleRowClass . '" data-title-row="1">';
-            $html .= '<td colspan="' . $colCount . '"' . $titleEdit
+            $titleBgAttr = $this->tableCellBgAttr($titleBg);
+            $html .= '<tr class="' . $titleRowClass . '" data-title-row="1">';
+            $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleBgAttr
                 . ' data-placeholder="Table title (spans all columns)">' . $titleDisplay . '</td>';
-            $html .= '</tr></tbody>';
+            $html .= '</tr>';
         }
 
-        $html .= '<thead><tr>';
+        $html .= '<tr class="cpb-table-header-row">';
         $colIndex = 0;
         foreach ($headers as $header) {
             $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-            $html .= '<th' . $headerEdit . ' data-col-index="' . $colIndex . '">';
+            $headerBg = (string)($headerBgs[$colIndex] ?? '');
+            $html .= '<th' . $headerEdit . $this->tableCellBgAttr($headerBg) . ' data-col-index="' . $colIndex . '">';
             $html .= '<span class="cpb-th-text">' . h((string)$header) . '</span>';
             if ($edit) {
                 $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
@@ -258,13 +271,26 @@ final class ControlledPublishingBookRenderer
         $html .= '</tr></thead>';
 
         $html .= '<tbody data-table-part="body">';
+        $rowIndex = 0;
         foreach ($rows as $row) {
             $html .= '<tr>';
+            $cellIndex = 0;
             foreach ($row as $cell) {
                 $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-                $html .= '<td' . $cellEdit . '>' . h((string)$cell) . '</td>';
+                $bg = (string)($cellBgs[$rowIndex][$cellIndex] ?? '');
+                $rawCell = (string)$cell;
+                $displayCell = $edit
+                    ? $rawCell
+                    : ControlledPublishingTableFormula::displayValue($rawCell, $rows);
+                $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
+                    ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
+                    : '';
+                $html .= '<td' . $cellEdit . $this->tableCellBgAttr($bg) . $formulaAttr . '>'
+                    . h($displayCell) . '</td>';
+                $cellIndex++;
             }
             $html .= '</tr>';
+            $rowIndex++;
         }
         $html .= '</tbody></table></div>';
 
@@ -277,6 +303,24 @@ final class ControlledPublishingBookRenderer
                 . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
                 . ($hasTitleRow ? 'Remove title row' : '+ Title row')
                 . '</button>'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<span class="cpb-table-style-label">Border</span>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thin' ? ' is-active' : '') . '" data-table-action="border-thin" title="Thin border">─</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'medium' ? ' is-active' : '') . '" data-table-action="border-medium" title="Medium border">━</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thick' ? ' is-active' : '') . '" data-table-action="border-thick" title="Thick border">▬</button>'
+                . '<input type="color" class="cpb-table-color" data-table-action="border-color" value="' . h($borderColor) . '" title="Border color">'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<span class="cpb-table-style-label">Cell fill</span>'
+                . '<input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background (select a cell first)">'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear</button>'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<span class="cpb-table-style-label">Calc</span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-sum" title="Insert SUM formula">SUM</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-avg" title="Insert AVG formula">AVG</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-custom" title="Insert custom formula">fx</button>'
                 . '</div>';
         }
         $html .= '</div>';
@@ -290,7 +334,7 @@ final class ControlledPublishingBookRenderer
     private function normalizeTableShape(array $payload): array
     {
         $title = trim((string)($payload['title'] ?? ''));
-        $hasTitleRow = !empty($payload['has_title_row']) || $title !== '';
+        $hasTitleRow = !empty($payload['has_title_row']);
         $headers = array();
         $rows = array();
         $colWidths = array();
@@ -334,13 +378,71 @@ final class ControlledPublishingBookRenderer
         }
         $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);
 
+        $borderWidth = strtolower(trim((string)($payload['border_width'] ?? 'medium')));
+        if (!in_array($borderWidth, array('thin', 'medium', 'thick'), true)) {
+            $borderWidth = 'medium';
+        }
+        $borderColor = $this->normalizeTableHexColor((string)($payload['border_color'] ?? ''), '#94a3b8');
+
+        $headerBg = array();
+        if (is_array($payload['header_bg'] ?? null)) {
+            foreach ($payload['header_bg'] as $color) {
+                $headerBg[] = $this->normalizeTableHexColor((string)$color, '');
+            }
+        }
+        $headerBg = array_pad(array_slice($headerBg, 0, $colCount), $colCount, '');
+
+        $titleBg = $this->normalizeTableHexColor((string)($payload['title_bg'] ?? ''), '');
+
+        $cellBg = array();
+        if (is_array($payload['cell_bg'] ?? null)) {
+            foreach ($payload['cell_bg'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $color) {
+                    $line[] = $this->normalizeTableHexColor((string)$color, '');
+                }
+                $cellBg[] = array_pad(array_slice($line, 0, $colCount), $colCount, '');
+            }
+        }
+        while (count($cellBg) < count($normalizedRows)) {
+            $cellBg[] = array_fill(0, $colCount, '');
+        }
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
             'headers' => $headers,
             'rows' => $normalizedRows,
             'col_widths' => $colWidths,
+            'border_width' => $borderWidth,
+            'border_color' => $borderColor,
+            'title_bg' => $titleBg,
+            'header_bg' => $headerBg,
+            'cell_bg' => $cellBg,
         );
+    }
+
+    private function normalizeTableHexColor(string $color, string $fallback): string
+    {
+        $color = trim($color);
+        if ($color === '') {
+            return $fallback === '' ? '' : $fallback;
+        }
+        if (preg_match('/^#[0-9a-fA-F]{3,8}$/', $color) === 1) {
+            return strtolower($color);
+        }
+        return $fallback;
+    }
+
+    private function tableCellBgAttr(string $bg): string
+    {
+        if ($bg === '') {
+            return '';
+        }
+        return ' data-cell-bg="' . h($bg) . '" style="background-color:' . h($bg) . '"';
     }
 
     /**
