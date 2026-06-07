@@ -6,16 +6,16 @@
   border: 1px solid var(--border-soft, #e2e8f0);
   border-radius: 20px;
   box-shadow: var(--card-shadow, 0 10px 28px rgba(15, 23, 42, 0.06));
-  overflow: visible;
+  overflow: hidden;
 }
 
 .cpb-editor-shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: auto;
+  min-height: calc(100vh - 280px);
   border: none;
   border-radius: 0;
-  overflow: visible;
+  overflow: hidden;
   background: #eef2f7;
 }
 
@@ -25,10 +25,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  position: sticky;
-  top: 0;
-  align-self: start;
-  max-height: 100vh;
+  border-bottom-left-radius: 20px;
 }
 
 .cpb-tree-head {
@@ -159,7 +156,8 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
+  border-bottom-right-radius: 20px;
 }
 
 .cpb-toolbar {
@@ -170,9 +168,7 @@
   padding: 6px 12px;
   background: #fff;
   border-bottom: 1px solid #dbe3ef;
-  position: sticky;
-  top: 0;
-  z-index: 40;
+  flex-shrink: 0;
 }
 
 .cpb-toolbar-group {
@@ -243,8 +239,9 @@
 }
 
 .cpb-canvas-scroll {
-  flex: none;
-  overflow: visible;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 28px 20px 40px;
   background: linear-gradient(180deg, #e8edf4 0%, #dfe6f0 100%);
 }
@@ -529,11 +526,6 @@
   align-items: center;
   margin-top: 8px;
   padding: 6px 0 8px;
-  position: sticky;
-  bottom: 0;
-  z-index: 15;
-  background: rgba(255, 255, 255, 0.96);
-  border-top: 1px solid #e8ecf2;
 }
 
 .cpb-table-style-sep {
@@ -935,11 +927,16 @@
 @media (max-width: 960px) {
   .cpb-editor-shell {
     grid-template-columns: 1fr;
-    min-height: auto;
+    min-height: calc(100vh - 240px);
   }
 
   .cpb-tree-panel {
     max-height: 240px;
+    border-bottom-left-radius: 0;
+  }
+
+  .cpb-workspace {
+    border-bottom-right-radius: 20px;
   }
 
   .cpb-sheet {
