@@ -586,7 +586,7 @@ final class ControlledPublishingBlockService
     private function normalizeCalloutPayload(array $payload, bool $strict): array
     {
         $type = strtolower(trim((string)($payload['callout_type'] ?? 'warning')));
-        if (!in_array($type, array('warning', 'caution'), true)) {
+        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
             $type = 'warning';
         }
         $title = trim((string)($payload['title'] ?? strtoupper($type)));
@@ -606,30 +606,49 @@ final class ControlledPublishingBlockService
      */
     private function normalizeStyleFields(array $payload): array
     {
-        $fonts = array(
-            'serif', 'sans', 'mono', 'arial',
-            'manuallabel', 'manualtitle', 'sectiontitle',
-        );
+        $fonts = array('serif', 'sans', 'mono', 'arial');
         $font = strtolower(trim((string)($payload['font_family'] ?? 'serif')));
+        if (in_array($font, array('manuallabel', 'manualtitle', 'sectiontitle'), true)) {
+            $font = 'sans';
+        }
         if (!in_array($font, $fonts, true)) {
             $font = 'serif';
+        }
+        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $allowedStyles = array(
+            'title', 'subtitle_1', 'heading_1', 'heading_2',
+            'subtitle_3', 'subtitle_4', 'body', 'caption',
+        );
+        if ($paragraphStyle !== '' && !in_array($paragraphStyle, $allowedStyles, true)) {
+            $paragraphStyle = '';
+        }
+        $textColor = trim((string)($payload['text_color'] ?? $payload['color'] ?? ''));
+        if ($textColor !== '' && preg_match('/^#[0-9a-fA-F]{3,8}$/', $textColor) !== 1) {
+            $textColor = '';
         }
         $align = strtolower(trim((string)($payload['text_align'] ?? 'left')));
         if (!in_array($align, array('left', 'center', 'right'), true)) {
             $align = 'left';
         }
-        $allowedSizes = array(8, 9, 10, 11, 12, 14, 16, 18);
+        $allowedSizes = array(8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32);
         $fontSize = (int)($payload['font_size'] ?? 11);
         if (!in_array($fontSize, $allowedSizes, true)) {
             $fontSize = 11;
         }
         $indentLevel = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
-        return array(
+        $out = array(
             'font_family' => $font,
             'text_align' => $align,
             'font_size' => $fontSize,
             'indent_level' => $indentLevel,
         );
+        if ($paragraphStyle !== '') {
+            $out['paragraph_style'] = $paragraphStyle;
+        }
+        if ($textColor !== '') {
+            $out['text_color'] = strtolower($textColor);
+        }
+        return $out;
     }
 
     /**

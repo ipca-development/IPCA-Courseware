@@ -878,6 +878,12 @@ body.cpb-browser-fullscreen .cpb-workspace {
   padding: 0 10px 0 4px !important;
 }
 
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--paragraph-style {
+  min-width: 88px !important;
+  max-width: 108px !important;
+  padding: 0 12px 0 4px !important;
+}
+
 .cmp-page .cpb-editor-root .cpb-toolbar input.cpb-tool-color {
   all: unset;
   box-sizing: border-box;
@@ -900,6 +906,21 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--caution {
   color: #ca8a04 !important;
   border-color: #fde047 !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--info {
+  color: #fff !important;
+  background: #1e3a8a !important;
+  border-color: #1e40af !important;
+  border-radius: 50% !important;
+  width: 22px !important;
+  min-width: 22px !important;
+  max-width: 22px !important;
+  padding: 0 !important;
+  font-weight: 800 !important;
+  font-style: italic !important;
+  font-size: 12px !important;
+  line-height: 22px !important;
 }
 
 .cpb-running-band {
@@ -973,6 +994,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #fffbeb;
 }
 
+.cpb-callout--info {
+  border-color: #1e40af;
+  background: #eff6ff;
+}
+
 .cpb-callout-icon {
   flex-shrink: 0;
   width: 32px;
@@ -1006,6 +1032,22 @@ body.cpb-browser-fullscreen .cpb-workspace {
   content: '!';
 }
 
+.cpb-callout-icon--info {
+  background: #1e3a8a;
+  color: #fff;
+  border-radius: 50%;
+  clip-path: none;
+  width: 28px;
+  height: 28px;
+  font-style: italic;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.cpb-callout-icon--info::before {
+  content: 'i';
+}
+
 .cpb-callout-title {
   font-weight: 700;
   font-size: 11pt;
@@ -1020,6 +1062,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-callout--caution .cpb-callout-title {
   color: #854d0e;
+}
+
+.cpb-callout--info .cpb-callout-title {
+  color: #1e3a8a;
 }
 
 .cpb-callout-text {
@@ -1100,6 +1146,160 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-callout-dialog-actions button.cpb-callout-save {
+  background: #1e3c72;
+  border-color: #1e3c72;
+  color: #fff;
+}
+
+.cpb-style-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 9100;
+  overflow-y: auto;
+  padding: 24px 16px;
+}
+
+.cpb-style-dialog {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px 18px;
+  width: min(920px, 96vw);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  font-family: system-ui, sans-serif;
+  margin: auto 0;
+}
+
+.cpb-style-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #0f2744;
+}
+
+.cpb-style-lead {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.cpb-style-section {
+  margin-bottom: 18px;
+}
+
+.cpb-style-section h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cpb-style-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cpb-style-table th,
+.cpb-style-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cpb-style-table th {
+  background: #f8fafc;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.cpb-style-name {
+  font-weight: 600;
+  color: #0f2744;
+  white-space: nowrap;
+}
+
+.cpb-style-input {
+  border: 1px solid #d1dae6;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.cpb-style-input--num {
+  width: 52px;
+}
+
+.cpb-style-input--color {
+  width: 36px;
+  height: 28px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.cpb-style-sample {
+  display: inline-block;
+  min-width: 120px;
+}
+
+.cpb-style-table-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.cpb-style-table-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+}
+
+.cpb-style-table-row {
+  display: grid;
+  grid-template-columns: 90px 100px 56px 44px 44px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.cpb-style-table-row-label {
+  font-weight: 600;
+  color: #334155;
+}
+
+.cpb-style-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.cpb-style-dialog-actions button {
+  border: 1px solid #d1dae6;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.cpb-style-dialog-actions button.cpb-style-save {
   background: #1e3c72;
   border-color: #1e3c72;
   color: #fff;

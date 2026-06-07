@@ -115,14 +115,21 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" data-align="right" title="Align right">R</button>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--style">
+          <select id="cpbParagraphStyleSelect" class="cpb-tool-select cpb-tool-select--paragraph-style" title="Paragraph style">
+            <option value="title">Title</option>
+            <option value="subtitle_1">Subtitle 1</option>
+            <option value="heading_1">Heading 1</option>
+            <option value="heading_2">Heading 2</option>
+            <option value="subtitle_3">Subtitle 3</option>
+            <option value="subtitle_4">Subtitle 4</option>
+            <option value="body" selected>Body</option>
+            <option value="caption">Caption</option>
+          </select>
           <select id="cpbFontSelect" class="cpb-tool-select" title="Font family">
-            <option value="serif">Body</option>
+            <option value="serif">Serif</option>
             <option value="sans">Sans</option>
             <option value="arial">Arial</option>
             <option value="mono">Mono</option>
-            <option value="manuallabel">Manual label</option>
-            <option value="manualtitle">Manual title</option>
-            <option value="sectiontitle">Section title</option>
           </select>
           <select id="cpbFontSizeSelect" class="cpb-tool-select cpb-tool-select--size" title="Font size">
             <option value="8">8</option>
@@ -150,7 +157,7 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
         </div>
         <div class="cpb-toolbar-group">
-          <button type="button" class="cpb-tool-btn" data-add-block="heading" title="Add heading">H</button>
+          <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Book style editor">Styles</button>
           <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
           <button type="button" class="cpb-tool-btn" data-add-block="list" title="Add list">List</button>
           <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
@@ -159,9 +166,11 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn cpb-tool-btn--warning" data-add-callout="warning" title="Insert Warning">⚠</button>
           <button type="button" class="cpb-tool-btn cpb-tool-btn--caution" data-add-callout="caution" title="Insert Caution">⚡</button>
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--info" data-add-callout="info" title="Insert Info">i</button>
           <button type="button" class="cpb-tool-btn" id="cpbManageCallouts" title="Manage callout presets">⋯</button>
         </div>
         <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbSyncToc" title="Regenerate Table of Contents">Sync TOC</button>
           <button type="button" class="cpb-tool-btn" id="cpbSyncHighlights" title="Regenerate Highlight of Changes">Sync highlights</button>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--view">

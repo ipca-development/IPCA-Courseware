@@ -16,8 +16,11 @@
   var imageInput = document.getElementById('cpbImageInput');
   var undoBtn = document.getElementById('cpbUndo');
   var redoBtn = document.getElementById('cpbRedo');
+  var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
   var fontSelect = document.getElementById('cpbFontSelect');
   var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
+  var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
+  var syncTocBtn = document.getElementById('cpbSyncToc');
   var textColorInput = document.getElementById('cpbTextColor');
   var manageCalloutsBtn = document.getElementById('cpbManageCallouts');
   var syncHighlightsBtn = document.getElementById('cpbSyncHighlights');
@@ -30,26 +33,30 @@
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
-    'cpb-font-manuallabel', 'cpb-font-manualtitle', 'cpb-font-sectiontitle',
   ];
-  var ALIGN_CLASSES = ['cpb-align-left', 'cpb-align-center', 'cpb-align-right'];
-  var FONT_PRESET_SIZES = {
-    serif: 11,
-    sans: 11,
-    mono: 11,
-    arial: 11,
-    manuallabel: 9,
-    manualtitle: 16,
-    sectiontitle: 14,
+  var PARAGRAPH_STYLE_CLASSES = [
+    'cpb-ps-title', 'cpb-ps-subtitle_1', 'cpb-ps-heading_1', 'cpb-ps-heading_2',
+    'cpb-ps-subtitle_3', 'cpb-ps-subtitle_4', 'cpb-ps-body', 'cpb-ps-caption',
+  ];
+  var PARAGRAPH_STYLE_KEYS = [
+    'title', 'subtitle_1', 'heading_1', 'heading_2', 'subtitle_3', 'subtitle_4', 'body', 'caption',
+  ];
+  var PARAGRAPH_STYLE_LABELS = {
+    title: 'Title',
+    subtitle_1: 'Subtitle 1',
+    heading_1: 'Heading 1',
+    heading_2: 'Heading 2',
+    subtitle_3: 'Subtitle 3',
+    subtitle_4: 'Subtitle 4',
+    body: 'Body',
+    caption: 'Caption',
   };
+  var ALIGN_CLASSES = ['cpb-align-left', 'cpb-align-center', 'cpb-align-right'];
   var FONT_STACKS = {
     serif: "Georgia, 'Times New Roman', serif",
     sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
     mono: "'Courier New', Courier, monospace",
     arial: 'Arial, Helvetica, sans-serif',
-    manuallabel: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-    manualtitle: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-    sectiontitle: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   };
 
   var state = {
@@ -63,6 +70,7 @@
     expanded: {},
     pageLayout: {},
     calloutPresets: [],
+    bookStyles: null,
     undoStack: [],
     redoStack: [],
     layoutTimer: null,
@@ -198,10 +206,7 @@
         }
       })
       .catch(function () {
-        state.calloutPresets = [
-          { callout_type: 'warning', title: 'WARNING', text: '' },
-          { callout_type: 'caution', title: 'CAUTION', text: '' },
-        ];
+        state.calloutPresets = defaultBookStyles().callout_presets;
       });
   }
 
@@ -214,6 +219,10 @@
       state.editable = !!res.editable;
       state.sectionsTree = res.sections_tree || [];
       state.pageLayout = res.page_layout || {};
+      state.bookStyles = res.book_styles || defaultBookStyles();
+      if (state.bookStyles.callout_presets) {
+        state.calloutPresets = state.bookStyles.callout_presets;
+      }
       state.undoStack = [];
       state.redoStack = [];
       root.classList.toggle('cpb-editor-readonly', !state.editable);
@@ -765,6 +774,54 @@
     }).catch(showError);
   }
 
+  function defaultBookStyles() {
+    return {
+      paragraph_styles: {
+        title: { font_family: 'sans', font_size: 24, color: '#0f2744' },
+        subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744' },
+        heading_1: { font_family: 'sans', font_size: 16, color: '#0f2744' },
+        heading_2: { font_family: 'sans', font_size: 14, color: '#0f2744' },
+        subtitle_3: { font_family: 'sans', font_size: 12, color: '#334155' },
+        subtitle_4: { font_family: 'sans', font_size: 11, color: '#475569' },
+        body: { font_family: 'serif', font_size: 11, color: '#0f172a' },
+        caption: { font_family: 'sans', font_size: 9, color: '#64748b' },
+      },
+      table_styles: {
+        standard: defaultTableStyleDef(),
+        text: Object.assign({}, defaultTableStyleDef(), { border_width: 'thin' }),
+      },
+      callout_presets: [
+        { callout_type: 'warning', title: 'WARNING', text: '' },
+        { callout_type: 'caution', title: 'CAUTION', text: '' },
+        { callout_type: 'info', title: 'INFO', text: '' },
+      ],
+    };
+  }
+
+  function defaultTableStyleDef() {
+    return {
+      border_width: 'medium',
+      border_color: '#94a3b8',
+      cell_bg: '#ffffff',
+      title_row: { font_family: 'sans', font_size: 11, color: '#0f2744', bg: '#e8eef6' },
+      header_row: { font_family: 'sans', font_size: 10, color: '#0f172a', bg: '#f1f5f9' },
+      body_row: { font_family: 'serif', font_size: 10, color: '#0f172a', bg: '' },
+    };
+  }
+
+  function resolveTypographyFromPayload(payload) {
+    var styles = state.bookStyles || defaultBookStyles();
+    var ps = (payload && payload.paragraph_style) || 'body';
+    var def = (styles.paragraph_styles && styles.paragraph_styles[ps]) || styles.paragraph_styles.body;
+    return {
+      font_family: (payload && payload.font_family) || def.font_family || 'serif',
+      font_size: (payload && payload.font_size) || def.font_size || 11,
+      color: (payload && (payload.text_color || payload.color)) || def.color || '#0f172a',
+      text_align: (payload && payload.text_align) || 'left',
+      indent_level: (payload && payload.indent_level) || 0,
+    };
+  }
+
   function extractStyleFields(blockEl, blockType) {
     var el = null;
     if (blockType === 'heading') el = blockEl.querySelector('.cpb-heading');
@@ -772,9 +829,11 @@
     else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
     return {
+      paragraph_style: el.getAttribute('data-paragraph-style') || 'body',
       font_family: el.getAttribute('data-font-family') || 'serif',
       text_align: el.getAttribute('data-text-align') || 'left',
       font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
+      text_color: el.getAttribute('data-text-color') || '#0f172a',
       indent_level: parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0,
     };
   }
@@ -1485,12 +1544,52 @@
     return null;
   }
 
+  function syncToolbarFromTarget(target) {
+    if (!target) return;
+    if (target.type === 'table-cell') {
+      var cellFont = target.el.getAttribute('data-font-family') || 'serif';
+      var cellSize = parseInt(target.el.getAttribute('data-font-size') || '10', 10) || 10;
+      if (fontSelect) fontSelect.value = cellFont;
+      if (fontSizeSelect) fontSizeSelect.value = String(cellSize);
+      return;
+    }
+    if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
+      var ps = target.el.getAttribute('data-paragraph-style') || 'body';
+      var font = target.el.getAttribute('data-font-family') || 'serif';
+      var size = parseInt(target.el.getAttribute('data-font-size') || '11', 10) || 11;
+      var color = target.el.getAttribute('data-text-color') || '#0f172a';
+      if (paragraphStyleSelect) paragraphStyleSelect.value = ps;
+      if (fontSelect) fontSelect.value = font;
+      if (fontSizeSelect) fontSizeSelect.value = String(size);
+      if (textColorInput) textColorInput.value = color;
+    }
+  }
+
   function rememberStyleTarget() {
     if (!selectionInCanvas() && !(document.activeElement && canvasEl.contains(document.activeElement))) {
       return;
     }
     var target = getActiveStyleTargetFromEditor();
-    if (target) state.lastStyleTarget = target;
+    if (target) {
+      state.lastStyleTarget = target;
+      syncToolbarFromTarget(target);
+    }
+  }
+
+  function tablePayloadFromBookStyles(kind) {
+    kind = kind || 'standard';
+    var styles = state.bookStyles || defaultBookStyles();
+    var def = (styles.table_styles && styles.table_styles[kind]) || defaultTableStyleDef();
+    return {
+      title: '',
+      headers: ['Column 1', 'Column 2'],
+      rows: [['', '']],
+      col_widths: [140, 140],
+      border_width: def.border_width || 'medium',
+      border_color: def.border_color || '#94a3b8',
+      cell_bg: def.cell_bg || '#ffffff',
+      table_style_kind: kind,
+    };
   }
 
   function getActiveStyleTarget() {
@@ -1581,32 +1680,58 @@
     }
   }
 
-  function applyBlockTypography(el, font, size) {
+  function applyTypographyToElement(el, typo, paragraphStyle) {
     FONT_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
-    el.classList.add('cpb-font-' + font);
-    el.setAttribute('data-font-family', font);
-    var stack = FONT_STACKS[font];
-    if (stack) el.style.fontFamily = stack;
-    if (size) applyFontSizeToElement(el, size, false);
+    PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
+    el.classList.add('cpb-font-' + typo.font_family);
+    if (paragraphStyle) {
+      el.classList.add('cpb-ps-' + paragraphStyle);
+      el.setAttribute('data-paragraph-style', paragraphStyle);
+    }
+    el.setAttribute('data-font-family', typo.font_family);
+    el.setAttribute('data-font-size', String(typo.font_size));
+    el.setAttribute('data-text-color', typo.color);
+    el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
+    el.style.fontSize = typo.font_size + 'pt';
+    el.style.color = typo.color;
+  }
+
+  function applyParagraphStyle(styleKey) {
+    var target = getActiveStyleTarget();
+    if (!target || target.type === 'table-cell') return;
+    if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
+    pushUndo();
+    var styles = state.bookStyles || defaultBookStyles();
+    var def = (styles.paragraph_styles && styles.paragraph_styles[styleKey]) || styles.paragraph_styles.body;
+    var typo = {
+      font_family: def.font_family || 'serif',
+      font_size: def.font_size || 11,
+      color: def.color || '#0f172a',
+    };
+    applyTypographyToElement(target.el, typo, styleKey);
+    if (fontSelect) fontSelect.value = typo.font_family;
+    if (fontSizeSelect) fontSizeSelect.value = String(typo.font_size);
+    if (textColorInput) textColorInput.value = typo.color;
+    if (paragraphStyleSelect) paragraphStyleSelect.value = styleKey;
+    scheduleSave(target.block);
+    flushSave(target.block);
   }
 
   function applyFontFamily(font) {
     var target = getActiveStyleTarget();
     if (!target) return;
     pushUndo();
-    var presetSize = FONT_PRESET_SIZES[font] || null;
     if (target.type === 'table-cell') {
-      applyStyleToTableCell(target.el, { font: font, size: presetSize });
-      if (presetSize && fontSizeSelect) fontSizeSelect.value = String(presetSize);
+      applyStyleToTableCell(target.el, { font: font });
     } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       var stack = FONT_STACKS[font];
       target.el.focus();
-      var inlineStyles = { fontFamily: stack || '' };
-      if (presetSize) inlineStyles.fontSize = presetSize + 'pt';
-      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection(inlineStyles)) {
-        applyBlockTypography(target.el, font, presetSize);
+      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ fontFamily: stack || '' })) {
+        FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
+        target.el.classList.add('cpb-font-' + font);
+        target.el.setAttribute('data-font-family', font);
+        if (stack) target.el.style.fontFamily = stack;
       }
-      if (presetSize && fontSizeSelect) fontSizeSelect.value = String(presetSize);
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -1702,13 +1827,13 @@
     if (!preset) {
       preset = {
         callout_type: type,
-        title: type === 'caution' ? 'CAUTION' : 'WARNING',
+        title: type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : 'WARNING'),
         text: '',
       };
     }
     createBlock('callout', {
       callout_type: type,
-      title: preset.title || (type === 'caution' ? 'CAUTION' : 'WARNING'),
+      title: preset.title || (type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : 'WARNING')),
       text: preset.text || 'Enter callout text…',
     }).catch(showError);
   }
@@ -1723,13 +1848,14 @@
   function openCalloutManager() {
     var warning = presetByType('warning') || { callout_type: 'warning', title: 'WARNING', text: '' };
     var caution = presetByType('caution') || { callout_type: 'caution', title: 'CAUTION', text: '' };
+    var info = presetByType('info') || { callout_type: 'info', title: 'INFO', text: '' };
 
     var overlay = document.createElement('div');
     overlay.className = 'cpb-callout-overlay';
     overlay.innerHTML = ''
       + '<div class="cpb-callout-dialog" role="dialog" aria-label="Manage callout presets">'
       + '<h3>Callout presets</h3>'
-      + '<p style="margin:0 0 12px;font-size:13px;color:#64748b;">Default title and text used when inserting Warning or Caution blocks.</p>'
+      + '<p style="margin:0 0 12px;font-size:13px;color:#64748b;">Default title and text used when inserting Warning, Caution, or Info blocks.</p>'
       + '<div class="cpb-callout-field"><label>Warning title</label>'
       + '<input type="text" id="cpbPresetWarnTitle" value="' + escapeAttr(warning.title) + '"></div>'
       + '<div class="cpb-callout-field"><label>Warning default text</label>'
@@ -1738,6 +1864,10 @@
       + '<input type="text" id="cpbPresetCautionTitle" value="' + escapeAttr(caution.title) + '"></div>'
       + '<div class="cpb-callout-field"><label>Caution default text</label>'
       + '<textarea id="cpbPresetCautionText">' + escapeHtml(caution.text) + '</textarea></div>'
+      + '<div class="cpb-callout-field"><label>Info title</label>'
+      + '<input type="text" id="cpbPresetInfoTitle" value="' + escapeAttr(info.title) + '"></div>'
+      + '<div class="cpb-callout-field"><label>Info default text</label>'
+      + '<textarea id="cpbPresetInfoText">' + escapeHtml(info.text) + '</textarea></div>'
       + '<div class="cpb-callout-dialog-actions">'
       + '<button type="button" class="cpb-callout-cancel">Cancel</button>'
       + '<button type="button" class="cpb-callout-save">Save presets</button>'
@@ -1763,6 +1893,11 @@
           title: overlay.querySelector('#cpbPresetCautionTitle').value.trim() || 'CAUTION',
           text: overlay.querySelector('#cpbPresetCautionText').value.trim(),
         },
+        {
+          callout_type: 'info',
+          title: overlay.querySelector('#cpbPresetInfoTitle').value.trim() || 'INFO',
+          text: overlay.querySelector('#cpbPresetInfoText').value.trim(),
+        },
       ];
       apiPost('save_callout_presets', {
         version_id: state.versionId,
@@ -1784,6 +1919,165 @@
 
   function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function styleEditorFontOptions(selected) {
+    var html = '';
+    ['serif', 'sans', 'arial', 'mono'].forEach(function (font) {
+      html += '<option value="' + font + '"' + (font === selected ? ' selected' : '') + '>'
+        + (font === 'serif' ? 'Serif' : font.charAt(0).toUpperCase() + font.slice(1)) + '</option>';
+    });
+    return html;
+  }
+
+  function styleEditorBorderOptions(selected) {
+    return ['thin', 'medium', 'thick'].map(function (w) {
+      return '<option value="' + w + '"' + (w === selected ? ' selected' : '') + '>' + w + '</option>';
+    }).join('');
+  }
+
+  function openStyleEditor() {
+    var styles = JSON.parse(JSON.stringify(state.bookStyles || defaultBookStyles()));
+    var overlay = document.createElement('div');
+    overlay.className = 'cpb-style-overlay';
+
+    var paragraphRows = PARAGRAPH_STYLE_KEYS.map(function (key) {
+      var def = styles.paragraph_styles[key] || {};
+      var sample = PARAGRAPH_STYLE_LABELS[key] || key;
+      return ''
+        + '<tr data-ps-row="' + key + '">'
+        + '<td class="cpb-style-name">' + escapeHtml(sample) + '</td>'
+        + '<td><select class="cpb-style-input" data-ps-field="font_family">' + styleEditorFontOptions(def.font_family || 'serif') + '</select></td>'
+        + '<td><input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-ps-field="font_size" value="' + (def.font_size || 11) + '"></td>'
+        + '<td><input class="cpb-style-input cpb-style-input--color" type="color" data-ps-field="color" value="' + escapeAttr(def.color || '#0f172a') + '"></td>'
+        + '<td><span class="cpb-style-sample" data-ps-sample="' + key + '" style="font-family:' + escapeAttr(FONT_STACKS[def.font_family] || FONT_STACKS.serif) + ';font-size:' + (def.font_size || 11) + 'pt;color:' + escapeAttr(def.color || '#0f172a') + '">' + escapeHtml(sample) + '</span></td>'
+        + '</tr>';
+    }).join('');
+
+    function tableSection(kind, label) {
+      var t = styles.table_styles[kind] || defaultTableStyleDef();
+      function rowField(rowKey, rowLabel) {
+        var row = t[rowKey] || {};
+        return ''
+          + '<div class="cpb-style-table-row">'
+          + '<div class="cpb-style-table-row-label">' + escapeHtml(rowLabel) + '</div>'
+          + '<select class="cpb-style-input" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_family">' + styleEditorFontOptions(row.font_family || 'serif') + '</select>'
+          + '<input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_size" value="' + (row.font_size || 10) + '">'
+          + '<input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.color" value="' + escapeAttr(row.color || '#0f172a') + '">'
+          + '<input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.bg" value="' + escapeAttr(row.bg || '#ffffff') + '" title="Background">'
+          + '</div>';
+      }
+      return ''
+        + '<section class="cpb-style-section"><h4>' + escapeHtml(label) + '</h4>'
+        + '<div class="cpb-style-table-grid">'
+        + '<label>Border <select class="cpb-style-input" data-table-kind="' + kind + '" data-table-field="border_width">' + styleEditorBorderOptions(t.border_width || 'medium') + '</select></label>'
+        + '<label>Border color <input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="border_color" value="' + escapeAttr(t.border_color || '#94a3b8') + '"></label>'
+        + '<label>Default cell fill <input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="cell_bg" value="' + escapeAttr(t.cell_bg || '#ffffff') + '"></label>'
+        + '</div>'
+        + rowField('title_row', 'Title row')
+        + rowField('header_row', 'Header row')
+        + rowField('body_row', 'Body rows')
+        + '</section>';
+    }
+
+    overlay.innerHTML = ''
+      + '<div class="cpb-style-dialog" role="dialog" aria-label="Book style editor">'
+      + '<h3>Book style editor</h3>'
+      + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents. Title and Subtitle levels are collected when you run Sync TOC.</p>'
+      + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
+      + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Sample</th></tr></thead><tbody>'
+      + paragraphRows + '</tbody></table></section>'
+      + tableSection('standard', 'Standard tables')
+      + tableSection('text', 'Text tables')
+      + '<div class="cpb-style-dialog-actions">'
+      + '<button type="button" class="cpb-style-cancel">Cancel</button>'
+      + '<button type="button" class="cpb-style-save">Save styles</button>'
+      + '</div></div>';
+
+    function readStylesFromDialog() {
+      var next = defaultBookStyles();
+      PARAGRAPH_STYLE_KEYS.forEach(function (key) {
+        var row = overlay.querySelector('[data-ps-row="' + key + '"]');
+        if (!row) return;
+        next.paragraph_styles[key] = {
+          font_family: row.querySelector('[data-ps-field="font_family"]').value,
+          font_size: parseInt(row.querySelector('[data-ps-field="font_size"]').value, 10) || 11,
+          color: row.querySelector('[data-ps-field="color"]').value,
+        };
+      });
+      ['standard', 'text'].forEach(function (kind) {
+        var base = next.table_styles[kind];
+        overlay.querySelectorAll('[data-table-kind="' + kind + '"]').forEach(function (input) {
+          var field = input.getAttribute('data-table-field');
+          if (!field) return;
+          if (field.indexOf('.') > -1) {
+            var parts = field.split('.');
+            base[parts[0]][parts[1]] = input.value;
+          } else {
+            base[field] = input.value;
+          }
+        });
+      });
+      next.callout_presets = (state.bookStyles && state.bookStyles.callout_presets) || defaultBookStyles().callout_presets;
+      return next;
+    }
+
+    overlay.addEventListener('input', function (e) {
+      var row = e.target.closest('[data-ps-row]');
+      if (!row) return;
+      var key = row.getAttribute('data-ps-row');
+      var sample = row.querySelector('[data-ps-sample="' + key + '"]');
+      if (!sample) return;
+      var font = row.querySelector('[data-ps-field="font_family"]').value;
+      var size = row.querySelector('[data-ps-field="font_size"]').value;
+      var color = row.querySelector('[data-ps-field="color"]').value;
+      sample.style.fontFamily = FONT_STACKS[font] || FONT_STACKS.serif;
+      sample.style.fontSize = size + 'pt';
+      sample.style.color = color;
+    });
+
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.querySelector('.cpb-style-cancel').addEventListener('click', close);
+    overlay.querySelector('.cpb-style-save').addEventListener('click', function () {
+      var payload = readStylesFromDialog();
+      apiPost('save_book_styles', { version_id: state.versionId, book_styles: payload })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Save failed');
+          state.bookStyles = res.book_styles || payload;
+          state.calloutPresets = state.bookStyles.callout_presets || state.calloutPresets;
+          close();
+          setStatus('Book styles saved', 'saved');
+          return loadSection(state.sectionId);
+        })
+        .catch(showError);
+    });
+    document.body.appendChild(overlay);
+  }
+
+  function syncToc() {
+    if (!confirm('Regenerate the Table of Contents from Title / Subtitle / Heading paragraph styles?')) return;
+    setStatus('Syncing TOC…', 'saving');
+    apiPost('regenerate_toc', { version_id: state.versionId })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'TOC sync failed');
+        var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+        setStatus('TOC updated (' + count + ' entries)', 'saved');
+        var tocId = findTocSectionId(state.sectionsTree);
+        if (tocId) loadSection(tocId);
+      })
+      .catch(showError);
+  }
+
+  function findTocSectionId(nodes) {
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].section_key === 'toc') return nodes[i].id;
+      if (nodes[i].children && nodes[i].children.length) {
+        var found = findTocSectionId(nodes[i].children);
+        if (found) return found;
+      }
+    }
+    return null;
   }
 
   function syncHighlights() {
@@ -1865,18 +2159,10 @@
         e.preventDefault();
         var type = add.getAttribute('data-add-block');
         var payload = {};
-        if (type === 'heading') payload = { text: 'New heading', level: 2 };
-        if (type === 'paragraph') payload = { html: '<p>New paragraph</p>' };
+        if (type === 'paragraph') payload = { html: '<p>New paragraph</p>', paragraph_style: 'body' };
         if (type === 'list') payload = { ordered: false, items: ['List item'] };
         if (type === 'table') {
-          payload = {
-            title: '',
-            headers: ['Column 1', 'Column 2'],
-            rows: [['', '']],
-            col_widths: [140, 140],
-            border_width: 'medium',
-            border_color: '#94a3b8',
-          };
+          payload = tablePayloadFromBookStyles('standard');
         }
         createBlock(type, payload).catch(showError);
         return;
@@ -1908,6 +2194,13 @@
     if (selectionInCanvas()) rememberStyleTarget();
   });
 
+  if (paragraphStyleSelect) {
+    paragraphStyleSelect.addEventListener('focus', rememberStyleTarget);
+    paragraphStyleSelect.addEventListener('change', function () {
+      applyParagraphStyle(paragraphStyleSelect.value);
+    });
+  }
+
   if (fontSelect) {
     fontSelect.addEventListener('focus', rememberStyleTarget);
     fontSelect.addEventListener('change', function () {
@@ -1925,7 +2218,21 @@
   if (textColorInput) {
     textColorInput.addEventListener('focus', rememberStyleTarget);
     textColorInput.addEventListener('input', function () {
-      execFormat('foreColor', textColorInput.value);
+      var target = getActiveStyleTarget();
+      var color = textColorInput.value;
+      if (target && target.type !== 'table-cell'
+        && (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list')) {
+        pushUndo();
+        target.el.focus();
+        if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ color: color })) {
+          target.el.style.color = color;
+          target.el.setAttribute('data-text-color', color);
+        }
+        scheduleSave(target.block);
+        flushSave(target.block);
+        return;
+      }
+      execFormat('foreColor', color);
     });
   }
 
@@ -1980,6 +2287,20 @@
     manageCalloutsBtn.addEventListener('click', function (e) {
       e.preventDefault();
       openCalloutManager();
+    });
+  }
+
+  if (openStyleEditorBtn) {
+    openStyleEditorBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      openStyleEditor();
+    });
+  }
+
+  if (syncTocBtn) {
+    syncTocBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      syncToc();
     });
   }
 

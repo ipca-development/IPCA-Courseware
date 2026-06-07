@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 require_once __DIR__ . '/ControlledPublishingTableFormula.php';
+require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -11,6 +12,20 @@ final class ControlledPublishingBookRenderer
 {
     public const MODE_READ = 'read';
     public const MODE_EDIT = 'edit';
+
+    /** @var array<string,mixed> */
+    private array $bookStyles = array();
+
+    private ?ControlledPublishingBookStyleService $styleService = null;
+
+    /**
+     * @param array<string,mixed> $styles
+     */
+    public function setBookStyles(array $styles, ?ControlledPublishingBookStyleService $styleService = null): void
+    {
+        $this->bookStyles = $styles;
+        $this->styleService = $styleService;
+    }
 
     /**
      * @param array<string,mixed> $block
@@ -608,10 +623,13 @@ final class ControlledPublishingBookRenderer
     private function renderCallout(array $payload, string $mode): string
     {
         $type = (string)($payload['callout_type'] ?? 'warning');
+        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
+            $type = 'warning';
+        }
         $title = (string)($payload['title'] ?? strtoupper($type));
         $text = (string)($payload['text'] ?? '');
         $edit = $mode === self::MODE_EDIT;
-        $icon = $type === 'caution' ? 'caution' : 'warning';
+        $icon = $type;
         $titleEdit = $edit ? ' contenteditable="true" data-field="callout_title" spellcheck="true"' : '';
         $textEdit = $edit ? ' contenteditable="true" data-field="callout_text" spellcheck="true"' : '';
         return '<div class="cpb-callout cpb-callout--' . h($type) . '" data-callout-type="' . h($type) . '">'
@@ -627,10 +645,12 @@ final class ControlledPublishingBookRenderer
      */
     private function styleClass(array $payload): string
     {
-        $font = (string)($payload['font_family'] ?? 'serif');
-        $align = (string)($payload['text_align'] ?? 'left');
-        return ' cpb-font-' . preg_replace('/[^a-z]/', '', strtolower($font))
-            . ' cpb-align-' . preg_replace('/[^a-z]/', '', strtolower($align));
+        $typography = $this->resolveTypography($payload);
+        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $psClass = $paragraphStyle !== '' ? ' cpb-ps-' . preg_replace('/[^a-z0-9_]/', '', $paragraphStyle) : '';
+        return ' cpb-font-' . preg_replace('/[^a-z]/', '', strtolower((string)$typography['font_family']))
+            . ' cpb-align-' . preg_replace('/[^a-z]/', '', strtolower((string)$typography['text_align']))
+            . $psClass;
     }
 
     /**
@@ -638,27 +658,55 @@ final class ControlledPublishingBookRenderer
      */
     private function styleAttr(array $payload): string
     {
+        $typography = $this->resolveTypography($payload);
+        $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $fontStack = $this->fontFamilyStack((string)$typography['font_family']);
+        $styles = array(
+            'text-align:' . (string)$typography['text_align'],
+            'font-size:' . (int)$typography['font_size'] . 'pt',
+            'color:' . (string)$typography['color'],
+            'font-family:' . $fontStack,
+        );
+        $indentLevel = (int)$typography['indent_level'];
+        if ($indentLevel > 0) {
+            $styles[] = 'margin-left:' . ($indentLevel * 24) . 'px';
+        }
+        $attrs = ' style="' . h(implode(';', $styles)) . '"'
+            . ' data-font-family="' . h((string)$typography['font_family']) . '"'
+            . ' data-text-align="' . h((string)$typography['text_align']) . '"'
+            . ' data-font-size="' . (int)$typography['font_size'] . '"'
+            . ' data-text-color="' . h((string)$typography['color']) . '"'
+            . ' data-indent-level="' . $indentLevel . '"';
+        if ($paragraphStyle !== '') {
+            $attrs .= ' data-paragraph-style="' . h($paragraphStyle) . '"';
+        }
+        return $attrs;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int}
+     */
+    private function resolveTypography(array $payload): array
+    {
+        if ($this->styleService !== null && $this->bookStyles !== array()) {
+            return $this->styleService->resolveBlockTypography($payload, $this->bookStyles);
+        }
         $align = (string)($payload['text_align'] ?? 'left');
         if (!in_array($align, array('left', 'center', 'right'), true)) {
             $align = 'left';
         }
         $fontSize = (int)($payload['font_size'] ?? 11);
-        if ($fontSize < 8 || $fontSize > 18) {
+        if ($fontSize < 8 || $fontSize > 32) {
             $fontSize = 11;
         }
-        $indentLevel = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
-        $styles = array(
-            'text-align:' . $align,
-            'font-size:' . $fontSize . 'pt',
+        return array(
+            'font_family' => (string)($payload['font_family'] ?? 'serif'),
+            'font_size' => $fontSize,
+            'color' => (string)($payload['text_color'] ?? $payload['color'] ?? '#0f172a'),
+            'text_align' => $align,
+            'indent_level' => max(0, min(8, (int)($payload['indent_level'] ?? 0))),
         );
-        if ($indentLevel > 0) {
-            $styles[] = 'margin-left:' . ($indentLevel * 24) . 'px';
-        }
-        return ' style="' . h(implode(';', $styles)) . '"'
-            . ' data-font-family="' . h((string)($payload['font_family'] ?? 'serif')) . '"'
-            . ' data-text-align="' . h($align) . '"'
-            . ' data-font-size="' . $fontSize . '"'
-            . ' data-indent-level="' . $indentLevel . '"';
     }
 
     /**

@@ -9,6 +9,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionServ
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRevisionService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionLayoutService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingTocService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -28,6 +30,8 @@ $sections = new ControlledPublishingSectionService($pdo);
 $renderer = new ControlledPublishingBookRenderer();
 $revision = new ControlledPublishingRevisionService($pdo);
 $layoutSvc = new ControlledPublishingSectionLayoutService($pdo);
+$styleSvc = new ControlledPublishingBookStyleService($pdo);
+$tocSvc = new ControlledPublishingTocService($pdo, $blocks);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -42,7 +46,16 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc);
+            break;
+        case 'get_book_styles':
+            cp_editor_handle_get_book_styles($foundation, $styleSvc);
+            break;
+        case 'save_book_styles':
+            cp_editor_handle_save_book_styles($foundation, $styleSvc, $uid);
+            break;
+        case 'regenerate_toc':
+            cp_editor_handle_regenerate_toc($tocSvc, $uid);
             break;
         case 'save_section_layout':
             cp_editor_handle_save_section_layout($sections, $layoutSvc, $uid);
@@ -57,22 +70,22 @@ try {
             cp_editor_handle_get_callout_presets($foundation);
             break;
         case 'create_block':
-            cp_editor_handle_create_block($blocks, $renderer, $uid);
+            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $uid);
             break;
         case 'update_block':
-            cp_editor_handle_update_block($blocks, $renderer, $uid);
+            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $uid);
             break;
         case 'delete_block':
             cp_editor_handle_delete_block($blocks, $uid);
             break;
         case 'move_block':
-            cp_editor_handle_move_block($blocks, $renderer, $uid);
+            cp_editor_handle_move_block($foundation, $blocks, $renderer, $styleSvc, $uid);
             break;
         case 'create_subsection':
             cp_editor_handle_create_subsection($sections, $uid);
             break;
         case 'upload_image':
-            cp_editor_handle_upload_image($foundation, $blocks, $renderer, $uid);
+            cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $uid);
             break;
         default:
             cp_editor_json(400, array('ok' => false, 'error' => 'Unknown action.'));
@@ -96,13 +109,23 @@ function cp_editor_input(): array
     return $_POST;
 }
 
+function cp_editor_configure_renderer(
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
+    array $version
+): void {
+    $bookStyles = $styleSvc->resolveFromVersion($version);
+    $renderer->setBookStyles($bookStyles, $styleSvc);
+}
+
 function cp_editor_handle_load(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingRevisionService $revision,
-    ControlledPublishingSectionLayoutService $layoutSvc
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
     $sectionId = (int)($_GET['section_id'] ?? 0);
@@ -129,6 +152,8 @@ function cp_editor_handle_load(
         $section['allow_author_blocks'] = 1;
     }
 
+    $bookStyles = $styleSvc->resolveFromVersion($version);
+    cp_editor_configure_renderer($renderer, $styleSvc, $version);
     $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
     $pageLayout = $layoutSvc->resolveLayout($section);
     $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
@@ -154,7 +179,56 @@ function cp_editor_handle_load(
         'page_layout' => $pageLayout,
         'editable' => $editable,
         'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
+        'book_styles' => $bookStyles,
     ));
+}
+
+function cp_editor_handle_get_book_styles(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingBookStyleService $styleSvc
+): void {
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    cp_editor_json(200, array(
+        'ok' => true,
+        'book_styles' => $styleSvc->resolveFromVersion($version),
+    ));
+}
+
+function cp_editor_handle_save_book_styles(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingBookStyleService $styleSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $styles = is_array($in['book_styles'] ?? null) ? $in['book_styles'] : array();
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    $saved = $styleSvc->saveForVersion($versionId, $styles, $uid);
+    cp_editor_json(200, array('ok' => true, 'book_styles' => $saved));
+}
+
+function cp_editor_handle_regenerate_toc(ControlledPublishingTocService $tocSvc, int $uid): void
+{
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $result = $tocSvc->regenerateTocSection($versionId, $uid);
+    cp_editor_json(200, array('ok' => true, 'result' => $result));
 }
 
 function cp_editor_handle_save_section_layout(
@@ -199,7 +273,7 @@ function cp_editor_handle_save_callout_presets(
             continue;
         }
         $type = strtolower(trim((string)($preset['callout_type'] ?? '')));
-        if (!in_array($type, array('warning', 'caution'), true)) {
+        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
             continue;
         }
         $normalized[] = array(
@@ -261,6 +335,7 @@ function cp_editor_default_callout_presets(): array
     return array(
         array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
         array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
+        array('callout_type' => 'info', 'title' => 'INFO', 'text' => ''),
     );
 }
 
@@ -279,8 +354,10 @@ function cp_editor_decode_version_meta(array $version): array
 }
 
 function cp_editor_handle_create_block(
+    ControlledPublishingFoundationService $foundation,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -291,6 +368,11 @@ function cp_editor_handle_create_block(
 
     if ($versionId <= 0 || $sectionId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+    }
+
+    $version = $foundation->getVersion($versionId);
+    if ($version !== null) {
+        cp_editor_configure_renderer($renderer, $styleSvc, $version);
     }
 
     $insertAfterBlockId = (int)($in['insert_after_block_id'] ?? 0);
@@ -317,6 +399,8 @@ function cp_editor_handle_create_block(
 function cp_editor_handle_update_block(
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingFoundationService $foundation,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -324,6 +408,14 @@ function cp_editor_handle_update_block(
     $payload = is_array($in['payload'] ?? null) ? $in['payload'] : array();
     if ($blockId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'block_id required'));
+    }
+
+    $row = $blocks->getBlock($blockId);
+    if ($row !== null) {
+        $version = $foundation->getVersion((int)($row['book_version_id'] ?? 0));
+        if ($version !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version);
+        }
     }
 
     $blocks->updateBlock($blockId, $payload, $uid);
@@ -351,8 +443,10 @@ function cp_editor_handle_delete_block(ControlledPublishingBlockService $blocks,
 }
 
 function cp_editor_handle_move_block(
+    ControlledPublishingFoundationService $foundation,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -361,6 +455,14 @@ function cp_editor_handle_move_block(
     $sectionId = (int)($in['section_id'] ?? 0);
     if ($blockId <= 0 || !in_array($direction, array('up', 'down'), true)) {
         cp_editor_json(400, array('ok' => false, 'error' => 'block_id and direction required'));
+    }
+
+    $row = $blocks->getBlock($blockId);
+    if ($row !== null) {
+        $version = $foundation->getVersion((int)($row['book_version_id'] ?? 0));
+        if ($version !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version);
+        }
     }
 
     $blocks->moveBlock($blockId, $direction, $uid);
@@ -396,6 +498,7 @@ function cp_editor_handle_upload_image(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
     int $uid
 ): void {
     $versionId = (int)($_POST['version_id'] ?? 0);
@@ -455,6 +558,7 @@ function cp_editor_handle_upload_image(
         'width_pct' => 100,
     ), $uid);
     $block = $blocks->getBlock($blockId);
+    cp_editor_configure_renderer($renderer, $styleSvc, $version);
 
     cp_editor_json(200, array(
         'ok' => true,
