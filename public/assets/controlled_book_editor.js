@@ -194,6 +194,55 @@
     saveStatusEl.className = 'cpb-save-status' + (tone ? ' is-' + tone : '');
   }
 
+  function isConnectedEl(el) {
+    return !!(el && document.body && document.body.contains(el));
+  }
+
+  function isLiveStyleTarget(target) {
+    return !!(target && target.block && isConnectedEl(target.block)
+      && target.el && isConnectedEl(target.el));
+  }
+
+  function clearStyleTargetForBlock(blockEl) {
+    if (state.lastStyleTarget && state.lastStyleTarget.block === blockEl) {
+      state.lastStyleTarget = null;
+    }
+  }
+
+  function clearPendingForBlock(blockId) {
+    if (state.pending[blockId]) {
+      delete state.pending[blockId];
+    }
+  }
+
+  function blurCanvasEditing() {
+    var ae = document.activeElement;
+    if (ae && ae.blur && canvasEl.contains(ae)) {
+      ae.blur();
+    }
+    var sel = window.getSelection();
+    if (sel && sel.removeAllRanges) {
+      sel.removeAllRanges();
+    }
+  }
+
+  function applyPageHtmlFromResponse(pageHtml) {
+    if (!pageHtml) return;
+    blurCanvasEditing();
+    var tmp = document.createElement('div');
+    tmp.innerHTML = pageHtml;
+    var newRoot = tmp.querySelector('[data-blocks-root]');
+    var curRoot = canvasEl.querySelector('[data-blocks-root]');
+    if (newRoot && curRoot) {
+      curRoot.innerHTML = newRoot.innerHTML;
+      wireCanvas();
+      return;
+    }
+    canvasEl.innerHTML = pageHtml;
+    wireCanvas();
+    applyCanvasZoom(state.canvasZoom, false);
+  }
+
   function apiGet(url) {
     return fetch(url, { credentials: 'same-origin' }).then(function (r) {
       return r.json();
@@ -513,8 +562,11 @@
         var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
         apiPost('delete_block', { block_id: blockId }).then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Delete failed');
+          clearPendingForBlock(blockId);
+          clearStyleTargetForBlock(blockEl);
           blockEl.remove();
           setStatus('Table deleted', 'saved');
+          return recomputeSectionNumbers();
         }).catch(showError);
         return;
       }
@@ -702,6 +754,8 @@
           pushUndo();
           apiPost('delete_block', { block_id: blockId }).then(function (res) {
             if (!res.ok) throw new Error(res.error || 'Delete failed');
+            clearPendingForBlock(blockId);
+            clearStyleTargetForBlock(blockEl);
             blockEl.remove();
             setStatus('Deleted', 'saved');
             return recomputeSectionNumbers();
@@ -774,7 +828,12 @@
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(function () {
       Object.keys(state.pending).forEach(function (id) {
-        flushSave(state.pending[id]);
+        var pendingEl = state.pending[id];
+        if (isConnectedEl(pendingEl)) {
+          flushSave(pendingEl);
+        } else {
+          clearPendingForBlock(parseInt(id, 10));
+        }
       });
       state.pending = {};
     }, 700);
@@ -782,7 +841,7 @@
   }
 
   function flushSave(blockEl, refreshNumbering) {
-    if (!state.editable || !blockEl) return;
+    if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var payload = extractPayload(blockEl, blockType);
@@ -792,7 +851,7 @@
       applyNumberingState(res);
       setStatus('Saved', 'saved');
       if (refreshNumbering) {
-        return recomputeSectionNumbers();
+        return recomputeSectionNumbers().catch(showError);
       }
     }).catch(showError);
   }
@@ -890,11 +949,7 @@
     }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Numbering refresh failed');
       applyNumberingState(res);
-      if (res.page_html) {
-        canvasEl.innerHTML = res.page_html;
-        wireCanvas();
-        applyCanvasZoom(state.canvasZoom, false);
-      }
+      applyPageHtmlFromResponse(res.page_html);
       return res;
     });
   }
@@ -1692,20 +1747,22 @@
 
   function getActiveStyleTarget() {
     var ae = document.activeElement;
-    if (toolbarEl && ae && toolbarEl.contains(ae) && state.lastStyleTarget) {
+    if (toolbarEl && ae && toolbarEl.contains(ae) && isLiveStyleTarget(state.lastStyleTarget)) {
       return state.lastStyleTarget;
     }
-    return getActiveStyleTargetFromEditor();
+    var live = getActiveStyleTargetFromEditor();
+    if (live) return live;
+    return null;
   }
 
   function getFocusedBlock() {
     var target = getActiveStyleTargetFromEditor();
-    if (target && target.block) return target.block;
-    if (state.lastStyleTarget && state.lastStyleTarget.block) return state.lastStyleTarget.block;
+    if (target && target.block && isConnectedEl(target.block)) return target.block;
+    if (isLiveStyleTarget(state.lastStyleTarget)) return state.lastStyleTarget.block;
     var ae = document.activeElement;
     if (ae && ae.closest) {
       var block = ae.closest('.cpb-block');
-      if (block) return block;
+      if (block && isConnectedEl(block)) return block;
     }
     return null;
   }
@@ -1727,9 +1784,13 @@
     try {
       range.surroundContents(span);
     } catch (err) {
-      var extracted = range.extractContents();
-      span.appendChild(extracted);
-      range.insertNode(span);
+      try {
+        var extracted = range.extractContents();
+        span.appendChild(extracted);
+        range.insertNode(span);
+      } catch (err2) {
+        return false;
+      }
     }
     sel.removeAllRanges();
     var next = document.createRange();
@@ -1796,7 +1857,7 @@
 
   function applyParagraphStyle(styleKey) {
     var target = getActiveStyleTarget();
-    if (!target || target.type === 'table-cell') return;
+    if (!isLiveStyleTarget(target) || target.type === 'table-cell') return;
     if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
     pushUndo();
     var styles = state.bookStyles || defaultBookStyles();
@@ -1884,10 +1945,11 @@
   function createBlock(blockType, payload, insertAfterBlockEl) {
     pushUndo();
     setStatus('Adding block…', 'saving');
-    var afterId = insertAfterBlockEl
-      ? parseInt(insertAfterBlockEl.getAttribute('data-block-id') || '0', 10)
+    var liveInsertAfter = isConnectedEl(insertAfterBlockEl) ? insertAfterBlockEl : null;
+    var afterId = liveInsertAfter
+      ? parseInt(liveInsertAfter.getAttribute('data-block-id') || '0', 10)
       : 0;
-    var focusedBlock = !insertAfterBlockEl ? getFocusedBlock() : null;
+    var focusedBlock = !liveInsertAfter ? getFocusedBlock() : null;
     if (!afterId && focusedBlock) {
       afterId = parseInt(focusedBlock.getAttribute('data-block-id') || '0', 10);
     }
@@ -1897,10 +1959,13 @@
       block_type: blockType,
       payload: payload || {},
     };
-    if (afterId > 0) req.insert_after_block_id = afterId;
+    if (afterId > 0 && (liveInsertAfter || focusedBlock)) {
+      req.insert_after_block_id = afterId;
+    }
     return apiPost('create_block', req).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Create failed');
-      var anchor = insertAfterBlockEl || focusedBlock;
+      var anchor = liveInsertAfter || (focusedBlock && isConnectedEl(focusedBlock) ? focusedBlock : null);
+      var body = canvasEl.querySelector('[data-blocks-root]');
       if (anchor && res.block_html) {
         anchor.insertAdjacentHTML('afterend', res.block_html);
         wireCanvas();
@@ -1909,22 +1974,19 @@
           var field = newBlock.querySelector('[contenteditable="true"]');
           if (field) field.focus();
         }
-      } else {
-        var body = canvasEl.querySelector('[data-blocks-root]');
-        if (body && res.block_html) {
-          body.insertAdjacentHTML('beforeend', res.block_html);
-          wireCanvas();
-          var lastBlock = body.querySelector('.cpb-block:last-child');
-          if (lastBlock) {
-            var field2 = lastBlock.querySelector('[contenteditable="true"]');
-            if (field2) field2.focus();
-          }
+      } else if (body && res.block_html) {
+        body.insertAdjacentHTML('beforeend', res.block_html);
+        wireCanvas();
+        var lastBlock = body.querySelector('.cpb-block:last-child');
+        if (lastBlock) {
+          var field2 = lastBlock.querySelector('[contenteditable="true"]');
+          if (field2) field2.focus();
         }
       }
       setStatus('Added', 'saved');
       applyNumberingState(res);
       if (blockType === 'paragraph' || blockType === 'heading') {
-        return recomputeSectionNumbers().then(function () { return res; });
+        return recomputeSectionNumbers().catch(showError).then(function () { return res; });
       }
       return res;
     });

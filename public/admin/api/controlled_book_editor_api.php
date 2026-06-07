@@ -246,6 +246,9 @@ function cp_editor_handle_recompute_section_numbers(
     if ($sectionId > 0) {
         $section = $sections->getSection($versionId, $sectionId);
         if ($section !== null) {
+            if (!empty($section['parent_section_id'])) {
+                $section['allow_author_blocks'] = 1;
+            }
             cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
             $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
             $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
