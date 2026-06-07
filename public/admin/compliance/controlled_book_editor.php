@@ -122,9 +122,11 @@ compliance_page_open(array(
             <option value="heading_2">Heading 2</option>
             <option value="subtitle_3">Subtitle 3</option>
             <option value="subtitle_4">Subtitle 4</option>
+            <option value="regulatory_reference">Regulatory Ref</option>
             <option value="body" selected>Body</option>
             <option value="caption">Caption</option>
           </select>
+          <input type="text" id="cpbRegulatoryRef" class="cpb-tool-reg-ref" placeholder="MCCF key" title="MCCF regulatory reference (manual override)" hidden>
           <select id="cpbFontSelect" class="cpb-tool-select" title="Font family">
             <option value="serif">Serif</option>
             <option value="sans">Sans</option>

@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRevisionSer
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionLayoutService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingTocService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionNumberService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -32,6 +33,7 @@ $revision = new ControlledPublishingRevisionService($pdo);
 $layoutSvc = new ControlledPublishingSectionLayoutService($pdo);
 $styleSvc = new ControlledPublishingBookStyleService($pdo);
 $tocSvc = new ControlledPublishingTocService($pdo, $blocks);
+$numberSvc = new ControlledPublishingSectionNumberService($pdo, $blocks);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -46,7 +48,10 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc);
+            break;
+        case 'recompute_section_numbers':
+            cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc);
             break;
         case 'get_book_styles':
             cp_editor_handle_get_book_styles($foundation, $styleSvc);
@@ -70,22 +75,22 @@ try {
             cp_editor_handle_get_callout_presets($foundation);
             break;
         case 'create_block':
-            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $uid);
+            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
         case 'update_block':
-            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $uid);
+            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $numberSvc, $uid);
             break;
         case 'delete_block':
             cp_editor_handle_delete_block($blocks, $uid);
             break;
         case 'move_block':
-            cp_editor_handle_move_block($foundation, $blocks, $renderer, $styleSvc, $uid);
+            cp_editor_handle_move_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
         case 'create_subsection':
             cp_editor_handle_create_subsection($sections, $uid);
             break;
         case 'upload_image':
-            cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $uid);
+            cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
         default:
             cp_editor_json(400, array('ok' => false, 'error' => 'Unknown action.'));
@@ -112,10 +117,32 @@ function cp_editor_input(): array
 function cp_editor_configure_renderer(
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
-    array $version
-): void {
+    array $version,
+    ?ControlledPublishingSectionNumberService $numberSvc = null
+): array {
     $bookStyles = $styleSvc->resolveFromVersion($version);
     $renderer->setBookStyles($bookStyles, $styleSvc);
+    $numbering = array(
+        'section_numbers' => array(),
+        'section_number_display' => array(),
+        'suggested_regulatory_refs' => array(),
+        'manual_code' => (string)($version['manual_code'] ?? ''),
+    );
+    if ($numberSvc !== null) {
+        $computed = $numberSvc->computeForVersion(
+            (int)$version['id'],
+            (string)($version['manual_code'] ?? '')
+        );
+        $renderer->setSectionNumbers(
+            $computed['display'],
+            $computed['suggested_regulatory_refs'],
+            $numberSvc
+        );
+        $numbering['section_numbers'] = $computed['numbers'];
+        $numbering['section_number_display'] = $computed['display'];
+        $numbering['suggested_regulatory_refs'] = $computed['suggested_regulatory_refs'];
+    }
+    return $numbering;
 }
 
 function cp_editor_handle_load(
@@ -125,7 +152,8 @@ function cp_editor_handle_load(
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingRevisionService $revision,
     ControlledPublishingSectionLayoutService $layoutSvc,
-    ControlledPublishingBookStyleService $styleSvc
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
     $sectionId = (int)($_GET['section_id'] ?? 0);
@@ -153,7 +181,7 @@ function cp_editor_handle_load(
     }
 
     $bookStyles = $styleSvc->resolveFromVersion($version);
-    cp_editor_configure_renderer($renderer, $styleSvc, $version);
+    $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
     $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
     $pageLayout = $layoutSvc->resolveLayout($section);
     $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
@@ -180,7 +208,54 @@ function cp_editor_handle_load(
         'editable' => $editable,
         'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
         'book_styles' => $bookStyles,
+        'section_numbers' => $numbering['section_numbers'],
+        'section_number_display' => $numbering['section_number_display'],
+        'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
+        'manual_code' => $numbering['manual_code'],
     ));
+}
+
+function cp_editor_handle_recompute_section_numbers(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    $numbering = $numberSvc->computeForVersion($versionId, (string)($version['manual_code'] ?? ''));
+    $payload = array(
+        'ok' => true,
+        'section_numbers' => $numbering['numbers'],
+        'section_number_display' => $numbering['display'],
+        'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
+        'manual_code' => (string)($version['manual_code'] ?? ''),
+    );
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+            $editable = (string)$version['lifecycle_status'] !== 'released' && !empty($section['allow_author_blocks']);
+            $mode = $editable ? ControlledPublishingBookRenderer::MODE_EDIT : ControlledPublishingBookRenderer::MODE_READ;
+            $blocksHtml = $renderer->renderBlocks($sectionBlocks, $mode);
+            $pageLayout = $layoutSvc->resolveLayout($section);
+            $payload['page_html'] = $renderer->renderPageShell($version, $section, $blocksHtml, $mode, $pageLayout);
+        }
+    }
+    cp_editor_json(200, $payload);
 }
 
 function cp_editor_handle_get_book_styles(
@@ -358,6 +433,7 @@ function cp_editor_handle_create_block(
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -371,8 +447,9 @@ function cp_editor_handle_create_block(
     }
 
     $version = $foundation->getVersion($versionId);
+    $numbering = array();
     if ($version !== null) {
-        cp_editor_configure_renderer($renderer, $styleSvc, $version);
+        $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
     }
 
     $insertAfterBlockId = (int)($in['insert_after_block_id'] ?? 0);
@@ -389,11 +466,12 @@ function cp_editor_handle_create_block(
         cp_editor_json(500, array('ok' => false, 'error' => 'Block create failed'));
     }
 
-    cp_editor_json(200, array(
+    cp_editor_json(200, array_merge(array(
         'ok' => true,
         'block' => $block,
         'block_html' => $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT),
-    ));
+    ), cp_editor_numbering_payload($numbering)));
+
 }
 
 function cp_editor_handle_update_block(
@@ -401,6 +479,7 @@ function cp_editor_handle_update_block(
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
     ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionNumberService $numberSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -410,11 +489,12 @@ function cp_editor_handle_update_block(
         cp_editor_json(400, array('ok' => false, 'error' => 'block_id required'));
     }
 
+    $numbering = array();
     $row = $blocks->getBlock($blockId);
     if ($row !== null) {
         $version = $foundation->getVersion((int)($row['book_version_id'] ?? 0));
         if ($version !== null) {
-            cp_editor_configure_renderer($renderer, $styleSvc, $version);
+            $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
         }
     }
 
@@ -424,11 +504,28 @@ function cp_editor_handle_update_block(
         cp_editor_json(404, array('ok' => false, 'error' => 'Block not found'));
     }
 
-    cp_editor_json(200, array(
+    cp_editor_json(200, array_merge(array(
         'ok' => true,
         'block' => $block,
         'block_html' => $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT),
-    ));
+    ), cp_editor_numbering_payload($numbering)));
+}
+
+/**
+ * @param array<string,mixed> $numbering
+ * @return array<string,mixed>
+ */
+function cp_editor_numbering_payload(array $numbering): array
+{
+    if ($numbering === array()) {
+        return array();
+    }
+    return array(
+        'section_numbers' => $numbering['section_numbers'] ?? array(),
+        'section_number_display' => $numbering['section_number_display'] ?? array(),
+        'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'] ?? array(),
+        'manual_code' => $numbering['manual_code'] ?? '',
+    );
 }
 
 function cp_editor_handle_delete_block(ControlledPublishingBlockService $blocks, int $uid): void
@@ -447,6 +544,7 @@ function cp_editor_handle_move_block(
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -457,11 +555,12 @@ function cp_editor_handle_move_block(
         cp_editor_json(400, array('ok' => false, 'error' => 'block_id and direction required'));
     }
 
+    $numbering = array();
     $row = $blocks->getBlock($blockId);
     if ($row !== null) {
         $version = $foundation->getVersion((int)($row['book_version_id'] ?? 0));
         if ($version !== null) {
-            cp_editor_configure_renderer($renderer, $styleSvc, $version);
+            $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
         }
     }
 
@@ -473,7 +572,10 @@ function cp_editor_handle_move_block(
     $sectionBlocks = $blocks->listSectionBlocks($sectionId);
     $html = $renderer->renderBlocks($sectionBlocks, ControlledPublishingBookRenderer::MODE_EDIT);
 
-    cp_editor_json(200, array('ok' => true, 'page_body_html' => $html));
+    cp_editor_json(200, array_merge(array(
+        'ok' => true,
+        'page_body_html' => $html,
+    ), cp_editor_numbering_payload($numbering)));
 }
 
 function cp_editor_handle_create_subsection(ControlledPublishingSectionService $sections, int $uid): void
@@ -499,6 +601,7 @@ function cp_editor_handle_upload_image(
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
     int $uid
 ): void {
     $versionId = (int)($_POST['version_id'] ?? 0);
@@ -558,14 +661,14 @@ function cp_editor_handle_upload_image(
         'width_pct' => 100,
     ), $uid);
     $block = $blocks->getBlock($blockId);
-    cp_editor_configure_renderer($renderer, $styleSvc, $version);
+    $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
 
-    cp_editor_json(200, array(
+    cp_editor_json(200, array_merge(array(
         'ok' => true,
         'url' => $url,
         'block' => $block,
         'block_html' => $block ? $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT) : '',
-    ));
+    ), cp_editor_numbering_payload($numbering)));
 }
 
 function cp_editor_default_section_id(ControlledPublishingSectionService $sections, int $versionId): int

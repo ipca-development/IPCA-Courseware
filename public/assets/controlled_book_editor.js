@@ -17,6 +17,7 @@
   var undoBtn = document.getElementById('cpbUndo');
   var redoBtn = document.getElementById('cpbRedo');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
+  var regulatoryRefInput = document.getElementById('cpbRegulatoryRef');
   var fontSelect = document.getElementById('cpbFontSelect');
   var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
   var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
@@ -36,11 +37,20 @@
   ];
   var PARAGRAPH_STYLE_CLASSES = [
     'cpb-ps-title', 'cpb-ps-subtitle_1', 'cpb-ps-heading_1', 'cpb-ps-heading_2',
-    'cpb-ps-subtitle_3', 'cpb-ps-subtitle_4', 'cpb-ps-body', 'cpb-ps-caption',
+    'cpb-ps-subtitle_3', 'cpb-ps-subtitle_4', 'cpb-ps-regulatory_reference', 'cpb-ps-body', 'cpb-ps-caption',
   ];
   var PARAGRAPH_STYLE_KEYS = [
-    'title', 'subtitle_1', 'heading_1', 'heading_2', 'subtitle_3', 'subtitle_4', 'body', 'caption',
+    'title', 'subtitle_1', 'heading_1', 'heading_2', 'subtitle_3', 'subtitle_4',
+    'regulatory_reference', 'body', 'caption',
   ];
+  var NUMBERED_PARAGRAPH_STYLES = {
+    title: 1,
+    subtitle_1: 2,
+    heading_1: 3,
+    heading_2: 4,
+    subtitle_3: 5,
+    subtitle_4: 6,
+  };
   var PARAGRAPH_STYLE_LABELS = {
     title: 'Title',
     subtitle_1: 'Subtitle 1',
@@ -48,6 +58,7 @@
     heading_2: 'Heading 2',
     subtitle_3: 'Subtitle 3',
     subtitle_4: 'Subtitle 4',
+    regulatory_reference: 'Regulatory Reference',
     body: 'Body',
     caption: 'Caption',
   };
@@ -71,6 +82,9 @@
     pageLayout: {},
     calloutPresets: [],
     bookStyles: null,
+    sectionNumberDisplay: {},
+    suggestedRegulatoryRefs: {},
+    manualCode: '',
     undoStack: [],
     redoStack: [],
     layoutTimer: null,
@@ -223,6 +237,7 @@
       if (state.bookStyles.callout_presets) {
         state.calloutPresets = state.bookStyles.callout_presets;
       }
+      applyNumberingState(res);
       state.undoStack = [];
       state.redoStack = [];
       root.classList.toggle('cpb-editor-readonly', !state.editable);
@@ -689,6 +704,7 @@
             if (!res.ok) throw new Error(res.error || 'Delete failed');
             blockEl.remove();
             setStatus('Deleted', 'saved');
+            return recomputeSectionNumbers();
           }).catch(showError);
         } else if (action === 'move-up' || action === 'move-down') {
           pushUndo();
@@ -699,9 +715,12 @@
           }).then(function (res) {
             if (!res.ok) throw new Error(res.error || 'Move failed');
             var body = canvasEl.querySelector('[data-blocks-root]');
+            applyNumberingState(res);
             if (body && res.page_body_html) {
               body.innerHTML = res.page_body_html;
               wireCanvas();
+            } else {
+              return recomputeSectionNumbers();
             }
             setStatus('Moved', 'saved');
           }).catch(showError);
@@ -762,15 +781,22 @@
     setStatus('Editing…', 'saving');
   }
 
-  function flushSave(blockEl) {
+  function flushSave(blockEl, refreshNumbering) {
     if (!state.editable || !blockEl) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var payload = extractPayload(blockEl, blockType);
+    if (!refreshNumbering && payload.paragraph_style) {
+      refreshNumbering = styleNeedsNumberingRefresh(payload.paragraph_style);
+    }
     setStatus('Saving…', 'saving');
     apiPost('update_block', { block_id: blockId, payload: payload }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Save failed');
+      applyNumberingState(res);
       setStatus('Saved', 'saved');
+      if (refreshNumbering) {
+        return recomputeSectionNumbers();
+      }
     }).catch(showError);
   }
 
@@ -783,6 +809,7 @@
         heading_2: { font_family: 'sans', font_size: 14, color: '#0f2744' },
         subtitle_3: { font_family: 'sans', font_size: 12, color: '#334155' },
         subtitle_4: { font_family: 'sans', font_size: 11, color: '#475569' },
+        regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a' },
         body: { font_family: 'serif', font_size: 11, color: '#0f172a' },
         caption: { font_family: 'sans', font_size: 9, color: '#64748b' },
       },
@@ -828,7 +855,7 @@
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
     else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
-    return {
+    var fields = {
       paragraph_style: el.getAttribute('data-paragraph-style') || 'body',
       font_family: el.getAttribute('data-font-family') || 'serif',
       text_align: el.getAttribute('data-text-align') || 'left',
@@ -836,6 +863,59 @@
       text_color: el.getAttribute('data-text-color') || '#0f172a',
       indent_level: parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0,
     };
+    if (fields.paragraph_style === 'regulatory_reference') {
+      fields.regulatory_ref = el.getAttribute('data-regulatory-ref') || '';
+    }
+    return fields;
+  }
+
+  function applyNumberingState(res) {
+    if (!res) return;
+    if (res.section_number_display) {
+      state.sectionNumberDisplay = res.section_number_display;
+    }
+    if (res.suggested_regulatory_refs) {
+      state.suggestedRegulatoryRefs = res.suggested_regulatory_refs;
+    }
+    if (res.manual_code !== undefined) {
+      state.manualCode = res.manual_code || '';
+    }
+  }
+
+  function styleNeedsNumberingRefresh(styleKey) {
+    return !!NUMBERED_PARAGRAPH_STYLES[styleKey] || styleKey === 'regulatory_reference';
+  }
+
+  function recomputeSectionNumbers() {
+    return apiPost('recompute_section_numbers', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Numbering refresh failed');
+      applyNumberingState(res);
+      if (res.page_html) {
+        canvasEl.innerHTML = res.page_html;
+        wireCanvas();
+        applyCanvasZoom(state.canvasZoom, false);
+      }
+      return res;
+    });
+  }
+
+  function updateRegulatoryRefFieldVisibility(styleKey, el, blockId) {
+    if (!regulatoryRefInput) return;
+    var show = styleKey === 'regulatory_reference';
+    regulatoryRefInput.hidden = !show;
+    if (!show) return;
+    var manual = el ? (el.getAttribute('data-regulatory-ref') || '') : '';
+    if (manual) {
+      regulatoryRefInput.value = manual;
+      regulatoryRefInput.placeholder = 'MCCF key (manual)';
+      return;
+    }
+    var suggested = state.suggestedRegulatoryRefs[blockId] || '';
+    regulatoryRefInput.value = '';
+    regulatoryRefInput.placeholder = suggested ? ('Auto: ' + suggested) : 'MCCF key';
   }
 
   function extractPayload(blockEl, blockType) {
@@ -1558,10 +1638,12 @@
       var font = target.el.getAttribute('data-font-family') || 'serif';
       var size = parseInt(target.el.getAttribute('data-font-size') || '11', 10) || 11;
       var color = target.el.getAttribute('data-text-color') || '#0f172a';
+      var blockId = parseInt(target.block.getAttribute('data-block-id') || '0', 10);
       if (paragraphStyleSelect) paragraphStyleSelect.value = ps;
       if (fontSelect) fontSelect.value = font;
       if (fontSizeSelect) fontSizeSelect.value = String(size);
       if (textColorInput) textColorInput.value = color;
+      updateRegulatoryRefFieldVisibility(ps, target.el, blockId);
     }
   }
 
@@ -1713,8 +1795,14 @@
     if (fontSizeSelect) fontSizeSelect.value = String(typo.font_size);
     if (textColorInput) textColorInput.value = typo.color;
     if (paragraphStyleSelect) paragraphStyleSelect.value = styleKey;
+    var blockId = parseInt(target.block.getAttribute('data-block-id') || '0', 10);
+    updateRegulatoryRefFieldVisibility(styleKey, target.el, blockId);
+    if (styleKey === 'regulatory_reference') {
+      target.el.setAttribute('data-regulatory-ref', '');
+      if (regulatoryRefInput) regulatoryRefInput.value = '';
+    }
     scheduleSave(target.block);
-    flushSave(target.block);
+    flushSave(target.block, styleNeedsNumberingRefresh(styleKey));
   }
 
   function applyFontFamily(font) {
@@ -1818,6 +1906,10 @@
         }
       }
       setStatus('Added', 'saved');
+      applyNumberingState(res);
+      if (blockType === 'paragraph' || blockType === 'heading') {
+        return recomputeSectionNumbers().then(function () { return res; });
+      }
       return res;
     });
   }
@@ -1983,7 +2075,8 @@
     overlay.innerHTML = ''
       + '<div class="cpb-style-dialog" role="dialog" aria-label="Book style editor">'
       + '<h3>Book style editor</h3>'
-      + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents. Title and Subtitle levels are collected when you run Sync TOC.</p>'
+      + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering (1. / 1.1 / 1.1.1). '
+      + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived from the parent section number or entered manually in the toolbar.</p>'
       + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
       + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Sample</th></tr></thead><tbody>'
       + paragraphRows + '</tbody></table></section>'
@@ -2198,6 +2291,24 @@
     paragraphStyleSelect.addEventListener('focus', rememberStyleTarget);
     paragraphStyleSelect.addEventListener('change', function () {
       applyParagraphStyle(paragraphStyleSelect.value);
+    });
+  }
+
+  if (regulatoryRefInput) {
+    regulatoryRefInput.addEventListener('focus', rememberStyleTarget);
+    regulatoryRefInput.addEventListener('change', function () {
+      var target = getActiveStyleTarget();
+      if (!target || target.type === 'table-cell') return;
+      if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
+      pushUndo();
+      var value = regulatoryRefInput.value.trim();
+      if (value) {
+        target.el.setAttribute('data-regulatory-ref', value);
+      } else {
+        target.el.removeAttribute('data-regulatory-ref');
+      }
+      scheduleSave(target.block);
+      flushSave(target.block, true);
     });
   }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 require_once __DIR__ . '/ControlledPublishingTableFormula.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -16,7 +17,15 @@ final class ControlledPublishingBookRenderer
     /** @var array<string,mixed> */
     private array $bookStyles = array();
 
+    /** @var array<int,string> */
+    private array $sectionNumberDisplay = array();
+
+    /** @var array<int,string> */
+    private array $suggestedRegulatoryRefs = array();
+
     private ?ControlledPublishingBookStyleService $styleService = null;
+
+    private ?ControlledPublishingSectionNumberService $sectionNumberService = null;
 
     /**
      * @param array<string,mixed> $styles
@@ -25,6 +34,20 @@ final class ControlledPublishingBookRenderer
     {
         $this->bookStyles = $styles;
         $this->styleService = $styleService;
+    }
+
+    /**
+     * @param array<int,string> $displayByBlockId
+     * @param array<int,string> $suggestedRegulatoryRefs
+     */
+    public function setSectionNumbers(
+        array $displayByBlockId,
+        array $suggestedRegulatoryRefs = array(),
+        ?ControlledPublishingSectionNumberService $sectionNumberService = null
+    ): void {
+        $this->sectionNumberDisplay = $displayByBlockId;
+        $this->suggestedRegulatoryRefs = $suggestedRegulatoryRefs;
+        $this->sectionNumberService = $sectionNumberService;
     }
 
     /**
@@ -63,9 +86,9 @@ final class ControlledPublishingBookRenderer
         }
 
         $inner = match ($type) {
-            'heading' => $this->renderHeading($payload, $mode),
-            'paragraph' => $this->renderParagraph($payload, $mode),
-            'list' => $this->renderList($payload, $mode),
+            'heading' => $this->renderHeading($payload, $mode, $id),
+            'paragraph' => $this->renderParagraph($payload, $mode, $id),
+            'list' => $this->renderList($payload, $mode, $id),
             'table' => $this->renderTable($payload, $mode),
             'image' => $this->renderImage($payload, $mode),
             'callout' => $this->renderCallout($payload, $mode),
@@ -170,7 +193,7 @@ final class ControlledPublishingBookRenderer
     /**
      * @param array<string,mixed> $payload
      */
-    private function renderHeading(array $payload, string $mode): string
+    private function renderHeading(array $payload, string $mode, int $blockId = 0): string
     {
         $level = max(1, min(6, (int)($payload['level'] ?? 2)));
         $text = (string)($payload['text'] ?? '');
@@ -182,15 +205,17 @@ final class ControlledPublishingBookRenderer
             ? ' data-field="level" data-level="' . $level . '"'
             : '';
         $style = $this->styleAttr($payload);
+        $prefix = $this->renderSectionNumberPrefix($payload, $blockId);
+        $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
         return '<' . $tag . ' class="cpb-heading cpb-heading--l' . $level . $this->styleClass($payload) . '"'
             . $levelAttr . $style . $edit . '>'
-            . h($text) . '</' . $tag . '>';
+            . $prefix . $regRef . h($text) . '</' . $tag . '>';
     }
 
     /**
      * @param array<string,mixed> $payload
      */
-    private function renderParagraph(array $payload, string $mode): string
+    private function renderParagraph(array $payload, string $mode, int $blockId = 0): string
     {
         $html = (string)($payload['html'] ?? '');
         if ($html === '' && isset($payload['text'])) {
@@ -202,13 +227,55 @@ final class ControlledPublishingBookRenderer
             ? ' contenteditable="true" data-field="html" spellcheck="true"'
             : '';
         $style = $this->styleAttr($payload);
-        return '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>' . $html . '</div>';
+        $prefix = $this->renderSectionNumberPrefix($payload, $blockId);
+        $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
+        return '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>'
+            . $prefix . $regRef . $html . '</div>';
     }
 
     /**
      * @param array<string,mixed> $payload
      */
-    private function renderList(array $payload, string $mode): string
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function renderSectionNumberPrefix(array $payload, int $blockId): string
+    {
+        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        if (!isset(ControlledPublishingSectionNumberService::NUMBERED_STYLE_DEPTHS[$style])) {
+            return '';
+        }
+        $display = $this->sectionNumberDisplay[$blockId] ?? '';
+        if ($display === '') {
+            return '';
+        }
+        return '<span class="cpb-section-number" contenteditable="false" data-section-number="'
+            . h($display) . '">' . h($display) . '</span> ';
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function renderRegulatoryRefPrefix(array $payload, int $blockId): string
+    {
+        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        if ($style !== 'regulatory_reference') {
+            return '';
+        }
+        $suggested = $this->suggestedRegulatoryRefs[$blockId] ?? '';
+        $effective = $this->sectionNumberService !== null
+            ? $this->sectionNumberService->resolveRegulatoryRef($payload, $suggested)
+            : trim((string)($payload['regulatory_ref'] ?? $payload['regulatory_ref_auto'] ?? $suggested));
+        if ($effective === '') {
+            return '';
+        }
+        $manual = trim((string)($payload['regulatory_ref'] ?? ''));
+        $autoAttr = $manual === '' ? ' data-regulatory-ref-auto="' . h($suggested) . '"' : '';
+        return '<span class="cpb-regulatory-ref" contenteditable="false" data-regulatory-ref="'
+            . h($effective) . '"' . $autoAttr . '>' . h($effective) . '</span> ';
+    }
+
+    private function renderList(array $payload, string $mode, int $blockId = 0): string
     {
         $ordered = !empty($payload['ordered']);
         $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
@@ -679,6 +746,10 @@ final class ControlledPublishingBookRenderer
             . ' data-indent-level="' . $indentLevel . '"';
         if ($paragraphStyle !== '') {
             $attrs .= ' data-paragraph-style="' . h($paragraphStyle) . '"';
+        }
+        $regulatoryRef = trim((string)($payload['regulatory_ref'] ?? ''));
+        if ($regulatoryRef !== '') {
+            $attrs .= ' data-regulatory-ref="' . h($regulatoryRef) . '"';
         }
         return $attrs;
     }

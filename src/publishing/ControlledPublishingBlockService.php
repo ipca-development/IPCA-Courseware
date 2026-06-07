@@ -617,7 +617,7 @@ final class ControlledPublishingBlockService
         $paragraphStyle = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
         $allowedStyles = array(
             'title', 'subtitle_1', 'heading_1', 'heading_2',
-            'subtitle_3', 'subtitle_4', 'body', 'caption',
+            'subtitle_3', 'subtitle_4', 'regulatory_reference', 'body', 'caption',
         );
         if ($paragraphStyle !== '' && !in_array($paragraphStyle, $allowedStyles, true)) {
             $paragraphStyle = '';
@@ -647,6 +647,13 @@ final class ControlledPublishingBlockService
         }
         if ($textColor !== '') {
             $out['text_color'] = strtolower($textColor);
+        }
+        if (array_key_exists('regulatory_ref', $payload)) {
+            $regulatoryRef = trim((string)$payload['regulatory_ref']);
+            $regulatoryRef = preg_replace('/\s+/', '', $regulatoryRef) ?? $regulatoryRef;
+            if ($regulatoryRef !== '' && strlen($regulatoryRef) <= 128) {
+                $out['regulatory_ref'] = $regulatoryRef;
+            }
         }
         return $out;
     }

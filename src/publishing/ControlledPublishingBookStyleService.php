@@ -14,6 +14,7 @@ final class ControlledPublishingBookStyleService
         'heading_2',
         'subtitle_3',
         'subtitle_4',
+        'regulatory_reference',
         'body',
         'caption',
     );
@@ -51,6 +52,7 @@ final class ControlledPublishingBookStyleService
                 'heading_2' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744'),
                 'subtitle_3' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155'),
                 'subtitle_4' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#475569'),
+                'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a'),
                 'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a'),
                 'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b'),
             ),
@@ -209,6 +211,7 @@ final class ControlledPublishingBookStyleService
             'heading_2' => 'Heading 2',
             'subtitle_3' => 'Subtitle 3',
             'subtitle_4' => 'Subtitle 4',
+            'regulatory_reference' => 'Regulatory Reference',
             'body' => 'Body',
             'caption' => 'Caption',
             default => ucwords(str_replace('_', ' ', $key)),

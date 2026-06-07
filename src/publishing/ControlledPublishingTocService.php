@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 
 /**
  * Builds the Table of Contents section from Title / Subtitle / Heading paragraph styles.
@@ -25,7 +26,9 @@ final class ControlledPublishingTocService
             throw new RuntimeException('Table of Contents section not found for this version.');
         }
 
-        $entries = $this->collectTocEntries($versionId);
+        $numberSvc = new ControlledPublishingSectionNumberService($this->pdo, $this->blocks);
+        $numbering = $numberSvc->computeForVersion($versionId);
+        $entries = $this->collectTocEntries($versionId, $numbering['display']);
         $this->pdo->prepare("
             DELETE FROM ipca_publishing_book_blocks
             WHERE section_id = :section_id AND is_system_managed = 0
@@ -96,7 +99,10 @@ final class ControlledPublishingTocService
     /**
      * @return list<array{label:string,depth:int,style:string,section_title:string}>
      */
-    private function collectTocEntries(int $versionId): array
+    /**
+     * @param array<int,string> $sectionNumberDisplay
+     */
+    private function collectTocEntries(int $versionId, array $sectionNumberDisplay = array()): array
     {
         $stmt = $this->pdo->prepare("
             SELECT b.*, s.title AS section_title, s.section_key, s.sort_order AS section_sort
@@ -111,6 +117,7 @@ final class ControlledPublishingTocService
 
         $entries = array();
         foreach ($rows as $row) {
+            $blockId = (int)($row['id'] ?? 0);
             $payload = $this->blocks->decodePayload($row);
             $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
             if ($style === '' && (string)($row['block_type'] ?? '') === 'heading') {
@@ -124,11 +131,16 @@ final class ControlledPublishingTocService
             if ($label === '') {
                 continue;
             }
+            $number = $sectionNumberDisplay[$blockId] ?? '';
+            if ($number !== '') {
+                $label = $number . ' ' . $label;
+            }
             $entries[] = array(
                 'label' => $label,
                 'depth' => $this->styleDepth($style),
                 'style' => $style,
                 'section_title' => (string)($row['section_title'] ?? ''),
+                'section_number' => $number,
             );
         }
         return $entries;
