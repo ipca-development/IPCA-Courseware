@@ -21,10 +21,9 @@
   var fontSelect = document.getElementById('cpbFontSelect');
   var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
   var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
-  var syncTocBtn = document.getElementById('cpbSyncToc');
+  var calloutSelect = document.getElementById('cpbCalloutSelect');
+  var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
-  var manageCalloutsBtn = document.getElementById('cpbManageCallouts');
-  var syncHighlightsBtn = document.getElementById('cpbSyncHighlights');
   var fullscreenBtn = document.getElementById('cpbFullscreen');
   var zoomInBtn = document.getElementById('cpbZoomIn');
   var zoomOutBtn = document.getElementById('cpbZoomOut');
@@ -238,6 +237,7 @@
         state.calloutPresets = state.bookStyles.callout_presets;
       }
       applyNumberingState(res);
+      refreshCalloutSelectOptions();
       state.undoStack = [];
       state.redoStack = [];
       root.classList.toggle('cpb-editor-readonly', !state.editable);
@@ -1937,6 +1937,23 @@
     return null;
   }
 
+  function refreshCalloutSelectOptions() {
+    if (!calloutSelect) return;
+    var presets = state.calloutPresets && state.calloutPresets.length
+      ? state.calloutPresets
+      : defaultBookStyles().callout_presets;
+    var labels = { warning: 'Warning', caution: 'Caution', info: 'Info' };
+    var html = '<option value="">⚑</option>';
+    presets.forEach(function (preset) {
+      var type = preset.callout_type || '';
+      if (!type || type === 'manage') return;
+      var label = labels[type] || (type.charAt(0).toUpperCase() + type.slice(1));
+      html += '<option value="' + escapeAttr(type) + '">' + escapeHtml(label) + '</option>';
+    });
+    html += '<option value="manage">Presets…</option>';
+    calloutSelect.innerHTML = html;
+  }
+
   function openCalloutManager() {
     var warning = presetByType('warning') || { callout_type: 'warning', title: 'WARNING', text: '' };
     var caution = presetByType('caution') || { callout_type: 'caution', title: 'CAUTION', text: '' };
@@ -1997,6 +2014,7 @@
       }).then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Save failed');
         state.calloutPresets = res.presets || presets;
+        refreshCalloutSelectOptions();
         close();
         setStatus('Callout presets saved', 'saved');
       }).catch(showError);
@@ -2241,19 +2259,12 @@
         applyTextAlign(alignBtn.getAttribute('data-align'));
         return;
       }
-      var calloutBtn = e.target.closest('[data-add-callout]');
-      if (calloutBtn) {
-        e.preventDefault();
-        insertCallout(calloutBtn.getAttribute('data-add-callout'));
-        return;
-      }
       var add = e.target.closest('[data-add-block]');
       if (add) {
         e.preventDefault();
         var type = add.getAttribute('data-add-block');
         var payload = {};
         if (type === 'paragraph') payload = { html: '<p>New paragraph</p>', paragraph_style: 'body' };
-        if (type === 'list') payload = { ordered: false, items: ['List item'] };
         if (type === 'table') {
           payload = tablePayloadFromBookStyles('standard');
         }
@@ -2271,14 +2282,6 @@
       if (e.target.closest('#cpbRedo')) {
         e.preventDefault();
         doRedo();
-      }
-      if (e.target.closest('#cpbManageCallouts')) {
-        e.preventDefault();
-        openCalloutManager();
-      }
-      if (e.target.closest('#cpbSyncHighlights')) {
-        e.preventDefault();
-        syncHighlights();
       }
     });
   }
@@ -2394,10 +2397,25 @@
     });
   }
 
-  if (manageCalloutsBtn) {
-    manageCalloutsBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      openCalloutManager();
+  if (calloutSelect) {
+    calloutSelect.addEventListener('change', function () {
+      var action = calloutSelect.value;
+      calloutSelect.value = '';
+      if (!action) return;
+      if (action === 'manage') {
+        openCalloutManager();
+        return;
+      }
+      insertCallout(action);
+    });
+  }
+
+  if (syncSelect) {
+    syncSelect.addEventListener('change', function () {
+      var action = syncSelect.value;
+      syncSelect.value = '';
+      if (action === 'toc') syncToc();
+      else if (action === 'highlights') syncHighlights();
     });
   }
 
@@ -2405,20 +2423,6 @@
     openStyleEditorBtn.addEventListener('click', function (e) {
       e.preventDefault();
       openStyleEditor();
-    });
-  }
-
-  if (syncTocBtn) {
-    syncTocBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      syncToc();
-    });
-  }
-
-  if (syncHighlightsBtn) {
-    syncHighlightsBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      syncHighlights();
     });
   }
 

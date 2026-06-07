@@ -172,15 +172,19 @@
 
 .cpb-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   align-items: center;
   box-sizing: border-box;
   min-height: var(--cpb-panel-head-height);
+  max-height: var(--cpb-panel-head-height);
   padding: 0 12px;
   background: #fff;
   border-bottom: 1px solid #dbe3ef;
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .cpb-toolbar-group {
@@ -879,9 +883,22 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--paragraph-style {
-  min-width: 88px !important;
-  max-width: 108px !important;
+  min-width: 82px !important;
+  max-width: 96px !important;
   padding: 0 12px 0 4px !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--callout,
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--sync {
+  min-width: 28px !important;
+  max-width: 34px !important;
+  padding: 0 12px 0 4px !important;
+  text-align: center !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--callout option,
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--sync option {
+  font-family: system-ui, sans-serif !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar input.cpb-tool-reg-ref {

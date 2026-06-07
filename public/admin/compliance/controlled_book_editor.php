@@ -161,21 +161,22 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Book style editor">Styles</button>
           <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
-          <button type="button" class="cpb-tool-btn" data-add-block="list" title="Add list">List</button>
           <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
           <button type="button" class="cpb-tool-btn" id="cpbPickImage" title="Insert image">Image</button>
-        </div>
-        <div class="cpb-toolbar-group">
-          <button type="button" class="cpb-tool-btn cpb-tool-btn--warning" data-add-callout="warning" title="Insert Warning">⚠</button>
-          <button type="button" class="cpb-tool-btn cpb-tool-btn--caution" data-add-callout="caution" title="Insert Caution">⚡</button>
-          <button type="button" class="cpb-tool-btn cpb-tool-btn--info" data-add-callout="info" title="Insert Info">i</button>
-          <button type="button" class="cpb-tool-btn" id="cpbManageCallouts" title="Manage callout presets">⋯</button>
-        </div>
-        <div class="cpb-toolbar-group">
-          <button type="button" class="cpb-tool-btn" id="cpbSyncToc" title="Regenerate Table of Contents">Sync TOC</button>
-          <button type="button" class="cpb-tool-btn" id="cpbSyncHighlights" title="Regenerate Highlight of Changes">Sync highlights</button>
+          <select id="cpbCalloutSelect" class="cpb-tool-select cpb-tool-select--callout" title="Insert Warning, Caution, Info…">
+            <option value="" selected>⚑</option>
+            <option value="warning">Warning</option>
+            <option value="caution">Caution</option>
+            <option value="info">Info</option>
+            <option value="manage">Presets…</option>
+          </select>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--view">
+          <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC or Highlight of Changes">
+            <option value="" selected>⟳</option>
+            <option value="toc">Sync TOC</option>
+            <option value="highlights">Sync changes</option>
+          </select>
           <button type="button" class="cpb-tool-btn" id="cpbFullscreen" title="Full screen — hide app menu" aria-pressed="false">⤢</button>
         </div>
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
