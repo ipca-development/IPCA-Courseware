@@ -786,9 +786,6 @@
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var payload = extractPayload(blockEl, blockType);
-    if (!refreshNumbering && payload.paragraph_style) {
-      refreshNumbering = styleNeedsNumberingRefresh(payload.paragraph_style);
-    }
     setStatus('Saving…', 'saving');
     apiPost('update_block', { block_id: blockId, payload: payload }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Save failed');
@@ -918,18 +915,37 @@
     regulatoryRefInput.placeholder = suggested ? ('Auto: ' + suggested) : 'MCCF key';
   }
 
+  function stripEditorChromeFromHtml(html) {
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    tmp.querySelectorAll('.cpb-section-number, .cpb-regulatory-ref').forEach(function (el) {
+      el.remove();
+    });
+    return tmp.innerHTML;
+  }
+
+  function stripLeadingSectionNumberText(text) {
+    text = String(text || '').trim();
+    var prev = null;
+    while (prev !== text) {
+      prev = text;
+      text = text.replace(/^\d+(?:\.\d+)*\.?\s+/, '').trim();
+    }
+    return text;
+  }
+
   function extractPayload(blockEl, blockType) {
     if (blockType === 'heading') {
       var h = blockEl.querySelector('.cpb-heading');
       return Object.assign({
-        text: h ? h.textContent.trim() : '',
+        text: h ? stripLeadingSectionNumberText(h.textContent) : '',
         level: parseInt(h ? (h.getAttribute('data-level') || h.tagName.replace('H', '')) : '2', 10),
       }, extractStyleFields(blockEl, blockType));
     }
     if (blockType === 'paragraph') {
       var p = blockEl.querySelector('.cpb-paragraph');
       return Object.assign({
-        html: p ? p.innerHTML : '',
+        html: p ? stripEditorChromeFromHtml(p.innerHTML) : '',
       }, extractStyleFields(blockEl, blockType));
     }
     if (blockType === 'list') {

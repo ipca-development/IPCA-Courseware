@@ -443,11 +443,36 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #b91c1c;
 }
 
+.cpb-heading-row,
+.cpb-paragraph-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0.6em 0 0.2em;
+}
+
+.cpb-paragraph-row {
+  margin: 0;
+}
+
+.cpb-heading-row .cpb-section-number,
+.cpb-paragraph-row .cpb-section-number,
+.cpb-heading-row .cpb-regulatory-ref,
+.cpb-paragraph-row .cpb-regulatory-ref {
+  flex-shrink: 0;
+}
+
+.cpb-heading-row .cpb-heading,
+.cpb-paragraph-row .cpb-paragraph {
+  flex: 1;
+  min-width: 0;
+}
+
 .cpb-heading {
   font-family: system-ui, sans-serif;
   font-weight: 700;
   color: #0f2744;
-  margin: 0.6em 0 0.2em;
+  margin: 0;
 }
 
 .cpb-heading--l1 { font-size: 18pt; }

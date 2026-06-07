@@ -207,9 +207,12 @@ final class ControlledPublishingBookRenderer
         $style = $this->styleAttr($payload);
         $prefix = $this->renderSectionNumberPrefix($payload, $blockId);
         $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
-        return '<' . $tag . ' class="cpb-heading cpb-heading--l' . $level . $this->styleClass($payload) . '"'
+        return '<div class="cpb-heading-row">'
+            . $prefix . $regRef
+            . '<' . $tag . ' class="cpb-heading cpb-heading--l' . $level . $this->styleClass($payload) . '"'
             . $levelAttr . $style . $edit . '>'
-            . $prefix . $regRef . h($text) . '</' . $tag . '>';
+            . h(ControlledPublishingHtmlSanitizer::stripLeadingSectionNumberText($text)) . '</' . $tag . '>'
+            . '</div>';
     }
 
     /**
@@ -229,13 +232,12 @@ final class ControlledPublishingBookRenderer
         $style = $this->styleAttr($payload);
         $prefix = $this->renderSectionNumberPrefix($payload, $blockId);
         $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
-        return '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>'
-            . $prefix . $regRef . $html . '</div>';
+        return '<div class="cpb-paragraph-row">'
+            . $prefix . $regRef
+            . '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>'
+            . $html . '</div></div>';
     }
 
-    /**
-     * @param array<string,mixed> $payload
-     */
     /**
      * @param array<string,mixed> $payload
      */

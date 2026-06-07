@@ -11,6 +11,7 @@ final class ControlledPublishingHtmlSanitizer
      */
     public static function sanitizeInline(string $html): string
     {
+        $html = self::stripEditorChrome($html);
         $html = trim($html);
         if ($html === '') {
             return '';
@@ -75,5 +76,41 @@ final class ControlledPublishingHtmlSanitizer
         foreach ($remove as $n) {
             $node->removeChild($n);
         }
+    }
+
+    /**
+     * Remove auto-generated section numbers and regulatory refs accidentally saved in content.
+     */
+    public static function stripEditorChrome(string $html): string
+    {
+        if ($html === '') {
+            return '';
+        }
+        $patterns = array(
+            '/<span[^>]*\bcpb-section-number\b[^>]*>.*?<\/span>\s*/is',
+            '/<span[^>]*\bcpb-regulatory-ref\b[^>]*>.*?<\/span>\s*/is',
+        );
+        foreach ($patterns as $pattern) {
+            $html = preg_replace($pattern, '', $html) ?? $html;
+        }
+        return $html;
+    }
+
+    /**
+     * Strip duplicated leading hierarchical numbers from plain heading text.
+     */
+    public static function stripLeadingSectionNumberText(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+        $previous = null;
+        while ($previous !== $text) {
+            $previous = $text;
+            $text = preg_replace('/^\d+(?:\.\d+)*\.?\s+/u', '', $text) ?? $text;
+            $text = trim($text);
+        }
+        return $text;
     }
 }

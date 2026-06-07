@@ -349,7 +349,9 @@ final class ControlledPublishingBlockService
      */
     private function normalizeHeadingPayload(array $payload, bool $strict): array
     {
-        $text = trim((string)($payload['text'] ?? ''));
+        $text = ControlledPublishingHtmlSanitizer::stripLeadingSectionNumberText(
+            trim((string)($payload['text'] ?? ''))
+        );
         if ($strict && $text === '') {
             throw new RuntimeException('Heading text is required.');
         }
