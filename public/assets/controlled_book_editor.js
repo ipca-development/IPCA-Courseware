@@ -108,6 +108,7 @@
     tableClipboard: '',
     canvasZoom: 100,
     lastStyleTarget: null,
+    savedSelectionRange: null,
   };
 
   var INDENT_STEP_PX = 24;
@@ -221,6 +222,42 @@
   function clearStyleTargetForBlock(blockEl) {
     if (state.lastStyleTarget && state.lastStyleTarget.block === blockEl) {
       state.lastStyleTarget = null;
+    }
+    if (state.focusedTableCell && blockEl.contains(state.focusedTableCell)) {
+      state.focusedTableCell = null;
+    }
+  }
+
+  function isRichTextStyleTarget(target) {
+    if (!target) return false;
+    return target.type === 'heading' || target.type === 'paragraph' || target.type === 'list'
+      || target.type === 'callout-title' || target.type === 'callout-text';
+  }
+
+  function isBlockTypographyTarget(target) {
+    return !!(target && (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list'));
+  }
+
+  function saveSelectionRange() {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !selectionInCanvas()) {
+      state.savedSelectionRange = null;
+      return;
+    }
+    state.savedSelectionRange = sel.getRangeAt(0).cloneRange();
+  }
+
+  function restoreSelectionRange() {
+    if (!state.savedSelectionRange) return false;
+    var sel = window.getSelection();
+    if (!sel) return false;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(state.savedSelectionRange);
+      return !sel.isCollapsed;
+    } catch (err) {
+      state.savedSelectionRange = null;
+      return false;
     }
   }
 
@@ -548,9 +585,18 @@
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
       if (cell && cell.isContentEditable) {
         state.focusedTableCell = cell;
+      } else if (e.target.closest('.cpb-callout-title, .cpb-callout-text, .cpb-paragraph, .cpb-heading, .cpb-list')) {
+        state.focusedTableCell = null;
       }
       rememberStyleTarget();
     });
+
+    canvasEl.addEventListener('mouseup', function () {
+      saveSelectionRange();
+      rememberStyleTarget();
+    });
+
+    canvasEl.addEventListener('keyup', rememberStyleTarget);
 
     canvasEl.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-table-action]');
@@ -1355,6 +1401,7 @@
       cell.setAttribute('data-cell-focus-wired', '1');
       cell.addEventListener('focus', function () {
         state.focusedTableCell = cell;
+        rememberStyleTarget();
         var bgInput = blockEl.querySelector('[data-table-action="cell-bg"]');
         if (bgInput) {
           bgInput.value = cell.getAttribute('data-cell-bg') || '#ffffff';
@@ -1882,21 +1929,42 @@
   }
 
   function getActiveTableCell() {
-    var cell = state.focusedTableCell;
-    if (cell && document.body.contains(cell) && cell.isContentEditable) {
-      var trackedBlock = cell.closest('.cpb-block');
-      if (trackedBlock) return { block: trackedBlock, el: cell, type: 'table-cell' };
+    var sel = window.getSelection();
+    if (sel && sel.anchorNode) {
+      var node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      if (node) {
+        var cellFromSel = node.closest('.cpb-table th, .cpb-table td');
+        if (cellFromSel && cellFromSel.isContentEditable && canvasEl.contains(cellFromSel)) {
+          state.focusedTableCell = cellFromSel;
+          var blockFromSel = cellFromSel.closest('.cpb-block');
+          if (blockFromSel) return { block: blockFromSel, el: cellFromSel, type: 'table-cell' };
+        }
+      }
     }
     var focused = document.activeElement;
-    if (!focused || !focused.closest) return null;
-    cell = focused.closest('.cpb-table th, .cpb-table td');
-    if (!cell || !cell.isContentEditable) return null;
-    var block = cell.closest('.cpb-block');
-    return block ? { block: block, el: cell, type: 'table-cell' } : null;
+    if (focused && focused.closest) {
+      var cell = focused.closest('.cpb-table th, .cpb-table td');
+      if (cell && cell.isContentEditable && canvasEl.contains(cell)) {
+        state.focusedTableCell = cell;
+        var block = cell.closest('.cpb-block');
+        if (block) return { block: block, el: cell, type: 'table-cell' };
+      }
+    }
+    return null;
   }
 
   function blockStyleTarget(block, node, focused) {
     if (!block) return null;
+    var calloutTitle = block.querySelector('.cpb-callout-title');
+    var calloutText = block.querySelector('.cpb-callout-text');
+    if (calloutTitle && (calloutTitle.contains(node) || node === calloutTitle
+      || (focused && focused.closest && focused.closest('.cpb-callout-title')))) {
+      return { block: block, el: calloutTitle, type: 'callout-title' };
+    }
+    if (calloutText && (calloutText.contains(node) || node === calloutText
+      || (focused && focused.closest && focused.closest('.cpb-callout-text')))) {
+      return { block: block, el: calloutText, type: 'callout-text' };
+    }
     var heading = block.querySelector('.cpb-heading');
     var paragraph = block.querySelector('.cpb-paragraph');
     var list = block.querySelector('.cpb-list');
@@ -1966,13 +2034,20 @@
       if (fontSizeSelect) fontSizeSelect.value = String(size);
       if (textColorInput) textColorInput.value = color;
       updateRegulatoryRefFieldVisibility(ps, target.el, blockId);
+      return;
+    }
+    if (target.type === 'callout-title' || target.type === 'callout-text') {
+      if (paragraphStyleSelect) paragraphStyleSelect.value = 'body';
+      if (fontSelect) fontSelect.value = 'sans';
+      if (fontSizeSelect) {
+        fontSizeSelect.value = target.type === 'callout-title' ? '11' : '10';
+      }
+      if (textColorInput) textColorInput.value = '#1e293b';
+      if (regulatoryRefInput) regulatoryRefInput.hidden = true;
     }
   }
 
   function rememberStyleTarget() {
-    if (!selectionInCanvas() && !(document.activeElement && canvasEl.contains(document.activeElement))) {
-      return;
-    }
     var target = getActiveStyleTargetFromEditor();
     if (target) {
       state.lastStyleTarget = target;
@@ -1997,13 +2072,16 @@
   }
 
   function getActiveStyleTarget() {
+    var live = getActiveStyleTargetFromEditor();
+    if (live) {
+      state.lastStyleTarget = live;
+      return live;
+    }
     var ae = document.activeElement;
     if (toolbarEl && ae && toolbarEl.contains(ae) && isLiveStyleTarget(state.lastStyleTarget)) {
       return state.lastStyleTarget;
     }
-    var live = getActiveStyleTargetFromEditor();
-    if (live) return live;
-    return null;
+    return isLiveStyleTarget(state.lastStyleTarget) ? state.lastStyleTarget : null;
   }
 
   function getFocusedBlock() {
@@ -2133,7 +2211,7 @@
     styleKey = canonicalParagraphStyleKey(styleKey);
     var target = getActiveStyleTarget();
     if (!isLiveStyleTarget(target) || target.type === 'table-cell') return;
-    if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
+    if (!isBlockTypographyTarget(target)) return;
     pushUndo();
     var styles = state.bookStyles || defaultBookStyles();
     var def = (styles.paragraph_styles && styles.paragraph_styles[styleKey]) || styles.paragraph_styles.body;
@@ -2157,22 +2235,38 @@
     flushSave(target.block, styleNeedsNumberingRefresh(styleKey));
   }
 
+  function applyRichTextStyle(target, styles, wholeElementFallback) {
+    target.el.focus();
+    restoreSelectionRange();
+    if (hasTextSelectionInCanvas() && applyInlineStyleToSelection(styles)) {
+      return true;
+    }
+    if (typeof wholeElementFallback === 'function') {
+      wholeElementFallback();
+    }
+    return false;
+  }
+
   function applyFontFamily(font) {
     var target = getActiveStyleTarget();
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { font: font });
-    } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
+    } else if (isBlockTypographyTarget(target)) {
       var stack = FONT_STACKS[font];
-      target.el.focus();
-      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ fontFamily: stack || '' })) {
+      applyRichTextStyle(target, { fontFamily: stack || '' }, function () {
         FONT_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
         target.el.classList.add('cpb-font-' + font);
         target.el.setAttribute('data-font-family', font);
         if (stack) target.el.style.fontFamily = stack;
         syncSectionNumberTypography(target.el);
-      }
+      });
+    } else if (target.type === 'callout-title' || target.type === 'callout-text') {
+      var calloutStack = FONT_STACKS[font];
+      applyRichTextStyle(target, { fontFamily: calloutStack || '' }, function () {
+        if (calloutStack) target.el.style.fontFamily = calloutStack;
+      });
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -2191,13 +2285,16 @@
     pushUndo();
     if (target.type === 'table-cell') {
       applyStyleToTableCell(target.el, { size: size });
-    } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
-      target.el.focus();
-      if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ fontSize: size + 'pt' })) {
+    } else if (isBlockTypographyTarget(target)) {
+      applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
         applyFontSizeToElement(target.el, size, true);
-      } else if (fontSizeSelect) {
-        fontSizeSelect.value = String(size);
-      }
+      });
+      if (fontSizeSelect) fontSizeSelect.value = String(size);
+    } else if (target.type === 'callout-title' || target.type === 'callout-text') {
+      applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
+        target.el.style.fontSize = size + 'pt';
+      });
+      if (fontSizeSelect) fontSizeSelect.value = String(size);
     }
     scheduleSave(target.block);
     flushSave(target.block);
@@ -2932,8 +3029,18 @@
   }
 
   document.addEventListener('selectionchange', function () {
-    if (selectionInCanvas()) rememberStyleTarget();
+    if (selectionInCanvas()) {
+      saveSelectionRange();
+      rememberStyleTarget();
+    }
   });
+
+  if (toolbarEl) {
+    toolbarEl.addEventListener('mousedown', function () {
+      saveSelectionRange();
+      rememberStyleTarget();
+    }, true);
+  }
 
   if (paragraphStyleSelect) {
     paragraphStyleSelect.addEventListener('focus', rememberStyleTarget);
@@ -2979,15 +3086,15 @@
     textColorInput.addEventListener('input', function () {
       var target = getActiveStyleTarget();
       var color = textColorInput.value;
-      if (target && target.type !== 'table-cell'
-        && (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list')) {
+      if (target && target.type !== 'table-cell' && isRichTextStyleTarget(target)) {
         pushUndo();
-        target.el.focus();
-        if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ color: color })) {
+        applyRichTextStyle(target, { color: color }, function () {
           target.el.style.color = color;
-          target.el.setAttribute('data-text-color', color);
-          syncSectionNumberTypography(target.el);
-        }
+          if (isBlockTypographyTarget(target)) {
+            target.el.setAttribute('data-text-color', color);
+            syncSectionNumberTypography(target.el);
+          }
+        });
         scheduleSave(target.block);
         flushSave(target.block);
         return;
