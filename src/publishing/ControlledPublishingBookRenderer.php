@@ -325,6 +325,7 @@ final class ControlledPublishingBookRenderer
         $rowHeight = max(20, min(120, $rowHeight));
         $padY = max(2, (int)round(($rowHeight - 14) / 2));
         $fontSize = max(8, min(24, (int)$typography['font_size']));
+        $fontStack = $this->fontFamilyStack((string)$typography['font_family']);
         $parts = array(
             'font-size:' . $fontSize . 'pt',
             'font-weight:' . (!empty($typography['font_bold']) ? '700' : '400'),
@@ -335,6 +336,9 @@ final class ControlledPublishingBookRenderer
             'line-height:1.45',
             'box-sizing:border-box',
         );
+        if ($fontStack !== '') {
+            $parts[] = 'font-family:' . $fontStack . ' !important';
+        }
         return ' style="' . implode(';', $parts) . '"';
     }
 
@@ -413,7 +417,7 @@ final class ControlledPublishingBookRenderer
         }
         return '<span class="cpb-section-number' . $this->styleClass($payload) . '" contenteditable="false"'
             . $this->typographyStyleAttr($payload)
-            . ' data-section-number="' . h($display) . '">' . h($display) . '</span> ';
+            . ' data-section-number="' . h($display) . '">' . h($display) . ' </span>';
     }
 
     /**
@@ -892,7 +896,7 @@ final class ControlledPublishingBookRenderer
         if ($fontStack !== '') {
             $styles[] = 'font-family:' . $fontStack;
         }
-        return ' style="' . h(implode(';', $styles)) . '"';
+        return ' style="' . implode(';', $styles) . '"';
     }
 
     /**

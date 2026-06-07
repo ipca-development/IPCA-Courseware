@@ -401,23 +401,31 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-sheet .cpb-page-header-table td.cpb-font-serif,
-.cpb-sheet .cpb-page-footer-table td.cpb-font-serif {
-  font-family: Georgia, 'Times New Roman', serif;
+.cpb-sheet .cpb-page-footer-table td.cpb-font-serif,
+.cmp-page .cpb-sheet .cpb-page-header-table td.cpb-font-serif,
+.cmp-page .cpb-sheet .cpb-page-footer-table td.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif !important;
 }
 
 .cpb-sheet .cpb-page-header-table td.cpb-font-sans,
-.cpb-sheet .cpb-page-footer-table td.cpb-font-sans {
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+.cpb-sheet .cpb-page-footer-table td.cpb-font-sans,
+.cmp-page .cpb-sheet .cpb-page-header-table td.cpb-font-sans,
+.cmp-page .cpb-sheet .cpb-page-footer-table td.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
 }
 
 .cpb-sheet .cpb-page-header-table td.cpb-font-mono,
-.cpb-sheet .cpb-page-footer-table td.cpb-font-mono {
-  font-family: 'Courier New', Courier, monospace;
+.cpb-sheet .cpb-page-footer-table td.cpb-font-mono,
+.cmp-page .cpb-sheet .cpb-page-header-table td.cpb-font-mono,
+.cmp-page .cpb-sheet .cpb-page-footer-table td.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace !important;
 }
 
 .cpb-sheet .cpb-page-header-table td.cpb-font-arial,
-.cpb-sheet .cpb-page-footer-table td.cpb-font-arial {
-  font-family: Arial, Helvetica, sans-serif;
+.cpb-sheet .cpb-page-footer-table td.cpb-font-arial,
+.cmp-page .cpb-sheet .cpb-page-header-table td.cpb-font-arial,
+.cmp-page .cpb-sheet .cpb-page-footer-table td.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif !important;
 }
 
 .cpb-page-header-logo {
@@ -688,7 +696,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-sheet-body {
   display: grid;
-  gap: 14px;
+  gap: 4px;
 }
 
 .cpb-block {
@@ -764,10 +772,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: flex;
   align-items: baseline;
   gap: 0;
-  margin: 0.6em 0 0.2em;
-}
-
-.cpb-paragraph-row {
   margin: 0;
 }
 
@@ -801,6 +805,20 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-paragraph {
   margin: 0;
   text-align: justify;
+}
+
+.cpb-paragraph p,
+.cpb-heading p,
+.cpb-paragraph > :first-child,
+.cpb-heading > :first-child {
+  margin-top: 0;
+}
+
+.cpb-paragraph p,
+.cpb-heading p,
+.cpb-paragraph > :last-child,
+.cpb-heading > :last-child {
+  margin-bottom: 0;
 }
 
 .cpb-font-serif {
@@ -1264,7 +1282,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-section-number {
   user-select: none;
-  white-space: nowrap;
+  white-space: pre;
 }
 
 .cpb-regulatory-ref {

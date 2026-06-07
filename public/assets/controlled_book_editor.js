@@ -730,6 +730,7 @@
       blockEl.querySelectorAll('[contenteditable="true"]').forEach(function (field) {
         if (field.getAttribute('data-input-wired') === '1') return;
         field.setAttribute('data-input-wired', '1');
+        syncSectionNumberTypography(field);
         field.addEventListener('input', function () {
           scheduleSave(blockEl);
         });
@@ -976,11 +977,13 @@
     var row = parseInt(rowHeight, 10) || 32;
     row = Math.max(20, Math.min(120, row));
     var padY = Math.max(2, Math.round((row - 14) / 2));
+    var stack = FONT_STACKS[col.font_family] || FONT_STACKS.sans;
     var parts = [
       'font-size:' + size + 'pt',
       'font-weight:' + (col.font_bold ? '700' : '400'),
       'font-style:' + (col.font_italic ? 'italic' : 'normal'),
       'text-decoration:' + (col.font_underline ? 'underline' : 'none'),
+      'font-family:' + stack + ' !important',
       'padding:' + padY + 'px 8px',
       'min-height:' + row + 'px',
       'line-height:1.45',
