@@ -3,8 +3,10 @@
 ## Routes
 
 - Kiosk display: `/tv/flipboard.php?screen=main`
+- Aircraft status board: `/tv/flipboard.php?screen=aircraft`
 - Admin control: `/admin/tv_screens/index.php`
 - Active message API: `/tv/api/messages.php?screen_key=main`
+- Aircraft status API: `/tv/api/aircraft_status.php?hex=a4b605&label=N153PC&home_airport=KTRM`
 
 ## Database Setup
 
@@ -22,6 +24,36 @@ Use the same MySQL connection settings as the application environment. The API r
 - `urgent`: interrupting high-priority operational override.
 - `schedule`: departure-board style rows. Put one row per line in the body, using `TITLE | STATUS`.
 - `night`: normal board content with dimmed kiosk lighting when opened with `mode=night`.
+- `aircraft`: live ADS-B status board for a tail number (for example `N397EA – At the SPC Gate`).
+
+## Live Aircraft Status (ADS-B Exchange)
+
+The flip board can show real-time aircraft movement using the [ADS-B Exchange API v2](https://gateway.adsbexchange.com/api/aircraft/v2/docs/index.html).
+
+1. Set your RapidAPI key in PHP-FPM (for example `CW_ADSBEXCHANGE_API_KEY` in `/etc/php/*/fpm/pool.d/www.conf`).
+
+2. Apply migrations:
+
+```bash
+mysql "$CW_DB_NAME" < scripts/sql/2026_05_31_tv_screen_aircraft_type.sql
+mysql "$CW_DB_NAME" < scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql
+```
+
+3. In admin, open **Settings** and configure the SPC gate coordinates (defaults target KTRM / Thermal).
+
+4. Add a message with mode **Aircraft (ADS-B)** and set:
+   - **ADS-B hex code** (example: `a4b605`)
+   - **Preferred name** (example: `N153PC`)
+   - **Home base** (example: `KTRM — Thermal`)
+
+Example live status lines:
+
+- `N397EA – At the SPC Gate`
+- `N397EA – Taxiing to RWY`
+- `N397EA – In Flight (10.2 NM, South-East)`
+- `N397EA – Landed in Blythe (KBLH)`
+
+The kiosk polls aircraft status every 15 seconds (configurable in admin) and animates the split-flap board when status changes.
 
 ## Audio
 

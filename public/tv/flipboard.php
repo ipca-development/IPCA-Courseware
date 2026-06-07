@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/helpers.php';
+require_once __DIR__ . '/../../src/tv_kiosk_config.php';
+
+$kioskConfig = tv_kiosk_config();
 
 $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['screen'] ?? 'main'));
 if ($screenKey === '') {
@@ -34,8 +37,15 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-screen-key="<?= h($screenKey) ?>"
     data-initial-mode="<?= h($mode) ?>"
     data-api-url="/tv/api/messages.php"
-    data-poll-ms="7000"
-    data-auto-audio="1">
+    data-aircraft-api-url="/tv/api/aircraft_status.php"
+    data-poll-ms="<?= h((string)max(5000, min(10000, (int)($kioskConfig['poll_ms'] ?? 7000)))) ?>"
+    data-aircraft-poll-ms="<?= h((string)max(10000, min(60000, (int)($kioskConfig['aircraft_poll_ms'] ?? 15000)))) ?>"
+    data-gate-label="<?= h((string)($kioskConfig['gate_label'] ?? 'SPC Gate')) ?>"
+    data-gate-lat="<?= h((string)($kioskConfig['gate_lat'] ?? '33.6267')) ?>"
+    data-gate-lon="<?= h((string)($kioskConfig['gate_lon'] ?? '-116.1600')) ?>"
+    data-gate-radius-nm="<?= h((string)($kioskConfig['gate_radius_nm'] ?? '0.18')) ?>"
+    data-home-airport="<?= h((string)($kioskConfig['home_airport'] ?? 'KTRM')) ?>"
+    data-auto-audio="<?= ((int)($kioskConfig['audio_enabled'] ?? 1) === 1) ? '1' : '0' ?>">
     <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
         <div class="fb-brand-stack">

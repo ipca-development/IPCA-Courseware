@@ -9,6 +9,16 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 $screenKey = trim((string)($_GET['screen_key'] ?? 'main'));
 $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', $screenKey) ?: 'main';
 
+function tv_messages_aircraft_columns_ready(PDO $pdo): bool
+{
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_hex'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 try {
     $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
     if ($tableCheck === false || $tableCheck->fetchColumn() === false) {
@@ -23,6 +33,11 @@ try {
         exit;
     }
 
+    $aircraftColumnsReady = tv_messages_aircraft_columns_ready($pdo);
+    $aircraftSelect = $aircraftColumnsReady
+        ? "aircraft_hex, aircraft_label, aircraft_home_airport,"
+        : "";
+
     $stmt = $pdo->prepare("
         SELECT
             id,
@@ -30,6 +45,7 @@ try {
             message_type,
             title,
             body,
+            {$aircraftSelect}
             priority,
             starts_at,
             ends_at,
@@ -63,8 +79,8 @@ try {
         $rows = array_slice($urgent, 0, 3);
     }
 
-    $messages = array_map(static function (array $row): array {
-        return array(
+    $messages = array_map(static function (array $row) use ($aircraftColumnsReady): array {
+        $message = array(
             'id' => (int)$row['id'],
             'screen_key' => (string)$row['screen_key'],
             'message_type' => (string)$row['message_type'],
@@ -81,6 +97,18 @@ try {
             'status' => (string)$row['status'],
             'updated_at' => (string)$row['updated_at'],
         );
+
+        if ($aircraftColumnsReady) {
+            $message['aircraft_hex'] = strtolower(trim((string)($row['aircraft_hex'] ?? '')));
+            $message['aircraft_label'] = (string)($row['aircraft_label'] ?? '');
+            $message['aircraft_home_airport'] = strtoupper(trim((string)($row['aircraft_home_airport'] ?? '')));
+        } else {
+            $message['aircraft_hex'] = strtolower(trim((string)($row['body'] ?? '')));
+            $message['aircraft_label'] = (string)($row['title'] ?? '');
+            $message['aircraft_home_airport'] = '';
+        }
+
+        return $message;
     }, $rows);
 
     echo json_encode(array(

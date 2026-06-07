@@ -1155,7 +1155,9 @@
     return {
       font_family: fontFamily,
       font_size: fontSize,
-      text_color: el.getAttribute('data-text-color') || paragraphStyleDef('body').color || '#0f172a',
+      text_color: extractCellTextColor(el)
+        || paragraphStyleDef('body').color
+        || '#0f172a',
     };
   }
 
@@ -1245,8 +1247,9 @@
     if (!el) return;
     el.querySelectorAll('span, font').forEach(function (node) {
       var style = node.style;
-      if (!style) return;
-      if (style.fontFamily || style.fontSize || style.color || style.fontWeight || style.fontStyle) {
+      var hasLegacyColor = node.tagName === 'FONT' && node.getAttribute('color');
+      if (!style && !hasLegacyColor) return;
+      if (hasLegacyColor || (style && (style.fontFamily || style.fontSize || style.color || style.fontWeight || style.fontStyle))) {
         unwrapElement(node);
       }
     });
@@ -1536,6 +1539,10 @@
         if (fontSizeSelect && cell.getAttribute('data-font-size')) {
           fontSizeSelect.value = cell.getAttribute('data-font-size');
         }
+        if (textColorInput) {
+          var cellColor = extractCellTextColor(cell);
+          if (cellColor) textColorInput.value = cellColor;
+        }
       });
       cell.addEventListener('input', function () {
         var titleRow = cell.closest('[data-title-row]');
@@ -1563,8 +1570,30 @@
     return size ? (parseInt(size, 10) || 0) : 0;
   }
 
+  function cssColorToHex(color) {
+    color = String(color || '').trim();
+    if (!color) return '';
+    if (color.charAt(0) === '#') return color.toLowerCase();
+    var match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!match) return color;
+    function hex(n) {
+      var s = parseInt(n, 10).toString(16);
+      return s.length === 1 ? '0' + s : s;
+    }
+    return '#' + hex(match[1]) + hex(match[2]) + hex(match[3]);
+  }
+
   function extractCellTextColor(cell) {
-    return cell.getAttribute('data-text-color') || '';
+    if (!cell) return '';
+    var fromAttr = cell.getAttribute('data-text-color');
+    if (fromAttr) return fromAttr;
+    if (cell.style && cell.style.color) return cssColorToHex(cell.style.color);
+    var coloredSpan = cell.querySelector('span[style*="color"], font[color]');
+    if (coloredSpan) {
+      if (coloredSpan.style && coloredSpan.style.color) return cssColorToHex(coloredSpan.style.color);
+      if (coloredSpan.getAttribute('color')) return cssColorToHex(coloredSpan.getAttribute('color'));
+    }
+    return '';
   }
 
   function extractCellHtml(cell) {
@@ -1606,7 +1635,7 @@
       cell.setAttribute('data-font-size', String(opts.size));
     }
     if (opts.color) {
-      cell.style.color = opts.color;
+      cell.style.setProperty('color', opts.color, 'important');
       cell.setAttribute('data-text-color', opts.color);
     }
     if (opts.align) {
@@ -1623,6 +1652,18 @@
       size: typo.font_size,
       color: typo.color,
     });
+  }
+
+  function applyColorToTableCell(cell, color) {
+    if (!cell || !color) return;
+    cell.focus();
+    restoreSelectionRange();
+    if (hasTextSelectionInCanvas() && !selectionCoversElementText(cell)) {
+      applyInlineStyleToSelection({ color: color });
+      return;
+    }
+    clearInlineTypographyInElement(cell);
+    applyStyleToTableCell(cell, { color: color });
   }
 
   function applyTypographyToCalloutElement(el, typo) {
@@ -3389,9 +3430,7 @@
       var color = textColorInput.value;
       if (target && target.type === 'table-cell') {
         pushUndo();
-        applyRichTextStyle(target, { color: color }, function () {
-          applyStyleToTableCell(target.el, { color: color });
-        });
+        applyColorToTableCell(target.el, color);
         updateParagraphStyleSelectForElement(target.el);
         scheduleSave(target.block);
         flushSave(target.block);

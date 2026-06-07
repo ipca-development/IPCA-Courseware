@@ -547,7 +547,14 @@
     this.screenKey = root.getAttribute('data-screen-key') || 'main';
     this.mode = root.getAttribute('data-initial-mode') || 'standard';
     this.apiUrl = root.getAttribute('data-api-url') || '/tv/api/messages.php';
+    this.aircraftApiUrl = root.getAttribute('data-aircraft-api-url') || '/tv/api/aircraft_status.php';
     this.pollMs = clamp(parseInt(root.getAttribute('data-poll-ms') || '7000', 10), 5000, 10000);
+    this.aircraftPollMs = clamp(parseInt(root.getAttribute('data-aircraft-poll-ms') || '15000', 10), 10000, 60000);
+    this.gateLabel = root.getAttribute('data-gate-label') || 'SPC Gate';
+    this.gateLat = parseFloat(root.getAttribute('data-gate-lat') || '33.6267');
+    this.gateLon = parseFloat(root.getAttribute('data-gate-lon') || '-116.1600');
+    this.gateRadiusNm = parseFloat(root.getAttribute('data-gate-radius-nm') || '0.18');
+    this.homeAirport = root.getAttribute('data-home-airport') || 'KTRM';
     this.autoAudio = root.getAttribute('data-auto-audio') === '1';
     this.audio = new BoardAudio();
     this.lines = [];
@@ -559,7 +566,9 @@
     this.rendering = false;
     this.pendingRender = false;
     this.lastRenderedKey = '';
+    this.lastAircraftDisplay = '';
     this.rotateTimer = null;
+    this.aircraftPollTimer = null;
   }
 
   FlipBoard.prototype.init = function () {
@@ -667,6 +676,119 @@
     });
   };
 
+  FlipBoard.prototype.isAircraftMessage = function (message) {
+    return String((message && message.message_type) || '').toLowerCase() === 'aircraft';
+  };
+
+  FlipBoard.prototype.aircraftTrack = function (message) {
+    var hex = String((message && message.aircraft_hex) || (message && message.body) || '').trim().toLowerCase();
+    hex = hex.replace(/[^a-f0-9]/g, '');
+    if (hex.length !== 6) hex = '';
+
+    var label = String((message && message.aircraft_label) || (message && message.title) || '').trim();
+    label = normalizeText(label).replace(/[^A-Z0-9-]/g, '');
+
+    var homeAirport = String((message && message.aircraft_home_airport) || this.homeAirport || 'KTRM').trim().toUpperCase();
+
+    return {
+      hex: hex,
+      label: label,
+      home_airport: homeAirport
+    };
+  };
+
+  FlipBoard.prototype.ensureAircraftPoll = function () {
+    var self = this;
+    var hasAircraft = (this.messages || []).some(function (message) {
+      return self.isAircraftMessage(message);
+    });
+
+    if (!hasAircraft) {
+      if (this.aircraftPollTimer) {
+        window.clearInterval(this.aircraftPollTimer);
+        this.aircraftPollTimer = null;
+      }
+      return;
+    }
+
+    if (this.aircraftPollTimer) return;
+
+    this.aircraftPollTimer = window.setInterval(function () {
+      var current = self.messages[self.activeIndex];
+      if (!self.isAircraftMessage(current) || self.rendering) return;
+      self.renderCurrent(true);
+    }, this.aircraftPollMs);
+  };
+
+  FlipBoard.prototype.fetchAircraftStatus = function (track) {
+    var params = new URLSearchParams();
+    if (track.hex) params.set('hex', track.hex);
+    if (track.label) params.set('label', track.label);
+    if (track.home_airport) params.set('home_airport', track.home_airport);
+    params.set('gate_lat', String(this.gateLat));
+    params.set('gate_lon', String(this.gateLon));
+    params.set('gate_radius_nm', String(this.gateRadiusNm));
+    params.set('gate_label', this.gateLabel);
+
+    return fetch(this.aircraftApiUrl + '?' + params.toString(), {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    }).then(function (res) {
+      if (!res.ok) throw new Error('Aircraft status unavailable');
+      return res.json();
+    });
+  };
+
+  FlipBoard.prototype.renderAircraft = function (message, statusPayload, urgent) {
+    this.messageBoard.hidden = false;
+    this.scheduleBoard.hidden = true;
+
+    var track = this.aircraftTrack(message);
+    var display = String((statusPayload && statusPayload.display) || '').trim();
+    if (!display) {
+      display = (track.label || track.hex || 'AIRCRAFT') + ' – STATUS UNAVAILABLE';
+    }
+
+    var changed = display !== this.lastAircraftDisplay;
+    this.lastAircraftDisplay = display;
+    var rows = wrapWordsToRows(display, ROW_COLS, ROW_COUNT);
+    var options = { urgent: urgent, force: changed || urgent };
+    var self = this;
+
+    return Promise.all(this.lines.map(function (line, idx) {
+      var rowDelay = idx * randomBetween(60, 110);
+      return line.setText(rows[idx] || '', options, self.audio, rowDelay);
+    }));
+  };
+
+  FlipBoard.prototype.fetchAndRenderAircraft = function (message, urgent) {
+    var self = this;
+    var track = this.aircraftTrack(message);
+    if (!track.hex && !track.label) {
+      return this.renderAircraft(message, {
+        display: 'AIRCRAFT HEX OR LABEL REQUIRED'
+      }, urgent);
+    }
+
+    return this.fetchAircraftStatus(track)
+      .then(function (payload) {
+        if (!payload || !payload.ok) throw new Error('status unavailable');
+        self.statusLabel.textContent = payload.live ? 'AIRCRAFT TRACKING' : 'AIRCRAFT STALE';
+        self.root.classList.toggle('is-urgent', false);
+        self.statusLight.classList.toggle('is-urgent', false);
+        if (String(payload.display || '') === self.lastAircraftDisplay) {
+          return Promise.resolve();
+        }
+        return self.renderAircraft(message, payload, false);
+      })
+      .catch(function () {
+        self.statusLabel.textContent = 'AIRCRAFT TRACKING';
+        return self.renderAircraft(message, {
+          display: (track.label || track.hex || 'AIRCRAFT') + ' – STATUS UNAVAILABLE'
+        }, false);
+      });
+  };
+
   FlipBoard.prototype.poll = function () {
     var self = this;
     fetch(this.apiUrl + '?screen_key=' + encodeURIComponent(this.screenKey), {
@@ -686,6 +808,7 @@
         self.messageHash = nextHash;
         self.messages = incoming;
         self.prefetchAnnouncements(incoming);
+        self.ensureAircraftPoll();
         self.activeIndex = 0;
         self.renderCurrent(false);
       })
@@ -704,8 +827,11 @@
       return;
     }
     var message = this.messages[this.activeIndex] || DEFAULT_MESSAGES[0];
-    var key = [message.id, message.message_type, message.title, message.body, message.priority].join('|');
-    if (!force && key === this.lastRenderedKey) return;
+    var aircraft = this.isAircraftMessage(message);
+    var key = aircraft
+      ? [message.id, 'aircraft', this.lastAircraftDisplay, message.aircraft_hex, message.aircraft_label, message.aircraft_home_airport].join('|')
+      : [message.id, message.message_type, message.title, message.body, message.priority].join('|');
+    if (!force && !aircraft && key === this.lastRenderedKey) return;
 
     this.rendering = true;
     this.lastRenderedKey = key;
@@ -716,12 +842,14 @@
     var schedule = String(message.message_type || '').toLowerCase() === 'schedule'
       || this.mode === 'schedule';
 
-    this.root.classList.toggle('is-urgent', urgent);
-    this.statusLight.classList.toggle('is-urgent', urgent);
-    this.statusLabel.textContent = urgent ? 'URGENT OVERRIDE' : (schedule ? 'SCHEDULE MODE' : 'STANDARD OPS');
+    if (!aircraft) {
+      this.root.classList.toggle('is-urgent', urgent);
+      this.statusLight.classList.toggle('is-urgent', urgent);
+      this.statusLabel.textContent = urgent ? 'URGENT OVERRIDE' : (schedule ? 'SCHEDULE MODE' : 'STANDARD OPS');
+    }
 
     var announcePromise = Promise.resolve();
-    if (message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
+    if (!aircraft && message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
       announcePromise = new Promise(function (resolve) {
         window.setTimeout(resolve, urgent ? 200 : 500);
       }).then(function () {
@@ -731,6 +859,7 @@
 
     announcePromise
       .then(function () {
+        if (aircraft) return self.fetchAndRenderAircraft(message, false);
         if (schedule) return self.renderSchedule(message, urgent);
         return self.renderMessage(message, urgent);
       })
@@ -742,11 +871,15 @@
           self.renderCurrent(true);
           return;
         }
-        var duration = clamp(parseInt(message.display_duration_seconds || 12, 10), 5, 120) * 1000;
-        self.rotateTimer = window.setTimeout(function () {
-          self.activeIndex = (self.activeIndex + 1) % Math.max(1, self.messages.length);
-          self.renderCurrent(false);
-        }, duration);
+        var duration = aircraft
+          ? self.aircraftPollMs
+          : clamp(parseInt(message.display_duration_seconds || 12, 10), 5, 120) * 1000;
+        if (!aircraft || self.messages.length > 1) {
+          self.rotateTimer = window.setTimeout(function () {
+            self.activeIndex = (self.activeIndex + 1) % Math.max(1, self.messages.length);
+            self.renderCurrent(false);
+          }, duration);
+        }
       });
   };
 

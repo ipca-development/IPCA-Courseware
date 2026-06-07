@@ -817,7 +817,7 @@ final class ControlledPublishingBookRenderer
             $attrs['data-font-size'] = (string)$fontSize;
         }
         if ($textColor !== '') {
-            $styles[] = 'color:' . $textColor;
+            $styles[] = 'color:' . $textColor . ' !important';
             $attrs['data-text-color'] = $textColor;
         }
 
