@@ -730,6 +730,11 @@
       blockEl.querySelectorAll('[contenteditable="true"]').forEach(function (field) {
         if (field.getAttribute('data-input-wired') === '1') return;
         field.setAttribute('data-input-wired', '1');
+        if (field.classList.contains('cpb-paragraph')
+          || field.classList.contains('cpb-heading')
+          || field.classList.contains('cpb-list')) {
+          refreshBlockTypographyFromBookStyles(field);
+        }
         syncSectionNumberTypography(field);
         field.addEventListener('input', function () {
           scheduleSave(blockEl);
@@ -1067,6 +1072,59 @@
     };
   }
 
+  function paragraphStyleDef(styleKey) {
+    var styles = state.bookStyles || defaultBookStyles();
+    styleKey = canonicalParagraphStyleKey(styleKey || 'body') || 'body';
+    return (styles.paragraph_styles && styles.paragraph_styles[styleKey])
+      || (styles.paragraph_styles && styles.paragraph_styles.body)
+      || { font_family: 'serif', font_size: 11, color: '#0f172a' };
+  }
+
+  function typographyMatchesParagraphStyleDef(fields, styleKey) {
+    var def = paragraphStyleDef(styleKey);
+    return fields.font_family === (def.font_family || 'serif')
+      && fields.font_size === (def.font_size || 11)
+      && fields.text_color === (def.color || '#0f172a');
+  }
+
+  function unwrapElement(node) {
+    if (!node || !node.parentNode) return;
+    var parent = node.parentNode;
+    while (node.firstChild) {
+      parent.insertBefore(node.firstChild, node);
+    }
+    parent.removeChild(node);
+  }
+
+  function clearInlineTypographyInElement(el) {
+    if (!el) return;
+    el.querySelectorAll('span, font').forEach(function (node) {
+      var style = node.style;
+      if (!style) return;
+      if (style.fontFamily || style.fontSize || style.color || style.fontWeight || style.fontStyle) {
+        unwrapElement(node);
+      }
+    });
+  }
+
+  function refreshBlockTypographyFromBookStyles(el) {
+    if (!el) return;
+    var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
+    var def = paragraphStyleDef(styleKey);
+    var fields = {
+      font_family: el.getAttribute('data-font-family') || def.font_family || 'serif',
+      font_size: parseInt(el.getAttribute('data-font-size') || String(def.font_size || 11), 10) || 11,
+      text_color: el.getAttribute('data-text-color') || def.color || '#0f172a',
+    };
+    if (typographyMatchesParagraphStyleDef(fields, styleKey)) {
+      applyTypographyToElement(el, {
+        font_family: def.font_family || 'serif',
+        font_size: def.font_size || 11,
+        color: def.color || '#0f172a',
+      }, styleKey, true);
+    }
+  }
+
   function resolveTypographyFromPayload(payload) {
     var styles = state.bookStyles || defaultBookStyles();
     var ps = (payload && payload.paragraph_style) || 'body';
@@ -1086,18 +1144,34 @@
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
     else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
+    var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
     var fields = {
-      paragraph_style: el.getAttribute('data-paragraph-style') || 'body',
+      paragraph_style: styleKey,
       font_family: el.getAttribute('data-font-family') || 'serif',
       text_align: el.getAttribute('data-text-align') || 'left',
       font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
       text_color: el.getAttribute('data-text-color') || '#0f172a',
       indent_level: parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0,
     };
-    if (fields.paragraph_style === 'regulatory_reference') {
-      fields.regulatory_ref = el.getAttribute('data-regulatory-ref') || '';
+    var def = paragraphStyleDef(styleKey);
+    var out = {
+      paragraph_style: styleKey,
+      text_align: fields.text_align,
+      indent_level: fields.indent_level,
+    };
+    if (fields.font_family !== (def.font_family || 'serif')) {
+      out.font_family = fields.font_family;
     }
-    return fields;
+    if (fields.font_size !== (def.font_size || 11)) {
+      out.font_size = fields.font_size;
+    }
+    if (fields.text_color !== (def.color || '#0f172a')) {
+      out.text_color = fields.text_color;
+    }
+    if (styleKey === 'regulatory_reference') {
+      out.regulatory_ref = el.getAttribute('data-regulatory-ref') || '';
+    }
+    return out;
   }
 
   function applyNumberingState(res) {
@@ -2014,7 +2088,10 @@
     }
   }
 
-  function applyTypographyToElement(el, typo, paragraphStyle) {
+  function applyTypographyToElement(el, typo, paragraphStyle, skipInlineClear) {
+    if (!skipInlineClear) {
+      clearInlineTypographyInElement(el);
+    }
     FONT_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
     PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { el.classList.remove(cls); });
     el.classList.add('cpb-font-' + typo.font_family);
@@ -2721,7 +2798,11 @@
           state.calloutPresets = state.bookStyles.callout_presets || state.calloutPresets;
           close();
           setStatus('Book styles saved', 'saved');
-          return loadSection(state.sectionId);
+          return loadSection(state.sectionId).then(function () {
+            canvasEl.querySelectorAll('.cpb-paragraph, .cpb-heading, .cpb-list').forEach(function (el) {
+              refreshBlockTypographyFromBookStyles(el);
+            });
+          });
         })
         .catch(showError);
     });

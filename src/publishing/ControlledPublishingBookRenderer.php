@@ -877,7 +877,8 @@ final class ControlledPublishingBookRenderer
     private function canonicalParagraphStyle(array $payload): string
     {
         $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
-        return ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+        $style = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+        return $style !== '' ? $style : 'body';
     }
 
     /**

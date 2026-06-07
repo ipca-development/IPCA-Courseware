@@ -163,6 +163,7 @@ final class ControlledPublishingBookStyleService
     {
         $version = $this->requireVersion($versionId);
         $meta = $this->decodeMeta($version);
+        $previousStyles = $this->resolveFromMetadata($meta);
         $normalized = $this->resolveFromMetadata(array_merge($meta, $styles));
         $meta['paragraph_styles'] = $normalized['paragraph_styles'];
         $meta['table_styles'] = $normalized['table_styles'];
@@ -178,6 +179,8 @@ final class ControlledPublishingBookStyleService
             ':id' => $versionId,
         ));
 
+        $this->stripRedundantBlockTypography($versionId, $previousStyles['paragraph_styles']);
+
         return $normalized;
     }
 
@@ -189,6 +192,9 @@ final class ControlledPublishingBookStyleService
     public function resolveBlockTypography(array $payload, array $bookStyles): array
     {
         $paragraphStyle = $this->canonicalParagraphStyleKey((string)($payload['paragraph_style'] ?? ''));
+        if ($paragraphStyle === '') {
+            $paragraphStyle = 'body';
+        }
         $paragraphDefs = is_array($bookStyles['paragraph_styles'] ?? null)
             ? $bookStyles['paragraph_styles']
             : array();
@@ -199,19 +205,118 @@ final class ControlledPublishingBookStyleService
             'text_align' => 'left',
             'indent_level' => 0,
         );
-        if ($paragraphStyle !== '' && isset($paragraphDefs[$paragraphStyle])) {
+        if (isset($paragraphDefs[$paragraphStyle])) {
             $def = $paragraphDefs[$paragraphStyle];
             $base['font_family'] = (string)($def['font_family'] ?? $base['font_family']);
             $base['font_size'] = (int)($def['font_size'] ?? $base['font_size']);
             $base['color'] = (string)($def['color'] ?? $base['color']);
         }
-        $base['font_family'] = $this->normalizeFont((string)($payload['font_family'] ?? $base['font_family']));
-        $base['font_size'] = $this->normalizeFontSize($payload['font_size'] ?? $base['font_size']);
-        $base['color'] = $this->normalizeColor((string)($payload['text_color'] ?? $payload['color'] ?? $base['color']), $base['color']);
+        if (array_key_exists('font_family', $payload)) {
+            $override = $this->normalizeFont((string)$payload['font_family']);
+            if ($override !== $base['font_family']) {
+                $base['font_family'] = $override;
+            }
+        }
+        if (array_key_exists('font_size', $payload)) {
+            $override = $this->normalizeFontSize($payload['font_size']);
+            if ($override !== $base['font_size']) {
+                $base['font_size'] = $override;
+            }
+        }
+        $colorOverride = null;
+        if (array_key_exists('text_color', $payload)) {
+            $colorOverride = (string)$payload['text_color'];
+        } elseif (array_key_exists('color', $payload)) {
+            $colorOverride = (string)$payload['color'];
+        }
+        if ($colorOverride !== null) {
+            $override = $this->normalizeColor($colorOverride, $base['color']);
+            if ($override !== $base['color']) {
+                $base['color'] = $override;
+            }
+        }
         $align = strtolower(trim((string)($payload['text_align'] ?? 'left')));
         $base['text_align'] = in_array($align, array('left', 'center', 'right'), true) ? $align : 'left';
         $base['indent_level'] = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
         return $base;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $paragraphStyles
+     */
+    private function stripRedundantBlockTypography(int $versionId, array $paragraphStyles): void
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, payload_json
+            FROM ipca_publishing_book_blocks
+            WHERE book_version_id = :version_id
+              AND block_type IN ('paragraph', 'heading', 'list')
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        $update = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_blocks
+            SET payload_json = :payload_json, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        ");
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $payload = json_decode((string)($row['payload_json'] ?? '{}'), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            if (!$this->stripRedundantTypographyFromPayload($payload, $paragraphStyles)) {
+                continue;
+            }
+            $update->execute(array(
+                ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':id' => (int)$row['id'],
+            ));
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @param array<string,array<string,mixed>> $paragraphStyles
+     */
+    private function stripRedundantTypographyFromPayload(array &$payload, array $paragraphStyles): bool
+    {
+        $styleKey = $this->canonicalParagraphStyleKey((string)($payload['paragraph_style'] ?? ''));
+        if ($styleKey === '') {
+            $styleKey = 'body';
+        }
+        $def = is_array($paragraphStyles[$styleKey] ?? null) ? $paragraphStyles[$styleKey] : null;
+        if ($def === null) {
+            return false;
+        }
+        $defFont = $this->normalizeFont((string)($def['font_family'] ?? 'serif'));
+        $defSize = $this->normalizeFontSize($def['font_size'] ?? 11);
+        $defColor = $this->normalizeColor((string)($def['color'] ?? '#0f172a'), '#0f172a');
+
+        $changed = false;
+        if (array_key_exists('font_family', $payload)
+            && $this->normalizeFont((string)$payload['font_family']) === $defFont) {
+            unset($payload['font_family']);
+            $changed = true;
+        }
+        if (array_key_exists('font_size', $payload)
+            && $this->normalizeFontSize($payload['font_size']) === $defSize) {
+            unset($payload['font_size']);
+            $changed = true;
+        }
+        $payloadColor = null;
+        if (array_key_exists('text_color', $payload)) {
+            $payloadColor = (string)$payload['text_color'];
+        } elseif (array_key_exists('color', $payload)) {
+            $payloadColor = (string)$payload['color'];
+        }
+        if ($payloadColor !== null
+            && $this->normalizeColor($payloadColor, $defColor) === $defColor) {
+            unset($payload['text_color'], $payload['color']);
+            $changed = true;
+        }
+        return $changed;
     }
 
     public function paragraphStyleLabel(string $key): string

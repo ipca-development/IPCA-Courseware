@@ -625,8 +625,8 @@ final class ControlledPublishingBlockService
             'title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4',
             'regulatory_reference', 'body', 'caption',
         );
-        if ($paragraphStyle !== '' && !in_array($paragraphStyle, $allowedStyles, true)) {
-            $paragraphStyle = '';
+        if ($paragraphStyle === '' || !in_array($paragraphStyle, $allowedStyles, true)) {
+            $paragraphStyle = 'body';
         }
         $textColor = trim((string)($payload['text_color'] ?? $payload['color'] ?? ''));
         if ($textColor !== '' && preg_match('/^#[0-9a-fA-F]{3,8}$/', $textColor) !== 1) {
@@ -643,13 +643,15 @@ final class ControlledPublishingBlockService
         }
         $indentLevel = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
         $out = array(
-            'font_family' => $font,
+            'paragraph_style' => $paragraphStyle,
             'text_align' => $align,
-            'font_size' => $fontSize,
             'indent_level' => $indentLevel,
         );
-        if ($paragraphStyle !== '') {
-            $out['paragraph_style'] = $paragraphStyle;
+        if (array_key_exists('font_family', $payload)) {
+            $out['font_family'] = $font;
+        }
+        if (array_key_exists('font_size', $payload)) {
+            $out['font_size'] = $fontSize;
         }
         if ($textColor !== '') {
             $out['text_color'] = strtolower($textColor);
