@@ -1049,21 +1049,23 @@
     var footerLeft = escapeHtml(resolveHeaderTokensPreview(f.left_text)).replace(/\n/g, '<br>');
     var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text)).replace(/\n/g, '<br>');
     var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
-    return '<table class="cpb-page-header-table" role="presentation"><tr>'
+    return '<header class="cpb-page-header">'
+      + '<table class="cpb-page-header-table" role="presentation"><tr>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerRowCellStyleAttr(headerRow) + '>' + logo + '</td>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--center ' + headerFontClass(h.center_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'center'), headerRow) + '>' + center + '</td>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--right ' + headerFontClass(h.right_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'right'), headerRow) + '>' + right + '</td>'
-      + '</tr></table>'
-      + (f.enabled ? '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
+      + '</tr></table></header>'
+      + (f.enabled ? '<footer class="cpb-page-footer">'
+        + '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
         + '<td class="cpb-page-header-cell cpb-page-header-cell--left ' + headerFontClass(f.left_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'left'), footerRow) + '>' + footerLeft + '</td>'
         + '<td class="cpb-page-header-cell cpb-page-header-cell--center ' + headerFontClass(f.center_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'center'), footerRow) + '>' + footerCenter + '</td>'
         + '<td class="cpb-page-header-cell cpb-page-header-cell--right ' + headerFontClass(f.right_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'right'), footerRow) + '>' + footerRight + '</td>'
-        + '</tr></table>' : '');
+        + '</tr></table></footer>' : '');
   }
 
   function defaultTableStyleDef() {
     return {
-      border_width: 'medium',
+      border_width: 'thin',
       border_color: '#94a3b8',
       cell_bg: '#ffffff',
       title_row: { font_family: 'sans', font_size: 11, color: '#0f2744', bg: '#e8eef6' },

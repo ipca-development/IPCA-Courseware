@@ -331,6 +331,9 @@ body.cpb-browser-fullscreen .cpb-workspace {
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 11pt;
   line-height: 1.55;
+  --cpb-frame-radius: 4px;
+  --cpb-frame-border-color: #94a3b8;
+  --cpb-frame-border-width: 1px;
 }
 
 .cpb-sheet-header {
@@ -349,6 +352,9 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-page-header {
   margin-bottom: 20px;
   cursor: pointer;
+  border: var(--cpb-frame-border-width) solid var(--cpb-frame-border-color);
+  border-radius: var(--cpb-frame-radius);
+  overflow: hidden;
 }
 
 .cpb-page-header[contenteditable="false"]:hover {
@@ -359,6 +365,9 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-page-footer {
   margin-top: 24px;
   cursor: pointer;
+  border: var(--cpb-frame-border-width) solid var(--cpb-frame-border-color);
+  border-radius: var(--cpb-frame-radius);
+  overflow: hidden;
 }
 
 .cpb-page-footer[contenteditable="false"]:hover {
@@ -369,7 +378,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-page-header-table {
   width: 100%;
   border-collapse: collapse;
-  border: 1px solid #0f172a;
+  border: none;
   table-layout: fixed;
 }
 
@@ -378,9 +387,14 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-page-header-table td {
-  border: 1px solid #0f172a;
+  border: none;
+  border-left: var(--cpb-frame-border-width) solid var(--cpb-frame-border-color);
   padding: 4px 8px;
   vertical-align: middle;
+}
+
+.cpb-page-header-table td:first-child {
+  border-left: none;
 }
 
 .cpb-page-header-cell--left {
@@ -661,6 +675,17 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
+  --cpb-frame-radius: 4px;
+  --cpb-frame-border-color: #94a3b8;
+  --cpb-frame-border-width: 1px;
+}
+
+.cpb-header-preview .cpb-page-header {
+  margin-bottom: 12px;
+}
+
+.cpb-header-preview .cpb-page-footer {
+  margin-top: 0;
 }
 
 .cpb-sheet-org {
@@ -923,8 +948,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
   max-width: 100%;
   overflow: hidden;
   --cpb-table-border-color: #94a3b8;
-  --cpb-table-border-width: 2px;
-  border-radius: 2px;
+  --cpb-table-border-width: 1px;
+  border-radius: var(--cpb-frame-radius, 4px);
   background: #fff;
 }
 
@@ -1401,8 +1426,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
   align-items: flex-start;
   margin: 0.8em 0;
   padding: 12px 14px;
-  border: 2px solid;
-  border-radius: 4px;
+  border: var(--cpb-frame-border-width, 1px) solid var(--cpb-frame-border-color, #94a3b8);
+  border-radius: var(--cpb-frame-radius, 4px);
   font-family: system-ui, sans-serif;
 }
 

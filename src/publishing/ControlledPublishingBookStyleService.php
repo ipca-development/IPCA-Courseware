@@ -79,7 +79,7 @@ final class ControlledPublishingBookStyleService
     private function defaultTableStyle(): array
     {
         return array(
-            'border_width' => 'medium',
+            'border_width' => 'thin',
             'border_color' => '#94a3b8',
             'cell_bg' => '#ffffff',
             'title_row' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#0f2744', 'bg' => '#e8eef6'),
