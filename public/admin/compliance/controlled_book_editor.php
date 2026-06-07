@@ -82,7 +82,7 @@ compliance_page_open(array(
 ?>
 <link rel="stylesheet" href="/assets/controlled_book_editor.css?v=<?= h($cssVer) ?>">
 
-<div class="cpb-editor-root cpb-editor-fullbleed" id="cpbEditorRoot"
+<div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
      data-section-id="<?= (int)$sectionId ?>">
   <div class="cpb-editor-shell">

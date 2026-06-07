@@ -1,31 +1,22 @@
-/* Full-bleed editor: break out of .app-content padding */
-.cmp-page .cpb-editor-fullbleed {
-  --cpb-page-pad: 38px;
-  margin-left: calc(-1 * var(--cpb-page-pad));
-  margin-right: calc(-1 * var(--cpb-page-pad));
-  width: calc(100% + (2 * var(--cpb-page-pad)));
-  max-width: none;
-  margin-bottom: 0;
-}
-
-@media (max-width: 960px) {
-  .cmp-page .cpb-editor-fullbleed {
-    --cpb-page-pad: 16px;
-  }
-}
-
-.cpb-editor-root {
-  margin: 0;
+/* Single compliance panel — same width/margins as hero, no nested cmp-card */
+.cmp-page .cpb-editor-root {
+  margin: 0 0 18px 0;
+  padding: 0;
+  background: var(--panel-bg, #fff);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: 20px;
+  box-shadow: var(--card-shadow, 0 10px 28px rgba(15, 23, 42, 0.06));
+  overflow: hidden;
 }
 
 .cpb-editor-shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: calc(100vh - 200px);
+  min-height: calc(100vh - 280px);
   border: none;
   border-radius: 0;
   overflow: hidden;
-  background: #e8edf4;
+  background: #eef2f7;
 }
 
 .cpb-tree-panel {
