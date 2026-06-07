@@ -218,23 +218,19 @@ final class ControlledPublishingBookRenderer
         $logoAlt = h((string)($pageHeader['logo_alt'] ?? ''));
         $logoMaxHeight = max(16, min(120, (int)($pageHeader['logo_max_height'] ?? 40)));
         $logoStyle = ' style="max-height:' . $logoMaxHeight . 'px;"';
-        $rowHeight = max(20, min(72, (int)($pageHeader['row_height'] ?? 32)));
-        $rowCellStyle = $this->pageBandRowCellStyleAttr($rowHeight);
+        $rowHeight = max(20, min(120, (int)($pageHeader['row_height'] ?? 32)));
+        $rowCellStyle = $this->pageBandRowCellStyleAttr($rowHeight, false);
+        $centerTypo = $this->columnTypography($pageHeader, 'center');
+        $rightTypo = $this->columnTypography($pageHeader, 'right');
+        $centerStyle = $this->pageBandCellStyleAttr($centerTypo, $rowHeight);
+        $rightStyle = $this->pageBandCellStyleAttr($rightTypo, $rowHeight);
+
         $leftCell = '';
         if ($logoUrl !== '') {
             $leftCell = '<img class="cpb-page-header-logo" src="' . h($logoUrl) . '" alt="' . $logoAlt . '"' . $logoStyle . '>';
         } elseif ($editable) {
             $leftCell = '<span class="cpb-page-header-logo-placeholder">Logo</span>';
         }
-
-        $centerStyle = $this->pageBandCellStyleAttr(
-            $this->columnTypography($pageHeader, 'center'),
-            $rowHeight
-        );
-        $rightStyle = $this->pageBandCellStyleAttr(
-            $this->columnTypography($pageHeader, 'right'),
-            $rowHeight
-        );
 
         $editAttr = $editable
             ? ' data-open-header-editor="1" title="Click to edit page header"'
@@ -244,10 +240,10 @@ final class ControlledPublishingBookRenderer
             . '<table class="cpb-page-header-table" role="presentation">'
             . '<tr>'
             . '<td class="cpb-page-header-cell cpb-page-header-cell--left"' . $rowCellStyle . '>' . $leftCell . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--center"' . $centerStyle . '>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center ' . $this->pageBandFontClass($centerTypo) . '"' . $centerStyle . '>'
             . $resolve((string)($pageHeader['center_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--right"' . $rightStyle . '>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right ' . $this->pageBandFontClass($rightTypo) . '"' . $rightStyle . '>'
             . $resolve((string)($pageHeader['right_text'] ?? ''))
             . '</td>'
             . '</tr></table></header>';
@@ -274,30 +270,24 @@ final class ControlledPublishingBookRenderer
             ? ' data-open-header-editor="1" title="Click to edit page footer"'
             : '';
 
-        $rowHeight = max(20, min(72, (int)($pageFooter['row_height'] ?? 26)));
-        $leftStyle = $this->pageBandCellStyleAttr(
-            $this->columnTypography($pageFooter, 'left'),
-            $rowHeight
-        );
-        $centerStyle = $this->pageBandCellStyleAttr(
-            $this->columnTypography($pageFooter, 'center'),
-            $rowHeight
-        );
-        $rightStyle = $this->pageBandCellStyleAttr(
-            $this->columnTypography($pageFooter, 'right'),
-            $rowHeight
-        );
+        $rowHeight = max(20, min(120, (int)($pageFooter['row_height'] ?? 26)));
+        $leftTypo = $this->columnTypography($pageFooter, 'left');
+        $centerTypo = $this->columnTypography($pageFooter, 'center');
+        $rightTypo = $this->columnTypography($pageFooter, 'right');
+        $leftStyle = $this->pageBandCellStyleAttr($leftTypo, $rowHeight);
+        $centerStyle = $this->pageBandCellStyleAttr($centerTypo, $rowHeight);
+        $rightStyle = $this->pageBandCellStyleAttr($rightTypo, $rowHeight);
 
         return '<footer class="cpb-page-footer"' . $editAttr . ' contenteditable="false">'
             . '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation">'
             . '<tr>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--left"' . $leftStyle . '>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--left ' . $this->pageBandFontClass($leftTypo) . '"' . $leftStyle . '>'
             . $resolve((string)($pageFooter['left_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--center"' . $centerStyle . '>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--center ' . $this->pageBandFontClass($centerTypo) . '"' . $centerStyle . '>'
             . $resolve((string)($pageFooter['center_text'] ?? ''))
             . '</td>'
-            . '<td class="cpb-page-header-cell cpb-page-header-cell--right"' . $rightStyle . '>'
+            . '<td class="cpb-page-header-cell cpb-page-header-cell--right ' . $this->pageBandFontClass($rightTypo) . '"' . $rightStyle . '>'
             . $resolve((string)($pageFooter['right_text'] ?? ''))
             . '</td>'
             . '</tr></table></footer>';
@@ -318,12 +308,13 @@ final class ControlledPublishingBookRenderer
         );
     }
 
-    private function pageBandRowCellStyleAttr(int $rowHeight): string
+    private function pageBandRowCellStyleAttr(int $rowHeight, bool $textCell = false): string
     {
-        $rowHeight = max(20, min(72, $rowHeight));
-        $padY = max(2, (int)round(($rowHeight - 12) / 2));
+        $rowHeight = max(20, min(120, $rowHeight));
+        $padY = max(2, (int)round(($rowHeight - 14) / 2));
+        $lineHeight = $textCell ? '1.45' : '1.2';
         return ' style="padding:' . $padY . 'px 8px;min-height:' . $rowHeight
-            . 'px;height:' . $rowHeight . 'px;line-height:1.2;box-sizing:border-box;"';
+            . 'px;line-height:' . $lineHeight . ';box-sizing:border-box;"';
     }
 
     /**
@@ -331,26 +322,32 @@ final class ControlledPublishingBookRenderer
      */
     private function pageBandCellStyleAttr(array $typography, int $rowHeight): string
     {
-        $stack = $this->fontFamilyStack((string)$typography['font_family']);
-        if ($stack === '') {
-            return $this->pageBandRowCellStyleAttr($rowHeight);
-        }
-        $rowHeight = max(20, min(72, $rowHeight));
-        $padY = max(2, (int)round(($rowHeight - 12) / 2));
+        $rowHeight = max(20, min(120, $rowHeight));
+        $padY = max(2, (int)round(($rowHeight - 14) / 2));
         $fontSize = max(8, min(24, (int)$typography['font_size']));
         $parts = array(
-            'font-family:' . $stack,
             'font-size:' . $fontSize . 'pt',
             'font-weight:' . (!empty($typography['font_bold']) ? '700' : '400'),
             'font-style:' . (!empty($typography['font_italic']) ? 'italic' : 'normal'),
             'text-decoration:' . (!empty($typography['font_underline']) ? 'underline' : 'none'),
             'padding:' . $padY . 'px 8px',
             'min-height:' . $rowHeight . 'px',
-            'height:' . $rowHeight . 'px',
-            'line-height:1.2',
+            'line-height:1.45',
             'box-sizing:border-box',
         );
         return ' style="' . implode(';', $parts) . '"';
+    }
+
+    /**
+     * @param array{font_family:string,font_size:int,font_bold:bool,font_italic:bool,font_underline:bool} $typography
+     */
+    private function pageBandFontClass(array $typography): string
+    {
+        $key = preg_replace('/[^a-z]/', '', strtolower((string)($typography['font_family'] ?? 'sans')));
+        if (!in_array($key, ControlledPublishingBookStyleService::FONT_KEYS, true)) {
+            $key = 'sans';
+        }
+        return 'cpb-font-' . $key;
     }
 
     /**
@@ -414,8 +411,9 @@ final class ControlledPublishingBookRenderer
         if ($display === '') {
             return '';
         }
-        return '<span class="cpb-section-number" contenteditable="false" data-section-number="'
-            . h($display) . '">' . h($display) . '</span> ';
+        return '<span class="cpb-section-number' . $this->styleClass($payload) . '" contenteditable="false"'
+            . $this->typographyStyleAttr($payload)
+            . ' data-section-number="' . h($display) . '">' . h($display) . '</span> ';
     }
 
     /**
@@ -876,6 +874,25 @@ final class ControlledPublishingBookRenderer
     {
         $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
         return ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+    }
+
+    /**
+     * Font size, family, and color matching the adjacent block — not indent/align.
+     *
+     * @param array<string,mixed> $payload
+     */
+    private function typographyStyleAttr(array $payload): string
+    {
+        $typography = $this->resolveTypography($payload);
+        $fontStack = $this->fontFamilyStack((string)$typography['font_family']);
+        $styles = array(
+            'font-size:' . (int)$typography['font_size'] . 'pt',
+            'color:' . (string)$typography['color'],
+        );
+        if ($fontStack !== '') {
+            $styles[] = 'font-family:' . $fontStack;
+        }
+        return ' style="' . h(implode(';', $styles)) . '"';
     }
 
     /**

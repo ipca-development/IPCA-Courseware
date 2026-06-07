@@ -391,15 +391,33 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-page-header-cell--center {
   width: 40%;
   text-align: center;
-  line-height: 1.2;
   color: #0f172a;
 }
 
 .cpb-page-header-cell--right {
   width: 30%;
   text-align: left;
-  line-height: 1.2;
   color: #0f172a;
+}
+
+.cpb-sheet .cpb-page-header-table td.cpb-font-serif,
+.cpb-sheet .cpb-page-footer-table td.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.cpb-sheet .cpb-page-header-table td.cpb-font-sans,
+.cpb-sheet .cpb-page-footer-table td.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.cpb-sheet .cpb-page-header-table td.cpb-font-mono,
+.cpb-sheet .cpb-page-footer-table td.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.cpb-sheet .cpb-page-header-table td.cpb-font-arial,
+.cpb-sheet .cpb-page-footer-table td.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .cpb-page-header-logo {
@@ -1245,8 +1263,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-section-number {
-  font-weight: 700;
-  color: #0f2744;
   user-select: none;
   white-space: nowrap;
 }

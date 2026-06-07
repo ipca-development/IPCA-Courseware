@@ -964,23 +964,26 @@
     };
   }
 
+  function headerFontClass(fontFamily) {
+    var key = String(fontFamily || 'sans').toLowerCase().replace(/[^a-z]/g, '');
+    if (['serif', 'sans', 'mono', 'arial'].indexOf(key) === -1) key = 'sans';
+    return 'cpb-font-' + key;
+  }
+
   function headerCellStyleAttr(column, rowHeight) {
     var col = column || {};
-    var stack = FONT_STACKS[col.font_family] || FONT_STACKS.sans;
     var size = parseInt(col.font_size, 10) || 11;
     var row = parseInt(rowHeight, 10) || 32;
-    row = Math.max(20, Math.min(72, row));
-    var padY = Math.max(2, Math.round((row - 12) / 2));
+    row = Math.max(20, Math.min(120, row));
+    var padY = Math.max(2, Math.round((row - 14) / 2));
     var parts = [
-      'font-family:' + stack,
       'font-size:' + size + 'pt',
       'font-weight:' + (col.font_bold ? '700' : '400'),
       'font-style:' + (col.font_italic ? 'italic' : 'normal'),
       'text-decoration:' + (col.font_underline ? 'underline' : 'none'),
       'padding:' + padY + 'px 8px',
       'min-height:' + row + 'px',
-      'height:' + row + 'px',
-      'line-height:1.2',
+      'line-height:1.45',
       'box-sizing:border-box',
     ];
     return ' style="' + parts.join(';') + '"';
@@ -988,9 +991,9 @@
 
   function headerRowCellStyleAttr(rowHeight) {
     var row = parseInt(rowHeight, 10) || 32;
-    row = Math.max(20, Math.min(72, row));
-    var padY = Math.max(2, Math.round((row - 12) / 2));
-    return ' style="padding:' + padY + 'px 8px;min-height:' + row + 'px;height:' + row + 'px;line-height:1.2;box-sizing:border-box;"';
+    row = Math.max(20, Math.min(120, row));
+    var padY = Math.max(2, Math.round((row - 14) / 2));
+    return ' style="padding:' + padY + 'px 8px;min-height:' + row + 'px;line-height:1.2;box-sizing:border-box;"';
   }
 
   function defaultHeaderTokens() {
@@ -1040,13 +1043,13 @@
     var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
     return '<table class="cpb-page-header-table" role="presentation"><tr>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerRowCellStyleAttr(headerRow) + '>' + logo + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(headerColumnFromBand(h, 'center'), headerRow) + '>' + center + '</td>'
-      + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(headerColumnFromBand(h, 'right'), headerRow) + '>' + right + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--center ' + headerFontClass(h.center_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'center'), headerRow) + '>' + center + '</td>'
+      + '<td class="cpb-page-header-cell cpb-page-header-cell--right ' + headerFontClass(h.right_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'right'), headerRow) + '>' + right + '</td>'
       + '</tr></table>'
       + (f.enabled ? '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerCellStyleAttr(headerColumnFromBand(f, 'left'), footerRow) + '>' + footerLeft + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--center"' + headerCellStyleAttr(headerColumnFromBand(f, 'center'), footerRow) + '>' + footerCenter + '</td>'
-        + '<td class="cpb-page-header-cell cpb-page-header-cell--right"' + headerCellStyleAttr(headerColumnFromBand(f, 'right'), footerRow) + '>' + footerRight + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--left ' + headerFontClass(f.left_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'left'), footerRow) + '>' + footerLeft + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--center ' + headerFontClass(f.center_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'center'), footerRow) + '>' + footerCenter + '</td>'
+        + '<td class="cpb-page-header-cell cpb-page-header-cell--right ' + headerFontClass(f.right_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'right'), footerRow) + '>' + footerRight + '</td>'
         + '</tr></table>' : '');
   }
 
@@ -2022,6 +2025,26 @@
     el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
     el.style.fontSize = typo.font_size + 'pt';
     el.style.color = typo.color;
+    syncSectionNumberTypography(el);
+  }
+
+  function syncSectionNumberTypography(contentEl) {
+    if (!contentEl) return;
+    var row = contentEl.closest('.cpb-paragraph-row, .cpb-heading-row');
+    if (!row) return;
+    var num = row.querySelector('.cpb-section-number');
+    if (!num) return;
+    var font = contentEl.getAttribute('data-font-family') || 'serif';
+    var size = contentEl.getAttribute('data-font-size') || '11';
+    var color = contentEl.getAttribute('data-text-color') || contentEl.style.color || '#0f172a';
+    FONT_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
+    PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
+    num.classList.add('cpb-font-' + font);
+    var ps = contentEl.getAttribute('data-paragraph-style');
+    if (ps) num.classList.add('cpb-ps-' + ps);
+    num.style.fontFamily = contentEl.style.fontFamily || FONT_STACKS[font] || FONT_STACKS.serif;
+    num.style.fontSize = contentEl.style.fontSize || (size + 'pt');
+    num.style.color = color;
   }
 
   function applyParagraphStyle(styleKey) {
@@ -2066,6 +2089,7 @@
         target.el.classList.add('cpb-font-' + font);
         target.el.setAttribute('data-font-family', font);
         if (stack) target.el.style.fontFamily = stack;
+        syncSectionNumberTypography(target.el);
       }
     }
     scheduleSave(target.block);
@@ -2076,6 +2100,7 @@
     el.style.fontSize = size + 'pt';
     el.setAttribute('data-font-size', String(size));
     if (updateSelect && fontSizeSelect) fontSizeSelect.value = String(size);
+    syncSectionNumberTypography(el);
   }
 
   function applyFontSize(size) {
@@ -2875,6 +2900,7 @@
         if (!hasTextSelectionInCanvas() || !applyInlineStyleToSelection({ color: color })) {
           target.el.style.color = color;
           target.el.setAttribute('data-text-color', color);
+          syncSectionNumberTypography(target.el);
         }
         scheduleSave(target.block);
         flushSave(target.block);

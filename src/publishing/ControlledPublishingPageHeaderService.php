@@ -389,7 +389,7 @@ final class ControlledPublishingPageHeaderService
     private function normalizeRowHeight(mixed $height): int
     {
         $height = (int)$height;
-        return max(20, min(72, $height > 0 ? $height : 32));
+        return max(20, min(120, $height > 0 ? $height : 32));
     }
 
     private function normalizeBool(mixed $value, bool $default): bool
