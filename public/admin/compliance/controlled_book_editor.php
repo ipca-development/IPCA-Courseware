@@ -155,6 +155,9 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbSyncHighlights" title="Regenerate Highlight of Changes">Sync highlights</button>
         </div>
+        <div class="cpb-toolbar-group cpb-toolbar-group--view">
+          <button type="button" class="cpb-tool-btn" id="cpbFullscreen" title="Full screen — hide app menu" aria-pressed="false">⤢</button>
+        </div>
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
       </div>
 

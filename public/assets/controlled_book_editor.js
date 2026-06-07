@@ -21,6 +21,7 @@
   var textColorInput = document.getElementById('cpbTextColor');
   var manageCalloutsBtn = document.getElementById('cpbManageCallouts');
   var syncHighlightsBtn = document.getElementById('cpbSyncHighlights');
+  var fullscreenBtn = document.getElementById('cpbFullscreen');
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
@@ -1747,7 +1748,40 @@
     });
   }
 
+  function isBrowserFullscreen() {
+    return document.body.classList.contains('cpb-browser-fullscreen');
+  }
+
+  function setBrowserFullscreen(on) {
+    document.body.classList.toggle('cpb-browser-fullscreen', on);
+    if (fullscreenBtn) {
+      fullscreenBtn.classList.toggle('is-active', on);
+      fullscreenBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      fullscreenBtn.title = on ? 'Exit full screen (Esc)' : 'Full screen — hide app menu';
+      fullscreenBtn.textContent = on ? '⤡' : '⤢';
+    }
+    try {
+      sessionStorage.setItem('cpb_browser_fullscreen', on ? '1' : '0');
+    } catch (err) { /* ignore */ }
+  }
+
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      setBrowserFullscreen(!isBrowserFullscreen());
+    });
+    try {
+      if (sessionStorage.getItem('cpb_browser_fullscreen') === '1') {
+        setBrowserFullscreen(true);
+      }
+    } catch (err) { /* ignore */ }
+  }
+
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && isBrowserFullscreen()) {
+      setBrowserFullscreen(false);
+      return;
+    }
     var inEditor = root.contains(document.activeElement);
     if (!inEditor) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
