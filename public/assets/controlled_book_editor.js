@@ -525,7 +525,7 @@
       var hint = ensureResizeHint();
 
       function onMove(ev) {
-        var w = Math.max(60, Math.min(600, startW + (ev.clientX - startX)));
+        var w = clampColWidth(blockEl, colIndex, startW + (ev.clientX - startX));
         if (col) col.style.width = w + 'px';
         syncTableWidth(blockEl);
         hint.textContent = w + 'px';
@@ -1050,7 +1050,9 @@
 
     if (colgroup) {
       var col = document.createElement('col');
-      col.style.width = '140px';
+      var others = tableOtherColsWidth(blockEl, cols);
+      var newW = clampColWidth(blockEl, cols, Math.min(140, tableContentMaxWidth(blockEl) - others));
+      col.style.width = newW + 'px';
       colgroup.appendChild(col);
     }
 
@@ -1140,16 +1142,74 @@
     return isNaN(w) ? 140 : w;
   }
 
+  function tableContentMaxWidth(blockEl) {
+    var sheetBody = blockEl.closest('.cpb-sheet-body');
+    if (sheetBody && sheetBody.clientWidth > 0) {
+      return sheetBody.clientWidth;
+    }
+    var sheet = blockEl.closest('.cpb-sheet');
+    if (sheet && sheet.clientWidth > 0) {
+      var style = window.getComputedStyle(sheet);
+      var padL = parseFloat(style.paddingLeft) || 0;
+      var padR = parseFloat(style.paddingRight) || 0;
+      return Math.max(200, sheet.clientWidth - padL - padR);
+    }
+    return 704;
+  }
+
+  function tableOtherColsWidth(blockEl, skipIndex) {
+    var table = blockEl.querySelector('table');
+    if (!table) return 0;
+    var total = 0;
+    table.querySelectorAll('colgroup col').forEach(function (col, idx) {
+      if (idx !== skipIndex) total += colWidthPx(col);
+    });
+    return total;
+  }
+
+  function clampColWidth(blockEl, colIndex, desired) {
+    var min = 60;
+    var max = 600;
+    var maxTable = tableContentMaxWidth(blockEl);
+    var others = tableOtherColsWidth(blockEl, colIndex);
+    var maxForCol = Math.max(min, maxTable - others);
+    return Math.max(min, Math.min(max, maxForCol, desired));
+  }
+
+  function tableTotalWidth(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return 0;
+    var total = 0;
+    table.querySelectorAll('colgroup col').forEach(function (col) {
+      total += colWidthPx(col);
+    });
+    return total;
+  }
+
   function syncTableWidth(blockEl) {
     var table = blockEl.querySelector('table');
     if (!table) return;
-    var cols = table.querySelectorAll('colgroup col');
-    var total = 0;
-    cols.forEach(function (col) {
-      total += colWidthPx(col);
-    });
-    table.style.width = total + 'px';
+    var total = tableTotalWidth(blockEl);
+    var maxTable = tableContentMaxWidth(blockEl);
+    table.style.width = Math.min(total, maxTable) + 'px';
+    table.style.maxWidth = '100%';
     table.style.minWidth = '0';
+  }
+
+  function fitTableToPage(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    var cols = table.querySelectorAll('colgroup col');
+    var total = tableTotalWidth(blockEl);
+    var maxTable = tableContentMaxWidth(blockEl);
+    if (total > maxTable && cols.length > 0) {
+      var scale = maxTable / total;
+      cols.forEach(function (col) {
+        var w = Math.max(60, Math.round(colWidthPx(col) * scale));
+        col.style.width = w + 'px';
+      });
+    }
+    syncTableWidth(blockEl);
   }
 
   function ensureResizeHint() {
@@ -1162,7 +1222,7 @@
   }
 
   function wireTableResize(blockEl) {
-    syncTableWidth(blockEl);
+    fitTableToPage(blockEl);
   }
 
   function getActiveStyleTarget() {

@@ -448,10 +448,12 @@
 
 .cpb-table-block {
   margin: 0.6em 0;
+  max-width: 100%;
 }
 
 .cpb-table-wrap {
-  overflow-x: auto;
+  max-width: 100%;
+  overflow-x: hidden;
   overflow-y: visible;
   --cpb-table-border-color: #94a3b8;
   --cpb-table-border-width: 2px;
