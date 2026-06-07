@@ -15,6 +15,7 @@
   height: calc(100vh - 280px);
   min-height: calc(100vh - 280px);
   max-height: calc(100vh - 280px);
+  --cpb-panel-head-height: 42px;
   border: none;
   border-radius: 0;
   overflow: hidden;
@@ -32,13 +33,19 @@
 }
 
 .cpb-tree-head {
-  padding: 14px 16px 10px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: var(--cpb-panel-head-height);
+  padding: 0 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .cpb-tree-head h2 {
   margin: 0;
   font-size: 13px;
+  line-height: 1.2;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #94a3b8;
@@ -168,7 +175,9 @@
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
-  padding: 6px 12px;
+  box-sizing: border-box;
+  min-height: var(--cpb-panel-head-height);
+  padding: 0 12px;
   background: #fff;
   border-bottom: 1px solid #dbe3ef;
   flex-shrink: 0;
@@ -430,6 +439,34 @@
   color: #0f2744;
 }
 
+.cpb-table td.cpb-font-serif,
+.cpb-table th.cpb-font-serif { font-family: Georgia, 'Times New Roman', serif; }
+.cpb-table td.cpb-font-sans,
+.cpb-table th.cpb-font-sans { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.cpb-table td.cpb-font-mono,
+.cpb-table th.cpb-font-mono { font-family: 'Courier New', Courier, monospace; }
+.cpb-table td.cpb-font-arial,
+.cpb-table th.cpb-font-arial { font-family: Arial, Helvetica, sans-serif; }
+.cpb-table td.cpb-font-manuallabel,
+.cpb-table th.cpb-font-manuallabel {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.cpb-table td.cpb-font-manualtitle,
+.cpb-table th.cpb-font-manualtitle {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 700;
+  color: #0f2744;
+}
+.cpb-table td.cpb-font-sectiontitle,
+.cpb-table th.cpb-font-sectiontitle {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 700;
+  color: #0f2744;
+}
+
 .cpb-align-left {
   text-align: left;
 }
@@ -453,11 +490,9 @@
 
 .cpb-table-wrap {
   max-width: 100%;
-  overflow-x: hidden;
-  overflow-y: visible;
+  overflow: hidden;
   --cpb-table-border-color: #94a3b8;
   --cpb-table-border-width: 2px;
-  border: var(--cpb-table-border-width) solid var(--cpb-table-border-color);
   border-radius: 2px;
   background: #fff;
 }
@@ -488,8 +523,6 @@
   padding: 6px 8px;
   vertical-align: top;
   word-break: break-word;
-  font-family: inherit;
-  font-size: inherit;
 }
 
 .cpb-table thead tr.cpb-table-header-row th {
@@ -501,8 +534,6 @@
 .cpb-table thead tr.cpb-table-title-row td {
   background: #e8eef6;
   font-weight: 700;
-  font-family: inherit;
-  border-bottom: 2px solid #64748b;
 }
 
 .cpb-table thead tr.cpb-table-title-row.is-empty td[data-placeholder]:empty::before,

@@ -36,6 +36,15 @@
     manualtitle: 16,
     sectiontitle: 14,
   };
+  var FONT_STACKS = {
+    serif: "Georgia, 'Times New Roman', serif",
+    sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    mono: "'Courier New', Courier, monospace",
+    arial: 'Arial, Helvetica, sans-serif',
+    manuallabel: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    manualtitle: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    sectiontitle: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  };
 
   var state = {
     versionId: versionId,
@@ -898,6 +907,8 @@
       FONT_CLASSES.forEach(function (cls) { cell.classList.remove(cls); });
       cell.classList.add('cpb-font-' + opts.font);
       cell.setAttribute('data-font-family', opts.font);
+      var stack = FONT_STACKS[opts.font];
+      if (stack) cell.style.fontFamily = stack;
     }
     if (opts.size) {
       cell.style.fontSize = opts.size + 'pt';

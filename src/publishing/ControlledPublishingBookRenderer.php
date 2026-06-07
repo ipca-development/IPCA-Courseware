@@ -526,6 +526,10 @@ final class ControlledPublishingBookRenderer
             $fontKey = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
             $attrs['class'] = 'cpb-font-' . $fontKey;
             $attrs['data-font-family'] = $fontFamily;
+            $fontStack = $this->fontFamilyStack($fontFamily);
+            if ($fontStack !== '') {
+                $styles[] = 'font-family:' . $fontStack;
+            }
         }
         if ($fontSize > 0) {
             $styles[] = 'font-size:' . $fontSize . 'pt';
@@ -540,6 +544,19 @@ final class ControlledPublishingBookRenderer
             $html .= ' ' . $key . '="' . h((string)$value) . '"';
         }
         return $html;
+    }
+
+    private function fontFamilyStack(string $fontFamily): string
+    {
+        $key = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
+        return match ($key) {
+            'serif' => "Georgia,'Times New Roman',serif",
+            'sans' => 'system-ui,-apple-system,Segoe UI,sans-serif',
+            'mono' => "'Courier New',Courier,monospace",
+            'arial' => 'Arial,Helvetica,sans-serif',
+            'manuallabel', 'manualtitle', 'sectiontitle' => 'system-ui,-apple-system,Segoe UI,sans-serif',
+            default => '',
+        };
     }
 
     /**
