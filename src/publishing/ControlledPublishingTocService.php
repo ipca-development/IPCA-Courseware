@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
+require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 
 /**
  * Builds the Table of Contents section from Title / Subtitle paragraph styles.
@@ -180,6 +181,9 @@ final class ControlledPublishingTocService
      */
     private function collectTocEntries(int $versionId, array $sectionNumberDisplay, array $settings): array
     {
+        $part0Svc = new ControlledPublishingPart0PageService($this->pdo, $this->blocks);
+        $entries = $part0Svc->collectOutlineTocEntries($versionId);
+
         $stmt = $this->pdo->prepare("
             SELECT
               b.*,
@@ -191,13 +195,15 @@ final class ControlledPublishingTocService
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
-              AND s.section_key NOT IN ('toc', 'highlights', 'cover')
+              AND s.section_key NOT IN (
+                'toc', 'highlights', 'cover', 'lep', 'revision_system',
+                'amendment_list', 'distribution_list', 'abbreviations', 'definitions'
+              )
             ORDER BY s.sort_order, s.id, b.sort_order, b.id
         ");
         $stmt->execute(array(':version_id' => $versionId));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
 
-        $entries = array();
         $lastSectionId = null;
         $pendingSectionEntry = null;
         foreach ($rows as $row) {

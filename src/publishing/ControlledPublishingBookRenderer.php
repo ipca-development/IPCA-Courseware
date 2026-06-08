@@ -275,6 +275,302 @@ final class ControlledPublishingBookRenderer
     }
 
     /**
+     * Part 0 admin page shell (0.2–0.7): shared heading hierarchy + section body.
+     *
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param list<array{key:string,style:string,text:string}> $headings
+     */
+    public function renderPart0AdminPageShell(
+        array $version,
+        array $section,
+        array $headings,
+        string $bodyHtml,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null
+    ): string {
+        $editable = $mode === self::MODE_EDIT;
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array(
+                'page_header' => array('enabled' => true),
+                'page_footer' => array('enabled' => true),
+            );
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageHeader = is_array($config['page_header'] ?? null)
+            ? $config['page_header']
+            : $defaults['page_header'];
+        $pageFooter = is_array($config['page_footer'] ?? null)
+            ? $config['page_footer']
+            : $defaults['page_footer'];
+
+        $tokenContext = $headerSvc !== null
+            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
+            : array();
+
+        $headerHtml = '';
+        $footerHtml = '';
+        if (!empty($pageHeader['enabled'])) {
+            $headerHtml = $this->renderPageHeaderTable($pageHeader, $tokenContext, $editable, $headerSvc);
+        }
+        if (!empty($pageFooter['enabled'])) {
+            $footerHtml = $this->renderPageFooterTable($pageFooter, $tokenContext, $editable, $headerSvc);
+        }
+
+        $editAttr = $editable ? ' data-part0-editable="1"' : '';
+        $headingsByKey = array();
+        foreach ($headings as $heading) {
+            if (!is_array($heading)) {
+                continue;
+            }
+            $headingsByKey[(string)($heading['key'] ?? '')] = $heading;
+        }
+
+        $headingsHtml = '';
+        foreach (array('part_title', 'title', 'subtitle_1') as $headingKey) {
+            if (!isset($headingsByKey[$headingKey]) || !is_array($headingsByKey[$headingKey])) {
+                continue;
+            }
+            $headingsHtml .= $this->renderPart0Heading($headingsByKey[$headingKey], $editable);
+        }
+
+        return '<div class="cpb-sheet cpb-sheet--part0" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
+            . $headerHtml
+            . '<div class="cpb-part0 cpb-lep" contenteditable="false">'
+            . $headingsHtml
+            . '<div class="cpb-part0-body">' . $bodyHtml . '</div>'
+            . '</div>'
+            . $footerHtml
+            . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $heading
+     */
+    private function renderPart0Heading(array $heading, bool $editable): string
+    {
+        $key = h((string)($heading['key'] ?? ''));
+        $styleKey = (string)($heading['style'] ?? 'body');
+        $text = h((string)($heading['text'] ?? ''));
+        $styling = $this->lepParagraphStyle($styleKey);
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        return '<div class="cpb-lep-heading cpb-lep-heading--' . $key . ' cpb-part0-heading ' . $styling['class'] . '"'
+            . ' data-part0-heading="' . $key . '" data-part0-field="heading_' . $key . '"'
+            . $styling['attr'] . $fieldEdit . '>' . $text . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    public function renderAmendmentListContent(array $page, bool $editable): string
+    {
+        $rows = is_array($page['rows'] ?? null) ? $page['rows'] : array();
+        $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 8)));
+        $footerNotice = (string)($page['footer_notice'] ?? '');
+        $tableStyle = $this->resolveStandardTableStyle();
+        $headerRow = $tableStyle['header_row'];
+        $bodyRow = $tableStyle['body_row'];
+        $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
+        $bodyVisual = $this->tableRowVisualAttr($bodyRow, 'center');
+        $borderWidth = (string)$tableStyle['border_width'];
+        $borderColor = (string)$tableStyle['border_color'];
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+
+        $bodyHtml = '';
+        $rowIdx = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $bodyHtml .= '<tr class="cpb-part0-amend-row" data-part0-row="' . $rowIdx . '">'
+                . $this->renderPart0TableCell('revision_nr', $rowIdx, (string)($row['revision_nr'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('reason', $rowIdx, (string)($row['reason'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('revision_date', $rowIdx, (string)($row['revision_date'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('effective_date', $rowIdx, (string)($row['effective_date'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('date_incorp', $rowIdx, (string)($row['date_incorp'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('incorp_by', $rowIdx, (string)($row['incorp_by'] ?? ''), $bodyVisual, $fieldEdit)
+                . '</tr>';
+            $rowIdx++;
+        }
+        for ($i = 0; $i < $emptyRows; $i++) {
+            $bodyHtml .= '<tr class="cpb-part0-amend-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
+                . $this->renderPart0TableCell('revision_nr', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('reason', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('revision_date', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('effective_date', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('date_incorp', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('incorp_by', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . '</tr>';
+            $rowIdx++;
+        }
+
+        $bodyStyle = $this->lepParagraphStyle('body');
+        $footerEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+
+        return '<div class="cpb-part0-amendment cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
+            . ' data-border-width="' . h($borderWidth) . '"'
+            . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
+            . '<table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
+            . '<thead><tr class="cpb-table-header-row">'
+            . '<th' . $headerVisual . '>REVISION NR</th>'
+            . '<th' . $headerVisual . '>REASON</th>'
+            . '<th' . $headerVisual . '>REVISION DATE</th>'
+            . '<th' . $headerVisual . '>EFFECTIVE DATE</th>'
+            . '<th' . $headerVisual . '>DATE INCORP.</th>'
+            . '<th' . $headerVisual . '>INCORP. BY</th>'
+            . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table>'
+            . '<div class="cpb-part0-amend-footer ' . trim($bodyStyle['class']) . '" data-part0-field="footer_notice"'
+            . $bodyStyle['attr'] . $footerEdit . '>' . h($footerNotice) . '</div>'
+            . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    public function renderDistributionListContent(array $page, bool $editable): string
+    {
+        $rows = is_array($page['rows'] ?? null) ? $page['rows'] : array();
+        $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 10)));
+        $tableStyle = $this->resolveStandardTableStyle();
+        $headerRow = $tableStyle['header_row'];
+        $bodyRow = $tableStyle['body_row'];
+        $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
+        $bodyVisual = $this->tableRowVisualAttr($bodyRow, 'center');
+        $borderWidth = (string)$tableStyle['border_width'];
+        $borderColor = (string)$tableStyle['border_color'];
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+
+        $bodyHtml = '';
+        $rowIdx = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $bodyHtml .= '<tr class="cpb-part0-dist-row" data-part0-row="' . $rowIdx . '">'
+                . $this->renderPart0TableCell('copy_nr', $rowIdx, (string)($row['copy_nr'] ?? ''), $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('issue_to', $rowIdx, (string)($row['issue_to'] ?? ''), $bodyVisual, $fieldEdit)
+                . '</tr>';
+            $rowIdx++;
+        }
+        for ($i = 0; $i < $emptyRows; $i++) {
+            $bodyHtml .= '<tr class="cpb-part0-dist-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
+                . $this->renderPart0TableCell('copy_nr', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . $this->renderPart0TableCell('issue_to', $rowIdx, '', $bodyVisual, $fieldEdit)
+                . '</tr>';
+            $rowIdx++;
+        }
+
+        return '<div class="cpb-part0-distribution cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
+            . ' data-border-width="' . h($borderWidth) . '"'
+            . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
+            . '<table class="cpb-table cpb-part0-table" data-part0-table="distribution_list">'
+            . '<thead><tr class="cpb-table-header-row">'
+            . '<th' . $headerVisual . '>COPY NR</th>'
+            . '<th' . $headerVisual . '>ISSUE TO</th>'
+            . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table>'
+            . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    public function renderAbbreviationsIndexContent(array $page, bool $editable): string
+    {
+        $entries = is_array($page['entries'] ?? null) ? $page['entries'] : array();
+        $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 10)));
+        $bodyStyle = $this->lepParagraphStyle('body');
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $rowsHtml = '';
+        $rowIdx = 0;
+
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $abbr = h((string)($entry['abbreviation'] ?? ''));
+            $def = h((string)($entry['definition'] ?? ''));
+            $rowsHtml .= '<div class="cpb-part0-abbr-row" data-part0-row="' . $rowIdx . '">'
+                . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>' . $abbr . '</span>'
+                . '<span class="cpb-part0-abbr-def ' . $bodyStyle['class'] . '" data-part0-col="definition"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $def . '</span>'
+                . '</div>';
+            $rowIdx++;
+        }
+        for ($i = 0; $i < $emptyRows; $i++) {
+            $rowsHtml .= '<div class="cpb-part0-abbr-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
+                . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>&nbsp;</span>'
+                . '<span class="cpb-part0-abbr-def ' . $bodyStyle['class'] . '" data-part0-col="definition"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>&nbsp;</span>'
+                . '</div>';
+            $rowIdx++;
+        }
+        if ($rowsHtml === '') {
+            $rowsHtml = '<p class="' . trim($bodyStyle['class']) . '"' . $bodyStyle['attr']
+                . '>No abbreviations found — use Regenerate in the toolbar.</p>';
+        }
+
+        return '<div class="cpb-part0-abbreviations" data-part0-table="abbreviations" contenteditable="false">'
+            . $rowsHtml . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    public function renderDefinitionsListContent(array $page, bool $editable): string
+    {
+        $entries = is_array($page['entries'] ?? null) ? $page['entries'] : array();
+        $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 12)));
+        $bodyStyle = $this->lepParagraphStyle('body');
+        $termStyle = $this->lepEmphasisStyle();
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $rowsHtml = '';
+        $rowIdx = 0;
+
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = h((string)($entry['term'] ?? ''));
+            $def = h((string)($entry['definition'] ?? ''));
+            $rowsHtml .= '<div class="cpb-part0-def-row" data-part0-row="' . $rowIdx . '">'
+                . '<span class="cpb-part0-def-term ' . trim($termStyle['class'] . ' cpb-lep-emphasis') . '" data-part0-col="term"'
+                . ' data-part0-row="' . $rowIdx . '"' . $termStyle['attr'] . $fieldEdit . '>' . $term . ':</span>'
+                . '<span class="cpb-part0-def-text ' . $bodyStyle['class'] . '" data-part0-col="definition"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $def . '</span>'
+                . '</div>';
+            $rowIdx++;
+        }
+        for ($i = 0; $i < $emptyRows; $i++) {
+            $rowsHtml .= '<div class="cpb-part0-def-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
+                . '<span class="cpb-part0-def-term ' . trim($termStyle['class'] . ' cpb-lep-emphasis') . '" data-part0-col="term"'
+                . ' data-part0-row="' . $rowIdx . '"' . $termStyle['attr'] . $fieldEdit . '>&nbsp;</span>'
+                . '<span class="cpb-part0-def-text ' . $bodyStyle['class'] . '" data-part0-col="definition"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>&nbsp;</span>'
+                . '</div>';
+            $rowIdx++;
+        }
+
+        return '<div class="cpb-part0-definitions" data-part0-table="definitions" contenteditable="false">'
+            . $rowsHtml . '</div>';
+    }
+
+    private function renderPart0TableCell(
+        string $col,
+        int $rowIdx,
+        string $value,
+        string $bodyVisual,
+        string $fieldEdit
+    ): string {
+        $display = $value !== '' ? h($value) : '&nbsp;';
+        return '<td' . $bodyVisual
+            . ' data-part0-col="' . h($col) . '" data-part0-row="' . $rowIdx . '"' . $fieldEdit . '>'
+            . $display . '</td>';
+    }
+
+    /**
      * @return array{class:string,attr:string}
      */
     private function lepParagraphStyle(string $styleKey, bool $forceBold = false): array
@@ -537,14 +833,6 @@ final class ControlledPublishingBookRenderer
             : ($coverSvc !== null ? $coverSvc->resolveFromVersion($version) : array());
 
         $headerSvc = $this->pageHeaderService;
-        $defaults = $headerSvc !== null
-            ? $headerSvc->resolveFromMetadata(array())
-            : array('page_footer' => array('enabled' => true));
-        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        $pageFooter = is_array($config['page_footer'] ?? null)
-            ? $config['page_footer']
-            : $defaults['page_footer'];
-
         $tokenContext = $headerSvc !== null
             ? $headerSvc->buildTokenContext($version, $section, array(
                 'editor_preview' => $mode === self::MODE_EDIT,
@@ -582,11 +870,6 @@ final class ControlledPublishingBookRenderer
         $logoDropAttr = $editable ? ' data-cover-drop="logo"' : '';
         $imageDropAttr = $editable ? ' data-cover-drop="cover_image"' : '';
 
-        $footerHtml = '';
-        if (!empty($pageFooter['enabled'])) {
-            $footerHtml = $this->renderPageFooterTable($pageFooter, $tokenContext, $editable, $headerSvc, true);
-        }
-
         $metaLines = array();
         if ($revisionLine !== '') {
             $metaLines[] = '<p class="cpb-cover-meta-line">' . $revisionLine . '</p>';
@@ -617,7 +900,6 @@ final class ControlledPublishingBookRenderer
             . implode('', $metaLines)
             . '</div>'
             . '</div>'
-            . $footerHtml
             . '</div>';
     }
 
@@ -996,6 +1278,7 @@ final class ControlledPublishingBookRenderer
             return '<nav class="cpb-toc" aria-label="Table of contents"><p class="cpb-toc-empty">No entries.</p></nav>';
         }
 
+        $titleColor = (string)$this->resolveTypography(array('paragraph_style' => 'title'))['color'];
         $rows = '';
         foreach ($entries as $entry) {
             if (!is_array($entry)) {
@@ -1012,7 +1295,10 @@ final class ControlledPublishingBookRenderer
             $page = $entry['page'] ?? null;
             $pageText = $page === null || $page === '' ? '—' : (string)$page;
 
-            $typoPayload = array('paragraph_style' => $style);
+            $typoPayload = array(
+                'paragraph_style' => $style,
+                'text_color' => $titleColor,
+            );
             $styleClass = $this->styleClass($typoPayload);
             $styleAttr = $this->styleAttr($typoPayload);
             $titleClass = $style === 'title' ? ' cpb-toc-row--title' : '';

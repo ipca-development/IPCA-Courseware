@@ -124,12 +124,17 @@ final class ControlledPublishingRevisionService
 
         $this->pdo->prepare("
             DELETE FROM ipca_publishing_book_blocks
-            WHERE section_id = :section_id AND is_system_managed = 0
+            WHERE section_id = :section_id AND is_system_managed = 1
         ")->execute(array(':section_id' => $sectionId));
 
         $section = $this->sectionRow($sectionId);
         $stableBase = (string)($section['stable_anchor'] ?? 'HIGHLIGHTS');
-        $sort = 10;
+        $sortStmt = $this->pdo->prepare("
+            SELECT COALESCE(MAX(sort_order), 0) FROM ipca_publishing_book_blocks
+            WHERE section_id = :section_id AND is_system_managed = 0
+        ");
+        $sortStmt->execute(array(':section_id' => $sectionId));
+        $sort = max(10, (int)$sortStmt->fetchColumn() + 10);
         $created = 0;
         $ins = $this->pdo->prepare("
             INSERT INTO ipca_publishing_book_blocks
@@ -137,7 +142,7 @@ final class ControlledPublishingRevisionService
                  payload_json, content_hash, is_system_managed, created_by, updated_by)
             VALUES
                 (:book_version_id, :section_id, :block_key, :stable_anchor, :block_type, :sort_order,
-                 :payload_json, :content_hash, 0, :actor, :actor)
+                 :payload_json, :content_hash, 1, :actor, :actor)
         ");
 
         $summaryPayload = array(

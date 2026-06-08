@@ -14,6 +14,7 @@
   var toolbarMainEl = document.getElementById('cpbToolbarMain');
   var toolbarTocEl = document.getElementById('cpbToolbarToc');
   var toolbarLepEl = document.getElementById('cpbToolbarLep');
+  var toolbarPart0El = document.getElementById('cpbToolbarPart0');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
@@ -128,6 +129,11 @@
     lepSaveTimer: null,
     lepSignModal: null,
     lepSignSlotKey: '',
+    isPart0Section: false,
+    part0SectionKey: '',
+    part0Structured: false,
+    part0Page: null,
+    part0SaveTimer: null,
   };
 
   var INDENT_STEP_PX = 24;
@@ -360,6 +366,10 @@
       state.isCoverSection = !!res.is_cover_section;
       state.isTocSection = !!res.is_toc_section;
       state.isLepSection = !!res.is_lep_section;
+      state.isPart0Section = !!res.is_part0_section;
+      state.part0SectionKey = res.part0_section_key || '';
+      state.part0Structured = !!res.part0_structured;
+      state.part0Page = res.part0_page || null;
       state.coverPage = res.cover_page || defaultCoverPage();
       state.lepPage = res.lep_page || defaultLepPage();
       state.lepApprovalUrl = res.lep_approval_url || '';
@@ -378,8 +388,14 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      if (state.isTocSection) {
+        refreshTocTypographyFromBookStyles();
+      }
       if (state.isLepSection) {
         refreshLepTypographyFromBookStyles();
+      }
+      if (state.isPart0Section) {
+        refreshPart0TypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
@@ -907,6 +923,8 @@
 
     wireLepPage();
 
+    wirePart0Page();
+
     wireTocNavigation();
 
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
@@ -1094,8 +1112,8 @@
     var isReleased = state.versionInfo && state.versionInfo.lifecycle_status === 'released';
     root.classList.toggle('cpb-editor-toc-mode', !!state.isTocSection && !isReleased);
     root.classList.toggle('cpb-editor-lep-mode', !!state.isLepSection && !isReleased);
-    if (state.isCoverSection || isReleased) {
-      toolbarEl.style.display = 'none';
+    root.classList.toggle('cpb-editor-part0-mode', !!state.part0Structured && !isReleased);
+    function hideAuxToolbars() {
       if (toolbarTocEl) {
         toolbarTocEl.hidden = true;
         toolbarTocEl.setAttribute('aria-hidden', 'true');
@@ -1104,6 +1122,14 @@
         toolbarLepEl.hidden = true;
         toolbarLepEl.setAttribute('aria-hidden', 'true');
       }
+      if (toolbarPart0El) {
+        toolbarPart0El.hidden = true;
+        toolbarPart0El.setAttribute('aria-hidden', 'true');
+      }
+    }
+    if (state.isCoverSection || isReleased) {
+      toolbarEl.style.display = 'none';
+      hideAuxToolbars();
       return;
     }
     if (state.isTocSection) {
@@ -1111,6 +1137,10 @@
       if (toolbarLepEl) {
         toolbarLepEl.hidden = true;
         toolbarLepEl.setAttribute('aria-hidden', 'true');
+      }
+      if (toolbarPart0El) {
+        toolbarPart0El.hidden = true;
+        toolbarPart0El.setAttribute('aria-hidden', 'true');
       }
       renderTocToolbar();
       return;
@@ -1121,17 +1151,27 @@
         toolbarTocEl.hidden = true;
         toolbarTocEl.setAttribute('aria-hidden', 'true');
       }
+      if (toolbarPart0El) {
+        toolbarPart0El.hidden = true;
+        toolbarPart0El.setAttribute('aria-hidden', 'true');
+      }
       renderLepToolbar();
       return;
     }
-    if (toolbarTocEl) {
-      toolbarTocEl.hidden = true;
-      toolbarTocEl.setAttribute('aria-hidden', 'true');
+    if (state.part0Structured) {
+      toolbarEl.style.display = 'flex';
+      if (toolbarTocEl) {
+        toolbarTocEl.hidden = true;
+        toolbarTocEl.setAttribute('aria-hidden', 'true');
+      }
+      if (toolbarLepEl) {
+        toolbarLepEl.hidden = true;
+        toolbarLepEl.setAttribute('aria-hidden', 'true');
+      }
+      renderPart0Toolbar();
+      return;
     }
-    if (toolbarLepEl) {
-      toolbarLepEl.hidden = true;
-      toolbarLepEl.setAttribute('aria-hidden', 'true');
-    }
+    hideAuxToolbars();
     toolbarEl.style.display = state.editable ? 'flex' : 'none';
   }
 
@@ -1485,6 +1525,241 @@
       state.lepPage = res.lep_page || payload;
       setStatus('LEP saved', 'saved');
     }).catch(showError);
+  }
+
+  function part0PageLabel() {
+    var labels = {
+      amendment_list: 'Amendment List',
+      distribution_list: 'Distribution List',
+      abbreviations: 'Index of Abbreviations',
+      definitions: 'Definitions and Terms',
+    };
+    return labels[state.part0SectionKey] || 'Part 0';
+  }
+
+  function renderPart0Toolbar() {
+    if (!toolbarPart0El) return;
+    toolbarPart0El.hidden = false;
+    toolbarPart0El.setAttribute('aria-hidden', 'false');
+    var regenBtn = state.part0SectionKey === 'abbreviations'
+      ? '<button type="button" class="cpb-tool-btn cpb-part0-regenerate" title="Regenerate from manual content">Regenerate</button>'
+      : '';
+    if (toolbarPart0El.getAttribute('data-part0-wired') !== '1') {
+      toolbarPart0El.innerHTML = ''
+        + '<div class="cpb-toolbar-group cpb-toolbar-group--part0-label">'
+        + '<span class="cpb-toolbar-part0-label" data-part0-toolbar-label="1">' + escapeHtml(part0PageLabel()) + '</span>'
+        + '</div>'
+        + '<div class="cpb-toolbar-group">'
+        + regenBtn
+        + '<button type="button" class="cpb-tool-btn" id="cpbPart0Save" title="Save page">Save</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenHeader" title="Page header editor">Header</button>'
+        + '</div>';
+      toolbarPart0El.setAttribute('data-part0-wired', '1');
+      var regenEl = toolbarPart0El.querySelector('.cpb-part0-regenerate');
+      if (regenEl) {
+        regenEl.addEventListener('click', function () {
+          syncAbbreviations(true);
+        });
+      }
+      toolbarPart0El.querySelector('#cpbPart0Save').addEventListener('click', function () {
+        if (state.part0SaveTimer) {
+          clearTimeout(state.part0SaveTimer);
+          state.part0SaveTimer = null;
+        }
+        flushPart0Save();
+      });
+      toolbarPart0El.querySelector('#cpbPart0OpenHeader').addEventListener('click', function () {
+        openHeaderEditor();
+      });
+    } else {
+      var labelEl = toolbarPart0El.querySelector('[data-part0-toolbar-label="1"]');
+      if (labelEl) labelEl.textContent = part0PageLabel();
+      var existingRegen = toolbarPart0El.querySelector('.cpb-part0-regenerate');
+      if (state.part0SectionKey === 'abbreviations' && !existingRegen) {
+        var group = toolbarPart0El.querySelector('.cpb-toolbar-group:last-child');
+        if (group) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'cpb-tool-btn cpb-part0-regenerate';
+          btn.title = 'Regenerate from manual content';
+          btn.textContent = 'Regenerate';
+          btn.addEventListener('click', function () { syncAbbreviations(true); });
+          group.insertBefore(btn, group.firstChild);
+        }
+      } else if (state.part0SectionKey !== 'abbreviations' && existingRegen) {
+        existingRegen.remove();
+      }
+    }
+  }
+
+  function extractPart0HeadingsFromCanvas() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--part0');
+    if (!sheet) return [];
+    var headings = [];
+    sheet.querySelectorAll('[data-part0-field^="heading_"]').forEach(function (el) {
+      var key = (el.getAttribute('data-part0-field') || '').replace(/^heading_/, '');
+      if (!key) return;
+      headings.push({
+        key: key,
+        style: el.getAttribute('data-paragraph-style') || 'body',
+        text: el.textContent.trim(),
+      });
+    });
+    return headings;
+  }
+
+  function extractPart0PageFromCanvas() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--part0');
+    if (!sheet || !state.part0Structured) return null;
+    var key = state.part0SectionKey;
+    var emptyRows = state.part0Page && state.part0Page.empty_rows !== undefined
+      ? state.part0Page.empty_rows
+      : 10;
+
+    if (key === 'amendment_list') {
+      var amendRows = [];
+      sheet.querySelectorAll('[data-part0-table="amendment_list"] tbody tr').forEach(function (tr) {
+        var row = {};
+        tr.querySelectorAll('[data-part0-col]').forEach(function (cell) {
+          row[cell.getAttribute('data-part0-col')] = cell.textContent.replace(/\u00a0/g, ' ').trim();
+        });
+        if (Object.keys(row).some(function (k) { return row[k]; })) amendRows.push(row);
+      });
+      var footerEl = sheet.querySelector('[data-part0-field="footer_notice"]');
+      return {
+        rows: amendRows,
+        footer_notice: footerEl ? footerEl.textContent.trim() : '',
+        empty_rows: emptyRows,
+      };
+    }
+    if (key === 'distribution_list') {
+      var distRows = [];
+      sheet.querySelectorAll('[data-part0-table="distribution_list"] tbody tr').forEach(function (tr) {
+        var row = {};
+        tr.querySelectorAll('[data-part0-col]').forEach(function (cell) {
+          row[cell.getAttribute('data-part0-col')] = cell.textContent.replace(/\u00a0/g, ' ').trim();
+        });
+        if (Object.keys(row).some(function (k) { return row[k]; })) distRows.push(row);
+      });
+      return { rows: distRows, empty_rows: emptyRows };
+    }
+    if (key === 'abbreviations') {
+      var abbrEntries = [];
+      sheet.querySelectorAll('.cpb-part0-abbr-row').forEach(function (rowEl) {
+        var abbrEl = rowEl.querySelector('[data-part0-col="abbreviation"]');
+        var defEl = rowEl.querySelector('[data-part0-col="definition"]');
+        var abbr = abbrEl ? abbrEl.textContent.replace(/\u00a0/g, ' ').trim() : '';
+        if (!abbr) return;
+        abbrEntries.push({
+          abbreviation: abbr,
+          definition: defEl ? defEl.textContent.replace(/\u00a0/g, ' ').trim() : '',
+        });
+      });
+      return { entries: abbrEntries, empty_rows: emptyRows };
+    }
+    if (key === 'definitions') {
+      var defEntries = [];
+      sheet.querySelectorAll('.cpb-part0-def-row').forEach(function (rowEl) {
+        var termEl = rowEl.querySelector('[data-part0-col="term"]');
+        var defTextEl = rowEl.querySelector('[data-part0-col="definition"]');
+        var term = termEl ? termEl.textContent.replace(/\u00a0/g, ' ').replace(/:$/, '').trim() : '';
+        if (!term) return;
+        defEntries.push({
+          term: term,
+          definition: defTextEl ? defTextEl.textContent.replace(/\u00a0/g, ' ').trim() : '',
+        });
+      });
+      return { entries: defEntries, empty_rows: emptyRows };
+    }
+    return null;
+  }
+
+  function schedulePart0Save() {
+    if (!state.editable || !state.part0Structured) return;
+    if (state.part0SaveTimer) clearTimeout(state.part0SaveTimer);
+    state.part0SaveTimer = setTimeout(function () {
+      state.part0SaveTimer = null;
+      flushPart0Save();
+    }, 450);
+  }
+
+  function flushPart0Save() {
+    if (!state.editable || !state.part0Structured) return;
+    var page = extractPart0PageFromCanvas();
+    if (!page) return;
+    setStatus('Saving…', 'saving');
+    apiPost('save_part0_page', {
+      version_id: state.versionId,
+      section_key: state.part0SectionKey,
+      part0_page: page,
+      headings: extractPart0HeadingsFromCanvas(),
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Save failed');
+      state.part0Page = res.part0_page || page;
+      setStatus('Saved', 'saved');
+    }).catch(showError);
+  }
+
+  function syncAbbreviations(skipConfirm) {
+    if (!skipConfirm && !confirm('Regenerate the Index of Abbreviations from the entire manual?')) return;
+    setStatus('Regenerating abbreviations…', 'saving');
+    apiPost('regenerate_abbreviations', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Regenerate failed');
+      var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+      state.part0Page = res.part0_page || state.part0Page;
+      if (res.page_html) {
+        canvasEl.innerHTML = res.page_html;
+        wireCanvas();
+        refreshPart0TypographyFromBookStyles();
+        setStatus('Abbreviations updated (' + count + ' entries)', 'saved');
+      } else {
+        return loadSection(state.sectionId);
+      }
+    }).catch(showError);
+  }
+
+  function wirePart0Page() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--part0');
+    if (!sheet || sheet.getAttribute('data-part0-wired') === '1') return;
+    sheet.setAttribute('data-part0-wired', '1');
+
+    sheet.querySelectorAll('[data-part0-field], [data-part0-col]').forEach(function (field) {
+      if (!state.editable || field.getAttribute('contenteditable') !== 'true') return;
+      if (field.getAttribute('data-part0-field-wired') === '1') return;
+      field.setAttribute('data-part0-field-wired', '1');
+      field.addEventListener('input', schedulePart0Save);
+      field.addEventListener('blur', function () {
+        if (state.part0SaveTimer) {
+          clearTimeout(state.part0SaveTimer);
+          state.part0SaveTimer = null;
+        }
+        flushPart0Save();
+      });
+    });
+  }
+
+  function refreshPart0TypographyFromBookStyles() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--part0');
+    if (!sheet) return;
+    sheet.querySelectorAll('[data-paragraph-style]').forEach(function (el) {
+      if (el.classList.contains('cpb-lep-emphasis')) return;
+      refreshBlockTypographyFromBookStyles(el);
+    });
+    sheet.querySelectorAll('.cpb-lep-emphasis').forEach(function (el) {
+      el.style.fontWeight = '700';
+      el.setAttribute('data-font-bold', '1');
+    });
+    var tableStyle = (state.bookStyles && state.bookStyles.table_styles && state.bookStyles.table_styles.standard)
+      || defaultTableStyleDef();
+    sheet.querySelectorAll('.cpb-part0-table thead th').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.header_row || defaultTableStyleDef().header_row);
+    });
+    sheet.querySelectorAll('.cpb-part0-table tbody td').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.body_row || defaultTableStyleDef().body_row);
+    });
   }
 
   function syncLepParts(skipConfirm) {
@@ -3261,6 +3536,18 @@
     cell.style.setProperty('text-decoration', typo.font_underline ? 'underline' : 'none', 'important');
   }
 
+  function refreshTocTypographyFromBookStyles() {
+    var titleDef = paragraphStyleDef('title');
+    var titleColor = titleDef.color || '#0f2744';
+    canvasEl.querySelectorAll('.cpb-toc-row[data-toc-style]').forEach(function (row) {
+      row.style.color = titleColor;
+      row.setAttribute('data-text-color', titleColor);
+      row.querySelectorAll('.cpb-toc-label, .cpb-toc-page, .cpb-toc-link').forEach(function (el) {
+        el.style.color = titleColor;
+      });
+    });
+  }
+
   function refreshLepTypographyFromBookStyles() {
     var sheet = canvasEl.querySelector('.cpb-sheet--lep');
     if (!sheet) return;
@@ -4142,6 +4429,7 @@
             canvasEl.querySelectorAll('.cpb-paragraph, .cpb-heading, .cpb-list').forEach(function (el) {
               refreshBlockTypographyFromBookStyles(el);
             });
+            refreshTocTypographyFromBookStyles();
             refreshLepTypographyFromBookStyles();
           });
         })
@@ -4192,10 +4480,20 @@
   function syncHighlights() {
     if (!confirm('Regenerate the Highlight of Changes section from revision markers?')) return;
     setStatus('Syncing highlights…', 'saving');
-    apiPost('regenerate_highlights', { version_id: state.versionId })
+    apiPost('regenerate_highlights', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+    })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Sync failed');
         var count = res.result && res.result.changes_count !== undefined ? res.result.changes_count : 0;
+        if (res.page_html && state.part0SectionKey === 'highlights') {
+          canvasEl.innerHTML = res.page_html;
+          wireCanvas();
+          refreshPart0TypographyFromBookStyles();
+          setStatus('Highlights updated (' + count + ' changes)', 'saved');
+          return;
+        }
         setStatus('Highlights updated (' + count + ' changes)', 'saved');
         var highlightsId = findHighlightsSectionId(state.sectionsTree);
         if (highlightsId) loadSection(highlightsId);
