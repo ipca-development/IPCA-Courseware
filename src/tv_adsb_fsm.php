@@ -53,9 +53,21 @@ function tv_adsb_fsm_touch_go_prune_events(array &$cache, int $maxAgeSeconds = 3
     $events = array_values(array_filter($events, static function ($timestamp) use ($cutoff): bool {
         return (int)$timestamp >= $cutoff;
     }));
-    $cache['touch_go_events'] = $events;
+    sort($events, SORT_NUMERIC);
 
-    return $events;
+    $deduped = array();
+    $lastKept = 0;
+    foreach ($events as $timestamp) {
+        $timestamp = (int)$timestamp;
+        if ($lastKept === 0 || ($timestamp - $lastKept) >= 90) {
+            $deduped[] = $timestamp;
+            $lastKept = $timestamp;
+        }
+    }
+
+    $cache['touch_go_events'] = $deduped;
+
+    return $deduped;
 }
 
 function tv_adsb_fsm_touch_go_note_surface(array &$cache, array $obs): void
@@ -87,6 +99,11 @@ function tv_adsb_fsm_touch_go_note_transition(string $from, string $to, array &$
     }
 
     $events = tv_adsb_fsm_touch_go_prune_events($cache, 3600);
+    $lastEvent = count($events) > 0 ? (int)$events[count($events) - 1] : 0;
+    if ($lastEvent > 0 && (time() - $lastEvent) < 90) {
+        return;
+    }
+
     $events[] = time();
     $cache['touch_go_events'] = $events;
     $cache['touch_go_session_until'] = time() + 2700;
@@ -143,13 +160,14 @@ function tv_adsb_fsm_touch_go_active(array $cache, array $obs, string $state): b
 
 function tv_adsb_fsm_touch_go_count_from_history(array $history): int
 {
-    if (count($history) < 3) {
+    if (count($history) < 4) {
         return 0;
     }
 
     $count = 0;
-    $phase = 'airborne';
-    $touchdownAt = 0;
+    $phase = 'idle';
+    $cycleStart = 0;
+    $lastCountAt = 0;
 
     foreach ($history as $sample) {
         if (!is_array($sample)) {
@@ -163,27 +181,38 @@ function tv_adsb_fsm_touch_go_count_from_history(array $history): int
         $nearAirport = $onSurface || $spcDist <= 6.0;
 
         if (!$nearAirport) {
-            $phase = 'airborne';
-            $touchdownAt = 0;
+            $phase = 'idle';
+            $cycleStart = 0;
             continue;
         }
 
-        if ($phase === 'airborne' && $onSurface && $gs >= 5.0 && $gs <= 70.0) {
-            $phase = 'touchdown';
-            $touchdownAt = $timestamp;
+        if ($phase === 'idle' && $gs >= 38.0) {
+            $phase = 'approaching';
+        }
+
+        if ($phase === 'approaching' && $onSurface && $gs >= 12.0 && $gs <= 95.0) {
+            $phase = 'rolling';
+            $cycleStart = $timestamp;
             continue;
         }
 
-        if ($phase === 'touchdown' && $touchdownAt > 0 && $gs >= 42.0 && ($timestamp - $touchdownAt) <= 360) {
-            $count++;
-            $phase = 'airborne';
-            $touchdownAt = 0;
+        if ($phase === 'rolling' && $cycleStart > 0 && $gs >= 52.0 && ($timestamp - $cycleStart) <= 420) {
+            if ($lastCountAt === 0 || ($timestamp - $lastCountAt) >= 60) {
+                $count++;
+                $lastCountAt = $timestamp;
+            }
+            $phase = 'departed';
+            $cycleStart = 0;
             continue;
         }
 
-        if ($phase === 'touchdown' && $touchdownAt > 0 && ($timestamp - $touchdownAt) > 360) {
-            $phase = 'airborne';
-            $touchdownAt = 0;
+        if ($phase === 'departed' && (!$onSurface || $gs >= 75.0)) {
+            $phase = 'idle';
+        }
+
+        if ($phase === 'rolling' && $cycleStart > 0 && ($timestamp - $cycleStart) > 420) {
+            $phase = 'idle';
+            $cycleStart = 0;
         }
     }
 
@@ -195,17 +224,19 @@ function tv_adsb_fsm_touch_go_count(array &$cache, array $obs): int
     $events = tv_adsb_fsm_touch_go_prune_events($cache, 3600);
     $fromEvents = count($events);
     $fromHistory = tv_adsb_fsm_touch_go_count_from_history($obs['history'] ?? array());
-    $count = max($fromEvents, $fromHistory);
-    $previous = (int)($cache['touch_go_session_count'] ?? 0);
 
-    if ($count > $previous) {
-        $cache['touch_go_session_count'] = $count;
-        return $count;
+    // FSM transitions are one count per completed touchdown→relaunch cycle.
+    // History is a fallback and must not inflate the count with per-sample noise.
+    if ($fromEvents > 0) {
+        $count = $fromEvents;
+        if ($fromHistory > $fromEvents && $fromHistory <= ($fromEvents + 1)) {
+            $count = $fromHistory;
+        }
+    } else {
+        $count = $fromHistory;
     }
 
-    if ($previous > 0 && tv_adsb_fsm_touch_go_active($cache, $obs, (string)($cache['fsm_state'] ?? ''))) {
-        return $previous;
-    }
+    $cache['touch_go_session_count'] = $count;
 
     return $count;
 }
