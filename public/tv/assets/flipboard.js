@@ -93,6 +93,7 @@
   function aircraftSymChar(row) {
     var statusText = normalizeText(String(row.status || ''));
     if (statusText === 'MAINTENANCE') return 'M';
+    if (statusText === 'PARKED AT SPC') return 'P';
 
     var code = String(row.status_code || '').toLowerCase();
     switch (code) {

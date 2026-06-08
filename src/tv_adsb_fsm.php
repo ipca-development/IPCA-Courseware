@@ -144,8 +144,17 @@ function tv_adsb_fsm_candidate(array $obs, array &$cache): string
         return 'taxiing_in';
     }
 
-    if ($inSpc && $gs < 1.0 && tv_adsb_position_variation_m($history, 300) <= 10.0
-        && tv_adsb_fsm_parked_dwell_seconds($history, $inSpc) >= 300) {
+    if ($inSpc && $gs < 1.5 && ($state === 'parked_at_spc' || ($cache['fsm_last_confirmed'] ?? '') === 'parked_at_spc')) {
+        return 'parked_at_spc';
+    }
+
+    if ($inSpc && $gs < 1.0 && tv_adsb_position_variation_m($history, 300) <= 15.0
+        && tv_adsb_fsm_parked_dwell_seconds($history, $inSpc) >= 120) {
+        return 'parked_at_spc';
+    }
+
+    if ($inSpc && $gs < 1.0 && count($history) >= 2
+        && tv_adsb_position_variation_m($history, 180) <= 15.0) {
         return 'parked_at_spc';
     }
 
@@ -200,7 +209,7 @@ function tv_adsb_fsm_confirm_transition(string $candidate, array &$cache, array 
     $since = (int)($cache['fsm_pending_since'] ?? time());
     $dwell = time() - $since;
 
-    if ($candidate === 'parked_at_spc' && $dwell < 300) {
+    if ($candidate === 'parked_at_spc' && $dwell < 120) {
         return $current !== '' ? $current : $candidate;
     }
 
@@ -291,6 +300,9 @@ function tv_adsb_fsm_build_display(string $state, array $obs, array &$cache, arr
             return 'AWAITING POSITION';
 
         default:
+            if ((bool)($obs['in_spc_parking'] ?? false) && (float)($obs['gs'] ?? 0) < 2.0) {
+                return 'PARKED AT SPC';
+            }
             if ((float)($obs['gs'] ?? 0) > 0.0 || (bool)($obs['on_surface'] ?? false)) {
                 return 'TRACKING';
             }
@@ -330,13 +342,26 @@ function tv_adsb_fsm_tick(
     }
 
     $position = tv_adsb_position($aircraft);
+    $positionSource = 'live';
+    if ($position === null) {
+        $cachedPosition = tv_adsb_last_history_position($cache);
+        if ($cachedPosition !== null && (int)($cachedPosition['age_s'] ?? 99999) <= 86400) {
+            $position = array(
+                'lat' => (float)$cachedPosition['lat'],
+                'lon' => (float)$cachedPosition['lon'],
+            );
+            $positionSource = 'cache';
+            $base['stale'] = true;
+        }
+    }
+
     $hex = tv_adsb_normalize_hex((string)($aircraft['hex'] ?? ($track['hex'] ?? '')));
     $gs = tv_adsb_airspeed($aircraft);
     $gsRounded = round($gs, 0);
     $altFt = tv_adsb_altitude_ft($aircraft);
     $vr = tv_adsb_vertical_rate($aircraft);
     $seen = isset($aircraft['seen']) && is_numeric($aircraft['seen']) ? (float)$aircraft['seen'] : null;
-    $live = $seen === null || $seen <= 90.0;
+    $live = $positionSource === 'live' && ($seen === null || $seen <= 90.0);
 
     $base['hex'] = $hex;
     $base['live'] = $live;
@@ -385,6 +410,10 @@ function tv_adsb_fsm_tick(
     $statusText = tv_adsb_fsm_build_display($state, $obs, $cache, $gate);
     $symbol = tv_adsb_fsm_symbol($state);
     $iconCode = tv_adsb_fsm_icon_code($state);
+    if ($statusText === 'PARKED AT SPC' && $symbol === '?') {
+        $symbol = 'P';
+        $iconCode = 'parked';
+    }
 
     return array_merge($base, array(
         'symbol' => $symbol,
@@ -398,5 +427,19 @@ function tv_adsb_fsm_tick(
         'distance_nm' => round((float)$obs['distance_spc_nm'], 1),
         'direction' => (string)$obs['direction_spc'],
         'nearest_airport' => $nearest,
+        'position_source' => $positionSource,
+        'debug' => array(
+            'lat' => round($lat, 6),
+            'lon' => round($lon, 6),
+            'in_spc_parking' => (bool)($obs['in_spc_parking'] ?? false),
+            'spc_dist_nm' => round((float)($obs['spc_dist_nm'] ?? 0), 3),
+            'on_surface' => (bool)($obs['on_surface'] ?? false),
+            'fsm_state' => $state,
+            'fsm_candidate' => $candidate,
+            'history_samples' => count($history),
+            'position_source' => $positionSource,
+            'gate_lat' => (float)($gate['lat'] ?? 0),
+            'gate_lon' => (float)($gate['lon'] ?? 0),
+        ),
     ));
 }

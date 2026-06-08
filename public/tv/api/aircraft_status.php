@@ -90,6 +90,10 @@ try {
         );
     }
 
+    if ((int)($_GET['debug'] ?? 0) === 1 && !empty($status['debug']) && is_array($status['debug'])) {
+        $response['debug'] = $status['debug'];
+    }
+
     echo json_encode($response, JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {
     http_response_code(502);

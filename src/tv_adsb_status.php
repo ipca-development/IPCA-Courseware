@@ -272,6 +272,36 @@ function tv_adsb_position(array $aircraft): ?array
         return array('lat' => (float)$last['lat'], 'lon' => (float)$last['lon']);
     }
 
+    foreach (array('lastpos', 'lastPos', 'position') as $key) {
+        $candidate = $aircraft[$key] ?? null;
+        if (!is_array($candidate)) {
+            continue;
+        }
+        if (is_numeric($candidate['lat'] ?? null) && is_numeric($candidate['lon'] ?? null)) {
+            return array('lat' => (float)$candidate['lat'], 'lon' => (float)$candidate['lon']);
+        }
+    }
+
+    return null;
+}
+
+function tv_adsb_last_history_position(array $cache): ?array
+{
+    $history = isset($cache['history']) && is_array($cache['history']) ? $cache['history'] : array();
+    for ($i = count($history) - 1; $i >= 0; $i--) {
+        $sample = $history[$i];
+        if (!is_array($sample)) {
+            continue;
+        }
+        if (is_numeric($sample['lat'] ?? null) && is_numeric($sample['lon'] ?? null)) {
+            return array(
+                'lat' => (float)$sample['lat'],
+                'lon' => (float)$sample['lon'],
+                'age_s' => max(0, time() - (int)($sample['t'] ?? time())),
+            );
+        }
+    }
+
     return null;
 }
 

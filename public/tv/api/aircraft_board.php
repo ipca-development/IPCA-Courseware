@@ -150,7 +150,7 @@ try {
             continue;
         }
 
-        $rows[] = array(
+        $rowOut = array(
             'id' => (int)$trackRow['id'],
             'symbol' => (string)($status['symbol'] ?? '?'),
             'icon_code' => (string)($status['icon_code'] ?? 'unknown'),
@@ -162,6 +162,10 @@ try {
             'live' => (bool)($status['live'] ?? false),
             'stale' => (bool)($status['stale'] ?? false),
         );
+        if ((int)($_GET['debug'] ?? 0) === 1 && !empty($status['debug']) && is_array($status['debug'])) {
+            $rowOut['debug'] = $status['debug'];
+        }
+        $rows[] = $rowOut;
 
         if ($announceEnabled && !empty($status['announcement']) && is_array($status['announcement'])) {
             $announcements[] = array(
