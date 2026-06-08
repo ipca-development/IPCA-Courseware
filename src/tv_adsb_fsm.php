@@ -227,6 +227,35 @@ function tv_adsb_fsm_apply_parked_state(array &$cache): void
     unset($cache['off_block_at'], $cache['departure_airport']);
 }
 
+function tv_adsb_fsm_apply_state(string $state, array &$cache, array $obs): void
+{
+    $cache['fsm_state'] = $state;
+    $cache['fsm_last_confirmed'] = $state;
+    $cache['fsm_state_since'] = time();
+    $cache['fsm_pending_state'] = '';
+    $cache['fsm_pending_count'] = 0;
+
+    if ($state === 'taking_off') {
+        $cache['fsm_takeoff_hold_until'] = time() + 60;
+        $nearest = $obs['nearest_airport'] ?? null;
+        if (is_array($nearest) && !empty($nearest['name'])) {
+            $cache['departure_airport'] = (string)$nearest['name'];
+        }
+    }
+
+    if ($state === 'taxiing_out' && empty($cache['off_block_at'])) {
+        $cache['off_block_at'] = time();
+    }
+
+    if ($state === 'landed') {
+        $cache['fsm_landed_hold_until'] = time() + 300;
+    }
+
+    if ($state === 'parked_at_spc') {
+        unset($cache['off_block_at'], $cache['departure_airport']);
+    }
+}
+
 function tv_adsb_fsm_confirm_transition(string $candidate, array &$cache, array $obs): string
 {
     $current = (string)($cache['fsm_state'] ?? '');
@@ -237,6 +266,15 @@ function tv_adsb_fsm_confirm_transition(string $candidate, array &$cache, array 
     if ($candidate === 'parked_at_spc' && $gs < 10.0 && ($inSpc || $spcDist <= 0.05)) {
         tv_adsb_fsm_apply_parked_state($cache);
         return 'parked_at_spc';
+    }
+
+    $taxiStates = array('taxiing_in', 'taxiing_out');
+    $flightStates = array('landing', 'landed', 'taking_off', 'in_flight');
+    if (in_array($current, $taxiStates, true)
+        && in_array($candidate, $flightStates, true)
+        && $gs >= 35.0) {
+        tv_adsb_fsm_apply_state($candidate, $cache, $obs);
+        return $candidate;
     }
 
     if ($candidate === $current) {
@@ -266,32 +304,7 @@ function tv_adsb_fsm_confirm_transition(string $candidate, array &$cache, array 
         return $current !== '' ? $current : $candidate;
     }
 
-    $cache['fsm_state'] = $candidate;
-    $cache['fsm_last_confirmed'] = $candidate;
-    $cache['fsm_state_since'] = time();
-    $cache['fsm_pending_state'] = '';
-    $cache['fsm_pending_count'] = 0;
-
-    if ($candidate === 'taking_off') {
-        $cache['fsm_takeoff_hold_until'] = time() + 60;
-        $nearest = $obs['nearest_airport'] ?? null;
-        if (is_array($nearest) && !empty($nearest['name'])) {
-            $cache['departure_airport'] = (string)$nearest['name'];
-        }
-    }
-
-    if ($candidate === 'taxiing_out' && empty($cache['off_block_at'])) {
-        $cache['off_block_at'] = time();
-    }
-
-    if ($candidate === 'landed') {
-        $cache['fsm_landed_hold_until'] = time() + 300;
-    }
-
-    if ($candidate === 'parked_at_spc') {
-        unset($cache['off_block_at']);
-        unset($cache['departure_airport']);
-    }
+    tv_adsb_fsm_apply_state($candidate, $cache, $obs);
 
     return $candidate;
 }
