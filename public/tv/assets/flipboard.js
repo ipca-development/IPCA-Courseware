@@ -189,6 +189,9 @@
     this.ctx = null;
     this.master = null;
     this.armed = false;
+    this.announcing = false;
+    this.announcementDepth = 0;
+    this.onStateChange = null;
     this.lastClickAt = 0;
     this.windowStart = 0;
     this.clicksInWindow = 0;
@@ -196,6 +199,26 @@
     this.chimeSamples = [];
     this.pendingSettle = null;
   }
+
+  BoardAudio.prototype.setStateListener = function (fn) {
+    this.onStateChange = typeof fn === 'function' ? fn : null;
+  };
+
+  BoardAudio.prototype.beginAnnouncement = function () {
+    this.announcementDepth += 1;
+    this.announcing = true;
+    if (this.pendingSettle) {
+      window.clearTimeout(this.pendingSettle);
+      this.pendingSettle = null;
+    }
+    if (this.onStateChange) this.onStateChange();
+  };
+
+  BoardAudio.prototype.endAnnouncement = function () {
+    this.announcementDepth = Math.max(0, this.announcementDepth - 1);
+    this.announcing = this.announcementDepth > 0;
+    if (this.onStateChange) this.onStateChange();
+  };
 
   BoardAudio.prototype.arm = function () {
     var self = this;
@@ -323,7 +346,7 @@
   };
 
   BoardAudio.prototype.flap = function (intensity) {
-    if (!this.armed || !this.canClick()) return;
+    if (!this.armed || this.announcing || !this.canClick()) return;
     this.lastClickAt = performance.now();
     this.clicksInWindow += 1;
     if (this.flapSamples.length > 0 && Math.random() > 0.5) {
@@ -343,6 +366,7 @@
 
   BoardAudio.prototype.scheduleSettle = function () {
     var self = this;
+    if (this.announcing) return;
     if (this.pendingSettle) window.clearTimeout(this.pendingSettle);
     this.pendingSettle = window.setTimeout(function () {
       self.pendingSettle = null;
@@ -471,6 +495,7 @@
   BoardAudio.prototype.playAnnouncement = function (message) {
     var self = this;
     if (!this.armed) return Promise.resolve();
+    this.beginAnnouncement();
     return this.chime()
       .then(function () {
         return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
@@ -479,6 +504,9 @@
         var url = self.announcementUrl(message);
         if (!url) return;
         return self.playMp3(url);
+      })
+      .finally(function () {
+        self.endAnnouncement();
       });
   };
 
@@ -496,12 +524,16 @@
     if (!this.armed) return Promise.resolve();
     var url = this.aircraftEventUrl(event);
     if (!url) return Promise.resolve();
+    this.beginAnnouncement();
     return this.chime()
       .then(function () {
         return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
       })
       .then(function () {
         return self.playMp3(url);
+      })
+      .finally(function () {
+        self.endAnnouncement();
       });
   };
 
@@ -833,14 +865,17 @@
 
   FlipBoard.prototype.updateAudioStatus = function () {
     if (!this.audioState) return;
+    var footerItem = this.audioState.closest('.fb-footer-item');
     if (!window.AudioContext && !window.webkitAudioContext) {
+      if (footerItem) footerItem.hidden = false;
       this.audioState.textContent = 'UNSUPPORTED';
       return;
     }
-    if (this.audio.armed) {
-      this.audioState.textContent = 'LIVE';
+    if (this.audio.announcing || this.audio.armed) {
+      if (footerItem) footerItem.hidden = true;
       return;
     }
+    if (footerItem) footerItem.hidden = false;
     if (this.audio.ctx && this.audio.ctx.state === 'suspended') {
       this.audioState.textContent = 'TAP TO ENABLE';
       return;
@@ -854,6 +889,9 @@
 
   FlipBoard.prototype.bindAudio = function () {
     var self = this;
+    this.audio.setStateListener(function () {
+      self.updateAudioStatus();
+    });
     var tryArm = function () {
       return self.audio.arm().then(function (armed) {
         self.updateAudioStatus();
@@ -977,7 +1015,7 @@
     }
 
     this.aircraftPageTimer = window.setTimeout(function () {
-      if (self.rendering) return;
+      if (self.rendering || self.audio.announcing) return;
       var pageCount = Math.ceil(self.cachedAircraftRows.length / OPS_DATA_ROWS);
       self.aircraftPageIndex = (self.aircraftPageIndex + 1) % pageCount;
       self.renderAircraftBoard({ rows: self.cachedAircraftRows }, true);
@@ -999,7 +1037,7 @@
     if (!hasAircraft && !this.isAircraftOpsScreen()) return;
 
     this.aircraftPollTimer = window.setInterval(function () {
-      if (self.rendering) return;
+      if (self.rendering || self.audio.announcing) return;
       if (self.isAircraftBoardMode()) {
         self.fetchAndRenderAircraftBoard(false);
         return;
@@ -1129,10 +1167,10 @@
       .then(function (payload) {
         if (!payload || !payload.ok) throw new Error('board unavailable');
         self.statusLabel.textContent = payload.live ? 'AIRCRAFT OPS' : 'AIRCRAFT STALE';
-        return Promise.all([
-          self.renderAircraftBoard(payload, force),
-          self.playAircraftAnnouncements(payload.announcements || [])
-        ]);
+        return self.renderAircraftBoard(payload, force)
+          .then(function () {
+            return self.playAircraftAnnouncements(payload.announcements || []);
+          });
       })
       .catch(function () {
         self.statusLabel.textContent = 'AIRCRAFT OPS';
@@ -1187,10 +1225,10 @@
         if (previewKey === self.lastAircraftDisplay) {
           return self.playAircraftAnnouncements(announcements);
         }
-        return Promise.all([
-          self.renderAircraft(message, payload, false),
-          self.playAircraftAnnouncements(announcements)
-        ]);
+        return self.renderAircraft(message, payload, false)
+          .then(function () {
+            return self.playAircraftAnnouncements(announcements);
+          });
       })
       .catch(function () {
         self.statusLabel.textContent = 'AIRCRAFT TRACKING';
