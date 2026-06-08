@@ -148,8 +148,9 @@ try {
         $rows[] = array(
             'id' => (int)$trackRow['id'],
             'symbol' => (string)($status['symbol'] ?? '?'),
+            'icon_code' => (string)($status['icon_code'] ?? 'unknown'),
             'aircraft' => (string)($status['label'] ?? $track['label']),
-            'aircraft_display' => (string)($status['aircraft_display'] ?? ''),
+            'aircraft_display' => (string)($status['aircraft_display'] ?? ($status['label'] ?? $track['label'])),
             'type' => (string)($status['type_display'] ?? ($track['type'] !== '' ? $track['type'] : '--')),
             'status' => (string)($status['status_text'] ?? ''),
             'status_code' => (string)($status['status_code'] ?? ''),

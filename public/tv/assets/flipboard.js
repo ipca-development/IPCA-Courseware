@@ -3,10 +3,12 @@
 
   var ROW_COLS = 24;
   var ROW_COUNT = 4;
-  var AIRCRAFT_COLS = 10;
-  var AIRCRAFT_TYPE_COLS = 8;
-  var AIRCRAFT_STATUS_COLS = 14;
-  var AIRCRAFT_BOARD_ROWS = 8;
+  var OPS_ICON_COLS = 1;
+  var OPS_AIRCRAFT_COLS = 8;
+  var OPS_TYPE_COLS = 8;
+  var OPS_STATUS_COLS = 32;
+  var OPS_DATA_ROWS = 8;
+  var OPS_BOARD_ROWS = OPS_DATA_ROWS + 1;
   var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()';
 
   var DEFAULT_MESSAGES = [
@@ -40,6 +42,13 @@
     var text = normalizeText(value);
     if (text.length > length) return text.slice(0, length);
     return text.padEnd(length, ' ');
+  }
+
+  function fitTextEllipsis(value, length) {
+    var text = normalizeText(value);
+    if (text.length <= length) return text.padEnd(length, ' ');
+    if (length <= 1) return text.slice(0, length);
+    return (text.slice(0, length - 1) + '.').padEnd(length, ' ');
   }
 
   function wrapWordsToRows(text, cols, maxRows) {
@@ -410,6 +419,153 @@
       });
   };
 
+  function OpsIconCell() {
+    this.el = document.createElement('div');
+    this.el.className = 'fb-ops-icon';
+    this.el.setAttribute('aria-hidden', 'true');
+    this.code = 'unknown';
+  }
+
+  OpsIconCell.prototype.setCode = function (code) {
+    this.code = String(code || 'unknown');
+    this.el.innerHTML = opsIconSvg(this.code);
+  };
+
+  function opsIconSvg(code) {
+    switch (code) {
+      case 'parked':
+        return '<svg viewBox="0 0 16 16"><text x="8" y="11" text-anchor="middle" fill="#d8e6ff" font-size="10" font-weight="700" font-family="monospace">P</text></svg>';
+      case 'taxi':
+        return '<svg viewBox="0 0 16 16"><rect x="2.5" y="6" width="11" height="4" rx="1" stroke="#d8e6ff"/><path d="M4 10v1.5M12 10v1.5"/></svg>';
+      case 'takeoff':
+        return '<svg viewBox="0 0 16 16"><path d="M3 12 L8 4 L13 12"/><path d="M8 4 L8 13"/></svg>';
+      case 'arrival':
+        return '<svg viewBox="0 0 16 16"><path d="M3 4 L8 12 L13 4"/><path d="M8 12 L8 3"/></svg>';
+      case 'flight':
+        return '<svg viewBox="0 0 16 16"><path d="M2 8 L6 7 L9 4 L10 7 L14 8 L10 9 L9 12 L6 9 Z"/></svg>';
+      default:
+        return '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.5"/></svg>';
+    }
+  }
+
+  function OpsFlipTile(char) {
+    this.char = char || ' ';
+    this.el = document.createElement('div');
+    this.el.className = 'fb-tile fb-ops-tile' + (this.char === ' ' ? ' is-space' : '');
+    this.el.innerHTML =
+      '<div class="fb-clip fb-clip-top fb-display-top"><span class="fb-char"></span></div>' +
+      '<div class="fb-clip fb-clip-bottom fb-display-bottom"><span class="fb-char"></span></div>' +
+      '<div class="fb-flap-stack fb-flap-upper">' +
+        '<div class="fb-flap-face fb-flap-front"><div class="fb-clip fb-clip-top"><span class="fb-char"></span></div></div>' +
+        '<div class="fb-flap-face fb-flap-back"><div class="fb-clip fb-clip-top"><span class="fb-char"></span></div></div>' +
+      '</div>' +
+      '<div class="fb-flap-stack fb-flap-lower">' +
+        '<div class="fb-flap-face fb-flap-front"><div class="fb-clip fb-clip-bottom"><span class="fb-char"></span></div></div>' +
+        '<div class="fb-flap-face fb-flap-back"><div class="fb-clip fb-clip-bottom"><span class="fb-char"></span></div></div>' +
+      '</div>';
+    this.displayTop = this.el.querySelector('.fb-display-top .fb-char');
+    this.displayBottom = this.el.querySelector('.fb-display-bottom .fb-char');
+    this.upperFront = this.el.querySelector('.fb-flap-upper .fb-flap-front .fb-char');
+    this.upperBack = this.el.querySelector('.fb-flap-upper .fb-flap-back .fb-char');
+    this.lowerFront = this.el.querySelector('.fb-flap-lower .fb-flap-front .fb-char');
+    this.lowerBack = this.el.querySelector('.fb-flap-lower .fb-flap-back .fb-char');
+    this.flapUpper = this.el.querySelector('.fb-flap-upper');
+    this.flapLower = this.el.querySelector('.fb-flap-lower');
+    this.setChar(this.char);
+  }
+
+  OpsFlipTile.prototype.setChar = function (char) {
+    this.char = char || ' ';
+    this.displayTop.textContent = this.char;
+    this.displayBottom.textContent = this.char;
+    this.upperFront.textContent = this.char;
+    this.upperBack.textContent = this.char;
+    this.lowerFront.textContent = this.char;
+    this.lowerBack.textContent = this.char;
+    this.el.classList.toggle('is-space', this.char === ' ');
+  };
+
+  OpsFlipTile.prototype.resetFlapMotion = function () {
+    this.flapUpper.style.animation = 'none';
+    this.flapLower.style.animation = 'none';
+    this.flapUpper.style.transform = '';
+    this.flapLower.style.transform = '';
+    void this.flapUpper.offsetWidth;
+    this.flapUpper.style.animation = '';
+    this.flapLower.style.animation = '';
+  };
+
+  OpsFlipTile.prototype.flipOnce = function (nextChar, duration, options, audio) {
+    var self = this;
+    return new Promise(function (resolve) {
+      if (nextChar === self.char) {
+        resolve();
+        return;
+      }
+      var fromChar = self.char;
+      self.upperFront.textContent = fromChar;
+      self.lowerFront.textContent = fromChar;
+      self.upperBack.textContent = nextChar;
+      self.lowerBack.textContent = nextChar;
+      self.el.style.setProperty('--flip-duration', duration + 'ms');
+      self.el.style.setProperty('--ops-tile-h', self.el.offsetHeight + 'px');
+      self.resetFlapMotion();
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        self.el.classList.remove('is-flipping');
+        self.resetFlapMotion();
+        self.setChar(nextChar);
+        resolve();
+      }
+      self.el.classList.add('is-flipping');
+      if (audio) audio.flap(0.65);
+      window.setTimeout(function () {
+        self.displayBottom.textContent = nextChar;
+      }, duration * 0.48);
+      self.flapUpper.addEventListener('animationend', finish, { once: true });
+      window.setTimeout(finish, duration + 80);
+    });
+  };
+  OpsFlipTile.prototype.flipTo = function (target, options, audio) {
+    var self = this;
+    options = options || {};
+    target = target || ' ';
+    if (target === this.char && !options.force) return Promise.resolve();
+    var duration = Math.floor(randomBetween(220, 420));
+    return self.flipOnce(target, duration, options, audio);
+  };
+
+  function OpsFlipLine(length, extraClass) {
+    this.length = length;
+    this.el = document.createElement('div');
+    this.el.className = 'fb-line fb-ops-line' + (extraClass ? ' ' + extraClass : '');
+    this.tiles = [];
+    for (var i = 0; i < length; i += 1) {
+      var tile = new OpsFlipTile(' ');
+      this.tiles.push(tile);
+      this.el.appendChild(tile.el);
+    }
+  }
+
+  OpsFlipLine.prototype.setText = function (text, options, audio, rowDelayBase) {
+    var fitted = fitTextEllipsis(text, this.length);
+    var jobs = [];
+    var self = this;
+    this.tiles.forEach(function (tile, idx) {
+      var char = fitted.charAt(idx);
+      if (char === tile.char && !options.force) return;
+      var delay = rowDelayBase + idx * randomBetween(2, 8);
+      jobs.push(new Promise(function (resolve) {
+        window.setTimeout(function () {
+          tile.flipTo(char, options, audio).then(resolve);
+        }, delay);
+      }));
+    });
+    return Promise.all(jobs);
+  };
+
   function FlipTile(char) {
     this.char = char || ' ';
     this.el = document.createElement('div');
@@ -592,6 +748,7 @@
     this.scheduleBuilt = false;
     this.aircraftBoardRows = [];
     this.aircraftBoardBuilt = false;
+    this.boardTitle = root.querySelector('#fbBoardTitle');
     this.messages = DEFAULT_MESSAGES.slice();
     this.messageHash = '';
     this.activeIndex = 0;
@@ -740,24 +897,40 @@
     };
   };
 
+  FlipBoard.prototype.setAircraftOpsMode = function (enabled) {
+    document.body.classList.toggle('is-aircraft-ops', !!enabled);
+    if (this.boardTitle) this.boardTitle.hidden = !enabled;
+  };
+
   FlipBoard.prototype.ensureAircraftBoard = function () {
     if (this.aircraftBoardBuilt || !this.aircraftBoard) return;
     this.aircraftBoardBuilt = true;
     var self = this;
-    for (var i = 0; i < AIRCRAFT_BOARD_ROWS; i += 1) {
+    for (var i = 0; i < OPS_BOARD_ROWS; i += 1) {
       var row = document.createElement('div');
-      row.className = 'fb-aircraft-row' + (i === 0 ? ' is-header' : '');
-      var aircraftLine = new FlipLine(AIRCRAFT_COLS);
-      var typeLine = new FlipLine(AIRCRAFT_TYPE_COLS);
-      var statusLine = new FlipLine(AIRCRAFT_STATUS_COLS);
+      var isHeader = i === 0;
+      row.className = 'fb-aircraft-row' + (isHeader ? ' is-header' : '');
+      var iconCell = new OpsIconCell();
+      var aircraftLine = new OpsFlipLine(OPS_AIRCRAFT_COLS);
+      var typeLine = new OpsFlipLine(OPS_TYPE_COLS);
+      var statusLine = new OpsFlipLine(OPS_STATUS_COLS, 'fb-ops-status-line');
+      if (isHeader) {
+        var iconLabel = document.createElement('div');
+        iconLabel.className = 'fb-ops-col-label';
+        iconLabel.textContent = 'ICON';
+        row.appendChild(iconLabel);
+      } else {
+        row.appendChild(iconCell.el);
+      }
       row.appendChild(aircraftLine.el);
       row.appendChild(typeLine.el);
       row.appendChild(statusLine.el);
       self.aircraftBoardRows.push({
+        icon: iconCell,
         aircraft: aircraftLine,
         type: typeLine,
         status: statusLine,
-        isHeader: i === 0
+        isHeader: isHeader
       });
       self.aircraftBoard.appendChild(row);
     }
@@ -854,13 +1027,14 @@
 
   FlipBoard.prototype.renderAircraftBoard = function (payload, force) {
     this.ensureAircraftBoard();
+    this.setAircraftOpsMode(true);
     this.messageBoard.hidden = true;
     this.scheduleBoard.hidden = true;
     if (this.aircraftBoard) this.aircraftBoard.hidden = false;
 
     var rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
     var boardKey = JSON.stringify(rows.map(function (row) {
-      return [row.aircraft_display, row.type, row.status].join('|');
+      return [row.icon_code, row.aircraft_display, row.type, row.status].join('|');
     }));
     if (!force && boardKey === this.lastAircraftBoardKey) {
       return Promise.resolve();
@@ -874,14 +1048,26 @@
       var item;
       if (row.isHeader) {
         item = { aircraft: 'AIRCRAFT', type: 'TYPE', status: 'STATUS' };
-      } else {
-        item = rows[idx - 1] || { aircraft_display: '', type: '', status: '' };
+        return Promise.all([
+          row.aircraft.setText(item.aircraft, options, self.audio, 0),
+          row.type.setText(item.type, options, self.audio, 4),
+          row.status.setText(item.status, options, self.audio, 8)
+        ]);
       }
-      var rowDelay = idx * randomBetween(50, 100);
+
+      item = rows[idx - 1] || {
+        icon_code: 'unknown',
+        aircraft_display: '',
+        aircraft: '',
+        type: '',
+        status: ''
+      };
+      var rowDelay = (idx - 1) * randomBetween(18, 36);
+      if (row.icon) row.icon.setCode(item.icon_code || 'unknown');
       return Promise.all([
-        row.aircraft.setText(row.isHeader ? item.aircraft : (item.aircraft_display || item.aircraft || ''), options, self.audio, rowDelay),
-        row.type.setText(item.type || '', options, self.audio, rowDelay + 30),
-        row.status.setText(item.status || '', options, self.audio, rowDelay + 60)
+        row.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay),
+        row.type.setText(item.type || '', options, self.audio, rowDelay + 6),
+        row.status.setText(item.status || '', options, self.audio, rowDelay + 12)
       ]);
     }));
   };
@@ -908,6 +1094,7 @@
   };
 
   FlipBoard.prototype.renderAircraft = function (message, statusPayload, urgent) {
+    this.setAircraftOpsMode(false);
     this.messageBoard.hidden = false;
     this.scheduleBoard.hidden = true;
     if (this.aircraftBoard) this.aircraftBoard.hidden = true;
@@ -1064,6 +1251,7 @@
   };
 
   FlipBoard.prototype.renderMessage = function (message, urgent) {
+    this.setAircraftOpsMode(false);
     this.messageBoard.hidden = false;
     this.scheduleBoard.hidden = true;
     if (this.aircraftBoard) this.aircraftBoard.hidden = true;
@@ -1080,6 +1268,7 @@
   };
 
   FlipBoard.prototype.renderSchedule = function (message, urgent) {
+    this.setAircraftOpsMode(false);
     this.ensureScheduleBoard();
     this.messageBoard.hidden = true;
     this.scheduleBoard.hidden = false;

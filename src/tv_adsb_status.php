@@ -67,15 +67,20 @@ function tv_adsb_default_home_airport(): string
 function tv_adsb_airports(): array
 {
     return array(
-        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156, 'elev_ft' => 115),
-        'KBLH' => array('name' => 'Blythe', 'lat' => 33.619167, 'lon' => -114.716889, 'elev_ft' => 399),
-        'KCRQ' => array('name' => 'Carlsbad', 'lat' => 33.128333, 'lon' => -117.280000, 'elev_ft' => 329),
-        'KMYF' => array('name' => 'Montgomery Field', 'lat' => 32.815833, 'lon' => -117.139444, 'elev_ft' => 427),
-        'KSAN' => array('name' => 'San Diego', 'lat' => 32.733556, 'lon' => -117.189667, 'elev_ft' => 17),
-        'KPSP' => array('name' => 'Palm Springs', 'lat' => 33.829667, 'lon' => -116.506667, 'elev_ft' => 477),
-        'KONT' => array('name' => 'Ontario', 'lat' => 34.056000, 'lon' => -117.601194, 'elev_ft' => 944),
-        'KLAX' => array('name' => 'Los Angeles', 'lat' => 33.942500, 'lon' => -118.408056, 'elev_ft' => 125),
-        'EBAW' => array('name' => 'Antwerp', 'lat' => 51.189444, 'lon' => 4.460278, 'elev_ft' => 39),
+        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156, 'elev_ft' => 115, 'surface_nm' => 1.8, 'boundary_nm' => 5.0),
+        'KPSP' => array('name' => 'Palm Springs', 'lat' => 33.829667, 'lon' => -116.506667, 'elev_ft' => 477, 'surface_nm' => 2.0, 'boundary_nm' => 6.0),
+        'KHMT' => array('name' => 'Hemet Ryan', 'lat' => 33.734000, 'lon' => -117.023000, 'elev_ft' => 1517, 'surface_nm' => 1.5, 'boundary_nm' => 5.0),
+        'KUDD' => array('name' => 'Bermuda Dunes', 'lat' => 33.748333, 'lon' => -116.274722, 'elev_ft' => 73, 'surface_nm' => 1.5, 'boundary_nm' => 5.0),
+        'KBNG' => array('name' => 'Banning', 'lat' => 33.922611, 'lon' => -116.850694, 'elev_ft' => 2219, 'surface_nm' => 1.2, 'boundary_nm' => 4.0),
+        'KRAL' => array('name' => 'Riverside Muni', 'lat' => 33.951894, 'lon' => -117.445111, 'elev_ft' => 818, 'surface_nm' => 1.6, 'boundary_nm' => 5.0),
+        'KSBD' => array('name' => 'San Bernardino', 'lat' => 34.095356, 'lon' => -117.234872, 'elev_ft' => 1159, 'surface_nm' => 1.8, 'boundary_nm' => 5.0),
+        'KBLH' => array('name' => 'Blythe', 'lat' => 33.619167, 'lon' => -114.716889, 'elev_ft' => 399, 'surface_nm' => 1.5, 'boundary_nm' => 5.0),
+        'KCRQ' => array('name' => 'Carlsbad', 'lat' => 33.128333, 'lon' => -117.280000, 'elev_ft' => 329, 'surface_nm' => 1.6, 'boundary_nm' => 5.0),
+        'KMYF' => array('name' => 'Montgomery Field', 'lat' => 32.815833, 'lon' => -117.139444, 'elev_ft' => 427, 'surface_nm' => 1.6, 'boundary_nm' => 5.0),
+        'KSAN' => array('name' => 'San Diego', 'lat' => 32.733556, 'lon' => -117.189667, 'elev_ft' => 17, 'surface_nm' => 2.5, 'boundary_nm' => 8.0),
+        'KONT' => array('name' => 'Ontario', 'lat' => 34.056000, 'lon' => -117.601194, 'elev_ft' => 944, 'surface_nm' => 2.2, 'boundary_nm' => 6.0),
+        'KLAX' => array('name' => 'Los Angeles', 'lat' => 33.942500, 'lon' => -118.408056, 'elev_ft' => 125, 'surface_nm' => 3.0, 'boundary_nm' => 10.0),
+        'EBAW' => array('name' => 'Antwerp', 'lat' => 51.189444, 'lon' => 4.460278, 'elev_ft' => 39, 'surface_nm' => 2.0, 'boundary_nm' => 6.0),
     );
 }
 
@@ -327,6 +332,8 @@ function tv_adsb_nearest_airport(float $lat, float $lon, float $maxNm = 5.0): ?a
     return $best;
 }
 
+require_once __DIR__ . '/tv_adsb_geofence.php';
+require_once __DIR__ . '/tv_adsb_fsm.php';
 require_once __DIR__ . '/tv_adsb_operations.php';
 require_once __DIR__ . '/tv_adsb_announcements.php';
 
@@ -418,7 +425,6 @@ function tv_adsb_build_status(array $trackInput, array $options = array()): arra
         return $stale;
     }
 
-    tv_adsb_record_history($cache, $aircraft, $gate, $homeAirport);
     $status = tv_adsb_format_status($track, $aircraft, $gate, $homeAirport, $cache);
     $status['source'] = $source;
     $status['server_time'] = gmdate('c');

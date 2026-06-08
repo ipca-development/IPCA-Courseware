@@ -30,7 +30,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
   <title>IPCA Flip Board</title>
   <link rel="stylesheet" href="/tv/assets/flipboard.css?v=<?= h($cssVersion) ?>">
 </head>
-<body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?>">
+<body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?><?= $screenKey === 'aircraft' ? ' is-aircraft-ops' : '' ?>">
   <div
     class="fb-stage"
     id="ipcaFlipBoardApp"
@@ -56,6 +56,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
             alt="IPCA International Pilot Center Alliance"
             width="240"
             height="auto">
+          <div class="fb-board-title" id="fbBoardTitle"<?= $screenKey === 'aircraft' ? '' : ' hidden' ?>>AIRCRAFT OPS</div>
         </div>
         <div class="fb-status-cluster">
           <div class="fb-status-light" id="fbStatusLight" aria-hidden="true"></div>

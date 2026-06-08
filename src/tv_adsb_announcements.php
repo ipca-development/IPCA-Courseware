@@ -3,19 +3,27 @@ declare(strict_types=1);
 
 function tv_adsb_announceable_status_codes(): array
 {
-    return array('landed', 'takeoff', 'in_flight', 'taxi_in');
+    return array(
+        'parked_at_spc',
+        'taxiing_out',
+        'taxiing_in',
+        'taking_off',
+        'landing',
+        'landed',
+        'in_flight',
+    );
 }
 
 function tv_adsb_pa_gate_phrase(array $gate): string
 {
-    $label = trim((string)($gate['label'] ?? 'SoCal Pilot Center Gate'));
+    $label = trim((string)($gate['label'] ?? 'SoCal Pilot Center'));
     if ($label === '') {
-        $label = 'SoCal Pilot Center Gate';
+        $label = 'SoCal Pilot Center';
     }
-    if (stripos($label, 'gate') === false) {
+    if (stripos($label, 'gate') === false && stripos($label, 'center') === false) {
         $label .= ' Gate';
     }
-    return 'the ' . $label;
+    return $label;
 }
 
 function tv_adsb_airport_name_for_speech(array $status, array $cache): string
@@ -39,26 +47,6 @@ function tv_adsb_airport_name_for_speech(array $status, array $cache): string
     return 'the airport';
 }
 
-function tv_adsb_record_departure_airport(array $status, array &$cache): void
-{
-    $code = (string)($status['status_code'] ?? '');
-    if (!in_array($code, array('takeoff', 'taxi_out'), true)) {
-        return;
-    }
-
-    $nearest = $status['nearest_airport'] ?? null;
-    if (is_array($nearest) && !empty($nearest['name'])) {
-        $cache['departure_airport'] = (string)$nearest['name'];
-        return;
-    }
-
-    $home = tv_adsb_normalize_home_airport((string)($status['home_airport'] ?? ''));
-    $airports = tv_adsb_airports();
-    if (isset($airports[$home]['name'])) {
-        $cache['departure_airport'] = (string)$airports[$home]['name'];
-    }
-}
-
 function tv_adsb_extract_eta_from_status(array $status): string
 {
     $text = (string)($status['status_text'] ?? '');
@@ -66,6 +54,15 @@ function tv_adsb_extract_eta_from_status(array $status): string
         return (string)$matches[1];
     }
     return tv_adsb_format_local_time(time());
+}
+
+function tv_adsb_speech_altitude(?float $altFt): string
+{
+    $rounded = tv_adsb_round_altitude_100($altFt);
+    if ($rounded === null) {
+        return 'unknown altitude';
+    }
+    return number_format($rounded) . ' feet';
 }
 
 function tv_adsb_build_event_speech(array $status, array $gate, array $cache): string
@@ -79,27 +76,41 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
     $airport = tv_adsb_airport_name_for_speech($status, $cache);
 
     switch ($code) {
-        case 'landed':
-            return $label . ' Landed at ' . $airport;
+        case 'parked_at_spc':
+            return $label . ' is parked at ' . tv_adsb_pa_gate_phrase($gate) . '.';
 
-        case 'takeoff':
-            return $label . ' is taking off from ' . $airport;
+        case 'taxiing_out':
+            return $label . ' is taxiing out.';
 
-        case 'in_flight':
-            $from = trim((string)($cache['departure_airport'] ?? ''));
-            if ($from === '') {
-                $from = $airport;
-            }
-            return $label . ' is Airborne from ' . $from;
-
-        case 'taxi_in':
+        case 'taxiing_in':
             $eta = tv_adsb_extract_eta_from_status($status);
             return $label . ' is taxiing in and expected to arrive at '
-                . tv_adsb_pa_gate_phrase($gate) . ' at time: ' . $eta;
+                . tv_adsb_pa_gate_phrase($gate) . ' at ' . $eta . '.';
+
+        case 'taking_off':
+            return $label . ' is taking off from ' . $airport . '.';
+
+        case 'landing':
+            return $label . ' is landing at ' . $airport . '.';
+
+        case 'landed':
+            return $label . ' has landed.';
+
+        case 'in_flight':
+            $direction = strtolower((string)($status['direction'] ?? 'southwest'));
+            $distance = number_format((float)($status['distance_nm'] ?? 0), 1);
+            $altSpeech = tv_adsb_speech_altitude(isset($status['altitude_ft']) ? (float)$status['altitude_ft'] : null);
+            return $label . ' is in flight, ' . $distance . ' nautical miles ' . $direction . ' at ' . $altSpeech . '.';
 
         default:
             return '';
     }
+}
+
+function tv_adsb_announcement_cooldown_ok(array &$cache, int $seconds = 30): bool
+{
+    $last = (int)($cache['last_announcement_at'] ?? 0);
+    return (time() - $last) >= $seconds;
 }
 
 function tv_adsb_maybe_announcement(
@@ -112,33 +123,22 @@ function tv_adsb_maybe_announcement(
         return null;
     }
 
-    tv_adsb_record_departure_airport($status, $cache);
-
-    $newCode = (string)($status['status_code'] ?? '');
-    $prevCode = '';
-    if (!empty($cache['last_status']) && is_array($cache['last_status'])) {
-        $prevCode = (string)($cache['last_status']['status_code'] ?? '');
-    }
-
-    if ($newCode === 'parked_spc' && $prevCode !== 'parked_spc') {
-        $cache['last_announced_status'] = 'parked_spc';
-        unset($cache['departure_airport']);
-        return null;
-    }
-
+    $newCode = (string)($cache['fsm_state'] ?? ($status['status_code'] ?? ''));
     if (!in_array($newCode, tv_adsb_announceable_status_codes(), true)) {
         return null;
     }
 
-    if ($prevCode === '' || $prevCode === $newCode) {
-        if (!isset($cache['last_announced_status'])) {
-            $cache['last_announced_status'] = $newCode;
-        }
+    $lastAnnounced = (string)($cache['fsm_prev_announced_state'] ?? '');
+    if ($lastAnnounced === '') {
+        $cache['fsm_prev_announced_state'] = $newCode;
         return null;
     }
 
-    $lastAnnounced = (string)($cache['last_announced_status'] ?? '');
     if ($lastAnnounced === $newCode) {
+        return null;
+    }
+
+    if (!tv_adsb_announcement_cooldown_ok($cache, 30)) {
         return null;
     }
 
@@ -147,7 +147,8 @@ function tv_adsb_maybe_announcement(
         return null;
     }
 
-    $cache['last_announced_status'] = $newCode;
+    $cache['fsm_prev_announced_state'] = $newCode;
+    $cache['last_announcement_at'] = time();
 
     return array(
         'speech' => $speech,
