@@ -337,14 +337,13 @@ final class ControlledPublishingBookRenderer
                 . 'No parts generated yet — use Regenerate in the toolbar.</td></tr>';
         }
 
-        return '<div class="cpb-table-block cpb-table-block--align-left cpb-lep-table-block" contenteditable="false">'
-            . '<div class="cpb-table-wrap cpb-table-border-thin">'
-            . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1" style="width:100%">'
+        return '<div class="cpb-lep-parts-wrap cpb-table-wrap cpb-table-border-thin" contenteditable="false">'
+            . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1">'
             . '<thead><tr class="cpb-table-header-row">'
             . '<th>Part</th><th>Pages</th><th>Date</th><th>Revision</th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
-            . '</table></div></div>';
+            . '</table></div>';
     }
 
     /**
