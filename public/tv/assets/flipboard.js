@@ -3,11 +3,8 @@
 
   var ROW_COLS = 24;
   var ROW_COUNT = 4;
-  var OPS_ICON_COLS = 1;
   var OPS_AIRCRAFT_COLS = 8;
-  var OPS_TYPE_COLS = 8;
-  var OPS_STATUS_COLS = 32;
-  var OPS_DATA_ROWS = 8;
+  var OPS_DATA_ROWS = 12;
   var OPS_BOARD_ROWS = OPS_DATA_ROWS + 1;
   var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()';
 
@@ -537,10 +534,26 @@
     return self.flipOnce(target, duration, options, audio);
   };
 
-  function OpsFlipLine(length, extraClass) {
+  function OpsTextCell(kind) {
+    this.el = document.createElement('div');
+    this.el.className = 'fb-ops-text' + (kind ? ' is-' + kind : '');
+    this.value = '';
+  }
+
+  OpsTextCell.prototype.setText = function (text) {
+    var next = normalizeText(text);
+    if (next === this.value) {
+      return Promise.resolve();
+    }
+    this.value = next;
+    this.el.textContent = next;
+    return Promise.resolve();
+  };
+
+  function OpsFlipLine(length) {
     this.length = length;
     this.el = document.createElement('div');
-    this.el.className = 'fb-line fb-ops-line' + (extraClass ? ' ' + extraClass : '');
+    this.el.className = 'fb-line fb-ops-reg-line';
     this.tiles = [];
     for (var i = 0; i < length; i += 1) {
       var tile = new OpsFlipTile(' ');
@@ -762,11 +775,25 @@
     this.aircraftPollTimer = null;
   }
 
+  FlipBoard.prototype.isAircraftOpsScreen = function () {
+    return this.screenKey === 'aircraft'
+      || this.root.getAttribute('data-aircraft-ops') === '1';
+  };
+
   FlipBoard.prototype.init = function () {
-    this.buildMessageBoard();
     this.bindAudio();
     this.tickClock();
-    this.renderCurrent(true);
+    if (this.isAircraftOpsScreen()) {
+      this.setAircraftOpsMode(true);
+      if (this.messageBoard) this.messageBoard.hidden = true;
+      if (this.aircraftBoard) this.aircraftBoard.hidden = false;
+      if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
+      this.fetchAndRenderAircraftBoard(true);
+      this.ensureAircraftPoll();
+    } else {
+      this.buildMessageBoard();
+      this.renderCurrent(true);
+    }
     this.poll();
     window.setInterval(this.poll.bind(this), this.pollMs);
     window.setInterval(this.tickClock.bind(this), 1000);
@@ -872,6 +899,7 @@
   };
 
   FlipBoard.prototype.isAircraftBoardMode = function () {
+    if (this.isAircraftOpsScreen()) return true;
     var messages = this.messages || [];
     if (!messages.length) return false;
     return messages.every(function (message) {
@@ -900,36 +928,48 @@
   FlipBoard.prototype.setAircraftOpsMode = function (enabled) {
     document.body.classList.toggle('is-aircraft-ops', !!enabled);
     if (this.boardTitle) this.boardTitle.hidden = !enabled;
+    if (this.messageBoard) this.messageBoard.hidden = !!enabled;
+    if (enabled && this.aircraftBoard) this.aircraftBoard.hidden = false;
   };
 
   FlipBoard.prototype.ensureAircraftBoard = function () {
     if (this.aircraftBoardBuilt || !this.aircraftBoard) return;
     this.aircraftBoardBuilt = true;
     var self = this;
+
+    function headerLabel(text) {
+      var el = document.createElement('div');
+      el.className = 'fb-ops-col-label';
+      el.textContent = text;
+      return el;
+    }
+
     for (var i = 0; i < OPS_BOARD_ROWS; i += 1) {
       var row = document.createElement('div');
       var isHeader = i === 0;
       row.className = 'fb-aircraft-row' + (isHeader ? ' is-header' : '');
-      var iconCell = new OpsIconCell();
-      var aircraftLine = new OpsFlipLine(OPS_AIRCRAFT_COLS);
-      var typeLine = new OpsFlipLine(OPS_TYPE_COLS);
-      var statusLine = new OpsFlipLine(OPS_STATUS_COLS, 'fb-ops-status-line');
+      var iconCell = isHeader ? null : new OpsIconCell();
+      var aircraftLine = isHeader ? null : new OpsFlipLine(OPS_AIRCRAFT_COLS);
+      var typeCell = new OpsTextCell('type');
+      var statusCell = new OpsTextCell('status');
+
       if (isHeader) {
-        var iconLabel = document.createElement('div');
-        iconLabel.className = 'fb-ops-col-label';
-        iconLabel.textContent = 'ICON';
-        row.appendChild(iconLabel);
+        row.appendChild(headerLabel('ICON'));
+        row.appendChild(headerLabel('AIRCRAFT'));
+        typeCell.setText('TYPE');
+        statusCell.setText('STATUS');
       } else {
         row.appendChild(iconCell.el);
+        row.appendChild(aircraftLine.el);
       }
-      row.appendChild(aircraftLine.el);
-      row.appendChild(typeLine.el);
-      row.appendChild(statusLine.el);
+      row.appendChild(typeCell.el);
+      row.appendChild(statusCell.el);
+
       self.aircraftBoardRows.push({
         icon: iconCell,
         aircraft: aircraftLine,
-        type: typeLine,
-        status: statusLine,
+        type: typeCell,
+        status: statusCell,
         isHeader: isHeader
       });
       self.aircraftBoard.appendChild(row);
@@ -947,7 +987,7 @@
       this.aircraftPollTimer = null;
     }
 
-    if (!hasAircraft) return;
+    if (!hasAircraft && !this.isAircraftOpsScreen()) return;
 
     this.aircraftPollTimer = window.setInterval(function () {
       if (self.rendering) return;
@@ -1045,36 +1085,33 @@
     var self = this;
 
     return Promise.all(this.aircraftBoardRows.map(function (row, idx) {
-      var item;
       if (row.isHeader) {
-        item = { aircraft: 'AIRCRAFT', type: 'TYPE', status: 'STATUS' };
-        return Promise.all([
-          row.aircraft.setText(item.aircraft, options, self.audio, 0),
-          row.type.setText(item.type, options, self.audio, 4),
-          row.status.setText(item.status, options, self.audio, 8)
-        ]);
+        return Promise.resolve();
       }
 
-      item = rows[idx - 1] || {
+      var item = rows[idx - 1] || {
         icon_code: 'unknown',
         aircraft_display: '',
         aircraft: '',
         type: '',
         status: ''
       };
-      var rowDelay = (idx - 1) * randomBetween(18, 36);
+      var rowDelay = (idx - 1) * randomBetween(12, 24);
       if (row.icon) row.icon.setCode(item.icon_code || 'unknown');
       return Promise.all([
-        row.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay),
-        row.type.setText(item.type || '', options, self.audio, rowDelay + 6),
-        row.status.setText(item.status || '', options, self.audio, rowDelay + 12)
+        row.aircraft
+          ? row.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay)
+          : Promise.resolve(),
+        row.type.setText(item.type || ''),
+        row.status.setText(item.status || '')
       ]);
     }));
   };
 
   FlipBoard.prototype.fetchAndRenderAircraftBoard = function (force) {
     var self = this;
-    this.statusLabel.textContent = 'AIRCRAFT OPS';
+    this.setAircraftOpsMode(true);
+    if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
     this.root.classList.toggle('is-urgent', false);
     this.statusLight.classList.toggle('is-urgent', false);
 
@@ -1160,20 +1197,30 @@
         return res.json();
       })
       .then(function (payload) {
-        var incoming = Array.isArray(payload.messages) && payload.messages.length
-          ? payload.messages
-          : DEFAULT_MESSAGES;
+        var incoming = Array.isArray(payload.messages) ? payload.messages : [];
+        if (!incoming.length && !self.isAircraftOpsScreen()) {
+          incoming = DEFAULT_MESSAGES.slice();
+        }
         var nextHash = hashMessages(incoming);
         if (nextHash === self.messageHash) return;
         self.messageHash = nextHash;
         self.messages = incoming;
         self.lastAircraftBoardKey = '';
-        self.prefetchAnnouncements(incoming);
+        if (!self.isAircraftOpsScreen()) {
+          self.prefetchAnnouncements(incoming);
+        }
         self.ensureAircraftPoll();
         self.activeIndex = 0;
         self.renderCurrent(false);
       })
       .catch(function () {
+        if (self.isAircraftOpsScreen()) {
+          if (!self.messageHash) {
+            self.messages = [];
+            self.fetchAndRenderAircraftBoard(false);
+          }
+          return;
+        }
         if (!self.messageHash) {
           self.messages = DEFAULT_MESSAGES.slice();
           self.renderCurrent(false);

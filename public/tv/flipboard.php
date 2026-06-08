@@ -46,7 +46,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-gate-lon="<?= h((string)($kioskConfig['gate_lon'] ?? '-116.1600')) ?>"
     data-gate-radius-nm="<?= h((string)($kioskConfig['gate_radius_nm'] ?? '0.18')) ?>"
     data-home-airport="<?= h((string)($kioskConfig['home_airport'] ?? 'KTRM')) ?>"
-    data-auto-audio="<?= ((int)($kioskConfig['audio_enabled'] ?? 1) === 1) ? '1' : '0' ?>">
+    data-auto-audio="<?= ((int)($kioskConfig['audio_enabled'] ?? 1) === 1) ? '1' : '0' ?>"
+    data-aircraft-ops="<?= $screenKey === 'aircraft' ? '1' : '0' ?>">
     <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
         <div class="fb-brand-stack">
@@ -72,9 +73,9 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
           <span></span><span></span><span></span><span></span>
         </div>
         <div class="fb-perspective">
-          <div class="fb-message-board" id="fbMessageBoard"></div>
+          <div class="fb-message-board" id="fbMessageBoard"<?= $screenKey === 'aircraft' ? ' hidden' : '' ?>></div>
           <div class="fb-schedule-board" id="fbScheduleBoard" hidden></div>
-          <div class="fb-aircraft-board" id="fbAircraftBoard" hidden></div>
+          <div class="fb-aircraft-board" id="fbAircraftBoard"<?= $screenKey === 'aircraft' ? '' : ' hidden' ?>></div>
         </div>
       </section>
 

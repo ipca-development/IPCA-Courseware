@@ -250,7 +250,9 @@ function tv_adsb_fsm_required_confirmations(string $state): int
 function tv_adsb_fsm_build_display(string $state, array $obs, array &$cache, array $gate): string
 {
     $nearest = $obs['nearest_airport'] ?? null;
+    $airportIcao = is_array($nearest) ? strtoupper((string)($nearest['icao'] ?? '')) : '';
     $airportName = is_array($nearest) ? strtoupper((string)($nearest['name'] ?? 'AIRPORT')) : 'AIRPORT';
+    $airportShort = $airportIcao !== '' ? $airportIcao : $airportName;
     $spcDist = (float)($obs['spc_dist_nm'] ?? 0);
     $gs = (float)($obs['gs'] ?? 0);
 
@@ -267,13 +269,13 @@ function tv_adsb_fsm_build_display(string $state, array $obs, array &$cache, arr
             return 'TAXI IN ETA ' . tv_adsb_format_local_time(time() + (int)round($etaMin * 60));
 
         case 'taking_off':
-            return 'TAKING OFF FROM ' . $airportName;
+            return 'TAKING OFF FROM ' . $airportShort;
 
         case 'landing':
-            return 'LANDING AT ' . $airportName;
+            return 'LANDING ' . $airportShort;
 
         case 'landed':
-            return 'LANDED AT ' . $airportName;
+            return 'LANDED AT ' . $airportShort;
 
         case 'in_flight':
             $altRounded = tv_adsb_round_altitude_100($obs['alt']);

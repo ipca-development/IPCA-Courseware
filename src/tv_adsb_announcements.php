@@ -18,10 +18,7 @@ function tv_adsb_pa_gate_phrase(array $gate): string
 {
     $label = trim((string)($gate['label'] ?? 'SoCal Pilot Center'));
     if ($label === '') {
-        $label = 'SoCal Pilot Center';
-    }
-    if (stripos($label, 'gate') === false && stripos($label, 'center') === false) {
-        $label .= ' Gate';
+        return 'SoCal Pilot Center';
     }
     return $label;
 }
@@ -47,24 +44,6 @@ function tv_adsb_airport_name_for_speech(array $status, array $cache): string
     return 'the airport';
 }
 
-function tv_adsb_extract_eta_from_status(array $status): string
-{
-    $text = (string)($status['status_text'] ?? '');
-    if (preg_match('/ETA\s+(\d{1,2}:\d{2})/i', $text, $matches) === 1) {
-        return (string)$matches[1];
-    }
-    return tv_adsb_format_local_time(time());
-}
-
-function tv_adsb_speech_altitude(?float $altFt): string
-{
-    $rounded = tv_adsb_round_altitude_100($altFt);
-    if ($rounded === null) {
-        return 'unknown altitude';
-    }
-    return number_format($rounded) . ' feet';
-}
-
 function tv_adsb_build_event_speech(array $status, array $gate, array $cache): string
 {
     $label = tv_adsb_normalize_label((string)($status['label'] ?? ''));
@@ -83,9 +62,7 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
             return $label . ' is taxiing out.';
 
         case 'taxiing_in':
-            $eta = tv_adsb_extract_eta_from_status($status);
-            return $label . ' is taxiing in and expected to arrive at '
-                . tv_adsb_pa_gate_phrase($gate) . ' at ' . $eta . '.';
+            return $label . ' is taxiing in.';
 
         case 'taking_off':
             return $label . ' is taking off from ' . $airport . '.';
@@ -97,10 +74,7 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
             return $label . ' has landed.';
 
         case 'in_flight':
-            $direction = strtolower((string)($status['direction'] ?? 'southwest'));
-            $distance = number_format((float)($status['distance_nm'] ?? 0), 1);
-            $altSpeech = tv_adsb_speech_altitude(isset($status['altitude_ft']) ? (float)$status['altitude_ft'] : null);
-            return $label . ' is in flight, ' . $distance . ' nautical miles ' . $direction . ' at ' . $altSpeech . '.';
+            return $label . ' is in flight.';
 
         default:
             return '';
