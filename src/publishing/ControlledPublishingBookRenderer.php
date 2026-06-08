@@ -592,6 +592,9 @@ final class ControlledPublishingBookRenderer
                 . '<input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background (select a cell first)">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear</button>'
                 . '<span class="cpb-table-style-sep"></span>'
+                . '<span class="cpb-table-style-label">Text</span>'
+                . '<input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color (select a cell first)">'
+                . '<span class="cpb-table-style-sep"></span>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
                 . '<span class="cpb-table-style-sep"></span>'
@@ -813,7 +816,7 @@ final class ControlledPublishingBookRenderer
             }
         }
         if ($fontSize > 0) {
-            $styles[] = 'font-size:' . $fontSize . 'pt';
+            $styles[] = 'font-size:' . $fontSize . 'pt !important';
             $attrs['data-font-size'] = (string)$fontSize;
         }
         if ($textColor !== '') {

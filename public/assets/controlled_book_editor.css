@@ -892,6 +892,24 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-table th.cpb-font-mono { font-family: 'Courier New', Courier, monospace; }
 .cpb-table td.cpb-font-arial,
 .cpb-table th.cpb-font-arial { font-family: Arial, Helvetica, sans-serif; }
+
+/* Override app-shell `table td:first-child { font-family: monospace !important }` in the editor. */
+.cmp-page .cpb-editor-root .cpb-table td.cpb-font-serif,
+.cmp-page .cpb-editor-root .cpb-table th.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-table td.cpb-font-sans,
+.cmp-page .cpb-editor-root .cpb-table th.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-table td.cpb-font-mono,
+.cmp-page .cpb-editor-root .cpb-table th.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace !important;
+}
+.cmp-page .cpb-editor-root .cpb-table td.cpb-font-arial,
+.cmp-page .cpb-editor-root .cpb-table th.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
 .cpb-table td.cpb-font-manuallabel,
 .cpb-table th.cpb-font-manuallabel {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;

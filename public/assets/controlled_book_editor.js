@@ -654,14 +654,22 @@
     });
 
     canvasEl.addEventListener('input', function (e) {
-      var input = e.target.closest('input[data-table-action="border-color"], input[data-table-action="cell-bg"]');
+      var input = e.target.closest('input[data-table-action="border-color"], input[data-table-action="cell-bg"], input[data-table-action="cell-text-color"]');
       if (!input || !state.editable) return;
       var blockEl = input.closest('.cpb-block');
       if (!blockEl) return;
       pushUndo();
       var action = input.getAttribute('data-table-action');
       if (action === 'border-color') applyTableBorderColor(blockEl, input.value);
-      else if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+      else if (action === 'cell-text-color') {
+        if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+          setStatus('Click a table cell first', 'error');
+          return;
+        }
+        applyColorToTableCell(state.focusedTableCell, input.value);
+        if (textColorInput) textColorInput.value = input.value;
+        updateParagraphStyleSelectForElement(state.focusedTableCell);
+      } else if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
         setStatus('Click a table cell first', 'error');
         return;
       } else applyTableCellBg(blockEl, state.focusedTableCell, input.value);
@@ -1543,6 +1551,10 @@
           var cellColor = extractCellTextColor(cell);
           if (cellColor) textColorInput.value = cellColor;
         }
+        var textColorControl = blockEl.querySelector('[data-table-action="cell-text-color"]');
+        if (textColorControl) {
+          textColorControl.value = extractCellTextColor(cell) || '#0f172a';
+        }
       });
       cell.addEventListener('input', function () {
         var titleRow = cell.closest('[data-title-row]');
@@ -1631,7 +1643,7 @@
       cell.style.removeProperty('text-transform');
     }
     if (opts.size) {
-      cell.style.fontSize = opts.size + 'pt';
+      cell.style.setProperty('font-size', opts.size + 'pt', 'important');
       cell.setAttribute('data-font-size', String(opts.size));
     }
     if (opts.color) {
@@ -1659,11 +1671,33 @@
     cell.focus();
     restoreSelectionRange();
     if (hasTextSelectionInCanvas() && !selectionCoversElementText(cell)) {
-      applyInlineStyleToSelection({ color: color });
-      return;
+      if (applyInlineStyleToSelection({ color: color })) return;
     }
     clearInlineTypographyInElement(cell);
     applyStyleToTableCell(cell, { color: color });
+  }
+
+  function applyFontToTableCell(cell, font) {
+    if (!cell || !font) return;
+    var stack = FONT_STACKS[font] || '';
+    cell.focus();
+    restoreSelectionRange();
+    if (hasTextSelectionInCanvas() && !selectionCoversElementText(cell)) {
+      if (applyInlineStyleToSelection({ fontFamily: stack })) return;
+    }
+    clearInlineTypographyInElement(cell);
+    applyStyleToTableCell(cell, { font: font });
+  }
+
+  function applySizeToTableCell(cell, size) {
+    if (!cell || !size) return;
+    cell.focus();
+    restoreSelectionRange();
+    if (hasTextSelectionInCanvas() && !selectionCoversElementText(cell)) {
+      if (applyInlineStyleToSelection({ fontSize: size + 'pt' })) return;
+    }
+    clearInlineTypographyInElement(cell);
+    applyStyleToTableCell(cell, { size: size });
   }
 
   function applyTypographyToCalloutElement(el, typo) {
@@ -2182,6 +2216,12 @@
         if (block) return { block: block, el: cell, type: 'table-cell' };
       }
     }
+    if (state.focusedTableCell && state.focusedTableCell.isContentEditable && canvasEl.contains(state.focusedTableCell)) {
+      var rememberedBlock = state.focusedTableCell.closest('.cpb-block');
+      if (rememberedBlock) {
+        return { block: rememberedBlock, el: state.focusedTableCell, type: 'table-cell' };
+      }
+    }
     return null;
   }
 
@@ -2572,7 +2612,7 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      applyStyleToTableCell(target.el, { font: font });
+      applyFontToTableCell(target.el, font);
       updateParagraphStyleSelectForElement(target.el);
     } else if (isBlockTypographyTarget(target)) {
       var stack = FONT_STACKS[font];
@@ -2610,7 +2650,7 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      applyStyleToTableCell(target.el, { size: size });
+      applySizeToTableCell(target.el, size);
       updateParagraphStyleSelectForElement(target.el);
     } else if (isBlockTypographyTarget(target)) {
       applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
