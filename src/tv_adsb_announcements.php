@@ -85,6 +85,10 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
             return $spokenLabel . ' is in flight.';
 
         case 'touch_and_go':
+            $count = (int)($status['touch_go_count'] ?? 0);
+            if ($count > 0) {
+                return $spokenLabel . ' is conducting touch and go training at ' . $airport . '. ' . $count . ' touch and goes completed.';
+            }
             return $spokenLabel . ' is conducting touch and go training at ' . $airport . '.';
 
         default:

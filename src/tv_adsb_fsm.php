@@ -141,6 +141,75 @@ function tv_adsb_fsm_touch_go_active(array $cache, array $obs, string $state): b
     return true;
 }
 
+function tv_adsb_fsm_touch_go_count_from_history(array $history): int
+{
+    if (count($history) < 3) {
+        return 0;
+    }
+
+    $count = 0;
+    $phase = 'airborne';
+    $touchdownAt = 0;
+
+    foreach ($history as $sample) {
+        if (!is_array($sample)) {
+            continue;
+        }
+
+        $timestamp = (int)($sample['t'] ?? 0);
+        $gs = (float)($sample['gs'] ?? 0);
+        $onSurface = (bool)($sample['on_surface'] ?? false);
+        $spcDist = (float)($sample['spc_dist_nm'] ?? 99);
+        $nearAirport = $onSurface || $spcDist <= 6.0;
+
+        if (!$nearAirport) {
+            $phase = 'airborne';
+            $touchdownAt = 0;
+            continue;
+        }
+
+        if ($phase === 'airborne' && $onSurface && $gs >= 5.0 && $gs <= 70.0) {
+            $phase = 'touchdown';
+            $touchdownAt = $timestamp;
+            continue;
+        }
+
+        if ($phase === 'touchdown' && $touchdownAt > 0 && $gs >= 42.0 && ($timestamp - $touchdownAt) <= 360) {
+            $count++;
+            $phase = 'airborne';
+            $touchdownAt = 0;
+            continue;
+        }
+
+        if ($phase === 'touchdown' && $touchdownAt > 0 && ($timestamp - $touchdownAt) > 360) {
+            $phase = 'airborne';
+            $touchdownAt = 0;
+        }
+    }
+
+    return $count;
+}
+
+function tv_adsb_fsm_touch_go_count(array &$cache, array $obs): int
+{
+    $events = tv_adsb_fsm_touch_go_prune_events($cache, 3600);
+    $fromEvents = count($events);
+    $fromHistory = tv_adsb_fsm_touch_go_count_from_history($obs['history'] ?? array());
+    $count = max($fromEvents, $fromHistory);
+    $previous = (int)($cache['touch_go_session_count'] ?? 0);
+
+    if ($count > $previous) {
+        $cache['touch_go_session_count'] = $count;
+        return $count;
+    }
+
+    if ($previous > 0 && tv_adsb_fsm_touch_go_active($cache, $obs, (string)($cache['fsm_state'] ?? ''))) {
+        return $previous;
+    }
+
+    return $count;
+}
+
 function tv_adsb_fsm_touch_go_status(string $state, array $obs, array &$cache): ?string
 {
     if (!tv_adsb_fsm_touch_go_active($cache, $obs, $state)) {
@@ -155,12 +224,15 @@ function tv_adsb_fsm_touch_go_status(string $state, array $obs, array &$cache): 
         $icao = tv_adsb_normalize_home_airport((string)($obs['home_airport'] ?? 'KTRM'));
     }
 
+    $count = tv_adsb_fsm_touch_go_count($cache, $obs);
+    $suffix = $count > 0 ? ' ' . $count : '';
+
     return match ($state) {
-        'taking_off' => 'T&G DEPART ' . $icao,
-        'landing' => 'T&G FINAL ' . $icao,
-        'landed' => 'T&G TOUCHDOWN ' . $icao,
-        'in_flight' => 'T&G PATTERN ' . $icao,
-        default => 'T&G TRAINING ' . $icao,
+        'taking_off' => 'T&G DEPART ' . $icao . $suffix,
+        'landing' => 'T&G FINAL ' . $icao . $suffix,
+        'landed' => 'T&G DOWN ' . $icao . $suffix,
+        'in_flight' => 'T&G PATTERN ' . $icao . $suffix,
+        default => 'T&G TRAINING ' . $icao . $suffix,
     };
 }
 
@@ -348,6 +420,12 @@ function tv_adsb_fsm_apply_parked_state(array &$cache): void
     $cache['fsm_pending_state'] = '';
     $cache['fsm_pending_count'] = 0;
     unset($cache['off_block_at'], $cache['departure_airport']);
+    unset(
+        $cache['touch_go_events'],
+        $cache['touch_go_session_until'],
+        $cache['touch_go_last_surface_at'],
+        $cache['touch_go_session_count']
+    );
 }
 
 function tv_adsb_fsm_apply_state(string $state, array &$cache, array $obs): void
@@ -656,11 +734,13 @@ function tv_adsb_fsm_tick(
     $iconCode = tv_adsb_fsm_icon_code($state);
 
     $touchGoStatus = tv_adsb_fsm_touch_go_status($state, $obs, $cache);
+    $touchGoCount = (int)($cache['touch_go_session_count'] ?? 0);
     if ($touchGoStatus !== null) {
         $statusText = $touchGoStatus;
         $state = 'touch_and_go';
         $symbol = 'O';
         $iconCode = 'pattern';
+        $touchGoCount = (int)($cache['touch_go_session_count'] ?? 0);
     }
 
     if ($statusText === 'PARKED AT SPC' && $symbol === '?') {
@@ -680,6 +760,7 @@ function tv_adsb_fsm_tick(
         'distance_nm' => round((float)$obs['distance_spc_nm'], 1),
         'direction' => (string)$obs['direction_spc'],
         'nearest_airport' => $nearest,
+        'touch_go_count' => $touchGoCount,
         'position_source' => $positionSource,
         'debug' => array(
             'lat' => round($lat, 6),
@@ -691,6 +772,8 @@ function tv_adsb_fsm_tick(
             'fsm_state' => $fsmState,
             'fsm_candidate' => $candidate,
             'touch_go_events' => count(tv_adsb_fsm_touch_go_prune_events($cache, 3600)),
+            'touch_go_history' => tv_adsb_fsm_touch_go_count_from_history($history),
+            'touch_go_count' => $touchGoCount,
             'touch_go_active' => $touchGoStatus !== null,
             'history_samples' => count($history),
             'position_source' => $positionSource,

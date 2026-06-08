@@ -4,8 +4,8 @@
   var ROW_COLS = 24;
   var ROW_COUNT = 4;
   var OPS_COLS_SYM = 1;
-  var OPS_COLS_AIRCRAFT = 7;
-  var OPS_COLS_TYPE = 6;
+  var OPS_COLS_AIRCRAFT = 8;
+  var OPS_COLS_TYPE = 7;
   var OPS_COLS_STATUS = 18;
   var OPS_DATA_ROWS = 9;
   var OPS_MAX_DATA_ROWS = 10;
@@ -775,6 +775,25 @@
     return Promise.all(jobs);
   };
 
+  FlipLine.prototype.setStatusText = function (text, options, audio, rowDelayBase) {
+    options = options || {};
+    var fitted = fitTextEllipsis(text, this.length);
+    var jobs = [];
+    this.tiles.forEach(function (tile, idx) {
+      var char = fitted.charAt(idx);
+      if (char === tile.char && !options.force) return;
+      var delay = rowDelayBase + ((options && options.urgent)
+        ? randomBetween(0, 150)
+        : idx * randomBetween(7, 22) + randomBetween(0, 260));
+      jobs.push(new Promise(function (resolve) {
+        window.setTimeout(function () {
+          tile.flipTo(char, options, audio).then(resolve);
+        }, delay);
+      }));
+    });
+    return Promise.all(jobs);
+  };
+
   FlipLine.prototype.setSymbol = function (symbol, options, audio, rowDelayBase, symKind) {
     var char = symCharForTile(symbol);
     options = options || {};
@@ -826,7 +845,7 @@
       this.sym.setSymbol(fields.sym || ' ', options, audio, rowDelayBase, fields.symKind || ''),
       this.aircraft.setText(fields.aircraft || ' ', options, audio, rowDelayBase + randomBetween(4, 12)),
       this.type.setText(fields.type || ' ', options, audio, rowDelayBase + randomBetween(8, 18)),
-      this.status.setText(fields.status || ' ', options, audio, rowDelayBase + randomBetween(12, 24))
+      this.status.setStatusText(fields.status || ' ', options, audio, rowDelayBase + randomBetween(12, 24))
     ]);
   };
 
@@ -930,7 +949,7 @@
   FlipBoard.prototype.opsHeaderFields = function () {
     return {
       sym: 'S',
-      aircraft: 'AIRCRFT',
+      aircraft: 'AIRCRAFT',
       type: 'TYPE',
       status: 'STATUS'
     };
