@@ -230,6 +230,7 @@ final class ControlledPublishingBookRenderer
         return '<div class="cpb-sheet cpb-sheet--lep" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
             . $headerHtml
             . '<div class="cpb-lep" contenteditable="false">'
+            . '<div class="cpb-lep-cert-wrap">'
             . '<div class="cpb-lep-cert-block">'
             . '<div class="cpb-lep-cert-row cpb-lep-cert-row--text">'
             . '<div class="cpb-lep-cert-text" data-lep-field="certification_text"' . $fieldEdit . '>' . $certText . '</div>'
@@ -239,6 +240,7 @@ final class ControlledPublishingBookRenderer
             . '</div>'
             . '<div class="cpb-lep-cert-row cpb-lep-cert-row--signatures">' . $signatureHtml . '</div>'
             . $authorityHtml
+            . '</div>'
             . '</div>'
             . '<h2 class="cpb-lep-table-title" data-lep-field="table_title"' . $fieldEdit . '>' . $tableTitle . '</h2>'
             . $partsHtml
@@ -335,13 +337,14 @@ final class ControlledPublishingBookRenderer
                 . 'No parts generated yet — use Regenerate in the toolbar.</td></tr>';
         }
 
-        return '<div class="cpb-lep-table-wrap" contenteditable="false">'
-            . '<table class="cpb-lep-table" data-lep-parts-table="1">'
-            . '<thead><tr>'
+        return '<div class="cpb-table-block cpb-table-block--align-left cpb-lep-table-block" contenteditable="false">'
+            . '<div class="cpb-table-wrap cpb-table-border-thin">'
+            . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1" style="width:100%">'
+            . '<thead><tr class="cpb-table-header-row">'
             . '<th>Part</th><th>Pages</th><th>Date</th><th>Revision</th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
-            . '</table></div>';
+            . '</table></div></div>';
     }
 
     /**
