@@ -6,10 +6,14 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalService.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
 $svc = new ControlledPublishingFoundationService($pdo);
+$lepSvc = new ControlledPublishingLepService($pdo);
+$approvalSvc = new ControlledPublishingApprovalService($pdo, $lepSvc);
 
 function cpv_flash(string $type, string $msg): void
 {
@@ -108,6 +112,11 @@ $selections = $svc->getVersionSourceSelections($versionId);
 $sections = $svc->listVersionSections($versionId);
 $validation = $svc->validateVersionReleaseFoundation($versionId);
 $allSourceSets = $svc->listActiveSourceSets();
+$lepApprovalUrl = '';
+if (in_array((string)$version['lifecycle_status'], array('draft', 'in_review', 'approved'), true)) {
+    $approvalResult = $approvalSvc->ensureApprovalToken($versionId, $uid);
+    $lepApprovalUrl = (string)($approvalResult['approval_url'] ?? '');
+}
 $selectedIds = array();
 $selectedRoles = array();
 foreach ($selections as $sel) {
@@ -185,6 +194,19 @@ compliance_page_open(array(
     </div>
   </form>
 </section>
+
+<?php if ($lepApprovalUrl !== ''): ?>
+<section class="cmp-card" style="margin-top:16px;">
+  <h2 style="margin:0 0 12px;">LEP authority approval</h2>
+  <p style="margin:0 0 12px;font-size:13px;color:#64748b;">
+    Share this link with the competent authority to collect their e-signature on the List of Effective Parts.
+    The link is token-protected and expires after 90 days.
+  </p>
+  <p style="margin:0;font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;">
+    <a href="<?= h($lepApprovalUrl) ?>" target="_blank" rel="noopener"><?= h($lepApprovalUrl) ?></a>
+  </p>
+</section>
+<?php endif; ?>
 
 <section class="cmp-card" style="margin-top:16px;">
   <h2 style="margin:0 0 12px;">Mandatory section scaffold</h2>

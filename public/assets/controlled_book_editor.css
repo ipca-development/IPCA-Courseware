@@ -2149,3 +2149,287 @@ body.cpb-browser-fullscreen .cpb-workspace {
   font-family: system-ui, sans-serif;
   font-size: 10pt;
 }
+
+.cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar-main {
+  display: none;
+}
+
+.cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar-lep {
+  display: flex;
+}
+
+.cpb-toolbar-lep {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cpb-toolbar-lep-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar-lep button.cpb-tool-btn.cpb-lep-regenerate {
+  background: #0f2744 !important;
+  border-color: #0f2744 !important;
+  color: #fff !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar-lep button.cpb-tool-btn.cpb-lep-regenerate:hover {
+  background: #1a3a5c !important;
+  border-color: #1a3a5c !important;
+}
+
+.cpb-lep {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  color: #0f172a;
+  padding: 0 4px;
+}
+
+.cpb-lep-cert-block {
+  border: 1px solid #0f172a;
+  margin-bottom: 18px;
+}
+
+.cpb-lep-cert-row {
+  border-bottom: 1px solid #0f172a;
+}
+
+.cpb-lep-cert-row:last-child {
+  border-bottom: none;
+}
+
+.cpb-lep-cert-row--text {
+  padding: 10px 12px;
+}
+
+.cpb-lep-cert-text,
+.cpb-lep-on-behalf {
+  line-height: 1.45;
+}
+
+.cpb-lep-cert-row--signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.cpb-lep-signatures {
+  display: contents;
+}
+
+.cpb-lep-signatory {
+  padding: 10px 12px;
+  border-right: 1px solid #0f172a;
+  min-height: 120px;
+}
+
+.cpb-lep-signatory:last-child {
+  border-right: none;
+}
+
+.cpb-lep-signatory-name {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.cpb-lep-signatory-title {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.cpb-lep-label {
+  font-weight: 400;
+}
+
+.cpb-lep-signatory-date,
+.cpb-lep-signatory-signature {
+  margin-top: 6px;
+}
+
+.cpb-lep-signature-box {
+  min-height: 48px;
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.cpb-lep-signature-img {
+  max-height: 56px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.cpb-lep-sign-btn {
+  font-size: 10px;
+  padding: 4px 10px;
+  border: 1px solid #0f2744;
+  background: #fff;
+  color: #0f2744;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cpb-lep-sign-btn:hover {
+  background: #f1f5f9;
+}
+
+.cpb-lep-cert-row--authority {
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.cpb-lep-authority-label {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.cpb-lep-authority-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 9.5pt;
+  color: #475569;
+}
+
+.cpb-lep-approval-link {
+  display: inline-block;
+  margin-top: 6px;
+  color: #0f2744;
+  font-weight: 600;
+}
+
+.cpb-lep-table-title {
+  font-size: 12pt;
+  font-weight: 700;
+  margin: 0 0 10px;
+  text-align: left;
+}
+
+.cpb-lep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+
+.cpb-lep-table th,
+.cpb-lep-table td {
+  border: 1px solid #0f172a;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.cpb-lep-table th {
+  background: #e2e8f0;
+  font-weight: 700;
+}
+
+.cpb-lep-part-row--empty td {
+  height: 28px;
+}
+
+.cpb-lep-parts-empty {
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
+}
+
+.cpb-sheet--lep [data-lep-field][contenteditable="true"]:focus {
+  outline: 1px dashed #94a3b8;
+  outline-offset: 2px;
+}
+
+.cpb-lep-sign-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cpb-lep-sign-modal[hidden] {
+  display: none !important;
+}
+
+.cpb-lep-sign-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.cpb-lep-sign-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(520px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.cpb-lep-sign-modal-panel h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #0f2744;
+}
+
+.cpb-lep-sign-modal-hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.cpb-lep-sign-field {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.cpb-lep-sign-field input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.cpb-lep-sign-canvas-wrap {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  background: #fff;
+}
+
+.cpb-lep-sign-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.cpb-lep-sign-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cpb-lep-sign-submit {
+  background: #0f2744 !important;
+  border-color: #0f2744 !important;
+  color: #fff !important;
+}

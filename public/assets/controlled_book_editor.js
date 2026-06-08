@@ -13,6 +13,7 @@
   var toolbarEl = document.getElementById('cpbToolbar');
   var toolbarMainEl = document.getElementById('cpbToolbarMain');
   var toolbarTocEl = document.getElementById('cpbToolbarToc');
+  var toolbarLepEl = document.getElementById('cpbToolbarLep');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
@@ -121,6 +122,12 @@
     tocSettings: null,
     tocSettingsCatalog: [],
     tocNavWired: false,
+    isLepSection: false,
+    lepPage: null,
+    lepApprovalUrl: '',
+    lepSaveTimer: null,
+    lepSignModal: null,
+    lepSignSlotKey: '',
   };
 
   var INDENT_STEP_PX = 24;
@@ -352,7 +359,10 @@
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
       state.isTocSection = !!res.is_toc_section;
+      state.isLepSection = !!res.is_lep_section;
       state.coverPage = res.cover_page || defaultCoverPage();
+      state.lepPage = res.lep_page || defaultLepPage();
+      state.lepApprovalUrl = res.lep_approval_url || '';
       state.tocSettings = res.toc_settings || defaultTocSettings();
       state.tocSettingsCatalog = res.toc_settings_catalog || defaultTocSettingsCatalog();
       state.bookStyles = res.book_styles || defaultBookStyles();
@@ -892,6 +902,8 @@
 
     wireCoverPage();
 
+    wireLepPage();
+
     wireTocNavigation();
 
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
@@ -1078,22 +1090,44 @@
     if (!toolbarEl) return;
     var isReleased = state.versionInfo && state.versionInfo.lifecycle_status === 'released';
     root.classList.toggle('cpb-editor-toc-mode', !!state.isTocSection && !isReleased);
+    root.classList.toggle('cpb-editor-lep-mode', !!state.isLepSection && !isReleased);
     if (state.isCoverSection || isReleased) {
       toolbarEl.style.display = 'none';
       if (toolbarTocEl) {
         toolbarTocEl.hidden = true;
         toolbarTocEl.setAttribute('aria-hidden', 'true');
       }
+      if (toolbarLepEl) {
+        toolbarLepEl.hidden = true;
+        toolbarLepEl.setAttribute('aria-hidden', 'true');
+      }
       return;
     }
     if (state.isTocSection) {
       toolbarEl.style.display = 'flex';
+      if (toolbarLepEl) {
+        toolbarLepEl.hidden = true;
+        toolbarLepEl.setAttribute('aria-hidden', 'true');
+      }
       renderTocToolbar();
+      return;
+    }
+    if (state.isLepSection) {
+      toolbarEl.style.display = 'flex';
+      if (toolbarTocEl) {
+        toolbarTocEl.hidden = true;
+        toolbarTocEl.setAttribute('aria-hidden', 'true');
+      }
+      renderLepToolbar();
       return;
     }
     if (toolbarTocEl) {
       toolbarTocEl.hidden = true;
       toolbarTocEl.setAttribute('aria-hidden', 'true');
+    }
+    if (toolbarLepEl) {
+      toolbarLepEl.hidden = true;
+      toolbarLepEl.setAttribute('aria-hidden', 'true');
     }
     toolbarEl.style.display = state.editable ? 'flex' : 'none';
   }
@@ -1294,6 +1328,335 @@
         var files = e.dataTransfer && e.dataTransfer.files;
         if (!files || !files[0]) return;
         uploadCoverAsset(zone.getAttribute('data-cover-drop'), files[0]);
+      });
+    });
+  }
+
+  function defaultLepPage() {
+    return {
+      certification_text: '',
+      on_behalf_text: '',
+      table_title: 'Effective Parts',
+      empty_rows: 10,
+      signatories: [],
+      effective_parts: [],
+    };
+  }
+
+  function renderLepToolbar() {
+    if (!toolbarLepEl) return;
+    toolbarLepEl.hidden = false;
+    toolbarLepEl.setAttribute('aria-hidden', 'false');
+
+    if (toolbarLepEl.getAttribute('data-lep-wired') !== '1') {
+      toolbarLepEl.innerHTML = ''
+        + '<div class="cpb-toolbar-group cpb-toolbar-group--lep-label">'
+        + '<span class="cpb-toolbar-lep-label">List of Effective Parts</span>'
+        + '</div>'
+        + '<div class="cpb-toolbar-group">'
+        + '<button type="button" class="cpb-tool-btn cpb-lep-regenerate" title="Regenerate effective parts from manual structure">Regenerate parts</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbLepSave" title="Save LEP text and signatory details">Save</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenHeader" title="Page header editor">Header</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbLepApprovalLink" title="Open authority approval page">Approval page</button>'
+        + '</div>';
+
+      toolbarLepEl.setAttribute('data-lep-wired', '1');
+      toolbarLepEl.querySelector('.cpb-lep-regenerate').addEventListener('click', function () {
+        syncLepParts(true);
+      });
+      toolbarLepEl.querySelector('#cpbLepSave').addEventListener('click', function () {
+        if (state.lepSaveTimer) {
+          clearTimeout(state.lepSaveTimer);
+          state.lepSaveTimer = null;
+        }
+        flushLepSave();
+      });
+      toolbarLepEl.querySelector('#cpbLepOpenHeader').addEventListener('click', function () {
+        openHeaderEditor();
+      });
+      toolbarLepEl.querySelector('#cpbLepApprovalLink').addEventListener('click', function () {
+        openLepApprovalPage();
+      });
+    }
+
+    var approvalBtn = toolbarLepEl.querySelector('#cpbLepApprovalLink');
+    if (approvalBtn) {
+      approvalBtn.disabled = !state.lepApprovalUrl;
+    }
+  }
+
+  function openLepApprovalPage() {
+    if (!state.lepApprovalUrl) {
+      setStatus('Generating approval link…', 'saving');
+      apiPost('ensure_lep_approval', { version_id: state.versionId })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Could not create approval link');
+          state.lepApprovalUrl = res.approval_url || '';
+          window.open(state.lepApprovalUrl, '_blank', 'noopener');
+        })
+        .catch(showError);
+      return;
+    }
+    window.open(state.lepApprovalUrl, '_blank', 'noopener');
+  }
+
+  function extractLepPageFromCanvas() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--lep');
+    if (!sheet) return Object.assign({}, defaultLepPage(), state.lepPage || {});
+    var lep = Object.assign({}, defaultLepPage(), state.lepPage || {});
+
+    var cert = sheet.querySelector('[data-lep-field="certification_text"]');
+    var onBehalf = sheet.querySelector('[data-lep-field="on_behalf_text"]');
+    var tableTitle = sheet.querySelector('[data-lep-field="table_title"]');
+    if (cert) lep.certification_text = cert.textContent.trim();
+    if (onBehalf) lep.on_behalf_text = onBehalf.textContent.trim();
+    if (tableTitle) lep.table_title = tableTitle.textContent.trim();
+
+    var signatories = [];
+    sheet.querySelectorAll('.cpb-lep-signatory[data-lep-slot]').forEach(function (box) {
+      var slotKey = box.getAttribute('data-lep-slot') || '';
+      if (!slotKey) return;
+      var existing = null;
+      (lep.signatories || []).forEach(function (slot) {
+        if (slot && slot.slot_key === slotKey) existing = slot;
+      });
+      var nameEl = box.querySelector('[data-lep-field="name"]');
+      var titleEl = box.querySelector('[data-lep-field="title"]');
+      var dateEl = box.querySelector('[data-lep-field="date"]');
+      signatories.push({
+        slot_key: slotKey,
+        name: nameEl ? nameEl.textContent.trim() : '',
+        title: titleEl ? titleEl.textContent.trim() : '',
+        date: dateEl ? dateEl.textContent.trim() : '',
+        signature_url: existing ? (existing.signature_url || '') : '',
+        signed_at: existing ? existing.signed_at : null,
+        signed_by_user_id: existing ? existing.signed_by_user_id : null,
+        signer_type: 'internal',
+      });
+    });
+    if (signatories.length) lep.signatories = signatories;
+    return lep;
+  }
+
+  function scheduleLepSave() {
+    if (!state.editable || !state.isLepSection) return;
+    if (state.lepSaveTimer) clearTimeout(state.lepSaveTimer);
+    state.lepSaveTimer = setTimeout(function () {
+      state.lepSaveTimer = null;
+      flushLepSave();
+    }, 450);
+  }
+
+  function flushLepSave() {
+    if (!state.editable || !state.isLepSection) return;
+    var payload = extractLepPageFromCanvas();
+    setStatus('Saving LEP…', 'saving');
+    apiPost('save_lep_page', {
+      version_id: state.versionId,
+      lep_page: payload,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'LEP save failed');
+      state.lepPage = res.lep_page || payload;
+      setStatus('LEP saved', 'saved');
+    }).catch(showError);
+  }
+
+  function syncLepParts(skipConfirm) {
+    if (!skipConfirm && !confirm('Regenerate the Effective Parts table from the current manual structure?')) return;
+    setStatus('Regenerating parts…', 'saving');
+    apiPost('regenerate_lep_parts', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Regenerate failed');
+      var count = res.result && res.result.parts_count !== undefined ? res.result.parts_count : 0;
+      state.lepPage = res.lep_page || state.lepPage;
+      if (res.page_html) {
+        canvasEl.innerHTML = res.page_html;
+        wireCanvas();
+        setStatus('Parts updated (' + count + ' rows)', 'saved');
+      } else {
+        return loadSection(state.sectionId);
+      }
+    }).catch(showError);
+  }
+
+  function ensureLepSignModal() {
+    if (state.lepSignModal) return state.lepSignModal;
+    var modal = document.createElement('div');
+    modal.className = 'cpb-lep-sign-modal';
+    modal.hidden = true;
+    modal.innerHTML = ''
+      + '<div class="cpb-lep-sign-modal-backdrop" data-lep-sign-close="1"></div>'
+      + '<div class="cpb-lep-sign-modal-panel" role="dialog" aria-labelledby="cpbLepSignTitle">'
+      + '<h3 id="cpbLepSignTitle">E-signature</h3>'
+      + '<p class="cpb-lep-sign-modal-hint">Enter your name and draw your signature below.</p>'
+      + '<label class="cpb-lep-sign-field">Name<input type="text" id="cpbLepSignName" autocomplete="name"></label>'
+      + '<label class="cpb-lep-sign-field">Function / title<input type="text" id="cpbLepSignTitleInput" autocomplete="organization-title"></label>'
+      + '<div class="cpb-lep-sign-canvas-wrap"><canvas id="cpbLepSignCanvas" width="480" height="140"></canvas></div>'
+      + '<div class="cpb-lep-sign-modal-actions">'
+      + '<button type="button" class="cpb-tool-btn" id="cpbLepSignClear">Clear</button>'
+      + '<button type="button" class="cpb-tool-btn" id="cpbLepSignCancel" data-lep-sign-close="1">Cancel</button>'
+      + '<button type="button" class="cpb-tool-btn cpb-lep-sign-submit" id="cpbLepSignSubmit">Apply signature</button>'
+      + '</div></div>';
+    root.appendChild(modal);
+    state.lepSignModal = modal;
+    return modal;
+  }
+
+  function openLepSignatureModal(slotKey) {
+    var modal = ensureLepSignModal();
+    state.lepSignSlotKey = slotKey;
+    var sheet = canvasEl.querySelector('.cpb-sheet--lep');
+    var box = sheet ? sheet.querySelector('.cpb-lep-signatory[data-lep-slot="' + slotKey + '"]') : null;
+    var nameInput = modal.querySelector('#cpbLepSignName');
+    var titleInput = modal.querySelector('#cpbLepSignTitleInput');
+    var canvas = modal.querySelector('#cpbLepSignCanvas');
+    if (box && nameInput) {
+      var nameEl = box.querySelector('[data-lep-field="name"]');
+      var titleEl = box.querySelector('[data-lep-field="title"]');
+      nameInput.value = nameEl ? nameEl.textContent.trim() : '';
+      titleInput.value = titleEl ? titleEl.textContent.trim() : '';
+    }
+    modal.hidden = false;
+    initLepSignCanvas(canvas);
+    if (canvas && canvas._cpbClear) canvas._cpbClear();
+  }
+
+  function closeLepSignatureModal() {
+    if (state.lepSignModal) state.lepSignModal.hidden = true;
+    state.lepSignSlotKey = '';
+  }
+
+  function initLepSignCanvas(canvas) {
+    if (!canvas || canvas.getAttribute('data-sign-wired') === '1') {
+      if (canvas && canvas.getContext) {
+        var ctx0 = canvas.getContext('2d');
+        ctx0.fillStyle = '#fff';
+        ctx0.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
+    canvas.setAttribute('data-sign-wired', '1');
+    var ctx = canvas.getContext('2d');
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a';
+    var drawing = false;
+
+    function pos(e) {
+      var rect = canvas.getBoundingClientRect();
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height),
+      };
+    }
+
+    function clearCanvas() {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    clearCanvas();
+    canvas._cpbClear = clearCanvas;
+
+    function start(e) {
+      e.preventDefault();
+      drawing = true;
+      var p = pos(e);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+    function move(e) {
+      if (!drawing) return;
+      e.preventDefault();
+      var p = pos(e);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    function end() {
+      drawing = false;
+    }
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end);
+
+    var modal = canvas.closest('.cpb-lep-sign-modal');
+    if (modal && modal.getAttribute('data-sign-actions-wired') !== '1') {
+      modal.setAttribute('data-sign-actions-wired', '1');
+      modal.querySelector('#cpbLepSignClear').addEventListener('click', function () {
+        if (canvas._cpbClear) canvas._cpbClear();
+      });
+      modal.querySelectorAll('[data-lep-sign-close]').forEach(function (btn) {
+        btn.addEventListener('click', closeLepSignatureModal);
+      });
+      modal.querySelector('#cpbLepSignSubmit').addEventListener('click', submitLepSignature);
+    }
+  }
+
+  function submitLepSignature() {
+    if (!state.lepSignSlotKey) return;
+    var modal = state.lepSignModal;
+    if (!modal) return;
+    var name = (modal.querySelector('#cpbLepSignName') || {}).value || '';
+    var title = (modal.querySelector('#cpbLepSignTitleInput') || {}).value || '';
+    var canvas = modal.querySelector('#cpbLepSignCanvas');
+    if (!name.trim()) {
+      alert('Please enter your name.');
+      return;
+    }
+    if (!canvas) return;
+    var dataUrl = canvas.toDataURL('image/png');
+    setStatus('Applying signature…', 'saving');
+    apiPost('sign_lep_slot', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+      slot_key: state.lepSignSlotKey,
+      name: name.trim(),
+      title: title.trim(),
+      signature_data_url: dataUrl,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Signature failed');
+      closeLepSignatureModal();
+      state.lepPage = res.lep_page || state.lepPage;
+      if (res.page_html) {
+        canvasEl.innerHTML = res.page_html;
+        wireCanvas();
+      }
+      setStatus('Signature applied', 'saved');
+    }).catch(showError);
+  }
+
+  function wireLepPage() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--lep');
+    if (!sheet || sheet.getAttribute('data-lep-wired') === '1') return;
+    sheet.setAttribute('data-lep-wired', '1');
+
+    sheet.querySelectorAll('[data-lep-field]').forEach(function (field) {
+      if (!state.editable || field.getAttribute('data-lep-field-wired') === '1') return;
+      field.setAttribute('data-lep-field-wired', '1');
+      field.addEventListener('input', scheduleLepSave);
+      field.addEventListener('blur', function () {
+        if (state.lepSaveTimer) {
+          clearTimeout(state.lepSaveTimer);
+          state.lepSaveTimer = null;
+        }
+        flushLepSave();
+      });
+    });
+
+    sheet.querySelectorAll('[data-lep-sign]').forEach(function (btn) {
+      if (btn.getAttribute('data-lep-sign-wired') === '1') return;
+      btn.setAttribute('data-lep-sign-wired', '1');
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        openLepSignatureModal(btn.getAttribute('data-lep-sign') || '');
       });
     });
   }

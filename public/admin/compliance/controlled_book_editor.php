@@ -170,6 +170,7 @@ compliance_page_open(array(
         </div>
         </div>
         <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>
+        <div class="cpb-toolbar-lep" id="cpbToolbarLep" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-shared" id="cpbToolbarShared">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>

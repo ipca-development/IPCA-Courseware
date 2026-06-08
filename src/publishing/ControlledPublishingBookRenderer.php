@@ -7,6 +7,7 @@ require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
 require_once __DIR__ . '/ControlledPublishingCoverPageService.php';
+require_once __DIR__ . '/ControlledPublishingLepService.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -32,6 +33,8 @@ final class ControlledPublishingBookRenderer
     private ?ControlledPublishingPageHeaderService $pageHeaderService = null;
 
     private ?ControlledPublishingCoverPageService $coverPageService = null;
+
+    private ?ControlledPublishingLepService $lepPageService = null;
 
     /**
      * @param array<string,mixed> $styles
@@ -136,6 +139,209 @@ final class ControlledPublishingBookRenderer
     public function setCoverPageService(?ControlledPublishingCoverPageService $coverPageService): void
     {
         $this->coverPageService = $coverPageService;
+    }
+
+    public function setLepPageService(?ControlledPublishingLepService $lepPageService): void
+    {
+        $this->lepPageService = $lepPageService;
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param array<string,mixed>|null $lepPage
+     * @param array<string,mixed>|null $approval
+     */
+    public function renderLepPageShell(
+        array $version,
+        array $section,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null,
+        ?array $lepPage = null,
+        ?array $approval = null
+    ): string {
+        $editable = $mode === self::MODE_EDIT;
+        $lepSvc = $this->lepPageService;
+        $lep = is_array($lepPage)
+            ? $lepPage
+            : ($lepSvc !== null ? $lepSvc->resolveFromVersion($version) : array());
+
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array(
+                'page_header' => array('enabled' => true),
+                'page_footer' => array('enabled' => true),
+            );
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageHeader = is_array($config['page_header'] ?? null)
+            ? $config['page_header']
+            : $defaults['page_header'];
+        $pageFooter = is_array($config['page_footer'] ?? null)
+            ? $config['page_footer']
+            : $defaults['page_footer'];
+
+        $tokenContext = $headerSvc !== null
+            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
+            : array();
+
+        $headerHtml = '';
+        $footerHtml = '';
+        if (!empty($pageHeader['enabled'])) {
+            $headerHtml = $this->renderPageHeaderTable($pageHeader, $tokenContext, $editable, $headerSvc);
+        }
+        if (!empty($pageFooter['enabled'])) {
+            $footerHtml = $this->renderPageFooterTable($pageFooter, $tokenContext, $editable, $headerSvc);
+        }
+
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $editAttr = $editable ? ' data-lep-editable="1"' : '';
+
+        $certText = h((string)($lep['certification_text'] ?? ''));
+        $onBehalf = h((string)($lep['on_behalf_text'] ?? ''));
+        $tableTitle = h((string)($lep['table_title'] ?? 'Effective Parts'));
+
+        $internalSlots = array();
+        $authoritySlot = null;
+        foreach (is_array($lep['signatories'] ?? null) ? $lep['signatories'] : array() as $slot) {
+            if (!is_array($slot)) {
+                continue;
+            }
+            if ((string)($slot['signer_type'] ?? '') === 'authority' || (string)($slot['slot_key'] ?? '') === 'authority') {
+                $authoritySlot = $slot;
+                continue;
+            }
+            $internalSlots[] = $slot;
+        }
+        if ($internalSlots === array() && $lepSvc !== null) {
+            $internalSlots = $lepSvc->defaultSignatories();
+        }
+
+        $signatureHtml = '<div class="cpb-lep-signatures">';
+        foreach ($internalSlots as $slot) {
+            $signatureHtml .= $this->renderLepSignatoryBox($slot, $editable);
+        }
+        $signatureHtml .= '</div>';
+
+        $authorityHtml = $this->renderLepAuthorityBlock($authoritySlot, $approval, $editable, (int)($version['id'] ?? 0));
+
+        $partsHtml = $this->renderLepPartsTable($lep, $editable);
+
+        return '<div class="cpb-sheet cpb-sheet--lep" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
+            . $headerHtml
+            . '<div class="cpb-lep" contenteditable="false">'
+            . '<div class="cpb-lep-cert-block">'
+            . '<div class="cpb-lep-cert-row cpb-lep-cert-row--text">'
+            . '<div class="cpb-lep-cert-text" data-lep-field="certification_text"' . $fieldEdit . '>' . $certText . '</div>'
+            . '</div>'
+            . '<div class="cpb-lep-cert-row cpb-lep-cert-row--text">'
+            . '<div class="cpb-lep-on-behalf" data-lep-field="on_behalf_text"' . $fieldEdit . '>' . $onBehalf . '</div>'
+            . '</div>'
+            . '<div class="cpb-lep-cert-row cpb-lep-cert-row--signatures">' . $signatureHtml . '</div>'
+            . $authorityHtml
+            . '</div>'
+            . '<h2 class="cpb-lep-table-title" data-lep-field="table_title"' . $fieldEdit . '>' . $tableTitle . '</h2>'
+            . $partsHtml
+            . '</div>'
+            . $footerHtml
+            . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $slot
+     */
+    private function renderLepSignatoryBox(array $slot, bool $editable): string
+    {
+        $slotKey = h((string)($slot['slot_key'] ?? ''));
+        $name = h((string)($slot['name'] ?? ''));
+        $title = h((string)($slot['title'] ?? ''));
+        $date = h((string)($slot['date'] ?? ''));
+        $sigUrl = trim((string)($slot['signature_url'] ?? ''));
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+
+        $sigInner = '';
+        if ($sigUrl !== '') {
+            $sigInner = '<img class="cpb-lep-signature-img" src="' . h($sigUrl) . '" alt="Signature">';
+        } elseif ($editable) {
+            $sigInner = '<button type="button" class="cpb-lep-sign-btn" data-lep-sign="' . $slotKey . '">Sign</button>';
+        } else {
+            $sigInner = '<span class="cpb-lep-signature-empty">—</span>';
+        }
+
+        return '<div class="cpb-lep-signatory" data-lep-slot="' . $slotKey . '">'
+            . '<div class="cpb-lep-signatory-name" data-lep-field="name"' . $fieldEdit . '>' . $name . '</div>'
+            . '<div class="cpb-lep-signatory-title" data-lep-field="title"' . $fieldEdit . '>' . $title . '</div>'
+            . '<div class="cpb-lep-signatory-date"><span class="cpb-lep-label">Date:</span> '
+            . '<span class="cpb-lep-signatory-date-value" data-lep-field="date"' . $fieldEdit . '>' . $date . '</span></div>'
+            . '<div class="cpb-lep-signatory-signature"><span class="cpb-lep-label">Signature:</span> '
+            . '<div class="cpb-lep-signature-box" data-lep-signature-box="' . $slotKey . '">' . $sigInner . '</div></div>'
+            . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed>|null $authoritySlot
+     * @param array<string,mixed>|null $approval
+     */
+    private function renderLepAuthorityBlock(?array $authoritySlot, ?array $approval, bool $editable, int $versionId): string
+    {
+        $signed = is_array($authoritySlot)
+            && trim((string)($authoritySlot['signature_url'] ?? '')) !== '';
+        if ($signed) {
+            return '<div class="cpb-lep-cert-row cpb-lep-cert-row--authority">'
+                . '<div class="cpb-lep-authority-label">Authority approval</div>'
+                . $this->renderLepSignatoryBox($authoritySlot, false)
+                . '</div>';
+        }
+        $approvalUrl = '';
+        if ($versionId > 0 && is_array($approval) && trim((string)($approval['token'] ?? '')) !== '') {
+            $approvalUrl = '/admin/compliance/controlled_book_approval.php?version_id='
+                . $versionId
+                . '&token=' . rawurlencode((string)$approval['token']);
+        }
+        $pending = '<div class="cpb-lep-authority-pending">'
+            . '<strong>Authority signature pending</strong>'
+            . '<span>Competent authority approval is collected via the Approval page.</span>';
+        if ($editable && $approvalUrl !== '') {
+            $pending .= '<a class="cpb-lep-approval-link" href="' . h($approvalUrl) . '" target="_blank" rel="noopener">Open Approval page</a>';
+        }
+        $pending .= '</div>';
+        return '<div class="cpb-lep-cert-row cpb-lep-cert-row--authority">' . $pending . '</div>';
+    }
+
+    /**
+     * @param array<string,mixed> $lep
+     */
+    private function renderLepPartsTable(array $lep, bool $editable): string
+    {
+        $parts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
+        $emptyRows = max(0, min(20, (int)($lep['empty_rows'] ?? 10)));
+        $rows = '';
+        foreach ($parts as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rows .= '<tr class="cpb-lep-part-row" data-lep-part-generated="1">'
+                . '<td>' . h((string)($row['part'] ?? '')) . '</td>'
+                . '<td>' . h((string)($row['pages'] ?? '—')) . '</td>'
+                . '<td>' . h((string)($row['date'] ?? '')) . '</td>'
+                . '<td>' . h((string)($row['revision'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+        for ($i = 0; $i < $emptyRows; $i++) {
+            $rows .= '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td>&nbsp;</td><td></td><td></td><td></td></tr>';
+        }
+        if ($rows === '' && $editable) {
+            $rows = '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td colspan="4" class="cpb-lep-parts-empty">'
+                . 'No parts generated yet — use Regenerate in the toolbar.</td></tr>';
+        }
+
+        return '<div class="cpb-lep-table-wrap" contenteditable="false">'
+            . '<table class="cpb-lep-table" data-lep-parts-table="1">'
+            . '<thead><tr>'
+            . '<th>Part</th><th>Pages</th><th>Date</th><th>Revision</th>'
+            . '</tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table></div>';
     }
 
     /**
