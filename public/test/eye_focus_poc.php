@@ -351,6 +351,151 @@
     }
 
     .loading-overlay.hidden { display: none; }
+
+    /* ---- Guided calibration overlay ---- */
+    .calibration-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding-bottom: 2rem;
+    }
+
+    .calibration-overlay.hidden { display: none; }
+
+    .calibration-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(4, 8, 14, 0.82);
+      backdrop-filter: blur(2px);
+    }
+
+    .cal-dot {
+      position: fixed;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #3d8bfd;
+      border: 3px solid #e8f2ff;
+      box-shadow: 0 0 24px rgba(61, 139, 253, 0.9), 0 0 48px rgba(61, 139, 253, 0.45);
+      transform: translate(-50%, -50%);
+      animation: cal-pulse 1.1s ease-in-out infinite;
+      z-index: 1002;
+      pointer-events: none;
+    }
+
+    .cal-dot.pos-center      { top: 50%; left: 50%; }
+    .cal-dot.pos-top-left    { top: var(--cal-margin); left: var(--cal-margin); }
+    .cal-dot.pos-top-right   { top: var(--cal-margin); right: var(--cal-margin); left: auto; transform: translate(50%, -50%); }
+    .cal-dot.pos-bottom-left { bottom: var(--cal-margin); left: var(--cal-margin); top: auto; transform: translate(-50%, 50%); }
+    .cal-dot.pos-bottom-right{ bottom: var(--cal-margin); right: var(--cal-margin); top: auto; left: auto; transform: translate(50%, 50%); }
+
+    @keyframes cal-pulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+      50%      { transform: translate(-50%, -50%) scale(1.18); opacity: 0.85; }
+    }
+
+    .cal-dot.pos-top-right,
+    .cal-dot.pos-bottom-right {
+      animation-name: cal-pulse-right;
+    }
+
+    .cal-dot.pos-bottom-left,
+    .cal-dot.pos-bottom-right {
+      animation-name: cal-pulse-bottom;
+    }
+
+    @keyframes cal-pulse-right {
+      0%, 100% { transform: translate(50%, -50%) scale(1); opacity: 1; }
+      50%      { transform: translate(50%, -50%) scale(1.18); opacity: 0.85; }
+    }
+
+    @keyframes cal-pulse-bottom {
+      0%, 100% { transform: translate(-50%, 50%) scale(1); opacity: 1; }
+      50%      { transform: translate(-50%, 50%) scale(1.18); opacity: 0.85; }
+    }
+
+    .cal-dot.pos-bottom-right { animation-name: cal-pulse-bottom-right; }
+
+    @keyframes cal-pulse-bottom-right {
+      0%, 100% { transform: translate(50%, 50%) scale(1); opacity: 1; }
+      50%      { transform: translate(50%, 50%) scale(1.18); opacity: 0.85; }
+    }
+
+    .calibration-panel {
+      position: relative;
+      z-index: 1003;
+      width: min(520px, calc(100vw - 2rem));
+      padding: 1.25rem 1.5rem;
+      background: rgba(18, 24, 32, 0.95);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .calibration-panel h2 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #e8eef4;
+      margin-bottom: 0.6rem;
+    }
+
+    .calibration-panel .cal-step-label {
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.5rem;
+    }
+
+    .calibration-panel .cal-instruction {
+      font-size: 0.95rem;
+      line-height: 1.45;
+      color: var(--text);
+      margin-bottom: 1rem;
+    }
+
+    .cal-progress-track {
+      height: 6px;
+      background: #1a2330;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 0.65rem;
+    }
+
+    .cal-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--inside));
+      border-radius: 3px;
+      transition: width 0.1s linear;
+    }
+
+    .cal-countdown {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      margin-bottom: 1rem;
+    }
+
+    .calibration-actions {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+
+    .meta-calibrated {
+      color: var(--inside) !important;
+    }
+
+    .meta-not-calibrated {
+      color: var(--outside) !important;
+    }
   </style>
 </head>
 <body>
@@ -375,7 +520,7 @@
       </div>
       <button id="btn-start" class="btn btn-primary" disabled>Start Camera</button>
       <button id="btn-stop" class="btn btn-danger" disabled>Stop Camera</button>
-      <button id="btn-calibrate" class="btn btn-calibrate" disabled>Calibrate Inside Baseline</button>
+      <button id="btn-calibrate" class="btn btn-calibrate" disabled>Start Calibration</button>
       <button id="btn-voice" class="btn">Enable Voice</button>
     </div>
 
@@ -404,7 +549,11 @@
             <label>Face Detected</label>
             <span id="meta-face">—</span>
           </div>
-          <div class="meta-item" style="grid-column: 1 / -1;">
+          <div class="meta-item">
+            <label>Calibration</label>
+            <span id="meta-calibration" class="meta-not-calibrated">not done</span>
+          </div>
+          <div class="meta-item">
             <label>Selected Camera</label>
             <span id="meta-camera">—</span>
           </div>
@@ -422,13 +571,33 @@
         <div class="debug-row">Baseline H: <strong id="dbg-baseline-h">—</strong></div>
         <div class="debug-row">Baseline V: <strong id="dbg-baseline-v">—</strong></div>
         <div class="debug-row">Diff from baseline: <strong id="dbg-diff">—</strong></div>
-        <div class="debug-row">Threshold: <strong id="dbg-threshold">—</strong></div>
+        <div class="debug-row">Threshold H: <strong id="dbg-threshold-h">—</strong></div>
+        <div class="debug-row">Threshold V: <strong id="dbg-threshold-v">—</strong></div>
+        <div class="debug-row">Calibration: <strong id="dbg-calibration">not done</strong></div>
         <div class="debug-row">FPS estimate: <strong id="dbg-fps">—</strong></div>
         <div class="debug-row">Last status change: <strong id="dbg-status-change">—</strong></div>
         <div class="debug-row">Voice enabled: <strong id="dbg-voice">no</strong></div>
         <div class="debug-row">Voice cooldown: <strong id="dbg-cooldown">—</strong></div>
       </div>
     </details>
+  </div>
+
+  <!-- Full-screen guided calibration wizard -->
+  <div id="calibration-overlay" class="calibration-overlay hidden" style="--cal-margin: 56px;">
+    <div class="calibration-backdrop"></div>
+    <div id="cal-dot" class="cal-dot pos-center"></div>
+    <div class="calibration-panel">
+      <h2>Eye Focus Calibration</h2>
+      <p id="cal-step-label" class="cal-step-label">Step 1 of 5</p>
+      <p id="cal-instruction" class="cal-instruction">Look at the dot on screen.</p>
+      <div class="cal-progress-track">
+        <div id="cal-progress-fill" class="cal-progress-fill"></div>
+      </div>
+      <p id="cal-countdown" class="cal-countdown">Preparing…</p>
+      <div class="calibration-actions">
+        <button id="btn-cal-cancel" class="btn">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script type="module">
@@ -444,11 +613,62 @@
     const CAMERA_FPS    = 30;
 
     /**
-     * Gaze deviation threshold (0–1 scale).
-     * Lower = more sensitive (easier to trigger "outside").
-     * Compares smoothed gaze position against calibrated baseline.
+     * Fallback gaze threshold before calibration completes (0–1 scale).
+     * After guided calibration, inside/outside uses learned margins instead.
      */
     const GAZE_THRESHOLD = 0.12;
+
+    /**
+     * Fraction of center-to-corner gaze range treated as "inside".
+     * Lower = stricter (must look closer to center). Range: 0.3–0.55 typical.
+     */
+    const INSIDE_ZONE_FRACTION = 0.42;
+
+    /** Milliseconds to hold gaze on each calibration dot. */
+    const CALIBRATION_STEP_DURATION_MS = 3000;
+
+    /** Minimum face-tracked samples required per calibration step. */
+    const CALIBRATION_MIN_SAMPLES = 18;
+
+    /** Distance of calibration dots from screen edges (matches --cal-margin CSS). */
+    const CALIBRATION_DOT_MARGIN = 56;
+
+    /**
+     * Guided calibration steps — edit instructions or order here.
+     * Center establishes "inside"; corners map "outside" gaze extremes.
+     */
+    const CALIBRATION_STEPS = [
+      {
+        id: "center",
+        position: "pos-center",
+        stepLabel: "Center (Inside)",
+        instruction: "Look directly at the center dot. This defines your inside focus zone.",
+      },
+      {
+        id: "topLeft",
+        position: "pos-top-left",
+        stepLabel: "Top Left",
+        instruction: "Look at the dot in the top-left corner of your screen.",
+      },
+      {
+        id: "topRight",
+        position: "pos-top-right",
+        stepLabel: "Top Right",
+        instruction: "Look at the dot in the top-right corner of your screen.",
+      },
+      {
+        id: "bottomLeft",
+        position: "pos-bottom-left",
+        stepLabel: "Bottom Left",
+        instruction: "Look at the dot in the bottom-left corner of your screen.",
+      },
+      {
+        id: "bottomRight",
+        position: "pos-bottom-right",
+        stepLabel: "Bottom Right",
+        instruction: "Look at the dot in the bottom-right corner of your screen.",
+      },
+    ];
 
     /**
      * Number of frames to average for smoothing (10–15 recommended).
@@ -504,9 +724,18 @@
     const statusLabel    = document.getElementById("status-label");
     const metaScore      = document.getElementById("meta-score");
     const metaFace       = document.getElementById("meta-face");
-    const metaCamera     = document.getElementById("meta-camera");
-    const errorBanner    = document.getElementById("error-banner");
-    const loadingOverlay = document.getElementById("loading-overlay");
+    const metaCamera      = document.getElementById("meta-camera");
+    const metaCalibration = document.getElementById("meta-calibration");
+    const errorBanner     = document.getElementById("error-banner");
+    const loadingOverlay  = document.getElementById("loading-overlay");
+
+    const calOverlay    = document.getElementById("calibration-overlay");
+    const calDot        = document.getElementById("cal-dot");
+    const calInstruction= document.getElementById("cal-instruction");
+    const calStepLabel  = document.getElementById("cal-step-label");
+    const calCountdown  = document.getElementById("cal-countdown");
+    const calProgressFill = document.getElementById("cal-progress-fill");
+    const btnCalCancel  = document.getElementById("btn-cal-cancel");
 
     const dbg = {
       rawH:       document.getElementById("dbg-raw-h"),
@@ -516,7 +745,9 @@
       baselineH:  document.getElementById("dbg-baseline-h"),
       baselineV:  document.getElementById("dbg-baseline-v"),
       diff:       document.getElementById("dbg-diff"),
-      threshold:  document.getElementById("dbg-threshold"),
+      thresholdH: document.getElementById("dbg-threshold-h"),
+      thresholdV: document.getElementById("dbg-threshold-v"),
+      calibration:document.getElementById("dbg-calibration"),
       fps:        document.getElementById("dbg-fps"),
       statusChange: document.getElementById("dbg-status-change"),
       voice:      document.getElementById("dbg-voice"),
@@ -538,7 +769,17 @@
     let lastAnnouncedStatus = null;
     let statusChangeTime = null;
     let baseline         = { ...DEFAULT_BASELINE };
+    let gazeBounds       = null;   // learned { hMargin, vMargin } after calibration
     let isCalibrated     = false;
+
+    // Guided calibration wizard state
+    let calibrationActive   = false;
+    let calibrationStepIdx  = 0;
+    let calibrationPoints   = {};
+    let stepSamples         = [];
+    let stepStartTime       = 0;
+    let calibrationTimer    = null;
+    let stepRetryCount      = 0;
 
     const gazeHistory = [];  // rolling buffer for smoothing
 
@@ -640,19 +881,30 @@
     /**
      * INSIDE / OUTSIDE classification logic:
      *
-     * 1. Compute Euclidean distance between smoothed gaze and baseline.
-     * 2. If distance < GAZE_THRESHOLD → "inside" (looking at screen).
-     * 3. If distance >= GAZE_THRESHOLD → "outside" (gaze wandered away).
+     * After guided calibration:
+     *   - baseline = center-dot gaze (inside reference)
+     *   - gazeBounds = margins learned from corner dots × INSIDE_ZONE_FRACTION
+     *   - Inside when |Δh| < hMargin AND |Δv| < vMargin
      *
-     * Confidence is 1 − (distance / threshold), clamped 0–1.
+     * Before calibration, falls back to Euclidean distance vs GAZE_THRESHOLD.
      */
     function classifyGaze(smooth) {
-      const dH = smooth.h - baseline.h;
-      const dV = smooth.v - baseline.v;
+      const dH = Math.abs(smooth.h - baseline.h);
+      const dV = Math.abs(smooth.v - baseline.v);
       const distance = Math.sqrt(dH * dH + dV * dV);
 
-      const isInside = distance < GAZE_THRESHOLD;
-      const confidence = clamp(1 - distance / GAZE_THRESHOLD, 0, 1);
+      let isInside;
+      let confidence;
+
+      if (isCalibrated && gazeBounds) {
+        isInside = dH < gazeBounds.hMargin && dV < gazeBounds.vMargin;
+        const hScore = gazeBounds.hMargin > 0 ? 1 - dH / gazeBounds.hMargin : 1;
+        const vScore = gazeBounds.vMargin > 0 ? 1 - dV / gazeBounds.vMargin : 1;
+        confidence = clamp(Math.min(hScore, vScore), 0, 1);
+      } else {
+        isInside = distance < GAZE_THRESHOLD;
+        confidence = clamp(1 - distance / GAZE_THRESHOLD, 0, 1);
+      }
 
       return { isInside, distance, confidence, dH, dV };
     }
@@ -702,7 +954,14 @@
       dbg.baselineH.textContent = baseline.h.toFixed(4) + (isCalibrated ? " (calibrated)" : " (default)");
       dbg.baselineV.textContent = baseline.v.toFixed(4);
       dbg.diff.textContent    = classification.distance.toFixed(4);
-      dbg.threshold.textContent = GAZE_THRESHOLD.toFixed(4);
+      if (gazeBounds) {
+        dbg.thresholdH.textContent = gazeBounds.hMargin.toFixed(4);
+        dbg.thresholdV.textContent = gazeBounds.vMargin.toFixed(4);
+      } else {
+        dbg.thresholdH.textContent = GAZE_THRESHOLD.toFixed(4) + " (fallback)";
+        dbg.thresholdV.textContent = GAZE_THRESHOLD.toFixed(4) + " (fallback)";
+      }
+      dbg.calibration.textContent = isCalibrated ? "complete" : (calibrationActive ? "in progress" : "not done");
       dbg.fps.textContent     = fpsEstimate.toFixed(1);
       dbg.voice.textContent   = voiceEnabled ? "yes" : "no";
 
@@ -975,6 +1234,11 @@
         lastAnnouncedStatus = null;
 
         detectLoop();
+
+        // Prompt calibration automatically on first camera start
+        if (!isCalibrated) {
+          setTimeout(() => startCalibrationWizard(), 500);
+        }
       } catch (err) {
         showError("Camera access failed: " + err.message + ". Ensure you are on HTTPS or localhost.");
         console.error(err);
@@ -999,6 +1263,8 @@
       btnStop.disabled  = true;
       btnCalibrate.disabled = true;
       cameraSelect.disabled = false;
+
+      cancelCalibration();
 
       setStatus("idle", 0, false);
       metaScore.textContent = "—";
@@ -1049,19 +1315,36 @@
       if (hasFace) {
         lastFaceTime = Date.now();
         const landmarks = result.faceLandmarks[0];
+        const raw = computeGaze(landmarks);
 
-        const raw    = computeGaze(landmarks);
+        drawOverlay(landmarks);
+
+        // During guided calibration, collect samples instead of classifying
+        if (calibrationActive) {
+          stepSamples.push(raw);
+          return;
+        }
+
         pushGazeSample(raw);
         const smooth = smoothedGaze();
         const cls    = classifyGaze(smooth);
 
-        drawOverlay(landmarks);
-
-        const status = cls.isInside ? "inside" : "outside";
-        setStatus(status, cls.confidence, true);
+        if (!isCalibrated) {
+          statusIndicator.className = "status-indicator idle";
+          statusLabel.textContent = "NEEDS CALIBRATION";
+          metaFace.textContent = "yes";
+          metaScore.textContent = "—";
+        } else {
+          const status = cls.isInside ? "inside" : "outside";
+          setStatus(status, cls.confidence, true);
+        }
         updateDebug(raw, smooth, cls);
       } else {
         drawOverlay(null);
+
+        if (calibrationActive) {
+          return;
+        }
 
         const noFaceDuration = Date.now() - lastFaceTime;
         if (noFaceDuration > NO_FACE_TIMEOUT_MS) {
@@ -1081,26 +1364,193 @@
     }
 
     // =========================================================================
-    // Calibration
+    // Guided calibration wizard
     // =========================================================================
 
-    function calibrateBaseline() {
-      if (gazeHistory.length === 0) {
-        showError("No gaze data yet — look at the screen and try again.");
+    function averageGazeSamples(samples) {
+      const sum = samples.reduce(
+        (acc, g) => ({ h: acc.h + g.h, v: acc.v + g.v }),
+        { h: 0, v: 0 }
+      );
+      return { h: sum.h / samples.length, v: sum.v / samples.length };
+    }
+
+    function updateCalibrationMeta() {
+      if (isCalibrated) {
+        metaCalibration.textContent = "complete";
+        metaCalibration.className = "meta-calibrated";
+        btnCalibrate.textContent = "Recalibrate";
+      } else {
+        metaCalibration.textContent = calibrationActive ? "in progress…" : "not done";
+        metaCalibration.className = "meta-not-calibrated";
+        btnCalibrate.textContent = "Start Calibration";
+      }
+    }
+
+    function showCalibrationOverlay() {
+      calOverlay.style.setProperty("--cal-margin", `${CALIBRATION_DOT_MARGIN}px`);
+      calOverlay.classList.remove("hidden");
+      btnCalibrate.disabled = true;
+    }
+
+    function hideCalibrationOverlay() {
+      calOverlay.classList.add("hidden");
+      if (mediaStream) {
+        btnCalibrate.disabled = false;
+      }
+    }
+
+    function clearCalibrationTimer() {
+      if (calibrationTimer) {
+        clearInterval(calibrationTimer);
+        calibrationTimer = null;
+      }
+    }
+
+    function startCalibrationStep(index) {
+      const step = CALIBRATION_STEPS[index];
+      calibrationStepIdx = index;
+      stepSamples = [];
+      stepStartTime = Date.now();
+      stepRetryCount = 0;
+
+      calDot.className = `cal-dot ${step.position}`;
+      calStepLabel.textContent = `Step ${index + 1} of ${CALIBRATION_STEPS.length}: ${step.stepLabel}`;
+      calInstruction.textContent = step.instruction;
+      calProgressFill.style.width = "0%";
+      calCountdown.textContent = "Look at the dot and hold steady…";
+
+      clearCalibrationTimer();
+      calibrationTimer = setInterval(tickCalibrationStep, 100);
+    }
+
+    function tickCalibrationStep() {
+      const elapsed = Date.now() - stepStartTime;
+      const progress = Math.min(100, (elapsed / CALIBRATION_STEP_DURATION_MS) * 100);
+      calProgressFill.style.width = `${progress}%`;
+
+      const remainingSec = Math.ceil(Math.max(0, CALIBRATION_STEP_DURATION_MS - elapsed) / 1000);
+
+      if (stepSamples.length < CALIBRATION_MIN_SAMPLES) {
+        calCountdown.textContent = `Collecting gaze samples… ${stepSamples.length} / ${CALIBRATION_MIN_SAMPLES}`;
+      } else {
+        calCountdown.textContent = `Hold your gaze on the dot… ${remainingSec}s`;
+      }
+
+      if (elapsed < CALIBRATION_STEP_DURATION_MS) {
+        return;
+      }
+
+      if (stepSamples.length < CALIBRATION_MIN_SAMPLES) {
+        stepRetryCount++;
+        if (stepRetryCount >= 4) {
+          cancelCalibration("Calibration failed — face not detected reliably. Ensure good lighting and try again.");
+          return;
+        }
+        stepStartTime = Date.now();
+        stepSamples = [];
+        calCountdown.textContent = "Face not detected enough — keep looking at the dot";
+        return;
+      }
+
+      completeCalibrationStep();
+    }
+
+    function completeCalibrationStep() {
+      clearCalibrationTimer();
+
+      const step = CALIBRATION_STEPS[calibrationStepIdx];
+      calibrationPoints[step.id] = averageGazeSamples(stepSamples);
+
+      if (calibrationStepIdx < CALIBRATION_STEPS.length - 1) {
+        startCalibrationStep(calibrationStepIdx + 1);
+        return;
+      }
+
+      finishCalibrationWizard();
+    }
+
+    /**
+     * Derive inside baseline and outside margins from the five calibration points.
+     * Adjust INSIDE_ZONE_FRACTION to tune how close to center counts as "inside".
+     */
+    function finalizeCalibration() {
+      const center = calibrationPoints.center;
+      const corners = ["topLeft", "topRight", "bottomLeft", "bottomRight"]
+        .map(id => calibrationPoints[id])
+        .filter(Boolean);
+
+      if (!center || corners.length < 4) {
+        return false;
+      }
+
+      baseline = { h: center.h, v: center.v };
+
+      const hSpread = Math.max(...corners.map(c => Math.abs(c.h - center.h)), 0.05);
+      const vSpread = Math.max(...corners.map(c => Math.abs(c.v - center.v)), 0.05);
+
+      gazeBounds = {
+        hMargin: hSpread * INSIDE_ZONE_FRACTION,
+        vMargin: vSpread * INSIDE_ZONE_FRACTION,
+      };
+
+      isCalibrated = true;
+      gazeHistory.length = 0;
+      lastAnnouncedStatus = null;
+      return true;
+    }
+
+    function finishCalibrationWizard() {
+      calibrationActive = false;
+      clearCalibrationTimer();
+
+      if (!finalizeCalibration()) {
+        cancelCalibration("Calibration incomplete — please try again.");
+        return;
+      }
+
+      hideCalibrationOverlay();
+      clearError();
+      updateCalibrationMeta();
+
+      statusLabel.textContent = "CALIBRATION COMPLETE";
+      statusIndicator.className = "status-indicator inside";
+
+      if (voiceEnabled && window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance("Calibration complete.");
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    function cancelCalibration(message) {
+      calibrationActive = false;
+      calibrationPoints = {};
+      clearCalibrationTimer();
+      hideCalibrationOverlay();
+      updateCalibrationMeta();
+
+      if (message) {
+        showError(message);
+      }
+    }
+
+    function startCalibrationWizard() {
+      if (!mediaStream) {
+        showError("Start the camera before calibrating.");
         return;
       }
 
       clearError();
-      const smooth = smoothedGaze();
-      baseline = { h: smooth.h, v: smooth.v };
-      isCalibrated = true;
+      calibrationActive = true;
+      calibrationPoints = {};
+      isCalibrated = false;
+      gazeBounds = null;
+      gazeHistory.length = 0;
+      lastAnnouncedStatus = null;
 
-      dbg.baselineH.textContent = baseline.h.toFixed(4) + " (calibrated)";
-      dbg.baselineV.textContent = baseline.v.toFixed(4);
-
-      // Brief visual feedback
-      btnCalibrate.textContent = "Baseline Saved!";
-      setTimeout(() => { btnCalibrate.textContent = "Calibrate Inside Baseline"; }, 2000);
+      updateCalibrationMeta();
+      showCalibrationOverlay();
+      startCalibrationStep(0);
     }
 
     // =========================================================================
@@ -1109,7 +1559,8 @@
 
     btnStart.addEventListener("click", startCamera);
     btnStop.addEventListener("click", stopCamera);
-    btnCalibrate.addEventListener("click", calibrateBaseline);
+    btnCalibrate.addEventListener("click", startCalibrationWizard);
+    btnCalCancel.addEventListener("click", () => cancelCalibration("Calibration cancelled."));
 
     btnVoice.addEventListener("click", () => {
       voiceEnabled = !voiceEnabled;
@@ -1139,6 +1590,7 @@
       showError("Camera access requires HTTPS or localhost. Current origin: " + location.origin);
     } else {
       initFaceLandmarker();
+      updateCalibrationMeta();
     }
   </script>
 </body>
