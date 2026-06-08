@@ -65,10 +65,88 @@ function tv_pa_instructions(string $messageType = 'standard'): string
 
     if ($messageType === 'aircraft') {
         return $base . ' This is a live aircraft movement call for flight school operations. '
-            . 'Speak the registration clearly, then the movement status. Keep it brief and operational.';
+            . 'The aircraft registration is already written in ICAO phonetic alphabet. '
+            . 'Speak each phonetic word exactly as written, then the movement status. Keep it brief and operational.';
     }
 
     return $base;
+}
+
+function tv_pa_phonetic_letter(string $letter): string
+{
+    static $map = array(
+        'A' => 'Alpha',
+        'B' => 'Bravo',
+        'C' => 'Charlie',
+        'D' => 'Delta',
+        'E' => 'Echo',
+        'F' => 'Foxtrot',
+        'G' => 'Golf',
+        'H' => 'Hotel',
+        'I' => 'India',
+        'J' => 'Juliett',
+        'K' => 'Kilo',
+        'L' => 'Lima',
+        'M' => 'Mike',
+        'N' => 'November',
+        'O' => 'Oscar',
+        'P' => 'Papa',
+        'Q' => 'Quebec',
+        'R' => 'Romeo',
+        'S' => 'Sierra',
+        'T' => 'Tango',
+        'U' => 'Uniform',
+        'V' => 'Victor',
+        'W' => 'Whiskey',
+        'X' => 'X-ray',
+        'Y' => 'Yankee',
+        'Z' => 'Zulu',
+    );
+
+    return $map[strtoupper($letter)] ?? $letter;
+}
+
+function tv_pa_phonetic_digit(string $digit): string
+{
+    return match ($digit) {
+        '0' => 'Zero',
+        '1' => 'One',
+        '2' => 'Two',
+        '3' => 'Three',
+        '4' => 'Four',
+        '5' => 'Five',
+        '6' => 'Six',
+        '7' => 'Seven',
+        '8' => 'Eight',
+        '9' => 'Niner',
+        default => $digit,
+    };
+}
+
+function tv_pa_registration_spoken(string $registration): string
+{
+    $registration = strtoupper(preg_replace('/[^A-Z0-9-]/', '', trim($registration)) ?? '');
+    if ($registration === '') {
+        return '';
+    }
+
+    $parts = array();
+    $length = strlen($registration);
+    for ($i = 0; $i < $length; $i++) {
+        $char = $registration[$i];
+        if ($char === '-') {
+            continue;
+        }
+        if (ctype_digit($char)) {
+            $parts[] = tv_pa_phonetic_digit($char);
+            continue;
+        }
+        if (ctype_alpha($char)) {
+            $parts[] = tv_pa_phonetic_letter($char);
+        }
+    }
+
+    return implode(' ', $parts);
 }
 
 function tv_pa_build_speech(array $row): string

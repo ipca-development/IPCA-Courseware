@@ -90,10 +90,23 @@
     return text.replace(/\s+/g, ' ').trim();
   }
 
+  function symCharForTile(value) {
+    var raw = String(value || ' ').trim();
+    if (!raw) return ' ';
+    var ch = raw.charAt(0);
+    if (TILE_CHARS.indexOf(ch) >= 0) return ch;
+    return '-';
+  }
+
   function aircraftSymChar(row) {
     var statusText = normalizeText(String(row.status || ''));
     if (statusText === 'MAINTENANCE') return 'M';
     if (statusText === 'PARKED AT SPC') return 'P';
+    if (statusText.indexOf('TAXI IN') === 0 || statusText.indexOf('TAXI OUT') === 0) return '\u21C4';
+    if (statusText.indexOf('TAKING OFF') === 0) return '\u2197';
+    if (statusText.indexOf('LANDING') === 0) return '\u2198';
+    if (statusText.indexOf('LANDED') === 0) return 'G';
+    if (statusText.indexOf('IN FLIGHT') === 0) return '\u2708';
 
     var code = String(row.status_code || '').toLowerCase();
     switch (code) {
@@ -760,6 +773,19 @@
     return Promise.all(jobs);
   };
 
+  FlipLine.prototype.setSymbol = function (symbol, options, audio, rowDelayBase) {
+    var char = symCharForTile(symbol);
+    options = options || {};
+    if (char === this.tiles[0].char && !options.force) return Promise.resolve();
+    var delay = rowDelayBase + randomBetween(0, 120);
+    var tile = this.tiles[0];
+    return new Promise(function (resolve) {
+      window.setTimeout(function () {
+        tile.flipTo(char, options, audio).then(resolve);
+      }, delay);
+    });
+  };
+
   function AircraftOpsRow(isHeader) {
     this.isHeader = !!isHeader;
     this.sym = new FlipLine(OPS_COLS_SYM, { compact: true, header: isHeader });
@@ -787,7 +813,7 @@
   AircraftOpsRow.prototype.setFields = function (fields, options, audio, rowDelayBase) {
     fields = fields || {};
     return Promise.all([
-      this.sym.setText(fields.sym || ' ', options, audio, rowDelayBase),
+      this.sym.setSymbol(fields.sym || ' ', options, audio, rowDelayBase),
       this.aircraft.setText(fields.aircraft || ' ', options, audio, rowDelayBase + randomBetween(4, 12)),
       this.type.setText(fields.type || ' ', options, audio, rowDelayBase + randomBetween(8, 18)),
       this.status.setText(fields.status || ' ', options, audio, rowDelayBase + randomBetween(12, 24))

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/tv_screen_pa.php';
+
 function tv_adsb_announceable_status_codes(): array
 {
     return array(
@@ -51,30 +53,35 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
         return '';
     }
 
+    $spokenLabel = tv_pa_registration_spoken($label);
+    if ($spokenLabel === '') {
+        $spokenLabel = $label;
+    }
+
     $code = (string)($status['status_code'] ?? '');
     $airport = tv_adsb_airport_name_for_speech($status, $cache);
 
     switch ($code) {
         case 'parked_at_spc':
-            return $label . ' is parked at ' . tv_adsb_pa_gate_phrase($gate) . '.';
+            return $spokenLabel . ' is parked at ' . tv_adsb_pa_gate_phrase($gate) . '.';
 
         case 'taxiing_out':
-            return $label . ' is taxiing out.';
+            return $spokenLabel . ' is taxiing out.';
 
         case 'taxiing_in':
-            return $label . ' is taxiing in.';
+            return $spokenLabel . ' is taxiing in.';
 
         case 'taking_off':
-            return $label . ' is taking off from ' . $airport . '.';
+            return $spokenLabel . ' is taking off from ' . $airport . '.';
 
         case 'landing':
-            return $label . ' is landing at ' . $airport . '.';
+            return $spokenLabel . ' is landing at ' . $airport . '.';
 
         case 'landed':
-            return $label . ' has landed.';
+            return $spokenLabel . ' has landed.';
 
         case 'in_flight':
-            return $label . ' is in flight.';
+            return $spokenLabel . ' is in flight.';
 
         default:
             return '';
