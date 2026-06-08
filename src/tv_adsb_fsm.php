@@ -138,17 +138,40 @@ function tv_adsb_fsm_candidate(array $obs, array &$cache): string
 
     $spcDist = (float)($obs['spc_dist_nm'] ?? 99);
 
-    if ($onSurface && ($inSpc || $spcDist <= 0.25) && $gs < 10.0
-        && tv_adsb_position_variation_m($history, 300) <= 35.0) {
+    if ($onSurface && $inSpc && $gs < 2.0 && count($history) < 2) {
         return 'parked_at_spc';
+    }
+
+    if ($onSurface && ($inSpc || $spcDist <= 0.25) && $gs < 10.0) {
+        $variation = count($history) < 2 ? 0.0 : tv_adsb_position_variation_m($history, 300);
+        $maxVariation = $gs < 5.0 ? 80.0 : 35.0;
+        if ($variation <= $maxVariation) {
+            return 'parked_at_spc';
+        }
     }
 
     if ($wasParked && !$inSpc && $onSurface && $gs > 2.0 && $spcTrend > 0.0008) {
         return 'taxiing_out';
     }
 
-    if ($onSurface && $gs > 10.0 && $spcTrend < -0.0008 && $spcDist < 2.0) {
+    if ($onSurface && !$inSpc && $gs > 10.0 && $gs <= 40.0 && $spcTrend < -0.0008 && $spcDist < 2.0) {
         return 'taxiing_in';
+    }
+
+    if ($inSpc && $gs > 15.0) {
+        if ($onSurface && $airportDist <= 3.0) {
+            return $gs >= 40.0 ? 'landing' : 'landed';
+        }
+        if ($airportDist <= 5.0 && $vr < -50.0) {
+            return 'landing';
+        }
+        if (!$onSurface && $alt !== null && $alt > 500.0) {
+            return 'in_flight';
+        }
+    }
+
+    if ($inSpc && $gs < 10.0 && in_array($state, array('taxiing_in', 'taxiing_out', 'unknown', 'landed'), true)) {
+        return 'parked_at_spc';
     }
 
     if ($inSpc && $gs < 1.5 && ($state === 'parked_at_spc' || ($cache['fsm_last_confirmed'] ?? '') === 'parked_at_spc')) {
