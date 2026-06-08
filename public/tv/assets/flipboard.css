@@ -387,6 +387,14 @@ body.fb-kiosk{
   font-size:clamp(14px,1.5vw,20px);
   letter-spacing:.06em;
 }
+.fb-stage.needs-audio-unlock .fb-footer-item:last-child strong{
+  color:#f5d76e;
+  animation:fb-audio-pulse 1.4s ease-in-out infinite;
+}
+@keyframes fb-audio-pulse{
+  0%,100%{opacity:1}
+  50%{opacity:.55}
+}
 
 .fb-kiosk.is-night .fb-stage{filter:brightness(.78)}
 .fb-stage.is-urgent .fb-board-frame{box-shadow:0 0 28px rgba(231,76,60,.35), 0 8px 32px rgba(0,0,0,.45)}

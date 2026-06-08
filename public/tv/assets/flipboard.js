@@ -198,7 +198,53 @@
     this.flapSamples = [];
     this.chimeSamples = [];
     this.pendingSettle = null;
+    this.html5Player = null;
+    this.html5Ready = false;
   }
+
+  BoardAudio.prototype.ensureHtml5Player = function () {
+    if (!this.html5Player) {
+      this.html5Player = new Audio();
+      this.html5Player.preload = 'auto';
+    }
+    return this.html5Player;
+  };
+
+  BoardAudio.prototype.canPlayAnnouncements = function () {
+    return this.armed || this.html5Ready || !!(this.ctx && this.ctx.state === 'running');
+  };
+
+  BoardAudio.prototype.playHtml5 = function (url) {
+    var self = this;
+    if (!url) return Promise.resolve(false);
+    var player = this.ensureHtml5Player();
+    return new Promise(function (resolve) {
+      var settled = false;
+      function finish(ok) {
+        if (settled) return;
+        settled = true;
+        resolve(!!ok);
+      }
+
+      player.onended = function () { finish(true); };
+      player.onerror = function () { finish(false); };
+      player.pause();
+      try {
+        player.currentTime = 0;
+      } catch (e) {}
+      player.src = url;
+      var attempt = player.play();
+      if (attempt && typeof attempt.then === 'function') {
+        attempt.then(function () {
+          self.html5Ready = true;
+        }).catch(function () {
+          finish(false);
+        });
+        return;
+      }
+      self.html5Ready = true;
+    });
+  };
 
   BoardAudio.prototype.setStateListener = function (fn) {
     this.onStateChange = typeof fn === 'function' ? fn : null;
@@ -233,6 +279,10 @@
         this.master = this.ctx.createGain();
         this.master.gain.value = 0.55;
         this.master.connect(this.ctx.destination);
+        this.ctx.onstatechange = function () {
+          self.armed = !!(self.ctx && self.ctx.state === 'running');
+          if (self.onStateChange) self.onStateChange();
+        };
         this.loadOptionalSamples();
       }
     } catch (e) {
@@ -258,7 +308,7 @@
       return Promise.resolve(true);
     }
 
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
       return this.ctx.resume().then(function () {
         return markRunning();
       }).catch(function () {
@@ -410,6 +460,17 @@
 
   BoardAudio.prototype.playOpenAiMp3 = function (url) {
     var self = this;
+    if (!url) return Promise.resolve(false);
+
+    return this.playHtml5(url).then(function (played) {
+      if (played) return true;
+      if (!self.armed || !self.ctx || !self.master) return false;
+      return self.playOpenAiWebAudio(url);
+    });
+  };
+
+  BoardAudio.prototype.playOpenAiWebAudio = function (url) {
+    var self = this;
     if (!this.armed || !this.ctx || !this.master || !url) {
       return Promise.resolve(false);
     }
@@ -494,15 +555,16 @@
 
   BoardAudio.prototype.playAnnouncement = function (message) {
     var self = this;
-    if (!this.armed) return Promise.resolve();
+    var url = this.announcementUrl(message);
+    if (!url) return Promise.resolve();
     this.beginAnnouncement();
-    return this.chime()
-      .then(function () {
+    var prelude = this.armed
+      ? this.chime().then(function () {
         return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
       })
+      : Promise.resolve();
+    return prelude
       .then(function () {
-        var url = self.announcementUrl(message);
-        if (!url) return;
         return self.playMp3(url);
       })
       .finally(function () {
@@ -521,14 +583,15 @@
 
   BoardAudio.prototype.playAircraftEvent = function (event) {
     var self = this;
-    if (!this.armed) return Promise.resolve();
     var url = this.aircraftEventUrl(event);
     if (!url) return Promise.resolve();
     this.beginAnnouncement();
-    return this.chime()
-      .then(function () {
+    var prelude = this.armed
+      ? this.chime().then(function () {
         return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
       })
+      : Promise.resolve();
+    return prelude
       .then(function () {
         return self.playMp3(url);
       })
@@ -866,25 +929,33 @@
   FlipBoard.prototype.updateAudioStatus = function () {
     if (!this.audioState) return;
     var footerItem = this.audioState.closest('.fb-footer-item');
+    var needsUnlock = !!(this.audio.ctx && !this.audio.armed && !this.audio.announcing);
+    this.root.classList.toggle('needs-audio-unlock', needsUnlock);
+
     if (!window.AudioContext && !window.webkitAudioContext) {
       if (footerItem) footerItem.hidden = false;
       this.audioState.textContent = 'UNSUPPORTED';
       return;
     }
-    if (this.audio.announcing || this.audio.armed) {
+    if (this.audio.announcing) {
+      if (footerItem) footerItem.hidden = false;
+      this.audioState.textContent = 'ANNOUNCING';
+      return;
+    }
+    if (this.audio.armed || this.audio.html5Ready) {
       if (footerItem) footerItem.hidden = true;
       return;
     }
     if (footerItem) footerItem.hidden = false;
-    if (this.audio.ctx && this.audio.ctx.state === 'suspended') {
-      this.audioState.textContent = 'TAP TO ENABLE';
+    if (needsUnlock) {
+      this.audioState.textContent = 'TAP SCREEN TO ENABLE';
       return;
     }
     if (this.audio.ctx) {
       this.audioState.textContent = this.audio.ctx.state.toUpperCase();
       return;
     }
-    this.audioState.textContent = 'STARTING';
+    this.audioState.textContent = 'INITIALIZING';
   };
 
   FlipBoard.prototype.bindAudio = function () {
@@ -901,24 +972,37 @@
 
     this.updateAudioStatus();
 
-    if (this.autoAudio) {
-      tryArm();
-      var tries = 0;
-      var retry = window.setInterval(function () {
-        tryArm().then(function (armed) {
-          tries += 1;
-          if (armed || tries >= 40) window.clearInterval(retry);
-        });
-      }, 500);
-    }
+    tryArm();
+    var tries = 0;
+    var retry = window.setInterval(function () {
+      tryArm().then(function (armed) {
+        tries += 1;
+        if (armed || tries >= 120) window.clearInterval(retry);
+      });
+    }, 500);
 
-    var unlock = function () { tryArm(); };
+    var unlock = function () {
+      tryArm().then(function (armed) {
+        if (armed || self.audio.html5Ready) return;
+        var probe = self.audio.ensureHtml5Player();
+        probe.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==';
+        var attempt = probe.play();
+        if (attempt && typeof attempt.then === 'function') {
+          attempt.then(function () {
+            probe.pause();
+            self.audio.html5Ready = true;
+            self.updateAudioStatus();
+          }).catch(function () {});
+        }
+      });
+    };
     document.addEventListener('pointerdown', unlock, { passive: true });
-    document.addEventListener('keydown', unlock, { once: true });
+    document.addEventListener('keydown', unlock);
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) tryArm();
+      if (!document.hidden) unlock();
     });
     this.root.addEventListener('click', unlock, { passive: true });
+    window.addEventListener('pageshow', unlock, { passive: true });
   };
 
   FlipBoard.prototype.tickClock = function () {

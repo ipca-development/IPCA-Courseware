@@ -86,7 +86,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
         </div>
         <div class="fb-footer-item">
           <span>AUDIO</span>
-          <strong id="fbAudioState">STARTING</strong>
+          <strong id="fbAudioState">INITIALIZING</strong>
         </div>
       </footer>
     </main>
