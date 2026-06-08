@@ -816,37 +816,101 @@
     // Camera management
     // =========================================================================
 
+    /**
+     * Browsers hide deviceId until camera permission is granted, so options
+     * may show "Camera 1" while value is still empty. Use index:N as fallback.
+     */
+    function cameraOptionValue(cam, index) {
+      return cam.deviceId || `index:${index}`;
+    }
+
+    function parseCameraIndex(value) {
+      if (!value || !value.startsWith("index:")) return -1;
+      return parseInt(value.split(":")[1], 10);
+    }
+
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter(d => d.kind === "videoinput");
+    }
+
+    async function primeCameraPermission() {
+      const tempStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      tempStream.getTracks().forEach(t => t.stop());
+    }
+
     async function refreshCameraList() {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cameras = devices.filter(d => d.kind === "videoinput");
+        const cameras = await listCameras();
 
-        const prev = cameraSelect.value;
+        const prevValue = cameraSelect.value;
+        const prevIndex = parseCameraIndex(prevValue);
+        const prevSelectedIndex = cameraSelect.selectedIndex;
+
         cameraSelect.innerHTML = '<option value="">— Select camera —</option>';
 
         cameras.forEach((cam, i) => {
           const opt = document.createElement("option");
-          opt.value = cam.deviceId;
+          opt.value = cameraOptionValue(cam, i);
           opt.textContent = cam.label || `Camera ${i + 1}`;
           cameraSelect.appendChild(opt);
         });
 
         cameraSelect.disabled = cameras.length === 0;
 
-        // Prefer ArduCam by label; otherwise restore previous or auto-pick a single camera
+        // Restore previous selection
         const arduCam = cameras.find(c => /ardu/i.test(c.label));
         if (arduCam) {
-          cameraSelect.value = arduCam.deviceId;
-        } else if (prev && cameras.some(c => c.deviceId === prev)) {
-          cameraSelect.value = prev;
+          cameraSelect.value = cameraOptionValue(arduCam, cameras.indexOf(arduCam));
+        } else if (prevValue && [...cameraSelect.options].some(o => o.value === prevValue)) {
+          cameraSelect.value = prevValue;
+        } else if (prevIndex >= 0 && prevIndex < cameras.length) {
+          cameraSelect.value = cameraOptionValue(cameras[prevIndex], prevIndex);
+        } else if (prevSelectedIndex > 0 && prevSelectedIndex <= cameras.length) {
+          const idx = prevSelectedIndex - 1;
+          cameraSelect.value = cameraOptionValue(cameras[idx], idx);
         } else if (cameras.length === 1) {
-          cameraSelect.value = cameras[0].deviceId;
+          cameraSelect.value = cameraOptionValue(cameras[0], 0);
         }
 
         updateCameraMeta();
       } catch (err) {
         showError("Could not enumerate cameras: " + err.message);
       }
+    }
+
+    /**
+     * Resolve the selected camera to a real deviceId.
+     * Requests permission first when IDs are still hidden by the browser.
+     */
+    async function resolveSelectedDeviceId() {
+      const selectedIndex = cameraSelect.selectedIndex - 1;
+      if (selectedIndex < 0) {
+        return null;
+      }
+
+      let cameras = await listCameras();
+      if (selectedIndex >= cameras.length) {
+        return null;
+      }
+
+      // Browsers omit deviceId until the user grants camera permission once
+      if (!cameras[selectedIndex].deviceId) {
+        await primeCameraPermission();
+        await refreshCameraList();
+        cameras = await listCameras();
+      }
+
+      const resolved = cameras[selectedIndex]?.deviceId;
+      if (resolved) {
+        return resolved;
+      }
+
+      const currentValue = cameraSelect.value;
+      return currentValue && !currentValue.startsWith("index:") ? currentValue : null;
     }
 
     function buildVideoConstraints(deviceId) {
@@ -869,8 +933,7 @@
     async function startCamera() {
       clearError();
 
-      const deviceId = cameraSelect.value;
-      if (!deviceId) {
+      if (cameraSelect.selectedIndex <= 0) {
         showError("Please select a camera first.");
         return;
       }
@@ -878,6 +941,12 @@
       stopCamera();
 
       try {
+        const deviceId = await resolveSelectedDeviceId();
+        if (!deviceId) {
+          showError("Could not access the selected camera. Try another device.");
+          return;
+        }
+
         mediaStream = await navigator.mediaDevices.getUserMedia(
           buildVideoConstraints(deviceId)
         );
@@ -888,7 +957,10 @@
 
         // Re-enumerate to get camera labels after permission granted
         await refreshCameraList();
-        cameraSelect.value = deviceId;
+        const match = [...cameraSelect.options].find(o => o.value === deviceId);
+        if (match) {
+          cameraSelect.value = deviceId;
+        }
         updateCameraMeta();
 
         btnStart.disabled = true;
