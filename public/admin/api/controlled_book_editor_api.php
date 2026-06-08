@@ -54,7 +54,7 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc);
             break;
         case 'recompute_section_numbers':
             cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc, $pageHeaderSvc, $coverPageSvc);
@@ -66,7 +66,10 @@ try {
             cp_editor_handle_save_book_styles($foundation, $styleSvc, $uid);
             break;
         case 'regenerate_toc':
-            cp_editor_handle_regenerate_toc($tocSvc, $uid);
+            cp_editor_handle_regenerate_toc($foundation, $tocSvc, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $uid);
+            break;
+        case 'save_toc_settings':
+            cp_editor_handle_save_toc_settings($foundation, $tocSvc, $uid);
             break;
         case 'save_section_layout':
             cp_editor_handle_save_section_layout($sections, $layoutSvc, $uid);
@@ -199,6 +202,11 @@ function cp_editor_legacy_section_layout(array $section): ?array
     return null;
 }
 
+function cp_editor_is_toc_section(array $section): bool
+{
+    return (string)($section['section_key'] ?? '') === 'toc';
+}
+
 function cp_editor_is_cover_section(array $section): bool
 {
     return (string)($section['section_key'] ?? '') === 'cover';
@@ -242,7 +250,8 @@ function cp_editor_handle_load(
     ControlledPublishingBookStyleService $styleSvc,
     ControlledPublishingSectionNumberService $numberSvc,
     ControlledPublishingPageHeaderService $pageHeaderSvc,
-    ControlledPublishingCoverPageService $coverPageSvc
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingTocService $tocSvc
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
     $sectionId = (int)($_GET['section_id'] ?? 0);
@@ -282,6 +291,7 @@ function cp_editor_handle_load(
     $pageHtml = cp_editor_render_page_html($renderer, $version, $section, $blocksHtml, $mode, $pageLayout, $pageHeaderConfig, $coverPageSvc);
     $prior = $revision->priorVersion($versionId);
     $coverPage = $coverPageSvc->resolveFromVersion($version);
+    $tocSettings = $tocSvc->resolveTocSettingsFromVersion($version);
 
     cp_editor_json(200, array(
         'ok' => true,
@@ -300,7 +310,10 @@ function cp_editor_handle_load(
         'page_layout' => $pageLayout,
         'editable' => $editable,
         'is_cover_section' => cp_editor_is_cover_section($section),
+        'is_toc_section' => cp_editor_is_toc_section($section),
         'cover_page' => $coverPage,
+        'toc_settings' => $tocSettings,
+        'toc_settings_catalog' => $tocSvc->tocSettingsForApi($tocSettings),
         'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
         'book_styles' => $bookStyles,
         'page_header' => $pageHeaderConfig['page_header'],
@@ -408,15 +421,93 @@ function cp_editor_handle_save_book_styles(
     cp_editor_json(200, array('ok' => true, 'book_styles' => $saved));
 }
 
-function cp_editor_handle_regenerate_toc(ControlledPublishingTocService $tocSvc, int $uid): void
-{
+function cp_editor_handle_regenerate_toc(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingTocService $tocSvc,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
+    }
+    if (is_array($in['toc_settings'] ?? null)) {
+        $tocSvc->saveTocSettingsForVersion($versionId, $in['toc_settings'], $uid);
+    }
+    $result = $tocSvc->regenerateTocSection($versionId, $uid);
+    $payload = array(
+        'ok' => true,
+        'result' => $result,
+        'toc_settings' => $result['toc_settings'],
+        'toc_settings_catalog' => $tocSvc->tocSettingsForApi($result['toc_settings']),
+    );
+    if ($sectionId <= 0) {
+        $sectionId = (int)($result['section_id'] ?? 0);
+    }
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+            $pageLayout = $layoutSvc->resolveLayout($section);
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $blocksHtml = $renderer->renderBlocks($sectionBlocks, ControlledPublishingBookRenderer::MODE_EDIT);
+            $payload['page_html'] = cp_editor_render_page_html(
+                $renderer,
+                $version,
+                $section,
+                $blocksHtml,
+                ControlledPublishingBookRenderer::MODE_EDIT,
+                $pageLayout,
+                $pageHeaderConfig,
+                $coverPageSvc
+            );
+        }
+    }
+    cp_editor_json(200, $payload);
+}
+
+function cp_editor_handle_save_toc_settings(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingTocService $tocSvc,
+    int $uid
+): void {
     $in = cp_editor_input();
     $versionId = (int)($in['version_id'] ?? 0);
     if ($versionId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
     }
-    $result = $tocSvc->regenerateTocSection($versionId, $uid);
-    cp_editor_json(200, array('ok' => true, 'result' => $result));
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
+    }
+    $settings = is_array($in['toc_settings'] ?? null) ? $in['toc_settings'] : array();
+    $saved = $tocSvc->saveTocSettingsForVersion($versionId, $settings, $uid);
+    cp_editor_json(200, array(
+        'ok' => true,
+        'toc_settings' => $saved,
+        'toc_settings_catalog' => $tocSvc->tocSettingsForApi($saved),
+    ));
 }
 
 function cp_editor_handle_save_section_layout(

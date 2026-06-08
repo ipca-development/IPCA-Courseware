@@ -115,6 +115,10 @@
     coverPage: null,
     coverSaveTimer: null,
     coverDropTarget: null,
+    isTocSection: false,
+    tocSettings: null,
+    tocSettingsCatalog: [],
+    tocNavWired: false,
   };
 
   var INDENT_STEP_PX = 24;
@@ -345,7 +349,10 @@
       state.versionInfo = res.version || {};
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
+      state.isTocSection = !!res.is_toc_section;
       state.coverPage = res.cover_page || defaultCoverPage();
+      state.tocSettings = res.toc_settings || defaultTocSettings();
+      state.tocSettingsCatalog = res.toc_settings_catalog || defaultTocSettingsCatalog();
       state.bookStyles = res.book_styles || defaultBookStyles();
       if (state.bookStyles.callout_presets) {
         state.calloutPresets = state.bookStyles.callout_presets;
@@ -360,6 +367,7 @@
       }
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
+      renderTocSettingsPanel();
       wireCanvas();
       applyCanvasZoom(state.canvasZoom, false);
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
@@ -885,6 +893,8 @@
 
     wireCoverPage();
 
+    wireTocNavigation();
+
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
     if (dropzone && state.editable && dropzone.getAttribute('data-drop-wired') !== '1') {
       dropzone.setAttribute('data-drop-wired', '1');
@@ -1019,6 +1029,123 @@
       right_font_italic: false,
       right_font_underline: false,
     };
+  }
+
+  function defaultTocSettings() {
+    return {
+      include_title: true,
+      include_subtitle_1: true,
+      include_subtitle_2: true,
+      include_subtitle_3: false,
+      include_subtitle_4: false,
+    };
+  }
+
+  function defaultTocSettingsCatalog() {
+    return [
+      { key: 'include_title', style: 'title', label: 'Title', enabled: true, locked: true },
+      { key: 'include_subtitle_1', style: 'subtitle_1', label: 'Subtitle 1', enabled: true, locked: false },
+      { key: 'include_subtitle_2', style: 'subtitle_2', label: 'Subtitle 2', enabled: true, locked: false },
+      { key: 'include_subtitle_3', style: 'subtitle_3', label: 'Subtitle 3', enabled: false, locked: false },
+      { key: 'include_subtitle_4', style: 'subtitle_4', label: 'Subtitle 4', enabled: false, locked: false },
+    ];
+  }
+
+  function collectTocSettingsFromPanel() {
+    var panel = canvasEl.querySelector('.cpb-toc-settings');
+    var settings = Object.assign({}, defaultTocSettings(), state.tocSettings || {});
+    if (!panel) return settings;
+    panel.querySelectorAll('[data-toc-setting]').forEach(function (input) {
+      var key = input.getAttribute('data-toc-setting');
+      if (!key) return;
+      settings[key] = input.checked;
+    });
+    settings.include_title = true;
+    return settings;
+  }
+
+  function renderTocSettingsPanel() {
+    var existing = canvasEl.querySelector('.cpb-toc-settings');
+    if (existing) existing.remove();
+    if (!state.isTocSection) return;
+    if ((state.versionInfo && state.versionInfo.lifecycle_status) === 'released') return;
+
+    var panel = document.createElement('div');
+    panel.className = 'cpb-toc-settings';
+    panel.setAttribute('contenteditable', 'false');
+
+    var catalog = state.tocSettingsCatalog && state.tocSettingsCatalog.length
+      ? state.tocSettingsCatalog
+      : defaultTocSettingsCatalog();
+    var levelsHtml = catalog.map(function (item) {
+      var checked = item.enabled ? ' checked' : '';
+      var disabled = item.locked ? ' disabled' : '';
+      var lockedClass = item.locked ? ' is-locked' : '';
+      return '<label class="' + lockedClass + '"><input type="checkbox" data-toc-setting="' + escapeHtml(item.key) + '"'
+        + checked + disabled + '> ' + escapeHtml(item.label) + '</label>';
+    }).join('');
+
+    panel.innerHTML = ''
+      + '<h4>Table of Contents settings</h4>'
+      + '<p class="cpb-toc-settings-lead">Choose which paragraph style levels appear in the TOC. '
+      + 'Page numbers are resolved automatically in the published e-manual.</p>'
+      + '<div class="cpb-toc-settings-levels">' + levelsHtml + '</div>'
+      + '<div class="cpb-toc-settings-actions">'
+      + '<button type="button" class="cpb-toc-regenerate">Regenerate TOC</button>'
+      + '<button type="button" class="cpb-toc-save-settings">Save settings</button>'
+      + '</div>';
+
+    var sheet = canvasEl.querySelector('.cpb-sheet');
+    if (sheet) {
+      canvasEl.insertBefore(panel, sheet);
+    } else {
+      canvasEl.insertBefore(panel, canvasEl.firstChild);
+    }
+
+    panel.querySelector('.cpb-toc-regenerate').addEventListener('click', function () {
+      syncToc(true);
+    });
+    panel.querySelector('.cpb-toc-save-settings').addEventListener('click', function () {
+      var settings = collectTocSettingsFromPanel();
+      setStatus('Saving TOC settings…', 'saving');
+      apiPost('save_toc_settings', {
+        version_id: state.versionId,
+        toc_settings: settings,
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Save failed');
+        state.tocSettings = res.toc_settings || settings;
+        state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
+        setStatus('TOC settings saved', 'saved');
+      }).catch(showError);
+    });
+  }
+
+  function scrollToTocTarget(anchor) {
+    if (!anchor) return;
+    var target = document.getElementById(anchor)
+      || canvasEl.querySelector('[data-stable-anchor="' + anchor + '"]');
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function wireTocNavigation() {
+    if (state.tocNavWired) return;
+    state.tocNavWired = true;
+    canvasEl.addEventListener('click', function (e) {
+      var link = e.target.closest('.cpb-toc-link');
+      if (!link) return;
+      e.preventDefault();
+      var sectionId = parseInt(link.getAttribute('data-section-id') || '0', 10);
+      var target = link.getAttribute('data-toc-target') || '';
+      if (sectionId > 0 && sectionId !== state.sectionId) {
+        loadSection(sectionId).then(function () {
+          scrollToTocTarget(target);
+        });
+      } else {
+        scrollToTocTarget(target);
+      }
+    });
   }
 
   function defaultCoverPage() {
@@ -3481,16 +3608,32 @@
     document.body.appendChild(overlay);
   }
 
-  function syncToc() {
-    if (!confirm('Regenerate the Table of Contents from Title / Subtitle / Heading paragraph styles?')) return;
+  function syncToc(skipConfirm) {
+    if (!skipConfirm && !confirm('Regenerate the Table of Contents from the selected paragraph style levels?')) return;
     setStatus('Syncing TOC…', 'saving');
-    apiPost('regenerate_toc', { version_id: state.versionId })
+    var settings = collectTocSettingsFromPanel();
+    apiPost('regenerate_toc', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+      toc_settings: settings,
+    })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'TOC sync failed');
         var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+        state.tocSettings = res.toc_settings || settings;
+        state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
+        if (res.page_html) {
+          var panel = canvasEl.querySelector('.cpb-toc-settings');
+          canvasEl.innerHTML = res.page_html;
+          if (panel) canvasEl.insertBefore(panel, canvasEl.firstChild);
+          else renderTocSettingsPanel();
+          wireCanvas();
+          setStatus('TOC updated (' + count + ' entries)', 'saved');
+        } else {
+          var tocId = findTocSectionId(state.sectionsTree);
+          if (tocId) return loadSection(tocId);
+        }
         setStatus('TOC updated (' + count + ' entries)', 'saved');
-        var tocId = findTocSectionId(state.sectionsTree);
-        if (tocId) loadSection(tocId);
       })
       .catch(showError);
   }

@@ -66,7 +66,7 @@ final class ControlledPublishingBookRenderer
         $payload = $this->decodePayload($block);
         $id = (int)($block['id'] ?? 0);
         $anchor = (string)($block['stable_anchor'] ?? '');
-        $system = !empty($block['is_system_managed']);
+        $system = !empty($block['is_system_managed']) || $type === 'toc';
 
         $change = (string)($block['change_status'] ?? '');
         $changeClass = in_array($change, array('new', 'modified'), true) ? ' cpb-block--changed cpb-block--' . $change : '';
@@ -74,6 +74,9 @@ final class ControlledPublishingBookRenderer
             . ' data-block-id="' . $id . '"'
             . ' data-block-type="' . h($type) . '"'
             . ' data-stable-anchor="' . h($anchor) . '"';
+        if ($anchor !== '') {
+            $attrs .= ' id="' . h($anchor) . '"';
+        }
         if ($change !== '' && $change !== 'unchanged') {
             $attrs .= ' data-change-status="' . h($change) . '"';
         }
@@ -98,6 +101,7 @@ final class ControlledPublishingBookRenderer
             'table' => $this->renderTable($payload, $mode),
             'image' => $this->renderImage($payload, $mode),
             'callout' => $this->renderCallout($payload, $mode),
+            'toc' => $this->renderToc($payload, $mode),
             'generated_placeholder' => $this->renderPlaceholder($payload),
             default => '<p class="cpb-unknown">Unsupported block: ' . h($type) . '</p>',
         };
@@ -600,6 +604,58 @@ final class ControlledPublishingBookRenderer
         }
         $html .= '</' . $tag . '>';
         return $html;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function renderToc(array $payload, string $mode): string
+    {
+        $entries = is_array($payload['entries'] ?? null) ? $payload['entries'] : array();
+        if ($entries === array()) {
+            return '<nav class="cpb-toc" aria-label="Table of contents"><p class="cpb-toc-empty">No entries.</p></nav>';
+        }
+
+        $rows = '';
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $style = (string)($entry['style'] ?? 'body');
+            $depth = max(0, min(4, (int)($entry['depth'] ?? 0)));
+            $label = (string)($entry['label'] ?? '');
+            if ($label === '') {
+                continue;
+            }
+            $anchor = trim((string)($entry['target_anchor'] ?? ''));
+            $sectionId = (int)($entry['section_id'] ?? 0);
+            $page = $entry['page'] ?? null;
+            $pageText = $page === null || $page === '' ? '—' : (string)$page;
+
+            $typoPayload = array('paragraph_style' => $style);
+            $styleClass = $this->styleClass($typoPayload);
+            $styleAttr = $this->styleAttr($typoPayload);
+            $titleClass = $style === 'title' ? ' cpb-toc-row--title' : '';
+
+            $labelInner = h($label);
+            if ($anchor !== '') {
+                $href = '#' . rawurlencode($anchor);
+                $labelInner = '<a class="cpb-toc-link" href="' . h($href) . '"'
+                    . ' data-section-id="' . $sectionId . '"'
+                    . ' data-toc-target="' . h($anchor) . '">'
+                    . h($label) . '</a>';
+            }
+
+            $rows .= '<div class="cpb-toc-row cpb-toc-depth-' . $depth . $titleClass
+                . $styleClass . '" data-toc-depth="' . $depth . '" data-toc-style="' . h($style) . '"'
+                . $styleAttr . '>'
+                . '<span class="cpb-toc-label">' . $labelInner . '</span>'
+                . '<span class="cpb-toc-leader" aria-hidden="true"></span>'
+                . '<span class="cpb-toc-page" data-toc-page="' . h($pageText) . '">' . h($pageText) . '</span>'
+                . '</div>';
+        }
+
+        return '<nav class="cpb-toc" aria-label="Table of contents">' . $rows . '</nav>';
     }
 
     /**

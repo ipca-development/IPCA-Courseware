@@ -9,7 +9,7 @@ require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 final class ControlledPublishingPageHeaderService
 {
     /** @var list<string> */
-    public const HIDE_HEADER_FOOTER_SECTIONS = array('cover', 'toc');
+    public const HIDE_HEADER_FOOTER_SECTIONS = array('cover');
 
     /** @var array<string,array{label:string,description:string}> */
     public const TOKEN_CATALOG = array(
