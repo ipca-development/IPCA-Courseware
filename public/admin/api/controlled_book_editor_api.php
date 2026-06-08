@@ -954,6 +954,13 @@ function cp_editor_handle_save_lep_page(
         $payload['signatories'] = $lepIn['signatories'];
     }
 
+    if (is_array($lepIn['headings'] ?? null)) {
+        $payload['headings'] = $lepIn['headings'];
+    }
+    if (array_key_exists('table_title', $lepIn)) {
+        $payload['table_title'] = (string)$lepIn['table_title'];
+    }
+
     $saved = $lepPageSvc->saveLepPageForVersion($versionId, $payload, $uid);
     cp_editor_json(200, array(
         'ok' => true,

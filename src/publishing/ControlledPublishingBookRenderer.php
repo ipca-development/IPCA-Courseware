@@ -197,9 +197,14 @@ final class ControlledPublishingBookRenderer
         $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
         $editAttr = $editable ? ' data-lep-editable="1"' : '';
 
-        $certText = h((string)($lep['certification_text'] ?? ''));
-        $onBehalf = h((string)($lep['on_behalf_text'] ?? ''));
-        $tableTitle = h((string)($lep['table_title'] ?? 'Effective Parts'));
+        $headings = is_array($lep['headings'] ?? null) ? $lep['headings'] : array();
+        $headingsByKey = array();
+        foreach ($headings as $heading) {
+            if (!is_array($heading)) {
+                continue;
+            }
+            $headingsByKey[(string)($heading['key'] ?? '')] = $heading;
+        }
 
         $internalSlots = array();
         $authoritySlot = null;
@@ -227,26 +232,100 @@ final class ControlledPublishingBookRenderer
 
         $partsHtml = $this->renderLepPartsTable($lep, $editable);
 
+        $preCertHeadings = '';
+        foreach (array('part_title', 'title', 'subtitle_1') as $headingKey) {
+            if (!isset($headingsByKey[$headingKey]) || !is_array($headingsByKey[$headingKey])) {
+                continue;
+            }
+            $preCertHeadings .= $this->renderLepHeading($headingsByKey[$headingKey], $editable);
+        }
+
+        $tableHeadingHtml = '';
+        if (isset($headingsByKey['subtitle_2']) && is_array($headingsByKey['subtitle_2'])) {
+            $tableHeadingHtml = $this->renderLepHeading($headingsByKey['subtitle_2'], $editable);
+        }
+
+        $bodyStyle = $this->lepParagraphStyle('body');
+        $certText = (string)($lep['certification_text'] ?? '');
+        $onBehalf = (string)($lep['on_behalf_text'] ?? '');
+
         return '<div class="cpb-sheet cpb-sheet--lep" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
             . $headerHtml
             . '<div class="cpb-lep" contenteditable="false">'
+            . $preCertHeadings
             . '<div class="cpb-lep-cert-wrap">'
             . '<div class="cpb-lep-cert-block">'
             . '<div class="cpb-lep-cert-row cpb-lep-cert-row--text">'
-            . '<div class="cpb-lep-cert-text" data-lep-field="certification_text"' . $fieldEdit . '>' . $certText . '</div>'
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-cert-text') . '" data-lep-field="certification_text"' . $bodyStyle['attr'] . $fieldEdit . '>'
+            . h($certText) . '</div>'
             . '</div>'
             . '<div class="cpb-lep-cert-row cpb-lep-cert-row--text">'
-            . '<div class="cpb-lep-on-behalf" data-lep-field="on_behalf_text"' . $fieldEdit . '>' . $onBehalf . '</div>'
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-on-behalf') . '" data-lep-field="on_behalf_text"' . $bodyStyle['attr'] . $fieldEdit . '>'
+            . h($onBehalf) . '</div>'
             . '</div>'
             . '<div class="cpb-lep-cert-row cpb-lep-cert-row--signatures">' . $signatureHtml . '</div>'
             . $authorityHtml
             . '</div>'
             . '</div>'
-            . '<h2 class="cpb-lep-table-title" data-lep-field="table_title"' . $fieldEdit . '>' . $tableTitle . '</h2>'
+            . $tableHeadingHtml
             . $partsHtml
             . '</div>'
             . $footerHtml
             . '</div>';
+    }
+
+    /**
+     * @return array{class:string,attr:string}
+     */
+    private function lepParagraphStyle(string $styleKey): array
+    {
+        $payload = array('paragraph_style' => $styleKey);
+        return array(
+            'class' => trim('cpb-paragraph' . $this->styleClass($payload)),
+            'attr' => $this->styleAttr($payload),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $heading
+     */
+    private function renderLepHeading(array $heading, bool $editable): string
+    {
+        $key = h((string)($heading['key'] ?? ''));
+        $styleKey = (string)($heading['style'] ?? 'body');
+        $text = h((string)($heading['text'] ?? ''));
+        $styling = $this->lepParagraphStyle($styleKey);
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        return '<div class="cpb-lep-heading cpb-lep-heading--' . $key . ' ' . $styling['class'] . '"'
+            . ' data-lep-heading="' . $key . '" data-lep-field="heading_' . $key . '"'
+            . $styling['attr'] . $fieldEdit . '>' . $text . '</div>';
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function resolveStandardTableStyle(): array
+    {
+        $tables = is_array($this->bookStyles['table_styles'] ?? null) ? $this->bookStyles['table_styles'] : array();
+        $standard = is_array($tables['standard'] ?? null) ? $tables['standard'] : array();
+        return array(
+            'border_width' => in_array((string)($standard['border_width'] ?? 'thin'), array('thin', 'medium', 'thick'), true)
+                ? (string)$standard['border_width']
+                : 'thin',
+            'border_color' => (string)($standard['border_color'] ?? '#94a3b8'),
+            'header_row' => is_array($standard['header_row'] ?? null) ? $standard['header_row'] : array(
+                'font_family' => 'sans',
+                'font_size' => 10,
+                'color' => '#0f172a',
+                'bg' => '#f1f5f9',
+            ),
+            'body_row' => is_array($standard['body_row'] ?? null) ? $standard['body_row'] : array(
+                'font_family' => 'serif',
+                'font_size' => 10,
+                'color' => '#0f172a',
+                'bg' => '',
+            ),
+        );
     }
 
     /**
@@ -260,6 +339,7 @@ final class ControlledPublishingBookRenderer
         $date = h((string)($slot['date'] ?? ''));
         $sigUrl = trim((string)($slot['signature_url'] ?? ''));
         $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $bodyStyle = $this->lepParagraphStyle('body');
 
         $sigInner = '';
         if ($sigUrl !== '') {
@@ -271,11 +351,13 @@ final class ControlledPublishingBookRenderer
         }
 
         return '<div class="cpb-lep-signatory" data-lep-slot="' . $slotKey . '">'
-            . '<div class="cpb-lep-signatory-name" data-lep-field="name"' . $fieldEdit . '>' . $name . '</div>'
-            . '<div class="cpb-lep-signatory-title" data-lep-field="title"' . $fieldEdit . '>' . $title . '</div>'
-            . '<div class="cpb-lep-signatory-date"><span class="cpb-lep-label">Date:</span> '
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-name cpb-lep-emphasis') . '" data-lep-field="name"' . $bodyStyle['attr'] . $fieldEdit . '>' . $name . '</div>'
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-title cpb-lep-emphasis') . '" data-lep-field="title"' . $bodyStyle['attr'] . $fieldEdit . '>' . $title . '</div>'
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-date') . '"' . $bodyStyle['attr'] . '>'
+            . '<span class="cpb-lep-label">Date:</span> '
             . '<span class="cpb-lep-signatory-date-value" data-lep-field="date"' . $fieldEdit . '>' . $date . '</span></div>'
-            . '<div class="cpb-lep-signatory-signature"><span class="cpb-lep-label">Signature:</span> '
+            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-signature') . '"' . $bodyStyle['attr'] . '>'
+            . '<span class="cpb-lep-label">Signature:</span> '
             . '<div class="cpb-lep-signature-box" data-lep-signature-box="' . $slotKey . '">' . $sigInner . '</div></div>'
             . '</div>';
     }
@@ -289,8 +371,9 @@ final class ControlledPublishingBookRenderer
         $signed = is_array($authoritySlot)
             && trim((string)($authoritySlot['signature_url'] ?? '')) !== '';
         if ($signed) {
+            $bodyStyle = $this->lepParagraphStyle('body');
             return '<div class="cpb-lep-cert-row cpb-lep-cert-row--authority">'
-                . '<div class="cpb-lep-authority-label">Authority approval</div>'
+                . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-authority-label cpb-lep-emphasis') . '"' . $bodyStyle['attr'] . '>Authority approval</div>'
                 . $this->renderLepSignatoryBox($authoritySlot, false)
                 . '</div>';
         }
@@ -300,8 +383,9 @@ final class ControlledPublishingBookRenderer
                 . $versionId
                 . '&token=' . rawurlencode((string)$approval['token']);
         }
-        $pending = '<div class="cpb-lep-authority-pending">'
-            . '<strong>Authority signature pending</strong>'
+        $pending = '<div class="cpb-lep-authority-pending ' . $this->lepParagraphStyle('body')['class'] . '"'
+            . $this->lepParagraphStyle('body')['attr'] . '>'
+            . '<strong class="cpb-lep-emphasis">Authority signature pending</strong>'
             . '<span>Competent authority approval is collected via the Approval page.</span>';
         if ($editable && $approvalUrl !== '') {
             $pending .= '<a class="cpb-lep-approval-link" href="' . h($approvalUrl) . '" target="_blank" rel="noopener">Open Approval page</a>';
@@ -317,30 +401,60 @@ final class ControlledPublishingBookRenderer
     {
         $parts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
         $emptyRows = max(0, min(20, (int)($lep['empty_rows'] ?? 10)));
+        $tableStyle = $this->resolveStandardTableStyle();
+        $headerRow = $tableStyle['header_row'];
+        $bodyRow = $tableStyle['body_row'];
+        $headerVisual = $this->tableCellVisualAttr(
+            (string)($headerRow['bg'] ?? '#f1f5f9'),
+            'center',
+            (string)($headerRow['font_family'] ?? 'sans'),
+            (int)($headerRow['font_size'] ?? 10),
+            (string)($headerRow['color'] ?? '#0f172a')
+        );
+        $bodyVisual = $this->tableCellVisualAttr(
+            (string)($bodyRow['bg'] ?? ''),
+            'center',
+            (string)($bodyRow['font_family'] ?? 'serif'),
+            (int)($bodyRow['font_size'] ?? 10),
+            (string)($bodyRow['color'] ?? '#0f172a')
+        );
+        $borderWidth = (string)$tableStyle['border_width'];
+        $borderColor = (string)$tableStyle['border_color'];
+
         $rows = '';
         foreach ($parts as $row) {
             if (!is_array($row)) {
                 continue;
             }
             $rows .= '<tr class="cpb-lep-part-row" data-lep-part-generated="1">'
-                . '<td>' . h((string)($row['part'] ?? '')) . '</td>'
-                . '<td>' . h((string)($row['pages'] ?? '—')) . '</td>'
-                . '<td>' . h((string)($row['date'] ?? '')) . '</td>'
-                . '<td>' . h((string)($row['revision'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['part'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['pages'] ?? '—')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['date'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['revision'] ?? '')) . '</td>'
                 . '</tr>';
         }
         for ($i = 0; $i < $emptyRows; $i++) {
-            $rows .= '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td>&nbsp;</td><td></td><td></td><td></td></tr>';
+            $rows .= '<tr class="cpb-lep-part-row cpb-lep-part-row--empty">'
+                . '<td' . $bodyVisual . '>&nbsp;</td>'
+                . '<td' . $bodyVisual . '></td>'
+                . '<td' . $bodyVisual . '></td>'
+                . '<td' . $bodyVisual . '></td></tr>';
         }
         if ($rows === '' && $editable) {
-            $rows = '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td colspan="4" class="cpb-lep-parts-empty">'
-                . 'No parts generated yet — use Regenerate in the toolbar.</td></tr>';
+            $rows = '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td colspan="4"'
+                . $bodyVisual
+                . '>No parts generated yet — use Regenerate in the toolbar.</td></tr>';
         }
 
-        return '<div class="cpb-lep-parts-wrap cpb-table-wrap cpb-table-border-thin" contenteditable="false">'
+        return '<div class="cpb-lep-parts-wrap cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
+            . ' data-border-width="' . h($borderWidth) . '"'
+            . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1">'
             . '<thead><tr class="cpb-table-header-row">'
-            . '<th>Part</th><th>Pages</th><th>Date</th><th>Revision</th>'
+            . '<th' . $headerVisual . '>Part</th>'
+            . '<th' . $headerVisual . '>Pages</th>'
+            . '<th' . $headerVisual . '>Date</th>'
+            . '<th' . $headerVisual . '>Revision</th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';

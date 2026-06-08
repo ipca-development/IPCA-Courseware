@@ -2246,10 +2246,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10pt;
-  color: #0f172a;
   padding: 0;
+}
+
+.cpb-lep-heading {
+  margin: 0 0 0.45em;
+}
+
+.cpb-lep-heading--part_title {
+  margin-top: 0;
+}
+
+.cpb-lep-heading--subtitle_2 {
+  margin: 0.8em 0 0.45em;
+}
+
+.cpb-lep-emphasis {
+  font-weight: 700;
 }
 
 .cpb-lep-cert-wrap,
@@ -2323,12 +2336,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-lep-signatory-name {
-  font-weight: 700;
   margin-bottom: 2px;
 }
 
 .cpb-lep-signatory-title {
-  font-weight: 700;
   margin-bottom: 10px;
 }
 
@@ -2355,13 +2366,13 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-lep-sign-btn {
-  font-size: 10px;
   padding: 4px 10px;
   border: 1px solid #0f2744;
   background: #fff;
   color: #0f2744;
   border-radius: 4px;
   cursor: pointer;
+  font: inherit;
 }
 
 .cpb-lep-sign-btn:hover {
@@ -2374,7 +2385,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-lep-authority-label {
-  font-weight: 700;
   margin-bottom: 8px;
 }
 
@@ -2382,8 +2392,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 9.5pt;
-  color: #475569;
 }
 
 .cpb-lep-approval-link {
@@ -2393,22 +2401,9 @@ body.cpb-browser-fullscreen .cpb-workspace {
   font-weight: 600;
 }
 
-.cpb-lep-table-title {
-  font-size: 12pt;
-  font-weight: 700;
-  margin: 0 0 10px;
-  text-align: left;
-}
-
 .cpb-lep-table {
   width: 100%;
   table-layout: fixed;
-}
-
-.cpb-lep-table th,
-.cpb-lep-table td {
-  text-align: center;
-  vertical-align: middle;
 }
 
 .cpb-lep-part-row--empty td {

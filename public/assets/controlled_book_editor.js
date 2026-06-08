@@ -1336,11 +1336,21 @@
     return {
       certification_text: '',
       on_behalf_text: '',
-      table_title: 'Effective Parts',
+      table_title: '0.1.1 Effective Parts',
       empty_rows: 10,
+      headings: defaultLepHeadings(),
       signatories: [],
       effective_parts: [],
     };
+  }
+
+  function defaultLepHeadings() {
+    return [
+      { key: 'part_title', style: 'title', text: 'PART 0 – Manual Administration' },
+      { key: 'title', style: 'title', text: '0. OUTLINE' },
+      { key: 'subtitle_1', style: 'subtitle_1', text: '0.1 List of effective Parts' },
+      { key: 'subtitle_2', style: 'subtitle_2', text: '0.1.1 Effective Parts' },
+    ];
   }
 
   function renderLepToolbar() {
@@ -1407,10 +1417,23 @@
 
     var cert = sheet.querySelector('[data-lep-field="certification_text"]');
     var onBehalf = sheet.querySelector('[data-lep-field="on_behalf_text"]');
-    var tableTitle = sheet.querySelector('[data-lep-field="table_title"]');
     if (cert) lep.certification_text = cert.textContent.trim();
     if (onBehalf) lep.on_behalf_text = onBehalf.textContent.trim();
-    if (tableTitle) lep.table_title = tableTitle.textContent.trim();
+
+    var headings = (state.lepPage && Array.isArray(state.lepPage.headings) && state.lepPage.headings.length)
+      ? state.lepPage.headings.map(function (h) {
+          return { key: h.key, style: h.style, text: h.text };
+        })
+      : defaultLepHeadings();
+    headings.forEach(function (heading) {
+      var field = sheet.querySelector('[data-lep-field="heading_' + heading.key + '"]');
+      if (field) {
+        heading.text = field.textContent.trim();
+      }
+    });
+    lep.headings = headings;
+    var subtitle2 = headings.filter(function (h) { return h.key === 'subtitle_2'; })[0];
+    if (subtitle2) lep.table_title = subtitle2.text;
 
     var signatories = [];
     sheet.querySelectorAll('.cpb-lep-signatory[data-lep-slot]').forEach(function (box) {

@@ -18,10 +18,40 @@ final class ControlledPublishingLepService
         return array(
             'certification_text' => 'EuroPilot Center\'s below nominated persons certify that the content of this Operations Manual complies with all applicable EASA PART-FCL and PART NCO requirements.',
             'on_behalf_text' => 'On behalf of EuroPilot Center: (name and function)',
-            'table_title' => 'Effective Parts',
+            'table_title' => '0.1.1 Effective Parts',
             'empty_rows' => 10,
+            'headings' => $this->defaultLepHeadings(),
             'signatories' => $this->defaultSignatories(),
             'effective_parts' => array(),
+        );
+    }
+
+    /**
+     * @return list<array{key:string,style:string,text:string}>
+     */
+    public function defaultLepHeadings(): array
+    {
+        return array(
+            array(
+                'key' => 'part_title',
+                'style' => 'title',
+                'text' => 'PART 0 – Manual Administration',
+            ),
+            array(
+                'key' => 'title',
+                'style' => 'title',
+                'text' => '0. OUTLINE',
+            ),
+            array(
+                'key' => 'subtitle_1',
+                'style' => 'subtitle_1',
+                'text' => '0.1 List of effective Parts',
+            ),
+            array(
+                'key' => 'subtitle_2',
+                'style' => 'subtitle_2',
+                'text' => '0.1.1 Effective Parts',
+            ),
         );
     }
 
@@ -380,9 +410,66 @@ final class ControlledPublishingLepService
             'on_behalf_text' => $this->truncate(trim((string)($raw['on_behalf_text'] ?? $defaults['on_behalf_text'])), 500),
             'table_title' => $this->truncate(trim((string)($raw['table_title'] ?? $defaults['table_title'])), 200),
             'empty_rows' => max(0, min(20, (int)($raw['empty_rows'] ?? $defaults['empty_rows']))),
+            'headings' => $this->normalizeLepHeadings(
+                is_array($raw['headings'] ?? null) ? $raw['headings'] : array(),
+                $defaults['headings'],
+                (string)($raw['table_title'] ?? $defaults['table_title'])
+            ),
             'signatories' => $normalizedSignatories,
             'effective_parts' => $normalizedParts,
         );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $raw
+     * @param list<array{key:string,style:string,text:string}> $defaults
+     * @return list<array{key:string,style:string,text:string}>
+     */
+    private function normalizeLepHeadings(array $raw, array $defaults, string $legacyTableTitle): array
+    {
+        $allowedStyles = array('title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4', 'body');
+        $defaultsByKey = array();
+        foreach ($defaults as $heading) {
+            $defaultsByKey[(string)$heading['key']] = $heading;
+        }
+
+        $normalized = array();
+        foreach ($raw as $heading) {
+            if (!is_array($heading)) {
+                continue;
+            }
+            $key = $this->truncate(trim((string)($heading['key'] ?? '')), 64);
+            if ($key === '' || !isset($defaultsByKey[$key])) {
+                continue;
+            }
+            $style = $this->truncate(trim((string)($heading['style'] ?? $defaultsByKey[$key]['style'])), 32);
+            if (!in_array($style, $allowedStyles, true)) {
+                $style = (string)$defaultsByKey[$key]['style'];
+            }
+            $text = $this->truncate(trim((string)($heading['text'] ?? '')), 500);
+            if ($text === '') {
+                $text = (string)$defaultsByKey[$key]['text'];
+            }
+            $normalized[$key] = array(
+                'key' => $key,
+                'style' => $style,
+                'text' => $text,
+            );
+        }
+
+        foreach ($defaults as $heading) {
+            $key = (string)$heading['key'];
+            if (!isset($normalized[$key])) {
+                $normalized[$key] = $heading;
+            }
+        }
+
+        if ($legacyTableTitle !== '' && $legacyTableTitle !== 'Effective Parts') {
+            $normalized['subtitle_2']['text'] = $this->truncate($legacyTableTitle, 500);
+        }
+        $normalized['subtitle_2']['text'] = $normalized['subtitle_2']['text'] ?? '0.1.1 Effective Parts';
+
+        return array_values($normalized);
     }
 
     private function normalizeImageUrl(string $url): string
