@@ -30,7 +30,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
   <title>IPCA Flip Board</title>
   <link rel="stylesheet" href="/tv/assets/flipboard.css?v=<?= h($cssVersion) ?>">
 </head>
-<body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?><?= $screenKey === 'aircraft' ? ' is-aircraft-ops' : '' ?>">
+<body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?>">
   <div
     class="fb-stage"
     id="ipcaFlipBoardApp"
@@ -47,7 +47,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-gate-radius-nm="<?= h((string)($kioskConfig['gate_radius_nm'] ?? '0.18')) ?>"
     data-home-airport="<?= h((string)($kioskConfig['home_airport'] ?? 'KTRM')) ?>"
     data-auto-audio="<?= ((int)($kioskConfig['audio_enabled'] ?? 1) === 1) ? '1' : '0' ?>"
-    data-aircraft-ops="<?= $screenKey === 'aircraft' ? '1' : '0' ?>">
+    data-aircraft-ops="<?= $screenKey === 'aircraft' ? '1' : '0' ?>"
+  >
     <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
         <div class="fb-brand-stack">
@@ -57,7 +58,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
             alt="IPCA International Pilot Center Alliance"
             width="240"
             height="auto">
-          <div class="fb-board-title" id="fbBoardTitle"<?= $screenKey === 'aircraft' ? '' : ' hidden' ?>>AIRCRAFT OPS</div>
+          <div class="fb-board-title" id="fbBoardTitle" hidden>AIRCRAFT OPS</div>
         </div>
         <div class="fb-status-cluster">
           <div class="fb-status-light" id="fbStatusLight" aria-hidden="true"></div>
@@ -73,9 +74,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
           <span></span><span></span><span></span><span></span>
         </div>
         <div class="fb-perspective">
-          <div class="fb-message-board" id="fbMessageBoard"<?= $screenKey === 'aircraft' ? ' hidden' : '' ?>></div>
+          <div class="fb-message-board" id="fbMessageBoard"></div>
           <div class="fb-schedule-board" id="fbScheduleBoard" hidden></div>
-          <div class="fb-aircraft-board" id="fbAircraftBoard"<?= $screenKey === 'aircraft' ? '' : ' hidden' ?>></div>
         </div>
       </section>
 
