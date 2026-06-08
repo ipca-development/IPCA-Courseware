@@ -179,7 +179,7 @@ final class ControlledPublishingBookRenderer
         if ($logoUrl !== '') {
             $logoHtml = '<img class="cpb-cover-logo-img" src="' . h($logoUrl) . '" alt="' . $logoAlt . '">';
         } elseif ($editable) {
-            $logoHtml = '<span class="cpb-cover-logo-placeholder">Drop logo here</span>';
+            $logoHtml = '<span class="cpb-cover-logo-placeholder">Drop logo here — spans full page width</span>';
         }
 
         $coverImageHtml = '';
@@ -217,11 +217,11 @@ final class ControlledPublishingBookRenderer
         return '<div class="cpb-sheet cpb-sheet--cover" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
             . '<div class="cpb-cover" contenteditable="false">'
             . '<header class="cpb-cover-header">'
+            . '<div class="cpb-cover-logo-band"' . $logoDropAttr . '>' . $logoHtml . '</div>'
             . '<div class="cpb-cover-brand">'
             . '<div class="cpb-cover-company" data-cover-field="company_name"' . $fieldEdit . '>' . $companyName . '</div>'
             . '<div class="cpb-cover-registration" data-cover-field="registration_number"' . $fieldEdit . '>' . $registration . '</div>'
             . '</div>'
-            . '<div class="cpb-cover-logo"' . $logoDropAttr . '>' . $logoHtml . '</div>'
             . '</header>'
             . '<div class="cpb-cover-hero">'
             . '<div class="cpb-cover-bar" aria-hidden="true"></div>'

@@ -1801,6 +1801,16 @@ body.cpb-browser-fullscreen .cpb-workspace {
     margin-right: -24px;
     width: calc(100% + 48px);
   }
+
+  .cpb-cover-header {
+    margin-left: -24px;
+    margin-right: -24px;
+    width: calc(100% + 48px);
+  }
+
+  .cpb-cover-brand {
+    left: 24px;
+  }
 }
 
 /* Cover page */
@@ -1818,16 +1828,44 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-cover-header {
+  position: relative;
+  margin: -48px -56px 0;
+  width: calc(100% + 112px);
+}
+
+.cpb-cover-logo-band {
+  width: 100%;
+  min-height: 140px;
+  overflow: hidden;
+  background: #fff;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 28px;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.cpb-cover-logo-band[data-cover-drop] {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cpb-cover-logo-band[data-cover-drop]:hover,
+.cpb-cover-logo-band.is-drag {
+  background: #f8fafc;
 }
 
 .cpb-cover-brand {
-  flex: 1 1 auto;
+  position: absolute;
+  left: 56px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
   min-width: 0;
+  max-width: calc(100% - 112px);
+  pointer-events: none;
+}
+
+.cpb-cover-brand [data-cover-field] {
+  pointer-events: auto;
 }
 
 .cpb-cover-company {
@@ -1845,47 +1883,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
   color: #64748b;
 }
 
-.cpb-cover-logo {
-  flex: 0 0 auto;
-  min-width: 120px;
-  min-height: 72px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.cpb-cover-logo[data-cover-drop] {
-  cursor: pointer;
-  border: 1px dashed transparent;
-  border-radius: 4px;
-  padding: 4px;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.cpb-cover-logo[data-cover-drop]:hover,
-.cpb-cover-logo.is-drag {
-  border-color: #94a3b8;
-  background: rgba(148, 163, 184, 0.08);
-}
-
 .cpb-cover-logo-img {
-  max-width: 180px;
-  max-height: 96px;
-  width: auto;
+  width: 100%;
   height: auto;
   display: block;
 }
 
 .cpb-cover-logo-placeholder {
   font-family: system-ui, sans-serif;
-  font-size: 9pt;
+  font-size: 10pt;
   color: #94a3b8;
-  text-align: right;
-  padding: 8px 0;
+  text-align: center;
+  padding: 56px 24px;
+  width: 100%;
 }
 
 .cpb-cover-hero {
-  margin: 8px -56px 0;
+  margin: 0 -56px 0;
   width: calc(100% + 112px);
 }
 
@@ -1931,6 +1945,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-cover-details {
   margin-top: 28px;
+  padding-top: 4px;
 }
 
 .cpb-cover-manual-title {
