@@ -23,6 +23,8 @@
   var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
   var openHeaderEditorBtn = document.getElementById('cpbOpenHeaderEditor');
   var headerLogoInput = document.getElementById('cpbHeaderLogoInput');
+  var coverLogoInput = document.getElementById('cpbCoverLogoInput');
+  var coverImageInput = document.getElementById('cpbCoverImageInput');
   var calloutSelect = document.getElementById('cpbCalloutSelect');
   var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
@@ -109,6 +111,10 @@
     canvasZoom: 100,
     lastStyleTarget: null,
     savedSelectionRange: null,
+    isCoverSection: false,
+    coverPage: null,
+    coverSaveTimer: null,
+    coverDropTarget: null,
   };
 
   var INDENT_STEP_PX = 24;
@@ -338,6 +344,8 @@
       state.headerTokens = res.header_tokens || defaultHeaderTokens();
       state.versionInfo = res.version || {};
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
+      state.isCoverSection = !!res.is_cover_section;
+      state.coverPage = res.cover_page || defaultCoverPage();
       state.bookStyles = res.book_styles || defaultBookStyles();
       if (state.bookStyles.callout_presets) {
         state.calloutPresets = state.bookStyles.callout_presets;
@@ -347,7 +355,9 @@
       state.undoStack = [];
       state.redoStack = [];
       root.classList.toggle('cpb-editor-readonly', !state.editable);
-      if (toolbarEl) toolbarEl.style.display = state.editable ? 'flex' : 'none';
+      if (toolbarEl) {
+        toolbarEl.style.display = (state.editable && !state.isCoverSection) ? 'flex' : 'none';
+      }
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
@@ -873,6 +883,8 @@
 
     wireLayout();
 
+    wireCoverPage();
+
     var dropzone = canvasEl.querySelector('[data-dropzone="image"]');
     if (dropzone && state.editable && dropzone.getAttribute('data-drop-wired') !== '1') {
       dropzone.setAttribute('data-drop-wired', '1');
@@ -1007,6 +1019,124 @@
       right_font_italic: false,
       right_font_underline: false,
     };
+  }
+
+  function defaultCoverPage() {
+    return {
+      logo_url: '',
+      logo_alt: 'EuroPilot Center',
+      company_name: 'EuroPilot Center',
+      registration_number: 'B/ATO-017',
+      cover_image_url: '',
+      cover_image_alt: '',
+      manual_title: '',
+    };
+  }
+
+  function extractCoverPageFromCanvas() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--cover');
+    if (!sheet) return Object.assign({}, defaultCoverPage(), state.coverPage || {});
+    var cover = Object.assign({}, defaultCoverPage(), state.coverPage || {});
+    var company = sheet.querySelector('[data-cover-field="company_name"]');
+    var registration = sheet.querySelector('[data-cover-field="registration_number"]');
+    var manualTitle = sheet.querySelector('[data-cover-field="manual_title"]');
+    if (company) cover.company_name = company.textContent.trim();
+    if (registration) cover.registration_number = registration.textContent.trim();
+    if (manualTitle) cover.manual_title = manualTitle.textContent.trim();
+    return cover;
+  }
+
+  function scheduleCoverSave() {
+    if (!state.editable || !state.isCoverSection) return;
+    if (state.coverSaveTimer) clearTimeout(state.coverSaveTimer);
+    state.coverSaveTimer = setTimeout(function () {
+      state.coverSaveTimer = null;
+      flushCoverSave();
+    }, 450);
+  }
+
+  function flushCoverSave() {
+    if (!state.editable || !state.isCoverSection) return;
+    var payload = extractCoverPageFromCanvas();
+    setStatus('Saving cover…', 'saving');
+    apiPost('save_cover_page', {
+      version_id: state.versionId,
+      cover_page: payload,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Cover save failed');
+      state.coverPage = res.cover_page || payload;
+      setStatus('Cover saved', 'saved');
+    }).catch(showError);
+  }
+
+  function uploadCoverAsset(assetType, file) {
+    if (!file || !file.type.match(/^image\/(jpeg|png|webp)$/)) {
+      alert('Only JPG, PNG, or WEBP images are allowed.');
+      return;
+    }
+    var action = assetType === 'logo' ? 'upload_cover_logo' : 'upload_cover_image';
+    setStatus('Uploading…', 'saving');
+    var fd = new FormData();
+    fd.append('action', action);
+    fd.append('version_id', String(state.versionId));
+    fd.append('image', file);
+    fetch(apiBase, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Upload failed');
+        state.coverPage = res.cover_page || state.coverPage;
+        return loadSection(state.sectionId);
+      })
+      .then(function () {
+        setStatus('Upload complete', 'saved');
+      })
+      .catch(showError);
+  }
+
+  function wireCoverPage() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--cover');
+    if (!sheet || sheet.getAttribute('data-cover-wired') === '1') return;
+    sheet.setAttribute('data-cover-wired', '1');
+
+    sheet.querySelectorAll('[data-cover-field]').forEach(function (field) {
+      if (!state.editable || field.getAttribute('data-cover-field-wired') === '1') return;
+      field.setAttribute('data-cover-field-wired', '1');
+      field.addEventListener('input', scheduleCoverSave);
+      field.addEventListener('blur', function () {
+        if (state.coverSaveTimer) {
+          clearTimeout(state.coverSaveTimer);
+          state.coverSaveTimer = null;
+        }
+        flushCoverSave();
+      });
+    });
+
+    sheet.querySelectorAll('[data-cover-drop]').forEach(function (zone) {
+      if (!state.editable || zone.getAttribute('data-cover-drop-wired') === '1') return;
+      zone.setAttribute('data-cover-drop-wired', '1');
+      zone.addEventListener('click', function () {
+        var target = zone.getAttribute('data-cover-drop');
+        state.coverDropTarget = target;
+        if (target === 'logo' && coverLogoInput) coverLogoInput.click();
+        else if (target === 'cover_image' && coverImageInput) coverImageInput.click();
+      });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) {
+          e.preventDefault();
+          zone.classList.add('is-drag');
+        });
+      });
+      zone.addEventListener('dragleave', function () {
+        zone.classList.remove('is-drag');
+      });
+      zone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        zone.classList.remove('is-drag');
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files[0]) return;
+        uploadCoverAsset(zone.getAttribute('data-cover-drop'), files[0]);
+      });
+    });
   }
 
   var HEADER_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24];
@@ -2545,23 +2675,43 @@
     syncSectionNumberTypography(el);
   }
 
+  function syncRegulatoryRefTypography(contentEl) {
+    if (!contentEl) return;
+    var row = contentEl.closest('.cpb-paragraph-row, .cpb-heading-row');
+    if (!row) return;
+    var ref = row.querySelector('.cpb-regulatory-ref');
+    if (!ref) return;
+    var bodyDef = paragraphStyleDef('body');
+    var font = bodyDef.font_family || 'serif';
+    var size = bodyDef.font_size || 11;
+    FONT_CLASSES.forEach(function (cls) { ref.classList.remove(cls); });
+    PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { ref.classList.remove(cls); });
+    ref.classList.add('cpb-font-' + font);
+    ref.style.fontFamily = FONT_STACKS[font] || FONT_STACKS.serif;
+    ref.style.fontSize = size + 'pt';
+    ref.style.fontWeight = '400';
+    ref.style.color = '#1e3a8a';
+  }
+
   function syncSectionNumberTypography(contentEl) {
     if (!contentEl) return;
     var row = contentEl.closest('.cpb-paragraph-row, .cpb-heading-row');
     if (!row) return;
     var num = row.querySelector('.cpb-section-number');
-    if (!num) return;
-    var font = contentEl.getAttribute('data-font-family') || 'serif';
-    var size = contentEl.getAttribute('data-font-size') || '11';
-    var color = contentEl.getAttribute('data-text-color') || contentEl.style.color || '#0f172a';
-    FONT_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
-    PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
-    num.classList.add('cpb-font-' + font);
-    var ps = contentEl.getAttribute('data-paragraph-style');
-    if (ps) num.classList.add('cpb-ps-' + ps);
-    num.style.fontFamily = contentEl.style.fontFamily || FONT_STACKS[font] || FONT_STACKS.serif;
-    num.style.fontSize = contentEl.style.fontSize || (size + 'pt');
-    num.style.color = color;
+    if (num) {
+      var font = contentEl.getAttribute('data-font-family') || 'serif';
+      var size = contentEl.getAttribute('data-font-size') || '11';
+      var color = contentEl.getAttribute('data-text-color') || contentEl.style.color || '#0f172a';
+      FONT_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
+      PARAGRAPH_STYLE_CLASSES.forEach(function (cls) { num.classList.remove(cls); });
+      num.classList.add('cpb-font-' + font);
+      var ps = contentEl.getAttribute('data-paragraph-style');
+      if (ps) num.classList.add('cpb-ps-' + ps);
+      num.style.fontFamily = contentEl.style.fontFamily || FONT_STACKS[font] || FONT_STACKS.serif;
+      num.style.fontSize = contentEl.style.fontSize || (size + 'pt');
+      num.style.color = color;
+    }
+    syncRegulatoryRefTypography(contentEl);
   }
 
   function applyParagraphStyle(styleKey) {
@@ -3708,6 +3858,24 @@
       if (imageInput.files && imageInput.files[0]) {
         uploadImageFile(imageInput.files[0]);
         imageInput.value = '';
+      }
+    });
+  }
+
+  if (coverLogoInput) {
+    coverLogoInput.addEventListener('change', function () {
+      if (coverLogoInput.files && coverLogoInput.files[0]) {
+        uploadCoverAsset('logo', coverLogoInput.files[0]);
+        coverLogoInput.value = '';
+      }
+    });
+  }
+
+  if (coverImageInput) {
+    coverImageInput.addEventListener('change', function () {
+      if (coverImageInput.files && coverImageInput.files[0]) {
+        uploadCoverAsset('cover_image', coverImageInput.files[0]);
+        coverImageInput.value = '';
       }
     });
   }

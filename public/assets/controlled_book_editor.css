@@ -1330,9 +1330,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-regulatory-ref {
   display: inline-block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
-  font-weight: 600;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11pt;
+  font-weight: 400;
+  line-height: 1.2;
   color: #1e3a8a;
   background: #dbeafe;
   border: 1px solid #93c5fd;
@@ -1341,6 +1342,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
   margin-right: 4px;
   user-select: none;
   white-space: nowrap;
+}
+
+.cmp-page .cpb-editor-root .cpb-regulatory-ref {
+  font-family: Georgia, 'Times New Roman', serif !important;
 }
 
 .cpb-paragraph.cpb-ps-regulatory_reference,
@@ -1790,4 +1795,195 @@ body.cpb-browser-fullscreen .cpb-workspace {
   .cpb-sheet {
     padding: 32px 24px 48px;
   }
+
+  .cpb-cover-hero {
+    margin-left: -24px;
+    margin-right: -24px;
+    width: calc(100% + 48px);
+  }
+}
+
+/* Cover page */
+.cpb-sheet--cover {
+  display: flex;
+  flex-direction: column;
+  min-height: 1056px;
+  padding-bottom: 48px;
+}
+
+.cpb-cover {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.cpb-cover-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.cpb-cover-brand {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cpb-cover-company {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 28pt;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #0f2744;
+}
+
+.cpb-cover-registration {
+  margin-top: 6px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 11pt;
+  color: #64748b;
+}
+
+.cpb-cover-logo {
+  flex: 0 0 auto;
+  min-width: 120px;
+  min-height: 72px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.cpb-cover-logo[data-cover-drop] {
+  cursor: pointer;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  padding: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.cpb-cover-logo[data-cover-drop]:hover,
+.cpb-cover-logo.is-drag {
+  border-color: #94a3b8;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.cpb-cover-logo-img {
+  max-width: 180px;
+  max-height: 96px;
+  width: auto;
+  height: auto;
+  display: block;
+}
+
+.cpb-cover-logo-placeholder {
+  font-family: system-ui, sans-serif;
+  font-size: 9pt;
+  color: #94a3b8;
+  text-align: right;
+  padding: 8px 0;
+}
+
+.cpb-cover-hero {
+  margin: 8px -56px 0;
+  width: calc(100% + 112px);
+}
+
+.cpb-cover-bar {
+  height: 10px;
+  background: #0f2744;
+  width: 100%;
+}
+
+.cpb-cover-image {
+  width: 100%;
+  min-height: 220px;
+  overflow: hidden;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cpb-cover-image[data-cover-drop] {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cpb-cover-image[data-cover-drop]:hover,
+.cpb-cover-image.is-drag {
+  background: #e2e8f0;
+}
+
+.cpb-cover-image-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.cpb-cover-image-placeholder {
+  font-family: system-ui, sans-serif;
+  font-size: 10pt;
+  color: #64748b;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.cpb-cover-details {
+  margin-top: 28px;
+}
+
+.cpb-cover-manual-title {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #0f2744;
+  margin: 0;
+}
+
+.cpb-cover-meta-line {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 11pt;
+  color: #475569;
+  margin: 8px 0 0;
+}
+
+.cpb-cover-status {
+  font-style: italic;
+}
+
+.cpb-sheet--cover .cpb-cover-company[contenteditable="true"]:focus,
+.cpb-sheet--cover .cpb-cover-registration[contenteditable="true"]:focus,
+.cpb-sheet--cover .cpb-cover-manual-title[contenteditable="true"]:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.cpb-sheet--cover .cpb-page-footer {
+  margin-top: auto;
+  padding-top: 32px;
+  border: none;
+  cursor: pointer;
+}
+
+.cpb-sheet--cover .cpb-page-footer--plain {
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.cpb-sheet--cover .cpb-page-footer--plain:hover {
+  outline: none;
+}
+
+.cpb-sheet--cover .cpb-page-footer-table {
+  border: none;
+}
+
+.cpb-sheet--cover .cpb-page-footer-table td {
+  border: none;
+  padding-left: 0;
+  padding-right: 0;
 }

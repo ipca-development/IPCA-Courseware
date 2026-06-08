@@ -6,6 +6,7 @@ require_once __DIR__ . '/ControlledPublishingTableFormula.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
+require_once __DIR__ . '/ControlledPublishingCoverPageService.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -29,6 +30,8 @@ final class ControlledPublishingBookRenderer
     private ?ControlledPublishingSectionNumberService $sectionNumberService = null;
 
     private ?ControlledPublishingPageHeaderService $pageHeaderService = null;
+
+    private ?ControlledPublishingCoverPageService $coverPageService = null;
 
     /**
      * @param array<string,mixed> $styles
@@ -124,6 +127,114 @@ final class ControlledPublishingBookRenderer
     public function setPageHeaderService(?ControlledPublishingPageHeaderService $pageHeaderService): void
     {
         $this->pageHeaderService = $pageHeaderService;
+    }
+
+    public function setCoverPageService(?ControlledPublishingCoverPageService $coverPageService): void
+    {
+        $this->coverPageService = $coverPageService;
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param array<string,mixed>|null $coverPage
+     */
+    public function renderCoverPageShell(
+        array $version,
+        array $section,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null,
+        ?array $coverPage = null
+    ): string {
+        $editable = $mode === self::MODE_EDIT;
+        $coverSvc = $this->coverPageService;
+        $cover = is_array($coverPage)
+            ? $coverPage
+            : ($coverSvc !== null ? $coverSvc->resolveFromVersion($version) : array());
+
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array('page_footer' => array('enabled' => true));
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageFooter = is_array($config['page_footer'] ?? null)
+            ? $config['page_footer']
+            : $defaults['page_footer'];
+
+        $tokenContext = $headerSvc !== null
+            ? $headerSvc->buildTokenContext($version, $section, array(
+                'editor_preview' => $mode === self::MODE_EDIT,
+                'page' => 1,
+            ))
+            : array();
+
+        $companyName = h((string)($cover['company_name'] ?? ''));
+        $registration = h((string)($cover['registration_number'] ?? ''));
+        $manualTitle = h((string)($cover['manual_title'] ?? ''));
+        $logoUrl = trim((string)($cover['logo_url'] ?? ''));
+        $logoAlt = h((string)($cover['logo_alt'] ?? ''));
+        $coverImageUrl = trim((string)($cover['cover_image_url'] ?? ''));
+
+        $logoHtml = '';
+        if ($logoUrl !== '') {
+            $logoHtml = '<img class="cpb-cover-logo-img" src="' . h($logoUrl) . '" alt="' . $logoAlt . '">';
+        } elseif ($editable) {
+            $logoHtml = '<span class="cpb-cover-logo-placeholder">Drop logo here</span>';
+        }
+
+        $coverImageHtml = '';
+        if ($coverImageUrl !== '') {
+            $coverImageHtml = '<img class="cpb-cover-image-img" src="' . h($coverImageUrl) . '" alt="' . h((string)($cover['cover_image_alt'] ?? '')) . '">';
+        } elseif ($editable) {
+            $coverImageHtml = '<span class="cpb-cover-image-placeholder">Drop cover image here</span>';
+        }
+
+        $revisionLine = $coverSvc !== null ? h($coverSvc->buildRevisionLine($version)) : '';
+        $dateLine = $coverSvc !== null ? h($coverSvc->buildDateLine($version)) : '';
+        $statusLine = $coverSvc !== null ? h($coverSvc->buildStatusLine($version)) : '';
+
+        $editAttr = $editable ? ' data-cover-editable="1"' : '';
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $logoDropAttr = $editable ? ' data-cover-drop="logo"' : '';
+        $imageDropAttr = $editable ? ' data-cover-drop="cover_image"' : '';
+
+        $footerHtml = '';
+        if (!empty($pageFooter['enabled'])) {
+            $footerHtml = $this->renderPageFooterTable($pageFooter, $tokenContext, $editable, $headerSvc, true);
+        }
+
+        $metaLines = array();
+        if ($revisionLine !== '') {
+            $metaLines[] = '<p class="cpb-cover-meta-line">' . $revisionLine . '</p>';
+        }
+        if ($dateLine !== '') {
+            $metaLines[] = '<p class="cpb-cover-meta-line">' . $dateLine . '</p>';
+        }
+        if ($statusLine !== '') {
+            $metaLines[] = '<p class="cpb-cover-meta-line cpb-cover-status">' . $statusLine . '</p>';
+        }
+
+        return '<div class="cpb-sheet cpb-sheet--cover" data-section-id="' . (int)($section['id'] ?? 0) . '"' . $editAttr . '>'
+            . '<div class="cpb-cover" contenteditable="false">'
+            . '<header class="cpb-cover-header">'
+            . '<div class="cpb-cover-brand">'
+            . '<div class="cpb-cover-company" data-cover-field="company_name"' . $fieldEdit . '>' . $companyName . '</div>'
+            . '<div class="cpb-cover-registration" data-cover-field="registration_number"' . $fieldEdit . '>' . $registration . '</div>'
+            . '</div>'
+            . '<div class="cpb-cover-logo"' . $logoDropAttr . '>' . $logoHtml . '</div>'
+            . '</header>'
+            . '<div class="cpb-cover-hero">'
+            . '<div class="cpb-cover-bar" aria-hidden="true"></div>'
+            . '<div class="cpb-cover-image"' . $imageDropAttr . '>' . $coverImageHtml . '</div>'
+            . '<div class="cpb-cover-bar" aria-hidden="true"></div>'
+            . '</div>'
+            . '<div class="cpb-cover-details">'
+            . '<h1 class="cpb-cover-manual-title" data-cover-field="manual_title"' . $fieldEdit . '>' . $manualTitle . '</h1>'
+            . implode('', $metaLines)
+            . '</div>'
+            . '</div>'
+            . $footerHtml
+            . '</div>';
     }
 
     /**
@@ -257,7 +368,8 @@ final class ControlledPublishingBookRenderer
         array $pageFooter,
         array $tokenContext,
         bool $editable,
-        ?ControlledPublishingPageHeaderService $headerSvc
+        ?ControlledPublishingPageHeaderService $headerSvc,
+        bool $plain = false
     ): string {
         $resolve = static function (string $template) use ($headerSvc, $tokenContext): string {
             if ($headerSvc === null) {
@@ -278,7 +390,9 @@ final class ControlledPublishingBookRenderer
         $centerStyle = $this->pageBandCellStyleAttr($centerTypo, $rowHeight);
         $rightStyle = $this->pageBandCellStyleAttr($rightTypo, $rowHeight);
 
-        return '<footer class="cpb-page-footer"' . $editAttr . ' contenteditable="false">'
+        $plainClass = $plain ? ' cpb-page-footer--plain' : '';
+
+        return '<footer class="cpb-page-footer' . $plainClass . '"' . $editAttr . ' contenteditable="false">'
             . '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation">'
             . '<tr>'
             . '<td class="cpb-page-header-cell cpb-page-header-cell--left ' . $this->pageBandFontClass($leftTypo) . '"' . $leftStyle . '>'
@@ -438,8 +552,33 @@ final class ControlledPublishingBookRenderer
         }
         $manual = trim((string)($payload['regulatory_ref'] ?? ''));
         $autoAttr = $manual === '' ? ' data-regulatory-ref-auto="' . h($suggested) . '"' : '';
-        return '<span class="cpb-regulatory-ref" contenteditable="false" data-regulatory-ref="'
-            . h($effective) . '"' . $autoAttr . '>' . h($effective) . '</span> ';
+        $bodyTypo = $this->resolveBodyTypography();
+        $fontFamily = (string)$bodyTypo['font_family'];
+        $fontSize = (int)$bodyTypo['font_size'];
+        $fontKey = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
+        $fontStack = $this->fontFamilyStack($fontFamily);
+        $badgeStyle = ' style="font-family:' . $fontStack . ';font-size:' . $fontSize
+            . 'pt;font-weight:400;color:#1e3a8a"';
+        return '<span class="cpb-regulatory-ref cpb-font-' . h($fontKey) . '" contenteditable="false" data-regulatory-ref="'
+            . h($effective) . '"' . $autoAttr . $badgeStyle . '>' . h($effective) . '</span> ';
+    }
+
+    /**
+     * @return array{font_family:string,font_size:int,color:string}
+     */
+    private function resolveBodyTypography(): array
+    {
+        if ($this->styleService !== null && $this->bookStyles !== array()) {
+            return $this->styleService->resolveBlockTypography(
+                array('paragraph_style' => 'body'),
+                $this->bookStyles
+            );
+        }
+        return array(
+            'font_family' => 'serif',
+            'font_size' => 11,
+            'color' => '#0f172a',
+        );
     }
 
     private function renderList(array $payload, string $mode, int $blockId = 0): string

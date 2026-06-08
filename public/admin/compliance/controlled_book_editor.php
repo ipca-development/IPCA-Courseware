@@ -190,6 +190,8 @@ compliance_page_open(array(
   </div>
   <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbHeaderLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
+  <input type="file" id="cpbCoverLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
+  <input type="file" id="cpbCoverImageInput" accept="image/jpeg,image/png,image/webp" hidden>
 </div>
 
 <script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>
