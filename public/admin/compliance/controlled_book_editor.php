@@ -100,6 +100,7 @@ compliance_page_open(array(
 
     <div class="cpb-workspace">
       <div class="cpb-toolbar" id="cpbToolbar">
+        <div class="cpb-toolbar-main" id="cpbToolbarMain">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbUndo" title="Undo (Ctrl+Z)">↶</button>
           <button type="button" class="cpb-tool-btn" id="cpbRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
@@ -154,11 +155,6 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbIndent" title="Increase indent (Tab)">⇥</button>
         </div>
         <div class="cpb-toolbar-group">
-          <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>
-          <span class="cpb-zoom-label" id="cpbZoomLabel">100%</span>
-          <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
-        </div>
-        <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Book style editor">Styles</button>
           <button type="button" class="cpb-tool-btn" id="cpbOpenHeaderEditor" title="Page header editor">Header</button>
           <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
@@ -172,6 +168,14 @@ compliance_page_open(array(
             <option value="manage">Presets…</option>
           </select>
         </div>
+        </div>
+        <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>
+        <div class="cpb-toolbar-shared" id="cpbToolbarShared">
+        <div class="cpb-toolbar-group">
+          <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>
+          <span class="cpb-zoom-label" id="cpbZoomLabel">100%</span>
+          <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
+        </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--view">
           <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC or Highlight of Changes">
             <option value="" selected>⟳</option>
@@ -179,6 +183,7 @@ compliance_page_open(array(
             <option value="highlights">Sync changes</option>
           </select>
           <button type="button" class="cpb-tool-btn" id="cpbFullscreen" title="Full screen — hide app menu" aria-pressed="false">⤢</button>
+        </div>
         </div>
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
       </div>

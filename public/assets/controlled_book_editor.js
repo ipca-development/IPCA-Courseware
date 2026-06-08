@@ -11,6 +11,8 @@
   var treeEl = document.getElementById('cpbSectionTree');
   var canvasEl = document.getElementById('cpbCanvas');
   var toolbarEl = document.getElementById('cpbToolbar');
+  var toolbarMainEl = document.getElementById('cpbToolbarMain');
+  var toolbarTocEl = document.getElementById('cpbToolbarToc');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
@@ -362,12 +364,9 @@
       state.undoStack = [];
       state.redoStack = [];
       root.classList.toggle('cpb-editor-readonly', !state.editable);
-      if (toolbarEl) {
-        toolbarEl.style.display = (state.editable && !state.isCoverSection) ? 'flex' : 'none';
-      }
+      updateToolbarMode();
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
-      renderTocSettingsPanel();
       wireCanvas();
       applyCanvasZoom(state.canvasZoom, false);
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
@@ -1052,8 +1051,8 @@
   }
 
   function collectTocSettingsFromPanel() {
-    var panel = canvasEl.querySelector('.cpb-toc-settings');
     var settings = Object.assign({}, defaultTocSettings(), state.tocSettings || {});
+    var panel = toolbarTocEl;
     if (!panel) return settings;
     panel.querySelectorAll('[data-toc-setting]').forEach(function (input) {
       var key = input.getAttribute('data-toc-setting');
@@ -1064,60 +1063,93 @@
     return settings;
   }
 
-  function renderTocSettingsPanel() {
-    var existing = canvasEl.querySelector('.cpb-toc-settings');
-    if (existing) existing.remove();
-    if (!state.isTocSection) return;
-    if ((state.versionInfo && state.versionInfo.lifecycle_status) === 'released') return;
-
-    var panel = document.createElement('div');
-    panel.className = 'cpb-toc-settings';
-    panel.setAttribute('contenteditable', 'false');
-
+  function updateTocToolbarCheckboxes() {
+    if (!toolbarTocEl) return;
     var catalog = state.tocSettingsCatalog && state.tocSettingsCatalog.length
       ? state.tocSettingsCatalog
       : defaultTocSettingsCatalog();
-    var levelsHtml = catalog.map(function (item) {
-      var checked = item.enabled ? ' checked' : '';
-      var disabled = item.locked ? ' disabled' : '';
-      var lockedClass = item.locked ? ' is-locked' : '';
-      return '<label class="' + lockedClass + '"><input type="checkbox" data-toc-setting="' + escapeHtml(item.key) + '"'
-        + checked + disabled + '> ' + escapeHtml(item.label) + '</label>';
-    }).join('');
+    catalog.forEach(function (item) {
+      var input = toolbarTocEl.querySelector('[data-toc-setting="' + item.key + '"]');
+      if (input) input.checked = !!item.enabled;
+    });
+  }
 
-    panel.innerHTML = ''
-      + '<h4>Table of Contents settings</h4>'
-      + '<p class="cpb-toc-settings-lead">Choose which paragraph style levels appear in the TOC. '
-      + 'Page numbers are resolved automatically in the published e-manual.</p>'
-      + '<div class="cpb-toc-settings-levels">' + levelsHtml + '</div>'
-      + '<div class="cpb-toc-settings-actions">'
-      + '<button type="button" class="cpb-toc-regenerate">Regenerate TOC</button>'
-      + '<button type="button" class="cpb-toc-save-settings">Save settings</button>'
-      + '</div>';
+  function updateToolbarMode() {
+    if (!toolbarEl) return;
+    var isReleased = state.versionInfo && state.versionInfo.lifecycle_status === 'released';
+    root.classList.toggle('cpb-editor-toc-mode', !!state.isTocSection && !isReleased);
+    if (state.isCoverSection || isReleased) {
+      toolbarEl.style.display = 'none';
+      if (toolbarTocEl) {
+        toolbarTocEl.hidden = true;
+        toolbarTocEl.setAttribute('aria-hidden', 'true');
+      }
+      return;
+    }
+    if (state.isTocSection) {
+      toolbarEl.style.display = 'flex';
+      renderTocToolbar();
+      return;
+    }
+    if (toolbarTocEl) {
+      toolbarTocEl.hidden = true;
+      toolbarTocEl.setAttribute('aria-hidden', 'true');
+    }
+    toolbarEl.style.display = state.editable ? 'flex' : 'none';
+  }
 
-    var sheet = canvasEl.querySelector('.cpb-sheet');
-    if (sheet) {
-      canvasEl.insertBefore(panel, sheet);
-    } else {
-      canvasEl.insertBefore(panel, canvasEl.firstChild);
+  function renderTocToolbar() {
+    if (!toolbarTocEl) return;
+    toolbarTocEl.hidden = false;
+    toolbarTocEl.setAttribute('aria-hidden', 'false');
+
+    if (toolbarTocEl.getAttribute('data-toc-wired') !== '1') {
+      var catalog = defaultTocSettingsCatalog();
+      var levelsHtml = catalog.map(function (item) {
+        var checked = item.enabled ? ' checked' : '';
+        var disabled = item.locked ? ' disabled' : '';
+        var lockedClass = item.locked ? ' is-locked' : '';
+        return '<label class="cpb-toc-level-check' + lockedClass + '">'
+          + '<input type="checkbox" data-toc-setting="' + escapeHtml(item.key) + '"'
+          + checked + disabled + '> '
+          + '<span>' + escapeHtml(item.label) + '</span></label>';
+      }).join('');
+
+      toolbarTocEl.innerHTML = ''
+        + '<div class="cpb-toolbar-group cpb-toolbar-group--toc-label">'
+        + '<span class="cpb-toolbar-toc-label">Include</span>'
+        + '</div>'
+        + '<div class="cpb-toolbar-group cpb-toolbar-group--toc-levels">' + levelsHtml + '</div>'
+        + '<div class="cpb-toolbar-group">'
+        + '<button type="button" class="cpb-tool-btn cpb-toc-regenerate" title="Regenerate table of contents">Regenerate</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbTocSaveSettings" title="Save TOC level settings">Save</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbTocOpenHeader" title="Page header editor">Header</button>'
+        + '</div>';
+
+      toolbarTocEl.setAttribute('data-toc-wired', '1');
+      toolbarTocEl.querySelector('.cpb-toc-regenerate').addEventListener('click', function () {
+        syncToc(true);
+      });
+      toolbarTocEl.querySelector('#cpbTocSaveSettings').addEventListener('click', function () {
+        var settings = collectTocSettingsFromPanel();
+        setStatus('Saving TOC settings…', 'saving');
+        apiPost('save_toc_settings', {
+          version_id: state.versionId,
+          toc_settings: settings,
+        }).then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Save failed');
+          state.tocSettings = res.toc_settings || settings;
+          state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
+          updateTocToolbarCheckboxes();
+          setStatus('TOC settings saved', 'saved');
+        }).catch(showError);
+      });
+      toolbarTocEl.querySelector('#cpbTocOpenHeader').addEventListener('click', function () {
+        openHeaderEditor();
+      });
     }
 
-    panel.querySelector('.cpb-toc-regenerate').addEventListener('click', function () {
-      syncToc(true);
-    });
-    panel.querySelector('.cpb-toc-save-settings').addEventListener('click', function () {
-      var settings = collectTocSettingsFromPanel();
-      setStatus('Saving TOC settings…', 'saving');
-      apiPost('save_toc_settings', {
-        version_id: state.versionId,
-        toc_settings: settings,
-      }).then(function (res) {
-        if (!res.ok) throw new Error(res.error || 'Save failed');
-        state.tocSettings = res.toc_settings || settings;
-        state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
-        setStatus('TOC settings saved', 'saved');
-      }).catch(showError);
-    });
+    updateTocToolbarCheckboxes();
   }
 
   function scrollToTocTarget(anchor) {
@@ -3623,11 +3655,9 @@
         state.tocSettings = res.toc_settings || settings;
         state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
         if (res.page_html) {
-          var panel = canvasEl.querySelector('.cpb-toc-settings');
           canvasEl.innerHTML = res.page_html;
-          if (panel) canvasEl.insertBefore(panel, canvasEl.firstChild);
-          else renderTocSettingsPanel();
           wireCanvas();
+          updateTocToolbarCheckboxes();
           setStatus('TOC updated (' + count + ' entries)', 'saved');
         } else {
           var tocId = findTocSectionId(state.sectionsTree);

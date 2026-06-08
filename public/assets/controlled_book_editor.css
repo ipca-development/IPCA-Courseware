@@ -237,7 +237,93 @@
 }
 
 .cpb-toolbar-group--view {
+  margin-left: 0;
+}
+
+.cpb-toolbar-shared {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cpb-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cpb-toolbar-toc {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cpb-editor-root.cpb-editor-toc-mode .cpb-toolbar-main {
+  display: none;
+}
+
+.cpb-editor-root.cpb-editor-toc-mode .cpb-toolbar-toc {
+  display: flex;
+}
+
+.cpb-toolbar-toc-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cpb-toolbar-group--toc-label {
+  padding-right: 4px;
+  margin-right: 0;
+  border-right: none;
+}
+
+.cpb-toolbar-group--toc-levels {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.cpb-toc-level-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+}
+
+.cpb-toc-level-check.is-locked {
+  color: #64748b;
+}
+
+.cpb-toc-level-check input {
+  margin: 0;
+  accent-color: #0f2744;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar-toc button.cpb-tool-btn.cpb-toc-regenerate {
+  background: #0f2744 !important;
+  border-color: #0f2744 !important;
+  color: #fff !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-toolbar-toc button.cpb-tool-btn.cpb-toc-regenerate:hover {
+  background: #1e3c72 !important;
+  border-color: #1e3c72 !important;
+  color: #fff !important;
 }
 
 .cpb-zoom-label {
@@ -2004,72 +2090,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 /* Table of contents */
-.cpb-toc-settings {
-  max-width: 816px;
-  margin: 0 auto 14px;
-  padding: 14px 16px;
-  background: #fff;
-  border: 1px solid rgba(15, 39, 68, 0.12);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(15, 39, 68, 0.06);
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-}
-
-.cpb-toc-settings h4 {
-  margin: 0 0 8px;
-  font-size: 11pt;
-  color: #0f2744;
-}
-
-.cpb-toc-settings-lead {
-  margin: 0 0 12px;
-  font-size: 9pt;
-  color: #64748b;
-  line-height: 1.45;
-}
-
-.cpb-toc-settings-levels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin-bottom: 12px;
-}
-
-.cpb-toc-settings-levels label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10pt;
-  color: #334155;
-}
-
-.cpb-toc-settings-levels label.is-locked {
-  color: #64748b;
-}
-
-.cpb-toc-settings-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cpb-toc-settings-actions button {
-  font-family: inherit;
-  font-size: 10pt;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f2744;
-  cursor: pointer;
-}
-
-.cpb-toc-settings-actions button.cpb-toc-regenerate {
-  background: #0f2744;
-  border-color: #0f2744;
-  color: #fff;
-}
-
 .cpb-toc {
   display: grid;
   gap: 2px;
