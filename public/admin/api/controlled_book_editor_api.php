@@ -15,6 +15,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionNumb
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPageHeaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingCoverPageService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
 
 header('Content-Type: application/json; charset=utf-8');
