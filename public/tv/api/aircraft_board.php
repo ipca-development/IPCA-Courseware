@@ -95,7 +95,7 @@ try {
           AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
           AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
         ORDER BY priority DESC, id ASC
-        LIMIT 8
+        LIMIT 10
     ");
     $stmt->execute([$screenKey]);
     $tracks = $stmt->fetchAll(PDO::FETCH_ASSOC);
