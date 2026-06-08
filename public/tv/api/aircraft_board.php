@@ -95,7 +95,7 @@ try {
           AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
           AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
         ORDER BY priority DESC, id ASC
-        LIMIT 12
+        LIMIT 8
     ");
     $stmt->execute([$screenKey]);
     $tracks = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -145,12 +145,17 @@ try {
             $anyLive = true;
         }
 
+        $aircraftLabel = tv_adsb_normalize_label((string)($status['label'] ?? $track['label']));
+        if ($aircraftLabel === '') {
+            continue;
+        }
+
         $rows[] = array(
             'id' => (int)$trackRow['id'],
             'symbol' => (string)($status['symbol'] ?? '?'),
             'icon_code' => (string)($status['icon_code'] ?? 'unknown'),
-            'aircraft' => (string)($status['label'] ?? $track['label']),
-            'aircraft_display' => (string)($status['aircraft_display'] ?? ($status['label'] ?? $track['label'])),
+            'aircraft' => $aircraftLabel,
+            'aircraft_display' => (string)($status['aircraft_display'] ?? $aircraftLabel),
             'type' => (string)($status['type_display'] ?? ($track['type'] !== '' ? $track['type'] : '--')),
             'status' => (string)($status['status_text'] ?? ''),
             'status_code' => (string)($status['status_code'] ?? ''),

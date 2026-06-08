@@ -4,8 +4,7 @@
   var ROW_COLS = 24;
   var ROW_COUNT = 4;
   var OPS_AIRCRAFT_COLS = 8;
-  var OPS_DATA_ROWS = 12;
-  var OPS_BOARD_ROWS = OPS_DATA_ROWS + 1;
+  var OPS_MAX_DATA_ROWS = 8;
   var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()';
 
   var DEFAULT_MESSAGES = [
@@ -46,6 +45,16 @@
     if (text.length <= length) return text.padEnd(length, ' ');
     if (length <= 1) return text.slice(0, length);
     return (text.slice(0, length - 1) + '.').padEnd(length, ' ');
+  }
+
+  function isValidAircraftRow(row) {
+    if (!row) return false;
+    var reg = normalizeText(String(row.aircraft_display || row.aircraft || ''));
+    return reg.length > 0;
+  }
+
+  function filterValidAircraftRows(rows) {
+    return (rows || []).filter(isValidAircraftRow).slice(0, OPS_MAX_DATA_ROWS);
   }
 
   function wrapWordsToRows(text, cols, maxRows) {
@@ -431,7 +440,7 @@
   function opsIconSvg(code) {
     switch (code) {
       case 'parked':
-        return '<svg viewBox="0 0 16 16"><text x="8" y="11" text-anchor="middle" fill="#d8e6ff" font-size="10" font-weight="700" font-family="monospace">P</text></svg>';
+        return '<svg viewBox="0 0 16 16"><text x="8" y="12" text-anchor="middle" fill="#e8f0ff" font-size="13" font-weight="800" font-family="monospace">P</text></svg>';
       case 'taxi':
         return '<svg viewBox="0 0 16 16"><rect x="2.5" y="6" width="11" height="4" rx="1" stroke="#d8e6ff"/><path d="M4 10v1.5M12 10v1.5"/></svg>';
       case 'takeoff':
@@ -759,8 +768,10 @@
     this.lines = [];
     this.scheduleRows = [];
     this.scheduleBuilt = false;
-    this.aircraftBoardRows = [];
+    this.aircraftDataRows = [];
     this.aircraftBoardBuilt = false;
+    this.aircraftBody = null;
+    this.aircraftEmpty = null;
     this.boardTitle = root.querySelector('#fbBoardTitle');
     this.messages = DEFAULT_MESSAGES.slice();
     this.messageHash = '';
@@ -932,10 +943,43 @@
     if (enabled && this.aircraftBoard) this.aircraftBoard.hidden = false;
   };
 
+  FlipBoard.prototype.createAircraftDataRow = function () {
+    var row = document.createElement('div');
+    row.className = 'fb-aircraft-row is-data';
+    var iconCell = new OpsIconCell();
+    var aircraftLine = new OpsFlipLine(OPS_AIRCRAFT_COLS);
+    var typeCell = new OpsTextCell('type');
+    var statusCell = new OpsTextCell('status');
+    row.appendChild(iconCell.el);
+    row.appendChild(aircraftLine.el);
+    row.appendChild(typeCell.el);
+    row.appendChild(statusCell.el);
+    return {
+      el: row,
+      icon: iconCell,
+      aircraft: aircraftLine,
+      type: typeCell,
+      status: statusCell
+    };
+  };
+
+  FlipBoard.prototype.syncAircraftDataRows = function (count) {
+    while (this.aircraftDataRows.length < count) {
+      var rowObj = this.createAircraftDataRow();
+      this.aircraftDataRows.push(rowObj);
+      if (this.aircraftBody) this.aircraftBody.appendChild(rowObj.el);
+    }
+    while (this.aircraftDataRows.length > count) {
+      var removed = this.aircraftDataRows.pop();
+      if (removed && removed.el && removed.el.parentNode) {
+        removed.el.parentNode.removeChild(removed.el);
+      }
+    }
+  };
+
   FlipBoard.prototype.ensureAircraftBoard = function () {
     if (this.aircraftBoardBuilt || !this.aircraftBoard) return;
     this.aircraftBoardBuilt = true;
-    var self = this;
 
     function headerLabel(text) {
       var el = document.createElement('div');
@@ -944,36 +988,27 @@
       return el;
     }
 
-    for (var i = 0; i < OPS_BOARD_ROWS; i += 1) {
-      var row = document.createElement('div');
-      var isHeader = i === 0;
-      row.className = 'fb-aircraft-row' + (isHeader ? ' is-header' : '');
-      var iconCell = isHeader ? null : new OpsIconCell();
-      var aircraftLine = isHeader ? null : new OpsFlipLine(OPS_AIRCRAFT_COLS);
-      var typeCell = new OpsTextCell('type');
-      var statusCell = new OpsTextCell('status');
+    var header = document.createElement('div');
+    header.className = 'fb-aircraft-row is-header';
+    var typeHeader = new OpsTextCell('type');
+    var statusHeader = new OpsTextCell('status');
+    header.appendChild(headerLabel('ICON'));
+    header.appendChild(headerLabel('AIRCRAFT'));
+    typeHeader.setText('TYPE');
+    statusHeader.setText('STATUS');
+    header.appendChild(typeHeader.el);
+    header.appendChild(statusHeader.el);
+    this.aircraftBoard.appendChild(header);
 
-      if (isHeader) {
-        row.appendChild(headerLabel('ICON'));
-        row.appendChild(headerLabel('AIRCRAFT'));
-        typeCell.setText('TYPE');
-        statusCell.setText('STATUS');
-      } else {
-        row.appendChild(iconCell.el);
-        row.appendChild(aircraftLine.el);
-      }
-      row.appendChild(typeCell.el);
-      row.appendChild(statusCell.el);
+    this.aircraftEmpty = document.createElement('div');
+    this.aircraftEmpty.className = 'fb-aircraft-empty';
+    this.aircraftEmpty.textContent = 'NO AIRCRAFT DATA RECEIVED';
+    this.aircraftEmpty.hidden = true;
+    this.aircraftBoard.appendChild(this.aircraftEmpty);
 
-      self.aircraftBoardRows.push({
-        icon: iconCell,
-        aircraft: aircraftLine,
-        type: typeCell,
-        status: statusCell,
-        isHeader: isHeader
-      });
-      self.aircraftBoard.appendChild(row);
-    }
+    this.aircraftBody = document.createElement('div');
+    this.aircraftBody.className = 'fb-aircraft-body';
+    this.aircraftBoard.appendChild(this.aircraftBody);
   };
 
   FlipBoard.prototype.ensureAircraftPoll = function () {
@@ -1072,7 +1107,7 @@
     this.scheduleBoard.hidden = true;
     if (this.aircraftBoard) this.aircraftBoard.hidden = false;
 
-    var rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    var rows = filterValidAircraftRows(Array.isArray(payload && payload.rows) ? payload.rows : []);
     var boardKey = JSON.stringify(rows.map(function (row) {
       return [row.icon_code, row.aircraft_display, row.type, row.status].join('|');
     }));
@@ -1081,29 +1116,28 @@
     }
     this.lastAircraftBoardKey = boardKey;
 
+    if (!rows.length) {
+      this.syncAircraftDataRows(0);
+      if (this.aircraftEmpty) this.aircraftEmpty.hidden = false;
+      if (this.aircraftBody) this.aircraftBody.hidden = true;
+      return Promise.resolve();
+    }
+
+    if (this.aircraftEmpty) this.aircraftEmpty.hidden = true;
+    if (this.aircraftBody) this.aircraftBody.hidden = false;
+    this.syncAircraftDataRows(rows.length);
+
     var options = { urgent: false, force: force };
     var self = this;
 
-    return Promise.all(this.aircraftBoardRows.map(function (row, idx) {
-      if (row.isHeader) {
-        return Promise.resolve();
-      }
-
-      var item = rows[idx - 1] || {
-        icon_code: 'unknown',
-        aircraft_display: '',
-        aircraft: '',
-        type: '',
-        status: ''
-      };
-      var rowDelay = (idx - 1) * randomBetween(12, 24);
-      if (row.icon) row.icon.setCode(item.icon_code || 'unknown');
+    return Promise.all(this.aircraftDataRows.map(function (rowObj, idx) {
+      var item = rows[idx];
+      var rowDelay = idx * randomBetween(20, 40);
+      rowObj.icon.setCode(item.icon_code || 'unknown');
       return Promise.all([
-        row.aircraft
-          ? row.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay)
-          : Promise.resolve(),
-        row.type.setText(item.type || ''),
-        row.status.setText(item.status || '')
+        rowObj.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay),
+        rowObj.type.setText(item.type && item.type !== '--' ? item.type : ''),
+        rowObj.status.setText(item.status || '')
       ]);
     }));
   };

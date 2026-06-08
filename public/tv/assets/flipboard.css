@@ -126,10 +126,10 @@ body.fb-kiosk{
   display:flex;
   flex-direction:column;
   justify-content:flex-start;
-  gap:2px;
+  gap:8px;
   width:100%;
   max-width:100%;
-  padding:4px 0 0;
+  padding:8px 0 0;
   overflow:hidden;
 }
 .fb-aircraft-board[hidden]{display:none !important}
@@ -315,50 +315,83 @@ body.fb-kiosk{
   height:var(--tile-h);
 }
 
+.fb-aircraft-body{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  width:100%;
+  flex:1 1 auto;
+  min-height:0;
+}
+.fb-aircraft-body[hidden]{display:none !important}
+
+.fb-aircraft-empty{
+  flex:1 1 auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:240px;
+  padding:32px 24px;
+  font-family:"SF Mono","Roboto Mono","Consolas","Liberation Mono",monospace;
+  font-size:clamp(22px,2.2vw,28px);
+  font-weight:700;
+  letter-spacing:.14em;
+  color:rgba(255,255,255,.72);
+  text-align:center;
+}
+.fb-aircraft-empty[hidden]{display:none !important}
+
 .fb-aircraft-row{
   display:grid;
-  grid-template-columns:40px 120px 120px minmax(0,1fr);
-  gap:8px;
+  grid-template-columns:70px 180px 150px minmax(0,1fr);
+  gap:12px;
   align-items:center;
   width:100%;
   max-width:100%;
-  min-height:36px;
-  height:36px;
+  min-height:72px;
+  height:72px;
 }
 .fb-aircraft-row.is-header{
-  height:32px;
-  min-height:32px;
-  margin-bottom:4px;
-  padding-bottom:4px;
-  border-bottom:1px solid rgba(255,255,255,.14);
+  height:auto;
+  min-height:48px;
+  margin-bottom:8px;
+  padding-bottom:10px;
+  border-bottom:2px solid rgba(255,255,255,.16);
+  flex:0 0 auto;
 }
 .fb-aircraft-row.is-header .fb-ops-col-label{
   font-family:"SF Mono","Roboto Mono","Consolas","Liberation Mono",monospace;
-  font-size:11px;
-  letter-spacing:.12em;
-  color:rgba(255,255,255,.48);
-  font-weight:700;
+  font-size:clamp(18px,1.65vw,22px);
+  letter-spacing:.14em;
+  color:rgba(255,255,255,.55);
+  font-weight:800;
   text-transform:uppercase;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
+.fb-aircraft-row.is-header .fb-ops-text{
+  font-size:clamp(18px,1.65vw,22px);
+  line-height:1.2;
+  color:rgba(255,255,255,.55);
+  font-weight:800;
+}
 
 .fb-ops-icon{
-  width:40px;
-  height:28px;
+  width:70px;
+  height:58px;
   display:grid;
   place-items:center;
-  border-radius:3px;
-  background:rgba(0,0,0,.22);
-  border:1px solid rgba(255,255,255,.07);
+  border-radius:6px;
+  background:rgba(0,0,0,.24);
+  border:1px solid rgba(255,255,255,.1);
 }
 .fb-ops-icon svg{
-  width:16px;
-  height:16px;
+  width:34px;
+  height:34px;
   fill:none;
-  stroke:#d8e6ff;
-  stroke-width:1.6;
+  stroke:#e8f0ff;
+  stroke-width:2;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
@@ -366,53 +399,53 @@ body.fb-kiosk{
 .fb-ops-reg-line{
   display:flex;
   flex-wrap:nowrap;
-  gap:1px;
-  width:120px;
-  max-width:120px;
-  min-height:28px;
+  gap:2px;
+  width:180px;
+  max-width:180px;
+  min-height:58px;
   overflow:hidden;
-  perspective:700px;
+  perspective:900px;
   font-family:"SF Mono","Roboto Mono","Consolas","Liberation Mono",monospace;
 }
 .fb-ops-tile{
   position:relative;
-  flex:0 0 14px;
-  width:14px;
-  --ops-tile-h:28px;
+  flex:0 0 21px;
+  width:21px;
+  --ops-tile-h:58px;
   height:var(--ops-tile-h);
-  border-radius:2px;
+  border-radius:4px;
   background:#0a101a;
-  box-shadow:0 1px 0 #000, inset 0 1px 0 rgba(255,255,255,.04);
+  box-shadow:0 2px 0 #000, inset 0 1px 0 rgba(255,255,255,.05);
   transform-style:preserve-3d;
 }
-.fb-ops-tile.is-space{opacity:.12}
+.fb-ops-tile.is-space{opacity:.14}
 .fb-ops-tile .fb-char{
-  font-size:12px;
+  font-size:clamp(28px,2.5vw,34px);
   line-height:var(--ops-tile-h);
   height:var(--ops-tile-h);
-  font-weight:700;
+  font-weight:800;
   letter-spacing:0;
 }
-.fb-ops-tile .fb-clip-top{background:linear-gradient(180deg,#121b2a 0%,#0f1724 100%)}
+.fb-ops-tile .fb-clip-top{background:linear-gradient(180deg,#141f32 0%,#101a2a 100%)}
 .fb-ops-tile .fb-clip-bottom{background:linear-gradient(180deg,#0b121c 0%,#090f17 100%)}
-.fb-ops-tile::after{height:1px;left:8%;right:8%}
-.fb-ops-tile.is-flipping{animation:fbTileRattle var(--flip-duration, 420ms) cubic-bezier(.18,.68,.19,1)}
+.fb-ops-tile::after{height:2px;left:8%;right:8%}
+.fb-ops-tile.is-flipping{animation:fbTileRattle var(--flip-duration, 520ms) cubic-bezier(.18,.68,.19,1)}
 
 .fb-ops-text{
   font-family:"SF Mono","Roboto Mono","Consolas","Liberation Mono",monospace;
-  font-size:13px;
-  font-weight:600;
-  line-height:36px;
-  color:#f2f6ff;
+  font-size:clamp(22px,2vw,26px);
+  font-weight:700;
+  line-height:72px;
+  color:#ffffff;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-  letter-spacing:.02em;
+  letter-spacing:.03em;
 }
 .fb-ops-text.is-type{
-  width:120px;
-  max-width:120px;
-  color:#e8eef8;
+  width:150px;
+  max-width:150px;
+  color:#eef3fb;
 }
 .fb-ops-text.is-status{
   min-width:0;
@@ -440,8 +473,8 @@ body.fb-kiosk{
   width:clamp(120px,12vw,180px);
 }
 .fb-kiosk.is-aircraft-ops .fb-board-title{
-  margin-top:4px;
-  font-size:clamp(14px,1.35vw,20px);
+  margin-top:6px;
+  font-size:clamp(18px,1.8vw,24px);
   letter-spacing:.32em;
 }
 .fb-kiosk.is-aircraft-ops .fb-status-label{
@@ -473,8 +506,9 @@ body.fb-kiosk{
   display:flex;
   flex-direction:column;
   justify-content:flex-start;
-  gap:1px;
+  gap:8px;
   overflow:hidden;
+  padding-top:8px;
 }
 .fb-kiosk.is-aircraft-ops .fb-footer{
   padding-top:6px;
