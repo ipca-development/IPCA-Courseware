@@ -72,12 +72,31 @@ function tv_adsb_point_to_segment_nm(
     return tv_adsb_haversine_nm($lat, $lon, $projLat, $projLon);
 }
 
+function tv_adsb_nm_to_parking_half_degrees(float $radiusNm, float $lat): array
+{
+    $radiusNm = max(0.08, min(0.5, $radiusNm));
+    $halfLat = $radiusNm / 60.0;
+    $cosLat = cos(deg2rad($lat));
+    $halfLon = $halfLat / max(0.2, abs($cosLat));
+
+    return array($halfLat, $halfLon);
+}
+
 function tv_adsb_spc_parking_polygon(array $gate): array
 {
     $lat = (float)($gate['lat'] ?? 33.6267);
     $lon = (float)($gate['lon'] ?? -116.1600);
-    $halfLat = (float)($gate['parking_half_lat'] ?? 0.00075);
-    $halfLon = (float)($gate['parking_half_lon'] ?? 0.00085);
+
+    if (isset($gate['parking_half_lat'], $gate['parking_half_lon'])) {
+        $halfLat = (float)$gate['parking_half_lat'];
+        $halfLon = (float)$gate['parking_half_lon'];
+    } else {
+        $radiusNm = (float)($gate['radius_nm'] ?? 0.18);
+        if ($radiusNm < 0.22) {
+            $radiusNm = 0.25;
+        }
+        [$halfLat, $halfLon] = tv_adsb_nm_to_parking_half_degrees($radiusNm, $lat);
+    }
 
     return array(
         array($lat + $halfLat, $lon - $halfLon),

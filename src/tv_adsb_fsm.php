@@ -136,11 +136,18 @@ function tv_adsb_fsm_candidate(array $obs, array &$cache): string
         return 'landed';
     }
 
+    $spcDist = (float)($obs['spc_dist_nm'] ?? 99);
+
+    if ($onSurface && ($inSpc || $spcDist <= 0.25) && $gs < 10.0
+        && tv_adsb_position_variation_m($history, 300) <= 35.0) {
+        return 'parked_at_spc';
+    }
+
     if ($wasParked && !$inSpc && $onSurface && $gs > 2.0 && $spcTrend > 0.0008) {
         return 'taxiing_out';
     }
 
-    if ($onSurface && $gs > 2.0 && $spcTrend < -0.0008 && (float)($obs['spc_dist_nm'] ?? 99) < 2.0) {
+    if ($onSurface && $gs > 10.0 && $spcTrend < -0.0008 && $spcDist < 2.0) {
         return 'taxiing_in';
     }
 
@@ -431,6 +438,7 @@ function tv_adsb_fsm_tick(
         'debug' => array(
             'lat' => round($lat, 6),
             'lon' => round($lon, 6),
+            'ground_speed_kt' => $gsRounded,
             'in_spc_parking' => (bool)($obs['in_spc_parking'] ?? false),
             'spc_dist_nm' => round((float)($obs['spc_dist_nm'] ?? 0), 3),
             'on_surface' => (bool)($obs['on_surface'] ?? false),
@@ -440,6 +448,7 @@ function tv_adsb_fsm_tick(
             'position_source' => $positionSource,
             'gate_lat' => (float)($gate['lat'] ?? 0),
             'gate_lon' => (float)($gate['lon'] ?? 0),
+            'gate_radius_nm' => (float)($gate['radius_nm'] ?? 0),
         ),
     ));
 }
