@@ -194,9 +194,28 @@ function tv_adsb_fsm_parked_dwell_seconds(array $history, bool $inSpc): int
     return max(0, $dwell);
 }
 
+function tv_adsb_fsm_apply_parked_state(array &$cache): void
+{
+    $cache['fsm_state'] = 'parked_at_spc';
+    $cache['fsm_last_confirmed'] = 'parked_at_spc';
+    $cache['fsm_state_since'] = time();
+    $cache['fsm_pending_state'] = '';
+    $cache['fsm_pending_count'] = 0;
+    unset($cache['off_block_at'], $cache['departure_airport']);
+}
+
 function tv_adsb_fsm_confirm_transition(string $candidate, array &$cache, array $obs): string
 {
     $current = (string)($cache['fsm_state'] ?? '');
+    $gs = (float)($obs['gs'] ?? 0);
+    $inSpc = (bool)($obs['in_spc_parking'] ?? false);
+    $spcDist = (float)($obs['spc_dist_nm'] ?? 99);
+
+    if ($candidate === 'parked_at_spc' && $gs < 10.0 && ($inSpc || $spcDist <= 0.05)) {
+        tv_adsb_fsm_apply_parked_state($cache);
+        return 'parked_at_spc';
+    }
+
     if ($candidate === $current) {
         $cache['fsm_pending_state'] = '';
         $cache['fsm_pending_count'] = 0;
@@ -341,24 +360,64 @@ function tv_adsb_fsm_tick(
         'stale' => false,
     );
 
+    $positionAgeS = null;
     if ($aircraft === null) {
-        return tv_adsb_status_row('?', 'off_radar', 'AWAITING ADS-B', array_merge($base, array(
-            'icon_code' => 'unknown',
-            'aircraft_display' => $label,
-        )));
+        $synthetic = tv_adsb_synthetic_aircraft_for_off_radar($track, $cache, $gate);
+        if ($synthetic === null) {
+            return tv_adsb_status_row('?', 'off_radar', 'AWAITING ADS-B', array_merge($base, array(
+                'icon_code' => 'unknown',
+                'aircraft_display' => $label,
+            )));
+        }
+        $aircraft = $synthetic['aircraft'];
+        $positionSource = (string)$synthetic['position_source'];
+        $positionAgeS = $synthetic['position_age_s'] ?? null;
+        $base['stale'] = true;
+        $base['live'] = false;
     }
 
     $position = tv_adsb_position($aircraft);
-    $positionSource = 'live';
+    if (!isset($positionSource)) {
+        $positionSource = 'live';
+    }
     if ($position === null) {
         $cachedPosition = tv_adsb_last_history_position($cache);
-        if ($cachedPosition !== null && (int)($cachedPosition['age_s'] ?? 99999) <= 86400) {
+        if ($cachedPosition !== null && (int)($cachedPosition['age_s'] ?? 99999) <= 7776000) {
             $position = array(
                 'lat' => (float)$cachedPosition['lat'],
                 'lon' => (float)$cachedPosition['lon'],
             );
-            $positionSource = 'cache';
+            $positionSource = 'cache_history';
+            $positionAgeS = (int)($cachedPosition['age_s'] ?? 0);
             $base['stale'] = true;
+        }
+    }
+    if ($position === null) {
+        $lastKnown = tv_adsb_cached_last_known($cache);
+        if ($lastKnown !== null) {
+            $position = array(
+                'lat' => (float)$lastKnown['lat'],
+                'lon' => (float)$lastKnown['lon'],
+            );
+            $positionSource = 'last_known';
+            $positionAgeS = (int)($lastKnown['age_s'] ?? 0);
+            $base['stale'] = true;
+            $aircraft['gs'] = 0.0;
+            $aircraft['alt_baro'] = 'ground';
+        }
+    }
+    if ($position === null) {
+        $synthetic = tv_adsb_synthetic_aircraft_for_off_radar($track, $cache, $gate);
+        if ($synthetic !== null) {
+            $aircraft = array_merge($aircraft, $synthetic['aircraft']);
+            $position = array(
+                'lat' => (float)$synthetic['aircraft']['lat'],
+                'lon' => (float)$synthetic['aircraft']['lon'],
+            );
+            $positionSource = (string)$synthetic['position_source'];
+            $positionAgeS = $synthetic['position_age_s'] ?? null;
+            $base['stale'] = true;
+            $base['live'] = false;
         }
     }
 
@@ -369,6 +428,12 @@ function tv_adsb_fsm_tick(
     $vr = tv_adsb_vertical_rate($aircraft);
     $seen = isset($aircraft['seen']) && is_numeric($aircraft['seen']) ? (float)$aircraft['seen'] : null;
     $live = $positionSource === 'live' && ($seen === null || $seen <= 90.0);
+    if ($positionSource !== 'live') {
+        $gs = 0.0;
+        $gsRounded = 0;
+        $base['live'] = false;
+        $base['stale'] = true;
+    }
 
     $base['hex'] = $hex;
     $base['live'] = $live;
@@ -382,7 +447,10 @@ function tv_adsb_fsm_tick(
         )));
     }
 
-    tv_adsb_record_motion_sample($cache, $aircraft, $gate, $homeAirport);
+    if ($positionSource === 'live') {
+        tv_adsb_persist_last_known($cache, (float)$position['lat'], (float)$position['lon'], $gs);
+        tv_adsb_record_motion_sample($cache, $aircraft, $gate, $homeAirport);
+    }
 
     $lat = $position['lat'];
     $lon = $position['lon'];
@@ -446,6 +514,7 @@ function tv_adsb_fsm_tick(
             'fsm_candidate' => $candidate,
             'history_samples' => count($history),
             'position_source' => $positionSource,
+            'position_age_s' => $positionAgeS,
             'gate_lat' => (float)($gate['lat'] ?? 0),
             'gate_lon' => (float)($gate['lon'] ?? 0),
             'gate_radius_nm' => (float)($gate['radius_nm'] ?? 0),

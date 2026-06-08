@@ -305,6 +305,105 @@ function tv_adsb_last_history_position(array $cache): ?array
     return null;
 }
 
+function tv_adsb_assume_parked_off_radar(array $gate): bool
+{
+    return (int)($gate['assume_parked_off_radar'] ?? 1) === 1;
+}
+
+function tv_adsb_persist_last_known(array &$cache, float $lat, float $lon, float $gs = 0.0): void
+{
+    $cache['last_known_lat'] = $lat;
+    $cache['last_known_lon'] = $lon;
+    $cache['last_known_gs'] = $gs;
+    $cache['last_known_at'] = time();
+}
+
+function tv_adsb_cached_last_known(array $cache, int $maxAgeSeconds = 7776000): ?array
+{
+    if (!isset($cache['last_known_lat'], $cache['last_known_lon'])) {
+        return null;
+    }
+
+    $age = max(0, time() - (int)($cache['last_known_at'] ?? 0));
+    if ($age > $maxAgeSeconds) {
+        return null;
+    }
+
+    return array(
+        'lat' => (float)$cache['last_known_lat'],
+        'lon' => (float)$cache['last_known_lon'],
+        'gs' => (float)($cache['last_known_gs'] ?? 0),
+        'age_s' => $age,
+    );
+}
+
+function tv_adsb_hydrate_last_known_from_cache(array &$cache): void
+{
+    if (isset($cache['last_known_lat'], $cache['last_known_lon'])) {
+        return;
+    }
+
+    $debug = $cache['last_status']['debug'] ?? null;
+    if (!is_array($debug) || !isset($debug['lat'], $debug['lon'])) {
+        return;
+    }
+
+    tv_adsb_persist_last_known(
+        $cache,
+        (float)$debug['lat'],
+        (float)$debug['lon'],
+        (float)($debug['ground_speed_kt'] ?? 0)
+    );
+}
+
+function tv_adsb_synthetic_aircraft_for_off_radar(array $track, array $cache, array $gate): ?array
+{
+    $lastKnown = tv_adsb_cached_last_known($cache);
+    if ($lastKnown === null) {
+        $history = tv_adsb_last_history_position($cache);
+        if ($history !== null) {
+            $lastKnown = array(
+                'lat' => (float)$history['lat'],
+                'lon' => (float)$history['lon'],
+                'gs' => 0.0,
+                'age_s' => (int)($history['age_s'] ?? 0),
+            );
+        }
+    }
+
+    if ($lastKnown !== null) {
+        return array(
+            'aircraft' => array(
+                'hex' => (string)($track['hex'] ?? ''),
+                'r' => (string)($track['label'] ?? ''),
+                'lat' => $lastKnown['lat'],
+                'lon' => $lastKnown['lon'],
+                'gs' => 0.0,
+                'alt_baro' => 'ground',
+            ),
+            'position_source' => 'last_known',
+            'position_age_s' => (int)($lastKnown['age_s'] ?? 0),
+        );
+    }
+
+    if ((string)($track['hex'] ?? '') === '' || !tv_adsb_assume_parked_off_radar($gate)) {
+        return null;
+    }
+
+    return array(
+        'aircraft' => array(
+            'hex' => (string)$track['hex'],
+            'r' => (string)($track['label'] ?? ''),
+            'lat' => (float)($gate['lat'] ?? tv_adsb_default_gate()['lat']),
+            'lon' => (float)($gate['lon'] ?? tv_adsb_default_gate()['lon']),
+            'gs' => 0.0,
+            'alt_baro' => 'ground',
+        ),
+        'position_source' => 'assumed_ramp',
+        'position_age_s' => null,
+    );
+}
+
 function tv_adsb_altitude_ft(array $aircraft): ?float
 {
     $alt = $aircraft['alt_baro'] ?? $aircraft['alt_geom'] ?? null;
@@ -407,6 +506,7 @@ function tv_adsb_build_status(array $trackInput, array $options = array()): arra
     $homeAirport = tv_adsb_normalize_home_airport((string)($options['home_airport'] ?? $track['home_airport']));
     $track['home_airport'] = $homeAirport;
     $cache = tv_adsb_load_cache($track);
+    tv_adsb_hydrate_last_known_from_cache($cache);
 
     $aircraft = null;
     $source = 'cache';
@@ -448,17 +548,25 @@ function tv_adsb_build_status(array $trackInput, array $options = array()): arra
     }
 
     if ($aircraft === null && !empty($cache['last_status']) && is_array($cache['last_status'])) {
-        $stale = $cache['last_status'];
-        $stale['stale'] = true;
-        $stale['source'] = 'cache';
-        $stale['server_time'] = gmdate('c');
-        return $stale;
+        $lastCode = (string)($cache['last_status']['status_code'] ?? '');
+        $retryOffRadar = tv_adsb_assume_parked_off_radar($gate)
+            && $track['hex'] !== ''
+            && in_array($lastCode, array('off_radar', 'position_unknown', 'unknown'), true);
+        if (!$retryOffRadar) {
+            $stale = $cache['last_status'];
+            $stale['stale'] = true;
+            $stale['source'] = 'cache';
+            $stale['server_time'] = gmdate('c');
+            return $stale;
+        }
     }
 
     $status = tv_adsb_format_status($track, $aircraft, $gate, $homeAirport, $cache);
     $status['source'] = $source;
     $status['server_time'] = gmdate('c');
-    $status['stale'] = false;
+    $positionSource = (string)($status['position_source'] ?? 'live');
+    $status['stale'] = $positionSource !== 'live' || (bool)($status['stale'] ?? false);
+    $status['live'] = $positionSource === 'live' && (bool)($status['live'] ?? false);
 
     $announceEnabled = (bool)($options['announce_audio_enabled'] ?? false);
     $announcement = tv_adsb_maybe_announcement($status, $cache, $gate, $announceEnabled);

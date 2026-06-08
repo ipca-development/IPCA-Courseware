@@ -176,6 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'gate_lat' => (float)($_POST['gate_lat'] ?? tv_adsb_default_gate()['lat']),
                 'gate_lon' => (float)($_POST['gate_lon'] ?? tv_adsb_default_gate()['lon']),
                 'gate_radius_nm' => max(0.05, min(2.0, (float)($_POST['gate_radius_nm'] ?? tv_adsb_default_gate()['radius_nm']))),
+                'assume_parked_off_radar' => isset($_POST['assume_parked_off_radar']) ? 1 : 0,
                 'home_airport' => strtoupper(trim((string)($_POST['home_airport'] ?? tv_adsb_default_home_airport()))) ?: tv_adsb_default_home_airport(),
                 'kiosk_notes' => trim((string)($_POST['kiosk_notes'] ?? '')),
             ));
@@ -669,6 +670,10 @@ cw_header('TV Flip Board');
           <div class="tv-field">
             <label class="tv-field-label" for="set_gate_radius_nm">Gate radius (NM)</label>
             <input class="app-input" type="number" step="0.01" min="0.05" max="2" id="set_gate_radius_nm" name="gate_radius_nm" value="<?= h((string)($settings['gate_radius_nm'] ?? '0.18')) ?>">
+          </div>
+          <div class="tv-field tv-check-row">
+            <input type="checkbox" id="set_assume_parked_off_radar" name="assume_parked_off_radar" value="1" <?= ((int)($settings['assume_parked_off_radar'] ?? 1) === 1) ? 'checked' : '' ?>>
+            <label class="tv-field-label" for="set_assume_parked_off_radar">Assume parked at SPC when aircraft is off ADS-B</label>
           </div>
           <div class="tv-field tv-check-row">
             <input type="checkbox" id="set_audio_enabled" name="audio_enabled" value="1" <?= ((int)$settings['audio_enabled'] === 1) ? 'checked' : '' ?>>

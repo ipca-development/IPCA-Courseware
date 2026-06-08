@@ -19,6 +19,7 @@ function tv_kiosk_config_defaults(): array
         'gate_lat' => (float)$gate['lat'],
         'gate_lon' => (float)$gate['lon'],
         'gate_radius_nm' => (float)$gate['radius_nm'],
+        'assume_parked_off_radar' => 1,
         'home_airport' => tv_adsb_default_home_airport(),
         'kiosk_notes' => '',
     );

@@ -33,6 +33,7 @@ $gate = array(
     'lat' => (float)($kiosk['gate_lat'] ?? tv_adsb_default_gate()['lat']),
     'lon' => (float)($kiosk['gate_lon'] ?? tv_adsb_default_gate()['lon']),
     'radius_nm' => (float)($kiosk['gate_radius_nm'] ?? tv_adsb_default_gate()['radius_nm']),
+    'assume_parked_off_radar' => (int)($kiosk['assume_parked_off_radar'] ?? 1),
 );
 if (isset($_GET['gate_lat'], $_GET['gate_lon'])) {
     $gate['lat'] = (float)$_GET['gate_lat'];
