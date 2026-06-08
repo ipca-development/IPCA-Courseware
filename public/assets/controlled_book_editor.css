@@ -2300,7 +2300,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-lep-emphasis {
-  font-weight: 700;
+  font-weight: 700 !important;
 }
 
 .cpb-lep-cert-wrap,
@@ -2442,6 +2442,19 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-lep-table {
   width: 100%;
   table-layout: fixed;
+}
+
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table tbody td[data-font-family="serif"] {
+  font-family: Georgia, 'Times New Roman', serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table tbody td[data-font-family="sans"] {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table tbody td[data-font-family="mono"] {
+  font-family: 'Courier New', Courier, monospace !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table tbody td[data-font-family="arial"] {
+  font-family: Arial, Helvetica, sans-serif !important;
 }
 
 .cpb-lep-part-row--empty td {

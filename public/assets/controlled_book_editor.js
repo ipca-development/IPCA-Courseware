@@ -378,6 +378,9 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      if (state.isLepSection) {
+        refreshLepTypographyFromBookStyles();
+      }
       applyCanvasZoom(state.canvasZoom, false);
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
       updateAddSubsection(res.section);
@@ -1816,7 +1819,7 @@
       cell_bg: '#ffffff',
       title_row: { font_family: 'sans', font_size: 11, color: '#0f2744', bg: '#e8eef6', font_bold: true, font_italic: false, font_underline: false },
       header_row: { font_family: 'sans', font_size: 10, color: '#0f172a', bg: '#f1f5f9', font_bold: true, font_italic: false, font_underline: false },
-      body_row: { font_family: 'serif', font_size: 10, color: '#0f172a', bg: '', font_bold: false, font_italic: false, font_underline: false },
+      body_row: { font_family: 'sans', font_size: 10, color: '#0f172a', bg: '', font_bold: false, font_italic: false, font_underline: false },
     };
   }
 
@@ -1978,7 +1981,7 @@
   }
 
   function refreshBlockTypographyFromBookStyles(el) {
-    if (!el) return;
+    if (!el || el.classList.contains('cpb-lep-emphasis')) return;
     var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
     var def = paragraphStyleDef(styleKey);
     var fields = {
@@ -3262,7 +3265,12 @@
     var sheet = canvasEl.querySelector('.cpb-sheet--lep');
     if (!sheet) return;
     sheet.querySelectorAll('[data-paragraph-style]').forEach(function (el) {
+      if (el.classList.contains('cpb-lep-emphasis')) return;
       refreshBlockTypographyFromBookStyles(el);
+    });
+    sheet.querySelectorAll('.cpb-lep-emphasis').forEach(function (el) {
+      el.style.fontWeight = '700';
+      el.setAttribute('data-font-bold', '1');
     });
     var tableStyle = (state.bookStyles && state.bookStyles.table_styles && state.bookStyles.table_styles.standard)
       || defaultTableStyleDef();

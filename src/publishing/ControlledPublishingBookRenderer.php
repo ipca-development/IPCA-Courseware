@@ -277,13 +277,26 @@ final class ControlledPublishingBookRenderer
     /**
      * @return array{class:string,attr:string}
      */
-    private function lepParagraphStyle(string $styleKey): array
+    private function lepParagraphStyle(string $styleKey, bool $forceBold = false): array
     {
         $payload = array('paragraph_style' => $styleKey);
+        if ($forceBold) {
+            $payload['font_bold'] = true;
+        }
         return array(
             'class' => trim('cpb-paragraph' . $this->styleClass($payload)),
             'attr' => $this->styleAttr($payload),
         );
+    }
+
+    /**
+     * Body typography with bold weight for post-holder names and titles.
+     *
+     * @return array{class:string,attr:string}
+     */
+    private function lepEmphasisStyle(): array
+    {
+        return $this->lepParagraphStyle('body', true);
     }
 
     /**
@@ -306,14 +319,23 @@ final class ControlledPublishingBookRenderer
      */
     private function resolveStandardTableStyle(): array
     {
-        $tables = is_array($this->bookStyles['table_styles'] ?? null) ? $this->bookStyles['table_styles'] : array();
-        $standard = is_array($tables['standard'] ?? null) ? $tables['standard'] : array();
+        if ($this->styleService !== null && $this->bookStyles !== array()) {
+            return $this->styleService->resolveStandardTableStyle($this->bookStyles);
+        }
         return array(
-            'border_width' => in_array((string)($standard['border_width'] ?? 'thin'), array('thin', 'medium', 'thick'), true)
-                ? (string)$standard['border_width']
-                : 'thin',
-            'border_color' => (string)($standard['border_color'] ?? '#94a3b8'),
-            'header_row' => is_array($standard['header_row'] ?? null) ? $standard['header_row'] : array(
+            'border_width' => 'thin',
+            'border_color' => '#94a3b8',
+            'cell_bg' => '#ffffff',
+            'title_row' => array(
+                'font_family' => 'sans',
+                'font_size' => 11,
+                'color' => '#0f2744',
+                'bg' => '#e8eef6',
+                'font_bold' => true,
+                'font_italic' => false,
+                'font_underline' => false,
+            ),
+            'header_row' => array(
                 'font_family' => 'sans',
                 'font_size' => 10,
                 'color' => '#0f172a',
@@ -322,8 +344,8 @@ final class ControlledPublishingBookRenderer
                 'font_italic' => false,
                 'font_underline' => false,
             ),
-            'body_row' => is_array($standard['body_row'] ?? null) ? $standard['body_row'] : array(
-                'font_family' => 'serif',
+            'body_row' => array(
+                'font_family' => 'sans',
                 'font_size' => 10,
                 'color' => '#0f172a',
                 'bg' => '',
@@ -387,6 +409,7 @@ final class ControlledPublishingBookRenderer
         $sigUrl = trim((string)($slot['signature_url'] ?? ''));
         $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
         $bodyStyle = $this->lepParagraphStyle('body');
+        $emphasisStyle = $this->lepEmphasisStyle();
 
         $sigInner = '';
         if ($sigUrl !== '') {
@@ -398,8 +421,8 @@ final class ControlledPublishingBookRenderer
         }
 
         return '<div class="cpb-lep-signatory" data-lep-slot="' . $slotKey . '">'
-            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-name cpb-lep-emphasis') . '" data-lep-field="name"' . $bodyStyle['attr'] . $fieldEdit . '>' . $name . '</div>'
-            . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-title cpb-lep-emphasis') . '" data-lep-field="title"' . $bodyStyle['attr'] . $fieldEdit . '>' . $title . '</div>'
+            . '<div class="' . trim($emphasisStyle['class'] . ' cpb-lep-signatory-name cpb-lep-emphasis') . '" data-lep-field="name"' . $emphasisStyle['attr'] . $fieldEdit . '>' . $name . '</div>'
+            . '<div class="' . trim($emphasisStyle['class'] . ' cpb-lep-signatory-title cpb-lep-emphasis') . '" data-lep-field="title"' . $emphasisStyle['attr'] . $fieldEdit . '>' . $title . '</div>'
             . '<div class="' . trim($bodyStyle['class'] . ' cpb-lep-signatory-date') . '"' . $bodyStyle['attr'] . '>'
             . '<span class="cpb-lep-label">Date:</span> '
             . '<span class="cpb-lep-signatory-date-value" data-lep-field="date"' . $fieldEdit . '>' . $date . '</span></div>'

@@ -63,7 +63,7 @@ final class ControlledPublishingLepService
         return array(
             array(
                 'slot_key' => 'accountable_manager',
-                'name' => 'Maria A. Paz',
+                'name' => 'Maria Paz-Vereeken',
                 'title' => 'Accountable Manager',
                 'date' => '',
                 'signature_url' => '',

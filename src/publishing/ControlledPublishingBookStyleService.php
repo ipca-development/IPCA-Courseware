@@ -66,7 +66,7 @@ final class ControlledPublishingBookStyleService
                 'text' => array_merge($this->defaultTableStyle(), array(
                     'border_width' => 'thin',
                     'title_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f2744', 'bg' => '#eef2f7'),
-                    'body_row' => array('font_family' => 'serif', 'font_size' => 10, 'color' => '#0f172a', 'bg' => ''),
+                    'body_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => ''),
                 )),
             ),
             'callout_presets' => $this->defaultCalloutPresets(),
@@ -84,7 +84,7 @@ final class ControlledPublishingBookStyleService
             'cell_bg' => '#ffffff',
             'title_row' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#0f2744', 'bg' => '#e8eef6', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
             'header_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '#f1f5f9', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
-            'body_row' => array('font_family' => 'serif', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'body_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
         );
     }
 
@@ -381,6 +381,20 @@ final class ControlledPublishingBookStyleService
             }
         }
         return $paragraph;
+    }
+
+    /**
+     * @param array<string,mixed> $bookStyles
+     * @return array<string,mixed>
+     */
+    public function resolveStandardTableStyle(array $bookStyles): array
+    {
+        $defaults = $this->defaultBookStyles()['table_styles']['standard'];
+        $tables = is_array($bookStyles['table_styles'] ?? null) ? $bookStyles['table_styles'] : array();
+        return $this->normalizeTableStyle(
+            is_array($tables['standard'] ?? null) ? $tables['standard'] : array(),
+            $defaults
+        );
     }
 
     public function fontFamilyStack(string $fontFamily): string
