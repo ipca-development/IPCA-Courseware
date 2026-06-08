@@ -10,7 +10,7 @@
   var OPS_DATA_ROWS = 9;
   var OPS_MAX_DATA_ROWS = 10;
   var AIRCRAFT_PAGE_SECONDS = 12;
-  var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()⇄↗↘✈';
+  var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()⇄↗↘✈O';
 
   var DEFAULT_MESSAGES = [
     {
@@ -69,6 +69,7 @@
     if (!text) return 'AWAITING ADS-B';
     if (text === 'MAINTENANCE' || code === 'maintenance') return 'MAINTENANCE';
     if (text === 'PARKED AT SPC' || code === 'parked_at_spc') return 'PARKED AT SPC';
+    if (text.indexOf('T&G') === 0 || code === 'touch_and_go') return text.replace(/\s+/g, ' ').trim();
     if (text.indexOf('TAXI OUT') === 0) {
       return text.replace(' OFF BLOCK', '').replace(/\s+/g, ' ').trim();
     }
@@ -98,44 +99,44 @@
     return '-';
   }
 
-  function aircraftSymChar(row) {
+  function aircraftSymKind(row) {
     var statusText = normalizeText(String(row.status || ''));
-    if (statusText === 'MAINTENANCE') return 'M';
-    if (statusText === 'PARKED AT SPC') return 'P';
-    if (statusText.indexOf('TAXI IN') === 0 || statusText.indexOf('TAXI OUT') === 0) return '\u21C4';
-    if (statusText.indexOf('TAKING OFF') === 0) return '\u2197';
-    if (statusText.indexOf('LANDING') === 0) return '\u2198';
-    if (statusText.indexOf('LANDED') === 0) return 'G';
-    if (statusText.indexOf('IN FLIGHT') === 0) return '\u2708';
-
     var code = String(row.status_code || '').toLowerCase();
-    switch (code) {
-      case 'parked_at_spc':
+
+    if (code === 'touch_and_go' || statusText.indexOf('T&G') === 0) return 'touchgo';
+    if (statusText === 'MAINTENANCE' || code === 'maintenance') return 'maintenance';
+    if (statusText === 'PARKED AT SPC' || code === 'parked_at_spc') return 'parked';
+    if (statusText.indexOf('TAXI IN') === 0 || statusText.indexOf('TAXI OUT') === 0
+      || code === 'taxiing_in' || code === 'taxiing_out') return 'taxi';
+    if (statusText.indexOf('TAKING OFF') === 0 || code === 'taking_off') return 'takeoff';
+    if (statusText.indexOf('LANDING') === 0 || code === 'landing') return 'landing';
+    if (statusText.indexOf('LANDED') === 0 || code === 'landed') return 'landed';
+    if (statusText.indexOf('IN FLIGHT') === 0 || code === 'in_flight') return 'flight';
+    return 'unknown';
+  }
+
+  function aircraftSymChar(row) {
+    var kind = aircraftSymKind(row);
+    switch (kind) {
+      case 'touchgo':
+        return 'O';
+      case 'parked':
         return 'P';
-      case 'taxiing_out':
-      case 'taxiing_in':
+      case 'maintenance':
+        return 'M';
+      case 'taxi':
         return '\u21C4';
-      case 'taking_off':
-        return '\u2197';
-      case 'in_flight':
-        return '\u2708';
+      case 'takeoff':
+        return '+';
       case 'landing':
         return '\u2198';
       case 'landed':
         return 'G';
-      case 'off_radar':
-      case 'position_unknown':
-      case 'unknown':
-        return '-';
+      case 'flight':
+        return '\u2708';
       default:
-        break;
+        return '-';
     }
-
-    var legacy = String(row.symbol || '').trim();
-    if (legacy === 'P' || legacy === 'T' || legacy === 'U' || legacy === 'L' || legacy === 'F' || legacy === 'G' || legacy === 'M') {
-      return legacy === 'T' ? '\u21C4' : (legacy === 'U' ? '\u2197' : (legacy === 'F' ? '\u2708' : (legacy === 'L' ? '\u2198' : legacy)));
-    }
-    return '-';
   }
 
   function aircraftRowFields(row) {
@@ -144,6 +145,7 @@
 
     return {
       sym: aircraftSymChar(row),
+      symKind: aircraftSymKind(row),
       aircraft: normalizeText(String(row.aircraft_display || row.aircraft || '')),
       type: type,
       status: formatAircraftStatusDisplay(row.status || '', row.status_code || '')
@@ -773,12 +775,20 @@
     return Promise.all(jobs);
   };
 
-  FlipLine.prototype.setSymbol = function (symbol, options, audio, rowDelayBase) {
+  FlipLine.prototype.setSymbol = function (symbol, options, audio, rowDelayBase, symKind) {
     var char = symCharForTile(symbol);
     options = options || {};
-    if (char === this.tiles[0].char && !options.force) return Promise.resolve();
-    var delay = rowDelayBase + randomBetween(0, 120);
     var tile = this.tiles[0];
+    var kinds = ['takeoff', 'landing', 'taxi', 'parked', 'flight', 'touchgo', 'landed', 'maintenance', 'unknown'];
+    kinds.forEach(function (kind) {
+      tile.el.classList.remove('is-sym-' + kind);
+    });
+    if (symKind) tile.el.classList.add('is-sym-' + symKind);
+    if (char === tile.char && !options.force && tile.el.dataset.symKind === (symKind || '')) {
+      return Promise.resolve();
+    }
+    tile.el.dataset.symKind = symKind || '';
+    var delay = rowDelayBase + randomBetween(0, 120);
     return new Promise(function (resolve) {
       window.setTimeout(function () {
         tile.flipTo(char, options, audio).then(resolve);
@@ -813,7 +823,7 @@
   AircraftOpsRow.prototype.setFields = function (fields, options, audio, rowDelayBase) {
     fields = fields || {};
     return Promise.all([
-      this.sym.setSymbol(fields.sym || ' ', options, audio, rowDelayBase),
+      this.sym.setSymbol(fields.sym || ' ', options, audio, rowDelayBase, fields.symKind || ''),
       this.aircraft.setText(fields.aircraft || ' ', options, audio, rowDelayBase + randomBetween(4, 12)),
       this.type.setText(fields.type || ' ', options, audio, rowDelayBase + randomBetween(8, 18)),
       this.status.setText(fields.status || ' ', options, audio, rowDelayBase + randomBetween(12, 24))

@@ -13,6 +13,7 @@ function tv_adsb_announceable_status_codes(): array
         'landing',
         'landed',
         'in_flight',
+        'touch_and_go',
     );
 }
 
@@ -83,6 +84,9 @@ function tv_adsb_build_event_speech(array $status, array $gate, array $cache): s
         case 'in_flight':
             return $spokenLabel . ' is in flight.';
 
+        case 'touch_and_go':
+            return $spokenLabel . ' is conducting touch and go training at ' . $airport . '.';
+
         default:
             return '';
     }
@@ -104,7 +108,7 @@ function tv_adsb_maybe_announcement(
         return null;
     }
 
-    $newCode = (string)($cache['fsm_state'] ?? ($status['status_code'] ?? ''));
+    $newCode = (string)($status['status_code'] ?? ($cache['fsm_state'] ?? ''));
     if (!in_array($newCode, tv_adsb_announceable_status_codes(), true)) {
         return null;
     }
