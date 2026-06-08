@@ -318,14 +318,61 @@ final class ControlledPublishingBookRenderer
                 'font_size' => 10,
                 'color' => '#0f172a',
                 'bg' => '#f1f5f9',
+                'font_bold' => true,
+                'font_italic' => false,
+                'font_underline' => false,
             ),
             'body_row' => is_array($standard['body_row'] ?? null) ? $standard['body_row'] : array(
                 'font_family' => 'serif',
                 'font_size' => 10,
                 'color' => '#0f172a',
                 'bg' => '',
+                'font_bold' => false,
+                'font_italic' => false,
+                'font_underline' => false,
             ),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $rowStyle
+     */
+    private function tableRowVisualAttr(array $rowStyle, string $align = 'center', string $bgOverride = ''): string
+    {
+        $bg = $bgOverride !== '' ? $bgOverride : (string)($rowStyle['bg'] ?? '');
+        return $this->tableCellVisualAttr(
+            $bg,
+            $align,
+            (string)($rowStyle['font_family'] ?? 'serif'),
+            (int)($rowStyle['font_size'] ?? 10),
+            (string)($rowStyle['color'] ?? '#0f172a'),
+            $this->normalizeDecorationBool($rowStyle['font_bold'] ?? null, false),
+            $this->normalizeDecorationBool($rowStyle['font_italic'] ?? null, false),
+            $this->normalizeDecorationBool($rowStyle['font_underline'] ?? null, false)
+        );
+    }
+
+    private function normalizeDecorationBool(mixed $value, bool $default): bool
+    {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int)$value !== 0;
+        }
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, array('1', 'true', 'yes', 'on'), true)) {
+                return true;
+            }
+            if (in_array($normalized, array('0', 'false', 'no', 'off', ''), true)) {
+                return false;
+            }
+        }
+        return $default;
     }
 
     /**
@@ -404,20 +451,8 @@ final class ControlledPublishingBookRenderer
         $tableStyle = $this->resolveStandardTableStyle();
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
-        $headerVisual = $this->tableCellVisualAttr(
-            (string)($headerRow['bg'] ?? '#f1f5f9'),
-            'center',
-            (string)($headerRow['font_family'] ?? 'sans'),
-            (int)($headerRow['font_size'] ?? 10),
-            (string)($headerRow['color'] ?? '#0f172a')
-        );
-        $bodyVisual = $this->tableCellVisualAttr(
-            (string)($bodyRow['bg'] ?? ''),
-            'center',
-            (string)($bodyRow['font_family'] ?? 'serif'),
-            (int)($bodyRow['font_size'] ?? 10),
-            (string)($bodyRow['color'] ?? '#0f172a')
-        );
+        $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
+        $bodyVisual = $this->tableRowVisualAttr($bodyRow, 'center');
         $borderWidth = (string)$tableStyle['border_width'];
         $borderColor = (string)$tableStyle['border_color'];
 
@@ -1311,7 +1346,10 @@ final class ControlledPublishingBookRenderer
         string $align = '',
         string $fontFamily = '',
         int $fontSize = 0,
-        string $textColor = ''
+        string $textColor = '',
+        ?bool $fontBold = null,
+        ?bool $fontItalic = null,
+        ?bool $fontUnderline = null
     ): string {
         $styles = array();
         $attrs = array();
@@ -1340,6 +1378,18 @@ final class ControlledPublishingBookRenderer
             $styles[] = 'color:' . $textColor . ' !important';
             $styles[] = '-webkit-text-fill-color:' . $textColor . ' !important';
             $attrs['data-text-color'] = $textColor;
+        }
+        if ($fontBold !== null) {
+            $styles[] = 'font-weight:' . ($fontBold ? '700' : '400') . ' !important';
+            $attrs['data-font-bold'] = $fontBold ? '1' : '0';
+        }
+        if ($fontItalic !== null) {
+            $styles[] = 'font-style:' . ($fontItalic ? 'italic' : 'normal') . ' !important';
+            $attrs['data-font-italic'] = $fontItalic ? '1' : '0';
+        }
+        if ($fontUnderline !== null) {
+            $styles[] = 'text-decoration:' . ($fontUnderline ? 'underline' : 'none') . ' !important';
+            $attrs['data-font-underline'] = $fontUnderline ? '1' : '0';
         }
 
         $html = '';
@@ -1621,6 +1671,9 @@ final class ControlledPublishingBookRenderer
         $styles = array(
             'font-size:' . (int)$typography['font_size'] . 'pt',
             'color:' . (string)$typography['color'],
+            'font-weight:' . (!empty($typography['font_bold']) ? '700' : '400'),
+            'font-style:' . (!empty($typography['font_italic']) ? 'italic' : 'normal'),
+            'text-decoration:' . (!empty($typography['font_underline']) ? 'underline' : 'none'),
         );
         if ($fontStack !== '') {
             $styles[] = 'font-family:' . $fontStack;
@@ -1654,6 +1707,9 @@ final class ControlledPublishingBookRenderer
             'font-size:' . (int)$typography['font_size'] . 'pt',
             'color:' . (string)$typography['color'],
             'font-family:' . $fontStack,
+            'font-weight:' . (!empty($typography['font_bold']) ? '700' : '400'),
+            'font-style:' . (!empty($typography['font_italic']) ? 'italic' : 'normal'),
+            'text-decoration:' . (!empty($typography['font_underline']) ? 'underline' : 'none'),
         );
         $indentLevel = (int)$typography['indent_level'];
         if ($indentLevel > 0) {
@@ -1664,6 +1720,9 @@ final class ControlledPublishingBookRenderer
             . ' data-text-align="' . h((string)$typography['text_align']) . '"'
             . ' data-font-size="' . (int)$typography['font_size'] . '"'
             . ' data-text-color="' . h((string)$typography['color']) . '"'
+            . ' data-font-bold="' . (!empty($typography['font_bold']) ? '1' : '0') . '"'
+            . ' data-font-italic="' . (!empty($typography['font_italic']) ? '1' : '0') . '"'
+            . ' data-font-underline="' . (!empty($typography['font_underline']) ? '1' : '0') . '"'
             . ' data-indent-level="' . $indentLevel . '"';
         if ($paragraphStyle !== '') {
             $attrs .= ' data-paragraph-style="' . h($paragraphStyle) . '"';
@@ -1677,7 +1736,7 @@ final class ControlledPublishingBookRenderer
 
     /**
      * @param array<string,mixed> $payload
-     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int}
+     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool}
      */
     private function resolveTypography(array $payload): array
     {
@@ -1698,6 +1757,9 @@ final class ControlledPublishingBookRenderer
             'color' => (string)($payload['text_color'] ?? $payload['color'] ?? '#0f172a'),
             'text_align' => $align,
             'indent_level' => max(0, min(8, (int)($payload['indent_level'] ?? 0))),
+            'font_bold' => !empty($payload['font_bold']),
+            'font_italic' => !empty($payload['font_italic']),
+            'font_underline' => !empty($payload['font_underline']),
         );
     }
 

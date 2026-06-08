@@ -52,14 +52,14 @@ final class ControlledPublishingBookStyleService
     {
         return array(
             'paragraph_styles' => array(
-                'title' => array('font_family' => 'sans', 'font_size' => 24, 'color' => '#0f2744'),
-                'subtitle_1' => array('font_family' => 'sans', 'font_size' => 18, 'color' => '#0f2744'),
-                'subtitle_2' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744'),
-                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744'),
-                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155'),
-                'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a'),
-                'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a'),
-                'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b'),
+                'title' => array('font_family' => 'sans', 'font_size' => 24, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
+                'subtitle_1' => array('font_family' => 'sans', 'font_size' => 18, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
+                'subtitle_2' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
+                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
             ),
             'table_styles' => array(
                 'standard' => $this->defaultTableStyle(),
@@ -82,9 +82,9 @@ final class ControlledPublishingBookStyleService
             'border_width' => 'thin',
             'border_color' => '#94a3b8',
             'cell_bg' => '#ffffff',
-            'title_row' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#0f2744', 'bg' => '#e8eef6'),
-            'header_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '#f1f5f9'),
-            'body_row' => array('font_family' => 'serif', 'font_size' => 10, 'color' => '#0f172a', 'bg' => ''),
+            'title_row' => array('font_family' => 'sans', 'font_size' => 11, 'color' => '#0f2744', 'bg' => '#e8eef6', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
+            'header_row' => array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '#f1f5f9', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
+            'body_row' => array('font_family' => 'serif', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
         );
     }
 
@@ -187,7 +187,7 @@ final class ControlledPublishingBookStyleService
     /**
      * @param array<string,mixed> $payload
      * @param array<string,mixed> $bookStyles
-     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int}
+     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool}
      */
     public function resolveBlockTypography(array $payload, array $bookStyles): array
     {
@@ -204,12 +204,18 @@ final class ControlledPublishingBookStyleService
             'color' => '#0f172a',
             'text_align' => 'left',
             'indent_level' => 0,
+            'font_bold' => false,
+            'font_italic' => false,
+            'font_underline' => false,
         );
         if (isset($paragraphDefs[$paragraphStyle])) {
             $def = $paragraphDefs[$paragraphStyle];
             $base['font_family'] = (string)($def['font_family'] ?? $base['font_family']);
             $base['font_size'] = (int)($def['font_size'] ?? $base['font_size']);
             $base['color'] = (string)($def['color'] ?? $base['color']);
+            $base['font_bold'] = $this->normalizeBool($def['font_bold'] ?? null, $base['font_bold']);
+            $base['font_italic'] = $this->normalizeBool($def['font_italic'] ?? null, $base['font_italic']);
+            $base['font_underline'] = $this->normalizeBool($def['font_underline'] ?? null, $base['font_underline']);
         }
         if (array_key_exists('font_family', $payload)) {
             $override = $this->normalizeFont((string)$payload['font_family']);
@@ -238,6 +244,11 @@ final class ControlledPublishingBookStyleService
         $align = strtolower(trim((string)($payload['text_align'] ?? 'left')));
         $base['text_align'] = in_array($align, array('left', 'center', 'right'), true) ? $align : 'left';
         $base['indent_level'] = max(0, min(8, (int)($payload['indent_level'] ?? 0)));
+        foreach (array('font_bold', 'font_italic', 'font_underline') as $decorationKey) {
+            if (array_key_exists($decorationKey, $payload)) {
+                $base[$decorationKey] = $this->normalizeBool($payload[$decorationKey], $base[$decorationKey]);
+            }
+        }
         return $base;
     }
 
@@ -293,6 +304,9 @@ final class ControlledPublishingBookStyleService
         $defFont = $this->normalizeFont((string)($def['font_family'] ?? 'serif'));
         $defSize = $this->normalizeFontSize($def['font_size'] ?? 11);
         $defColor = $this->normalizeColor((string)($def['color'] ?? '#0f172a'), '#0f172a');
+        $defBold = $this->normalizeBool($def['font_bold'] ?? null, false);
+        $defItalic = $this->normalizeBool($def['font_italic'] ?? null, false);
+        $defUnderline = $this->normalizeBool($def['font_underline'] ?? null, false);
 
         $changed = false;
         if (array_key_exists('font_family', $payload)
@@ -315,6 +329,17 @@ final class ControlledPublishingBookStyleService
             && $this->normalizeColor($payloadColor, $defColor) === $defColor) {
             unset($payload['text_color'], $payload['color']);
             $changed = true;
+        }
+        foreach (array(
+            'font_bold' => $defBold,
+            'font_italic' => $defItalic,
+            'font_underline' => $defUnderline,
+        ) as $decorationKey => $defValue) {
+            if (array_key_exists($decorationKey, $payload)
+                && $this->normalizeBool($payload[$decorationKey], $defValue) === $defValue) {
+                unset($payload[$decorationKey]);
+                $changed = true;
+            }
         }
         return $changed;
     }
@@ -373,7 +398,7 @@ final class ControlledPublishingBookStyleService
     /**
      * @param array<string,mixed> $input
      * @param array<string,mixed> $fallback
-     * @return array{font_family:string,font_size:int,color:string}
+     * @return array{font_family:string,font_size:int,color:string,font_bold:bool,font_italic:bool,font_underline:bool}
      */
     private function normalizeParagraphStyle(array $input, array $fallback): array
     {
@@ -381,6 +406,9 @@ final class ControlledPublishingBookStyleService
             'font_family' => $this->normalizeFont((string)($input['font_family'] ?? $fallback['font_family'] ?? 'serif')),
             'font_size' => $this->normalizeFontSize($input['font_size'] ?? $fallback['font_size'] ?? 11),
             'color' => $this->normalizeColor((string)($input['color'] ?? $fallback['color'] ?? '#0f172a'), '#0f172a'),
+            'font_bold' => $this->normalizeBool($input['font_bold'] ?? null, (bool)($fallback['font_bold'] ?? false)),
+            'font_italic' => $this->normalizeBool($input['font_italic'] ?? null, (bool)($fallback['font_italic'] ?? false)),
+            'font_underline' => $this->normalizeBool($input['font_underline'] ?? null, (bool)($fallback['font_underline'] ?? false)),
         );
     }
 
@@ -417,7 +445,7 @@ final class ControlledPublishingBookStyleService
     /**
      * @param array<string,mixed> $input
      * @param array<string,mixed> $fallback
-     * @return array{font_family:string,font_size:int,color:string,bg:string}
+     * @return array{font_family:string,font_size:int,color:string,bg:string,font_bold:bool,font_italic:bool,font_underline:bool}
      */
     private function normalizeTableRowStyle(array $input, array $fallback): array
     {
@@ -426,6 +454,9 @@ final class ControlledPublishingBookStyleService
             'font_size' => $this->normalizeFontSize($input['font_size'] ?? $fallback['font_size'] ?? 10),
             'color' => $this->normalizeColor((string)($input['color'] ?? $fallback['color'] ?? '#0f172a'), '#0f172a'),
             'bg' => $this->normalizeColor((string)($input['bg'] ?? $fallback['bg'] ?? ''), ''),
+            'font_bold' => $this->normalizeBool($input['font_bold'] ?? null, (bool)($fallback['font_bold'] ?? false)),
+            'font_italic' => $this->normalizeBool($input['font_italic'] ?? null, (bool)($fallback['font_italic'] ?? false)),
+            'font_underline' => $this->normalizeBool($input['font_underline'] ?? null, (bool)($fallback['font_underline'] ?? false)),
         );
     }
 
@@ -488,6 +519,29 @@ final class ControlledPublishingBookStyleService
             return strtolower($color);
         }
         return $fallback;
+    }
+
+    private function normalizeBool(mixed $value, bool $default): bool
+    {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int)$value !== 0;
+        }
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, array('1', 'true', 'yes', 'on'), true)) {
+                return true;
+            }
+            if (in_array($normalized, array('0', 'false', 'no', 'off', ''), true)) {
+                return false;
+            }
+        }
+        return $default;
     }
 
     /**

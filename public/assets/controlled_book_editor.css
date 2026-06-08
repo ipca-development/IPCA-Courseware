@@ -996,6 +996,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cmp-page .cpb-editor-root .cpb-table th.cpb-font-arial {
   font-family: Arial, Helvetica, sans-serif !important;
 }
+
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table td.cpb-font-serif,
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table th.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table td.cpb-font-sans,
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table th.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table td.cpb-font-mono,
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table th.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace !important;
+}
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table td.cpb-font-arial,
+.cmp-page .cpb-editor-root .cpb-sheet--lep .cpb-lep-table th.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
 .cpb-table td.cpb-font-manuallabel,
 .cpb-table th.cpb-font-manuallabel {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -1074,8 +1091,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
   width: auto;
   border-collapse: collapse;
   table-layout: fixed;
-  font-family: system-ui, sans-serif;
-  font-size: 10pt;
 }
 
 .cpb-table-wrap > .cpb-table,
@@ -1144,12 +1159,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-table thead tr.cpb-table-header-row th {
   position: relative;
   background: #f1f5f9;
-  font-weight: 700;
 }
 
 .cpb-table thead tr.cpb-table-title-row td {
   background: #e8eef6;
-  font-weight: 700;
 }
 
 .cpb-table thead tr.cpb-table-title-row.is-empty td[data-placeholder]:empty::before,
@@ -1839,6 +1852,26 @@ body.cpb-browser-fullscreen .cpb-workspace {
   white-space: nowrap;
 }
 
+.cpb-style-format {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.cpb-style-format label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cpb-style-format input[type="checkbox"] {
+  margin: 0;
+}
+
 .cpb-style-input {
   border: 1px solid #d1dae6;
   border-radius: 4px;
@@ -2247,6 +2280,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
   max-width: 100%;
   box-sizing: border-box;
   padding: 0;
+}
+
+.cpb-sheet--lep .cpb-lep .cpb-paragraph,
+.cpb-sheet--lep .cpb-lep [data-paragraph-style] {
+  text-align: left;
 }
 
 .cpb-lep-heading {

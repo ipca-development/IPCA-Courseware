@@ -971,14 +971,14 @@
   function defaultBookStyles() {
     return {
       paragraph_styles: {
-        title: { font_family: 'sans', font_size: 24, color: '#0f2744' },
-        subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744' },
-        subtitle_2: { font_family: 'sans', font_size: 16, color: '#0f2744' },
-        subtitle_3: { font_family: 'sans', font_size: 14, color: '#0f2744' },
-        subtitle_4: { font_family: 'sans', font_size: 12, color: '#334155' },
-        regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a' },
-        body: { font_family: 'serif', font_size: 11, color: '#0f172a' },
-        caption: { font_family: 'sans', font_size: 9, color: '#64748b' },
+        title: { font_family: 'sans', font_size: 24, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
+        subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
+        subtitle_2: { font_family: 'sans', font_size: 16, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
+        subtitle_3: { font_family: 'sans', font_size: 14, color: '#0f2744', font_bold: false, font_italic: false, font_underline: false },
+        subtitle_4: { font_family: 'sans', font_size: 12, color: '#334155', font_bold: false, font_italic: false, font_underline: false },
+        regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a', font_bold: false, font_italic: false, font_underline: false },
+        body: { font_family: 'serif', font_size: 11, color: '#0f172a', font_bold: false, font_italic: false, font_underline: false },
+        caption: { font_family: 'sans', font_size: 9, color: '#64748b', font_bold: false, font_italic: false, font_underline: false },
       },
       table_styles: {
         standard: defaultTableStyleDef(),
@@ -1814,25 +1814,36 @@
       border_width: 'thin',
       border_color: '#94a3b8',
       cell_bg: '#ffffff',
-      title_row: { font_family: 'sans', font_size: 11, color: '#0f2744', bg: '#e8eef6' },
-      header_row: { font_family: 'sans', font_size: 10, color: '#0f172a', bg: '#f1f5f9' },
-      body_row: { font_family: 'serif', font_size: 10, color: '#0f172a', bg: '' },
+      title_row: { font_family: 'sans', font_size: 11, color: '#0f2744', bg: '#e8eef6', font_bold: true, font_italic: false, font_underline: false },
+      header_row: { font_family: 'sans', font_size: 10, color: '#0f172a', bg: '#f1f5f9', font_bold: true, font_italic: false, font_underline: false },
+      body_row: { font_family: 'serif', font_size: 10, color: '#0f172a', bg: '', font_bold: false, font_italic: false, font_underline: false },
     };
   }
 
   function paragraphStyleDef(styleKey) {
     var styles = state.bookStyles || defaultBookStyles();
     styleKey = canonicalParagraphStyleKey(styleKey || 'body') || 'body';
-    return (styles.paragraph_styles && styles.paragraph_styles[styleKey])
+    var def = (styles.paragraph_styles && styles.paragraph_styles[styleKey])
       || (styles.paragraph_styles && styles.paragraph_styles.body)
-      || { font_family: 'serif', font_size: 11, color: '#0f172a' };
+      || { font_family: 'serif', font_size: 11, color: '#0f172a', font_bold: false, font_italic: false, font_underline: false };
+    return {
+      font_family: def.font_family || 'serif',
+      font_size: def.font_size || 11,
+      color: def.color || '#0f172a',
+      font_bold: !!def.font_bold,
+      font_italic: !!def.font_italic,
+      font_underline: !!def.font_underline,
+    };
   }
 
   function typographyMatchesParagraphStyleDef(fields, styleKey) {
     var def = paragraphStyleDef(styleKey);
     return fields.font_family === (def.font_family || 'serif')
       && fields.font_size === (def.font_size || 11)
-      && fields.text_color === (def.color || '#0f172a');
+      && fields.text_color === (def.color || '#0f172a')
+      && !!fields.font_bold === !!def.font_bold
+      && !!fields.font_italic === !!def.font_italic
+      && !!fields.font_underline === !!def.font_underline;
   }
 
   function readElementTypographyFields(el) {
@@ -1980,6 +1991,9 @@
         font_family: def.font_family || 'serif',
         font_size: def.font_size || 11,
         color: def.color || '#0f172a',
+        font_bold: !!def.font_bold,
+        font_italic: !!def.font_italic,
+        font_underline: !!def.font_underline,
       }, styleKey, true);
     }
   }
@@ -1987,13 +2001,16 @@
   function resolveTypographyFromPayload(payload) {
     var styles = state.bookStyles || defaultBookStyles();
     var ps = (payload && payload.paragraph_style) || 'body';
-    var def = (styles.paragraph_styles && styles.paragraph_styles[ps]) || styles.paragraph_styles.body;
+    var def = paragraphStyleDef(ps);
     return {
       font_family: (payload && payload.font_family) || def.font_family || 'serif',
       font_size: (payload && payload.font_size) || def.font_size || 11,
       color: (payload && (payload.text_color || payload.color)) || def.color || '#0f172a',
       text_align: (payload && payload.text_align) || 'left',
       indent_level: (payload && payload.indent_level) || 0,
+      font_bold: payload && Object.prototype.hasOwnProperty.call(payload, 'font_bold') ? !!payload.font_bold : !!def.font_bold,
+      font_italic: payload && Object.prototype.hasOwnProperty.call(payload, 'font_italic') ? !!payload.font_italic : !!def.font_italic,
+      font_underline: payload && Object.prototype.hasOwnProperty.call(payload, 'font_underline') ? !!payload.font_underline : !!def.font_underline,
     };
   }
 
@@ -2348,6 +2365,10 @@
       size: typo.font_size,
       color: typo.color,
     });
+    applyTypographyDecorationToElement(cell, typo);
+    cell.style.setProperty('font-weight', typo.font_bold ? '700' : '400', 'important');
+    cell.style.setProperty('font-style', typo.font_italic ? 'italic' : 'normal', 'important');
+    cell.style.setProperty('text-decoration', typo.font_underline ? 'underline' : 'none', 'important');
   }
 
   function resolveTableCellForStyle() {
@@ -2433,6 +2454,7 @@
     el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
     el.style.fontSize = typo.font_size + 'pt';
     el.style.color = typo.color;
+    applyTypographyDecorationToElement(el, typo);
   }
 
   function wireImageBlock(blockEl) {
@@ -3200,6 +3222,58 @@
     }
   }
 
+  function applyTypographyDecorationToElement(el, typo) {
+    if (!el || !typo) return;
+    el.style.fontWeight = typo.font_bold ? '700' : '400';
+    el.style.fontStyle = typo.font_italic ? 'italic' : 'normal';
+    el.style.textDecoration = typo.font_underline ? 'underline' : 'none';
+    el.setAttribute('data-font-bold', typo.font_bold ? '1' : '0');
+    el.setAttribute('data-font-italic', typo.font_italic ? '1' : '0');
+    el.setAttribute('data-font-underline', typo.font_underline ? '1' : '0');
+  }
+
+  function applyBookTableRowStyleToCell(cell, rowStyle) {
+    if (!cell || !rowStyle) return;
+    var typo = {
+      font_family: rowStyle.font_family || 'serif',
+      font_size: rowStyle.font_size || 10,
+      color: rowStyle.color || '#0f172a',
+      font_bold: !!rowStyle.font_bold,
+      font_italic: !!rowStyle.font_italic,
+      font_underline: !!rowStyle.font_underline,
+    };
+    FONT_CLASSES.forEach(function (cls) { cell.classList.remove(cls); });
+    cell.classList.add('cpb-font-' + typo.font_family);
+    cell.setAttribute('data-font-family', typo.font_family);
+    cell.setAttribute('data-font-size', String(typo.font_size));
+    cell.setAttribute('data-text-color', typo.color);
+    cell.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
+    cell.style.setProperty('font-family', FONT_STACKS[typo.font_family] || FONT_STACKS.serif, 'important');
+    cell.style.setProperty('font-size', typo.font_size + 'pt', 'important');
+    cell.style.setProperty('color', typo.color, 'important');
+    cell.style.setProperty('-webkit-text-fill-color', typo.color, 'important');
+    applyTypographyDecorationToElement(cell, typo);
+    cell.style.setProperty('font-weight', typo.font_bold ? '700' : '400', 'important');
+    cell.style.setProperty('font-style', typo.font_italic ? 'italic' : 'normal', 'important');
+    cell.style.setProperty('text-decoration', typo.font_underline ? 'underline' : 'none', 'important');
+  }
+
+  function refreshLepTypographyFromBookStyles() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--lep');
+    if (!sheet) return;
+    sheet.querySelectorAll('[data-paragraph-style]').forEach(function (el) {
+      refreshBlockTypographyFromBookStyles(el);
+    });
+    var tableStyle = (state.bookStyles && state.bookStyles.table_styles && state.bookStyles.table_styles.standard)
+      || defaultTableStyleDef();
+    sheet.querySelectorAll('.cpb-lep-table thead th').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.header_row || defaultTableStyleDef().header_row);
+    });
+    sheet.querySelectorAll('.cpb-lep-table tbody td').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.body_row || defaultTableStyleDef().body_row);
+    });
+  }
+
   function applyTypographyToElement(el, typo, paragraphStyle, skipInlineClear) {
     if (!skipInlineClear) {
       clearInlineTypographyInElement(el);
@@ -3217,6 +3291,7 @@
     el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
     el.style.fontSize = typo.font_size + 'pt';
     el.style.color = typo.color;
+    applyTypographyDecorationToElement(el, typo);
     syncSectionNumberTypography(el);
   }
 
@@ -3270,6 +3345,9 @@
       font_family: def.font_family || 'serif',
       font_size: def.font_size || 11,
       color: def.color || '#0f172a',
+      font_bold: !!def.font_bold,
+      font_italic: !!def.font_italic,
+      font_underline: !!def.font_underline,
     };
     var stack = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
 
@@ -3601,6 +3679,36 @@
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function styleEditorFormatToggles(def) {
+    var boldChecked = def && def.font_bold ? ' checked' : '';
+    var italicChecked = def && def.font_italic ? ' checked' : '';
+    var underlineChecked = def && def.font_underline ? ' checked' : '';
+    return '<span class="cpb-style-format">'
+      + '<label title="Bold"><input type="checkbox" data-ps-field="font_bold"' + boldChecked + '> <strong>B</strong></label>'
+      + '<label title="Italic"><input type="checkbox" data-ps-field="font_italic"' + italicChecked + '> <em>I</em></label>'
+      + '<label title="Underline"><input type="checkbox" data-ps-field="font_underline"' + underlineChecked + '> <u>U</u></label>'
+      + '</span>';
+  }
+
+  function updateParagraphStyleSample(row) {
+    if (!row) return;
+    var key = row.getAttribute('data-ps-row');
+    var sample = row.querySelector('[data-ps-sample="' + key + '"]');
+    if (!sample) return;
+    var font = row.querySelector('[data-ps-field="font_family"]').value;
+    var size = row.querySelector('[data-ps-field="font_size"]').value;
+    var color = row.querySelector('[data-ps-field="color"]').value;
+    var bold = row.querySelector('[data-ps-field="font_bold"]').checked;
+    var italic = row.querySelector('[data-ps-field="font_italic"]').checked;
+    var underline = row.querySelector('[data-ps-field="font_underline"]').checked;
+    sample.style.fontFamily = FONT_STACKS[font] || FONT_STACKS.serif;
+    sample.style.fontSize = size + 'pt';
+    sample.style.color = color;
+    sample.style.fontWeight = bold ? '700' : '400';
+    sample.style.fontStyle = italic ? 'italic' : 'normal';
+    sample.style.textDecoration = underline ? 'underline' : 'none';
+  }
+
   function styleEditorFontOptions(selected) {
     var html = '';
     ['serif', 'sans', 'arial', 'mono'].forEach(function (font) {
@@ -3909,13 +4017,20 @@
     var paragraphRows = PARAGRAPH_STYLE_KEYS.map(function (key) {
       var def = styles.paragraph_styles[key] || {};
       var sample = PARAGRAPH_STYLE_LABELS[key] || key;
+      var sampleStyle = 'font-family:' + escapeAttr(FONT_STACKS[def.font_family] || FONT_STACKS.serif)
+        + ';font-size:' + (def.font_size || 11) + 'pt'
+        + ';color:' + escapeAttr(def.color || '#0f172a')
+        + ';font-weight:' + (def.font_bold ? '700' : '400')
+        + ';font-style:' + (def.font_italic ? 'italic' : 'normal')
+        + ';text-decoration:' + (def.font_underline ? 'underline' : 'none');
       return ''
         + '<tr data-ps-row="' + key + '">'
         + '<td class="cpb-style-name">' + escapeHtml(sample) + '</td>'
         + '<td><select class="cpb-style-input" data-ps-field="font_family">' + styleEditorFontOptions(def.font_family || 'serif') + '</select></td>'
         + '<td><input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-ps-field="font_size" value="' + (def.font_size || 11) + '"></td>'
         + '<td><input class="cpb-style-input cpb-style-input--color" type="color" data-ps-field="color" value="' + escapeAttr(def.color || '#0f172a') + '"></td>'
-        + '<td><span class="cpb-style-sample" data-ps-sample="' + key + '" style="font-family:' + escapeAttr(FONT_STACKS[def.font_family] || FONT_STACKS.serif) + ';font-size:' + (def.font_size || 11) + 'pt;color:' + escapeAttr(def.color || '#0f172a') + '">' + escapeHtml(sample) + '</span></td>'
+        + '<td>' + styleEditorFormatToggles(def) + '</td>'
+        + '<td><span class="cpb-style-sample" data-ps-sample="' + key + '" style="' + sampleStyle + '">' + escapeHtml(sample) + '</span></td>'
         + '</tr>';
     }).join('');
 
@@ -3952,7 +4067,7 @@
       + '(Title 1. · Subtitle 1 1.1 · Subtitle 2 1.1.1 · …). '
       + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived or entered manually in the toolbar.</p>'
       + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
-      + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Sample</th></tr></thead><tbody>'
+      + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Format</th><th>Sample</th></tr></thead><tbody>'
       + paragraphRows + '</tbody></table></section>'
       + tableSection('standard', 'Standard tables')
       + tableSection('text', 'Text tables')
@@ -3970,6 +4085,9 @@
           font_family: row.querySelector('[data-ps-field="font_family"]').value,
           font_size: parseInt(row.querySelector('[data-ps-field="font_size"]').value, 10) || 11,
           color: row.querySelector('[data-ps-field="color"]').value,
+          font_bold: !!row.querySelector('[data-ps-field="font_bold"]').checked,
+          font_italic: !!row.querySelector('[data-ps-field="font_italic"]').checked,
+          font_underline: !!row.querySelector('[data-ps-field="font_underline"]').checked,
         };
       });
       ['standard', 'text'].forEach(function (kind) {
@@ -3992,15 +4110,12 @@
     overlay.addEventListener('input', function (e) {
       var row = e.target.closest('[data-ps-row]');
       if (!row) return;
-      var key = row.getAttribute('data-ps-row');
-      var sample = row.querySelector('[data-ps-sample="' + key + '"]');
-      if (!sample) return;
-      var font = row.querySelector('[data-ps-field="font_family"]').value;
-      var size = row.querySelector('[data-ps-field="font_size"]').value;
-      var color = row.querySelector('[data-ps-field="color"]').value;
-      sample.style.fontFamily = FONT_STACKS[font] || FONT_STACKS.serif;
-      sample.style.fontSize = size + 'pt';
-      sample.style.color = color;
+      updateParagraphStyleSample(row);
+    });
+    overlay.addEventListener('change', function (e) {
+      var row = e.target.closest('[data-ps-row]');
+      if (!row) return;
+      updateParagraphStyleSample(row);
     });
 
     function close() { overlay.remove(); }
@@ -4019,6 +4134,7 @@
             canvasEl.querySelectorAll('.cpb-paragraph, .cpb-heading, .cpb-list').forEach(function (el) {
               refreshBlockTypographyFromBookStyles(el);
             });
+            refreshLepTypographyFromBookStyles();
           });
         })
         .catch(showError);
