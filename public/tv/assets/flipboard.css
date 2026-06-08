@@ -343,8 +343,8 @@ body.fb-kiosk{
 
 .fb-aircraft-row{
   display:grid;
-  grid-template-columns:70px 180px 150px minmax(0,1fr);
-  gap:12px;
+  grid-template-columns:70px max-content 150px minmax(0,1fr);
+  gap:14px;
   align-items:center;
   width:100%;
   max-width:100%;
@@ -399,9 +399,8 @@ body.fb-kiosk{
 .fb-ops-reg-line{
   display:flex;
   flex-wrap:nowrap;
-  gap:2px;
-  width:180px;
-  max-width:180px;
+  gap:3px;
+  width:max-content;
   min-height:58px;
   overflow:hidden;
   perspective:900px;
@@ -409,9 +408,9 @@ body.fb-kiosk{
 }
 .fb-ops-tile{
   position:relative;
-  flex:0 0 21px;
-  width:21px;
-  --ops-tile-h:58px;
+  flex:0 0 22px;
+  width:22px;
+  --ops-tile-h:60px;
   height:var(--ops-tile-h);
   border-radius:4px;
   background:#0a101a;
@@ -447,9 +446,16 @@ body.fb-kiosk{
   max-width:150px;
   color:#eef3fb;
 }
+.fb-ops-text.is-type.is-placeholder{
+  color:rgba(238,243,251,.42);
+}
 .fb-ops-text.is-status{
   min-width:0;
   color:#ffffff;
+}
+.fb-ops-text.is-status.is-awaiting{
+  color:rgba(255,255,255,.58);
+  font-weight:600;
 }
 
 .fb-kiosk.is-aircraft-ops .fb-stage{

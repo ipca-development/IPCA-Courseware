@@ -285,13 +285,16 @@ function tv_adsb_fsm_build_display(string $state, array $obs, array &$cache, arr
                 . ' ' . $altText . ' FT';
 
         case 'off_radar':
-            return 'OFF RADAR';
+            return 'AWAITING ADS-B';
 
         case 'position_unknown':
-            return 'POSITION UNKNOWN';
+            return 'AWAITING POSITION';
 
         default:
-            return 'STATUS UNKNOWN';
+            if ((float)($obs['gs'] ?? 0) > 0.0 || (bool)($obs['on_surface'] ?? false)) {
+                return 'TRACKING';
+            }
+            return 'AWAITING ADS-B';
     }
 }
 
@@ -320,7 +323,7 @@ function tv_adsb_fsm_tick(
     );
 
     if ($aircraft === null) {
-        return tv_adsb_status_row('?', 'off_radar', 'OFF RADAR', array_merge($base, array(
+        return tv_adsb_status_row('?', 'off_radar', 'AWAITING ADS-B', array_merge($base, array(
             'icon_code' => 'unknown',
             'aircraft_display' => $label,
         )));
@@ -341,7 +344,7 @@ function tv_adsb_fsm_tick(
     $base['altitude_ft'] = $altFt;
 
     if ($position === null) {
-        return tv_adsb_status_row('?', 'position_unknown', 'POSITION UNKNOWN', array_merge($base, array(
+        return tv_adsb_status_row('?', 'position_unknown', 'AWAITING POSITION', array_merge($base, array(
             'icon_code' => 'unknown',
             'aircraft_display' => $label,
         )));

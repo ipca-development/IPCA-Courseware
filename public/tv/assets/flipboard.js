@@ -450,7 +450,7 @@
       case 'flight':
         return '<svg viewBox="0 0 16 16"><path d="M2 8 L6 7 L9 4 L10 7 L14 8 L10 9 L9 12 L6 9 Z"/></svg>';
       default:
-        return '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.5"/></svg>';
+        return '<svg viewBox="0 0 16 16"><text x="8" y="12" text-anchor="middle" fill="#9eb4d4" font-size="13" font-weight="800" font-family="monospace">?</text></svg>';
     }
   }
 
@@ -556,6 +556,8 @@
     }
     this.value = next;
     this.el.textContent = next;
+    this.el.classList.toggle('is-placeholder', next === '--' || next === '');
+    this.el.classList.toggle('is-awaiting', /^(AWAITING|TRACKING)/.test(next));
     return Promise.resolve();
   };
 
@@ -571,13 +573,40 @@
     }
   }
 
+  OpsFlipLine.prototype.resize = function (count) {
+    var needed = clamp(count, 1, this.length);
+    while (this.tiles.length > needed) {
+      var removed = this.tiles.pop();
+      if (removed && removed.el.parentNode) {
+        removed.el.parentNode.removeChild(removed.el);
+      }
+    }
+    while (this.tiles.length < needed) {
+      var tile = new OpsFlipTile(' ');
+      this.tiles.push(tile);
+      this.el.appendChild(tile.el);
+    }
+  };
+
   OpsFlipLine.prototype.setText = function (text, options, audio, rowDelayBase) {
-    var fitted = fitTextEllipsis(text, this.length);
+    options = options || {};
+    var raw = normalizeText(text);
+    if (raw.length > this.length) {
+      raw = raw.slice(0, this.length);
+    }
+    if (!raw.length) {
+      raw = ' ';
+    }
+    this.resize(raw.length);
+
     var jobs = [];
-    var self = this;
     this.tiles.forEach(function (tile, idx) {
-      var char = fitted.charAt(idx);
+      var char = raw.charAt(idx) || ' ';
       if (char === tile.char && !options.force) return;
+      if (options.instant) {
+        tile.setChar(char);
+        return;
+      }
       var delay = rowDelayBase + idx * randomBetween(2, 8);
       jobs.push(new Promise(function (resolve) {
         window.setTimeout(function () {
@@ -781,6 +810,7 @@
     this.lastRenderedKey = '';
     this.lastAircraftDisplay = '';
     this.lastAircraftBoardKey = '';
+    this.aircraftBoardPrimed = false;
     this.playedAnnouncementKeys = {};
     this.rotateTimer = null;
     this.aircraftPollTimer = null;
@@ -1127,19 +1157,27 @@
     if (this.aircraftBody) this.aircraftBody.hidden = false;
     this.syncAircraftDataRows(rows.length);
 
-    var options = { urgent: false, force: force };
+    var options = {
+      urgent: false,
+      force: force,
+      instant: !this.aircraftBoardPrimed || force
+    };
     var self = this;
 
     return Promise.all(this.aircraftDataRows.map(function (rowObj, idx) {
       var item = rows[idx];
-      var rowDelay = idx * randomBetween(20, 40);
+      var rowDelay = options.instant ? 0 : idx * randomBetween(20, 40);
+      var statusText = item.status || 'AWAITING ADS-B';
+      var typeText = item.type || '--';
       rowObj.icon.setCode(item.icon_code || 'unknown');
       return Promise.all([
         rowObj.aircraft.setText(item.aircraft_display || item.aircraft || '', options, self.audio, rowDelay),
-        rowObj.type.setText(item.type && item.type !== '--' ? item.type : ''),
-        rowObj.status.setText(item.status || '')
+        rowObj.type.setText(typeText),
+        rowObj.status.setText(statusText)
       ]);
-    }));
+    })).then(function () {
+      self.aircraftBoardPrimed = true;
+    });
   };
 
   FlipBoard.prototype.fetchAndRenderAircraftBoard = function (force) {
