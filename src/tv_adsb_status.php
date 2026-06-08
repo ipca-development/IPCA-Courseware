@@ -67,15 +67,15 @@ function tv_adsb_default_home_airport(): string
 function tv_adsb_airports(): array
 {
     return array(
-        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156),
-        'KBLH' => array('name' => 'Blythe', 'lat' => 33.619167, 'lon' => -114.716889),
-        'KCRQ' => array('name' => 'Carlsbad', 'lat' => 33.128333, 'lon' => -117.280000),
-        'KMYF' => array('name' => 'Montgomery Field', 'lat' => 32.815833, 'lon' => -117.139444),
-        'KSAN' => array('name' => 'San Diego', 'lat' => 32.733556, 'lon' => -117.189667),
-        'KPSP' => array('name' => 'Palm Springs', 'lat' => 33.829667, 'lon' => -116.506667),
-        'KONT' => array('name' => 'Ontario', 'lat' => 34.056000, 'lon' => -117.601194),
-        'KLAX' => array('name' => 'Los Angeles', 'lat' => 33.942500, 'lon' => -118.408056),
-        'EBAW' => array('name' => 'Antwerp', 'lat' => 51.189444, 'lon' => 4.460278),
+        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156, 'elev_ft' => 115),
+        'KBLH' => array('name' => 'Blythe', 'lat' => 33.619167, 'lon' => -114.716889, 'elev_ft' => 399),
+        'KCRQ' => array('name' => 'Carlsbad', 'lat' => 33.128333, 'lon' => -117.280000, 'elev_ft' => 329),
+        'KMYF' => array('name' => 'Montgomery Field', 'lat' => 32.815833, 'lon' => -117.139444, 'elev_ft' => 427),
+        'KSAN' => array('name' => 'San Diego', 'lat' => 32.733556, 'lon' => -117.189667, 'elev_ft' => 17),
+        'KPSP' => array('name' => 'Palm Springs', 'lat' => 33.829667, 'lon' => -116.506667, 'elev_ft' => 477),
+        'KONT' => array('name' => 'Ontario', 'lat' => 34.056000, 'lon' => -117.601194, 'elev_ft' => 944),
+        'KLAX' => array('name' => 'Los Angeles', 'lat' => 33.942500, 'lon' => -118.408056, 'elev_ft' => 125),
+        'EBAW' => array('name' => 'Antwerp', 'lat' => 51.189444, 'lon' => 4.460278, 'elev_ft' => 39),
     );
 }
 
@@ -327,6 +327,9 @@ function tv_adsb_nearest_airport(float $lat, float $lon, float $maxNm = 5.0): ?a
     return $best;
 }
 
+require_once __DIR__ . '/tv_adsb_operations.php';
+require_once __DIR__ . '/tv_adsb_announcements.php';
+
 function tv_adsb_resolve_track(array $input): array
 {
     $hex = tv_adsb_normalize_hex((string)($input['hex'] ?? ($input['aircraft_hex'] ?? ($input['body'] ?? ''))));
@@ -340,6 +343,7 @@ function tv_adsb_resolve_track(array $input): array
     return array(
         'hex' => $hex,
         'label' => $label,
+        'type' => tv_adsb_normalize_type((string)($input['type'] ?? ($input['aircraft_type'] ?? ''))),
         'home_airport' => $homeAirport,
     );
 }
@@ -348,132 +352,11 @@ function tv_adsb_format_status(
     array $track,
     ?array $aircraft,
     array $gate,
-    string $homeAirport
+    string $homeAirport,
+    array &$cache = array()
 ): array {
-    $label = tv_adsb_normalize_label((string)($track['label'] ?? ''));
-    if ($label === '') {
-        $label = strtoupper((string)($track['hex'] ?? 'AIRCRAFT'));
-    }
-
-    $homeAirport = tv_adsb_normalize_home_airport($homeAirport);
-    $gateLabel = trim((string)($gate['label'] ?? 'SPC Gate'));
-    $reference = tv_adsb_airports()[$homeAirport] ?? tv_adsb_airports()['KTRM'];
-
-    if ($aircraft === null) {
-        return array(
-            'hex' => (string)($track['hex'] ?? ''),
-            'label' => $label,
-            'home_airport' => $homeAirport,
-            'status_code' => 'off_radar',
-            'status_label' => 'Off Radar',
-            'display' => $label . ' – Off Radar',
-            'live' => false,
-        );
-    }
-
-    $position = tv_adsb_position($aircraft);
-    $hex = tv_adsb_normalize_hex((string)($aircraft['hex'] ?? ($track['hex'] ?? '')));
-    $gs = isset($aircraft['gs']) && is_numeric($aircraft['gs']) ? round((float)$aircraft['gs'], 0) : null;
-    $altFt = tv_adsb_altitude_ft($aircraft);
-    $seen = isset($aircraft['seen']) && is_numeric($aircraft['seen']) ? (float)$aircraft['seen'] : null;
-    $live = $seen === null || $seen <= 90.0;
-
-    if ($position === null) {
-        return array(
-            'hex' => $hex,
-            'label' => $label,
-            'home_airport' => $homeAirport,
-            'status_code' => 'position_unknown',
-            'status_label' => 'Position Unknown',
-            'display' => $label . ' – Position Unknown',
-            'live' => $live,
-            'ground_speed_kt' => $gs,
-            'altitude_ft' => $altFt,
-        );
-    }
-
-    $lat = $position['lat'];
-    $lon = $position['lon'];
-    $gateDist = tv_adsb_haversine_nm($lat, $lon, (float)$gate['lat'], (float)$gate['lon']);
-    $homeDist = tv_adsb_haversine_nm($lat, $lon, (float)$reference['lat'], (float)$reference['lon']);
-    $nearest = tv_adsb_nearest_airport($lat, $lon, 6.0);
-    $onGround = tv_adsb_is_on_ground($aircraft);
-    $taxiing = tv_adsb_is_taxiing($aircraft);
-
-    if ($onGround && $gateDist <= (float)($gate['radius_nm'] ?? 0.18)) {
-        return array(
-            'hex' => $hex,
-            'label' => $label,
-            'home_airport' => $homeAirport,
-            'status_code' => 'at_gate',
-            'status_label' => 'At Gate',
-            'display' => $label . ' – At the ' . $gateLabel,
-            'live' => $live,
-            'ground_speed_kt' => $gs,
-            'altitude_ft' => $altFt,
-            'distance_nm' => round($gateDist, 1),
-            'nearest_airport' => $nearest,
-        );
-    }
-
-    if ($taxiing && $homeDist <= 3.0) {
-        return array(
-            'hex' => $hex,
-            'label' => $label,
-            'home_airport' => $homeAirport,
-            'status_code' => 'taxiing',
-            'status_label' => 'Taxiing',
-            'display' => $label . ' – Taxiing to RWY',
-            'live' => $live,
-            'ground_speed_kt' => $gs,
-            'altitude_ft' => $altFt,
-            'distance_nm' => round($homeDist, 1),
-            'nearest_airport' => $nearest,
-        );
-    }
-
-    if ($onGround && $nearest !== null) {
-        $landedLabel = $label . ' – Landed in ' . $nearest['name'] . ' (' . $nearest['icao'] . ')';
-        if ($nearest['icao'] === $homeAirport) {
-            $landedLabel = $label . ' – On Ground at ' . $homeAirport;
-        }
-
-        return array(
-            'hex' => $hex,
-            'label' => $label,
-            'home_airport' => $homeAirport,
-            'status_code' => 'on_ground',
-            'status_label' => 'On Ground',
-            'display' => $landedLabel,
-            'live' => $live,
-            'ground_speed_kt' => $gs,
-            'altitude_ft' => $altFt,
-            'distance_nm' => $nearest['distance_nm'],
-            'nearest_airport' => $nearest,
-        );
-    }
-
-    $refLat = (float)$reference['lat'];
-    $refLon = (float)$reference['lon'];
-    $distanceNm = tv_adsb_haversine_nm($lat, $lon, $refLat, $refLon);
-    $bearing = tv_adsb_bearing($refLat, $refLon, $lat, $lon);
-    $direction = tv_adsb_cardinal($bearing);
-
-    return array(
-        'hex' => $hex,
-        'label' => $label,
-        'home_airport' => $homeAirport,
-        'status_code' => 'in_flight',
-        'status_label' => 'In Flight',
-        'display' => $label . ' – In Flight (' . number_format($distanceNm, 1) . ' NM, ' . $direction . ')',
-        'live' => $live,
-        'ground_speed_kt' => $gs,
-        'altitude_ft' => $altFt,
-        'distance_nm' => round($distanceNm, 1),
-        'bearing' => round($bearing, 0),
-        'direction' => $direction,
-        'nearest_airport' => $nearest,
-    );
+    $track['type'] = tv_adsb_normalize_type((string)($track['type'] ?? ''));
+    return tv_adsb_classify_operations($track, $aircraft, $gate, $homeAirport, $cache);
 }
 
 function tv_adsb_build_status(array $trackInput, array $options = array()): array
@@ -535,10 +418,17 @@ function tv_adsb_build_status(array $trackInput, array $options = array()): arra
         return $stale;
     }
 
-    $status = tv_adsb_format_status($track, $aircraft, $gate, $homeAirport);
+    tv_adsb_record_history($cache, $aircraft, $gate, $homeAirport);
+    $status = tv_adsb_format_status($track, $aircraft, $gate, $homeAirport, $cache);
     $status['source'] = $source;
     $status['server_time'] = gmdate('c');
     $status['stale'] = false;
+
+    $announceEnabled = (bool)($options['announce_audio_enabled'] ?? false);
+    $announcement = tv_adsb_maybe_announcement($status, $cache, $gate, $announceEnabled);
+    if ($announcement !== null) {
+        $status['announcement'] = $announcement;
+    }
 
     if ($aircraft !== null && !empty($aircraft['hex'])) {
         $cache['hex'] = tv_adsb_normalize_hex((string)$aircraft['hex']);

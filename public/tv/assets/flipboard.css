@@ -113,6 +113,17 @@ body.fb-kiosk{
 
 .fb-schedule-board[hidden]{display:none !important}
 
+.fb-aircraft-board{
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  gap:6px;
+  width:100%;
+  max-width:100%;
+  padding-top:8px;
+}
+.fb-aircraft-board[hidden]{display:none !important}
+
 .fb-line{
   display:flex;
   justify-content:center;
@@ -291,6 +302,24 @@ body.fb-kiosk{
 .fb-schedule-row .fb-tile{
   width:clamp(18px,2.2vw,38px);
   --tile-h:clamp(30px,3.4vw,56px);
+  height:var(--tile-h);
+}
+
+.fb-aircraft-row{
+  display:grid;
+  grid-template-columns:minmax(0,1.05fr) minmax(0,.72fr) minmax(0,1.45fr);
+  gap:10px;
+  align-items:center;
+  width:100%;
+  max-width:100%;
+}
+.fb-aircraft-row.is-header .fb-line .fb-tile{
+  color:rgba(255,255,255,.72);
+}
+.fb-aircraft-row .fb-line{justify-content:flex-start;min-height:clamp(30px,3.2vw,52px)}
+.fb-aircraft-row .fb-tile{
+  width:clamp(16px,1.9vw,34px);
+  --tile-h:clamp(28px,3.1vw,50px);
   height:var(--tile-h);
 }
 

@@ -63,6 +63,11 @@ function tv_pa_instructions(string $messageType = 'standard'): string
         return $base . ' This is an urgent operational override. Increase urgency slightly while staying controlled, intelligible, and professional.';
     }
 
+    if ($messageType === 'aircraft') {
+        return $base . ' This is a live aircraft movement call for flight school operations. '
+            . 'Speak the registration clearly, then the movement status. Keep it brief and operational.';
+    }
+
     return $base;
 }
 
@@ -89,11 +94,20 @@ function tv_pa_cache_dir(): string
 
 function tv_pa_cache_file(int $messageId, string $speech, string $voice, string $messageType): string
 {
+    return tv_pa_cache_dir() . '/msg_' . $messageId . '_' . tv_pa_cache_hash($speech, $voice, $messageType) . '.mp3';
+}
+
+function tv_pa_cache_hash(string $speech, string $voice, string $messageType): string
+{
     $model = tv_pa_tts_model();
     $instructions = tv_pa_instructions($messageType);
     $speed = (string)tv_pa_speed();
-    $sha = sha1($speech . '|' . $voice . '|' . $model . '|' . $instructions . '|' . $speed);
-    return tv_pa_cache_dir() . '/msg_' . $messageId . '_' . $sha . '.mp3';
+    return sha1($speech . '|' . $voice . '|' . $model . '|' . $instructions . '|' . $speed);
+}
+
+function tv_pa_event_cache_file(string $speech, string $voice, string $messageType = 'aircraft'): string
+{
+    return tv_pa_cache_dir() . '/evt_' . tv_pa_cache_hash($speech, $voice, $messageType) . '.mp3';
 }
 
 function tv_pa_synthesize_mp3(string $speech, string $voice, string $messageType = 'standard'): string

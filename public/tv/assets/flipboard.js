@@ -3,6 +3,10 @@
 
   var ROW_COLS = 24;
   var ROW_COUNT = 4;
+  var AIRCRAFT_COLS = 10;
+  var AIRCRAFT_TYPE_COLS = 8;
+  var AIRCRAFT_STATUS_COLS = 14;
+  var AIRCRAFT_BOARD_ROWS = 8;
   var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()';
 
   var DEFAULT_MESSAGES = [
@@ -319,7 +323,8 @@
   BoardAudio.prototype.playMp3 = function (url) {
     var self = this;
     if (!url) return Promise.resolve(false);
-    if (url.indexOf('/tv/api/announcement.php') === 0) {
+    if (url.indexOf('/tv/api/announcement.php') === 0
+      || url.indexOf('/tv/api/aircraft_announcement.php') === 0) {
       return this.playOpenAiMp3(url);
     }
 
@@ -378,6 +383,29 @@
       .then(function () {
         var url = self.announcementUrl(message);
         if (!url) return;
+        return self.playMp3(url);
+      });
+  };
+
+  BoardAudio.prototype.aircraftEventUrl = function (event) {
+    var speech = String((event && event.speech) || '').trim();
+    if (!speech) return '';
+    var params = new URLSearchParams();
+    params.set('speech', speech);
+    if (event.voice) params.set('voice', String(event.voice));
+    return '/tv/api/aircraft_announcement.php?' + params.toString();
+  };
+
+  BoardAudio.prototype.playAircraftEvent = function (event) {
+    var self = this;
+    if (!this.armed) return Promise.resolve();
+    var url = this.aircraftEventUrl(event);
+    if (!url) return Promise.resolve();
+    return this.chime()
+      .then(function () {
+        return new Promise(function (resolve) { window.setTimeout(resolve, 650); });
+      })
+      .then(function () {
         return self.playMp3(url);
       });
   };
@@ -540,6 +568,7 @@
     this.root = root;
     this.messageBoard = root.querySelector('#fbMessageBoard');
     this.scheduleBoard = root.querySelector('#fbScheduleBoard');
+    this.aircraftBoard = root.querySelector('#fbAircraftBoard');
     this.statusLabel = root.querySelector('#fbStatusLabel');
     this.statusLight = root.querySelector('#fbStatusLight');
     this.clock = root.querySelector('#fbClock');
@@ -548,6 +577,7 @@
     this.mode = root.getAttribute('data-initial-mode') || 'standard';
     this.apiUrl = root.getAttribute('data-api-url') || '/tv/api/messages.php';
     this.aircraftApiUrl = root.getAttribute('data-aircraft-api-url') || '/tv/api/aircraft_status.php';
+    this.aircraftBoardApiUrl = root.getAttribute('data-aircraft-board-api-url') || '/tv/api/aircraft_board.php';
     this.pollMs = clamp(parseInt(root.getAttribute('data-poll-ms') || '7000', 10), 5000, 10000);
     this.aircraftPollMs = clamp(parseInt(root.getAttribute('data-aircraft-poll-ms') || '15000', 10), 10000, 60000);
     this.gateLabel = root.getAttribute('data-gate-label') || 'SPC Gate';
@@ -560,6 +590,8 @@
     this.lines = [];
     this.scheduleRows = [];
     this.scheduleBuilt = false;
+    this.aircraftBoardRows = [];
+    this.aircraftBoardBuilt = false;
     this.messages = DEFAULT_MESSAGES.slice();
     this.messageHash = '';
     this.activeIndex = 0;
@@ -567,6 +599,8 @@
     this.pendingRender = false;
     this.lastRenderedKey = '';
     this.lastAircraftDisplay = '';
+    this.lastAircraftBoardKey = '';
+    this.playedAnnouncementKeys = {};
     this.rotateTimer = null;
     this.aircraftPollTimer = null;
   }
@@ -680,6 +714,14 @@
     return String((message && message.message_type) || '').toLowerCase() === 'aircraft';
   };
 
+  FlipBoard.prototype.isAircraftBoardMode = function () {
+    var messages = this.messages || [];
+    if (!messages.length) return false;
+    return messages.every(function (message) {
+      return String((message && message.message_type) || '').toLowerCase() === 'aircraft';
+    });
+  };
+
   FlipBoard.prototype.aircraftTrack = function (message) {
     var hex = String((message && message.aircraft_hex) || (message && message.body) || '').trim().toLowerCase();
     hex = hex.replace(/[^a-f0-9]/g, '');
@@ -693,8 +735,32 @@
     return {
       hex: hex,
       label: label,
+      type: normalizeText(String((message && message.aircraft_type) || '')).replace(/[^A-Z0-9]/g, ''),
       home_airport: homeAirport
     };
+  };
+
+  FlipBoard.prototype.ensureAircraftBoard = function () {
+    if (this.aircraftBoardBuilt || !this.aircraftBoard) return;
+    this.aircraftBoardBuilt = true;
+    var self = this;
+    for (var i = 0; i < AIRCRAFT_BOARD_ROWS; i += 1) {
+      var row = document.createElement('div');
+      row.className = 'fb-aircraft-row' + (i === 0 ? ' is-header' : '');
+      var aircraftLine = new FlipLine(AIRCRAFT_COLS);
+      var typeLine = new FlipLine(AIRCRAFT_TYPE_COLS);
+      var statusLine = new FlipLine(AIRCRAFT_STATUS_COLS);
+      row.appendChild(aircraftLine.el);
+      row.appendChild(typeLine.el);
+      row.appendChild(statusLine.el);
+      self.aircraftBoardRows.push({
+        aircraft: aircraftLine,
+        type: typeLine,
+        status: statusLine,
+        isHeader: i === 0
+      });
+      self.aircraftBoard.appendChild(row);
+    }
   };
 
   FlipBoard.prototype.ensureAircraftPoll = function () {
@@ -703,28 +769,57 @@
       return self.isAircraftMessage(message);
     });
 
-    if (!hasAircraft) {
-      if (this.aircraftPollTimer) {
-        window.clearInterval(this.aircraftPollTimer);
-        this.aircraftPollTimer = null;
-      }
-      return;
+    if (this.aircraftPollTimer) {
+      window.clearInterval(this.aircraftPollTimer);
+      this.aircraftPollTimer = null;
     }
 
-    if (this.aircraftPollTimer) return;
+    if (!hasAircraft) return;
 
     this.aircraftPollTimer = window.setInterval(function () {
+      if (self.rendering) return;
+      if (self.isAircraftBoardMode()) {
+        self.fetchAndRenderAircraftBoard(false);
+        return;
+      }
       var current = self.messages[self.activeIndex];
-      if (!self.isAircraftMessage(current) || self.rendering) return;
+      if (!self.isAircraftMessage(current)) return;
       self.renderCurrent(true);
     }, this.aircraftPollMs);
   };
 
-  FlipBoard.prototype.fetchAircraftStatus = function (track) {
+  FlipBoard.prototype.playAircraftAnnouncements = function (announcements) {
+    var self = this;
+    if (!this.autoAudio || !announcements || !announcements.length) {
+      return Promise.resolve();
+    }
+
+    var queue = announcements.filter(function (item) {
+      var speech = String((item && item.speech) || '').trim();
+      if (!speech) return false;
+      var key = [item.id || item.label || '', item.status_code || '', speech].join('|');
+      if (self.playedAnnouncementKeys[key]) return false;
+      self.playedAnnouncementKeys[key] = true;
+      return true;
+    });
+
+    return queue.reduce(function (chain, item) {
+      return chain.then(function () {
+        return self.audio.playAircraftEvent(item);
+      });
+    }, Promise.resolve());
+  };
+
+  FlipBoard.prototype.fetchAircraftStatus = function (track, message) {
     var params = new URLSearchParams();
     if (track.hex) params.set('hex', track.hex);
     if (track.label) params.set('label', track.label);
+    if (track.type) params.set('type', track.type);
     if (track.home_airport) params.set('home_airport', track.home_airport);
+    if (message && Number(message.announce_audio_enabled) === 1 && this.autoAudio) {
+      params.set('announce_audio_enabled', '1');
+      if (message.voice) params.set('voice', String(message.voice));
+    }
     params.set('gate_lat', String(this.gateLat));
     params.set('gate_lon', String(this.gateLon));
     params.set('gate_radius_nm', String(this.gateRadiusNm));
@@ -739,9 +834,83 @@
     });
   };
 
+  FlipBoard.prototype.fetchAircraftBoard = function () {
+    var params = new URLSearchParams();
+    params.set('screen_key', this.screenKey);
+    params.set('gate_lat', String(this.gateLat));
+    params.set('gate_lon', String(this.gateLon));
+    params.set('gate_radius_nm', String(this.gateRadiusNm));
+    params.set('gate_label', this.gateLabel);
+    params.set('home_airport', this.homeAirport);
+
+    return fetch(this.aircraftBoardApiUrl + '?' + params.toString(), {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    }).then(function (res) {
+      if (!res.ok) throw new Error('Aircraft board unavailable');
+      return res.json();
+    });
+  };
+
+  FlipBoard.prototype.renderAircraftBoard = function (payload, force) {
+    this.ensureAircraftBoard();
+    this.messageBoard.hidden = true;
+    this.scheduleBoard.hidden = true;
+    if (this.aircraftBoard) this.aircraftBoard.hidden = false;
+
+    var rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    var boardKey = JSON.stringify(rows.map(function (row) {
+      return [row.aircraft_display, row.type, row.status].join('|');
+    }));
+    if (!force && boardKey === this.lastAircraftBoardKey) {
+      return Promise.resolve();
+    }
+    this.lastAircraftBoardKey = boardKey;
+
+    var options = { urgent: false, force: force };
+    var self = this;
+
+    return Promise.all(this.aircraftBoardRows.map(function (row, idx) {
+      var item;
+      if (row.isHeader) {
+        item = { aircraft: 'AIRCRAFT', type: 'TYPE', status: 'STATUS' };
+      } else {
+        item = rows[idx - 1] || { aircraft_display: '', type: '', status: '' };
+      }
+      var rowDelay = idx * randomBetween(50, 100);
+      return Promise.all([
+        row.aircraft.setText(row.isHeader ? item.aircraft : (item.aircraft_display || item.aircraft || ''), options, self.audio, rowDelay),
+        row.type.setText(item.type || '', options, self.audio, rowDelay + 30),
+        row.status.setText(item.status || '', options, self.audio, rowDelay + 60)
+      ]);
+    }));
+  };
+
+  FlipBoard.prototype.fetchAndRenderAircraftBoard = function (force) {
+    var self = this;
+    this.statusLabel.textContent = 'AIRCRAFT OPS';
+    this.root.classList.toggle('is-urgent', false);
+    this.statusLight.classList.toggle('is-urgent', false);
+
+    return this.fetchAircraftBoard()
+      .then(function (payload) {
+        if (!payload || !payload.ok) throw new Error('board unavailable');
+        self.statusLabel.textContent = payload.live ? 'AIRCRAFT OPS' : 'AIRCRAFT STALE';
+        return Promise.all([
+          self.renderAircraftBoard(payload, force),
+          self.playAircraftAnnouncements(payload.announcements || [])
+        ]);
+      })
+      .catch(function () {
+        self.statusLabel.textContent = 'AIRCRAFT OPS';
+        return self.renderAircraftBoard({ rows: [] }, force);
+      });
+  };
+
   FlipBoard.prototype.renderAircraft = function (message, statusPayload, urgent) {
     this.messageBoard.hidden = false;
     this.scheduleBoard.hidden = true;
+    if (this.aircraftBoard) this.aircraftBoard.hidden = true;
 
     var track = this.aircraftTrack(message);
     var display = String((statusPayload && statusPayload.display) || '').trim();
@@ -770,16 +939,20 @@
       }, urgent);
     }
 
-    return this.fetchAircraftStatus(track)
+    return this.fetchAircraftStatus(track, message)
       .then(function (payload) {
         if (!payload || !payload.ok) throw new Error('status unavailable');
         self.statusLabel.textContent = payload.live ? 'AIRCRAFT TRACKING' : 'AIRCRAFT STALE';
         self.root.classList.toggle('is-urgent', false);
         self.statusLight.classList.toggle('is-urgent', false);
+        var announcements = payload.announcement ? [payload.announcement] : [];
         if (String(payload.display || '') === self.lastAircraftDisplay) {
-          return Promise.resolve();
+          return self.playAircraftAnnouncements(announcements);
         }
-        return self.renderAircraft(message, payload, false);
+        return Promise.all([
+          self.renderAircraft(message, payload, false),
+          self.playAircraftAnnouncements(announcements)
+        ]);
       })
       .catch(function () {
         self.statusLabel.textContent = 'AIRCRAFT TRACKING';
@@ -807,6 +980,7 @@
         if (nextHash === self.messageHash) return;
         self.messageHash = nextHash;
         self.messages = incoming;
+        self.lastAircraftBoardKey = '';
         self.prefetchAnnouncements(incoming);
         self.ensureAircraftPoll();
         self.activeIndex = 0;
@@ -827,11 +1001,15 @@
       return;
     }
     var message = this.messages[this.activeIndex] || DEFAULT_MESSAGES[0];
-    var aircraft = this.isAircraftMessage(message);
-    var key = aircraft
-      ? [message.id, 'aircraft', this.lastAircraftDisplay, message.aircraft_hex, message.aircraft_label, message.aircraft_home_airport].join('|')
-      : [message.id, message.message_type, message.title, message.body, message.priority].join('|');
+    var boardMode = this.isAircraftBoardMode();
+    var aircraft = boardMode || this.isAircraftMessage(message);
+    var key = boardMode
+      ? ['aircraft-board', this.screenKey, this.lastAircraftBoardKey, this.messages.length].join('|')
+      : aircraft
+        ? [message.id, 'aircraft', this.lastAircraftDisplay, message.aircraft_hex, message.aircraft_label, message.aircraft_home_airport].join('|')
+        : [message.id, message.message_type, message.title, message.body, message.priority].join('|');
     if (!force && !aircraft && key === this.lastRenderedKey) return;
+    if (!force && boardMode && key === this.lastRenderedKey) return;
 
     this.rendering = true;
     this.lastRenderedKey = key;
@@ -842,14 +1020,14 @@
     var schedule = String(message.message_type || '').toLowerCase() === 'schedule'
       || this.mode === 'schedule';
 
-    if (!aircraft) {
+    if (!aircraft && !boardMode) {
       this.root.classList.toggle('is-urgent', urgent);
       this.statusLight.classList.toggle('is-urgent', urgent);
       this.statusLabel.textContent = urgent ? 'URGENT OVERRIDE' : (schedule ? 'SCHEDULE MODE' : 'STANDARD OPS');
     }
 
     var announcePromise = Promise.resolve();
-    if (!aircraft && message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
+    if (!aircraft && !boardMode && message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
       announcePromise = new Promise(function (resolve) {
         window.setTimeout(resolve, urgent ? 200 : 500);
       }).then(function () {
@@ -859,6 +1037,7 @@
 
     announcePromise
       .then(function () {
+        if (boardMode) return self.fetchAndRenderAircraftBoard(force);
         if (aircraft) return self.fetchAndRenderAircraft(message, false);
         if (schedule) return self.renderSchedule(message, urgent);
         return self.renderMessage(message, urgent);
@@ -871,6 +1050,7 @@
           self.renderCurrent(true);
           return;
         }
+        if (boardMode) return;
         var duration = aircraft
           ? self.aircraftPollMs
           : clamp(parseInt(message.display_duration_seconds || 12, 10), 5, 120) * 1000;
@@ -886,6 +1066,7 @@
   FlipBoard.prototype.renderMessage = function (message, urgent) {
     this.messageBoard.hidden = false;
     this.scheduleBoard.hidden = true;
+    if (this.aircraftBoard) this.aircraftBoard.hidden = true;
 
     var combined = normalizeText((message.title || '') + ' ' + (message.body || '').replace(/\r?\n/g, ' '));
     var rows = wrapWordsToRows(combined, ROW_COLS, ROW_COUNT);
@@ -902,6 +1083,7 @@
     this.ensureScheduleBoard();
     this.messageBoard.hidden = true;
     this.scheduleBoard.hidden = false;
+    if (this.aircraftBoard) this.aircraftBoard.hidden = true;
     var rows = this.parseScheduleRows(message);
     var options = { urgent: urgent, force: urgent };
     var self = this;

@@ -19,6 +19,16 @@ function tv_messages_aircraft_columns_ready(PDO $pdo): bool
     }
 }
 
+function tv_messages_aircraft_type_ready(PDO $pdo): bool
+{
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_type'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 try {
     $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
     if ($tableCheck === false || $tableCheck->fetchColumn() === false) {
@@ -34,9 +44,12 @@ try {
     }
 
     $aircraftColumnsReady = tv_messages_aircraft_columns_ready($pdo);
+    $aircraftTypeReady = tv_messages_aircraft_type_ready($pdo);
     $aircraftSelect = $aircraftColumnsReady
-        ? "aircraft_hex, aircraft_label, aircraft_home_airport,"
-        : "";
+        ? 'aircraft_hex, aircraft_label,'
+        . ($aircraftTypeReady ? ' aircraft_type,' : '')
+        . ' aircraft_home_airport,'
+        : '';
 
     $stmt = $pdo->prepare("
         SELECT
@@ -79,7 +92,7 @@ try {
         $rows = array_slice($urgent, 0, 3);
     }
 
-    $messages = array_map(static function (array $row) use ($aircraftColumnsReady): array {
+    $messages = array_map(static function (array $row) use ($aircraftColumnsReady, $aircraftTypeReady): array {
         $message = array(
             'id' => (int)$row['id'],
             'screen_key' => (string)$row['screen_key'],
@@ -101,10 +114,14 @@ try {
         if ($aircraftColumnsReady) {
             $message['aircraft_hex'] = strtolower(trim((string)($row['aircraft_hex'] ?? '')));
             $message['aircraft_label'] = (string)($row['aircraft_label'] ?? '');
+            $message['aircraft_type'] = $aircraftTypeReady
+                ? strtoupper(trim((string)($row['aircraft_type'] ?? '')))
+                : '';
             $message['aircraft_home_airport'] = strtoupper(trim((string)($row['aircraft_home_airport'] ?? '')));
         } else {
             $message['aircraft_hex'] = strtolower(trim((string)($row['body'] ?? '')));
             $message['aircraft_label'] = (string)($row['title'] ?? '');
+            $message['aircraft_type'] = '';
             $message['aircraft_home_airport'] = '';
         }
 

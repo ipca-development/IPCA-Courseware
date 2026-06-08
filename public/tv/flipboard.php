@@ -38,6 +38,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-initial-mode="<?= h($mode) ?>"
     data-api-url="/tv/api/messages.php"
     data-aircraft-api-url="/tv/api/aircraft_status.php"
+    data-aircraft-board-api-url="/tv/api/aircraft_board.php"
     data-poll-ms="<?= h((string)max(5000, min(10000, (int)($kioskConfig['poll_ms'] ?? 7000)))) ?>"
     data-aircraft-poll-ms="<?= h((string)max(10000, min(60000, (int)($kioskConfig['aircraft_poll_ms'] ?? 15000)))) ?>"
     data-gate-label="<?= h((string)($kioskConfig['gate_label'] ?? 'SPC Gate')) ?>"
@@ -72,6 +73,7 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
         <div class="fb-perspective">
           <div class="fb-message-board" id="fbMessageBoard"></div>
           <div class="fb-schedule-board" id="fbScheduleBoard" hidden></div>
+          <div class="fb-aircraft-board" id="fbAircraftBoard" hidden></div>
         </div>
       </section>
 

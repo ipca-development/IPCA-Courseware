@@ -76,6 +76,16 @@ function tv_aircraft_columns_ready(PDO $pdo): bool
     }
 }
 
+function tv_aircraft_type_column_ready(PDO $pdo): bool
+{
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_type'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 function tv_svg(string $name): string
 {
     switch ($name) {
@@ -132,6 +142,7 @@ $defaults = array(
     'audio_url' => '',
     'aircraft_hex' => '',
     'aircraft_label' => '',
+    'aircraft_type' => '',
     'aircraft_home_airport' => 'KTRM',
     'status' => 'draft',
 );
@@ -143,6 +154,7 @@ $error = '';
 $tableReady = tv_messages_table_ready($pdo);
 $voiceColumnReady = $tableReady && tv_voice_column_ready($pdo);
 $aircraftColumnsReady = $tableReady && tv_aircraft_columns_ready($pdo);
+$aircraftTypeColumnReady = $tableReady && tv_aircraft_type_column_ready($pdo);
 $paVoices = tv_pa_voices();
 $airportOptions = tv_adsb_airports();
 $openModal = '';
@@ -212,6 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $audioUrl = trim((string)($_POST['audio_url'] ?? ''));
             $aircraftHex = tv_adsb_normalize_hex((string)($_POST['aircraft_hex'] ?? ''));
             $aircraftLabel = tv_adsb_normalize_label((string)($_POST['aircraft_label'] ?? ''));
+            $aircraftType = tv_adsb_normalize_type((string)($_POST['aircraft_type'] ?? ''));
             $aircraftHomeAirport = tv_adsb_normalize_home_airport((string)($_POST['aircraft_home_airport'] ?? ''));
 
             if ($type === 'aircraft') {
@@ -228,7 +241,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($id > 0) {
-                if ($voiceColumnReady && $aircraftColumnsReady) {
+                if ($voiceColumnReady && $aircraftColumnsReady && $aircraftTypeColumnReady) {
+                    $stmt = $pdo->prepare("
+                        UPDATE tv_screen_messages
+                        SET screen_key = ?, message_type = ?, title = ?, body = ?, aircraft_hex = ?, aircraft_label = ?, aircraft_type = ?, aircraft_home_airport = ?, priority = ?,
+                            starts_at = ?, ends_at = ?, display_duration_seconds = ?,
+                            announce_audio_enabled = ?, voice_text = ?, voice = ?, audio_url = ?, status = ?
+                        WHERE id = ? LIMIT 1
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body,
+                        $aircraftHex !== '' ? $aircraftHex : null,
+                        $aircraftLabel !== '' ? $aircraftLabel : null,
+                        $aircraftType !== '' ? $aircraftType : null,
+                        $aircraftHomeAirport !== '' ? $aircraftHomeAirport : null,
+                        $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $voice, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $id,
+                    ]);
+                } elseif ($voiceColumnReady && $aircraftColumnsReady) {
                     $stmt = $pdo->prepare("
                         UPDATE tv_screen_messages
                         SET screen_key = ?, message_type = ?, title = ?, body = ?, aircraft_hex = ?, aircraft_label = ?, aircraft_home_airport = ?, priority = ?,
@@ -273,7 +304,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 }
             } else {
-                if ($voiceColumnReady && $aircraftColumnsReady) {
+                if ($voiceColumnReady && $aircraftColumnsReady && $aircraftTypeColumnReady) {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO tv_screen_messages (
+                            screen_key, message_type, title, body, aircraft_hex, aircraft_label, aircraft_type, aircraft_home_airport,
+                            priority, starts_at, ends_at, display_duration_seconds, announce_audio_enabled, voice_text, voice, audio_url,
+                            status, created_by
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ");
+                    $stmt->execute([
+                        $screenKey, $type, $title, $body,
+                        $aircraftHex !== '' ? $aircraftHex : null,
+                        $aircraftLabel !== '' ? $aircraftLabel : null,
+                        $aircraftType !== '' ? $aircraftType : null,
+                        $aircraftHomeAirport !== '' ? $aircraftHomeAirport : null,
+                        $priority, $startsAt, $endsAt, $duration,
+                        $announce, $voiceText !== '' ? $voiceText : null, $voice, $audioUrl !== '' ? $audioUrl : null,
+                        $status, $uid > 0 ? $uid : null,
+                    ]);
+                } elseif ($voiceColumnReady && $aircraftColumnsReady) {
                     $stmt = $pdo->prepare("
                         INSERT INTO tv_screen_messages (
                             screen_key, message_type, title, body, aircraft_hex, aircraft_label, aircraft_home_airport,
@@ -349,6 +398,7 @@ if ($error !== '' && isset($_POST['action']) && $_POST['action'] === 'save') {
     $form['voice'] = tv_pa_voice_or_default((string)($_POST['voice'] ?? ''));
     $form['aircraft_hex'] = tv_adsb_normalize_hex((string)($_POST['aircraft_hex'] ?? ''));
     $form['aircraft_label'] = tv_adsb_normalize_label((string)($_POST['aircraft_label'] ?? ''));
+    $form['aircraft_type'] = tv_adsb_normalize_type((string)($_POST['aircraft_type'] ?? ''));
     $form['aircraft_home_airport'] = tv_adsb_normalize_home_airport((string)($_POST['aircraft_home_airport'] ?? ''));
 }
 
@@ -476,7 +526,7 @@ cw_header('TV Flip Board');
     <div class="tv-alert err">Apply <code>scripts/sql/2026_05_30_tv_screen_pa_voice.sql</code> to enable OpenAI PA voice selection.</div>
   <?php endif; ?>
   <?php if ($tableReady): ?>
-    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code> and <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>.</div>
+    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code>, <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>, and <code>scripts/sql/2026_06_08_tv_screen_aircraft_type_col.sql</code>.</div>
   <?php endif; ?>
 
   <section class="card tv-list-head-card">
@@ -511,6 +561,7 @@ cw_header('TV Flip Board');
             'audio_url' => (string)($row['audio_url'] ?? ''),
             'aircraft_hex' => strtolower(trim((string)($row['aircraft_hex'] ?? $row['body'] ?? ''))),
             'aircraft_label' => (string)($row['aircraft_label'] ?? $row['title'] ?? ''),
+            'aircraft_type' => strtoupper(trim((string)($row['aircraft_type'] ?? ''))),
             'aircraft_home_airport' => strtoupper(trim((string)($row['aircraft_home_airport'] ?? 'KTRM'))),
             'status' => (string)$row['status'],
           )), ENT_QUOTES, 'UTF-8');
@@ -531,6 +582,9 @@ cw_header('TV Flip Board');
                 <?php if ((string)($row['message_type'] ?? '') === 'aircraft'): ?>
                 <div><div class="tv-meta-label">Hex</div><div class="tv-meta-value"><?= h(strtolower((string)($row['aircraft_hex'] ?? $row['body'] ?? ''))) ?></div></div>
                 <div><div class="tv-meta-label">Label</div><div class="tv-meta-value"><?= h((string)($row['aircraft_label'] ?? $row['title'] ?? '')) ?></div></div>
+                <?php if ((string)($row['aircraft_type'] ?? '') !== ''): ?>
+                <div><div class="tv-meta-label">Type</div><div class="tv-meta-value"><?= h(strtoupper((string)$row['aircraft_type'])) ?></div></div>
+                <?php endif; ?>
                 <div><div class="tv-meta-label">Home Base</div><div class="tv-meta-value"><?= h(strtoupper((string)($row['aircraft_home_airport'] ?? 'KTRM'))) ?></div></div>
                 <?php endif; ?>
               </div>
@@ -689,6 +743,11 @@ cw_header('TV Flip Board');
             <label class="tv-field-label" for="msg_aircraft_label">Preferred name</label>
             <input class="app-input" id="msg_aircraft_label" name="aircraft_label" value="<?= h((string)$form['aircraft_label']) ?>" maxlength="16" placeholder="N153PC">
           </div>
+          <div class="tv-field" id="msg_aircraft_type_field">
+            <label class="tv-field-label" for="msg_aircraft_type">Aircraft type</label>
+            <input class="app-input" id="msg_aircraft_type" name="aircraft_type" value="<?= h((string)$form['aircraft_type']) ?>" maxlength="24" placeholder="ALPHA">
+            <p class="tv-field-hint">Shown in the TYPE column (for example Alpha, C172SP).</p>
+          </div>
           <div class="tv-field span-2" id="msg_aircraft_home_field">
             <label class="tv-field-label" for="msg_aircraft_home_airport">Home base (ICAO)</label>
             <select class="app-select" id="msg_aircraft_home_airport" name="aircraft_home_airport">
@@ -696,7 +755,7 @@ cw_header('TV Flip Board');
                 <option value="<?= h($icao) ?>" <?= strtoupper((string)$form['aircraft_home_airport']) === $icao ? 'selected' : '' ?>><?= h($icao . ' — ' . $airport['name']) ?></option>
               <?php endforeach; ?>
             </select>
-            <p class="tv-field-hint" id="msg_aircraft_hint">Track by hex via RapidAPI ADS-B Exchange. The board shows the preferred name (for example N153PC) with live status relative to the selected home base.</p>
+            <p class="tv-field-hint" id="msg_aircraft_hint">Track by hex via RapidAPI ADS-B Exchange. Enable PA announcements below for automatic calls on takeoff, airborne, taxi-in, and landing events.</p>
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="msg_priority">Priority</label>
@@ -791,6 +850,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var bodyField = document.getElementById('msg_body_field');
     var hexField = document.getElementById('msg_aircraft_hex_field');
     var labelField = document.getElementById('msg_aircraft_label_field');
+    var typeField = document.getElementById('msg_aircraft_type_field');
     var homeField = document.getElementById('msg_aircraft_home_field');
     var titleInput = document.getElementById('msg_title');
     var bodyInput = document.getElementById('msg_body');
@@ -801,12 +861,18 @@ document.addEventListener('DOMContentLoaded', function () {
     if (bodyField) bodyField.style.display = isAircraft ? 'none' : '';
     if (hexField) hexField.style.display = isAircraft ? '' : 'none';
     if (labelField) labelField.style.display = isAircraft ? '' : 'none';
+    if (typeField) typeField.style.display = isAircraft ? '' : 'none';
     if (homeField) homeField.style.display = isAircraft ? '' : 'none';
 
     if (titleInput) titleInput.required = !isAircraft;
     if (bodyInput) bodyInput.required = !isAircraft;
     if (hexInput) hexInput.required = !!isAircraft;
     if (labelInput) labelInput.required = !!isAircraft;
+
+    var announceInput = document.getElementById('msg_announce_audio_enabled');
+    if (announceInput && isAircraft && document.getElementById('msg_id').value === '0') {
+      announceInput.checked = true;
+    }
   }
 
   document.getElementById('msg_message_type')?.addEventListener('change', syncAircraftFormHints);
@@ -852,6 +918,7 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById('msg_voice_text').value = data.voice_text || '';
       document.getElementById('msg_aircraft_hex').value = data.aircraft_hex || '';
       document.getElementById('msg_aircraft_label').value = data.aircraft_label || '';
+      document.getElementById('msg_aircraft_type').value = data.aircraft_type || '';
       document.getElementById('msg_aircraft_home_airport').value = data.aircraft_home_airport || 'KTRM';
       var voiceSelect = document.getElementById('msg_voice');
       if (voiceSelect) voiceSelect.value = data.voice || voiceSelect.value;
