@@ -821,6 +821,7 @@ final class ControlledPublishingBookRenderer
         }
         if ($textColor !== '') {
             $styles[] = 'color:' . $textColor . ' !important';
+            $styles[] = '-webkit-text-fill-color:' . $textColor . ' !important';
             $attrs['data-text-color'] = $textColor;
         }
 

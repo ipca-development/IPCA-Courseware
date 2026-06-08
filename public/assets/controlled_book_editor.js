@@ -593,7 +593,15 @@
       });
     });
 
-    canvasEl.addEventListener('pointerdown', function () {
+    canvasEl.addEventListener('pointerdown', function (e) {
+      var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
+        state.focusedTableCell = tableCell;
+        var tableBlock = tableCell.closest('.cpb-block');
+        if (tableBlock) {
+          state.lastStyleTarget = { block: tableBlock, el: tableCell, type: 'table-cell' };
+        }
+      }
       requestAnimationFrame(function () {
         saveSelectionRange();
         rememberStyleTarget();
@@ -1648,6 +1656,7 @@
     }
     if (opts.color) {
       cell.style.setProperty('color', opts.color, 'important');
+      cell.style.setProperty('-webkit-text-fill-color', opts.color, 'important');
       cell.setAttribute('data-text-color', opts.color);
     }
     if (opts.align) {
@@ -1666,15 +1675,53 @@
     });
   }
 
+  function resolveTableCellForStyle() {
+    if (state.lastStyleTarget && state.lastStyleTarget.type === 'table-cell' && isLiveStyleTarget(state.lastStyleTarget)) {
+      return state.lastStyleTarget;
+    }
+    var sel = window.getSelection();
+    if (sel && sel.anchorNode) {
+      var node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      if (node) {
+        var cell = node.closest('.cpb-table th, .cpb-table td');
+        if (cell && cell.isContentEditable && canvasEl.contains(cell)) {
+          var blockEl = cell.closest('.cpb-block');
+          if (blockEl) return { block: blockEl, el: cell, type: 'table-cell' };
+        }
+      }
+    }
+    if (state.focusedTableCell && state.focusedTableCell.isContentEditable && canvasEl.contains(state.focusedTableCell)) {
+      var block = state.focusedTableCell.closest('.cpb-block');
+      if (block) return { block: block, el: state.focusedTableCell, type: 'table-cell' };
+    }
+    return null;
+  }
+
+  function applyTableCellTextColor(cell, color) {
+    if (!cell || !color) return;
+    clearInlineTypographyInElement(cell);
+    cell.style.setProperty('color', color, 'important');
+    cell.style.setProperty('-webkit-text-fill-color', color, 'important');
+    cell.setAttribute('data-text-color', color);
+    var blockEl = cell.closest('.cpb-block');
+    if (blockEl) {
+      var textColorControl = blockEl.querySelector('[data-table-action="cell-text-color"]');
+      if (textColorControl) textColorControl.value = color;
+    }
+  }
+
   function applyColorToTableCell(cell, color) {
     if (!cell || !color) return;
-    cell.focus();
     restoreSelectionRange();
     if (hasTextSelectionInCanvas() && !selectionCoversElementText(cell)) {
-      if (applyInlineStyleToSelection({ color: color })) return;
+      cell.focus();
+      restoreSelectionRange();
+      if (applyInlineStyleToSelection({ color: color })) {
+        cell.setAttribute('data-text-color', color);
+        return;
+      }
     }
-    clearInlineTypographyInElement(cell);
-    applyStyleToTableCell(cell, { color: color });
+    applyTableCellTextColor(cell, color);
   }
 
   function applyFontToTableCell(cell, font) {
@@ -2367,14 +2414,20 @@
     var toolbarFocused = !!(toolbarEl && ae && toolbarEl.contains(ae));
     if (toolbarFocused) {
       restoreSelectionRange();
+      if (isLiveStyleTarget(state.lastStyleTarget)) {
+        return state.lastStyleTarget;
+      }
+      var tableTarget = resolveTableCellForStyle();
+      if (tableTarget) {
+        state.lastStyleTarget = tableTarget;
+        return tableTarget;
+      }
+      return null;
     }
     var live = getActiveStyleTargetFromEditor();
     if (live) {
       state.lastStyleTarget = live;
       return live;
-    }
-    if (toolbarFocused && isLiveStyleTarget(state.lastStyleTarget)) {
-      return state.lastStyleTarget;
     }
     return isLiveStyleTarget(state.lastStyleTarget) ? state.lastStyleTarget : null;
   }
@@ -3464,18 +3517,24 @@
   }
 
   if (textColorInput) {
+    textColorInput.addEventListener('mousedown', function () {
+      saveSelectionRange();
+      var tableTarget = resolveTableCellForStyle();
+      if (tableTarget) state.lastStyleTarget = tableTarget;
+    });
     textColorInput.addEventListener('focus', rememberStyleTarget);
     textColorInput.addEventListener('input', function () {
-      var target = getActiveStyleTarget();
       var color = textColorInput.value;
-      if (target && target.type === 'table-cell') {
+      var tableTarget = resolveTableCellForStyle();
+      if (tableTarget) {
         pushUndo();
-        applyColorToTableCell(target.el, color);
-        updateParagraphStyleSelectForElement(target.el);
-        scheduleSave(target.block);
-        flushSave(target.block);
+        applyTableCellTextColor(tableTarget.el, color);
+        updateParagraphStyleSelectForElement(tableTarget.el);
+        scheduleSave(tableTarget.block);
+        flushSave(tableTarget.block);
         return;
       }
+      var target = getActiveStyleTarget();
       if (target && (target.type === 'callout-title' || target.type === 'callout-text')) {
         pushUndo();
         applyRichTextStyle(target, { color: color }, function () {
