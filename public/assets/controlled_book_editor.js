@@ -409,7 +409,8 @@
   function updateAddSubsection(section) {
     if (!addSubBtn || !section) return;
     var key = section.section_key || '';
-    var isNestable = key === 'main_content' || key === 'annexes' || !!section.parent_section_id;
+    var isNestable = ['part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'].indexOf(key) >= 0
+      || !!section.parent_section_id;
     addSubBtn.style.display = state.editable && isNestable ? 'block' : 'none';
     addSubBtn.setAttribute('data-parent-id', String(section.id || state.sectionId));
   }
@@ -427,10 +428,16 @@
 
   function renderTreeNode(node, activeId, depth) {
     var li = document.createElement('li');
-    li.className = 'cpb-tree-node';
+    if (node.is_separator) {
+      li.className = 'cpb-tree-separator';
+      li.setAttribute('aria-hidden', 'true');
+      return li;
+    }
+
+    li.className = 'cpb-tree-node' + (node.is_group ? ' cpb-tree-node--group' : '');
 
     var hasChildren = node.children && node.children.length > 0;
-    var nodeId = String(node.id);
+    var nodeId = node.nav_id || String(node.id || '');
     if (state.expanded[nodeId] === undefined) {
       state.expanded[nodeId] = depth < 1 || hasChildren;
     }
@@ -458,19 +465,27 @@
     var link = document.createElement('span');
     link.className = 'cpb-tree-link'
       + (node.id === activeId ? ' is-active' : '')
-      + (node.is_generated ? ' is-generated' : '');
+      + (node.is_generated ? ' is-generated' : '')
+      + (node.is_group ? ' cpb-tree-link--group' : '');
     link.textContent = node.title;
     link.setAttribute('role', 'button');
     link.setAttribute('tabindex', '0');
-    link.addEventListener('click', function () {
-      loadSection(node.id);
-    });
-    link.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        link.click();
-      }
-    });
+    if (node.is_navigable !== false && node.id) {
+      link.addEventListener('click', function () {
+        loadSection(node.id);
+      });
+      link.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          link.click();
+        }
+      });
+    } else if (hasChildren) {
+      link.addEventListener('click', function () {
+        state.expanded[nodeId] = !state.expanded[nodeId];
+        renderTree(state.sectionsTree, state.sectionId);
+      });
+    }
 
     row.appendChild(toggle);
     row.appendChild(link);
@@ -1541,7 +1556,7 @@
     if (!toolbarPart0El) return;
     toolbarPart0El.hidden = false;
     toolbarPart0El.setAttribute('aria-hidden', 'false');
-    var regenBtn = state.part0SectionKey === 'abbreviations'
+    var regenBtn = (state.part0SectionKey === 'abbreviations' || state.part0SectionKey === 'definitions')
       ? '<button type="button" class="cpb-tool-btn cpb-part0-regenerate" title="Regenerate from manual content">Regenerate</button>'
       : '';
     if (toolbarPart0El.getAttribute('data-part0-wired') !== '1') {
@@ -1558,7 +1573,8 @@
       var regenEl = toolbarPart0El.querySelector('.cpb-part0-regenerate');
       if (regenEl) {
         regenEl.addEventListener('click', function () {
-          syncAbbreviations(true);
+          if (state.part0SectionKey === 'definitions') syncDefinitions(true);
+          else syncAbbreviations(true);
         });
       }
       toolbarPart0El.querySelector('#cpbPart0Save').addEventListener('click', function () {
@@ -1575,7 +1591,8 @@
       var labelEl = toolbarPart0El.querySelector('[data-part0-toolbar-label="1"]');
       if (labelEl) labelEl.textContent = part0PageLabel();
       var existingRegen = toolbarPart0El.querySelector('.cpb-part0-regenerate');
-      if (state.part0SectionKey === 'abbreviations' && !existingRegen) {
+      var wantsRegen = state.part0SectionKey === 'abbreviations' || state.part0SectionKey === 'definitions';
+      if (wantsRegen && !existingRegen) {
         var group = toolbarPart0El.querySelector('.cpb-toolbar-group:last-child');
         if (group) {
           var btn = document.createElement('button');
@@ -1583,10 +1600,13 @@
           btn.className = 'cpb-tool-btn cpb-part0-regenerate';
           btn.title = 'Regenerate from manual content';
           btn.textContent = 'Regenerate';
-          btn.addEventListener('click', function () { syncAbbreviations(true); });
+          btn.addEventListener('click', function () {
+            if (state.part0SectionKey === 'definitions') syncDefinitions(true);
+            else syncAbbreviations(true);
+          });
           group.insertBefore(btn, group.firstChild);
         }
-      } else if (state.part0SectionKey !== 'abbreviations' && existingRegen) {
+      } else if (!wantsRegen && existingRegen) {
         existingRegen.remove();
       }
     }
@@ -1625,10 +1645,8 @@
         });
         if (Object.keys(row).some(function (k) { return row[k]; })) amendRows.push(row);
       });
-      var footerEl = sheet.querySelector('[data-part0-field="footer_notice"]');
       return {
         rows: amendRows,
-        footer_notice: footerEl ? footerEl.textContent.trim() : '',
         empty_rows: emptyRows,
       };
     }
@@ -1697,6 +1715,27 @@
       if (!res.ok) throw new Error(res.error || 'Save failed');
       state.part0Page = res.part0_page || page;
       setStatus('Saved', 'saved');
+    }).catch(showError);
+  }
+
+  function syncDefinitions(skipConfirm) {
+    if (!skipConfirm && !confirm('Suggest Definitions and Terms from the manual content using AI?')) return;
+    setStatus('Generating definitions…', 'saving');
+    apiPost('regenerate_definitions', {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Regenerate failed');
+      var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+      state.part0Page = res.part0_page || state.part0Page;
+      if (res.page_html) {
+        canvasEl.innerHTML = res.page_html;
+        wireCanvas();
+        refreshPart0TypographyFromBookStyles();
+        setStatus('Definitions updated (' + count + ' entries)', 'saved');
+      } else {
+        return loadSection(state.sectionId);
+      }
     }).catch(showError);
   }
 
@@ -3539,11 +3578,18 @@
   function refreshTocTypographyFromBookStyles() {
     var titleDef = paragraphStyleDef('title');
     var titleColor = titleDef.color || '#0f2744';
+    var styleKeys = ['title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4', 'body'];
     canvasEl.querySelectorAll('.cpb-toc-row[data-toc-style]').forEach(function (row) {
+      var styleKey = row.getAttribute('data-toc-style') || 'body';
+      var def = paragraphStyleDef(styleKey);
+      var size = Math.max(6, (parseInt(def.font_size, 10) || 11) - 4);
       row.style.color = titleColor;
+      row.style.fontSize = size + 'pt';
       row.setAttribute('data-text-color', titleColor);
+      row.setAttribute('data-font-size', String(size));
       row.querySelectorAll('.cpb-toc-label, .cpb-toc-page, .cpb-toc-link').forEach(function (el) {
         el.style.color = titleColor;
+        el.style.fontSize = size + 'pt';
       });
     });
   }

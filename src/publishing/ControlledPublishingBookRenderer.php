@@ -328,7 +328,7 @@ final class ControlledPublishingBookRenderer
         }
 
         $headingsHtml = '';
-        foreach (array('part_title', 'title', 'subtitle_1') as $headingKey) {
+        foreach (array('subtitle_1') as $headingKey) {
             if (!isset($headingsByKey[$headingKey]) || !is_array($headingsByKey[$headingKey])) {
                 continue;
             }
@@ -367,7 +367,6 @@ final class ControlledPublishingBookRenderer
     {
         $rows = is_array($page['rows'] ?? null) ? $page['rows'] : array();
         $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 8)));
-        $footerNotice = (string)($page['footer_notice'] ?? '');
         $tableStyle = $this->resolveStandardTableStyle();
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
@@ -405,9 +404,6 @@ final class ControlledPublishingBookRenderer
             $rowIdx++;
         }
 
-        $bodyStyle = $this->lepParagraphStyle('body');
-        $footerEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
-
         return '<div class="cpb-part0-amendment cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
@@ -420,8 +416,6 @@ final class ControlledPublishingBookRenderer
             . '<th' . $headerVisual . '>DATE INCORP.</th>'
             . '<th' . $headerVisual . '>INCORP. BY</th>'
             . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table>'
-            . '<div class="cpb-part0-amend-footer ' . trim($bodyStyle['class']) . '" data-part0-field="footer_notice"'
-            . $bodyStyle['attr'] . $footerEdit . '>' . h($footerNotice) . '</div>'
             . '</div>';
     }
 
@@ -509,7 +503,7 @@ final class ControlledPublishingBookRenderer
         }
         if ($rowsHtml === '') {
             $rowsHtml = '<p class="' . trim($bodyStyle['class']) . '"' . $bodyStyle['attr']
-                . '>No abbreviations found — use Regenerate in the toolbar.</p>';
+                . '>No abbreviations were identified in the manual content. Use Regenerate after adding content, or add entries manually.</p>';
         }
 
         return '<div class="cpb-part0-abbreviations" data-part0-table="abbreviations" contenteditable="false">'

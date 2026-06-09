@@ -7,7 +7,7 @@ declare(strict_types=1);
 final class ControlledPublishingSectionService
 {
     /** Section types that may contain author-created subsections. */
-    private const NESTABLE_SECTION_KEYS = array('main_content', 'annexes');
+    private const NESTABLE_SECTION_KEYS = array('part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes');
 
     public function __construct(private PDO $pdo)
     {
@@ -90,7 +90,7 @@ final class ControlledPublishingSectionService
             throw new RuntimeException('Parent section not found.');
         }
         if (!$this->parentAllowsSubsections($parent)) {
-            throw new RuntimeException('Subsections are only allowed under Main Content and Annexes.');
+            throw new RuntimeException('Subsections are only allowed under manual parts and annexes.');
         }
 
         $title = trim($title);

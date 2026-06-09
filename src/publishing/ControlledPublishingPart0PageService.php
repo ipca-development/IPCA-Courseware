@@ -149,7 +149,6 @@ final class ControlledPublishingPart0PageService
                 array('revision_nr' => 'Rev 6', 'reason' => '', 'revision_date' => '09/01/23', 'effective_date' => '09/01/23', 'date_incorp' => '09/01/23', 'incorp_by' => 'KVM'),
             ),
             'empty_rows' => 8,
-            'footer_notice' => 'RETAIN SHEET UNTIL REPLACED WITH NEW ISSUE',
         );
     }
 
@@ -609,6 +608,142 @@ final class ControlledPublishingPart0PageService
         return is_array($decoded) ? $decoded : array();
     }
 
+    /**
+     * @return array{section_id:int,entries_count:int}
+     */
+    public function regenerateDefinitionsFromManual(int $versionId, ?int $actorUserId = null): array
+    {
+        require_once __DIR__ . '/../openai.php';
+
+        $existing = $this->resolveDefinitionsFromVersion($this->requireVersion($versionId));
+        $definitionsByTerm = array();
+        foreach ($existing['entries'] as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = trim((string)($entry['term'] ?? ''));
+            if ($term === '') {
+                continue;
+            }
+            $definitionsByTerm[strtolower($term)] = trim((string)($entry['definition'] ?? ''));
+        }
+
+        $manualText = $this->collectManualPlainText($versionId, 14000);
+        if ($manualText === '') {
+            throw new RuntimeException('No manual content found to suggest definitions from.');
+        }
+
+        $resp = cw_openai_responses(array(
+            'model' => cw_openai_model(),
+            'input' => array(
+                array(
+                    'role' => 'system',
+                    'content' => array(array(
+                        'type' => 'input_text',
+                        'text' => 'You extract aviation manual definitions. Return ONLY valid JSON: {"entries":[{"term":"...","definition":"..."}]}. '
+                            . 'Include terms that are defined or clearly used with specific meaning in the manual. '
+                            . 'Keep definitions concise and operational. Preserve existing definitions when the term matches.',
+                    )),
+                ),
+                array(
+                    'role' => 'user',
+                    'content' => array(array(
+                        'type' => 'input_text',
+                        'text' => "Existing definitions (preserve when still valid):\n"
+                            . json_encode($existing['entries'], JSON_UNESCAPED_UNICODE)
+                            . "\n\nManual content:\n" . $manualText,
+                    )),
+                ),
+            ),
+        ), 120);
+
+        $text = trim((string)($resp['output_text'] ?? ''));
+        if ($text === '') {
+            throw new RuntimeException('AI returned empty definitions.');
+        }
+        if (preg_match('/\{[\s\S]*\}/', $text, $m)) {
+            $text = $m[0];
+        }
+        $decoded = json_decode($text, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('AI definitions response was not valid JSON.');
+        }
+        $rawEntries = is_array($decoded['entries'] ?? null) ? $decoded['entries'] : array();
+        $merged = array();
+        foreach ($rawEntries as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $term = trim((string)($row['term'] ?? ''));
+            if ($term === '') {
+                continue;
+            }
+            $key = strtolower($term);
+            $definition = trim((string)($row['definition'] ?? ''));
+            if ($definition === '' && isset($definitionsByTerm[$key])) {
+                $definition = $definitionsByTerm[$key];
+            }
+            $merged[$key] = array('term' => $term, 'definition' => $definition);
+        }
+        foreach ($definitionsByTerm as $key => $definition) {
+            if (!isset($merged[$key]) && $definition !== '') {
+                $merged[$key] = array(
+                    'term' => ucfirst($key),
+                    'definition' => $definition,
+                );
+            }
+        }
+
+        $pageData = $this->normalizeDefinitionsPage(array(
+            'entries' => array_values($merged),
+            'empty_rows' => (int)($existing['empty_rows'] ?? 12),
+        ));
+        $this->saveStructuredPage($versionId, 'definitions', $pageData);
+
+        return array(
+            'section_id' => $this->sectionIdByKey($versionId, 'definitions'),
+            'entries_count' => count($pageData['entries']),
+        );
+    }
+
+    private function collectManualPlainText(int $versionId, int $maxChars = 14000): string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT b.payload_json, b.block_type, s.section_key
+            FROM ipca_publishing_book_blocks b
+            INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
+            WHERE b.book_version_id = :version_id
+              AND s.section_key NOT IN ('cover','toc','highlights','abbreviations','definitions','lep')
+            ORDER BY s.sort_order, b.sort_order, b.id
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        $parts = array();
+        $length = 0;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $payload = json_decode((string)($row['payload_json'] ?? '{}'), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $text = $this->extractTextFromBlock((string)($row['block_type'] ?? ''), $payload);
+            if ($text === '') {
+                continue;
+            }
+            $parts[] = $text;
+            $length += strlen($text);
+            if ($length >= $maxChars) {
+                break;
+            }
+        }
+        $combined = trim(implode("\n\n", $parts));
+        if (strlen($combined) > $maxChars) {
+            $combined = substr($combined, 0, $maxChars);
+        }
+        return $combined;
+    }
+
     private function truncate(string $value, int $max): string
     {
         if (strlen($value) <= $max) {
@@ -644,10 +779,6 @@ final class ControlledPublishingPart0PageService
         return array(
             'rows' => $rows,
             'empty_rows' => max(0, min(30, (int)($raw['empty_rows'] ?? $defaults['empty_rows']))),
-            'footer_notice' => $this->truncate(
-                trim((string)($raw['footer_notice'] ?? $defaults['footer_notice'])),
-                500
-            ),
         );
     }
 

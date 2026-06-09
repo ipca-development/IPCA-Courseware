@@ -2188,7 +2188,19 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  min-height: 1.4em;
+  min-height: 1.5em;
+  margin-bottom: 6px;
+}
+
+.cpb-tree-separator {
+  list-style: none;
+  height: 10px;
+  margin: 4px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.cpb-tree-link--group {
+  font-weight: 600;
 }
 
 .cpb-toc-depth-0 { padding-left: 0; }
