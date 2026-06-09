@@ -1699,7 +1699,7 @@
           definition_status: status || (def ? 'confirmed' : 'needs_review'),
         });
       });
-      return { entries: abbrEntries, empty_rows: emptyRows };
+      return { entries: abbrEntries, empty_rows: 0 };
     }
     if (key === 'definitions') {
       var defEntries = [];
@@ -1713,7 +1713,7 @@
           definition: defTextEl ? defTextEl.textContent.replace(/\u00a0/g, ' ').trim() : '',
         });
       });
-      return { entries: defEntries, empty_rows: emptyRows };
+      return { entries: defEntries, empty_rows: 0 };
     }
     return null;
   }

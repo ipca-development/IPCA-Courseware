@@ -30,6 +30,60 @@ final class ControlledPublishingPart0PageService
     /** Minimum times an abbreviation must appear in the manual to be auto-discovered. */
     private const ABBREVIATION_MIN_OCCURRENCES = 4;
 
+    /** Well-known aviation abbreviations used when manual/AI context is inconclusive. */
+    private const COMMON_AVIATION_ABBREVIATIONS = array(
+        'ATC' => 'Air Traffic Control',
+        'ATS' => 'Air Traffic Services',
+        'CDFA' => 'Continuous Descent Final Approach',
+        'CRI' => 'Class Rating Instructor',
+        'CTR' => 'Control Zone',
+        'DME' => 'Distance Measuring Equipment',
+        'EFB' => 'Electronic Flight Bag',
+        'FAA' => 'Federal Aviation Administration',
+        'FATO' => 'Final Approach and Take-Off Area',
+        'GNSS' => 'Global Navigation Satellite System',
+        'ISA' => 'International Standard Atmosphere',
+        'MDA' => 'Minimum Descent Altitude',
+        'NDB' => 'Non-Directional Beacon',
+        'RVR' => 'Runway Visual Range',
+        'VMC' => 'Visual Meteorological Conditions',
+        'VOR' => 'VHF Omnidirectional Range',
+        'AFM' => 'Aircraft Flight Manual',
+        'MFD' => 'Multi-Function Display',
+        'ACAS' => 'Airborne Collision Avoidance System',
+        'ADF' => 'Automatic Direction Finder',
+        'AGL' => 'Above Ground Level',
+        'APU' => 'Auxiliary Power Unit',
+        'ATIS' => 'Automatic Terminal Information Service',
+        'CPL' => 'Commercial Pilot License',
+        'CRM' => 'Crew Resource Management',
+        'DA' => 'Decision Altitude',
+        'DH' => 'Decision Height',
+        'FIR' => 'Flight Information Region',
+        'FMS' => 'Flight Management System',
+        'GPWS' => 'Ground Proximity Warning System',
+        'ILS' => 'Instrument Landing System',
+        'IMC' => 'Instrument Meteorological Conditions',
+        'LDA' => 'Landing Distance Available',
+        'LPV' => 'Localizer Performance with Vertical Guidance',
+        'MEL' => 'Minimum Equipment List',
+        'MSA' => 'Minimum Sector Altitude',
+        'MSL' => 'Mean Sea Level',
+        'NOTAM' => 'Notice to Airmen',
+        'PBN' => 'Performance Based Navigation',
+        'RNAV' => 'Area Navigation',
+        'RNP' => 'Required Navigation Performance',
+        'RVSM' => 'Reduced Vertical Separation Minimum',
+        'SID' => 'Standard Instrument Departure',
+        'STAR' => 'Standard Terminal Arrival Route',
+        'TAS' => 'True Airspeed',
+        'TCAS' => 'Traffic Alert and Collision Avoidance System',
+        'TODA' => 'Take-Off Distance Available',
+        'TORA' => 'Take-Off Run Available',
+        'TRK' => 'Track',
+        'UTC' => 'Coordinated Universal Time',
+    );
+
     public const OUTLINE_TITLE = '0. OUTLINE';
 
     /** @var list<string> */
@@ -182,7 +236,7 @@ final class ControlledPublishingPart0PageService
                 array('copy_nr' => '0', 'issue_to' => 'Master Copy'),
                 array('copy_nr' => '1', 'issue_to' => 'BCAA - Training Department (Signed Digital PDF file)'),
             ),
-            'empty_rows' => 10,
+            'empty_rows' => 0,
         );
     }
 
@@ -193,7 +247,7 @@ final class ControlledPublishingPart0PageService
     {
         return array(
             'entries' => array(),
-            'empty_rows' => 12,
+            'empty_rows' => 0,
         );
     }
 
@@ -409,10 +463,22 @@ final class ControlledPublishingPart0PageService
             'block_id' => 0,
             'section_id' => 0,
             'target_anchor' => '',
+            'label' => self::PART_TITLE,
+            'text' => self::PART_TITLE,
+            'number' => '',
+            'depth' => 0,
+            'style' => 'title',
+            'entry_type' => 'part0_container',
+            'page' => null,
+        );
+        $entries[] = array(
+            'block_id' => 0,
+            'section_id' => 0,
+            'target_anchor' => '',
             'label' => self::OUTLINE_TITLE,
             'text' => self::OUTLINE_TITLE,
             'number' => '',
-            'depth' => 0,
+            'depth' => 1,
             'style' => 'title',
             'entry_type' => 'part0_outline',
             'page' => null,
@@ -442,7 +508,7 @@ final class ControlledPublishingPart0PageService
                 'label' => $def['number'] . ' ' . $def['label'],
                 'text' => $def['label'],
                 'number' => $def['number'],
-                'depth' => 1,
+                'depth' => 2,
                 'style' => 'subtitle_1',
                 'entry_type' => 'part0_section',
                 'page' => null,
@@ -521,10 +587,11 @@ final class ControlledPublishingPart0PageService
 
         $pageData = $this->normalizeAbbreviationsPage(array(
             'entries' => array_values($merged),
-            'empty_rows' => (int)($existing['empty_rows'] ?? 10),
+            'empty_rows' => 0,
             'synced_from' => 'canonical',
         ));
         $pageData = $this->completeAbbreviationDefinitions($versionId, $pageData, $actorUserId);
+        $pageData = $this->mergePreservedAbbreviationEdits($existing, $pageData);
         $this->saveAbbreviationsPageForVersion($versionId, $pageData, $actorUserId);
 
         return array(
@@ -585,6 +652,7 @@ final class ControlledPublishingPart0PageService
             }
         }
 
+        $byAbbr = $this->applyCommonAbbreviationDefinitions($byAbbr);
         $byAbbr = $this->fillAbbreviationDefinitionsWithAi($versionId, $byAbbr);
 
         foreach ($byAbbr as $abbr => $entry) {
@@ -1322,7 +1390,7 @@ final class ControlledPublishingPart0PageService
         ksort($entries, SORT_STRING);
         $out = array(
             'entries' => array_values($entries),
-            'empty_rows' => max(0, min(20, (int)($raw['empty_rows'] ?? 10))),
+            'empty_rows' => max(0, min(20, (int)($raw['empty_rows'] ?? 0))),
         );
         $syncedFrom = trim((string)($raw['synced_from'] ?? ''));
         if ($syncedFrom !== '') {
@@ -1345,6 +1413,75 @@ final class ControlledPublishingPart0PageService
             return 'needs_review';
         }
         return $status;
+    }
+
+    /**
+     * Keep user-reviewed abbreviation meanings when regenerating from the manual.
+     *
+     * @param array<string,mixed> $existing
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>
+     */
+    private function mergePreservedAbbreviationEdits(array $existing, array $page): array
+    {
+        $byAbbr = array();
+        foreach (is_array($page['entries'] ?? null) ? $page['entries'] : array() as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $abbr = strtoupper(trim((string)($entry['abbreviation'] ?? '')));
+            if ($abbr === '') {
+                continue;
+            }
+            $byAbbr[$abbr] = $entry;
+        }
+
+        foreach (is_array($existing['entries'] ?? null) ? $existing['entries'] : array() as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $abbr = strtoupper(trim((string)($entry['abbreviation'] ?? '')));
+            $definition = trim((string)($entry['definition'] ?? ''));
+            if ($abbr === '' || $definition === '') {
+                continue;
+            }
+            $status = strtolower(trim((string)($entry['definition_status'] ?? '')));
+            if ($status === '' && $definition !== '') {
+                $status = 'confirmed';
+            }
+            if ($status !== 'confirmed') {
+                continue;
+            }
+            $byAbbr[$abbr] = array(
+                'abbreviation' => $abbr,
+                'definition' => $definition,
+                'definition_status' => 'confirmed',
+            );
+        }
+
+        ksort($byAbbr, SORT_STRING);
+        $page['entries'] = array_values($byAbbr);
+        return $this->normalizeAbbreviationsPage($page);
+    }
+
+    /**
+     * @param array<string,array{abbreviation:string,definition:string,definition_status:string}> $byAbbr
+     * @return array<string,array{abbreviation:string,definition:string,definition_status:string}>
+     */
+    private function applyCommonAbbreviationDefinitions(array $byAbbr): array
+    {
+        foreach (self::COMMON_AVIATION_ABBREVIATIONS as $abbr => $definition) {
+            if (!isset($byAbbr[$abbr])) {
+                continue;
+            }
+            if (trim((string)($byAbbr[$abbr]['definition'] ?? '')) !== '') {
+                continue;
+            }
+            $byAbbr[$abbr]['definition'] = $definition;
+            $byAbbr[$abbr]['definition_status'] = 'ai_suggested';
+        }
+
+        return $byAbbr;
     }
 
     private function syncSectionTitle(int $versionId, string $sectionKey, string $title): void
@@ -1412,8 +1549,9 @@ final class ControlledPublishingPart0PageService
         }
 
         $pageData = $this->normalizeDefinitionsPage(array(
-            'entries' => $canonicalEntries,
-            'empty_rows' => (int)($existing['empty_rows'] ?? 12),
+            'entries' => $this->mergePreservedDefinitionEdits($existing, $canonicalEntries),
+            'empty_rows' => 0,
+            'synced_from' => 'canonical',
         ));
         $this->saveStructuredPage($versionId, 'definitions', $pageData);
 
@@ -1429,16 +1567,10 @@ final class ControlledPublishingPart0PageService
      */
     public function regenerateDefinitionsFromManual(int $versionId, ?int $actorUserId = null): array
     {
-        $canonicalEntries = $this->loadDefinitionsFromCanonical($versionId);
-        if ($canonicalEntries !== array()) {
-            return $this->importDefinitionsFromCanonical($versionId, $actorUserId);
-        }
-
-        require_once __DIR__ . '/../openai.php';
-
         $existing = $this->resolveDefinitionsFromVersion($this->requireVersion($versionId));
-        $definitionsByTerm = array();
-        foreach ($existing['entries'] as $entry) {
+        $canonicalEntries = $this->loadDefinitionsFromCanonical($versionId);
+        $merged = array();
+        foreach ($canonicalEntries as $entry) {
             if (!is_array($entry)) {
                 continue;
             }
@@ -1446,85 +1578,90 @@ final class ControlledPublishingPart0PageService
             if ($term === '') {
                 continue;
             }
-            $definitionsByTerm[strtolower($term)] = trim((string)($entry['definition'] ?? ''));
+            $merged[$this->definitionKey($term)] = array(
+                'term' => $term,
+                'definition' => trim((string)($entry['definition'] ?? '')),
+            );
         }
 
-        $manualText = $this->collectManualPlainText($versionId, 14000);
-        if ($manualText === '') {
-            throw new RuntimeException('No manual content found to suggest definitions from.');
+        if (count($merged) < 15) {
+            foreach ($this->discoverDefinitionsFromManualText($versionId) as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $term = trim((string)($entry['term'] ?? ''));
+                if ($term === '') {
+                    continue;
+                }
+                $key = $this->definitionKey($term);
+                if (!isset($merged[$key]) || trim((string)($merged[$key]['definition'] ?? '')) === '') {
+                    $merged[$key] = $entry;
+                }
+            }
         }
 
-        $resp = cw_openai_responses(array(
-            'model' => cw_openai_model(),
-            'input' => array(
-                array(
-                    'role' => 'system',
-                    'content' => array(array(
-                        'type' => 'input_text',
-                        'text' => 'You extract aviation manual definitions. Return ONLY valid JSON: {"entries":[{"term":"...","definition":"..."}]}. '
-                            . 'Include terms that are defined or clearly used with specific meaning in the manual. '
-                            . 'Keep definitions concise and operational. Preserve existing definitions when the term matches.',
-                    )),
-                ),
-                array(
-                    'role' => 'user',
-                    'content' => array(array(
-                        'type' => 'input_text',
-                        'text' => "Existing definitions (preserve when still valid):\n"
-                            . json_encode($existing['entries'], JSON_UNESCAPED_UNICODE)
-                            . "\n\nManual content:\n" . $manualText,
-                    )),
-                ),
-            ),
-        ), 120);
-
-        $text = trim((string)($resp['output_text'] ?? ''));
-        if ($text === '') {
-            throw new RuntimeException('AI returned empty definitions.');
-        }
-        if (preg_match('/\{[\s\S]*\}/', $text, $m)) {
-            $text = $m[0];
-        }
-        $decoded = json_decode($text, true);
-        if (!is_array($decoded)) {
-            throw new RuntimeException('AI definitions response was not valid JSON.');
-        }
-        $rawEntries = is_array($decoded['entries'] ?? null) ? $decoded['entries'] : array();
-        $merged = array();
-        foreach ($rawEntries as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $term = trim((string)($row['term'] ?? ''));
-            if ($term === '') {
-                continue;
-            }
-            $key = strtolower($term);
-            $definition = trim((string)($row['definition'] ?? ''));
-            if ($definition === '' && isset($definitionsByTerm[$key])) {
-                $definition = $definitionsByTerm[$key];
-            }
-            $merged[$key] = array('term' => $term, 'definition' => $definition);
-        }
-        foreach ($definitionsByTerm as $key => $definition) {
-            if (!isset($merged[$key]) && $definition !== '') {
-                $merged[$key] = array(
-                    'term' => ucfirst($key),
-                    'definition' => $definition,
-                );
+        if (count($merged) < 15) {
+            require_once __DIR__ . '/../openai.php';
+            $manualText = $this->extractDefinitionsSectionText($versionId);
+            if ($manualText !== '') {
+                try {
+                    $resp = cw_openai_responses(array(
+                        'model' => cw_openai_model(),
+                        'input' => array(
+                            array(
+                                'role' => 'system',
+                                'content' => array(array(
+                                    'type' => 'input_text',
+                                    'text' => 'You extract aviation manual definitions from section 0.6 Definitions and Terms. '
+                                        . 'Return ONLY valid JSON: {"entries":[{"term":"...","definition":"..."}]}. '
+                                        . 'Include every defined term. Preserve multi-sentence definitions and bullet lists.',
+                                )),
+                            ),
+                            array(
+                                'role' => 'user',
+                                'content' => array(array(
+                                    'type' => 'input_text',
+                                    'text' => "Manual definitions section:\n" . $manualText,
+                                )),
+                            ),
+                        ),
+                    ), 180);
+                    $text = trim((string)($resp['output_text'] ?? ''));
+                    if ($text !== '' && preg_match('/\{[\s\S]*\}/', $text, $m)) {
+                        $decoded = json_decode($m[0], true);
+                        $rows = is_array($decoded['entries'] ?? null) ? $decoded['entries'] : array();
+                        foreach ($rows as $row) {
+                            if (!is_array($row)) {
+                                continue;
+                            }
+                            $term = trim((string)($row['term'] ?? ''));
+                            $definition = trim((string)($row['definition'] ?? ''));
+                            if ($term === '' || $definition === '') {
+                                continue;
+                            }
+                            $merged[$this->definitionKey($term)] = array(
+                                'term' => $term,
+                                'definition' => $definition,
+                            );
+                        }
+                    }
+                } catch (Throwable $e) {
+                    // Keep canonical / discovered entries when AI is unavailable.
+                }
             }
         }
 
         $pageData = $this->normalizeDefinitionsPage(array(
-            'entries' => array_values($merged),
-            'empty_rows' => (int)($existing['empty_rows'] ?? 12),
+            'entries' => $this->mergePreservedDefinitionEdits($existing, array_values($merged)),
+            'empty_rows' => 0,
+            'synced_from' => $canonicalEntries !== array() ? 'canonical' : 'manual',
         ));
         $this->saveStructuredPage($versionId, 'definitions', $pageData);
 
         return array(
             'section_id' => $this->sectionIdByKey($versionId, 'definitions'),
             'entries_count' => count($pageData['entries']),
-            'source' => 'ai',
+            'source' => $canonicalEntries !== array() ? 'canonical' : 'manual',
         );
     }
 
@@ -1542,12 +1679,21 @@ final class ControlledPublishingPart0PageService
             SELECT body_text
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
-              AND section_ref IN ('0.6', '0.6.0')
-            ORDER BY CASE section_ref WHEN '0.6' THEN 0 ELSE 1 END, id
-            LIMIT 1
+              AND section_ref REGEXP '^0\\.6(\\.|$)'
+            ORDER BY section_ref, id
         ");
         $stmt->execute(array(':source_set_id' => $sourceSetId));
-        $body = trim((string)$stmt->fetchColumn());
+        $parts = array();
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $text = trim((string)($row['body_text'] ?? ''));
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+        $body = trim(implode("\n\n", $parts));
         if ($body === '') {
             $fallback = $this->pdo->prepare("
                 SELECT body_text
@@ -1558,13 +1704,119 @@ final class ControlledPublishingPart0PageService
                     OR UPPER(body_text) LIKE '%DEFINITIONS AND TERMS%'
                   )
                 ORDER BY id
-                LIMIT 1
             ");
             $fallback->execute(array(':source_set_id' => $sourceSetId));
-            $body = trim((string)$fallback->fetchColumn());
+            while ($row = $fallback->fetch(PDO::FETCH_ASSOC)) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $text = trim((string)($row['body_text'] ?? ''));
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
+            }
+            $body = trim(implode("\n\n", $parts));
         }
 
         return $this->parseDefinitionsBodyText($body);
+    }
+
+    private function extractDefinitionsSectionText(int $versionId): string
+    {
+        $sourceSetId = $this->resolveManualSourceSetId($versionId);
+        if ($sourceSetId <= 0) {
+            return '';
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT body_text
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND section_ref REGEXP '^0\\.6(\\.|$)'
+            ORDER BY section_ref, id
+        ");
+        $stmt->execute(array(':source_set_id' => $sourceSetId));
+        $parts = array();
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $text = trim((string)($row['body_text'] ?? ''));
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+        if ($parts !== array()) {
+            return trim(implode("\n\n", $parts));
+        }
+
+        $fullText = $this->collectFullManualPlainText($versionId, 500000);
+        if ($fullText === '') {
+            return '';
+        }
+        if (preg_match('/0\\.6\\s+DEFINITIONS AND TERMS([\\s\\S]*?)(?=\\n0\\.7\\b|\\nPART\\s+[0-9]|\\z)/iu', $fullText, $match)) {
+            return trim('0.6 DEFINITIONS AND TERMS' . $match[1]);
+        }
+
+        return '';
+    }
+
+    /**
+     * @return list<array{term:string,definition:string}>
+     */
+    private function discoverDefinitionsFromManualText(int $versionId): array
+    {
+        return $this->parseDefinitionsBodyText($this->extractDefinitionsSectionText($versionId));
+    }
+
+    /**
+     * @param array<string,mixed> $existing
+     * @param list<array{term:string,definition:string}> $generated
+     * @return list<array{term:string,definition:string}>
+     */
+    private function mergePreservedDefinitionEdits(array $existing, array $generated): array
+    {
+        $byTerm = array();
+        foreach ($generated as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = trim((string)($entry['term'] ?? ''));
+            if ($term === '') {
+                continue;
+            }
+            $byTerm[$this->definitionKey($term)] = array(
+                'term' => $term,
+                'definition' => trim((string)($entry['definition'] ?? '')),
+            );
+        }
+
+        foreach (is_array($existing['entries'] ?? null) ? $existing['entries'] : array() as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = trim((string)($entry['term'] ?? ''));
+            $definition = trim((string)($entry['definition'] ?? ''));
+            if ($term === '' || $definition === '') {
+                continue;
+            }
+            $byTerm[$this->definitionKey($term)] = array(
+                'term' => $term,
+                'definition' => $definition,
+            );
+        }
+
+        $entries = array_values($byTerm);
+        usort($entries, static function (array $a, array $b): int {
+            return strcasecmp((string)($a['term'] ?? ''), (string)($b['term'] ?? ''));
+        });
+
+        return $entries;
+    }
+
+    private function definitionKey(string $term): string
+    {
+        return strtolower(trim($term));
     }
 
     /**
@@ -1595,13 +1847,44 @@ final class ControlledPublishingPart0PageService
             if ($term === '' || $definition === '') {
                 continue;
             }
-            $entries[] = array(
+            $entries[$this->definitionKey($term)] = array(
                 'term' => $term,
                 'definition' => $definition,
             );
         }
 
-        return $entries;
+        if (count($entries) >= 10) {
+            return array_values($entries);
+        }
+
+        $blocks = preg_split('/\n\s*\n/u', $body) ?: array();
+        foreach ($blocks as $block) {
+            $block = trim($block);
+            if ($block === '') {
+                continue;
+            }
+            if (preg_match('/^0\.6\b/i', $block) || preg_match('/^DEFINITIONS AND TERMS$/i', $block)) {
+                continue;
+            }
+            $blockLines = preg_split('/\R/u', $block) ?: array();
+            if (count($blockLines) < 2) {
+                continue;
+            }
+            $term = trim((string)$blockLines[0]);
+            if ($term === '' || preg_match('/^(Means|Refers to|Note)\b/i', $term)) {
+                continue;
+            }
+            $definition = trim(implode("\n", array_slice($blockLines, 1)));
+            if ($definition === '' || !preg_match('/^(Means|Refers to)\b/i', $definition)) {
+                continue;
+            }
+            $entries[$this->definitionKey($term)] = array(
+                'term' => $term,
+                'definition' => $definition,
+            );
+        }
+
+        return array_values($entries);
     }
 
     private function resolveManualSourceSetId(int $versionId): int

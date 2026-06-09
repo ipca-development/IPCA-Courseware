@@ -184,6 +184,138 @@ final class ControlledPublishingTocService
         $part0Svc = new ControlledPublishingPart0PageService($this->pdo, $this->blocks);
         $entries = $part0Svc->collectOutlineTocEntries($versionId);
 
+        foreach ($this->loadChaptersGroupedByPart($versionId) as $partKey => $chapters) {
+            $partTitle = $this->resolvePartTitle($versionId, $partKey);
+            if ($partTitle !== '') {
+                $entries[] = $this->partContainerEntry($partKey, $partTitle, $chapters);
+            }
+            foreach ($chapters as $chapter) {
+                $entries = array_merge(
+                    $entries,
+                    $this->collectSectionTocEntries($versionId, $chapter, $sectionNumberDisplay, $settings)
+                );
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * @return array<string,list<array<string,mixed>>>
+     */
+    private function loadChaptersGroupedByPart(int $versionId): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, section_key, title, stable_anchor, sort_order
+            FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id
+              AND section_key REGEXP '^part_[0-9]+_chapter_[0-9]+$'
+            ORDER BY section_key
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        $grouped = array();
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $sectionKey = (string)($row['section_key'] ?? '');
+            if (!preg_match('/^part_(\d+)_chapter_/', $sectionKey, $match)) {
+                continue;
+            }
+            $partKey = 'part_' . $match[1];
+            if (!isset($grouped[$partKey])) {
+                $grouped[$partKey] = array();
+            }
+            $grouped[$partKey][] = $row;
+        }
+
+        foreach (array('part_1', 'part_2', 'part_3', 'part_4', 'annexes') as $partKey) {
+            if (!isset($grouped[$partKey])) {
+                continue;
+            }
+            usort($grouped[$partKey], static function (array $a, array $b): int {
+                return strcmp((string)($a['section_key'] ?? ''), (string)($b['section_key'] ?? ''));
+            });
+        }
+
+        return $grouped;
+    }
+
+    private function resolvePartTitle(int $versionId, string $partKey): string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT title
+            FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id
+              AND section_key = :section_key
+            LIMIT 1
+        ");
+        $stmt->execute(array(
+            ':version_id' => $versionId,
+            ':section_key' => $partKey,
+        ));
+        $title = trim((string)$stmt->fetchColumn());
+        if ($title !== '') {
+            return $title;
+        }
+
+        $defaults = array(
+            'part_1' => 'Part 1 – General',
+            'part_2' => 'Part 2 – Technical',
+            'part_3' => 'Part 3 – Route',
+            'part_4' => 'Part 4 – Personnel Training',
+            'annexes' => 'Annexes',
+        );
+
+        return $defaults[$partKey] ?? '';
+    }
+
+    /**
+     * @param list<array<string,mixed>> $chapters
+     * @return array<string,mixed>
+     */
+    private function partContainerEntry(string $partKey, string $title, array $chapters): array
+    {
+        $anchor = '';
+        $sectionId = 0;
+        if ($chapters !== array()) {
+            $first = $chapters[0];
+            $sectionId = (int)($first['id'] ?? 0);
+            $anchor = (string)($first['stable_anchor'] ?? '');
+        }
+
+        return array(
+            'block_id' => 0,
+            'section_id' => $sectionId,
+            'target_anchor' => $anchor,
+            'label' => $title,
+            'text' => $title,
+            'number' => '',
+            'depth' => 0,
+            'style' => 'title',
+            'entry_type' => 'part_container',
+            'page' => null,
+            'part_key' => $partKey,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $chapter
+     * @param array<int,string> $sectionNumberDisplay
+     * @param array<string,bool> $settings
+     * @return list<array<string,mixed>>
+     */
+    private function collectSectionTocEntries(
+        int $versionId,
+        array $chapter,
+        array $sectionNumberDisplay,
+        array $settings
+    ): array {
+        $sectionId = (int)($chapter['id'] ?? 0);
+        if ($sectionId <= 0) {
+            return array();
+        }
+
         $stmt = $this->pdo->prepare("
             SELECT
               b.*,
@@ -195,28 +327,20 @@ final class ControlledPublishingTocService
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
-              AND s.section_key NOT IN (
-                'toc', 'highlights', 'cover', 'lep', 'revision_system',
-                'amendment_list', 'distribution_list', 'abbreviations', 'definitions'
-              )
-            ORDER BY s.sort_order, s.id, b.sort_order, b.id
+              AND b.section_id = :section_id
+            ORDER BY b.sort_order, b.id
         ");
-        $stmt->execute(array(':version_id' => $versionId));
+        $stmt->execute(array(
+            ':version_id' => $versionId,
+            ':section_id' => $sectionId,
+        ));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
 
-        $lastSectionId = null;
-        $pendingSectionEntry = null;
+        $entries = array();
         foreach ($rows as $row) {
-            $sectionId = (int)($row['section_id'] ?? 0);
-            if ($sectionId !== $lastSectionId) {
-                if ($pendingSectionEntry !== null) {
-                    $entries[] = $pendingSectionEntry;
-                    $pendingSectionEntry = null;
-                }
-                $pendingSectionEntry = $this->sectionTitleEntry($row, $settings);
-                $lastSectionId = $sectionId;
+            if (!is_array($row)) {
+                continue;
             }
-
             $blockId = (int)($row['id'] ?? 0);
             $payload = $this->blocks->decodePayload($row);
             $style = $this->resolveParagraphStyle((string)($row['block_type'] ?? ''), $payload);
@@ -228,11 +352,6 @@ final class ControlledPublishingTocService
                 continue;
             }
             $blockAnchor = (string)($row['stable_anchor'] ?? '');
-            if ($pendingSectionEntry !== null) {
-                $pendingSectionEntry['target_anchor'] = $blockAnchor;
-                $entries[] = $pendingSectionEntry;
-                $pendingSectionEntry = null;
-            }
             $number = $sectionNumberDisplay[$blockId] ?? '';
             $label = $number !== '' ? $number . ' ' . $text : $text;
             $entries[] = array(
@@ -242,15 +361,13 @@ final class ControlledPublishingTocService
                 'label' => $label,
                 'text' => $text,
                 'number' => $number,
-                'depth' => $this->styleDepth($style),
+                'depth' => min(4, $this->styleDepth($style) + 1),
                 'style' => $style,
                 'entry_type' => 'block',
                 'page' => null,
             );
         }
-        if ($pendingSectionEntry !== null) {
-            $entries[] = $pendingSectionEntry;
-        }
+
         return $entries;
     }
 
