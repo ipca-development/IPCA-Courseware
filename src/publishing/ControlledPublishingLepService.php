@@ -204,7 +204,10 @@ final class ControlledPublishingLepService
         $date = $this->formatPartDate($version);
         $parts = array();
 
-        $mainId = $this->sectionIdByKey($versionId, 'main_content');
+        $mainId = $this->sectionIdByKey($versionId, 'part_1');
+        if ($mainId <= 0) {
+            $mainId = $this->sectionIdByKey($versionId, 'main_content');
+        }
         if ($mainId > 0) {
             $children = $this->listChildSections($versionId, $mainId);
             if ($children === array()) {

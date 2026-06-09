@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingEditorNavService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -46,6 +47,7 @@ $lepPageSvc = new ControlledPublishingLepService($pdo);
 $approvalSvc = new ControlledPublishingApprovalService($pdo, $lepPageSvc);
 $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
 $editorNavSvc = new ControlledPublishingEditorNavService($sections);
+$manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections);
 $renderer->setPageHeaderService($pageHeaderSvc);
 $renderer->setCoverPageService($coverPageSvc);
 $renderer->setLepPageService($lepPageSvc);
@@ -63,7 +65,7 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $uid);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $uid);
             break;
         case 'recompute_section_numbers':
             cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc);
@@ -106,6 +108,9 @@ try {
             break;
         case 'regenerate_lep_parts':
             cp_editor_handle_regenerate_lep_parts($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
+            break;
+        case 'sync_manual_structure':
+            cp_editor_handle_sync_manual_structure($foundation, $manualStructureSvc, $uid);
             break;
         case 'sign_lep_slot':
             cp_editor_handle_sign_lep_slot($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
@@ -446,6 +451,7 @@ function cp_editor_handle_load(
     ControlledPublishingApprovalService $approvalSvc,
     ControlledPublishingPart0PageService $part0PageSvc,
     ControlledPublishingEditorNavService $editorNavSvc,
+    ControlledPublishingManualStructureService $manualStructureSvc,
     int $uid
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
@@ -457,6 +463,11 @@ function cp_editor_handle_load(
     $version = $foundation->getVersion($versionId);
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    $structureSync = null;
+    if ((string)($version['lifecycle_status'] ?? '') !== 'released') {
+        $structureSync = $manualStructureSvc->ensureVersionStructure($versionId, $uid);
     }
 
     $tree = $editorNavSvc->buildNavTree($versionId, (string)($version['book_key'] ?? 'OM'));
@@ -550,6 +561,7 @@ function cp_editor_handle_load(
         'section_number_display' => $numbering['section_number_display'],
         'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
         'manual_code' => $numbering['manual_code'],
+        'structure_sync' => $structureSync,
     ));
 }
 
@@ -1925,4 +1937,27 @@ function cp_editor_default_section_id(ControlledPublishingSectionService $sectio
     }
     $flat = $sections->listFlatSections($versionId);
     return $flat !== array() ? (int)$flat[0]['id'] : 0;
+}
+
+function cp_editor_handle_sync_manual_structure(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingManualStructureService $manualStructureSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+        cp_editor_json(409, array('ok' => false, 'error' => 'Released versions cannot be restructured.'));
+    }
+
+    $result = $manualStructureSvc->syncVersionStructure($versionId, $uid);
+    cp_editor_json(200, array_merge(array('ok' => true), $result));
 }

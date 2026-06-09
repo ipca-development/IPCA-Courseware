@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 
@@ -84,6 +85,7 @@ final class ControlledPublishingEditorNavService
         }
 
         $tree[] = $this->separatorNode('after_cover');
+        $part0Children = array();
         if (isset($byKey['toc'])) {
             $part0Children[] = $this->leafNode($byKey['toc'], 'Table of Contents');
         }
@@ -104,11 +106,11 @@ final class ControlledPublishingEditorNavService
 
         foreach (self::BOOK_PARTS[$bookKey] ?? self::BOOK_PARTS['OM'] as $partDef) {
             $partKey = (string)$partDef['section_key'];
-            if (!isset($byKey[$partKey])) {
+            if (!isset($byKey[$partKey]) && !($partKey === 'part_1' && isset($byKey['main_content']))) {
                 continue;
             }
-            $partRow = $byKey[$partKey];
-            $partId = (int)($partRow['id'] ?? 0);
+            $partRow = $byKey[$partKey] ?? $byKey['main_content'];
+            $partId = $this->resolvePartParentId($partKey, $byKey, $childrenByParent);
             $subsections = $this->formatSubsections($childrenByParent[$partId] ?? array());
             if ($subsections !== array()) {
                 $tree[] = $this->groupNode('group_' . $partKey, (string)$partDef['title'], $subsections);
@@ -133,6 +135,34 @@ final class ControlledPublishingEditorNavService
         return $tree;
     }
 
+    /**
+     * @param array<string,array<string,mixed>> $byKey
+     * @param array<int,list<array<string,mixed>>> $childrenByParent
+     */
+    private function resolvePartParentId(string $partKey, array $byKey, array $childrenByParent): int
+    {
+        if ($partKey === 'part_1') {
+            $mainContent = $byKey['main_content'] ?? null;
+            $part1 = $byKey['part_1'] ?? null;
+            if (is_array($mainContent) && !is_array($part1)) {
+                return (int)($mainContent['id'] ?? 0);
+            }
+            if (is_array($mainContent) && is_array($part1)) {
+                $mainId = (int)($mainContent['id'] ?? 0);
+                $partId = (int)($part1['id'] ?? 0);
+                $mainChildren = $childrenByParent[$mainId] ?? array();
+                $partChildren = $childrenByParent[$partId] ?? array();
+                if ($mainChildren !== array() && $partChildren === array()) {
+                    return $mainId;
+                }
+                return $partId;
+            }
+        }
+
+        $partRow = $byKey[$partKey] ?? null;
+        return is_array($partRow) ? (int)($partRow['id'] ?? 0) : 0;
+    }
+
     private function part0NavLabel(string $sectionKey): string
     {
         $registry = ControlledPublishingPart0PageService::PAGE_REGISTRY[$sectionKey] ?? null;
@@ -153,7 +183,8 @@ final class ControlledPublishingEditorNavService
     {
         $nodes = array();
         foreach ($rows as $row) {
-            $nodes[] = $this->leafNode($row, (string)($row['title'] ?? ''));
+            $label = ControlledPublishingManualStructureService::navLabelForSection($row);
+            $nodes[] = $this->leafNode($row, $label);
         }
         return $nodes;
     }
