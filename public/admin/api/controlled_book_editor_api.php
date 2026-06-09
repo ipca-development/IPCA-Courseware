@@ -46,8 +46,8 @@ $coverPageSvc = new ControlledPublishingCoverPageService($pdo);
 $lepPageSvc = new ControlledPublishingLepService($pdo);
 $approvalSvc = new ControlledPublishingApprovalService($pdo, $lepPageSvc);
 $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
-$editorNavSvc = new ControlledPublishingEditorNavService($sections);
-$manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections);
+$manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
+$editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStructureSvc);
 $renderer->setPageHeaderService($pageHeaderSvc);
 $renderer->setCoverPageService($coverPageSvc);
 $renderer->setLepPageService($lepPageSvc);
@@ -210,14 +210,24 @@ function cp_editor_configure_renderer(
 function cp_editor_page_header_config(
     ControlledPublishingPageHeaderService $pageHeaderSvc,
     array $version,
-    array $section
+    array $section,
+    ?ControlledPublishingManualStructureService $manualStructure = null,
+    ?ControlledPublishingSectionService $sections = null,
+    ?int $versionId = null
 ): array {
     $meta = cp_editor_decode_version_meta($version);
     $legacyLayout = null;
     if (!is_array($meta['page_header'] ?? null)) {
         $legacyLayout = cp_editor_legacy_section_layout($section);
     }
-    return $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
+    $config = $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
+    if ($manualStructure !== null && $sections !== null && $versionId !== null && $versionId > 0) {
+        $flat = $sections->listFlatSections($versionId);
+        $config['token_overrides'] = array(
+            'part_title' => $manualStructure->resolvePartTitleForSection($section, $flat),
+        );
+    }
+    return $config;
 }
 
 /**
@@ -466,8 +476,10 @@ function cp_editor_handle_load(
     }
 
     $structureSync = null;
+    $contentImport = null;
     if ((string)($version['lifecycle_status'] ?? '') !== 'released') {
         $structureSync = $manualStructureSvc->ensureVersionStructure($versionId, $uid);
+        $contentImport = $manualStructureSvc->ensureVersionContent($versionId, $uid);
     }
 
     $tree = $editorNavSvc->buildNavTree($versionId, (string)($version['book_key'] ?? 'OM'));
@@ -508,7 +520,7 @@ function cp_editor_handle_load(
     }
 
     $bookStyles = $styleSvc->resolveFromVersion($version);
-    $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+    $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section, $manualStructureSvc, $sections, $versionId);
     $bookStyles['page_header'] = $pageHeaderConfig['page_header'];
     $bookStyles['page_footer'] = $pageHeaderConfig['page_footer'];
     $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
@@ -562,6 +574,7 @@ function cp_editor_handle_load(
         'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
         'manual_code' => $numbering['manual_code'],
         'structure_sync' => $structureSync,
+        'content_import' => $contentImport ?? null,
     ));
 }
 

@@ -44,7 +44,7 @@
 
 .cpb-tree-head h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.2;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -95,7 +95,7 @@
   flex-shrink: 0;
   color: #94a3b8;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.4;
   padding: 0;
   text-align: center;
@@ -112,11 +112,15 @@
 
 .cpb-tree-link {
   flex: 1;
-  display: inline;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #cbd5e1;
   cursor: pointer;
   padding: 0;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.4;
   font-family: system-ui, -apple-system, sans-serif;
   font-weight: 400;
@@ -149,7 +153,7 @@
   display: block;
   color: #94a3b8;
   padding: 4px 0;
-  font-size: 12px;
+  font-size: 10px;
   cursor: pointer;
   font-family: system-ui, -apple-system, sans-serif;
   user-select: none;
@@ -2201,6 +2205,20 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-tree-link--group {
   font-weight: 600;
+}
+
+.cpb-tree-link--upper {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.cpb-tree-link--part0 {
+  font-style: italic;
+}
+
+.cpb-tree-link--subtitle {
+  font-size: 10px;
+  color: #b8c5d6;
 }
 
 .cpb-toc-depth-0 { padding-left: 0; }

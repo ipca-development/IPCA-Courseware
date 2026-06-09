@@ -109,6 +109,7 @@
     redoStack: [],
     layoutTimer: null,
     focusedTableCell: null,
+    pendingScrollRef: null,
     canvasEventsWired: false,
     resizeHintEl: null,
     tableClipboard: '',
@@ -349,8 +350,16 @@
       });
   }
 
-  function loadSection(sectionId) {
+  function formatTreeLabel(text, maxLen) {
+    text = String(text || '');
+    maxLen = maxLen || 34;
+    if (text.length <= maxLen) return text;
+    return text.slice(0, maxLen - 3) + '...';
+  }
+
+  function loadSection(sectionId, scrollRef) {
     setStatus('Loading…', 'saving');
+    state.pendingScrollRef = scrollRef || null;
     var url = apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId;
     return apiGet(url).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Load failed');
@@ -398,6 +407,13 @@
         refreshPart0TypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
+      if (state.pendingScrollRef) {
+        var target = canvasEl.querySelector('[data-canonical-section-ref="' + state.pendingScrollRef + '"]');
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        state.pendingScrollRef = null;
+      }
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
       updateAddSubsection(res.section);
       if (res.prior_version_label) {
@@ -463,16 +479,21 @@
     });
 
     var link = document.createElement('span');
+    var labelStyle = node.label_style || '';
     link.className = 'cpb-tree-link'
       + (node.id === activeId ? ' is-active' : '')
       + (node.is_generated ? ' is-generated' : '')
-      + (node.is_group ? ' cpb-tree-link--group' : '');
-    link.textContent = node.title;
+      + (node.is_group ? ' cpb-tree-link--group' : '')
+      + (labelStyle === 'chapter_upper' ? ' cpb-tree-link--upper' : '')
+      + (labelStyle === 'part0' ? ' cpb-tree-link--part0' : '')
+      + (labelStyle === 'subtitle' ? ' cpb-tree-link--subtitle' : '');
+    link.textContent = node.truncate === false ? node.title : formatTreeLabel(node.title);
     link.setAttribute('role', 'button');
     link.setAttribute('tabindex', '0');
+    link.title = node.title;
     if (node.is_navigable !== false && node.id) {
       link.addEventListener('click', function () {
-        loadSection(node.id);
+        loadSection(node.id, node.scroll_section_ref || null);
       });
       link.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -1038,7 +1059,7 @@
       logo_alt: 'EuroPilot Center',
       logo_max_height: 40,
       row_height: 32,
-      center_text: '{manual_code}\n{section_title}',
+      center_text: '{book_title} ({manual_code})\n{part_title}',
       center_font_family: 'sans',
       center_font_size: 11,
       center_font_bold: true,

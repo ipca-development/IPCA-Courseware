@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 
 /**
@@ -26,10 +28,33 @@ final class ControlledPublishingManualStructureService
         1 => 'Introduction',
     );
 
+    /** @var array<string,string> */
+    private const PART_TITLES = array(
+        'part_1' => 'Part 1 – General',
+        'main_content' => 'Part 1 – General',
+        'part_2' => 'Part 2 – Technical',
+        'part_3' => 'Part 3 – Route',
+        'part_4' => 'Part 4 – Personnel Training',
+        'annexes' => 'Annexes',
+    );
+
+    /** @var list<string> */
+    private const PART0_SECTION_KEYS = array(
+        'toc',
+        'lep',
+        'revision_system',
+        'amendment_list',
+        'distribution_list',
+        'abbreviations',
+        'definitions',
+        'highlights',
+    );
+
     public function __construct(
         private PDO $pdo,
         private ControlledPublishingFoundationService $foundation,
-        private ControlledPublishingSectionService $sections
+        private ControlledPublishingSectionService $sections,
+        private ?ControlledPublishingBlockService $blocks = null
     ) {
     }
 
@@ -79,6 +104,7 @@ final class ControlledPublishingManualStructureService
                 $parentId,
                 $partKey,
                 $chapters,
+                $partIndex + 1,
                 $actorUserId
             );
             $partsSynced++;
@@ -113,6 +139,19 @@ final class ControlledPublishingManualStructureService
         $result = $this->syncVersionStructure($versionId, $actorUserId);
         $result['skipped'] = false;
         return $result;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function resolveVersion(int $versionId): ?array
+    {
+        return $this->foundation->getVersion($versionId);
+    }
+
+    public function resolveManualSourceSetIdPublic(int $versionId): int
+    {
+        return $this->resolveManualSourceSetId($versionId);
     }
 
     public function needsStructureSync(int $versionId): bool
@@ -268,6 +307,7 @@ final class ControlledPublishingManualStructureService
         int $parentSectionId,
         string $partKey,
         array $chapters,
+        int $manualPart,
         ?int $actorUserId
     ): array {
         $existing = $this->listChildSections($versionId, $parentSectionId);
@@ -299,14 +339,17 @@ final class ControlledPublishingManualStructureService
             $sectionKey = $this->chapterSectionKey($partKey, $number);
             $metadata = array(
                 'chapter_number' => $number,
+                'manual_part' => $manualPart,
                 'nav_label' => $navLabel,
                 'synced_from_canonical' => true,
             );
 
             if (isset($existingByNumber[$number])) {
                 $row = $existingByNumber[$number];
+                $meta = $this->decodeMeta($row);
                 $needsUpdate = ((string)($row['title'] ?? '') !== $title)
                     || ((string)($row['section_key'] ?? '') !== $sectionKey)
+                    || (int)($meta['manual_part'] ?? 0) !== $manualPart
                     || !$this->isCanonicalChapterSection($row);
                 if ($needsUpdate) {
                     $this->updateChapterSection(
@@ -612,26 +655,413 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
+     * Import canonical excerpt text into chapter section blocks.
+     *
+     * @return array{sections_imported:int,blocks_created:int,skipped:bool}
+     */
+    public function importVersionContent(int $versionId, ?int $actorUserId = null, bool $force = false): array
+    {
+        if ($this->blocks === null) {
+            throw new RuntimeException('Block service is required for content import.');
+        }
+
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+            throw new RuntimeException('Released versions cannot import content.');
+        }
+
+        $sourceSetId = $this->resolveManualSourceSetId($versionId);
+        if ($sourceSetId <= 0) {
+            throw new RuntimeException('No manual canonical source set is linked to this version.');
+        }
+
+        $manualCode = strtoupper(trim((string)($version['manual_code'] ?? '')));
+        $sectionsImported = 0;
+        $blocksCreated = 0;
+
+        foreach ($this->sections->listFlatSections($versionId) as $sectionRow) {
+            if (!$this->isCanonicalChapterSection($sectionRow)) {
+                continue;
+            }
+            $meta = $this->decodeMeta($sectionRow);
+            $manualPart = (int)($meta['manual_part'] ?? 0);
+            $chapterNumber = (int)($meta['chapter_number'] ?? 0);
+            if ($manualPart <= 0 || $chapterNumber <= 0) {
+                continue;
+            }
+
+            $sectionId = (int)($sectionRow['id'] ?? 0);
+            $existingBlocks = $this->blocks->listSectionBlocks($sectionId);
+            if ($existingBlocks !== array() && !$force) {
+                continue;
+            }
+
+            if ($existingBlocks !== array() && $force) {
+                foreach ($existingBlocks as $block) {
+                    if (empty($block['is_system_managed'])) {
+                        $this->blocks->deleteBlock((int)$block['id'], $actorUserId);
+                    }
+                }
+            }
+
+            $created = $this->importChapterContent(
+                $versionId,
+                $sectionId,
+                $sectionRow,
+                $sourceSetId,
+                $manualCode,
+                $manualPart,
+                $chapterNumber,
+                $actorUserId
+            );
+            if ($created > 0) {
+                $sectionsImported++;
+                $blocksCreated += $created;
+            }
+        }
+
+        return array(
+            'sections_imported' => $sectionsImported,
+            'blocks_created' => $blocksCreated,
+            'skipped' => $sectionsImported === 0 && $blocksCreated === 0,
+        );
+    }
+
+    public function needsContentImport(int $versionId): bool
+    {
+        if ($this->blocks === null) {
+            return false;
+        }
+        foreach ($this->sections->listFlatSections($versionId) as $sectionRow) {
+            if (!$this->isCanonicalChapterSection($sectionRow)) {
+                continue;
+            }
+            if ($this->blocks->listSectionBlocks((int)$sectionRow['id']) === array()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return array{sections_imported:int,blocks_created:int,skipped:bool}
+     */
+    public function ensureVersionContent(int $versionId, ?int $actorUserId = null): array
+    {
+        if (!$this->needsContentImport($versionId)) {
+            return array(
+                'sections_imported' => 0,
+                'blocks_created' => 0,
+                'skipped' => true,
+            );
+        }
+        $result = $this->importVersionContent($versionId, $actorUserId, false);
+        $result['skipped'] = false;
+        return $result;
+    }
+
+    /**
+     * Subtitle 1 entries for sidebar under a chapter (from canonical excerpts).
+     *
+     * @return list<array{section_ref:string,title:string,nav_label:string}>
+     */
+    public function listSubtitle1ForChapter(
+        string $manualCode,
+        int $sourceSetId,
+        int $manualPart,
+        int $chapterNumber
+    ): array {
+        $manualCode = strtoupper(trim($manualCode));
+        $pattern = '^' . $chapterNumber . '\\.[0-9]+$';
+        $stmt = $this->pdo->prepare("
+            SELECT section_ref, title
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND manual_part = :manual_part
+              AND source_status = 'active'
+              AND section_ref REGEXP :pattern
+            ORDER BY section_ref
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
+            ':manual_part' => (string)$manualPart,
+            ':pattern' => $pattern,
+        ));
+
+        $items = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $ref = trim((string)($row['section_ref'] ?? ''));
+            $title = trim((string)($row['title'] ?? ''));
+            if ($ref === '') {
+                continue;
+            }
+            $items[] = array(
+                'section_ref' => $ref,
+                'title' => $title,
+                'nav_label' => $ref . ' ' . $title,
+            );
+        }
+        return $items;
+    }
+
+    /**
+     * Resolve the running-header part title for a section.
+     *
+     * @param list<array<string,mixed>> $flatSections
+     */
+    public function resolvePartTitleForSection(array $section, array $flatSections): string
+    {
+        $key = (string)($section['section_key'] ?? '');
+        if (isset(self::PART_TITLES[$key])) {
+            return self::PART_TITLES[$key];
+        }
+        if (in_array($key, self::PART0_SECTION_KEYS, true)) {
+            return ControlledPublishingPart0PageService::PART_TITLE;
+        }
+
+        $byId = array();
+        foreach ($flatSections as $row) {
+            $byId[(int)($row['id'] ?? 0)] = $row;
+        }
+
+        $parentId = $section['parent_section_id'] !== null ? (int)$section['parent_section_id'] : 0;
+        while ($parentId > 0) {
+            $parent = $byId[$parentId] ?? null;
+            if (!is_array($parent)) {
+                break;
+            }
+            $parentKey = (string)($parent['section_key'] ?? '');
+            if (isset(self::PART_TITLES[$parentKey])) {
+                return self::PART_TITLES[$parentKey];
+            }
+            if (in_array($parentKey, self::PART0_SECTION_KEYS, true)) {
+                return ControlledPublishingPart0PageService::PART_TITLE;
+            }
+            $parentId = $parent['parent_section_id'] !== null ? (int)$parent['parent_section_id'] : 0;
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function manualPartForSection(array $section, array $flatSections): int
+    {
+        $meta = $this->decodeMeta($section);
+        if (!empty($meta['manual_part'])) {
+            return (int)$meta['manual_part'];
+        }
+
+        $byId = array();
+        foreach ($flatSections as $row) {
+            $byId[(int)($row['id'] ?? 0)] = $row;
+        }
+
+        $parentId = $section['parent_section_id'] !== null ? (int)$section['parent_section_id'] : 0;
+        while ($parentId > 0) {
+            $parent = $byId[$parentId] ?? null;
+            if (!is_array($parent)) {
+                break;
+            }
+            $parentKey = (string)($parent['section_key'] ?? '');
+            if (preg_match('/^part_(\d+)$/', $parentKey, $m)) {
+                return (int)$m[1];
+            }
+            if ($parentKey === 'main_content') {
+                return 1;
+            }
+            $parentId = $parent['parent_section_id'] !== null ? (int)$parent['parent_section_id'] : 0;
+        }
+
+        return 0;
+    }
+
+    /**
      * Sidebar label for a chapter subsection.
      *
      * @param array<string,mixed> $row
      */
-    public static function navLabelForSection(array $row): string
+    public static function navLabelForSection(array $row, bool $uppercase = false): string
     {
         $meta = $row['metadata_json'] ?? null;
         if (is_string($meta)) {
             $meta = json_decode($meta, true);
         }
+        $label = '';
         if (is_array($meta) && trim((string)($meta['nav_label'] ?? '')) !== '') {
-            return trim((string)$meta['nav_label']);
+            $label = trim((string)$meta['nav_label']);
+        } else {
+            $title = trim((string)($row['title'] ?? ''));
+            $key = (string)($row['section_key'] ?? '');
+            if (preg_match('/_chapter_(\d+)$/', $key, $m) && $title !== '') {
+                $label = $m[1] . '. ' . $title;
+            } else {
+                $label = $title;
+            }
         }
 
-        $title = trim((string)($row['title'] ?? ''));
-        $key = (string)($row['section_key'] ?? '');
-        if (preg_match('/_chapter_(\d+)$/', $key, $m) && $title !== '') {
-            return $m[1] . '. ' . $title;
+        return $uppercase ? self::uppercaseNavLabel($label) : $label;
+    }
+
+    public static function uppercaseNavLabel(string $label): string
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return '';
+        }
+        if (preg_match('/^(\d+(?:\.\d+)*\.?\s+)(.+)$/u', $label, $m)) {
+            return $m[1] . mb_strtoupper($m[2], 'UTF-8');
+        }
+        return mb_strtoupper($label, 'UTF-8');
+    }
+
+    private function importChapterContent(
+        int $versionId,
+        int $sectionId,
+        array $sectionRow,
+        int $sourceSetId,
+        string $manualCode,
+        int $manualPart,
+        int $chapterNumber,
+        ?int $actorUserId
+    ): int {
+        $blocks = $this->blocks;
+        if ($blocks === null) {
+            return 0;
         }
 
-        return $title;
+        $created = 0;
+        $chapterTitle = trim((string)($sectionRow['title'] ?? 'Chapter ' . $chapterNumber));
+        $blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+            'html' => '<p>' . htmlspecialchars($chapterTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>',
+            'paragraph_style' => 'title',
+            'canonical_section_ref' => (string)$chapterNumber,
+        ), $actorUserId);
+        $created++;
+
+        $stmt = $this->pdo->prepare("
+            SELECT section_ref, title, body_text
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND manual_part = :manual_part
+              AND source_status = 'active'
+              AND section_ref REGEXP :pattern
+            ORDER BY section_ref
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
+            ':manual_part' => (string)$manualPart,
+            ':pattern' => '^' . $chapterNumber . '\\.[0-9]',
+        ));
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $ref = trim((string)($row['section_ref'] ?? ''));
+            if ($ref === '' || !str_contains($ref, '.')) {
+                continue;
+            }
+            $style = $this->sectionRefToParagraphStyle($ref);
+            if ($style === 'title') {
+                continue;
+            }
+
+            $parsed = $this->parseExcerptBody((string)($row['body_text'] ?? ''), $ref);
+            $headingText = $parsed['heading'] !== '' ? $parsed['heading'] : trim((string)($row['title'] ?? ''));
+            $headingText = $this->stripLeadingSectionRef($headingText, $ref);
+
+            if ($headingText !== '') {
+                $blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                    'html' => '<p>' . htmlspecialchars($headingText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>',
+                    'paragraph_style' => $style,
+                    'canonical_section_ref' => $ref,
+                ), $actorUserId);
+                $created++;
+            }
+
+            if ($parsed['body'] !== '') {
+                $blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                    'html' => $this->bodyTextToHtml($parsed['body']),
+                    'paragraph_style' => 'body',
+                ), $actorUserId);
+                $created++;
+            }
+        }
+
+        return $created;
+    }
+
+    private function sectionRefToParagraphStyle(string $sectionRef): string
+    {
+        $depth = substr_count($sectionRef, '.') + 1;
+        return match ($depth) {
+            1 => 'title',
+            2 => 'subtitle_1',
+            3 => 'subtitle_2',
+            4 => 'subtitle_3',
+            default => 'subtitle_4',
+        };
+    }
+
+    /**
+     * @return array{heading:string,body:string}
+     */
+    private function parseExcerptBody(string $bodyText, string $sectionRef): array
+    {
+        $text = str_replace('\\n', "\n", trim($bodyText));
+        if ($text === '') {
+            return array('heading' => '', 'body' => '');
+        }
+
+        $parts = preg_split("/\r\n|\n/", $text, 2) ?: array($text);
+        $heading = trim((string)($parts[0] ?? ''));
+        $body = trim((string)($parts[1] ?? ''));
+
+        if ($heading !== '' && $this->stripLeadingSectionRef($heading, $sectionRef) === '') {
+            $heading = trim((string)($parts[1] ?? ''));
+            $bodyParts = preg_split("/\r\n|\n/", $text, 3) ?: array();
+            $body = trim((string)($bodyParts[2] ?? ''));
+        }
+
+        return array(
+            'heading' => $this->stripLeadingSectionRef($heading, $sectionRef),
+            'body' => $body,
+        );
+    }
+
+    private function stripLeadingSectionRef(string $text, string $sectionRef): string
+    {
+        $text = trim($text);
+        $pattern = '/^' . preg_quote($sectionRef, '/') . '(?:\.|\s)+/u';
+        $stripped = preg_replace($pattern, '', $text);
+        return is_string($stripped) ? trim($stripped) : $text;
+    }
+
+    private function bodyTextToHtml(string $body): string
+    {
+        $paragraphs = preg_split("/\n\s*\n/", $body) ?: array($body);
+        $html = '';
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = trim($paragraph);
+            if ($paragraph === '') {
+                continue;
+            }
+            $lines = preg_split("/\r\n|\n/", $paragraph) ?: array($paragraph);
+            $inner = implode('<br>', array_map(
+                static fn(string $line): string => htmlspecialchars(trim($line), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                $lines
+            ));
+            $html .= '<p>' . $inner . '</p>';
+        }
+        if ($html === '') {
+            $html = '<p></p>';
+        }
+        return $html;
     }
 }

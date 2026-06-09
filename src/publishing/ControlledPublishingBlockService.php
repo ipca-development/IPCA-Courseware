@@ -377,7 +377,12 @@ final class ControlledPublishingBlockService
         if ($strict && trim(strip_tags($html)) === '') {
             throw new RuntimeException('Paragraph content is required.');
         }
-        return array_merge(array('html' => $html), $this->normalizeStyleFields($payload));
+        $out = array_merge(array('html' => $html), $this->normalizeStyleFields($payload));
+        $canonRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+        if ($canonRef !== '') {
+            $out['canonical_section_ref'] = $canonRef;
+        }
+        return $out;
     }
 
     /**

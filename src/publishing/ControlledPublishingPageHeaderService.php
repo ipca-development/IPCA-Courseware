@@ -19,6 +19,7 @@ final class ControlledPublishingPageHeaderService
         'date' => array('label' => 'Publication date', 'description' => 'Effective or release date'),
         'manual_code' => array('label' => 'Manual code', 'description' => 'Short manual identifier (e.g. OM)'),
         'book_title' => array('label' => 'Manual title', 'description' => 'Full manual title'),
+        'part_title' => array('label' => 'Part title', 'description' => 'Current manual part (e.g. Part 1 – General)'),
         'section_title' => array('label' => 'Section title', 'description' => 'Current section name'),
     );
 
@@ -38,7 +39,7 @@ final class ControlledPublishingPageHeaderService
             'logo_alt' => 'EuroPilot Center',
             'logo_max_height' => 40,
             'row_height' => 32,
-            'center_text' => "{manual_code}\n{section_title}",
+            'center_text' => "{book_title} ({manual_code})\n{part_title}",
             'center_font_family' => 'sans',
             'center_font_size' => 11,
             'center_font_bold' => true,
@@ -186,7 +187,7 @@ final class ControlledPublishingPageHeaderService
     /**
      * @param array<string,mixed> $version
      * @param array<string,mixed> $section
-     * @param array{page?:int|string,page_total?:int|string,editor_preview?:bool} $overrides
+     * @param array{page?:int|string,page_total?:int|string,editor_preview?:bool,part_title?:string} $overrides
      * @return array<string,string>
      */
     public function buildTokenContext(array $version, array $section, array $overrides = array()): array
@@ -214,6 +215,7 @@ final class ControlledPublishingPageHeaderService
             'date' => $dateFormatted,
             'manual_code' => $manualCode,
             'book_title' => (string)($version['book_title'] ?? $version['title'] ?? ''),
+            'part_title' => trim((string)($overrides['part_title'] ?? '')),
             'section_title' => (string)($section['title'] ?? ''),
         );
     }
@@ -306,6 +308,11 @@ final class ControlledPublishingPageHeaderService
             $logoUrl = '';
         }
 
+        $centerText = trim((string)($raw['center_text'] ?? $defaults['center_text']));
+        if ($centerText === "{manual_code}\n{section_title}") {
+            $centerText = (string)$defaults['center_text'];
+        }
+
         return array_merge(
             array(
                 'enabled' => array_key_exists('enabled', $raw) ? !empty($raw['enabled']) : (bool)$defaults['enabled'],
@@ -314,7 +321,7 @@ final class ControlledPublishingPageHeaderService
                 'logo_alt' => $this->truncate(trim((string)($raw['logo_alt'] ?? $defaults['logo_alt'])), 200),
                 'logo_max_height' => $this->normalizeLogoMaxHeight($raw['logo_max_height'] ?? $defaults['logo_max_height']),
                 'row_height' => $this->normalizeRowHeight($raw['row_height'] ?? $defaults['row_height']),
-                'center_text' => $this->truncate(trim((string)($raw['center_text'] ?? $defaults['center_text'])), 2000),
+                'center_text' => $this->truncate($centerText, 2000),
                 'right_text' => $this->truncate(trim((string)($raw['right_text'] ?? $defaults['right_text'])), 2000),
             ),
             $this->normalizeColumnTypography($raw, $defaults, 'center'),

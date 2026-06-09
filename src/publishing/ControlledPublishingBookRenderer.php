@@ -181,9 +181,7 @@ final class ControlledPublishingBookRenderer
             ? $config['page_footer']
             : $defaults['page_footer'];
 
-        $tokenContext = $headerSvc !== null
-            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
-            : array();
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
 
         $headerHtml = '';
         $footerHtml = '';
@@ -305,9 +303,7 @@ final class ControlledPublishingBookRenderer
             ? $config['page_footer']
             : $defaults['page_footer'];
 
-        $tokenContext = $headerSvc !== null
-            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
-            : array();
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
 
         $headerHtml = '';
         $footerHtml = '';
@@ -932,9 +928,7 @@ final class ControlledPublishingBookRenderer
             ? $headerSvc->shouldShowHeader($section, $pageHeader, $pageFooter, $layout)
             : (!empty($pageHeader['enabled']) || !empty($pageFooter['enabled']));
 
-        $tokenContext = $headerSvc !== null
-            ? $headerSvc->buildTokenContext($version, $section, array('editor_preview' => $mode === self::MODE_EDIT))
-            : array();
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
 
         $drop = $editable
             ? '<div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div>'
@@ -1170,7 +1164,9 @@ final class ControlledPublishingBookRenderer
         $style = $this->styleAttr($payload);
         $prefix = $this->renderSectionNumberPrefix($payload, $blockId);
         $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
-        return '<div class="cpb-paragraph-row">'
+        $canonRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+        $canonAttr = $canonRef !== '' ? ' data-canonical-section-ref="' . h($canonRef) . '"' : '';
+        return '<div class="cpb-paragraph-row"' . $canonAttr . '>'
             . $prefix . $regRef
             . '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>'
             . $html . '</div></div>';
@@ -2064,6 +2060,27 @@ final class ControlledPublishingBookRenderer
             'font_italic' => !empty($payload['font_italic']),
             'font_underline' => !empty($payload['font_underline']),
         );
+    }
+
+    /**
+     * @param array<string,mixed>|null $pageHeaderConfig
+     * @return array<string,string>
+     */
+    private function buildHeaderTokenContext(
+        array $version,
+        array $section,
+        string $mode,
+        ?array $pageHeaderConfig = null
+    ): array {
+        $headerSvc = $this->pageHeaderService;
+        if ($headerSvc === null) {
+            return array();
+        }
+        $overrides = array('editor_preview' => $mode === self::MODE_EDIT);
+        if (is_array($pageHeaderConfig['token_overrides'] ?? null)) {
+            $overrides = array_merge($overrides, $pageHeaderConfig['token_overrides']);
+        }
+        return $headerSvc->buildTokenContext($version, $section, $overrides);
     }
 
     /**
