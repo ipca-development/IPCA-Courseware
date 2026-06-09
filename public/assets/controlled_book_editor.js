@@ -1699,7 +1699,7 @@
           definition_status: status || (def ? 'confirmed' : 'needs_review'),
         });
       });
-      return { entries: abbrEntries, empty_rows: 0 };
+      return { entries: abbrEntries, empty_rows: 0, excluded: (state.part0Page && state.part0Page.excluded) ? state.part0Page.excluded.slice() : [] };
     }
     if (key === 'definitions') {
       var defEntries = [];
@@ -1807,6 +1807,64 @@
         flushPart0Save();
       });
     });
+
+    if (state.part0SectionKey === 'abbreviations') {
+      sheet.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('[data-abbr-action]');
+        if (!btn || !state.editable) return;
+        ev.preventDefault();
+        var abbr = (btn.getAttribute('data-abbr') || '').trim().toUpperCase();
+        if (!abbr) return;
+        if (btn.getAttribute('data-abbr-action') === 'remove') {
+          removeAbbreviationPermanently(abbr, btn.closest('.cpb-part0-abbr-row'));
+        } else if (btn.getAttribute('data-abbr-action') === 'find') {
+          findAbbreviationMentions(abbr);
+        }
+      });
+    }
+  }
+
+  function removeAbbreviationPermanently(abbr, rowEl) {
+    if (!confirm('Remove ' + abbr + ' from the abbreviations list permanently? It will not reappear when you Regenerate.')) return;
+    if (!state.part0Page) state.part0Page = {};
+    if (!Array.isArray(state.part0Page.excluded)) state.part0Page.excluded = [];
+    if (state.part0Page.excluded.indexOf(abbr) < 0) state.part0Page.excluded.push(abbr);
+    if (rowEl && rowEl.parentNode) rowEl.parentNode.removeChild(rowEl);
+    flushPart0Save();
+    setStatus(abbr + ' removed from list', 'saved');
+  }
+
+  function findAbbreviationMentions(abbr) {
+    setStatus('Searching for ' + abbr + '…', 'saving');
+    apiPost('find_abbreviation_mentions', {
+      version_id: state.versionId,
+      abbreviation: abbr,
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Search failed');
+      var mentions = res.mentions || [];
+      if (!mentions.length) {
+        setStatus(abbr + ' — no mentions found in manual content', 'warn');
+        return;
+      }
+      var lines = mentions.map(function (m, idx) {
+        return (idx + 1) + '. ' + (m.section_title || m.section_key || 'Section') + '\n   …' + (m.snippet || '') + '…';
+      });
+      var pick = window.prompt(abbr + ' appears in ' + mentions.length + ' place(s). Enter number to open section, or Cancel:\n\n' + lines.join('\n\n'));
+      if (pick === null) {
+        setStatus('Ready', 'saved');
+        return;
+      }
+      var n = parseInt(pick, 10);
+      if (!n || n < 1 || n > mentions.length) {
+        setStatus('Ready', 'saved');
+        return;
+      }
+      var target = mentions[n - 1];
+      if (target && target.section_id) {
+        loadSection(target.section_id);
+        setStatus('Opened: ' + (target.section_title || abbr), 'saved');
+      }
+    }).catch(showError);
   }
 
   function refreshPart0TypographyFromBookStyles() {
@@ -4606,7 +4664,36 @@
     setStatus(err && err.message ? err.message : 'Error', 'error');
   }
 
+  function isFormControl(el) {
+    if (!el || !el.tagName) return false;
+    var tag = el.tagName.toUpperCase();
+    return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON';
+  }
+
+  function isFormatEditingActive() {
+    if (!state.editable) return false;
+    var ae = document.activeElement;
+    if (!ae || !root.contains(ae)) return false;
+    if (isFormControl(ae) && !ae.isContentEditable) return false;
+    if (ae.isContentEditable && canvasEl.contains(ae)) return true;
+    return selectionInCanvas() && !!state.savedSelectionRange;
+  }
+
+  function focusFormatTarget() {
+    restoreSelectionRange();
+    var ae = document.activeElement;
+    if (ae && ae.isContentEditable && canvasEl.contains(ae)) return ae;
+    var target = getActiveStyleTarget();
+    if (target && target.el && target.el.isContentEditable) {
+      target.el.focus();
+      restoreSelectionRange();
+      return target.el;
+    }
+    return null;
+  }
+
   function execFormat(cmd, value) {
+    focusFormatTarget();
     document.execCommand(cmd, false, value || null);
     var sel = window.getSelection();
     if (!sel || !sel.anchorNode) return;
@@ -4664,7 +4751,10 @@
   });
 
   if (toolbarEl) {
-    toolbarEl.addEventListener('mousedown', function () {
+    toolbarEl.addEventListener('mousedown', function (e) {
+      if (e.target.closest('[data-cmd], [data-align], #cpbUndo, #cpbRedo, #cpbIndent, #cpbOutdent')) {
+        e.preventDefault();
+      }
       saveSelectionRange();
       rememberStyleTarget();
     }, true);
@@ -4906,6 +4996,16 @@
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
       e.preventDefault();
       doRedo();
+    } else if ((e.ctrlKey || e.metaKey) && isFormatEditingActive()) {
+      var key = (e.key || '').toLowerCase();
+      var formatCmd = null;
+      if (key === 'b') formatCmd = 'bold';
+      else if (key === 'i') formatCmd = 'italic';
+      else if (key === 'u') formatCmd = 'underline';
+      if (formatCmd) {
+        e.preventDefault();
+        execFormat(formatCmd);
+      }
     }
   });
 

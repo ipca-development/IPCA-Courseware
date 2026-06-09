@@ -256,7 +256,7 @@ final class ControlledPublishingManualStructureService
 
         foreach ($rows as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
-            if ($ref === '') {
+            if ($ref === '' || $this->isSkippableCanonicalExcerpt($ref, (string)($row['title'] ?? ''), '')) {
                 continue;
             }
             if (preg_match('/^(\d+)\.\d/', $ref, $m)) {
@@ -967,6 +967,9 @@ final class ControlledPublishingManualStructureService
             if ($ref === '' || !str_contains($ref, '.')) {
                 continue;
             }
+            if ($this->isSkippableCanonicalExcerpt($ref, (string)($row['title'] ?? ''), (string)($row['body_text'] ?? ''))) {
+                continue;
+            }
             $style = $this->sectionRefToParagraphStyle($ref);
             if ($style === 'title') {
                 continue;
@@ -1063,5 +1066,39 @@ final class ControlledPublishingManualStructureService
             $html = '<p></p>';
         }
         return $html;
+    }
+
+    /**
+     * OCR / table fragments mis-tagged as section excerpts (e.g. "1.000 Kg" under Part 3).
+     */
+    private function isSkippableCanonicalExcerpt(string $sectionRef, string $title, string $bodyText): bool
+    {
+        $sectionRef = trim($sectionRef);
+        $title = trim($title);
+        $bodyText = trim($bodyText);
+
+        if (preg_match('/^\d+\.\d{3,}$/', $sectionRef)) {
+            return true;
+        }
+        if (preg_match('/^\d{3,}$/', $sectionRef)) {
+            return true;
+        }
+        if (preg_match('/^\d+\.\d+\s*Kg$/i', $title) || preg_match('/^Kg$/i', $title)) {
+            return true;
+        }
+        if (preg_match('/^\d+\s*ft\b/i', $title)) {
+            return true;
+        }
+        if (preg_match('/Chapter\s+\d+,\s*Page\s+\d+/i', $bodyText) && strlen($bodyText) < 120) {
+            return true;
+        }
+        if (preg_match('/Take\s+Off/i', $title . ' ' . $bodyText) && !preg_match('/Route|Planning|NCO\.OP/i', $title . ' ' . $bodyText)) {
+            return true;
+        }
+        if (preg_match('/Cruise\s+performance|Landing\s+performance|Enroute\s+\/\s+Cruise/i', $title . ' ' . $bodyText)) {
+            return true;
+        }
+
+        return false;
     }
 }

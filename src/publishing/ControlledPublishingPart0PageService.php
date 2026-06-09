@@ -589,9 +589,11 @@ final class ControlledPublishingPart0PageService
             'entries' => array_values($merged),
             'empty_rows' => 0,
             'synced_from' => 'canonical',
+            'excluded' => is_array($existing['excluded'] ?? null) ? $existing['excluded'] : array(),
         ));
         $pageData = $this->completeAbbreviationDefinitions($versionId, $pageData, $actorUserId);
         $pageData = $this->mergePreservedAbbreviationEdits($existing, $pageData);
+        $pageData = $this->applyExcludedAbbreviations($pageData);
         $this->saveAbbreviationsPageForVersion($versionId, $pageData, $actorUserId);
 
         return array(
@@ -628,6 +630,9 @@ final class ControlledPublishingPart0PageService
         }
 
         foreach ($this->discoverAbbreviationsFromManual($versionId) as $abbr => $discovered) {
+            if ($this->isAbbreviationExcluded($abbr, $page)) {
+                continue;
+            }
             if (!isset($byAbbr[$abbr])) {
                 $byAbbr[$abbr] = array(
                     'abbreviation' => $abbr,
@@ -673,7 +678,66 @@ final class ControlledPublishingPart0PageService
 
         ksort($byAbbr, SORT_STRING);
         $page['entries'] = array_values($byAbbr);
+        $page = $this->applyExcludedAbbreviations($page);
         return $this->normalizeAbbreviationsPage($page);
+    }
+
+    /**
+     * @return list<array{section_id:int,section_title:string,section_key:string,block_id:int,snippet:string}>
+     */
+    public function findAbbreviationMentions(int $versionId, string $abbreviation, int $limit = 25): array
+    {
+        $abbreviation = strtoupper(trim($abbreviation));
+        if ($abbreviation === '') {
+            return array();
+        }
+
+        $pattern = '/\b' . preg_quote($abbreviation, '/') . '\b/u';
+        $mentions = array();
+        $stmt = $this->pdo->prepare("
+            SELECT
+              b.id AS block_id,
+              b.block_type,
+              b.payload_json,
+              s.id AS section_id,
+              s.title AS section_title,
+              s.section_key
+            FROM ipca_publishing_book_blocks b
+            INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
+            WHERE b.book_version_id = :version_id
+              AND s.section_key NOT IN ('cover','toc')
+            ORDER BY s.sort_order, s.id, b.sort_order, b.id
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row) || count($mentions) >= $limit) {
+                break;
+            }
+            $payload = json_decode((string)($row['payload_json'] ?? '{}'), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $text = $this->extractTextFromBlock((string)($row['block_type'] ?? ''), $payload);
+            if ($text === '' || !preg_match($pattern, $text)) {
+                continue;
+            }
+            if (preg_match($pattern, $text, $match, PREG_OFFSET_CAPTURE)) {
+                $pos = (int)($match[0][1] ?? 0);
+                $snippet = trim(substr($text, max(0, $pos - 40), 120));
+            } else {
+                $snippet = trim(substr($text, 0, 120));
+            }
+            $mentions[] = array(
+                'section_id' => (int)($row['section_id'] ?? 0),
+                'section_title' => trim((string)($row['section_title'] ?? '')),
+                'section_key' => trim((string)($row['section_key'] ?? '')),
+                'block_id' => (int)($row['block_id'] ?? 0),
+                'snippet' => $snippet,
+            );
+        }
+
+        return $mentions;
     }
 
     /**
@@ -1400,6 +1464,17 @@ final class ControlledPublishingPart0PageService
         if ($needsReview > 0) {
             $out['needs_review_count'] = $needsReview;
         }
+        $excluded = array();
+        foreach (is_array($raw['excluded'] ?? null) ? $raw['excluded'] : array() as $abbr) {
+            $abbr = strtoupper(trim((string)$abbr));
+            if ($abbr !== '') {
+                $excluded[$abbr] = true;
+            }
+        }
+        if ($excluded !== array()) {
+            $out['excluded'] = array_values(array_keys($excluded));
+            sort($out['excluded'], SORT_STRING);
+        }
         return $out;
     }
 
@@ -1461,7 +1536,56 @@ final class ControlledPublishingPart0PageService
 
         ksort($byAbbr, SORT_STRING);
         $page['entries'] = array_values($byAbbr);
+        if (is_array($existing['excluded'] ?? null)) {
+            $page['excluded'] = $existing['excluded'];
+        }
         return $this->normalizeAbbreviationsPage($page);
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>
+     */
+    private function applyExcludedAbbreviations(array $page): array
+    {
+        $excluded = array();
+        foreach (is_array($page['excluded'] ?? null) ? $page['excluded'] : array() as $abbr) {
+            $abbr = strtoupper(trim((string)$abbr));
+            if ($abbr !== '') {
+                $excluded[$abbr] = true;
+            }
+        }
+
+        $entries = array();
+        foreach (is_array($page['entries'] ?? null) ? $page['entries'] : array() as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $abbr = strtoupper(trim((string)($entry['abbreviation'] ?? '')));
+            if ($abbr === '' || isset($excluded[$abbr])) {
+                continue;
+            }
+            $entries[] = $entry;
+        }
+
+        $page['entries'] = $entries;
+        $page['excluded'] = array_keys($excluded);
+        sort($page['excluded'], SORT_STRING);
+        return $page;
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    private function isAbbreviationExcluded(string $abbreviation, array $page): bool
+    {
+        $abbreviation = strtoupper(trim($abbreviation));
+        foreach (is_array($page['excluded'] ?? null) ? $page['excluded'] : array() as $abbr) {
+            if (strtoupper(trim((string)$abbr)) === $abbreviation) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

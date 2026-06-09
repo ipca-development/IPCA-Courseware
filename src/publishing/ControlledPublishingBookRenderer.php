@@ -503,6 +503,14 @@ final class ControlledPublishingBookRenderer
                 $badge = '<span class="cpb-part0-abbr-flag cpb-part0-abbr-flag--ai" title="AI-suggested expansion — please verify">AI</span>';
             }
 
+            $actions = '';
+            if ($editable) {
+                $actions = '<span class="cpb-part0-abbr-actions">'
+                    . '<button type="button" class="cpb-part0-abbr-action" data-abbr-action="find" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Find mentions in manual">Find</button>'
+                    . '<button type="button" class="cpb-part0-abbr-action cpb-part0-abbr-action--remove" data-abbr-action="remove" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Remove from list permanently">Remove</button>'
+                    . '</span>';
+            }
+
             $defHtml = $def !== '' ? h($def) : ($editable ? 'Add meaning…' : '—');
             $defClass = 'cpb-part0-abbr-def ' . $bodyStyle['class'];
             if ($def === '') {
@@ -517,6 +525,7 @@ final class ControlledPublishingBookRenderer
                 . '<span class="' . $defClass . '" data-part0-col="definition"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $defHtml . '</span>'
                 . $badge
+                . $actions
                 . '</div>';
             $rowIdx++;
         }

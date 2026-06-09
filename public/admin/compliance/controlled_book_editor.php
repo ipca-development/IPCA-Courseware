@@ -108,9 +108,9 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
         </div>
         <div class="cpb-toolbar-group">
-          <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold"><strong>B</strong></button>
-          <button type="button" class="cpb-tool-btn" data-cmd="italic" title="Italic"><em>I</em></button>
-          <button type="button" class="cpb-tool-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+          <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+          <button type="button" class="cpb-tool-btn" data-cmd="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+          <button type="button" class="cpb-tool-btn" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
         </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-align="left" title="Align left">L</button>

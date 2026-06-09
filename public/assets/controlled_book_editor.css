@@ -935,6 +935,50 @@ body.cpb-browser-fullscreen .cpb-workspace {
   margin-bottom: 0;
 }
 
+.cpb-paragraph strong,
+.cpb-paragraph b,
+.cpb-heading strong,
+.cpb-heading b,
+.cpb-list strong,
+.cpb-list b,
+.cpb-table th strong,
+.cpb-table th b,
+.cpb-table td strong,
+.cpb-table td b,
+.cpb-callout-title strong,
+.cpb-callout-title b,
+.cpb-callout-text strong,
+.cpb-callout-text b {
+  font-weight: 700;
+}
+
+.cpb-paragraph em,
+.cpb-paragraph i,
+.cpb-heading em,
+.cpb-heading i,
+.cpb-list em,
+.cpb-list i,
+.cpb-table th em,
+.cpb-table th i,
+.cpb-table td em,
+.cpb-table td i,
+.cpb-callout-title em,
+.cpb-callout-title i,
+.cpb-callout-text em,
+.cpb-callout-text i {
+  font-style: italic;
+}
+
+.cpb-paragraph u,
+.cpb-heading u,
+.cpb-list u,
+.cpb-table th u,
+.cpb-table td u,
+.cpb-callout-title u,
+.cpb-callout-text u {
+  text-decoration: underline;
+}
+
 .cpb-font-serif {
   font-family: Georgia, 'Times New Roman', serif;
 }
@@ -2416,6 +2460,37 @@ body.cpb-browser-fullscreen .cpb-workspace {
   color: #1e40af;
   background: #dbeafe;
   border-color: #93c5fd;
+}
+
+.cpb-part0-abbr-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.cpb-part0-abbr-action {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.cpb-part0-abbr-action:hover {
+  background: #f1f5f9;
+}
+
+.cpb-part0-abbr-action--remove {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.cpb-part0-abbr-action--remove:hover {
+  background: #fef2f2;
 }
 
 .cpb-part0-def-term {

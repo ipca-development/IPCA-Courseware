@@ -130,6 +130,9 @@ try {
         case 'regenerate_abbreviations':
             cp_editor_handle_regenerate_abbreviations($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
             break;
+        case 'find_abbreviation_mentions':
+            cp_editor_handle_find_abbreviation_mentions($foundation, $part0PageSvc, $uid);
+            break;
         case 'regenerate_definitions':
             cp_editor_handle_regenerate_definitions($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
             break;
@@ -1548,6 +1551,29 @@ function cp_editor_handle_regenerate_abbreviations(
         }
     }
     cp_editor_json(200, $payload);
+}
+
+function cp_editor_handle_find_abbreviation_mentions(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $abbreviation = trim((string)($in['abbreviation'] ?? ''));
+    if ($versionId <= 0 || $abbreviation === '') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id and abbreviation required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    cp_editor_json(200, array(
+        'ok' => true,
+        'abbreviation' => strtoupper($abbreviation),
+        'mentions' => $part0PageSvc->findAbbreviationMentions($versionId, $abbreviation),
+    ));
 }
 
 function cp_editor_purge_highlights_placeholders(
