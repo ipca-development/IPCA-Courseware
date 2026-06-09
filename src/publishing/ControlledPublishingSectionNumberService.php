@@ -43,12 +43,24 @@ final class ControlledPublishingSectionNumberService
         $nearest = array();
         $suggested = array();
         $currentNearest = '';
+        $currentSectionId = 0;
 
         foreach ($rows as $row) {
             $blockId = (int)($row['id'] ?? 0);
             if ($blockId <= 0) {
                 continue;
             }
+
+            $sectionId = (int)($row['section_id'] ?? 0);
+            if ($sectionId !== $currentSectionId) {
+                $currentSectionId = $sectionId;
+                $counters = array(0, 0, 0, 0, 0, 0);
+                $chapterNumber = $this->chapterNumberFromSectionMeta($row['section_metadata'] ?? null);
+                if ($chapterNumber > 0) {
+                    $counters[0] = $chapterNumber - 1;
+                }
+            }
+
             $payload = $this->blocks->decodePayload($row);
             $style = $this->resolveParagraphStyle((string)($row['block_type'] ?? ''), $payload);
             $nearest[$blockId] = $currentNearest;
@@ -60,6 +72,17 @@ final class ControlledPublishingSectionNumberService
 
             $depth = self::NUMBERED_STYLE_DEPTHS[$style] ?? 0;
             if ($depth <= 0) {
+                continue;
+            }
+
+            $canonRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+            if ($canonRef !== '' && $this->applyCanonicalSectionRef($canonRef, $style, $counters, $numbers, $display, $blockId)) {
+                $displayText = $display[$blockId];
+                $currentNearest = $displayText;
+                $nearest[$blockId] = $displayText;
+                if ($manualCode !== '') {
+                    $suggested[$blockId] = $this->formatRegulatoryRef($manualCode, $displayText);
+                }
                 continue;
             }
 
@@ -90,6 +113,53 @@ final class ControlledPublishingSectionNumberService
             'nearest_section_number' => $nearest,
             'suggested_regulatory_refs' => $suggested,
         );
+    }
+
+    /**
+     * @param array<int,int> $counters
+     * @param array<int,string> $numbers
+     * @param array<int,string> $display
+     */
+    private function applyCanonicalSectionRef(
+        string $canonRef,
+        string $style,
+        array &$counters,
+        array &$numbers,
+        array &$display,
+        int $blockId
+    ): bool {
+        if (!preg_match('/^\d+(?:\.\d+)*$/', $canonRef)) {
+            return false;
+        }
+
+        $segments = array_map('intval', explode('.', $canonRef));
+        $depth = count($segments);
+        if ($depth <= 0) {
+            return false;
+        }
+
+        for ($i = 0; $i < count($counters); $i++) {
+            $counters[$i] = $i < $depth ? $segments[$i] : 0;
+        }
+
+        $displayText = $style === 'title' ? $canonRef . '.' : $canonRef;
+        $numbers[$blockId] = $canonRef;
+        $display[$blockId] = $displayText;
+        return true;
+    }
+
+    /**
+     * @param mixed $sectionMetadata
+     */
+    private function chapterNumberFromSectionMeta(mixed $sectionMetadata): int
+    {
+        if (is_string($sectionMetadata)) {
+            $sectionMetadata = json_decode($sectionMetadata, true);
+        }
+        if (!is_array($sectionMetadata)) {
+            return 0;
+        }
+        return (int)($sectionMetadata['chapter_number'] ?? 0);
     }
 
     public function formatRegulatoryRef(string $manualCode, string $sectionNumberDisplay): string
@@ -134,12 +204,24 @@ final class ControlledPublishingSectionNumberService
     private function listNumberedBlocks(int $versionId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT b.*
+            SELECT
+              b.*,
+              s.metadata_json AS section_metadata
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
+            LEFT JOIN ipca_publishing_book_sections ps ON ps.id = s.parent_section_id
             WHERE b.book_version_id = :version_id
-              AND s.section_key NOT IN ('toc', 'highlights', 'cover')
-            ORDER BY s.sort_order, s.id, b.sort_order, b.id
+              AND s.section_key NOT IN (
+                'toc', 'highlights', 'cover', 'lep', 'revision_system',
+                'amendment_list', 'distribution_list', 'abbreviations', 'definitions',
+                'part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'
+              )
+            ORDER BY
+              COALESCE(ps.sort_order, s.sort_order),
+              s.sort_order,
+              s.id,
+              b.sort_order,
+              b.id
         ");
         $stmt->execute(array(':version_id' => $versionId));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
