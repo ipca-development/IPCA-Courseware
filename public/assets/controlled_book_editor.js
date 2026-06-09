@@ -1583,6 +1583,9 @@
     var regenBtn = (state.part0SectionKey === 'abbreviations' || state.part0SectionKey === 'definitions')
       ? '<button type="button" class="cpb-tool-btn cpb-part0-regenerate" title="Regenerate from manual content">Regenerate</button>'
       : '';
+    var importBtn = state.part0SectionKey === 'definitions'
+      ? '<button type="button" class="cpb-tool-btn" id="cpbPart0ImportDefinitions" title="Paste definitions from Word/PDF">Import</button>'
+      : '';
     if (toolbarPart0El.getAttribute('data-part0-wired') !== '1') {
       toolbarPart0El.innerHTML = ''
         + '<div class="cpb-toolbar-group cpb-toolbar-group--part0-label">'
@@ -1590,6 +1593,7 @@
         + '</div>'
         + '<div class="cpb-toolbar-group">'
         + regenBtn
+        + importBtn
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0Save" title="Save page">Save</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenHeader" title="Page header editor">Header</button>'
         + '</div>';
@@ -1611,11 +1615,14 @@
       toolbarPart0El.querySelector('#cpbPart0OpenHeader').addEventListener('click', function () {
         openHeaderEditor();
       });
+      wireDefinitionsImportButton();
     } else {
       var labelEl = toolbarPart0El.querySelector('[data-part0-toolbar-label="1"]');
       if (labelEl) labelEl.textContent = part0PageLabel();
       var existingRegen = toolbarPart0El.querySelector('.cpb-part0-regenerate');
+      var existingImport = toolbarPart0El.querySelector('#cpbPart0ImportDefinitions');
       var wantsRegen = state.part0SectionKey === 'abbreviations' || state.part0SectionKey === 'definitions';
+      var wantsImport = state.part0SectionKey === 'definitions';
       if (wantsRegen && !existingRegen) {
         var group = toolbarPart0El.querySelector('.cpb-toolbar-group:last-child');
         if (group) {
@@ -1633,7 +1640,75 @@
       } else if (!wantsRegen && existingRegen) {
         existingRegen.remove();
       }
+      if (wantsImport && !existingImport) {
+        var group = toolbarPart0El.querySelector('.cpb-toolbar-group:last-child');
+        if (group) {
+          var importEl = document.createElement('button');
+          importEl.type = 'button';
+          importEl.className = 'cpb-tool-btn';
+          importEl.id = 'cpbPart0ImportDefinitions';
+          importEl.title = 'Paste definitions from Word/PDF';
+          importEl.textContent = 'Import';
+          group.insertBefore(importEl, group.querySelector('#cpbPart0Save'));
+          wireDefinitionsImportButton();
+        }
+      } else if (!wantsImport && existingImport) {
+        existingImport.remove();
+      }
     }
+  }
+
+  function wireDefinitionsImportButton() {
+    var btn = document.getElementById('cpbPart0ImportDefinitions');
+    if (!btn || btn.getAttribute('data-import-wired') === '1') return;
+    btn.setAttribute('data-import-wired', '1');
+    btn.addEventListener('click', openDefinitionsImportDialog);
+  }
+
+  function openDefinitionsImportDialog() {
+    var overlay = document.getElementById('cpbDefinitionsImport');
+    var textarea = document.getElementById('cpbDefinitionsImportText');
+    var cancelBtn = document.getElementById('cpbDefinitionsImportCancel');
+    var submitBtn = document.getElementById('cpbDefinitionsImportSubmit');
+    if (!overlay || !textarea || !cancelBtn || !submitBtn) return;
+    textarea.value = '';
+    overlay.hidden = false;
+    overlay.setAttribute('aria-hidden', 'false');
+    textarea.focus();
+    function closeDialog() {
+      overlay.hidden = true;
+      overlay.setAttribute('aria-hidden', 'true');
+      cancelBtn.removeEventListener('click', closeDialog);
+      submitBtn.removeEventListener('click', submitImport);
+    }
+    function submitImport() {
+      var text = textarea.value.trim();
+      if (!text) {
+        showError(new Error('Paste the 0.6 Definitions and Terms text first.'));
+        return;
+      }
+      closeDialog();
+      setStatus('Importing definitions…', 'saving');
+      apiPost('import_definitions_text', {
+        version_id: state.versionId,
+        section_id: state.sectionId,
+        definitions_text: text,
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Import failed');
+        var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+        state.part0Page = res.part0_page || state.part0Page;
+        if (res.page_html) {
+          canvasEl.innerHTML = res.page_html;
+          wireCanvas();
+          refreshPart0TypographyFromBookStyles();
+          setStatus('Definitions imported (' + count + ' entries)', 'saved');
+        } else {
+          return loadSection(state.sectionId);
+        }
+      }).catch(showError);
+    }
+    cancelBtn.addEventListener('click', closeDialog);
+    submitBtn.addEventListener('click', submitImport);
   }
 
   function extractPart0HeadingsFromCanvas() {

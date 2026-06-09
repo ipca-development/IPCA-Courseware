@@ -160,6 +160,11 @@ compliance_page_open(array(
             'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
             'variant' => 'primary',
         ),
+        array(
+            'label' => 'Import from Word',
+            'href' => '/admin/compliance/controlled_book_docx_import.php?version_id=' . $versionId,
+            'variant' => 'secondary',
+        ),
     ),
 ));
 

@@ -2525,6 +2525,86 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: none !important;
 }
 
+.cpb-definitions-import {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 24px;
+}
+
+.cpb-definitions-import[hidden] {
+  display: none !important;
+}
+
+.cpb-definitions-import__dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #dbe3ef;
+  box-shadow: 0 24px 48px rgba(15, 39, 68, 0.18);
+  padding: 20px 22px;
+}
+
+.cpb-definitions-import__dialog h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #0f2744;
+}
+
+.cpb-definitions-import__help {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.cpb-definitions-import__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: 12px/1.45 Georgia, 'Times New Roman', serif;
+  resize: vertical;
+  min-height: 280px;
+}
+
+.cpb-definitions-import__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cmp-page .cpb-editor-root .cpb-definitions-import__actions button.cpb-tool-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  padding: 0 12px !important;
+  border: 1px solid #d1dae6 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #334155 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-definitions-import__actions button.cpb-definitions-import__submit {
+  background: #1e3c72 !important;
+  border-color: #1e3c72 !important;
+  color: #fff !important;
+}
+
 .cpb-sheet--part0 [data-part0-field][contenteditable="true"]:focus,
 .cpb-sheet--part0 [data-part0-col][contenteditable="true"]:focus {
   outline: 2px solid rgba(15, 39, 68, 0.25);

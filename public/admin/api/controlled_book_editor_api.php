@@ -136,6 +136,9 @@ try {
         case 'regenerate_definitions':
             cp_editor_handle_regenerate_definitions($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
             break;
+        case 'import_definitions_text':
+            cp_editor_handle_import_definitions_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
+            break;
         case 'get_callout_presets':
             cp_editor_handle_get_callout_presets($foundation);
             break;
@@ -1619,6 +1622,82 @@ function cp_editor_handle_regenerate_definitions(
     }
 
     $result = $part0PageSvc->regenerateDefinitionsFromManual($versionId, $uid);
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    $payload = array(
+        'ok' => true,
+        'result' => $result,
+        'part0_page' => $part0PageSvc->resolveDefinitionsFromVersion($version),
+    );
+    if ($sectionId <= 0) {
+        $sectionId = (int)($result['section_id'] ?? 0);
+    }
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+            $pageLayout = $layoutSvc->resolveLayout($section);
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $blocksHtml = $renderer->renderBlocks($sectionBlocks, ControlledPublishingBookRenderer::MODE_EDIT);
+            $payload['page_html'] = cp_editor_render_page_html(
+                $renderer,
+                $version,
+                $section,
+                $blocksHtml,
+                ControlledPublishingBookRenderer::MODE_EDIT,
+                $pageLayout,
+                $pageHeaderConfig,
+                $coverPageSvc,
+                $lepPageSvc,
+                $approvalSvc,
+                $part0PageSvc,
+                $sectionBlocks
+            );
+        }
+    }
+    cp_editor_json(200, $payload);
+}
+
+function cp_editor_handle_import_definitions_text(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $text = trim((string)($in['definitions_text'] ?? ''));
+    if ($versionId <= 0 || $text === '') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id and definitions_text required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
+    }
+
+    try {
+        $result = $part0PageSvc->importDefinitionsFromText($versionId, $text, $uid, true);
+    } catch (RuntimeException $e) {
+        cp_editor_json(400, array('ok' => false, 'error' => $e->getMessage()));
+    }
+
     $version = $foundation->getVersion($versionId);
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));

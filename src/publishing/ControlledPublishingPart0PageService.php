@@ -1719,6 +1719,125 @@ final class ControlledPublishingPart0PageService
     }
 
     /**
+     * Import definitions pasted from Word/PDF (0.6 section). Optionally updates canonical source.
+     *
+     * @return array{section_id:int,entries_count:int,source:string}
+     */
+    public function importDefinitionsFromText(
+        int $versionId,
+        string $text,
+        ?int $actorUserId = null,
+        bool $updateCanonical = true
+    ): array {
+        $text = trim($text);
+        if ($text === '') {
+            throw new RuntimeException('Paste the 0.6 Definitions and Terms text from your manual first.');
+        }
+
+        $parsed = $this->parseDefinitionsBodyText($text);
+        if (count($parsed) < 2) {
+            throw new RuntimeException(
+                'Could not parse enough definitions from the pasted text. '
+                . 'Copy the full 0.6 section from Word (term + definition columns) and try again.'
+            );
+        }
+
+        $existing = $this->resolveDefinitionsFromVersion($this->requireVersion($versionId));
+        $pageData = $this->normalizeDefinitionsPage(array(
+            'entries' => $this->mergePreservedDefinitionEdits($existing, $parsed),
+            'empty_rows' => 0,
+            'synced_from' => 'imported',
+        ));
+        $this->saveStructuredPage($versionId, 'definitions', $pageData);
+
+        if ($updateCanonical) {
+            $this->syncDefinitionsToCanonical($versionId, $pageData['entries']);
+        }
+
+        return array(
+            'section_id' => $this->sectionIdByKey($versionId, 'definitions'),
+            'entries_count' => count($pageData['entries']),
+            'source' => 'imported',
+        );
+    }
+
+    /**
+     * @param list<array{term:string,definition:string}> $entries
+     */
+    private function syncDefinitionsToCanonical(int $versionId, array $entries): void
+    {
+        $sourceSetId = $this->resolveManualSourceSetId($versionId);
+        if ($sourceSetId <= 0 || $entries === array()) {
+            return;
+        }
+
+        $lines = array('0.6 DEFINITIONS AND TERMS', '');
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = trim((string)($entry['term'] ?? ''));
+            $definition = trim((string)($entry['definition'] ?? ''));
+            if ($term === '' || $definition === '') {
+                continue;
+            }
+            $lines[] = $term . ': ' . $definition;
+        }
+        $body = trim(implode("\n", $lines));
+        if ($body === '') {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_canonical_excerpts
+            SET body_text = :body_text,
+                content_hash = :content_hash,
+                source_hash = :content_hash,
+                last_synced_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE source_set_id = :source_set_id
+              AND section_ref = '0.6'
+        ");
+        $hash = hash('sha256', $body);
+        $stmt->execute(array(
+            ':body_text' => $body,
+            ':content_hash' => $hash,
+            ':source_set_id' => $sourceSetId,
+        ));
+        if ($stmt->rowCount() > 0) {
+            return;
+        }
+
+        $existing = $this->pdo->prepare("
+            SELECT source_document_id, manual_code, excerpt_key
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+            ORDER BY id
+            LIMIT 1
+        ");
+        $existing->execute(array(':source_set_id' => $sourceSetId));
+        $row = $existing->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return;
+        }
+
+        $insert = $this->pdo->prepare("
+            INSERT INTO ipca_canonical_excerpts
+                (source_set_id, source_document_id, excerpt_key, manual_code, section_ref, title, body_text, source_file, content_hash, source_hash)
+            VALUES
+                (:source_set_id, :source_document_id, :excerpt_key, :manual_code, '0.6', 'DEFINITIONS AND TERMS', :body_text, 'editor_import', :content_hash, :content_hash)
+        ");
+        $insert->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':source_document_id' => (int)($row['source_document_id'] ?? 0),
+            ':excerpt_key' => (string)($row['excerpt_key'] ?? 'OM6_P0_0.6'),
+            ':manual_code' => (string)($row['manual_code'] ?? 'OM'),
+            ':body_text' => $body,
+            ':content_hash' => $hash,
+        ));
+    }
+
+    /**
      * @return array{section_id:int,entries_count:int,source:string}
      */
     public function importDefinitionsFromCanonical(int $versionId, ?int $actorUserId = null): array
@@ -2011,6 +2130,9 @@ final class ControlledPublishingPart0PageService
             return array();
         }
 
+        $body = strip_tags($body);
+        $body = preg_replace('/\*\*([^*]+)\*\*/u', '$1', $body) ?? $body;
+
         $entries = array();
         $lines = preg_split('/\R/u', $body) ?: array();
         foreach ($lines as $line) {
@@ -2024,18 +2146,44 @@ final class ControlledPublishingPart0PageService
             if (preg_match('/^[-•*]\s*(.+)$/u', $line, $bullet)) {
                 $line = trim((string)$bullet[1]);
             }
-            if (!preg_match('/^([^:]+):\s*(.+)$/u', $line, $m)) {
+
+            if (str_contains($line, "\t")) {
+                $parts = preg_split('/\t+/u', $line) ?: array();
+                if (count($parts) >= 2) {
+                    $term = trim((string)$parts[0]);
+                    $definition = trim(implode(' ', array_slice($parts, 1)));
+                    if ($term !== '' && $definition !== '') {
+                        $entries[$this->definitionKey($term)] = array(
+                            'term' => $this->cleanDefinitionTerm($term),
+                            'definition' => $definition,
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            if (preg_match('/^([^:]+):\s*(.+)$/u', $line, $m)) {
+                $term = $this->cleanDefinitionTerm(trim($m[1]));
+                $definition = trim($m[2]);
+                if ($term !== '' && $definition !== '') {
+                    $entries[$this->definitionKey($term)] = array(
+                        'term' => $term,
+                        'definition' => $definition,
+                    );
+                }
                 continue;
             }
-            $term = trim($m[1]);
-            $definition = trim($m[2]);
-            if ($term === '' || $definition === '') {
-                continue;
+
+            if (preg_match('/^(.+?)\s+(means|refers to)\s+(.+)$/iu', $line, $m)) {
+                $term = $this->cleanDefinitionTerm(trim($m[1]));
+                $definition = trim($m[2] . ' ' . $m[3]);
+                if ($term !== '' && $definition !== '') {
+                    $entries[$this->definitionKey($term)] = array(
+                        'term' => $term,
+                        'definition' => $definition,
+                    );
+                }
             }
-            $entries[$this->definitionKey($term)] = array(
-                'term' => $term,
-                'definition' => $definition,
-            );
         }
 
         if (count($entries) >= 10) {
@@ -2055,13 +2203,21 @@ final class ControlledPublishingPart0PageService
             if (count($blockLines) < 2) {
                 continue;
             }
-            $term = trim((string)$blockLines[0]);
+            $term = $this->cleanDefinitionTerm(trim((string)$blockLines[0]));
             if ($term === '' || preg_match('/^(Means|Refers to|Note)\b/i', $term)) {
                 continue;
             }
             $definition = trim(implode("\n", array_slice($blockLines, 1)));
-            if ($definition === '' || !preg_match('/^(Means|Refers to)\b/i', $definition)) {
+            if ($definition === '') {
                 continue;
+            }
+            if (!preg_match('/^(Means|Refers to)\b/i', $definition)) {
+                if (preg_match('/^([^:]+):\s*(.+)$/u', $term . ': ' . $definition, $inline)) {
+                    $term = $this->cleanDefinitionTerm(trim($inline[1]));
+                    $definition = trim($inline[2]);
+                } else {
+                    continue;
+                }
             }
             $entries[$this->definitionKey($term)] = array(
                 'term' => $term,
@@ -2069,7 +2225,37 @@ final class ControlledPublishingPart0PageService
             );
         }
 
+        if (count($entries) < 10) {
+            $pendingTerm = '';
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || preg_match('/^0\.6\b/i', $line) || preg_match('/^DEFINITIONS AND TERMS$/i', $line)) {
+                    continue;
+                }
+                if (preg_match('/^(means|refers to)\s+/iu', $line)) {
+                    if ($pendingTerm !== '') {
+                        $entries[$this->definitionKey($pendingTerm)] = array(
+                            'term' => $pendingTerm,
+                            'definition' => $line,
+                        );
+                        $pendingTerm = '';
+                    }
+                    continue;
+                }
+                if (!preg_match('/[.!?]$/u', $line) && strlen($line) < 120 && !preg_match('/^(means|refers to)\b/iu', $line)) {
+                    $pendingTerm = $this->cleanDefinitionTerm($line);
+                }
+            }
+        }
+
         return array_values($entries);
+    }
+
+    private function cleanDefinitionTerm(string $term): string
+    {
+        $term = trim($term);
+        $term = preg_replace('/\s+/u', ' ', $term) ?? $term;
+        return trim($term, " \t\n\r\0\x0B:.");
     }
 
     private function resolveManualSourceSetId(int $versionId): int

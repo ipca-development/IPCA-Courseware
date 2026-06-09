@@ -201,6 +201,17 @@ compliance_page_open(array(
   <input type="file" id="cpbHeaderLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbCoverLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbCoverImageInput" accept="image/jpeg,image/png,image/webp" hidden>
+  <div class="cpb-definitions-import" id="cpbDefinitionsImport" hidden aria-hidden="true">
+    <div class="cpb-definitions-import__dialog" role="dialog" aria-labelledby="cpbDefinitionsImportTitle">
+      <h3 id="cpbDefinitionsImportTitle">Import definitions from Word</h3>
+      <p class="cpb-definitions-import__help">Open your OM Word/PDF, select the full <strong>0.6 Definitions and Terms</strong> section (all pages), copy, and paste below. Existing saved definitions are kept when the term matches.</p>
+      <textarea id="cpbDefinitionsImportText" class="cpb-definitions-import__textarea" rows="16" placeholder="Paste 0.6 Definitions and Terms here…"></textarea>
+      <div class="cpb-definitions-import__actions">
+        <button type="button" class="cpb-tool-btn" id="cpbDefinitionsImportCancel">Cancel</button>
+        <button type="button" class="cpb-tool-btn cpb-definitions-import__submit" id="cpbDefinitionsImportSubmit">Import</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>
