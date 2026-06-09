@@ -893,6 +893,9 @@
           scheduleSave(blockEl);
         });
         field.addEventListener('blur', function () {
+          if (field.classList.contains('cpb-list')) {
+            repairListDomStructure(field);
+          }
           flushSave(blockEl);
         });
       });
@@ -2508,6 +2511,51 @@
     return tmp.innerHTML;
   }
 
+  function splitMergedListItemText(text) {
+    text = String(text || '').replace(/\u00a0/g, ' ').trim();
+    if (!text) return [];
+    var lines = text.split(/\n+/).map(function (line) { return line.trim(); }).filter(Boolean);
+    if (lines.length > 1) return lines;
+    if (/[•·▪‣]\s/.test(text)) {
+      return text.split(/\s*[•·▪‣]\s+/).map(function (part) { return part.trim(); }).filter(Boolean);
+    }
+    if (/\.\s+(?=[A-Z0-9(])/.test(text) && text.length > 120) {
+      return text.split(/\.\s+(?=[A-Z0-9(])/).map(function (part, idx, arr) {
+        var chunk = part.trim();
+        if (!chunk) return '';
+        if (idx < arr.length - 1 && !/[.!?]$/.test(chunk)) chunk += '.';
+        return chunk;
+      }).filter(Boolean);
+    }
+    return [text];
+  }
+
+  function normalizeListItemsFromElement(list) {
+    var items = [];
+    if (!list) return items;
+    var lis = list.querySelectorAll('li');
+    if (lis.length === 1) {
+      return splitMergedListItemText(lis[0].textContent);
+    }
+    lis.forEach(function (li) {
+      var t = li.textContent.replace(/\u00a0/g, ' ').trim();
+      if (t) items.push(t);
+    });
+    return items;
+  }
+
+  function repairListDomStructure(list) {
+    if (!list || (list.tagName !== 'UL' && list.tagName !== 'OL')) return false;
+    var items = normalizeListItemsFromElement(list);
+    if (items.length <= 1) return false;
+    var lis = list.querySelectorAll('li');
+    if (lis.length !== 1) return false;
+    list.innerHTML = items.map(function (item) {
+      return '<li>' + item.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</li>';
+    }).join('');
+    return true;
+  }
+
   function stripLeadingSectionNumberText(text) {
     text = String(text || '').trim();
     var prev = null;
@@ -2534,14 +2582,9 @@
     }
     if (blockType === 'list') {
       var list = blockEl.querySelector('.cpb-list');
+      repairListDomStructure(list);
       var ordered = list && list.tagName === 'OL';
-      var items = [];
-      if (list) {
-        list.querySelectorAll('li').forEach(function (li) {
-          var t = li.textContent.trim();
-          if (t) items.push(t);
-        });
-      }
+      var items = normalizeListItemsFromElement(list);
       return Object.assign({ ordered: ordered, items: items }, extractStyleFields(blockEl, 'list'));
     }
     if (blockType === 'table') {

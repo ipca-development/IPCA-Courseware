@@ -2467,30 +2467,47 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: inline-flex;
   gap: 4px;
   margin-left: 6px;
+  align-items: center;
 }
 
-.cpb-part0-abbr-action {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #334155;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 1.2;
-  padding: 2px 6px;
-  cursor: pointer;
+/* Match compact toolbar buttons — override global .cmp-page button pill styling */
+.cmp-page .cpb-editor-root .cpb-part0-abbr-actions button.cpb-tool-btn.cpb-part0-abbr-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 22px !important;
+  height: 20px !important;
+  padding: 0 6px !important;
+  border: 1px solid #d1dae6 !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: #334155 !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transform: none !important;
+  white-space: nowrap !important;
 }
 
-.cpb-part0-abbr-action:hover {
-  background: #f1f5f9;
+.cmp-page .cpb-editor-root .cpb-part0-abbr-actions button.cpb-tool-btn.cpb-part0-abbr-btn:hover {
+  background: #f8fafc !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+  transform: none !important;
 }
 
-.cpb-part0-abbr-action--remove {
-  color: #b91c1c;
-  border-color: #fecaca;
+.cmp-page .cpb-editor-root .cpb-part0-abbr-actions button.cpb-tool-btn.cpb-part0-abbr-btn--remove {
+  color: #b91c1c !important;
+  border-color: #fecaca !important;
 }
 
-.cpb-part0-abbr-action--remove:hover {
-  background: #fef2f2;
+.cmp-page .cpb-editor-root .cpb-part0-abbr-actions button.cpb-tool-btn.cpb-part0-abbr-btn--remove:hover {
+  background: #fef2f2 !important;
+  border-color: #f87171 !important;
 }
 
 .cpb-part0-def-term {

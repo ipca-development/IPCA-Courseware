@@ -506,8 +506,8 @@ final class ControlledPublishingBookRenderer
             $actions = '';
             if ($editable) {
                 $actions = '<span class="cpb-part0-abbr-actions">'
-                    . '<button type="button" class="cpb-part0-abbr-action" data-abbr-action="find" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Find mentions in manual">Find</button>'
-                    . '<button type="button" class="cpb-part0-abbr-action cpb-part0-abbr-action--remove" data-abbr-action="remove" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Remove from list permanently">Remove</button>'
+                    . '<button type="button" class="cpb-tool-btn cpb-part0-abbr-btn" data-abbr-action="find" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Find mentions in manual">Find</button>'
+                    . '<button type="button" class="cpb-tool-btn cpb-part0-abbr-btn cpb-part0-abbr-btn--remove" data-abbr-action="remove" data-abbr="' . h((string)($entry['abbreviation'] ?? '')) . '" title="Remove from list permanently">Remove</button>'
                     . '</span>';
             }
 

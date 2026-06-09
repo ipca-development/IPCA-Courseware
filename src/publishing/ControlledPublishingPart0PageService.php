@@ -657,7 +657,7 @@ final class ControlledPublishingPart0PageService
             }
         }
 
-        $byAbbr = $this->applyCommonAbbreviationDefinitions($byAbbr);
+        $byAbbr = $this->applyCommonAbbreviationDefinitions($versionId, $byAbbr, $page);
         $byAbbr = $this->fillAbbreviationDefinitionsWithAi($versionId, $byAbbr);
 
         foreach ($byAbbr as $abbr => $entry) {
@@ -988,7 +988,7 @@ final class ControlledPublishingPart0PageService
      */
     private function discoverAbbreviationsFromManual(int $versionId): array
     {
-        $text = $this->collectFullManualPlainText($versionId, 500000);
+        $text = $this->collectManualTextForDiscovery($versionId, 500000);
         if ($text === '') {
             return array();
         }
@@ -999,7 +999,7 @@ final class ControlledPublishingPart0PageService
         }
 
         $counts = array();
-        if (preg_match_all('/\b([A-Z][A-Z0-9\/\.]{1,11})\b/u', $text, $matches)) {
+        if (preg_match_all('/\b([A-Z][A-Z0-9\/\.]{1,11})(?:\'|\x{2019})?s?\b/u', $text, $matches)) {
             foreach ($matches[1] as $rawToken) {
                 $token = $this->normalizeAbbreviationToken($rawToken);
                 if ($token === '') {
@@ -1030,35 +1030,64 @@ final class ControlledPublishingPart0PageService
     private function extractStrictParentheticalExpansions(string $text): array
     {
         $found = array();
-        if (!preg_match_all(
+        if (preg_match_all(
             '/\b([A-Z][A-Za-z]+(?:\s+[A-Za-z]+){1,8})\s*\(([A-Z][A-Z0-9\/\.]{1,11})\)/u',
             $text,
             $matches,
             PREG_SET_ORDER
         )) {
-            return $found;
+            foreach ($matches as $match) {
+                $definition = $this->cleanExpansionPhrase((string)$match[1]);
+                $abbr = $this->normalizeAbbreviationToken((string)$match[2]);
+                if ($abbr === '' || !$this->isAviationAbbreviationCandidate($abbr)) {
+                    continue;
+                }
+                if (!$this->looksLikeDefinitionPhrase($definition)) {
+                    continue;
+                }
+                if (!isset($found[$abbr])) {
+                    $found[$abbr] = $definition;
+                }
+            }
         }
 
-        foreach ($matches as $match) {
-            $definition = $this->cleanExpansionPhrase((string)$match[1]);
-            $abbr = $this->normalizeAbbreviationToken((string)$match[2]);
-            if ($abbr === '' || !$this->isAviationAbbreviationCandidate($abbr)) {
-                continue;
-            }
-            if (!$this->looksLikeDefinitionPhrase($definition)) {
-                continue;
-            }
-            if (!isset($found[$abbr])) {
-                $found[$abbr] = $definition;
+        if (preg_match_all(
+            '/\b([a-z][a-z0-9\-]+(?:\s+(?:and\s+|&\s+)?[a-z0-9\-]+){1,14})\s*\(([A-Z][A-Z0-9\/\.]{1,11})(?:\'|\x{2019})?s?\)/ui',
+            $text,
+            $reverseMatches,
+            PREG_SET_ORDER
+        )) {
+            foreach ($reverseMatches as $match) {
+                $definition = $this->cleanExpansionPhrase((string)$match[1]);
+                $abbr = $this->normalizeAbbreviationToken((string)$match[2]);
+                if ($abbr === '' || !$this->isAviationAbbreviationCandidate($abbr)) {
+                    continue;
+                }
+                if (!$this->looksLikeDefinitionPhrase($definition)) {
+                    continue;
+                }
+                if (!isset($found[$abbr])) {
+                    $found[$abbr] = $this->titleCaseExpansionPhrase($definition);
+                }
             }
         }
 
         return $found;
     }
 
+    private function titleCaseExpansionPhrase(string $phrase): string
+    {
+        $phrase = trim($phrase);
+        if ($phrase === '') {
+            return '';
+        }
+        return mb_convert_case($phrase, MB_CASE_TITLE, 'UTF-8');
+    }
+
     private function normalizeAbbreviationToken(string $token): string
     {
         $token = strtoupper(trim($token));
+        $token = preg_replace("/(?:'|\x{2019})S$/u", '', $token) ?? $token;
         $token = rtrim($token, '.,;:');
         if ($token === '' || strlen($token) > 12) {
             return '';
@@ -1158,6 +1187,23 @@ final class ControlledPublishingPart0PageService
         return $this->collectManualPlainText($versionId, $maxChars > 0 ? $maxChars : 500000);
     }
 
+    private function collectManualTextForDiscovery(int $versionId, int $maxChars = 500000): string
+    {
+        $canonical = $this->collectFullManualPlainText($versionId, $maxChars);
+        $published = $this->collectManualPlainText($versionId, $maxChars);
+        if ($canonical === '') {
+            return $published;
+        }
+        if ($published === '' || $published === $canonical) {
+            return $canonical;
+        }
+        $combined = trim($canonical . "\n\n" . $published);
+        if ($maxChars > 0 && strlen($combined) > $maxChars) {
+            $combined = substr($combined, 0, $maxChars);
+        }
+        return $combined;
+    }
+
     private function cleanExpansionPhrase(string $phrase): string
     {
         $phrase = trim($phrase);
@@ -1168,10 +1214,10 @@ final class ControlledPublishingPart0PageService
     private function looksLikeDefinitionPhrase(string $phrase): bool
     {
         $phrase = trim($phrase);
-        if ($phrase === '' || strlen($phrase) < 4 || strlen($phrase) > 90) {
+        if ($phrase === '' || strlen($phrase) < 4 || strlen($phrase) > 120) {
             return false;
         }
-        if (!preg_match('/^[A-Z]/', $phrase) || !preg_match('/[a-z]/', $phrase)) {
+        if (!preg_match('/[a-z]/u', $phrase)) {
             return false;
         }
         if (preg_match('/^(For|The aircraft shall|The decision|The minimum|The obstacle|Reference is made)\b/i', $phrase)) {
@@ -1185,8 +1231,7 @@ final class ControlledPublishingPart0PageService
         $rejectFragments = array(
             ' shall ', ' may ', ' must ', ' will ', ' should ', ' the ', ' and the ',
             ' not exceed', ' not installed', ' only commence', ' under visual',
-            ' approach and', ' repair station', ' deputy head', ' head of training',
-            ' head of training', ' deputy head', ' one attitude', ' and dme',
+            ' repair station', ' deputy head', ' head of training',
             ' manager are described', ' california usa', ' aerodrome operating minima',
             ' afis only', ' portable electronic device a portable', 'function display',
         );
@@ -1198,7 +1243,7 @@ final class ControlledPublishingPart0PageService
 
         $words = preg_split('/\s+/u', $phrase) ?: array();
         if (count($words) < 2 && !preg_match('/\-/u', $phrase)) {
-            if (!preg_match('/^[A-Z][a-z]{3,}$/u', $phrase)) {
+            if (!preg_match('/^[A-Za-z][a-z]{3,}$/u', $phrase)) {
                 return false;
             }
         }
@@ -1589,14 +1634,26 @@ final class ControlledPublishingPart0PageService
     }
 
     /**
+     * @param array<string,mixed> $page
      * @param array<string,array{abbreviation:string,definition:string,definition_status:string}> $byAbbr
      * @return array<string,array{abbreviation:string,definition:string,definition_status:string}>
      */
-    private function applyCommonAbbreviationDefinitions(array $byAbbr): array
+    private function applyCommonAbbreviationDefinitions(int $versionId, array $byAbbr, array $page): array
     {
+        $text = $this->collectManualTextForDiscovery($versionId, 500000);
         foreach (self::COMMON_AVIATION_ABBREVIATIONS as $abbr => $definition) {
-            if (!isset($byAbbr[$abbr])) {
+            if ($this->isAbbreviationExcluded($abbr, $page)) {
                 continue;
+            }
+            if ($text !== '' && !preg_match('/\b' . preg_quote($abbr, '/') . '(?:\'|\x{2019})?s?\b/ui', $text)) {
+                continue;
+            }
+            if (!isset($byAbbr[$abbr])) {
+                $byAbbr[$abbr] = array(
+                    'abbreviation' => $abbr,
+                    'definition' => '',
+                    'definition_status' => '',
+                );
             }
             if (trim((string)($byAbbr[$abbr]['definition'] ?? '')) !== '') {
                 continue;
@@ -1708,23 +1765,21 @@ final class ControlledPublishingPart0PageService
             );
         }
 
-        if (count($merged) < 15) {
-            foreach ($this->discoverDefinitionsFromManualText($versionId) as $entry) {
-                if (!is_array($entry)) {
-                    continue;
-                }
-                $term = trim((string)($entry['term'] ?? ''));
-                if ($term === '') {
-                    continue;
-                }
-                $key = $this->definitionKey($term);
-                if (!isset($merged[$key]) || trim((string)($merged[$key]['definition'] ?? '')) === '') {
-                    $merged[$key] = $entry;
-                }
+        foreach ($this->discoverDefinitionsFromManualText($versionId) as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $term = trim((string)($entry['term'] ?? ''));
+            if ($term === '') {
+                continue;
+            }
+            $key = $this->definitionKey($term);
+            if (!isset($merged[$key]) || trim((string)($merged[$key]['definition'] ?? '')) === '') {
+                $merged[$key] = $entry;
             }
         }
 
-        if (count($merged) < 15) {
+        if (count($merged) < 60) {
             require_once __DIR__ . '/../openai.php';
             $manualText = $this->extractDefinitionsSectionText($versionId);
             if ($manualText !== '') {
@@ -1847,42 +1902,45 @@ final class ControlledPublishingPart0PageService
 
     private function extractDefinitionsSectionText(int $versionId): string
     {
+        $body = '';
         $sourceSetId = $this->resolveManualSourceSetId($versionId);
-        if ($sourceSetId <= 0) {
-            return '';
-        }
-
-        $stmt = $this->pdo->prepare("
-            SELECT body_text
-            FROM ipca_canonical_excerpts
-            WHERE source_set_id = :source_set_id
-              AND section_ref REGEXP '^0\\.6(\\.|$)'
-            ORDER BY section_ref, id
-        ");
-        $stmt->execute(array(':source_set_id' => $sourceSetId));
-        $parts = array();
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            if (!is_array($row)) {
-                continue;
+        if ($sourceSetId > 0) {
+            $stmt = $this->pdo->prepare("
+                SELECT body_text
+                FROM ipca_canonical_excerpts
+                WHERE source_set_id = :source_set_id
+                  AND section_ref REGEXP '^0\\.6(\\.|$)'
+                ORDER BY section_ref, id
+            ");
+            $stmt->execute(array(':source_set_id' => $sourceSetId));
+            $parts = array();
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $text = trim((string)($row['body_text'] ?? ''));
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
             }
-            $text = trim((string)($row['body_text'] ?? ''));
-            if ($text !== '') {
-                $parts[] = $text;
+            if ($parts !== array()) {
+                $body = trim(implode("\n\n", $parts));
             }
         }
-        if ($parts !== array()) {
-            return trim(implode("\n\n", $parts));
+
+        $fullText = $this->collectManualTextForDiscovery($versionId, 500000);
+        if ($fullText !== '') {
+            if (preg_match('/0\\.6\\s+DEFINITIONS AND TERMS([\\s\\S]*?)(?=\\n0\\.7\\b|\\nPART\\s+\\d|\\z)/iu', $fullText, $match)) {
+                $section = trim('0.6 DEFINITIONS AND TERMS' . $match[1]);
+                if (strlen($section) > strlen($body)) {
+                    $body = $section;
+                }
+            } elseif ($body === '' && preg_match('/DEFINITIONS AND TERMS([\\s\\S]{200,}?)(?=\\n0\\.7\\b|\\nPART\\s+\\d|\\z)/iu', $fullText, $match)) {
+                $body = trim('0.6 DEFINITIONS AND TERMS' . $match[1]);
+            }
         }
 
-        $fullText = $this->collectFullManualPlainText($versionId, 500000);
-        if ($fullText === '') {
-            return '';
-        }
-        if (preg_match('/0\\.6\\s+DEFINITIONS AND TERMS([\\s\\S]*?)(?=\\n0\\.7\\b|\\nPART\\s+[0-9]|\\z)/iu', $fullText, $match)) {
-            return trim('0.6 DEFINITIONS AND TERMS' . $match[1]);
-        }
-
-        return '';
+        return $body;
     }
 
     /**
@@ -1962,6 +2020,9 @@ final class ControlledPublishingPart0PageService
             }
             if (preg_match('/^0\.6\b/i', $line) || preg_match('/^DEFINITIONS AND TERMS$/i', $line)) {
                 continue;
+            }
+            if (preg_match('/^[-•*]\s*(.+)$/u', $line, $bullet)) {
+                $line = trim((string)$bullet[1]);
             }
             if (!preg_match('/^([^:]+):\s*(.+)$/u', $line, $m)) {
                 continue;
@@ -2058,7 +2119,7 @@ final class ControlledPublishingPart0PageService
             }
         }
         $combined = trim(implode("\n\n", $parts));
-        if (strlen($combined) > $maxChars) {
+        if ($maxChars > 0 && strlen($combined) > $maxChars) {
             $combined = substr($combined, 0, $maxChars);
         }
         return $combined;
