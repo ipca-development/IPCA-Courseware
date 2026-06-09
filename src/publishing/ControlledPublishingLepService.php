@@ -204,34 +204,49 @@ final class ControlledPublishingLepService
         $date = $this->formatPartDate($version);
         $parts = array();
 
-        $mainId = $this->sectionIdByKey($versionId, 'part_1');
-        if ($mainId <= 0) {
-            $mainId = $this->sectionIdByKey($versionId, 'main_content');
+        $part0Id = $this->sectionIdByKey($versionId, 'lep');
+        if ($part0Id > 0) {
+            $parts[] = array(
+                'part' => '0',
+                'label' => 'Part 0 – Manual Administration',
+                'pages' => '—',
+                'date' => $date,
+                'revision' => $revision,
+                'section_id' => $part0Id,
+            );
         }
-        if ($mainId > 0) {
-            $children = $this->listChildSections($versionId, $mainId);
-            if ($children === array()) {
+
+        $foundPartSections = false;
+        foreach (array('part_1', 'part_2', 'part_3', 'part_4') as $partKey) {
+            $sectionId = $this->sectionIdByKey($versionId, $partKey);
+            if ($sectionId <= 0) {
+                continue;
+            }
+            $foundPartSections = true;
+            $title = $this->sectionTitleById($sectionId);
+            $partNum = $this->extractPartNumberFromKey($partKey);
+            $parts[] = array(
+                'part' => (string)$partNum,
+                'label' => $title !== '' ? $title : 'Part ' . $partNum,
+                'pages' => '—',
+                'date' => $date,
+                'revision' => $revision,
+                'section_id' => $sectionId,
+            );
+        }
+
+        if (!$foundPartSections) {
+            $mainId = $this->sectionIdByKey($versionId, 'main_content');
+            if ($mainId > 0) {
+                $title = $this->sectionTitleById($mainId);
                 $parts[] = array(
                     'part' => '1',
-                    'label' => 'Part 1',
+                    'label' => $title !== '' ? $title : 'Part 1',
                     'pages' => '—',
                     'date' => $date,
                     'revision' => $revision,
                     'section_id' => $mainId,
                 );
-            } else {
-                foreach ($children as $index => $child) {
-                    $title = trim((string)($child['title'] ?? ''));
-                    $partNum = $this->extractPartNumber($title, $index);
-                    $parts[] = array(
-                        'part' => (string)$partNum,
-                        'label' => $title !== '' ? $title : 'Part ' . $partNum,
-                        'pages' => '—',
-                        'date' => $date,
-                        'revision' => $revision,
-                        'section_id' => (int)($child['id'] ?? 0),
-                    );
-                }
             }
         }
 
@@ -287,12 +302,22 @@ final class ControlledPublishingLepService
         return 'Rev ' . $label;
     }
 
-    private function extractPartNumber(string $title, int $index): int|string
+    private function extractPartNumberFromKey(string $partKey): int
     {
-        if (preg_match('/\bpart\s*(\d+)\b/i', $title, $m)) {
+        if (preg_match('/^part_(\d+)$/', $partKey, $m)) {
             return (int)$m[1];
         }
-        return $index;
+        return 0;
+    }
+
+    private function sectionTitleById(int $sectionId): string
+    {
+        if ($sectionId <= 0) {
+            return '';
+        }
+        $stmt = $this->pdo->prepare('SELECT title FROM ipca_publishing_book_sections WHERE id = :id LIMIT 1');
+        $stmt->execute(array(':id' => $sectionId));
+        return trim((string)$stmt->fetchColumn());
     }
 
     /**

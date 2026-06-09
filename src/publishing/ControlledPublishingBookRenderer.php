@@ -16,6 +16,7 @@ final class ControlledPublishingBookRenderer
 {
     public const MODE_READ = 'read';
     public const MODE_EDIT = 'edit';
+    private const TOC_FONT_SIZE_DELTA = 4;
 
     /** @var array<string,mixed> */
     private array $bookStyles = array();
@@ -479,12 +480,43 @@ final class ControlledPublishingBookRenderer
                 continue;
             }
             $abbr = h((string)($entry['abbreviation'] ?? ''));
-            $def = h((string)($entry['definition'] ?? ''));
-            $rowsHtml .= '<div class="cpb-part0-abbr-row" data-part0-row="' . $rowIdx . '">'
+            $def = trim((string)($entry['definition'] ?? ''));
+            $status = strtolower(trim((string)($entry['definition_status'] ?? '')));
+            if ($status === '' && $def !== '') {
+                $status = 'confirmed';
+            }
+            if ($def === '') {
+                $status = 'needs_review';
+            }
+
+            $rowClass = 'cpb-part0-abbr-row';
+            if ($status === 'needs_review') {
+                $rowClass .= ' cpb-part0-abbr-row--review';
+            } elseif ($status === 'ai_suggested') {
+                $rowClass .= ' cpb-part0-abbr-row--ai';
+            }
+
+            $badge = '';
+            if ($status === 'needs_review') {
+                $badge = '<span class="cpb-part0-abbr-flag" title="Meaning not confirmed — please review">Review</span>';
+            } elseif ($status === 'ai_suggested') {
+                $badge = '<span class="cpb-part0-abbr-flag cpb-part0-abbr-flag--ai" title="AI-suggested expansion — please verify">AI</span>';
+            }
+
+            $defHtml = $def !== '' ? h($def) : ($editable ? 'Add meaning…' : '—');
+            $defClass = 'cpb-part0-abbr-def ' . $bodyStyle['class'];
+            if ($def === '') {
+                $defClass .= ' cpb-part0-abbr-def--empty';
+            }
+
+            $rowsHtml .= '<div class="' . $rowClass . '" data-part0-row="' . $rowIdx . '"'
+                . ' data-definition-status="' . h($status) . '">'
                 . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>' . $abbr . '</span>'
-                . '<span class="cpb-part0-abbr-def ' . $bodyStyle['class'] . '" data-part0-col="definition"'
-                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $def . '</span>'
+                . '<span class="cpb-part0-abbr-sep" aria-hidden="true">–</span>'
+                . '<span class="' . $defClass . '" data-part0-col="definition"'
+                . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $defHtml . '</span>'
+                . $badge
                 . '</div>';
             $rowIdx++;
         }
@@ -492,6 +524,7 @@ final class ControlledPublishingBookRenderer
             $rowsHtml .= '<div class="cpb-part0-abbr-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
                 . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>&nbsp;</span>'
+                . '<span class="cpb-part0-abbr-sep" aria-hidden="true">–</span>'
                 . '<span class="cpb-part0-abbr-def ' . $bodyStyle['class'] . '" data-part0-col="definition"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>&nbsp;</span>'
                 . '</div>';
@@ -1289,6 +1322,8 @@ final class ControlledPublishingBookRenderer
                 'paragraph_style' => $style,
                 'text_color' => $titleColor,
             );
+            $baseTypography = $this->resolveTypography($typoPayload);
+            $typoPayload['font_size'] = max(6, (int)$baseTypography['font_size'] - self::TOC_FONT_SIZE_DELTA);
             $styleClass = $this->styleClass($typoPayload);
             $styleAttr = $this->styleAttr($typoPayload);
             $titleClass = $style === 'title' ? ' cpb-toc-row--title' : '';

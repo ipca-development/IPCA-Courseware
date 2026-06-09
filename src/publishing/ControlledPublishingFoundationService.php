@@ -367,6 +367,155 @@ final class ControlledPublishingFoundationService
         return $this->validateVersionReleaseFoundation($versionId)['ok'];
     }
 
+    public function releaseVersion(int $versionId, ?int $actorUserId = null): void
+    {
+        if (!$this->canReleaseVersion($versionId)) {
+            $validation = $this->validateVersionReleaseFoundation($versionId);
+            throw new RuntimeException('Cannot release version: ' . (string)($validation['status'] ?? 'not_ready'));
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_versions
+            SET lifecycle_status = 'released',
+                released_at = CURRENT_TIMESTAMP,
+                released_by = :released_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND lifecycle_status <> 'released'
+        ");
+        $stmt->execute(array(
+            ':released_by' => $actorUserId,
+            ':id' => $versionId,
+        ));
+        if ($stmt->rowCount() === 0) {
+            throw new RuntimeException('Version could not be released.');
+        }
+    }
+
+    public function suggestNextVersionLabel(string $currentLabel): string
+    {
+        $currentLabel = trim($currentLabel);
+        if (preg_match('/^(\d+)\.(\d+)$/', $currentLabel, $match)) {
+            return ((int)$match[1] + 1) . '.' . $match[2];
+        }
+        if (preg_match('/^(\d+)$/', $currentLabel, $match)) {
+            return (string)((int)$match[1] + 1);
+        }
+        return $currentLabel . '.1';
+    }
+
+    /**
+     * Copy a released (or draft) version into a new draft and prepare Part 0 admin pages.
+     *
+     * @return array{version_id:int,version_label:string}
+     */
+    public function createNextDraftVersion(int $sourceVersionId, string $newVersionLabel, ?int $actorUserId = null): array
+    {
+        require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+
+        $source = $this->getVersion($sourceVersionId);
+        if ($source === null) {
+            throw new RuntimeException('Source version not found.');
+        }
+
+        $newVersionLabel = trim($newVersionLabel);
+        if ($newVersionLabel === '') {
+            throw new RuntimeException('New version label is required.');
+        }
+
+        $bookId = (int)$source['book_id'];
+        $bookKey = (string)$source['book_key'];
+        $oldVersionLabel = (string)$source['version_label'];
+
+        $check = $this->pdo->prepare("
+            SELECT id FROM ipca_publishing_book_versions
+            WHERE book_id = :book_id AND version_label = :version_label
+            LIMIT 1
+        ");
+        $check->execute(array(
+            ':book_id' => $bookId,
+            ':version_label' => $newVersionLabel,
+        ));
+        if ($check->fetchColumn()) {
+            throw new RuntimeException("Version {$newVersionLabel} already exists for this book.");
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $newVersionId = $this->createDraftVersion($bookId, $newVersionLabel, $actorUserId);
+
+            if (!empty($source['template_id'])) {
+                $this->attachTemplateToVersion($newVersionId, (int)$source['template_id']);
+            }
+
+            $sourceMeta = $source['metadata_json'] ?? '{}';
+            if (is_string($sourceMeta)) {
+                $sourceMeta = json_decode($sourceMeta, true);
+            }
+            if (!is_array($sourceMeta)) {
+                $sourceMeta = array();
+            }
+
+            $upd = $this->pdo->prepare("
+                UPDATE ipca_publishing_book_versions
+                SET metadata_json = :metadata_json,
+                    supersedes_version_id = :supersedes_version_id,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            ");
+            $upd->execute(array(
+                ':metadata_json' => json_encode($sourceMeta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':supersedes_version_id' => $sourceVersionId,
+                ':id' => $newVersionId,
+            ));
+
+            $selections = array();
+            foreach ($this->getVersionSourceSelections($sourceVersionId) as $sel) {
+                $selections[] = array(
+                    'source_set_id' => (int)$sel['source_set_id'],
+                    'selection_role' => (string)$sel['selection_role'],
+                    'is_required_for_release' => !empty($sel['is_required_for_release']),
+                    'notes' => $sel['notes'] ?? null,
+                );
+            }
+            if ($selections !== array()) {
+                $this->setVersionSourceSets($newVersionId, $selections, $actorUserId);
+            }
+
+            $sectionMap = $this->copyVersionSections(
+                $sourceVersionId,
+                $newVersionId,
+                $bookKey,
+                $oldVersionLabel,
+                $newVersionLabel,
+                $actorUserId
+            );
+            $this->copyVersionBlocks(
+                $sourceVersionId,
+                $newVersionId,
+                $sectionMap,
+                $oldVersionLabel,
+                $newVersionLabel,
+                $actorUserId
+            );
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $part0 = new ControlledPublishingPart0PageService($this->pdo);
+        $part0->ensureAmendmentListForVersion($newVersionId, $actorUserId);
+
+        return array(
+            'version_id' => $newVersionId,
+            'version_label' => $newVersionLabel,
+        );
+    }
+
     public function freezeSourceBaseline(int $versionId, ?int $actorUserId = null): int
     {
         $validation = $this->validateVersionReleaseFoundation($versionId);
@@ -914,6 +1063,179 @@ final class ControlledPublishingFoundationService
         $links = (int)$stmt->fetchColumn();
 
         return array('requirements' => $req, 'excerpts' => $ex, 'links' => $links);
+    }
+
+    /**
+     * @return array<int,int> old_section_id => new_section_id
+     */
+    private function copyVersionSections(
+        int $sourceVersionId,
+        int $targetVersionId,
+        string $bookKey,
+        string $oldVersionLabel,
+        string $newVersionLabel,
+        ?int $actorUserId
+    ): array {
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id
+            ORDER BY parent_section_id IS NULL DESC, sort_order, id
+        ");
+        $stmt->execute(array(':version_id' => $sourceVersionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+        $map = array();
+        $pendingParents = array();
+
+        $ins = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_sections
+                (book_version_id, template_section_id, parent_section_id, section_key, stable_anchor, title,
+                 section_type, metadata_json, is_system_managed, is_generated, sort_order, created_by)
+            VALUES
+                (:book_version_id, :template_section_id, :parent_section_id, :section_key, :stable_anchor, :title,
+                 :section_type, :metadata_json, :is_system_managed, :is_generated, :sort_order, :created_by)
+        ");
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $oldId = (int)($row['id'] ?? 0);
+            $oldParentId = (int)($row['parent_section_id'] ?? 0);
+            $sectionKey = (string)($row['section_key'] ?? '');
+            $newParentId = null;
+            if ($oldParentId > 0) {
+                if (!isset($map[$oldParentId])) {
+                    $pendingParents[] = $row;
+                    continue;
+                }
+                $newParentId = $map[$oldParentId];
+            }
+
+            $ins->execute(array(
+                ':book_version_id' => $targetVersionId,
+                ':template_section_id' => !empty($row['template_section_id']) ? (int)$row['template_section_id'] : null,
+                ':parent_section_id' => $newParentId,
+                ':section_key' => $sectionKey,
+                ':stable_anchor' => $this->sectionAnchor($bookKey, $newVersionLabel, $sectionKey),
+                ':title' => (string)($row['title'] ?? ''),
+                ':section_type' => (string)($row['section_type'] ?? 'content'),
+                ':metadata_json' => $row['metadata_json'] ?? null,
+                ':is_system_managed' => !empty($row['is_system_managed']) ? 1 : 0,
+                ':is_generated' => !empty($row['is_generated']) ? 1 : 0,
+                ':sort_order' => (int)($row['sort_order'] ?? 0),
+                ':created_by' => $actorUserId,
+            ));
+            $map[$oldId] = (int)$this->pdo->lastInsertId();
+        }
+
+        $guard = 0;
+        while ($pendingParents !== array() && $guard < 20) {
+            $guard++;
+            $stillPending = array();
+            foreach ($pendingParents as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $oldId = (int)($row['id'] ?? 0);
+                $oldParentId = (int)($row['parent_section_id'] ?? 0);
+                if ($oldParentId <= 0 || !isset($map[$oldParentId])) {
+                    $stillPending[] = $row;
+                    continue;
+                }
+                $sectionKey = (string)($row['section_key'] ?? '');
+                $ins->execute(array(
+                    ':book_version_id' => $targetVersionId,
+                    ':template_section_id' => !empty($row['template_section_id']) ? (int)$row['template_section_id'] : null,
+                    ':parent_section_id' => $map[$oldParentId],
+                    ':section_key' => $sectionKey,
+                    ':stable_anchor' => $this->sectionAnchor($bookKey, $newVersionLabel, $sectionKey),
+                    ':title' => (string)($row['title'] ?? ''),
+                    ':section_type' => (string)($row['section_type'] ?? 'content'),
+                    ':metadata_json' => $row['metadata_json'] ?? null,
+                    ':is_system_managed' => !empty($row['is_system_managed']) ? 1 : 0,
+                    ':is_generated' => !empty($row['is_generated']) ? 1 : 0,
+                    ':sort_order' => (int)($row['sort_order'] ?? 0),
+                    ':created_by' => $actorUserId,
+                ));
+                $map[$oldId] = (int)$this->pdo->lastInsertId();
+            }
+            $pendingParents = $stillPending;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<int,int> $sectionMap
+     */
+    private function copyVersionBlocks(
+        int $sourceVersionId,
+        int $targetVersionId,
+        array $sectionMap,
+        string $oldVersionLabel,
+        string $newVersionLabel,
+        ?int $actorUserId
+    ): void {
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM ipca_publishing_book_blocks
+            WHERE book_version_id = :version_id
+            ORDER BY section_id, sort_order, id
+        ");
+        $stmt->execute(array(':version_id' => $sourceVersionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+        $ins = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_blocks
+                (book_version_id, section_id, block_key, stable_anchor, block_type, sort_order,
+                 payload_json, content_hash, is_system_managed, created_by, updated_by)
+            VALUES
+                (:book_version_id, :section_id, :block_key, :stable_anchor, :block_type, :sort_order,
+                 :payload_json, :content_hash, :is_system_managed, :created_by, :updated_by)
+        ");
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $oldSectionId = (int)($row['section_id'] ?? 0);
+            if ($oldSectionId <= 0 || !isset($sectionMap[$oldSectionId])) {
+                continue;
+            }
+            $stableAnchor = $this->remapVersionAnchor(
+                (string)($row['stable_anchor'] ?? ''),
+                $oldVersionLabel,
+                $newVersionLabel
+            );
+            $ins->execute(array(
+                ':book_version_id' => $targetVersionId,
+                ':section_id' => $sectionMap[$oldSectionId],
+                ':block_key' => (string)($row['block_key'] ?? ''),
+                ':stable_anchor' => $stableAnchor,
+                ':block_type' => (string)($row['block_type'] ?? 'paragraph'),
+                ':sort_order' => (int)($row['sort_order'] ?? 0),
+                ':payload_json' => (string)($row['payload_json'] ?? '{}'),
+                ':content_hash' => (string)($row['content_hash'] ?? ''),
+                ':is_system_managed' => !empty($row['is_system_managed']) ? 1 : 0,
+                ':created_by' => $actorUserId,
+                ':updated_by' => $actorUserId,
+            ));
+        }
+    }
+
+    private function remapVersionAnchor(string $anchor, string $oldVersionLabel, string $newVersionLabel): string
+    {
+        if ($anchor === '') {
+            return '';
+        }
+        $oldNorm = str_replace('.', '_', $oldVersionLabel);
+        $newNorm = str_replace('.', '_', $newVersionLabel);
+        if ($oldNorm === $newNorm) {
+            return $anchor;
+        }
+        return str_replace($oldNorm, $newNorm, $anchor);
     }
 
     /**

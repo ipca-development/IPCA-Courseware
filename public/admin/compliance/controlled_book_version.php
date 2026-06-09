@@ -72,6 +72,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $versionId > 0) {
                 'Section scaffold complete: ' . (int)$scaffold['sections_total'] . ' sections (' .
                 (int)$scaffold['sections_created'] . ' new, ' . (int)$scaffold['blocks_created'] . ' placeholders).'
             );
+        } elseif ($action === 'release_version') {
+            $svc->releaseVersion($versionId, $uid);
+            cpv_flash('success', 'Version ' . (string)$version['version_label'] . ' released.');
+        } elseif ($action === 'create_next_draft') {
+            $newLabel = trim((string)($_POST['new_version_label'] ?? ''));
+            if ($newLabel === '') {
+                $newLabel = $svc->suggestNextVersionLabel((string)$version['version_label']);
+            }
+            $created = $svc->createNextDraftVersion($versionId, $newLabel, $uid);
+            cpv_flash(
+                'success',
+                'Draft ' . (string)$created['version_label'] . ' created from ' . (string)$version['version_label'] . '.'
+            );
+            redirect('/admin/compliance/controlled_book_version.php?id=' . (int)$created['version_id']);
         }
     } catch (Throwable $e) {
         cpv_flash('error', $e->getMessage());
@@ -111,6 +125,8 @@ if ($version === null) {
 $selections = $svc->getVersionSourceSelections($versionId);
 $sections = $svc->listVersionSections($versionId);
 $validation = $svc->validateVersionReleaseFoundation($versionId);
+$canRelease = $svc->canReleaseVersion($versionId);
+$suggestedNextVersion = $svc->suggestNextVersionLabel((string)$version['version_label']);
 $allSourceSets = $svc->listActiveSourceSets();
 $lepApprovalUrl = '';
 if (in_array((string)$version['lifecycle_status'], array('draft', 'in_review', 'approved'), true)) {
@@ -156,6 +172,33 @@ compliance_page_open(array(
   <?php endif; ?>
   <?php if (!empty($version['baseline_hash'])): ?>
     <p style="margin:12px 0 0;font-family:ui-monospace,monospace;font-size:12px;">Baseline hash: <?= h((string)$version['baseline_hash']) ?></p>
+  <?php endif; ?>
+</section>
+
+<section class="cmp-card" style="margin-top:16px;">
+  <h2 style="margin:0 0 12px;">Version lifecycle</h2>
+  <p style="margin:0 0 12px;font-size:13px;color:#64748b;">
+    Release the current version when the manual is approved, then create the next draft (e.g. 6.0 → 7.0).
+    The Amendment List is copied forward and a new revision row is added automatically.
+  </p>
+  <?php if ((string)$version['lifecycle_status'] !== 'released'): ?>
+    <form method="post" style="display:inline-block;margin-right:12px;">
+      <input type="hidden" name="action" value="release_version">
+      <button type="submit" <?= $canRelease ? '' : 'disabled' ?> title="<?= $canRelease ? '' : h((string)$validation['status']) ?>">
+        Release <?= h((string)$version['version_label']) ?>
+      </button>
+    </form>
+    <?php if (!$canRelease): ?>
+      <p style="margin:8px 0 0;color:#b45309;font-size:13px;">Release blocked: <?= h((string)$validation['status']) ?></p>
+    <?php endif; ?>
+  <?php else: ?>
+    <p style="margin:0 0 12px;"><strong>Released</strong><?= !empty($version['released_at']) ? (' · ' . h((string)$version['released_at'])) : '' ?></p>
+    <form method="post" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input type="hidden" name="action" value="create_next_draft">
+      <label style="font-size:13px;">Next draft label</label>
+      <input type="text" name="new_version_label" value="<?= h($suggestedNextVersion) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:120px;">
+      <button type="submit">Create draft <?= h($suggestedNextVersion) ?></button>
+    </form>
   <?php endif; ?>
 </section>
 

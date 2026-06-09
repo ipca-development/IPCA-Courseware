@@ -502,12 +502,52 @@ function cp_editor_handle_load(
 
     if (cp_editor_is_lep_section($section) && cp_editor_is_section_editable($version, $section)) {
         $lep = $lepPageSvc->resolveFromVersion($version);
-        if (($lep['effective_parts'] ?? array()) === array()) {
+        $effectiveParts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
+        if ($effectiveParts === array() || count($effectiveParts) < 2) {
             $lepPageSvc->regenerateEffectiveParts($versionId, $uid);
             $version = $foundation->getVersion($versionId);
             if ($version === null) {
                 cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
             }
+        }
+    }
+
+    if ((string)($section['section_key'] ?? '') === 'definitions' && cp_editor_is_section_editable($version, $section)) {
+        $definitionsPage = $part0PageSvc->resolveDefinitionsFromVersion($version);
+        if (($definitionsPage['entries'] ?? array()) === array()) {
+            try {
+                $part0PageSvc->importDefinitionsFromCanonical($versionId, $uid);
+                $version = $foundation->getVersion($versionId);
+                if ($version === null) {
+                    cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+                }
+            } catch (RuntimeException $e) {
+                // Leave empty until the user regenerates manually.
+            }
+        }
+    }
+
+    if ((string)($section['section_key'] ?? '') === 'amendment_list' && cp_editor_is_section_editable($version, $section)) {
+        try {
+            $part0PageSvc->ensureAmendmentListForVersion($versionId, $uid);
+            $version = $foundation->getVersion($versionId);
+            if ($version === null) {
+                cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+            }
+        } catch (RuntimeException $e) {
+            // Keep existing amendment list if sync fails.
+        }
+    }
+
+    if ((string)($section['section_key'] ?? '') === 'abbreviations' && cp_editor_is_section_editable($version, $section)) {
+        try {
+            $part0PageSvc->ensureAbbreviationsForVersion($versionId, $uid);
+            $version = $foundation->getVersion($versionId);
+            if ($version === null) {
+                cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+            }
+        } catch (RuntimeException $e) {
+            // Keep existing abbreviations if sync fails.
         }
     }
 

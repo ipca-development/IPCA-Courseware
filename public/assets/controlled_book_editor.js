@@ -1689,9 +1689,14 @@
         var defEl = rowEl.querySelector('[data-part0-col="definition"]');
         var abbr = abbrEl ? abbrEl.textContent.replace(/\u00a0/g, ' ').trim() : '';
         if (!abbr) return;
+        var def = defEl ? defEl.textContent.replace(/\u00a0/g, ' ').trim() : '';
+        if (def === 'Add meaning…') def = '';
+        var status = rowEl.getAttribute('data-definition-status') || '';
+        if (def && status === 'needs_review') status = 'confirmed';
         abbrEntries.push({
           abbreviation: abbr,
-          definition: defEl ? defEl.textContent.replace(/\u00a0/g, ' ').trim() : '',
+          definition: def,
+          definition_status: status || (def ? 'confirmed' : 'needs_review'),
         });
       });
       return { entries: abbrEntries, empty_rows: emptyRows };
@@ -1769,12 +1774,15 @@
     }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Regenerate failed');
       var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
+      var reviewCount = res.result && res.result.needs_review_count !== undefined ? res.result.needs_review_count : 0;
       state.part0Page = res.part0_page || state.part0Page;
       if (res.page_html) {
         canvasEl.innerHTML = res.page_html;
         wireCanvas();
         refreshPart0TypographyFromBookStyles();
-        setStatus('Abbreviations updated (' + count + ' entries)', 'saved');
+        var msg = 'Abbreviations updated (' + count + ' entries)';
+        if (reviewCount > 0) msg += ' — ' + reviewCount + ' need review';
+        setStatus(msg, reviewCount > 0 ? 'warn' : 'saved');
       } else {
         return loadSection(state.sectionId);
       }

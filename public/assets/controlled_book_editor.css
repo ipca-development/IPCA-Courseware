@@ -2192,8 +2192,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  min-height: 1.5em;
-  margin-bottom: 6px;
+  min-height: 1.35em;
+  margin-bottom: 4px;
 }
 
 .cpb-tree-separator {
@@ -2270,7 +2270,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-toc-empty {
   color: #64748b;
   font-family: system-ui, sans-serif;
-  font-size: 10pt;
+  font-size: calc(10pt - 4px);
 }
 
 .cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar-main {
@@ -2356,20 +2356,66 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-part0-abbr-row,
 .cpb-part0-def-row {
   display: flex;
-  gap: 24px;
+  gap: 10px;
   margin-bottom: 4px;
   align-items: baseline;
+  position: relative;
 }
 
 .cpb-part0-abbr-term {
   flex: 0 0 72px;
   min-width: 72px;
+  font-weight: 600;
+}
+
+.cpb-part0-abbr-sep {
+  flex: 0 0 auto;
+  color: #64748b;
+  user-select: none;
 }
 
 .cpb-part0-abbr-def,
 .cpb-part0-def-text {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.cpb-part0-abbr-def--empty {
+  color: #b45309;
+  font-style: italic;
+}
+
+.cpb-part0-abbr-row--review {
+  background: rgba(251, 191, 36, 0.12);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.cpb-part0-abbr-row--ai {
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.cpb-part0-abbr-flag {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  user-select: none;
+}
+
+.cpb-part0-abbr-flag--ai {
+  color: #1e40af;
+  background: #dbeafe;
+  border-color: #93c5fd;
 }
 
 .cpb-part0-def-term {
