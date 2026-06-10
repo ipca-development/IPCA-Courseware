@@ -30,9 +30,7 @@
   var coverLogoInput = document.getElementById('cpbCoverLogoInput');
   var coverImageInput = document.getElementById('cpbCoverImageInput');
   var calloutSelect = document.getElementById('cpbCalloutSelect');
-  var detectCalloutsBtn = document.getElementById('cpbDetectCallouts');
-  var detectHyperlinksBtn = document.getElementById('cpbDetectHyperlinks');
-  var detectAnnexRefsBtn = document.getElementById('cpbDetectAnnexRefs');
+  var detectSelect = document.getElementById('cpbDetectSelect');
   var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
   var fullscreenBtn = document.getElementById('cpbFullscreen');
@@ -5289,24 +5287,17 @@
     });
   }
 
-  if (detectCalloutsBtn) {
-    detectCalloutsBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      detectCallouts('section');
-    });
-  }
-
-  if (detectHyperlinksBtn) {
-    detectHyperlinksBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      detectHyperlinks('section');
-    });
-  }
-
-  if (detectAnnexRefsBtn) {
-    detectAnnexRefsBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      detectAnnexRefs('section');
+  if (detectSelect) {
+    detectSelect.addEventListener('change', function () {
+      var action = detectSelect.value;
+      detectSelect.value = '';
+      if (!action) return;
+      if (action === 'callouts') detectCallouts('section');
+      else if (action === 'hyperlinks') detectHyperlinks('section');
+      else if (action === 'annex_refs') detectAnnexRefs('section');
+      else if (action === 'callouts_all') detectCallouts('version');
+      else if (action === 'hyperlinks_all') detectHyperlinks('version');
+      else if (action === 'annex_refs_all') detectAnnexRefs('version');
     });
   }
 
@@ -5329,9 +5320,6 @@
       syncSelect.value = '';
       if (action === 'toc') syncToc();
       else if (action === 'structure') syncManualStructure();
-      else if (action === 'callouts') detectCallouts('version');
-      else if (action === 'hyperlinks') detectHyperlinks('version');
-      else if (action === 'annex_refs') detectAnnexRefs('version');
       else if (action === 'highlights') syncHighlights();
     });
   }

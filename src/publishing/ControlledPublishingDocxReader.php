@@ -362,6 +362,19 @@ final class ControlledPublishingDocxReader
             }
         }
 
+        if (!$isPart0Ref && count($segments) >= 2) {
+            $leaf = (int)$segments[count($segments) - 1];
+            if ($leaf <= 0 || $leaf > 30) {
+                return false;
+            }
+            if (count($segments) === 2 && $leaf > 15 && !self::isChapterLevelTitle($title)) {
+                return false;
+            }
+            if (!self::isPlausibleSubtitleTitle($title)) {
+                return false;
+            }
+        }
+
         if (preg_match('/^\d+\.\d+\s*Kg$/iu', $title) || preg_match('/^Kg$/iu', $title)) {
             return false;
         }
@@ -396,10 +409,47 @@ final class ControlledPublishingDocxReader
         return mb_strtoupper($letters, 'UTF-8') === $letters;
     }
 
+    /**
+     * Reject table rows and instrument data mis-parsed as subtitle headings.
+     */
+    public static function isPlausibleSubtitleTitle(string $title): bool
+    {
+        $title = trim($title);
+        if ($title === '') {
+            return false;
+        }
+        if (str_contains($title, '|')) {
+            return false;
+        }
+        if (preg_match('/\b(DEGREES|FEATHERED|LOW PITCH|START LOCK|PITCH LOCK)\b/i', $title)) {
+            return false;
+        }
+        if (preg_match('/^\d+\s*ft\b/iu', $title)) {
+            return false;
+        }
+        if (preg_match('/\(\s*\d+\s*M\b/i', $title)) {
+            return false;
+        }
+        if (preg_match('/^[\d\s.,\-\/|()]+$/u', $title)) {
+            return false;
+        }
+        if (!preg_match('/\p{L}/u', $title)) {
+            return false;
+        }
+
+        return true;
+    }
+
     private static function isLikelyMeasurementOrIdLine(string $sectionRef, string $title): bool
     {
         $combined = $sectionRef . ' ' . $title;
-        if (preg_match('/\b(MHz|kHz|ft|KG|Kg|kg|NM|kt|VOR|ILS|DME|NOTAM)\b/iu', $combined)) {
+        if (str_contains($title, '|')) {
+            return true;
+        }
+        if (preg_match('/\b(MHz|kHz|ft|KG|Kg|kg|NM|kt|VOR|ILS|DME|NOTAM|DEGREES|FEATHERED)\b/iu', $combined)) {
+            return true;
+        }
+        if (preg_match('/\(\s*\d+\s*M\b/i', $title)) {
             return true;
         }
         if (preg_match('/^\d{10,}$/u', $sectionRef)) {

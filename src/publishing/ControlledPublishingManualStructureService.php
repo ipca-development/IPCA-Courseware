@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
@@ -812,6 +813,9 @@ final class ControlledPublishingManualStructureService
             if ($ref === '' || isset($seen[$ref])) {
                 continue;
             }
+            if ($this->isSkippableNavExcerpt($ref, $title, $manualPart)) {
+                continue;
+            }
             $seen[$ref] = true;
             $items[] = array(
                 'section_ref' => $ref,
@@ -820,6 +824,15 @@ final class ControlledPublishingManualStructureService
             );
         }
         return $items;
+    }
+
+    private function isSkippableNavExcerpt(string $sectionRef, string $title, int $manualPart): bool
+    {
+        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
+            return true;
+        }
+
+        return $this->isSkippableCanonicalExcerpt($sectionRef, $title, '');
     }
 
     /**
@@ -1090,6 +1103,10 @@ final class ControlledPublishingManualStructureService
         $title = trim($title);
         $bodyText = trim($bodyText);
 
+        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, -1)) {
+            return true;
+        }
+
         if (preg_match('/^\d+\.\d{3,}$/', $sectionRef)) {
             return true;
         }
@@ -1100,6 +1117,12 @@ final class ControlledPublishingManualStructureService
             return true;
         }
         if (preg_match('/^\d+\s*ft\b/i', $title)) {
+            return true;
+        }
+        if (str_contains($title, '|')) {
+            return true;
+        }
+        if (preg_match('/\b(DEGREES|FEATHERED|LOW PITCH|START LOCK|PITCH LOCK)\b/i', $title)) {
             return true;
         }
         if (preg_match('/Chapter\s+\d+,\s*Page\s+\d+/i', $bodyText) && strlen($bodyText) < 120) {

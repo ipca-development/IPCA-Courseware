@@ -1493,6 +1493,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--callout,
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--detect,
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--sync {
   min-width: 28px !important;
   max-width: 34px !important;
@@ -1501,6 +1502,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--callout option,
+.cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--detect option,
 .cmp-page .cpb-editor-root .cpb-toolbar select.cpb-tool-select--sync option {
   font-family: system-ui, sans-serif !important;
 }
@@ -1568,17 +1570,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #fff !important;
   cursor: pointer !important;
   vertical-align: middle !important;
-}
-
-.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-callouts,
-.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-links,
-.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-annex {
-  font-size: 11px !important;
-  padding: 0 8px !important;
-  max-width: 108px !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--warning {
