@@ -881,21 +881,23 @@ final class ControlledPublishingBlockService
             FROM ipca_publishing_book_blocks
             WHERE book_version_id = :version_id
               AND stable_anchor LIKE :anchor_prefix
-            ORDER BY stable_anchor DESC
-            LIMIT 1
         ");
+        $prefix = $sectionStableAnchor . '-BLOCK-';
         $stmt->execute(array(
             ':version_id' => $versionId,
-            ':anchor_prefix' => $sectionStableAnchor . '-BLOCK-%',
+            ':anchor_prefix' => $prefix . '%',
         ));
-        $lastAnchor = (string)($stmt->fetchColumn() ?: '');
-        if ($lastAnchor === '') {
-            return 1;
+
+        $max = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $anchor = (string)($row['stable_anchor'] ?? '');
+            if (preg_match('/-BLOCK-(\d+)$/', $anchor, $matches) !== 1) {
+                continue;
+            }
+            $max = max($max, (int)$matches[1]);
         }
-        if (preg_match('/-BLOCK-(\d+)$/', $lastAnchor, $matches) !== 1) {
-            return 1;
-        }
-        return ((int)$matches[1]) + 1;
+
+        return $max + 1;
     }
 
     private function blockKey(string $sectionKey, string $blockType, int $sequence): string

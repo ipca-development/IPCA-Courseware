@@ -15,6 +15,11 @@ require_once __DIR__ . '/ControlledPublishingLepService.php';
  */
 final class ControlledPublishingDocxImportService
 {
+    /** @var list<string> Part 0 pages filled by structured services or revision sync — not DOCX body import */
+    private const PART0_SKIP_DOCX_BODY_IMPORT = array(
+        'highlights',
+    );
+
     /** @var array<string,string> */
     private const PART0_SECTION_MAP = array(
         '0.1' => 'lep',
@@ -981,6 +986,10 @@ final class ControlledPublishingDocxImportService
             if ($pageKey === 'lep') {
                 $this->importPart0LepPage($versionId, $section, $actorUserId);
                 $part0Updated++;
+                continue;
+            }
+
+            if (in_array($pageKey, self::PART0_SKIP_DOCX_BODY_IMPORT, true)) {
                 continue;
             }
 
