@@ -260,7 +260,7 @@ final class ControlledPublishingDocxReader
         $sectionRef = '';
         $sectionTitle = '';
         $paragraphStyle = 'body';
-        if ($text !== '') {
+        if ($text !== '' && !$isBullet) {
             $parsed = self::parseSectionHeading($text);
             if ($parsed !== null && self::isPlausibleManualSectionRef($parsed['section_ref'], $parsed['title'], $manualPart)) {
                 $sectionRef = $parsed['section_ref'];
@@ -356,6 +356,9 @@ final class ControlledPublishingDocxReader
                 if (preg_match('/^[\d\s.,\-\/]+$/u', $title)) {
                     return false;
                 }
+                if (!self::isChapterLevelTitle($title)) {
+                    return false;
+                }
             }
         }
 
@@ -370,6 +373,27 @@ final class ControlledPublishingDocxReader
         }
 
         return true;
+    }
+
+    /**
+     * Chapter titles in OM/OMM use ALL CAPS (e.g. "1. INTRODUCTION").
+     * Numbered list items like "1. Personal Data" are rejected.
+     */
+    public static function isChapterLevelTitle(string $title): bool
+    {
+        $title = trim($title);
+        if ($title === '') {
+            return false;
+        }
+        if (preg_match('/^[a-z]/u', $title)) {
+            return false;
+        }
+        $letters = preg_replace('/[^\p{L}]/u', '', $title) ?? '';
+        if ($letters === '') {
+            return false;
+        }
+
+        return mb_strtoupper($letters, 'UTF-8') === $letters;
     }
 
     private static function isLikelyMeasurementOrIdLine(string $sectionRef, string $title): bool

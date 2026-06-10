@@ -794,12 +794,14 @@ final class ControlledPublishingManualStructureService
         ));
 
         $items = array();
+        $seen = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
             $title = trim((string)($row['title'] ?? ''));
-            if ($ref === '') {
+            if ($ref === '' || isset($seen[$ref])) {
                 continue;
             }
+            $seen[$ref] = true;
             $items[] = array(
                 'section_ref' => $ref,
                 'title' => $title,

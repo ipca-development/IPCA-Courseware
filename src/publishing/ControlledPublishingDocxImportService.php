@@ -91,6 +91,8 @@ final class ControlledPublishingDocxImportService
         $this->foundation->ensureTemplates($actorUserId);
         $this->foundation->scaffoldVersionSections($versionId, $actorUserId);
 
+        $this->consolidateDuplicateCanonicalExcerpts($sourceSetId, $manualCode);
+
         $stats = array(
             'canonical_excerpts' => 0,
             'blocks_created' => 0,
@@ -323,11 +325,42 @@ final class ControlledPublishingDocxImportService
             return;
         }
 
-        $revToken = str_replace('.', '_', $versionLabel);
-        $excerptKey = $manualCode . $revToken . '_P' . $manualPart . '_' . str_replace('.', '_', $sectionRef);
+        $excerptKey = $this->buildCanonicalExcerptKey($manualCode, $versionLabel, $manualPart, $sectionRef);
+        $excerptKeyNorm = $this->buildCanonicalExcerptKeyNorm($manualCode, $versionLabel, $manualPart, $sectionRef);
         $contentHash = hash('sha256', $bodyText);
-
         $docId = $this->resolveSourceDocumentId($sourceSetId);
+
+        $existingId = $this->findCanonicalExcerptId($sourceSetId, $manualCode, $manualPart, $sectionRef);
+        if ($existingId > 0) {
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_canonical_excerpts
+                SET title = :title,
+                    body_text = :body_text,
+                    source_file = :source_file,
+                    content_hash = :content_hash,
+                    source_hash = :content_hash,
+                    source_status = 'active',
+                    last_synced_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            ");
+            $stmt->execute(array(
+                ':title' => mb_substr($title, 0, 500),
+                ':body_text' => $bodyText,
+                ':source_file' => $sourceFile,
+                ':content_hash' => $contentHash,
+                ':id' => $existingId,
+            ));
+            $this->supersedeDuplicateCanonicalExcerpts(
+                $sourceSetId,
+                $manualCode,
+                $manualPart,
+                $sectionRef,
+                $existingId
+            );
+            return;
+        }
+
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_canonical_excerpts
                 (source_set_id, source_document_id, excerpt_key, excerpt_key_norm, manual_code, manual_rev,
@@ -349,7 +382,7 @@ final class ControlledPublishingDocxImportService
             ':source_set_id' => $sourceSetId,
             ':source_document_id' => $docId,
             ':excerpt_key' => $excerptKey,
-            ':excerpt_key_norm' => $excerptKey,
+            ':excerpt_key_norm' => $excerptKeyNorm,
             ':manual_code' => $manualCode,
             ':manual_rev' => $versionLabel,
             ':manual_part' => (string)$manualPart,
@@ -359,6 +392,146 @@ final class ControlledPublishingDocxImportService
             ':source_file' => $sourceFile,
             ':content_hash' => $contentHash,
         ));
+
+        $keptId = (int)$this->pdo->lastInsertId();
+        if ($keptId <= 0) {
+            $keptId = $this->findCanonicalExcerptId($sourceSetId, $manualCode, $manualPart, $sectionRef);
+        }
+        if ($keptId > 0) {
+            $this->supersedeDuplicateCanonicalExcerpts(
+                $sourceSetId,
+                $manualCode,
+                $manualPart,
+                $sectionRef,
+                $keptId
+            );
+        }
+    }
+
+    private function buildCanonicalExcerptKey(
+        string $manualCode,
+        string $versionLabel,
+        int $manualPart,
+        string $sectionRef
+    ): string {
+        $major = preg_replace('/\..*$/', '', trim($versionLabel));
+        if ($major === '') {
+            $major = str_replace('.', '_', trim($versionLabel));
+        }
+
+        return strtoupper(trim($manualCode)) . $major . '_P' . $manualPart . '_' . $sectionRef;
+    }
+
+    private function buildCanonicalExcerptKeyNorm(
+        string $manualCode,
+        string $versionLabel,
+        int $manualPart,
+        string $sectionRef
+    ): string {
+        $major = preg_replace('/\..*$/', '', trim($versionLabel));
+        if ($major === '') {
+            $major = str_replace('.', '_', trim($versionLabel));
+        }
+
+        return strtoupper(trim($manualCode)) . $major . '_P' . $manualPart . '_'
+            . str_replace('.', '_', $sectionRef);
+    }
+
+    private function findCanonicalExcerptId(
+        int $sourceSetId,
+        string $manualCode,
+        int $manualPart,
+        string $sectionRef
+    ): int {
+        $stmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND manual_part = :manual_part
+              AND section_ref = :section_ref
+              AND source_status = 'active'
+            ORDER BY
+                CASE WHEN source_file LIKE 'docx_import%' THEN 0 ELSE 1 END,
+                id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
+            ':manual_part' => (string)$manualPart,
+            ':section_ref' => $sectionRef,
+        ));
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    private function supersedeDuplicateCanonicalExcerpts(
+        int $sourceSetId,
+        string $manualCode,
+        int $manualPart,
+        string $sectionRef,
+        int $keepId
+    ): void {
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_canonical_excerpts
+            SET source_status = 'superseded',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND manual_part = :manual_part
+              AND section_ref = :section_ref
+              AND id <> :keep_id
+              AND source_status = 'active'
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
+            ':manual_part' => (string)$manualPart,
+            ':section_ref' => $sectionRef,
+            ':keep_id' => $keepId,
+        ));
+    }
+
+    private function consolidateDuplicateCanonicalExcerpts(int $sourceSetId, string $manualCode): void
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT manual_part, section_ref, GROUP_CONCAT(
+                id ORDER BY
+                    CASE WHEN source_file LIKE 'docx_import%' THEN 0 ELSE 1 END,
+                    id DESC
+            ) AS id_list
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND source_status = 'active'
+              AND section_ref IS NOT NULL
+              AND section_ref <> ''
+            GROUP BY manual_part, section_ref
+            HAVING COUNT(*) > 1
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
+        ));
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $ids = array_values(array_filter(array_map(
+                'intval',
+                explode(',', (string)($row['id_list'] ?? ''))
+            )));
+            if ($ids === array()) {
+                continue;
+            }
+            $keepId = $ids[0];
+            $this->supersedeDuplicateCanonicalExcerpts(
+                $sourceSetId,
+                $manualCode,
+                (int)($row['manual_part'] ?? 0),
+                (string)($row['section_ref'] ?? ''),
+                $keepId
+            );
+        }
     }
 
     private function resolveSourceDocumentId(int $sourceSetId): int
