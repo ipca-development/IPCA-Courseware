@@ -476,11 +476,18 @@ final class ControlledPublishingDocxReader
 
     private function extractParagraphText(DOMElement $p): string
     {
+        $text = $this->extractParagraphTextRaw($p);
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+
+    private function extractParagraphTextRaw(DOMElement $p): string
+    {
         $parts = array();
         $this->collectTextFromNode($p, $parts);
-        $text = implode('', $parts);
-        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
-        return trim($text);
+
+        return implode('', $parts);
     }
 
     /**
@@ -602,41 +609,226 @@ final class ControlledPublishingDocxReader
      */
     private function parseTable(DOMElement $tbl, DOMXPath $xpath): ?array
     {
+        unset($xpath);
+        $gridColCount = $this->tableGridColumnCount($tbl);
         $rows = array();
-        foreach ($tbl->getElementsByTagNameNS(self::W_NS, 'tr') as $tr) {
-            if (!$tr instanceof DOMElement) {
+
+        foreach ($this->directWordChildElements($tbl, 'tr') as $tr) {
+            $cells = $this->parseTableRowCells($tr);
+            if ($cells === array()) {
                 continue;
             }
-            $cells = array();
-            foreach ($tr->getElementsByTagNameNS(self::W_NS, 'tc') as $tc) {
-                if (!$tc instanceof DOMElement) {
-                    continue;
-                }
-                $cellParts = array();
-                foreach ($tc->getElementsByTagNameNS(self::W_NS, 'p') as $p) {
-                    if (!$p instanceof DOMElement) {
-                        continue;
-                    }
-                    $line = $this->extractParagraphText($p);
-                    if ($line !== '') {
-                        $cellParts[] = $line;
-                    }
-                }
-                $cells[] = trim(implode("\n", $cellParts));
-            }
-            if ($cells !== array()) {
-                $rows[] = $cells;
-            }
+            $cells = $this->expandTabSeparatedRowCells($cells, $gridColCount);
+            $rows[] = $cells;
         }
 
         if ($rows === array()) {
             return null;
         }
 
+        $rows = $this->normalizeTableRowWidths($rows, $gridColCount);
+
         return array(
             'type' => 'table',
             'rows' => $rows,
         );
+    }
+
+    /**
+     * @return list<DOMElement>
+     */
+    private function directWordChildElements(DOMElement $parent, string $localName): array
+    {
+        $elements = array();
+        foreach ($parent->childNodes as $child) {
+            if (!$child instanceof DOMElement) {
+                continue;
+            }
+            if ($child->namespaceURI === self::W_NS && $child->localName === $localName) {
+                $elements[] = $child;
+            }
+        }
+
+        return $elements;
+    }
+
+    /**
+     * @return list<DOMElement>
+     */
+    private function tableRowCellElements(DOMElement $tr): array
+    {
+        $cells = array();
+        foreach ($tr->childNodes as $child) {
+            if (!$child instanceof DOMElement || $child->namespaceURI !== self::W_NS) {
+                continue;
+            }
+            if ($child->localName === 'tc') {
+                $cells[] = $child;
+                continue;
+            }
+            if ($child->localName === 'sdt') {
+                foreach ($child->getElementsByTagNameNS(self::W_NS, 'tc') as $tc) {
+                    if ($tc instanceof DOMElement) {
+                        $cells[] = $tc;
+                    }
+                }
+            }
+        }
+
+        return $cells;
+    }
+
+    private function tableGridColumnCount(DOMElement $tbl): int
+    {
+        foreach ($this->directWordChildElements($tbl, 'tblGrid') as $grid) {
+            $count = count($this->directWordChildElements($grid, 'gridCol'));
+            if ($count > 0) {
+                return $count;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function parseTableRowCells(DOMElement $tr): array
+    {
+        $cells = array();
+        foreach ($this->tableRowCellElements($tr) as $tc) {
+            if ($this->tableCellVMerge($tc) === 'continue') {
+                $cells[] = '';
+                continue;
+            }
+
+            $text = $this->extractTableCellText($tc);
+            $gridSpan = $this->tableCellGridSpan($tc);
+            $cells[] = $text;
+            for ($i = 1; $i < $gridSpan; $i++) {
+                $cells[] = '';
+            }
+        }
+
+        return $cells;
+    }
+
+    private function extractTableCellText(DOMElement $tc): string
+    {
+        $cellParts = array();
+        foreach ($this->directWordChildElements($tc, 'p') as $p) {
+            $line = trim($this->extractParagraphTextRaw($p));
+            if ($line !== '') {
+                $cellParts[] = $line;
+            }
+        }
+        if ($cellParts === array()) {
+            $fallback = trim((string)$tc->textContent);
+            if ($fallback !== '') {
+                return preg_replace('/[ \x{00A0}]+/u', ' ', $fallback) ?? $fallback;
+            }
+        }
+
+        return trim(implode("\n", $cellParts));
+    }
+
+    private function tableCellGridSpan(DOMElement $tc): int
+    {
+        foreach ($this->directWordChildElements($tc, 'tcPr') as $tcPr) {
+            foreach ($this->directWordChildElements($tcPr, 'gridSpan') as $gridSpan) {
+                $value = (int)$this->wordIntAttribute($gridSpan, 'val');
+                return max(1, $value);
+            }
+        }
+
+        return 1;
+    }
+
+    /**
+     * @return 'continue'|'restart'|''
+     */
+    private function tableCellVMerge(DOMElement $tc): string
+    {
+        foreach ($this->directWordChildElements($tc, 'tcPr') as $tcPr) {
+            foreach ($this->directWordChildElements($tcPr, 'vMerge') as $vMerge) {
+                $value = strtolower(trim($this->wordAttribute($vMerge, 'val')));
+                return $value === 'restart' ? 'restart' : 'continue';
+            }
+        }
+
+        return '';
+    }
+
+    private function wordAttribute(DOMElement $element, string $name): string
+    {
+        $value = trim($element->getAttributeNS(self::W_NS, $name));
+        if ($value !== '') {
+            return $value;
+        }
+
+        return trim($element->getAttribute('w:' . $name));
+    }
+
+    private function wordIntAttribute(DOMElement $element, string $name): int
+    {
+        return (int)$this->wordAttribute($element, $name);
+    }
+
+    /**
+     * @param list<string> $cells
+     * @return list<string>
+     */
+    private function expandTabSeparatedRowCells(array $cells, int $gridColCount): array
+    {
+        if ($cells === array()) {
+            return $cells;
+        }
+
+        $expectedCols = $gridColCount > 0 ? $gridColCount : 0;
+        if (count($cells) === 1) {
+            $parts = preg_split('/\t/u', (string)$cells[0]) ?: array();
+            $parts = array_map('trim', $parts);
+            $nonEmptyParts = array_values(array_filter($parts, static fn(string $part): bool => $part !== ''));
+            if (count($nonEmptyParts) > 1 || (count($parts) > 1 && count($nonEmptyParts) > 0)) {
+                if ($expectedCols > 0) {
+                    return array_pad(array_slice($parts, 0, $expectedCols), $expectedCols, '');
+                }
+
+                return $parts;
+            }
+
+            if ($expectedCols > 1 && str_contains((string)$cells[0], '  ')) {
+                $spaceParts = preg_split('/\s{2,}/u', trim((string)$cells[0])) ?: array();
+                $spaceParts = array_values(array_filter(array_map('trim', $spaceParts), static fn(string $part): bool => $part !== ''));
+                if (count($spaceParts) >= $expectedCols || count($spaceParts) > 1) {
+                    return array_pad(array_slice($spaceParts, 0, $expectedCols), $expectedCols, '');
+                }
+            }
+        }
+
+        return $cells;
+    }
+
+    /**
+     * @param list<list<string>> $rows
+     * @return list<list<string>>
+     */
+    private function normalizeTableRowWidths(array $rows, int $gridColCount): array
+    {
+        $maxCols = $gridColCount;
+        foreach ($rows as $row) {
+            $maxCols = max($maxCols, count($row));
+        }
+        if ($maxCols <= 0) {
+            $maxCols = 1;
+        }
+
+        $normalized = array();
+        foreach ($rows as $row) {
+            $normalized[] = array_pad(array_slice($row, 0, $maxCols), $maxCols, '');
+        }
+
+        return $normalized;
     }
 
     /**

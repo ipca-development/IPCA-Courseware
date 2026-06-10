@@ -1361,6 +1361,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: inline-block;
   max-width: 100%;
   line-height: 0;
+  overflow: visible;
 }
 
 .cpb-image img {
@@ -1369,6 +1370,30 @@ body.cpb-browser-fullscreen .cpb-workspace {
   max-width: 100%;
   height: auto;
   border-radius: 4px;
+  transform-origin: center center;
+}
+
+.cpb-image-rotate {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #1e3c72;
+  border-radius: 4px;
+  background: #fff;
+  color: #1e3c72;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  z-index: 2;
+  padding: 0;
+}
+
+.cpb-image--editable .cpb-image-frame:hover .cpb-image-rotate,
+.cpb-image--editable .cpb-image-frame:focus-within .cpb-image-rotate {
+  background: #eff6ff;
 }
 
 .cpb-image-resize {

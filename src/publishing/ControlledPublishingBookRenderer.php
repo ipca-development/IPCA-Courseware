@@ -1944,13 +1944,21 @@ final class ControlledPublishingBookRenderer
             return '';
         }
         $widthPct = max(20, min(100, (int)($payload['width_pct'] ?? 100)));
+        $rotationDeg = (int)($payload['rotation_deg'] ?? 0);
+        if (!in_array($rotationDeg, array(0, 90, 180, 270), true)) {
+            $rotationDeg = 0;
+        }
         $editClass = $mode === self::MODE_EDIT ? ' cpb-image--editable' : '';
         $resize = $mode === self::MODE_EDIT
-            ? '<span class="cpb-image-resize" title="Drag to resize"></span>'
+            ? '<button type="button" class="cpb-image-rotate" title="Rotate 90° clockwise">↻</button>'
+            . '<span class="cpb-image-resize" title="Drag to resize"></span>'
             : '';
-        return '<figure class="cpb-image' . $editClass . '" data-field="image" style="width:' . $widthPct . '%" data-width-pct="' . $widthPct . '">'
+        $rotationAttr = $rotationDeg > 0 ? ' data-rotation-deg="' . $rotationDeg . '"' : '';
+        $imgStyle = $rotationDeg > 0 ? ' style="transform:rotate(' . $rotationDeg . 'deg)"' : '';
+        return '<figure class="cpb-image' . $editClass . '" data-field="image" style="width:' . $widthPct . '%" data-width-pct="' . $widthPct . '"' . $rotationAttr . '>'
             . '<div class="cpb-image-frame">'
-            . '<img src="' . h($url) . '" alt="' . h($alt) . '" loading="lazy">'
+            . '<img src="' . h($url) . '" alt="' . h($alt) . '" loading="lazy"' . $imgStyle
+            . ($rotationDeg > 0 ? ' data-rotation-deg="' . $rotationDeg . '"' : '') . '>'
             . $resize
             . '</div>'
             . ($mode === self::MODE_EDIT

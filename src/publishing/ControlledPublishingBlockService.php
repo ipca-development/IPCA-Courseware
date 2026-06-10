@@ -844,7 +844,7 @@ final class ControlledPublishingBlockService
     }
 
     /**
-     * @return array{url:string,alt:string,width_pct:int}
+     * @return array{url:string,alt:string,width_pct:int,rotation_deg:int}
      */
     private function normalizeImagePayload(array $payload, bool $strict): array
     {
@@ -856,7 +856,15 @@ final class ControlledPublishingBlockService
             'url' => $url,
             'alt' => trim((string)($payload['alt'] ?? '')),
             'width_pct' => max(20, min(100, (int)($payload['width_pct'] ?? 100))),
+            'rotation_deg' => $this->normalizeImageRotation($payload['rotation_deg'] ?? 0),
         );
+    }
+
+    private function normalizeImageRotation(mixed $deg): int
+    {
+        $deg = ((int)$deg % 360 + 360) % 360;
+
+        return in_array($deg, array(0, 90, 180, 270), true) ? $deg : 0;
     }
 
     /**

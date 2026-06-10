@@ -1326,6 +1326,23 @@ final class ControlledPublishingDocxImportService
             $rows = array(array('Column 1', 'Column 2'), array('', ''));
         }
 
+        $rows = $this->normalizeImportedTableRows($rows);
+        $hasTitleRow = false;
+        $title = '';
+
+        if (count($rows) >= 2) {
+            $firstRow = $rows[0];
+            $secondRow = $rows[1];
+            $firstNonEmpty = $this->countNonEmptyTableCells($firstRow);
+            $secondCols = count($secondRow);
+            $firstText = trim(implode(' ', array_map('trim', $firstRow)));
+            if ($firstNonEmpty === 1 && $secondCols > 1 && $firstText !== '') {
+                $hasTitleRow = true;
+                $title = $firstText;
+                array_shift($rows);
+            }
+        }
+
         $headers = array_map('trim', $rows[0]);
         $bodyRows = array();
         for ($i = 1, $c = count($rows); $i < $c; $i++) {
@@ -1369,8 +1386,8 @@ final class ControlledPublishingDocxImportService
         }
 
         return array(
-            'title' => '',
-            'has_title_row' => false,
+            'title' => $title,
+            'has_title_row' => $hasTitleRow,
             'headers' => $headers,
             'rows' => $normalizedRows,
             'col_widths' => array_fill(0, $colCount, $colWidth),
@@ -1387,6 +1404,43 @@ final class ControlledPublishingDocxImportService
             'table_style_kind' => $kind,
             'table_align' => 'left',
         );
+    }
+
+    /**
+     * @param list<list<string>> $rows
+     * @return list<list<string>>
+     */
+    private function normalizeImportedTableRows(array $rows): array
+    {
+        $maxCols = 0;
+        foreach ($rows as $row) {
+            $maxCols = max($maxCols, count($row));
+        }
+        if ($maxCols <= 0) {
+            return $rows;
+        }
+
+        $normalized = array();
+        foreach ($rows as $row) {
+            $normalized[] = array_pad(array_slice($row, 0, $maxCols), $maxCols, '');
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param list<string> $row
+     */
+    private function countNonEmptyTableCells(array $row): int
+    {
+        $count = 0;
+        foreach ($row as $cell) {
+            if (trim((string)$cell) !== '') {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     private function normalizeTableFontFamily(string $font): string

@@ -2734,6 +2734,7 @@
         url: img ? img.getAttribute('src') || '' : '',
         alt: cap ? cap.textContent.trim() : '',
         width_pct: figure ? parseInt(figure.getAttribute('data-width-pct') || '100', 10) : 100,
+        rotation_deg: figure ? parseInt(figure.getAttribute('data-rotation-deg') || '0', 10) || 0 : 0,
       };
     }
     if (blockType === 'callout') {
@@ -3040,11 +3041,50 @@
     applyTypographyDecorationToElement(el, typo);
   }
 
+  function applyImageRotation(figure, img, deg) {
+    deg = ((deg % 360) + 360) % 360;
+    if (deg !== 0 && deg !== 90 && deg !== 180 && deg !== 270) deg = 0;
+    if (deg === 0) {
+      figure.removeAttribute('data-rotation-deg');
+      img.style.transform = '';
+      img.removeAttribute('data-rotation-deg');
+      return;
+    }
+    figure.setAttribute('data-rotation-deg', String(deg));
+    img.setAttribute('data-rotation-deg', String(deg));
+    img.style.transform = 'rotate(' + deg + 'deg)';
+  }
+
+  function rotateImageBlock(blockEl) {
+    var figure = blockEl.querySelector('.cpb-image');
+    var img = blockEl.querySelector('.cpb-image img');
+    if (!figure || !img) return;
+    pushUndo();
+    var current = parseInt(figure.getAttribute('data-rotation-deg') || '0', 10) || 0;
+    applyImageRotation(figure, img, current + 90);
+    scheduleSave(blockEl);
+    flushSave(blockEl);
+  }
+
   function wireImageBlock(blockEl) {
     var figure = blockEl.querySelector('.cpb-image');
     if (!figure) return;
     var pct = parseInt(figure.getAttribute('data-width-pct') || '100', 10);
     if (!figure.style.width) figure.style.width = pct + '%';
+    var img = figure.querySelector('img');
+    if (img) {
+      applyImageRotation(figure, img, parseInt(figure.getAttribute('data-rotation-deg') || '0', 10) || 0);
+    }
+    var rotateBtn = figure.querySelector('.cpb-image-rotate');
+    if (rotateBtn && rotateBtn.getAttribute('data-wired') !== '1') {
+      rotateBtn.setAttribute('data-wired', '1');
+      rotateBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!state.editable) return;
+        rotateImageBlock(blockEl);
+      });
+    }
   }
 
   function extractTablePayload(blockEl) {
