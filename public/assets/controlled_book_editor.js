@@ -30,6 +30,9 @@
   var coverLogoInput = document.getElementById('cpbCoverLogoInput');
   var coverImageInput = document.getElementById('cpbCoverImageInput');
   var calloutSelect = document.getElementById('cpbCalloutSelect');
+  var detectCalloutsBtn = document.getElementById('cpbDetectCallouts');
+  var detectHyperlinksBtn = document.getElementById('cpbDetectHyperlinks');
+  var detectAnnexRefsBtn = document.getElementById('cpbDetectAnnexRefs');
   var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
   var fullscreenBtn = document.getElementById('cpbFullscreen');
@@ -4924,6 +4927,71 @@
       .catch(showError);
   }
 
+  function detectCallouts(scope) {
+    runContentDetection('detect_callouts', scope, {
+      sectionMessage: 'Detect Note, Warning, Caution and Info prefixes in body paragraphs on this page and convert them to callout blocks?',
+      versionMessage: 'Scan all sections for Note, Warning, Caution and Info prefixes and convert matching body paragraphs to callout blocks?',
+      working: 'Detecting callouts…',
+      countKey: 'converted',
+      countLabel: 'callout',
+    });
+  }
+
+  function detectHyperlinks(scope) {
+    runContentDetection('detect_hyperlinks', scope, {
+      sectionMessage: 'Turn plain http(s):// and www. URLs into clickable links in paragraphs, callouts, and tables on this page?',
+      versionMessage: 'Scan all sections and turn plain URLs into clickable links?',
+      working: 'Detecting hyperlinks…',
+      countKey: 'enriched',
+      countLabel: 'block',
+    });
+  }
+
+  function detectAnnexRefs(scope) {
+    runContentDetection('detect_annex_refs', scope, {
+      sectionMessage: 'Turn Annex references (e.g. Annex 3, OM Annex 3) into navigation links on this page?',
+      versionMessage: 'Scan all sections and turn Annex references into navigation links?',
+      working: 'Detecting annex references…',
+      countKey: 'enriched',
+      countLabel: 'block',
+    });
+  }
+
+  function runContentDetection(action, scope, opts) {
+    scope = scope || 'section';
+    if (!state.editable) {
+      showError(new Error('Released versions cannot be edited.'));
+      return;
+    }
+    var message = scope === 'version' ? opts.versionMessage : opts.sectionMessage;
+    if (!confirm(message)) return;
+
+    setStatus(opts.working, 'saving');
+    apiPost(action, {
+      version_id: state.versionId,
+      scope: scope,
+      section_id: state.sectionId,
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Detection failed');
+        var result = res.result || {};
+        var count = result[opts.countKey] !== undefined ? result[opts.countKey] : 0;
+        if (res.page_html) {
+          canvasEl.innerHTML = res.page_html;
+          wireCanvas();
+          refreshCalloutTypographyFromBookStyles();
+        } else if (scope === 'version') {
+          return loadSection(state.sectionId);
+        }
+        var summary = count + ' ' + opts.countLabel + (count === 1 ? '' : 's') + ' updated';
+        if (scope === 'version' && result.sections_updated !== undefined) {
+          summary += ' in ' + result.sections_updated + ' section' + (result.sections_updated === 1 ? '' : 's');
+        }
+        setStatus(count > 0 ? summary : 'Nothing detected', count > 0 ? 'saved' : '');
+      })
+      .catch(showError);
+  }
+
   function syncHighlights() {
     if (!confirm('Regenerate the Highlight of Changes section from revision markers?')) return;
     setStatus('Syncing highlights…', 'saving');
@@ -5221,6 +5289,27 @@
     });
   }
 
+  if (detectCalloutsBtn) {
+    detectCalloutsBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      detectCallouts('section');
+    });
+  }
+
+  if (detectHyperlinksBtn) {
+    detectHyperlinksBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      detectHyperlinks('section');
+    });
+  }
+
+  if (detectAnnexRefsBtn) {
+    detectAnnexRefsBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      detectAnnexRefs('section');
+    });
+  }
+
   if (calloutSelect) {
     calloutSelect.addEventListener('change', function () {
       var action = calloutSelect.value;
@@ -5240,6 +5329,9 @@
       syncSelect.value = '';
       if (action === 'toc') syncToc();
       else if (action === 'structure') syncManualStructure();
+      else if (action === 'callouts') detectCallouts('version');
+      else if (action === 'hyperlinks') detectHyperlinks('version');
+      else if (action === 'annex_refs') detectAnnexRefs('version');
       else if (action === 'highlights') syncHighlights();
     });
   }

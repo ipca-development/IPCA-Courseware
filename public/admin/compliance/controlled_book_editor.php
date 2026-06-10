@@ -170,6 +170,9 @@ compliance_page_open(array(
             <option value="note">Note</option>
             <option value="manage">Presets…</option>
           </select>
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--detect-callouts" id="cpbDetectCallouts" title="Detect Note, Warning, Caution and Info prefixes in body paragraphs on this page">Detect callouts</button>
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--detect-links" id="cpbDetectHyperlinks" title="Turn plain http(s):// and www. URLs into clickable links on this page">Detect links</button>
+          <button type="button" class="cpb-tool-btn cpb-tool-btn--detect-annex" id="cpbDetectAnnexRefs" title="Turn Annex references (e.g. Annex 3, OM Annex 3) into navigation links on this page">Detect annex</button>
         </div>
         </div>
         <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>
@@ -182,10 +185,13 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--view">
-          <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC, manual structure, or Highlight of Changes">
+          <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC, manual structure, detect content, or Highlight of Changes">
             <option value="" selected>⟳</option>
             <option value="toc">Sync TOC</option>
             <option value="structure">Sync manual structure</option>
+            <option value="callouts">Detect callouts (all)</option>
+            <option value="hyperlinks">Detect links (all)</option>
+            <option value="annex_refs">Detect annex (all)</option>
             <option value="highlights">Sync changes</option>
           </select>
           <button type="button" class="cpb-tool-btn" id="cpbFullscreen" title="Full screen — hide app menu" aria-pressed="false">⤢</button>

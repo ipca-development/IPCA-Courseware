@@ -19,6 +19,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalSer
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingEditorNavService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -48,6 +49,7 @@ $approvalSvc = new ControlledPublishingApprovalService($pdo, $lepPageSvc);
 $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
 $manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
 $editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStructureSvc);
+$richTextSvc = new ControlledPublishingRichTextService($pdo);
 $renderer->setPageHeaderService($pageHeaderSvc);
 $renderer->setCoverPageService($coverPageSvc);
 $renderer->setLepPageService($lepPageSvc);
@@ -141,6 +143,15 @@ try {
             break;
         case 'get_callout_presets':
             cp_editor_handle_get_callout_presets($foundation);
+            break;
+        case 'detect_callouts':
+            cp_editor_handle_detect_callouts($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid);
+            break;
+        case 'detect_hyperlinks':
+            cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'hyperlinks');
+            break;
+        case 'detect_annex_refs':
+            cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'annex_refs');
             break;
         case 'create_block':
             cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
@@ -1813,6 +1824,184 @@ function cp_editor_handle_get_callout_presets(ControlledPublishingFoundationServ
     $meta = cp_editor_decode_version_meta($version);
     $presets = is_array($meta['callout_presets'] ?? null) ? $meta['callout_presets'] : cp_editor_default_callout_presets();
     cp_editor_json(200, array('ok' => true, 'presets' => $presets));
+}
+
+function cp_editor_handle_detect_callouts(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    ControlledPublishingRichTextService $richTextSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $scope = strtolower(trim((string)($in['scope'] ?? 'section')));
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
+    }
+
+    if ($scope === 'version') {
+        $result = $richTextSvc->detectCalloutsInVersion($versionId, $blocks, $sections, $uid);
+    } else {
+        if ($sectionId <= 0) {
+            cp_editor_json(400, array('ok' => false, 'error' => 'section_id required'));
+        }
+        $result = $richTextSvc->detectCalloutsInSection($versionId, $sectionId, $blocks, $uid);
+    }
+
+    cp_editor_json(200, cp_editor_build_detection_response(
+        $foundation,
+        $sections,
+        $blocks,
+        $renderer,
+        $revision,
+        $layoutSvc,
+        $styleSvc,
+        $numberSvc,
+        $pageHeaderSvc,
+        $coverPageSvc,
+        $lepPageSvc,
+        $approvalSvc,
+        $part0PageSvc,
+        $version,
+        $versionId,
+        $sectionId,
+        $result
+    ));
+}
+
+function cp_editor_handle_detect_rich_text(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    ControlledPublishingRichTextService $richTextSvc,
+    int $uid,
+    string $kind
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $scope = strtolower(trim((string)($in['scope'] ?? 'section')));
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)$version['lifecycle_status'] === 'released') {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
+    }
+
+    if ($scope === 'version') {
+        $result = $richTextSvc->enrichRichTextInVersion($versionId, $blocks, $sections, $kind, $uid);
+    } else {
+        if ($sectionId <= 0) {
+            cp_editor_json(400, array('ok' => false, 'error' => 'section_id required'));
+        }
+        $result = $richTextSvc->enrichRichTextInSection($versionId, $sectionId, $blocks, $kind, $uid);
+    }
+
+    cp_editor_json(200, cp_editor_build_detection_response(
+        $foundation,
+        $sections,
+        $blocks,
+        $renderer,
+        $revision,
+        $layoutSvc,
+        $styleSvc,
+        $numberSvc,
+        $pageHeaderSvc,
+        $coverPageSvc,
+        $lepPageSvc,
+        $approvalSvc,
+        $part0PageSvc,
+        $version,
+        $versionId,
+        $sectionId,
+        $result
+    ));
+}
+
+/**
+ * @param array<string,mixed> $version
+ * @param array<string,mixed> $result
+ * @return array<string,mixed>
+ */
+function cp_editor_build_detection_response(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    array $version,
+    int $versionId,
+    int $sectionId,
+    array $result
+): array {
+    $payload = array('ok' => true, 'result' => $result);
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+            $pageLayout = $layoutSvc->resolveLayout($section);
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $blocksHtml = $renderer->renderBlocks($sectionBlocks, ControlledPublishingBookRenderer::MODE_EDIT);
+            $payload['blocks'] = $sectionBlocks;
+            $payload['page_html'] = cp_editor_render_page_html(
+                $renderer,
+                $version,
+                $section,
+                $blocksHtml,
+                ControlledPublishingBookRenderer::MODE_EDIT,
+                $pageLayout,
+                $pageHeaderConfig,
+                $coverPageSvc,
+                $lepPageSvc,
+                $approvalSvc,
+                $part0PageSvc,
+                $sectionBlocks
+            );
+        }
+    }
+    return $payload;
 }
 
 /**

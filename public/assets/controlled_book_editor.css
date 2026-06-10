@@ -1570,6 +1570,17 @@ body.cpb-browser-fullscreen .cpb-workspace {
   vertical-align: middle !important;
 }
 
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-callouts,
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-links,
+.cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--detect-annex {
+  font-size: 11px !important;
+  padding: 0 8px !important;
+  max-width: 108px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
 .cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--warning {
   color: #dc2626 !important;
   border-color: #fca5a5 !important;
