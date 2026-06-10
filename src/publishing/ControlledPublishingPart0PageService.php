@@ -561,6 +561,83 @@ final class ControlledPublishingPart0PageService
     }
 
     /**
+     * Import manual Highlight of Changes body from canonical source when author blocks are empty.
+     *
+     * @return array{section_id:int,blocks_created:int,skipped:bool}
+     */
+    public function ensureHighlightsAuthorBlocksFromCanonical(int $versionId, ?int $actorUserId = null): array
+    {
+        if ($this->blocks === null) {
+            return array(
+                'section_id' => $this->sectionIdByKey($versionId, 'highlights'),
+                'blocks_created' => 0,
+                'skipped' => true,
+            );
+        }
+
+        $sectionId = $this->sectionIdByKey($versionId, 'highlights');
+        if ($sectionId <= 0) {
+            return array('section_id' => 0, 'blocks_created' => 0, 'skipped' => true);
+        }
+
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $block) {
+            if (empty($block['is_system_managed'])) {
+                return array(
+                    'section_id' => $sectionId,
+                    'blocks_created' => 0,
+                    'skipped' => true,
+                );
+            }
+        }
+
+        $sourceSetId = $this->resolveManualSourceSetId($versionId);
+        if ($sourceSetId <= 0) {
+            return array('section_id' => $sectionId, 'blocks_created' => 0, 'skipped' => true);
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT body_text
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND section_ref = '0.7'
+              AND source_status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array(':source_set_id' => $sourceSetId));
+        $bodyText = trim(str_replace('\\n', "\n", (string)$stmt->fetchColumn()));
+        if ($bodyText === '') {
+            return array('section_id' => $sectionId, 'blocks_created' => 0, 'skipped' => true);
+        }
+
+        $paragraphs = preg_split('/\n{2,}/', $bodyText) ?: array();
+        $blocksCreated = 0;
+        $sort = 10;
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = trim($paragraph);
+            if ($paragraph === '') {
+                continue;
+            }
+            if (preg_match('/^0\.7\b/u', $paragraph)) {
+                continue;
+            }
+            $html = '<p>' . htmlspecialchars($paragraph, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>';
+            $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                'html' => $html,
+                'paragraph_style' => 'body',
+            ), $actorUserId);
+            $blocksCreated++;
+            $sort += 10;
+        }
+
+        return array(
+            'section_id' => $sectionId,
+            'blocks_created' => $blocksCreated,
+            'skipped' => $blocksCreated === 0,
+        );
+    }
+
+    /**
      * @return array{section_id:int,entries_count:int,source:string}
      */
     public function importAbbreviationsFromCanonical(int $versionId, ?int $actorUserId = null): array

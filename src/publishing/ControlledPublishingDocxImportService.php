@@ -16,10 +16,8 @@ require_once __DIR__ . '/ControlledPublishingRichTextService.php';
  */
 final class ControlledPublishingDocxImportService
 {
-    /** @var list<string> Part 0 pages filled by structured services or revision sync — not DOCX body import */
-    private const PART0_SKIP_DOCX_BODY_IMPORT = array(
-        'highlights',
-    );
+    /** @var list<string> Part 0 pages filled by structured services only — not DOCX body import */
+    private const PART0_SKIP_DOCX_BODY_IMPORT = array();
 
     /** @var array<string,string> */
     private const PART0_SECTION_MAP = array(
@@ -270,7 +268,7 @@ final class ControlledPublishingDocxImportService
         $count = 0;
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
-            $title = (string)($section['title'] ?? '');
+            $title = ControlledPublishingDocxReader::sanitizeSectionTitle((string)($section['title'] ?? ''));
             if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, $manualPart)) {
                 continue;
             }
@@ -303,7 +301,7 @@ final class ControlledPublishingDocxImportService
         $count = 0;
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
-            $title = (string)($section['title'] ?? '');
+            $title = ControlledPublishingDocxReader::sanitizeSectionTitle((string)($section['title'] ?? ''));
             if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, 0)) {
                 continue;
             }

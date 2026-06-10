@@ -146,10 +146,17 @@ final class ControlledPublishingRevisionService
         ");
 
         $summaryPayload = array(
-            'text' => count($changes) . ' governed change(s) detected versus the prior book version.',
+            'text' => 'Auto-detected changes',
             'level' => 2,
         );
         $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'summary', 'heading', $summaryPayload, $sort, $actorUserId);
+        $sort += 10;
+        $created++;
+
+        $introPayload = array(
+            'html' => '<p>' . count($changes) . ' governed change(s) detected versus the prior book version.</p>',
+        );
+        $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'summary_intro', 'paragraph', $introPayload, $sort, $actorUserId);
         $sort += 10;
         $created++;
 

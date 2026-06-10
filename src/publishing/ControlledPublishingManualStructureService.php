@@ -84,6 +84,7 @@ final class ControlledPublishingManualStructureService
         }
 
         $manualCode = strtoupper(trim((string)($version['manual_code'] ?? $bookKey)));
+        $invalidExcerptsRetired = $this->retireInvalidCanonicalExcerpts($sourceSetId, $manualCode);
         $partsSynced = 0;
         $created = 0;
         $updated = 0;
@@ -119,6 +120,7 @@ final class ControlledPublishingManualStructureService
             'chapters_created' => $created,
             'chapters_updated' => $updated,
             'chapters_removed' => $removed,
+            'invalid_excerpts_retired' => $invalidExcerptsRetired,
         );
     }
 
@@ -283,6 +285,16 @@ final class ControlledPublishingManualStructureService
                         continue;
                     }
                     $headingNum = (int)$headingMatch[1];
+                    if ($headingNum <= 0 || $headingNum > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+                        continue;
+                    }
+                    $refStr = (string)$headingNum;
+                    if ($this->isSkippableCanonicalExcerpt($refStr, $candidate, '')) {
+                        continue;
+                    }
+                    if (!ControlledPublishingDocxReader::isChapterLevelTitle($candidate)) {
+                        continue;
+                    }
                     $headingTitles[$headingNum] = $this->formatChapterTitle($candidate);
                     $chapterNumbers[$headingNum] = true;
                 }
@@ -620,7 +632,7 @@ final class ControlledPublishingManualStructureService
 
     private function formatChapterTitle(string $raw): string
     {
-        $raw = trim($raw);
+        $raw = ControlledPublishingDocxReader::sanitizeSectionTitle(trim($raw));
         if ($raw === '') {
             return '';
         }
@@ -809,7 +821,7 @@ final class ControlledPublishingManualStructureService
         $seen = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
-            $title = trim((string)($row['title'] ?? ''));
+            $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
             if ($ref === '' || isset($seen[$ref])) {
                 continue;
             }
@@ -1136,5 +1148,43 @@ final class ControlledPublishingManualStructureService
         }
 
         return false;
+    }
+
+    /**
+     * Retire canonical rows that fail manual section validation (table rows, instrument data, etc.).
+     */
+    private function retireInvalidCanonicalExcerpts(int $sourceSetId, string $manualCode): int
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, section_ref, title, body_text
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND source_status = 'active'
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => strtoupper(trim($manualCode)),
+        ));
+
+        $retired = 0;
+        $update = $this->pdo->prepare("
+            UPDATE ipca_canonical_excerpts
+            SET source_status = 'retired',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        ");
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $ref = trim((string)($row['section_ref'] ?? ''));
+            $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
+            $body = trim((string)($row['body_text'] ?? ''));
+            if ($ref === '' || !$this->isSkippableCanonicalExcerpt($ref, $title, $body)) {
+                continue;
+            }
+            $update->execute(array(':id' => (int)$row['id']));
+            $retired++;
+        }
+
+        return $retired;
     }
 }

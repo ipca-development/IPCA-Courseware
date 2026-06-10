@@ -7,7 +7,7 @@ declare(strict_types=1);
 final class ControlledPublishingDocxReader
 {
     /** Max top-level chapter number (e.g. "12. INTRODUCTION") in Parts 1–4. */
-    private const MAX_CHAPTER_NUMBER = 30;
+    public const MAX_CHAPTER_NUMBER = 30;
 
     private const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     private const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -298,9 +298,7 @@ final class ControlledPublishingDocxReader
             return null;
         }
         $ref = trim($m[1], '.');
-        $title = trim($m[2]);
-        $title = preg_replace('/(\d+)$/u', '', $title) ?? $title;
-        $title = trim($title);
+        $title = self::sanitizeSectionTitle(trim($m[2]));
         if ($ref === '' || $title === '') {
             return null;
         }
@@ -308,6 +306,27 @@ final class ControlledPublishingDocxReader
             'section_ref' => $ref,
             'title' => $title,
         );
+    }
+
+    /**
+     * Strip Word field/bookmark noise and page-number suffixes from heading titles.
+     */
+    public static function sanitizeSectionTitle(string $title): string
+    {
+        $title = trim($title);
+        if ($title === '') {
+            return '';
+        }
+
+        // Word bookmark / cross-ref suffixes such as "Electronic Mass & Balance-92178-".
+        $title = preg_replace('/-\d{4,}-?\s*$/u', '', $title) ?? $title;
+        $title = preg_replace('/-\d{4,}-(?=\s|$)/u', ' ', $title) ?? $title;
+
+        // Trailing page numbers separated by whitespace (e.g. "INTRODUCTION 12"), not model codes like G1000.
+        $title = preg_replace('/\s+\d{1,3}$/u', '', $title) ?? $title;
+        $title = preg_replace('/\s+-\s*$/u', '', $title) ?? $title;
+
+        return trim($title);
     }
 
     public static function isPlausibleManualSectionRef(string $sectionRef, string $title, int $manualPart = -1): bool
@@ -357,6 +376,9 @@ final class ControlledPublishingDocxReader
                     return false;
                 }
                 if (!self::isChapterLevelTitle($title)) {
+                    return false;
+                }
+                if (!self::isPlausibleSubtitleTitle($title)) {
                     return false;
                 }
             }

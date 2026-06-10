@@ -515,6 +515,15 @@ function cp_editor_handle_load(
 
     if ((string)($section['section_key'] ?? '') === 'highlights' && cp_editor_is_section_editable($version, $section)) {
         cp_editor_purge_highlights_placeholders($blocks, $sectionId);
+        try {
+            $part0PageSvc->ensureHighlightsAuthorBlocksFromCanonical($versionId, $uid);
+            $version = $foundation->getVersion($versionId);
+            if ($version === null) {
+                cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+            }
+        } catch (RuntimeException $e) {
+            // Keep existing highlights if canonical import fails.
+        }
     }
 
     if (cp_editor_is_lep_section($section) && cp_editor_is_section_editable($version, $section)) {
