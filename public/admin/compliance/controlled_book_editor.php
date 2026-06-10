@@ -182,9 +182,10 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbZoomIn" title="Zoom in">+</button>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--view">
-          <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC or Highlight of Changes">
+          <select id="cpbSyncSelect" class="cpb-tool-select cpb-tool-select--sync" title="Sync TOC, manual structure, or Highlight of Changes">
             <option value="" selected>⟳</option>
             <option value="toc">Sync TOC</option>
+            <option value="structure">Sync manual structure</option>
             <option value="highlights">Sync changes</option>
           </select>
           <button type="button" class="cpb-tool-btn" id="cpbFullscreen" title="Full screen — hide app menu" aria-pressed="false">⤢</button>

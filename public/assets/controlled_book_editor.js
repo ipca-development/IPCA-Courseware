@@ -4901,6 +4901,29 @@
     return null;
   }
 
+  function syncManualStructure() {
+    if (!state.editable) {
+      showError(new Error('Released versions cannot be restructured.'));
+      return;
+    }
+    if (!confirm('Sync chapter sections and sidebar labels from canonical structure? Existing page content is kept.')) return;
+    setStatus('Syncing manual structure…', 'saving');
+    apiPost('sync_manual_structure', { version_id: state.versionId })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Structure sync failed');
+        var parts = res.parts_synced !== undefined ? res.parts_synced : 0;
+        var created = res.chapters_created !== undefined ? res.chapters_created : 0;
+        var updated = res.chapters_updated !== undefined ? res.chapters_updated : 0;
+        var removed = res.chapters_removed !== undefined ? res.chapters_removed : 0;
+        var summary = parts + ' part(s), ' + created + ' created, ' + updated + ' updated';
+        if (removed > 0) summary += ', ' + removed + ' removed';
+        return loadSection(state.sectionId).then(function () {
+          setStatus('Manual structure synced (' + summary + ')', 'saved');
+        });
+      })
+      .catch(showError);
+  }
+
   function syncHighlights() {
     if (!confirm('Regenerate the Highlight of Changes section from revision markers?')) return;
     setStatus('Syncing highlights…', 'saving');
@@ -5216,6 +5239,7 @@
       var action = syncSelect.value;
       syncSelect.value = '';
       if (action === 'toc') syncToc();
+      else if (action === 'structure') syncManualStructure();
       else if (action === 'highlights') syncHighlights();
     });
   }
