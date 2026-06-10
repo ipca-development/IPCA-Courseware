@@ -827,6 +827,9 @@ final class ControlledPublishingDocxImportService
                 if ($text === '') {
                     continue;
                 }
+                if (ControlledPublishingDocxReader::sanitizeImportedText($text) === '') {
+                    continue;
+                }
 
                 if (($node['section_ref'] ?? '') !== '') {
                     if (!$emitSectionHeadings) {
@@ -1327,40 +1330,64 @@ final class ControlledPublishingDocxImportService
         $rows = $this->normalizeImportedTableRows($rows);
         $hasTitleRow = false;
         $title = '';
+        $headerColspans = array();
+        $rowColspans = array();
 
         if (count($rows) >= 2) {
-            $firstRow = $rows[0];
-            $secondRow = $rows[1];
-            $firstNonEmpty = $this->countNonEmptyTableCells($firstRow);
-            $secondCols = count($secondRow);
-            $firstText = trim(implode(' ', array_map('trim', $firstRow)));
-            if ($firstNonEmpty === 1 && $secondCols > 1 && $firstText !== '') {
+            $firstCollapsed = $this->collapseTableRowColspans($rows[0]);
+            $secondCollapsed = $this->collapseTableRowColspans($rows[1]);
+            $firstText = trim(implode(' ', $firstCollapsed['cells']));
+            if ($firstText !== ''
+                && count($firstCollapsed['cells']) === 1
+                && count($secondCollapsed['cells']) > 1) {
                 $hasTitleRow = true;
                 $title = $firstText;
                 array_shift($rows);
             }
         }
 
-        $headers = array_map('trim', $rows[0]);
+        $headerCollapsed = $this->collapseTableRowColspans($rows[0] ?? array('Column 1', 'Column 2'));
+        $headers = $headerCollapsed['cells'];
+        $headerColspans = $headerCollapsed['colspans'];
         $bodyRows = array();
         for ($i = 1, $c = count($rows); $i < $c; $i++) {
-            $bodyRows[] = array_map('trim', $rows[$i]);
+            $collapsed = $this->collapseTableRowColspans($rows[$i]);
+            $bodyRows[] = $collapsed['cells'];
+            $rowColspans[] = $collapsed['colspans'];
         }
         if ($bodyRows === array()) {
-            $bodyRows = array(array_fill(0, max(1, count($headers)), ''));
+            $bodyRows = array(array(''));
+            $rowColspans = array(array(1));
         }
 
         $colCount = max(count($headers), 1);
-        $headers = array_pad(array_slice($headers, 0, $colCount), $colCount, '');
+        foreach ($rowColspans as $spans) {
+            $colCount = max($colCount, array_sum($spans));
+        }
+        $colCount = max($colCount, array_sum($headerColspans));
+
+        $headers = array_pad(array_slice($headers, 0, count($headers)), count($headers), '');
+        if ($headerColspans === array()) {
+            $headerColspans = array_fill(0, count($headers), 1);
+        }
         $normalizedRows = array();
-        foreach ($bodyRows as $row) {
-            $normalizedRows[] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        foreach ($bodyRows as $rowIdx => $row) {
+            $spans = $rowColspans[$rowIdx] ?? array();
+            $normalizedRows[] = $row;
+            if ($spans === array()) {
+                $rowColspans[$rowIdx] = array_fill(0, count($row), 1);
+            }
         }
 
         $colWidth = max(60, min(600, (int)floor(840 / $colCount)));
 
+        $titleRow = is_array($styleDef['title_row'] ?? null) ? $styleDef['title_row'] : array();
         $headerRow = is_array($styleDef['header_row'] ?? null) ? $styleDef['header_row'] : array();
         $bodyRow = is_array($styleDef['body_row'] ?? null) ? $styleDef['body_row'] : array();
+        $titleFont = $this->normalizeTableFontFamily((string)($titleRow['font_family'] ?? 'sans'));
+        $titleSize = $this->normalizeTableFontSize($titleRow['font_size'] ?? 11);
+        $titleColor = $this->normalizeTableHexColor((string)($titleRow['color'] ?? ''), '#0f2744');
+        $titleBgColor = $this->normalizeTableHexColor((string)($titleRow['bg'] ?? ''), '#e8eef6');
         $headerFont = $this->normalizeTableFontFamily((string)($headerRow['font_family'] ?? 'sans'));
         $headerSize = $this->normalizeTableFontSize($headerRow['font_size'] ?? 10);
         $headerColor = $this->normalizeTableHexColor((string)($headerRow['color'] ?? ''), '#0f172a');
@@ -1370,7 +1397,7 @@ final class ControlledPublishingDocxImportService
         $bodyColor = $this->normalizeTableHexColor((string)($bodyRow['color'] ?? ''), '#0f172a');
 
         $headerBg = $headerBgColor !== ''
-            ? array_fill(0, $colCount, $headerBgColor)
+            ? array_fill(0, max(count($headers), $colCount), $headerBgColor)
             : array();
 
         $cellFontFamily = array();
@@ -1387,20 +1414,67 @@ final class ControlledPublishingDocxImportService
             'title' => $title,
             'has_title_row' => $hasTitleRow,
             'headers' => $headers,
+            'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
+            'row_colspans' => $rowColspans,
             'col_widths' => array_fill(0, $colCount, $colWidth),
             'border_width' => (string)($styleDef['border_width'] ?? 'medium'),
             'border_color' => (string)($styleDef['border_color'] ?? '#94a3b8'),
             'cell_bg' => (string)($styleDef['cell_bg'] ?? '#ffffff'),
             'header_bg' => $headerBg,
-            'header_font_family' => array_fill(0, $colCount, $headerFont),
-            'header_font_size' => array_fill(0, $colCount, $headerSize),
-            'header_text_color' => array_fill(0, $colCount, $headerColor),
+            'title_bg' => $titleBgColor,
+            'title_font_family' => $titleFont,
+            'title_font_size' => $titleSize,
+            'title_text_color' => $titleColor,
+            'title_align' => 'center',
+            'header_font_family' => array_fill(0, max(count($headers), 1), $headerFont),
+            'header_font_size' => array_fill(0, max(count($headers), 1), $headerSize),
+            'header_text_color' => array_fill(0, max(count($headers), 1), $headerColor),
             'cell_font_family' => $cellFontFamily,
             'cell_font_size' => $cellFontSize,
             'cell_text_color' => $cellTextColor,
             'table_style_kind' => $kind,
             'table_align' => 'left',
+        );
+    }
+
+    /**
+     * Merge adjacent empty cells into colspan metadata for HTML rendering.
+     *
+     * @param list<string> $row
+     * @return array{cells:list<string>,colspans:list<int>}
+     */
+    private function collapseTableRowColspans(array $row): array
+    {
+        $cells = array();
+        $colspans = array();
+        $count = count($row);
+        $index = 0;
+        while ($index < $count) {
+            $text = trim((string)$row[$index]);
+            if ($text === '') {
+                $index++;
+                continue;
+            }
+            $span = 1;
+            while ($index + $span < $count && trim((string)$row[$index + $span]) === '') {
+                $span++;
+            }
+            $cells[] = $text;
+            $colspans[] = $span;
+            $index += $span;
+        }
+
+        if ($cells === array()) {
+            return array(
+                'cells' => array(''),
+                'colspans' => array(max(1, $count)),
+            );
+        }
+
+        return array(
+            'cells' => $cells,
+            'colspans' => $colspans,
         );
     }
 

@@ -68,6 +68,9 @@ final class ControlledPublishingEditorNavService
         $version = $this->manualStructure->resolveVersion($versionId);
         $manualCode = strtoupper(trim((string)(($version['manual_code'] ?? '') !== '' ? $version['manual_code'] : $bookKey)));
         $sourceSetId = $this->manualStructure->resolveManualSourceSetIdPublic($versionId);
+        if ($sourceSetId > 0) {
+            $this->manualStructure->pruneInvalidCanonicalExcerpts($versionId);
+        }
 
         $tree = array();
 
@@ -218,6 +221,9 @@ final class ControlledPublishingEditorNavService
     ): array {
         $nodes = array();
         foreach ($rows as $row) {
+            if (!$this->manualStructure->isValidChapterNavEntry($row)) {
+                continue;
+            }
             $label = ControlledPublishingManualStructureService::navLabelForSection($row, true);
             $meta = $this->decodeMeta($row);
             $chapterNumber = (int)($meta['chapter_number'] ?? 0);

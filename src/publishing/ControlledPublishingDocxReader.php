@@ -302,10 +302,51 @@ final class ControlledPublishingDocxReader
         if ($ref === '' || $title === '') {
             return null;
         }
+        if (self::isLikelyTableOrMeasurementExcerpt($ref, $title)) {
+            return null;
+        }
         return array(
             'section_ref' => $ref,
             'title' => $title,
         );
+    }
+
+    /**
+     * Table rows and height/speed minima lines (e.g. "51. FT – 100 FT | 400 M") are not manual sections.
+     */
+    public static function isLikelyTableOrMeasurementExcerpt(string $sectionRef, string $title): bool
+    {
+        $sectionRef = trim($sectionRef);
+        $title = trim($title);
+        if ($sectionRef === '' && $title === '') {
+            return false;
+        }
+
+        if (self::isLikelyMeasurementOrIdLine($sectionRef, $title)) {
+            return true;
+        }
+
+        if (preg_match('/^\d+(?:\.\d+)*\.?\s+\d+\s*ft\b/iu', $sectionRef . ' ' . $title)) {
+            return true;
+        }
+        if (preg_match('/\b\d+\s*ft\b\s*[|–—-]/iu', $title)) {
+            return true;
+        }
+        if (preg_match('/\b\d+\s*M\s*\(\s*\d+\s*M\b/i', $title)) {
+            return true;
+        }
+
+        if (preg_match('/^(\d+)\.(\d+)$/', $sectionRef, $m)) {
+            $leaf = (int)$m[2];
+            if ($leaf > 11 && !self::isChapterLevelTitle($title)) {
+                return true;
+            }
+        }
+        if (preg_match('/^(\d+)$/', $sectionRef, $m) && (int)$m[1] > self::MAX_CHAPTER_NUMBER) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -326,7 +367,32 @@ final class ControlledPublishingDocxReader
         $title = preg_replace('/\s+\d{1,3}$/u', '', $title) ?? $title;
         $title = preg_replace('/\s+-\s*$/u', '', $title) ?? $title;
 
-        return trim($title);
+        return self::sanitizeImportedText($title);
+    }
+
+    /**
+     * Remove Word field/bookmark artifacts and orphan numeric IDs from imported body text.
+     */
+    public static function sanitizeImportedText(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        // Trailing cross-ref suffixes such as "**-116740251973" or "-116740251973".
+        $text = preg_replace('/\*\*-?\d{8,}\s*$/u', '**', $text) ?? $text;
+        $text = preg_replace('/(?<=\S)-\d{8,}(?=\s*$)/u', '', $text) ?? $text;
+
+        // Standalone paragraphs that are only a long numeric Word internal id.
+        if (preg_match('/^\d{10,}\s*$/u', $text)) {
+            return '';
+        }
+
+        // Trailing orphan ids separated by whitespace from real content.
+        $text = preg_replace('/\s+\d{10,}\s*$/u', '', $text) ?? $text;
+
+        return trim($text);
     }
 
     public static function isPlausibleManualSectionRef(string $sectionRef, string $title, int $manualPart = -1): bool
@@ -389,6 +455,10 @@ final class ControlledPublishingDocxReader
             if ($leaf <= 0 || $leaf > 30) {
                 return false;
             }
+            // Subtitle 1 entries are chapter.N (e.g. 6.1). Values like 6.12 are usually table rows.
+            if ($manualPart > 0 && count($segments) === 2 && $leaf > 11) {
+                return false;
+            }
             if (count($segments) === 2 && $leaf > 15 && !self::isChapterLevelTitle($title)) {
                 return false;
             }
@@ -404,6 +474,9 @@ final class ControlledPublishingDocxReader
             return false;
         }
         if (self::isLikelyMeasurementOrIdLine($sectionRef, $title)) {
+            return false;
+        }
+        if (self::isLikelyTableOrMeasurementExcerpt($sectionRef, $title)) {
             return false;
         }
 
@@ -446,7 +519,16 @@ final class ControlledPublishingDocxReader
         if (preg_match('/\b(DEGREES|FEATHERED|LOW PITCH|START LOCK|PITCH LOCK)\b/i', $title)) {
             return false;
         }
+        if (preg_match('/\(\s*(LOW PITCH|START LOCK|FEATHERED|PITCH LOCK)\s*\)/i', $title)) {
+            return false;
+        }
         if (preg_match('/^\d+\s*ft\b/iu', $title)) {
+            return false;
+        }
+        if (preg_match('/\b\d+\s*ft\b\s*[|–—-]/iu', $title)) {
+            return false;
+        }
+        if (preg_match('/\b\d+\s*M\s*\(\s*\d+\s*M\b/i', $title)) {
             return false;
         }
         if (preg_match('/\(\s*\d+\s*M\b/i', $title)) {
@@ -501,7 +583,7 @@ final class ControlledPublishingDocxReader
         $text = $this->extractParagraphTextRaw($p);
         $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
 
-        return trim($text);
+        return self::sanitizeImportedText($text);
     }
 
     private function extractParagraphTextRaw(DOMElement $p): string
@@ -535,6 +617,17 @@ final class ControlledPublishingDocxReader
         }
         if ($node->namespaceURI === self::W_NS && $node->localName === 't') {
             $parts[] = $node->textContent;
+            return;
+        }
+        if ($node->namespaceURI === self::W_NS && in_array($node->localName, array(
+            'instrText',
+            'fldChar',
+            'bookmarkStart',
+            'bookmarkEnd',
+            'commentReference',
+            'delText',
+            'softHyphen',
+        ), true)) {
             return;
         }
 
@@ -720,11 +813,10 @@ final class ControlledPublishingDocxReader
         $cells = array();
         foreach ($this->tableRowCellElements($tr) as $tc) {
             if ($this->tableCellVMerge($tc) === 'continue') {
-                $cells[] = '';
                 continue;
             }
 
-            $text = $this->extractTableCellText($tc);
+            $text = self::sanitizeImportedText($this->extractTableCellText($tc));
             $gridSpan = $this->tableCellGridSpan($tc);
             $cells[] = $text;
             for ($i = 1; $i < $gridSpan; $i++) {

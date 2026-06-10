@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
+require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingTableFormula.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
@@ -1385,6 +1386,8 @@ final class ControlledPublishingBookRenderer
         $cellFontFamilies = $table['cell_font_family'];
         $cellFontSizes = $table['cell_font_size'];
         $cellTextColors = $table['cell_text_color'];
+        $headerColspans = $table['header_colspans'];
+        $rowColspans = $table['row_colspans'];
         $hasTitleRow = !empty($table['has_title_row']);
         $tableAlign = (string)$table['table_align'];
         $tableStyleKind = strtolower(trim((string)($payload['table_style_kind'] ?? 'standard')));
@@ -1415,7 +1418,17 @@ final class ControlledPublishingBookRenderer
             $titleRowClass = 'cpb-table-title-row' . ($titlePlain === '' ? ' is-empty' : '');
             $titleEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $titleDisplay = $this->renderTableCellInner($title, $edit, $rows);
-            $titleVisual = $this->tableCellVisualAttr($titleBg, $titleAlign, $titleFontFamily, $titleFontSize, $titleTextColor);
+            $titleRowStyle = $this->resolveStandardTableStyle()['title_row'] ?? array();
+            $titleVisual = $this->tableCellVisualAttr(
+                $titleBg,
+                $titleAlign,
+                $titleFontFamily,
+                $titleFontSize,
+                $titleTextColor,
+                $this->normalizeDecorationBool($titleRowStyle['font_bold'] ?? null, true),
+                $this->normalizeDecorationBool($titleRowStyle['font_italic'] ?? null, false),
+                $this->normalizeDecorationBool($titleRowStyle['font_underline'] ?? null, false)
+            );
             $html .= '<tr class="' . $titleRowClass . '" data-title-row="1">';
             $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleVisual
                 . ' data-placeholder="Table title (spans all columns)">' . $titleDisplay . '</td>';
@@ -1424,20 +1437,21 @@ final class ControlledPublishingBookRenderer
 
         $html .= '<tr class="cpb-table-header-row">';
         $colIndex = 0;
-        foreach ($headers as $header) {
+        foreach ($headers as $headerIndex => $header) {
+            $colspan = max(1, (int)($headerColspans[$headerIndex] ?? 1));
             $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
             $headerBg = (string)($headerBgs[$colIndex] ?? '');
             $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
             $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
             $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
             $headerColor = (string)($headerTextColors[$colIndex] ?? '');
-            $html .= '<th' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign, $headerFont, $headerSize, $headerColor) . ' data-col-index="' . $colIndex . '">';
+            $html .= '<th colspan="' . $colspan . '"' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign, $headerFont, $headerSize, $headerColor) . ' data-col-index="' . $colIndex . '">';
             $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
             if ($edit) {
                 $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
             }
             $html .= '</th>';
-            $colIndex++;
+            $colIndex += $colspan;
         }
         $html .= '</tr></thead>';
 
@@ -1446,7 +1460,9 @@ final class ControlledPublishingBookRenderer
         foreach ($rows as $row) {
             $html .= '<tr>';
             $cellIndex = 0;
-            foreach ($row as $cell) {
+            $spans = $rowColspans[$rowIndex] ?? array();
+            foreach ($row as $cellPos => $cell) {
+                $colspan = max(1, (int)($spans[$cellPos] ?? 1));
                 $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
                 $bg = (string)($cellBgs[$rowIndex][$cellIndex] ?? '');
                 $align = (string)($cellAligns[$rowIndex][$cellIndex] ?? 'left');
@@ -1457,9 +1473,9 @@ final class ControlledPublishingBookRenderer
                 $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
                     ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
                     : '';
-                $html .= '<td' . $cellEdit . $this->tableCellVisualAttr($bg, $align, $cellFont, $cellSize, $cellColor) . $formulaAttr . '>'
+                $html .= '<td colspan="' . $colspan . '"' . $cellEdit . $this->tableCellVisualAttr($bg, $align, $cellFont, $cellSize, $cellColor) . $formulaAttr . '>'
                     . $this->renderTableCellInner($rawCell, $edit, $rows) . '</td>';
-                $cellIndex++;
+                $cellIndex += $colspan;
             }
             $html .= '</tr>';
             $rowIndex++;
@@ -1594,9 +1610,17 @@ final class ControlledPublishingBookRenderer
         }
 
         $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
-        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
-        $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
-        $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), '');
+        $titleStyle = $this->resolveStandardTableStyle()['title_row'] ?? array();
+        $titleFontDefault = (string)($titleStyle['font_family'] ?? 'sans');
+        $titleSizeDefault = (int)($titleStyle['font_size'] ?? 11);
+        $titleColorDefault = (string)($titleStyle['color'] ?? '#0f2744');
+        $titleBgDefault = (string)($titleStyle['bg'] ?? '#e8eef6');
+        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), $titleFontDefault);
+        $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? $titleSizeDefault);
+        $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), $titleColorDefault);
+        if ($titleBg === '' && trim((string)($payload['title_bg'] ?? '')) === '') {
+            $titleBg = $this->normalizeTableHexColor($titleBgDefault, '#e8eef6');
+        }
 
         $headerAlign = array();
         if (is_array($payload['header_align'] ?? null)) {
@@ -1631,11 +1655,40 @@ final class ControlledPublishingBookRenderer
         $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
         $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
 
+        $headerColspans = array();
+        if (is_array($payload['header_colspans'] ?? null)) {
+            foreach ($payload['header_colspans'] as $span) {
+                $headerColspans[] = max(1, (int)$span);
+            }
+        }
+        if ($headerColspans === array()) {
+            $headerColspans = array_fill(0, $colCount, 1);
+        }
+
+        $rowColspans = array();
+        if (is_array($payload['row_colspans'] ?? null)) {
+            foreach ($payload['row_colspans'] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $line = array();
+                foreach ($row as $span) {
+                    $line[] = max(1, (int)$span);
+                }
+                $rowColspans[] = $line;
+            }
+        }
+        while (count($rowColspans) < count($normalizedRows)) {
+            $rowColspans[] = array_fill(0, max(1, count($normalizedRows[count($rowColspans)] ?? array())), 1);
+        }
+
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
             'headers' => $headers,
+            'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
+            'row_colspans' => $rowColspans,
             'col_widths' => $colWidths,
             'border_width' => $borderWidth,
             'border_color' => $borderColor,
@@ -1753,7 +1806,7 @@ final class ControlledPublishingBookRenderer
 
     private function sanitizeTableCellValue(string $cell): string
     {
-        $cell = trim($cell);
+        $cell = ControlledPublishingDocxReader::sanitizeImportedText(trim($cell));
         if ($cell === '' || str_starts_with($cell, '=')) {
             return $cell;
         }

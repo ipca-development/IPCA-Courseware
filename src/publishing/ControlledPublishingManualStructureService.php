@@ -428,6 +428,22 @@ final class ControlledPublishingManualStructureService
      */
     private function canRemoveChapterSection(array $row): bool
     {
+        $meta = $this->decodeMeta($row);
+        $chapterNumber = (int)($meta['chapter_number'] ?? 0);
+        if ($this->isCanonicalChapterSection($row) && $chapterNumber > 0) {
+            if ($chapterNumber > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+                return true;
+            }
+            $title = trim((string)($row['title'] ?? ''));
+            $navLabel = trim((string)($meta['nav_label'] ?? ''));
+            if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt(
+                (string)$chapterNumber,
+                $navLabel !== '' ? $navLabel : $title
+            )) {
+                return true;
+            }
+        }
+
         if ((int)($row['block_count'] ?? 0) > 0) {
             return false;
         }
@@ -838,13 +854,38 @@ final class ControlledPublishingManualStructureService
         return $items;
     }
 
+    public function isValidChapterNavEntry(array $sectionRow): bool
+    {
+        $meta = $this->decodeMeta($sectionRow);
+        $chapterNumber = (int)($meta['chapter_number'] ?? 0);
+        if ($chapterNumber <= 0 || $chapterNumber > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+            return false;
+        }
+
+        $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($sectionRow['title'] ?? '')));
+        $navLabel = trim((string)($meta['nav_label'] ?? ''));
+        $label = $navLabel !== '' ? $navLabel : ($chapterNumber . '. ' . $title);
+
+        if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt((string)$chapterNumber, $label)) {
+            return false;
+        }
+        if ($title !== '' && ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt((string)$chapterNumber, $title)) {
+            return false;
+        }
+
+        return true;
+    }
+
     private function isSkippableNavExcerpt(string $sectionRef, string $title, int $manualPart): bool
     {
+        if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($sectionRef, $title)) {
+            return true;
+        }
         if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
             return true;
         }
 
-        return $this->isSkippableCanonicalExcerpt($sectionRef, $title, '');
+        return $this->isSkippableCanonicalExcerpt($sectionRef, $title, '', $manualPart);
     }
 
     /**
@@ -1109,13 +1150,17 @@ final class ControlledPublishingManualStructureService
     /**
      * OCR / table fragments mis-tagged as section excerpts (e.g. "1.000 Kg" under Part 3).
      */
-    private function isSkippableCanonicalExcerpt(string $sectionRef, string $title, string $bodyText): bool
+    private function isSkippableCanonicalExcerpt(string $sectionRef, string $title, string $bodyText, int $manualPart = -1): bool
     {
         $sectionRef = trim($sectionRef);
         $title = trim($title);
         $bodyText = trim($bodyText);
 
-        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, -1)) {
+        if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($sectionRef, $title)) {
+            return true;
+        }
+
+        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
             return true;
         }
 
@@ -1137,6 +1182,15 @@ final class ControlledPublishingManualStructureService
         if (preg_match('/\b(DEGREES|FEATHERED|LOW PITCH|START LOCK|PITCH LOCK)\b/i', $title)) {
             return true;
         }
+        if (preg_match('/\(\s*(LOW PITCH|START LOCK|FEATHERED|PITCH LOCK)\s*\)/i', $title)) {
+            return true;
+        }
+        if (preg_match('/^\d+\.\d+$/', $sectionRef)) {
+            $leaf = (int)substr($sectionRef, strrpos($sectionRef, '.') + 1);
+            if ($leaf > 11) {
+                return true;
+            }
+        }
         if (preg_match('/Chapter\s+\d+,\s*Page\s+\d+/i', $bodyText) && strlen($bodyText) < 120) {
             return true;
         }
@@ -1148,6 +1202,24 @@ final class ControlledPublishingManualStructureService
         }
 
         return false;
+    }
+
+    /**
+     * Retire canonical rows that fail manual section validation (table rows, instrument data, etc.).
+     */
+    public function pruneInvalidCanonicalExcerpts(int $versionId): int
+    {
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            return 0;
+        }
+        $sourceSetId = $this->resolveManualSourceSetId($versionId);
+        if ($sourceSetId <= 0) {
+            return 0;
+        }
+        $manualCode = strtoupper(trim((string)($version['manual_code'] ?? $version['book_key'] ?? 'OM')));
+
+        return $this->retireInvalidCanonicalExcerpts($sourceSetId, $manualCode);
     }
 
     /**
@@ -1178,7 +1250,8 @@ final class ControlledPublishingManualStructureService
             $ref = trim((string)($row['section_ref'] ?? ''));
             $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
             $body = trim((string)($row['body_text'] ?? ''));
-            if ($ref === '' || !$this->isSkippableCanonicalExcerpt($ref, $title, $body)) {
+            $part = (int)($row['manual_part'] ?? 0);
+            if ($ref === '' || !$this->isSkippableCanonicalExcerpt($ref, $title, $body, $part)) {
                 continue;
             }
             $update->execute(array(':id' => (int)$row['id']));
