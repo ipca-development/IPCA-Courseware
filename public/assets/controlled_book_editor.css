@@ -1671,6 +1671,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #eff6ff;
 }
 
+.cpb-callout--note {
+  border-color: #0d9488;
+  background: #f0fdfa;
+}
+
 .cpb-callout-icon {
   flex-shrink: 0;
   width: 32px;
@@ -1720,6 +1725,21 @@ body.cpb-browser-fullscreen .cpb-workspace {
   content: 'i';
 }
 
+.cpb-callout-icon--note {
+  background: #0d9488;
+  color: #fff;
+  border-radius: 4px;
+  clip-path: none;
+  width: 28px;
+  height: 28px;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.cpb-callout-icon--note::before {
+  content: 'N';
+}
+
 .cpb-callout-title {
   font-weight: 700;
   font-size: 11pt;
@@ -1740,10 +1760,26 @@ body.cpb-browser-fullscreen .cpb-workspace {
   color: #1e3a8a;
 }
 
+.cpb-callout--note .cpb-callout-title {
+  color: #115e59;
+}
+
 .cpb-callout-text {
   font-size: 10pt;
   line-height: 1.45;
   color: #1e293b;
+}
+
+.cpb-annex-link,
+.cpb-external-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.cpb-annex-link:hover,
+.cpb-external-link:hover {
+  color: #1e40af;
 }
 
 .cpb-callout-overlay {

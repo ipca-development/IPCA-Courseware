@@ -1414,7 +1414,7 @@ function cp_editor_handle_save_callout_presets(
             continue;
         }
         $type = strtolower(trim((string)($preset['callout_type'] ?? '')));
-        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
+        if (!in_array($type, array('warning', 'caution', 'info', 'note'), true)) {
             continue;
         }
         $normalized[] = array(
@@ -1824,6 +1824,7 @@ function cp_editor_default_callout_presets(): array
         array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
         array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
         array('callout_type' => 'info', 'title' => 'INFO', 'text' => ''),
+        array('callout_type' => 'note', 'title' => 'NOTE', 'text' => ''),
     );
 }
 

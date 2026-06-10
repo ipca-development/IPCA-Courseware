@@ -1974,7 +1974,7 @@ final class ControlledPublishingBookRenderer
     private function renderCallout(array $payload, string $mode): string
     {
         $type = (string)($payload['callout_type'] ?? 'warning');
-        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
+        if (!in_array($type, array('warning', 'caution', 'info', 'note'), true)) {
             $type = 'warning';
         }
         $title = (string)($payload['title'] ?? strtoupper($type));
@@ -1987,14 +1987,40 @@ final class ControlledPublishingBookRenderer
         $textTextColor = (string)($payload['text_text_color'] ?? '');
         $edit = $mode === self::MODE_EDIT;
         $icon = $type;
+
+        $styleDef = array();
+        if ($this->styleService !== null && $this->bookStyles !== array()) {
+            $styleDef = $this->styleService->resolveCalloutStyle($this->bookStyles, $type);
+        }
+        if ($titleFontFamily === '' && $styleDef !== array()) {
+            $titleFontFamily = (string)($styleDef['title_font_family'] ?? 'sans');
+            $titleFontSize = (int)($styleDef['title_font_size'] ?? 11);
+            $titleTextColor = (string)($styleDef['title_color'] ?? '#0f2744');
+        }
+        if ($textFontFamily === '' && $styleDef !== array()) {
+            $textFontFamily = (string)($styleDef['text_font_family'] ?? 'sans');
+            $textFontSize = (int)($styleDef['text_font_size'] ?? 10);
+            $textTextColor = (string)($styleDef['text_color'] ?? '#1e293b');
+        }
+
+        $boxStyle = '';
+        if ($styleDef !== array()) {
+            $boxStyle = ' style="border-color:' . h((string)($styleDef['border_color'] ?? '#94a3b8'))
+                . ';background:' . h((string)($styleDef['background'] ?? '#ffffff')) . '"';
+        }
+        $iconStyle = '';
+        if ($styleDef !== array()) {
+            $iconStyle = ' style="background:' . h((string)($styleDef['icon_color'] ?? '#0f2744')) . '"';
+        }
+
         $titleEdit = $edit ? ' contenteditable="true" data-field="callout_title" spellcheck="true"' : '';
         $textEdit = $edit ? ' contenteditable="true" data-field="callout_text" spellcheck="true"' : '';
         $titleVisual = $this->tableCellVisualAttr('', '', $titleFontFamily, $titleFontSize, $titleTextColor);
         $textVisual = $this->tableCellVisualAttr('', '', $textFontFamily, $textFontSize, $textTextColor);
         $titleHtml = $title !== '' ? $this->renderTableCellInner($title, $edit, array()) : h(strtoupper($type));
         $textHtml = $text !== '' ? $this->renderTableCellInner($text, $edit, array()) : '';
-        return '<div class="cpb-callout cpb-callout--' . h($type) . '" data-callout-type="' . h($type) . '">'
-            . '<div class="cpb-callout-icon cpb-callout-icon--' . h($icon) . '" aria-hidden="true"></div>'
+        return '<div class="cpb-callout cpb-callout--' . h($type) . '" data-callout-type="' . h($type) . '"' . $boxStyle . '>'
+            . '<div class="cpb-callout-icon cpb-callout-icon--' . h($icon) . '" aria-hidden="true"' . $iconStyle . '></div>'
             . '<div class="cpb-callout-body">'
             . '<div class="cpb-callout-title"' . $titleEdit . $titleVisual . '>' . $titleHtml . '</div>'
             . '<div class="cpb-callout-text"' . $textEdit . $textVisual . '>' . $textHtml . '</div>'

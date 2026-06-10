@@ -39,7 +39,7 @@ final class ControlledPublishingBookStyleService
     public const FONT_KEYS = array('serif', 'sans', 'arial', 'mono');
 
     /** @var list<string> */
-    public const CALLOUT_TYPES = array('warning', 'caution', 'info');
+    public const CALLOUT_TYPES = array('warning', 'caution', 'info', 'note');
 
     public function __construct(private PDO $pdo)
     {
@@ -70,6 +70,7 @@ final class ControlledPublishingBookStyleService
                 )),
             ),
             'callout_presets' => $this->defaultCalloutPresets(),
+            'callout_styles' => $this->defaultCalloutStyles(),
         );
     }
 
@@ -97,6 +98,64 @@ final class ControlledPublishingBookStyleService
             array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
             array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
             array('callout_type' => 'info', 'title' => 'INFO', 'text' => ''),
+            array('callout_type' => 'note', 'title' => 'NOTE', 'text' => ''),
+        );
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function defaultCalloutStyles(): array
+    {
+        return array(
+            'warning' => array(
+                'border_color' => '#dc2626',
+                'background' => '#fef2f2',
+                'icon_color' => '#dc2626',
+                'title_color' => '#991b1b',
+                'title_font_family' => 'sans',
+                'title_font_size' => 11,
+                'title_font_bold' => true,
+                'text_color' => '#1e293b',
+                'text_font_family' => 'sans',
+                'text_font_size' => 10,
+            ),
+            'caution' => array(
+                'border_color' => '#ca8a04',
+                'background' => '#fffbeb',
+                'icon_color' => '#eab308',
+                'title_color' => '#854d0e',
+                'title_font_family' => 'sans',
+                'title_font_size' => 11,
+                'title_font_bold' => true,
+                'text_color' => '#1e293b',
+                'text_font_family' => 'sans',
+                'text_font_size' => 10,
+            ),
+            'info' => array(
+                'border_color' => '#1e40af',
+                'background' => '#eff6ff',
+                'icon_color' => '#1e3a8a',
+                'title_color' => '#1e3a8a',
+                'title_font_family' => 'sans',
+                'title_font_size' => 11,
+                'title_font_bold' => true,
+                'text_color' => '#1e293b',
+                'text_font_family' => 'sans',
+                'text_font_size' => 10,
+            ),
+            'note' => array(
+                'border_color' => '#0d9488',
+                'background' => '#f0fdfa',
+                'icon_color' => '#0d9488',
+                'title_color' => '#115e59',
+                'title_font_family' => 'sans',
+                'title_font_size' => 11,
+                'title_font_bold' => true,
+                'text_color' => '#134e4a',
+                'text_font_family' => 'sans',
+                'text_font_size' => 10,
+            ),
         );
     }
 
@@ -112,6 +171,7 @@ final class ControlledPublishingBookStyleService
         );
         $tables = is_array($metadata['table_styles'] ?? null) ? $metadata['table_styles'] : array();
         $callouts = is_array($metadata['callout_presets'] ?? null) ? $metadata['callout_presets'] : array();
+        $calloutStyles = is_array($metadata['callout_styles'] ?? null) ? $metadata['callout_styles'] : array();
 
         $resolvedParagraph = array();
         foreach (self::PARAGRAPH_STYLE_KEYS as $key) {
@@ -137,6 +197,7 @@ final class ControlledPublishingBookStyleService
                 ),
             ),
             'callout_presets' => $this->normalizeCalloutPresets($callouts),
+            'callout_styles' => $this->normalizeCalloutStyles($calloutStyles),
             'page_header' => $pageLayout['page_header'],
             'page_footer' => $pageLayout['page_footer'],
         );
@@ -168,6 +229,7 @@ final class ControlledPublishingBookStyleService
         $meta['paragraph_styles'] = $normalized['paragraph_styles'];
         $meta['table_styles'] = $normalized['table_styles'];
         $meta['callout_presets'] = $normalized['callout_presets'];
+        $meta['callout_styles'] = $normalized['callout_styles'];
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions
@@ -397,6 +459,26 @@ final class ControlledPublishingBookStyleService
         );
     }
 
+    /**
+     * @param array<string,mixed> $bookStyles
+     * @return array<string,mixed>
+     */
+    public function resolveCalloutStyle(array $bookStyles, string $type): array
+    {
+        $type = strtolower(trim($type));
+        if (!in_array($type, self::CALLOUT_TYPES, true)) {
+            $type = 'warning';
+        }
+        $defaults = $this->defaultCalloutStyles();
+        $styles = is_array($bookStyles['callout_styles'] ?? null) ? $bookStyles['callout_styles'] : array();
+        $fallback = is_array($defaults[$type] ?? null) ? $defaults[$type] : $defaults['warning'];
+
+        return $this->normalizeCalloutStyle(
+            is_array($styles[$type] ?? null) ? $styles[$type] : array(),
+            $fallback
+        );
+    }
+
     public function fontFamilyStack(string $fontFamily): string
     {
         $key = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
@@ -502,6 +584,46 @@ final class ControlledPublishingBookStyleService
             }
         }
         return array_values($out);
+    }
+
+    /**
+     * @param array<string,mixed> $styles
+     * @return array<string, array<string, mixed>>
+     */
+    private function normalizeCalloutStyles(array $styles): array
+    {
+        $defaults = $this->defaultCalloutStyles();
+        $out = array();
+        foreach (self::CALLOUT_TYPES as $type) {
+            $fallback = is_array($defaults[$type] ?? null) ? $defaults[$type] : $defaults['warning'];
+            $out[$type] = $this->normalizeCalloutStyle(
+                is_array($styles[$type] ?? null) ? $styles[$type] : array(),
+                $fallback
+            );
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $fallback
+     * @return array<string,mixed>
+     */
+    private function normalizeCalloutStyle(array $input, array $fallback): array
+    {
+        return array(
+            'border_color' => $this->normalizeColor((string)($input['border_color'] ?? $fallback['border_color'] ?? '#94a3b8'), '#94a3b8'),
+            'background' => $this->normalizeColor((string)($input['background'] ?? $fallback['background'] ?? '#ffffff'), '#ffffff'),
+            'icon_color' => $this->normalizeColor((string)($input['icon_color'] ?? $fallback['icon_color'] ?? '#0f2744'), '#0f2744'),
+            'title_color' => $this->normalizeColor((string)($input['title_color'] ?? $fallback['title_color'] ?? '#0f2744'), '#0f2744'),
+            'title_font_family' => $this->normalizeFont((string)($input['title_font_family'] ?? $fallback['title_font_family'] ?? 'sans')),
+            'title_font_size' => $this->normalizeFontSize($input['title_font_size'] ?? $fallback['title_font_size'] ?? 11),
+            'title_font_bold' => $this->normalizeBool($input['title_font_bold'] ?? null, (bool)($fallback['title_font_bold'] ?? true)),
+            'text_color' => $this->normalizeColor((string)($input['text_color'] ?? $fallback['text_color'] ?? '#1e293b'), '#1e293b'),
+            'text_font_family' => $this->normalizeFont((string)($input['text_font_family'] ?? $fallback['text_font_family'] ?? 'sans')),
+            'text_font_size' => $this->normalizeFontSize($input['text_font_size'] ?? $fallback['text_font_size'] ?? 10),
+        );
     }
 
     private function normalizeFont(string $font): string

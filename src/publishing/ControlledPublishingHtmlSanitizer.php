@@ -17,7 +17,7 @@ final class ControlledPublishingHtmlSanitizer
             return '';
         }
 
-        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'span');
+        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'span', 'a');
         $doc = new DOMDocument();
         $prev = libxml_use_internal_errors(true);
         $wrapped = '<?xml encoding="utf-8" ?><div>' . $html . '</div>';
@@ -62,6 +62,25 @@ final class ControlledPublishingHtmlSanitizer
                     $style = (string)$child->getAttribute('style');
                     if (preg_match('/color\s*:\s*(#[0-9a-fA-F]{3,8})/', $style, $m) === 1) {
                         $keepAttrs['style'] = 'color:' . strtolower($m[1]);
+                    }
+                }
+                if ($tag === 'a') {
+                    $href = trim((string)$child->getAttribute('href'));
+                    if ($href !== '' && preg_match('/^(https?:\/\/|\/)/i', $href) === 1) {
+                        $keepAttrs['href'] = $href;
+                    }
+                    $class = trim((string)$child->getAttribute('class'));
+                    if ($class !== '') {
+                        $keepAttrs['class'] = $class;
+                    }
+                    $target = trim((string)$child->getAttribute('target'));
+                    if ($target === '_blank') {
+                        $keepAttrs['target'] = '_blank';
+                        $keepAttrs['rel'] = 'noopener noreferrer';
+                    }
+                    $sectionId = trim((string)$child->getAttribute('data-section-id'));
+                    if ($sectionId !== '' && ctype_digit($sectionId)) {
+                        $keepAttrs['data-section-id'] = $sectionId;
                     }
                 }
                 while ($child->attributes->length > 0) {

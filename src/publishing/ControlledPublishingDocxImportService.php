@@ -9,6 +9,7 @@ require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingLepService.php';
+require_once __DIR__ . '/ControlledPublishingRichTextService.php';
 
 /**
  * Imports Apple Pages / Word DOCX part exports into canonical excerpts and controlled book blocks.
@@ -32,6 +33,7 @@ final class ControlledPublishingDocxImportService
     );
 
     private ControlledPublishingDocxReader $reader;
+    private ControlledPublishingRichTextService $richText;
 
     public function __construct(
         private PDO $pdo,
@@ -42,9 +44,11 @@ final class ControlledPublishingDocxImportService
         private ControlledPublishingPart0PageService $part0Pages,
         private ControlledPublishingBookStyleService $styleService,
         private ControlledPublishingLepService $lepService,
-        ?ControlledPublishingDocxReader $reader = null
+        ?ControlledPublishingDocxReader $reader = null,
+        ?ControlledPublishingRichTextService $richText = null
     ) {
         $this->reader = $reader ?? new ControlledPublishingDocxReader();
+        $this->richText = $richText ?? new ControlledPublishingRichTextService($pdo);
     }
 
     /**
@@ -168,6 +172,9 @@ final class ControlledPublishingDocxImportService
             $stats['images_uploaded'] += $result['images_uploaded'];
             $stats['warnings'] = array_merge($stats['warnings'], $result['warnings']);
         }
+
+        // Re-sync after blocks import so chapter nav labels pick up depth-1 canonical titles.
+        $this->manualStructure->syncVersionStructure($versionId, $actorUserId);
 
         return $stats;
     }
@@ -756,7 +763,7 @@ final class ControlledPublishingDocxImportService
             if ($pendingBody === array()) {
                 return;
             }
-            $html = $this->mergedBodyParagraphHtml($pendingBody);
+            $html = $this->mergedBodyParagraphHtml($pendingBody, $versionId);
             if ($html === '') {
                 $pendingBody = array();
                 return;
@@ -839,6 +846,18 @@ final class ControlledPublishingDocxImportService
                     continue;
                 }
 
+                $callout = ControlledPublishingRichTextService::parseLeadingCallout($text);
+                if ($callout !== null) {
+                    $flushAll();
+                    $this->blocks->createBlock($versionId, $sectionId, 'callout', array(
+                        'callout_type' => $callout['callout_type'],
+                        'title' => $callout['title'],
+                        'text' => $this->richText->calloutTextHtml($callout['text'], $versionId),
+                    ), $actorUserId);
+                    $blocksCreated++;
+                    continue;
+                }
+
                 if (!empty($node['is_bullet'])) {
                     $flushBody();
                     $flushOrdered();
@@ -905,15 +924,11 @@ final class ControlledPublishingDocxImportService
     /**
      * @param list<string> $paragraphs
      */
-    private function mergedBodyParagraphHtml(array $paragraphs): string
+    private function mergedBodyParagraphHtml(array $paragraphs, int $versionId): string
     {
         $html = '';
         foreach ($paragraphs as $paragraph) {
-            $paragraph = trim($paragraph);
-            if ($paragraph === '') {
-                continue;
-            }
-            $html .= '<p>' . htmlspecialchars($paragraph, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>';
+            $html .= $this->richText->bodyParagraphHtml((string)$paragraph, $versionId);
         }
         return $html;
     }

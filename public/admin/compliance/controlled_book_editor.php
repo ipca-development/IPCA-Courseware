@@ -167,6 +167,7 @@ compliance_page_open(array(
             <option value="warning">Warning</option>
             <option value="caution">Caution</option>
             <option value="info">Info</option>
+            <option value="note">Note</option>
             <option value="manage">Presets…</option>
           </select>
         </div>

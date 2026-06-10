@@ -398,6 +398,7 @@
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
       refreshContentTableTypographyFromBookStyles();
+      refreshCalloutTypographyFromBookStyles();
       if (state.isTocSection) {
         refreshTocTypographyFromBookStyles();
       }
@@ -663,6 +664,16 @@
   function initCanvasEvents() {
     if (state.canvasEventsWired) return;
     state.canvasEventsWired = true;
+
+    canvasEl.addEventListener('click', function (e) {
+      var annexLink = e.target.closest('a.cpb-annex-link[data-section-id]');
+      if (annexLink && canvasEl.contains(annexLink)) {
+        e.preventDefault();
+        var sid = parseInt(annexLink.getAttribute('data-section-id') || '0', 10);
+        if (sid > 0) loadSection(sid);
+        return;
+      }
+    });
 
     canvasEl.addEventListener('focusin', function (e) {
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
@@ -1049,10 +1060,42 @@
         { callout_type: 'warning', title: 'WARNING', text: '' },
         { callout_type: 'caution', title: 'CAUTION', text: '' },
         { callout_type: 'info', title: 'INFO', text: '' },
+        { callout_type: 'note', title: 'NOTE', text: '' },
       ],
+      callout_styles: defaultCalloutStylesDef(),
       page_header: defaultPageHeader(),
       page_footer: defaultPageFooter(),
     };
+  }
+
+  function defaultCalloutStylesDef() {
+    return {
+      warning: {
+        border_color: '#dc2626', background: '#fef2f2', icon_color: '#dc2626',
+        title_color: '#991b1b', title_font_family: 'sans', title_font_size: 11, title_font_bold: true,
+        text_color: '#1e293b', text_font_family: 'sans', text_font_size: 10,
+      },
+      caution: {
+        border_color: '#ca8a04', background: '#fffbeb', icon_color: '#eab308',
+        title_color: '#854d0e', title_font_family: 'sans', title_font_size: 11, title_font_bold: true,
+        text_color: '#1e293b', text_font_family: 'sans', text_font_size: 10,
+      },
+      info: {
+        border_color: '#1e40af', background: '#eff6ff', icon_color: '#1e3a8a',
+        title_color: '#1e3a8a', title_font_family: 'sans', title_font_size: 11, title_font_bold: true,
+        text_color: '#1e293b', text_font_family: 'sans', text_font_size: 10,
+      },
+      note: {
+        border_color: '#0d9488', background: '#f0fdfa', icon_color: '#0d9488',
+        title_color: '#115e59', title_font_family: 'sans', title_font_size: 11, title_font_bold: true,
+        text_color: '#134e4a', text_font_family: 'sans', text_font_size: 10,
+      },
+    };
+  }
+
+  function calloutStyleDef(type) {
+    var styles = (state.bookStyles && state.bookStyles.callout_styles) || defaultCalloutStylesDef();
+    return styles[type] || defaultCalloutStylesDef()[type] || defaultCalloutStylesDef().info;
   }
 
   function defaultPageHeader() {
@@ -2321,28 +2364,41 @@
 
   function typographyMatchesParagraphStyleDef(fields, styleKey) {
     var def = paragraphStyleDef(styleKey);
+    var colorA = cssColorToHex(fields.text_color || '');
+    var colorB = cssColorToHex(def.color || '#0f172a');
     return fields.font_family === (def.font_family || 'serif')
       && fields.font_size === (def.font_size || 11)
-      && fields.text_color === (def.color || '#0f172a')
+      && colorA === colorB
       && !!fields.font_bold === !!def.font_bold
       && !!fields.font_italic === !!def.font_italic
       && !!fields.font_underline === !!def.font_underline;
   }
 
   function readElementTypographyFields(el) {
+    var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
+    var styleDef = paragraphStyleDef(styleKey);
     var fontFamily = el.getAttribute('data-font-family') || '';
     var fontSize = parseInt(el.getAttribute('data-font-size') || '0', 10) || 0;
     if (!fontFamily || !fontSize) {
-      var def = paragraphStyleDef('body');
-      if (!fontFamily) fontFamily = def.font_family || 'serif';
-      if (!fontSize) fontSize = def.font_size || 11;
+      var bodyDef = paragraphStyleDef('body');
+      if (!fontFamily) fontFamily = styleDef.font_family || bodyDef.font_family || 'serif';
+      if (!fontSize) fontSize = styleDef.font_size || bodyDef.font_size || 11;
+    }
+    function readTriStateAttr(name, styleDefault) {
+      var value = el.getAttribute(name);
+      if (value === null || value === '') return !!styleDefault;
+      return value === '1' || value === 'true';
     }
     return {
       font_family: fontFamily,
       font_size: fontSize,
       text_color: extractCellTextColor(el)
+        || styleDef.color
         || paragraphStyleDef('body').color
         || '#0f172a',
+      font_bold: readTriStateAttr('data-font-bold', styleDef.font_bold),
+      font_italic: readTriStateAttr('data-font-italic', styleDef.font_italic),
+      font_underline: readTriStateAttr('data-font-underline', styleDef.font_underline),
     };
   }
 
@@ -2468,6 +2524,9 @@
       font_family: el.getAttribute('data-font-family') || def.font_family || 'serif',
       font_size: parseInt(el.getAttribute('data-font-size') || String(def.font_size || 11), 10) || 11,
       text_color: el.getAttribute('data-text-color') || def.color || '#0f172a',
+      font_bold: el.getAttribute('data-font-bold') === '1',
+      font_italic: el.getAttribute('data-font-italic') === '1',
+      font_underline: el.getAttribute('data-font-underline') === '1',
     };
     if (typographyMatchesParagraphStyleDef(fields, styleKey)) {
       applyTypographyToElement(el, {
@@ -3801,6 +3860,39 @@
     });
   }
 
+  function refreshCalloutTypographyFromBookStyles() {
+    canvasEl.querySelectorAll('.cpb-callout').forEach(function (callout) {
+      var type = callout.getAttribute('data-callout-type') || 'warning';
+      var def = calloutStyleDef(type);
+      callout.style.borderColor = def.border_color || '';
+      callout.style.background = def.background || '';
+      var icon = callout.querySelector('.cpb-callout-icon');
+      if (icon) icon.style.background = def.icon_color || '';
+      var title = callout.querySelector('.cpb-callout-title');
+      if (title) {
+        applyTypographyToElement(title, {
+          font_family: def.title_font_family || 'sans',
+          font_size: def.title_font_size || 11,
+          color: def.title_color || '#0f2744',
+          font_bold: !!def.title_font_bold,
+          font_italic: false,
+          font_underline: false,
+        }, null, true);
+      }
+      var text = callout.querySelector('.cpb-callout-text');
+      if (text) {
+        applyTypographyToElement(text, {
+          font_family: def.text_font_family || 'sans',
+          font_size: def.text_font_size || 10,
+          color: def.text_color || '#1e293b',
+          font_bold: false,
+          font_italic: false,
+          font_underline: false,
+        }, null, true);
+      }
+    });
+  }
+
   function refreshContentTableTypographyFromBookStyles() {
     canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
       if (blockEl.closest('.cpb-sheet--lep, .cpb-sheet--part0')) {
@@ -4158,7 +4250,7 @@
     var presets = state.calloutPresets && state.calloutPresets.length
       ? state.calloutPresets
       : defaultBookStyles().callout_presets;
-    var labels = { warning: 'Warning', caution: 'Caution', info: 'Info' };
+    var labels = { warning: 'Warning', caution: 'Caution', info: 'Info', note: 'Note' };
     var html = '<option value="">⚑</option>';
     presets.forEach(function (preset) {
       var type = preset.callout_type || '';
@@ -4174,13 +4266,14 @@
     var warning = presetByType('warning') || { callout_type: 'warning', title: 'WARNING', text: '' };
     var caution = presetByType('caution') || { callout_type: 'caution', title: 'CAUTION', text: '' };
     var info = presetByType('info') || { callout_type: 'info', title: 'INFO', text: '' };
+    var note = presetByType('note') || { callout_type: 'note', title: 'NOTE', text: '' };
 
     var overlay = document.createElement('div');
     overlay.className = 'cpb-callout-overlay';
     overlay.innerHTML = ''
       + '<div class="cpb-callout-dialog" role="dialog" aria-label="Manage callout presets">'
       + '<h3>Callout presets</h3>'
-      + '<p style="margin:0 0 12px;font-size:13px;color:#64748b;">Default title and text used when inserting Warning, Caution, or Info blocks.</p>'
+      + '<p style="margin:0 0 12px;font-size:13px;color:#64748b;">Default title and text used when inserting callout blocks.</p>'
       + '<div class="cpb-callout-field"><label>Warning title</label>'
       + '<input type="text" id="cpbPresetWarnTitle" value="' + escapeAttr(warning.title) + '"></div>'
       + '<div class="cpb-callout-field"><label>Warning default text</label>'
@@ -4193,6 +4286,10 @@
       + '<input type="text" id="cpbPresetInfoTitle" value="' + escapeAttr(info.title) + '"></div>'
       + '<div class="cpb-callout-field"><label>Info default text</label>'
       + '<textarea id="cpbPresetInfoText">' + escapeHtml(info.text) + '</textarea></div>'
+      + '<div class="cpb-callout-field"><label>Note title</label>'
+      + '<input type="text" id="cpbPresetNoteTitle" value="' + escapeAttr(note.title) + '"></div>'
+      + '<div class="cpb-callout-field"><label>Note default text</label>'
+      + '<textarea id="cpbPresetNoteText">' + escapeHtml(note.text) + '</textarea></div>'
       + '<div class="cpb-callout-dialog-actions">'
       + '<button type="button" class="cpb-callout-cancel">Cancel</button>'
       + '<button type="button" class="cpb-callout-save">Save presets</button>'
@@ -4222,6 +4319,11 @@
           callout_type: 'info',
           title: overlay.querySelector('#cpbPresetInfoTitle').value.trim() || 'INFO',
           text: overlay.querySelector('#cpbPresetInfoText').value.trim(),
+        },
+        {
+          callout_type: 'note',
+          title: overlay.querySelector('#cpbPresetNoteTitle').value.trim() || 'NOTE',
+          text: overlay.querySelector('#cpbPresetNoteText').value.trim(),
         },
       ];
       apiPost('save_callout_presets', {
@@ -4628,6 +4730,38 @@
         + '</section>';
     }
 
+    function calloutStyleSection(type, label) {
+      var c = styles.callout_styles && styles.callout_styles[type]
+        ? styles.callout_styles[type]
+        : defaultCalloutStylesDef()[type];
+      function field(name, title, isColor) {
+        var val = c[name] || '';
+        if (isColor) {
+          return '<label>' + escapeHtml(title) + ' <input class="cpb-style-input cpb-style-input--color" type="color" data-callout-type="' + type + '" data-callout-field="' + name + '" value="' + escapeAttr(val || '#000000') + '"></label>';
+        }
+        if (name.indexOf('font_family') > -1) {
+          return '<label>' + escapeHtml(title) + ' <select class="cpb-style-input" data-callout-type="' + type + '" data-callout-field="' + name + '">' + styleEditorFontOptions(val || 'sans') + '</select></label>';
+        }
+        if (name.indexOf('font_size') > -1) {
+          return '<label>' + escapeHtml(title) + ' <input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-callout-type="' + type + '" data-callout-field="' + name + '" value="' + (val || 10) + '"></label>';
+        }
+        return '';
+      }
+      return ''
+        + '<section class="cpb-style-section"><h4>' + escapeHtml(label) + '</h4>'
+        + '<div class="cpb-style-table-grid">'
+        + field('border_color', 'Border', true)
+        + field('background', 'Background', true)
+        + field('icon_color', 'Icon', true)
+        + field('title_color', 'Title color', true)
+        + field('title_font_family', 'Title font')
+        + field('title_font_size', 'Title size')
+        + field('text_color', 'Text color', true)
+        + field('text_font_family', 'Text font')
+        + field('text_font_size', 'Text size')
+        + '</div></section>';
+    }
+
     overlay.innerHTML = ''
       + '<div class="cpb-style-dialog" role="dialog" aria-label="Book style editor">'
       + '<h3>Book style editor</h3>'
@@ -4639,6 +4773,10 @@
       + paragraphRows + '</tbody></table></section>'
       + tableSection('standard', 'Standard tables')
       + tableSection('text', 'Text tables')
+      + calloutStyleSection('warning', 'Warning boxes')
+      + calloutStyleSection('caution', 'Caution boxes')
+      + calloutStyleSection('info', 'Info boxes')
+      + calloutStyleSection('note', 'Note boxes')
       + '<div class="cpb-style-dialog-actions">'
       + '<button type="button" class="cpb-style-cancel">Cancel</button>'
       + '<button type="button" class="cpb-style-save">Save styles</button>'
@@ -4666,6 +4804,18 @@
           if (field.indexOf('.') > -1) {
             var parts = field.split('.');
             base[parts[0]][parts[1]] = input.value;
+          } else {
+            base[field] = input.value;
+          }
+        });
+      });
+      ['warning', 'caution', 'info', 'note'].forEach(function (type) {
+        var base = next.callout_styles[type];
+        overlay.querySelectorAll('[data-callout-type="' + type + '"]').forEach(function (input) {
+          var field = input.getAttribute('data-callout-field');
+          if (!field) return;
+          if (field === 'title_font_size' || field === 'text_font_size') {
+            base[field] = parseInt(input.value, 10) || 10;
           } else {
             base[field] = input.value;
           }
@@ -4704,6 +4854,7 @@
             });
             refreshTocTypographyFromBookStyles();
             refreshLepTypographyFromBookStyles();
+            refreshCalloutTypographyFromBookStyles();
           });
         })
         .catch(showError);

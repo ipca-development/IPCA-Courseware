@@ -259,6 +259,17 @@ final class ControlledPublishingManualStructureService
             if ($ref === '' || $this->isSkippableCanonicalExcerpt($ref, (string)($row['title'] ?? ''), '')) {
                 continue;
             }
+            if (preg_match('/^(\d+)$/', $ref, $chapterMatch)) {
+                $chapterNum = (int)$chapterMatch[1];
+                if ($chapterNum > 0) {
+                    $chapterNumbers[$chapterNum] = true;
+                    $titleCandidate = trim((string)($row['title'] ?? ''));
+                    if ($titleCandidate !== '' && strcasecmp($titleCandidate, 'outline') !== 0) {
+                        $headingTitles[$chapterNum] = $this->formatChapterTitle($titleCandidate);
+                    }
+                }
+                continue;
+            }
             if (preg_match('/^(\d+)\.\d/', $ref, $m)) {
                 $chapterNumbers[(int)$m[1]] = true;
             }

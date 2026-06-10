@@ -760,7 +760,7 @@ final class ControlledPublishingBlockService
     private function normalizeCalloutPayload(array $payload, bool $strict): array
     {
         $type = strtolower(trim((string)($payload['callout_type'] ?? 'warning')));
-        if (!in_array($type, array('warning', 'caution', 'info'), true)) {
+        if (!in_array($type, array('warning', 'caution', 'info', 'note'), true)) {
             $type = 'warning';
         }
         $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? strtoupper($type))));
