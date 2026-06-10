@@ -694,89 +694,19 @@ final class ControlledPublishingDocxImportService
                 $this->clearAuthorBlocks($sectionId);
             }
 
-            $pendingList = array();
-            $flushList = function () use (&$pendingList, $versionId, $sectionId, $actorUserId, &$blocksCreated): void {
-                if ($pendingList === array()) {
-                    return;
-                }
-                $this->blocks->createBlock($versionId, $sectionId, 'list', array(
-                    'ordered' => false,
-                    'items' => $pendingList,
-                ), $actorUserId);
-                $blocksCreated++;
-                $pendingList = array();
-            };
-
             foreach ($chapterSections as $section) {
-                foreach (is_array($section['nodes'] ?? null) ? $section['nodes'] : array() as $node) {
-                    if (!is_array($node)) {
-                        continue;
-                    }
-                    $type = (string)($node['type'] ?? '');
-
-                    if ($type === 'paragraph') {
-                        $text = trim((string)($node['text'] ?? ''));
-                        if ($text === '') {
-                            continue;
-                        }
-                        if (!empty($node['is_bullet']) && ($node['section_ref'] ?? '') === '') {
-                            $pendingList[] = $text;
-                            continue;
-                        }
-                        $flushList();
-
-                        if (($node['section_ref'] ?? '') !== '') {
-                            $style = (string)($node['paragraph_style'] ?? 'body');
-                            $headingText = (string)($node['section_title'] ?? $text);
-                            $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
-                                'html' => '<p>' . htmlspecialchars($headingText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>',
-                                'paragraph_style' => $style,
-                                'canonical_section_ref' => (string)$node['section_ref'],
-                            ), $actorUserId);
-                            $blocksCreated++;
-                            continue;
-                        }
-
-                        $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
-                            'html' => $this->textToHtml($text),
-                            'paragraph_style' => 'body',
-                        ), $actorUserId);
-                        $blocksCreated++;
-                        continue;
-                    }
-
-                    if ($type === 'table') {
-                        $flushList();
-                        $payload = $this->tablePayloadFromRows(
-                            is_array($node['rows'] ?? null) ? $node['rows'] : array(),
-                            'standard',
-                            $standardTable
-                        );
-                        $this->blocks->createBlock($versionId, $sectionId, 'table', $payload, $actorUserId);
-                        $blocksCreated++;
-                        continue;
-                    }
-
-                    if ($type === 'image') {
-                        $flushList();
-                        $url = $this->storeImageBytes(
-                            $bookKey,
-                            $versionLabel,
-                            (string)($node['bytes'] ?? ''),
-                            (string)($node['mime'] ?? 'image/png'),
-                            (string)($node['ext'] ?? 'png')
-                        );
-                        $this->blocks->createBlock($versionId, $sectionId, 'image', array(
-                            'url' => $url,
-                            'alt' => (string)($node['alt'] ?? 'Manual figure'),
-                            'width_pct' => (int)($node['width_pct'] ?? 100),
-                        ), $actorUserId);
-                        $blocksCreated++;
-                        $imagesUploaded++;
-                    }
-                }
+                $result = $this->importGroupedContentNodes(
+                    $versionId,
+                    $sectionId,
+                    is_array($section['nodes'] ?? null) ? $section['nodes'] : array(),
+                    $textTable,
+                    $bookKey,
+                    $versionLabel,
+                    $actorUserId
+                );
+                $blocksCreated += $result['blocks_created'];
+                $imagesUploaded += $result['images_uploaded'];
             }
-            $flushList();
         }
 
         return array(
@@ -784,6 +714,229 @@ final class ControlledPublishingDocxImportService
             'images_uploaded' => $imagesUploaded,
             'warnings' => $warnings,
         );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $nodes
+     * @param array<string,mixed> $contentTableStyle
+     * @param array<string,mixed> $options emit_section_headings (default true), import_tables (default true)
+     * @return array{blocks_created:int,images_uploaded:int}
+     */
+    private function importGroupedContentNodes(
+        int $versionId,
+        int $sectionId,
+        array $nodes,
+        array $contentTableStyle,
+        string $bookKey,
+        string $versionLabel,
+        ?int $actorUserId,
+        array $options = array()
+    ): array {
+        $emitSectionHeadings = !array_key_exists('emit_section_headings', $options) || $options['emit_section_headings'];
+        $importTables = !array_key_exists('import_tables', $options) || $options['import_tables'];
+        $blocksCreated = 0;
+        $imagesUploaded = 0;
+
+        $pendingBody = array();
+        $pendingBullets = array();
+        $pendingOrdered = array();
+
+        $flushBody = function () use (
+            &$pendingBody,
+            $versionId,
+            $sectionId,
+            $actorUserId,
+            &$blocksCreated
+        ): void {
+            if ($pendingBody === array()) {
+                return;
+            }
+            $html = $this->mergedBodyParagraphHtml($pendingBody);
+            if ($html === '') {
+                $pendingBody = array();
+                return;
+            }
+            $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                'html' => $html,
+                'paragraph_style' => 'body',
+            ), $actorUserId);
+            $blocksCreated++;
+            $pendingBody = array();
+        };
+
+        $flushBullets = function () use (
+            &$pendingBullets,
+            $versionId,
+            $sectionId,
+            $actorUserId,
+            &$blocksCreated
+        ): void {
+            if ($pendingBullets === array()) {
+                return;
+            }
+            $this->blocks->createBlock($versionId, $sectionId, 'list', array(
+                'ordered' => false,
+                'items' => $pendingBullets,
+            ), $actorUserId);
+            $blocksCreated++;
+            $pendingBullets = array();
+        };
+
+        $flushOrdered = function () use (
+            &$pendingOrdered,
+            $versionId,
+            $sectionId,
+            $actorUserId,
+            &$blocksCreated
+        ): void {
+            if ($pendingOrdered === array()) {
+                return;
+            }
+            $this->blocks->createBlock($versionId, $sectionId, 'list', array(
+                'ordered' => true,
+                'items' => $pendingOrdered,
+            ), $actorUserId);
+            $blocksCreated++;
+            $pendingOrdered = array();
+        };
+
+        $flushAll = function () use ($flushBody, $flushBullets, $flushOrdered): void {
+            $flushBody();
+            $flushBullets();
+            $flushOrdered();
+        };
+
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $type = (string)($node['type'] ?? '');
+
+            if ($type === 'paragraph') {
+                $text = trim((string)($node['text'] ?? ''));
+                if ($text === '') {
+                    continue;
+                }
+
+                if (($node['section_ref'] ?? '') !== '') {
+                    if (!$emitSectionHeadings) {
+                        continue;
+                    }
+                    $flushAll();
+                    $style = (string)($node['paragraph_style'] ?? 'body');
+                    $headingText = (string)($node['section_title'] ?? $text);
+                    $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                        'html' => '<p>' . htmlspecialchars($headingText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>',
+                        'paragraph_style' => $style,
+                        'canonical_section_ref' => (string)$node['section_ref'],
+                    ), $actorUserId);
+                    $blocksCreated++;
+                    continue;
+                }
+
+                if (!empty($node['is_bullet'])) {
+                    $flushBody();
+                    $flushOrdered();
+                    $pendingBullets[] = $text;
+                    continue;
+                }
+
+                if ($this->isManualOrderedListItem($text)) {
+                    $flushBody();
+                    $flushBullets();
+                    $pendingOrdered[] = $this->stripManualListPrefix($text);
+                    continue;
+                }
+
+                $flushOrdered();
+                $flushBullets();
+                $pendingBody[] = $text;
+                continue;
+            }
+
+            if ($type === 'table') {
+                if (!$importTables) {
+                    $flushAll();
+                    continue;
+                }
+                $flushAll();
+                $payload = $this->tablePayloadFromRows(
+                    is_array($node['rows'] ?? null) ? $node['rows'] : array(),
+                    'text',
+                    $contentTableStyle
+                );
+                $this->blocks->createBlock($versionId, $sectionId, 'table', $payload, $actorUserId);
+                $blocksCreated++;
+                continue;
+            }
+
+            if ($type === 'image') {
+                $flushAll();
+                $url = $this->storeImageBytes(
+                    $bookKey,
+                    $versionLabel,
+                    (string)($node['bytes'] ?? ''),
+                    (string)($node['mime'] ?? 'image/png'),
+                    (string)($node['ext'] ?? 'png')
+                );
+                $this->blocks->createBlock($versionId, $sectionId, 'image', array(
+                    'url' => $url,
+                    'alt' => (string)($node['alt'] ?? 'Manual figure'),
+                    'width_pct' => (int)($node['width_pct'] ?? 100),
+                ), $actorUserId);
+                $blocksCreated++;
+                $imagesUploaded++;
+            }
+        }
+
+        $flushAll();
+
+        return array(
+            'blocks_created' => $blocksCreated,
+            'images_uploaded' => $imagesUploaded,
+        );
+    }
+
+    /**
+     * @param list<string> $paragraphs
+     */
+    private function mergedBodyParagraphHtml(array $paragraphs): string
+    {
+        $html = '';
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = trim($paragraph);
+            if ($paragraph === '') {
+                continue;
+            }
+            $html .= '<p>' . htmlspecialchars($paragraph, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>';
+        }
+        return $html;
+    }
+
+    private function isManualOrderedListItem(string $text): bool
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return false;
+        }
+        if (!preg_match('/^\d{1,2}\.\s+(\S.+)$/u', $text, $matches)) {
+            return false;
+        }
+        if (preg_match('/^\d+(?:\.\d+)+\.?\s+/u', $text)) {
+            return false;
+        }
+        $rest = trim((string)($matches[1] ?? ''));
+        $letters = preg_replace('/[^\p{L}]/u', '', $rest) ?? '';
+        if ($letters !== '' && mb_strtoupper($letters, 'UTF-8') === $letters) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function stripManualListPrefix(string $text): string
+    {
+        return trim((string)preg_replace('/^\d+\.\s+/u', '', trim($text)));
     }
 
     /**
@@ -839,70 +992,21 @@ final class ControlledPublishingDocxImportService
                 $this->clearAuthorBlocks($sectionId);
             }
 
-            $pendingList = array();
-            $flushList = function () use (&$pendingList, $versionId, $sectionId, $actorUserId, &$blocksCreated): void {
-                if ($pendingList === array()) {
-                    return;
-                }
-                $this->blocks->createBlock($versionId, $sectionId, 'list', array(
-                    'ordered' => false,
-                    'items' => $pendingList,
-                ), $actorUserId);
-                $blocksCreated++;
-                $pendingList = array();
-            };
-
-            foreach (is_array($section['nodes'] ?? null) ? $section['nodes'] : array() as $node) {
-                if (!is_array($node)) {
-                    continue;
-                }
-                $type = (string)($node['type'] ?? '');
-
-                if ($type === 'paragraph') {
-                    $text = trim((string)($node['text'] ?? ''));
-                    if ($text === '') {
-                        continue;
-                    }
-                    if (($node['section_ref'] ?? '') !== '') {
-                        continue;
-                    }
-                    if (!empty($node['is_bullet'])) {
-                        $pendingList[] = $text;
-                        continue;
-                    }
-                    $flushList();
-                    $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
-                        'html' => $this->textToHtml($text),
-                        'paragraph_style' => 'body',
-                    ), $actorUserId);
-                    $blocksCreated++;
-                    continue;
-                }
-
-                if ($type === 'table') {
-                    $flushList();
-                    continue;
-                }
-
-                if ($type === 'image') {
-                    $flushList();
-                    $url = $this->storeImageBytes(
-                        $bookKey,
-                        $versionLabel,
-                        (string)($node['bytes'] ?? ''),
-                        (string)($node['mime'] ?? 'image/png'),
-                        (string)($node['ext'] ?? 'png')
-                    );
-                    $this->blocks->createBlock($versionId, $sectionId, 'image', array(
-                        'url' => $url,
-                        'alt' => (string)($node['alt'] ?? 'Manual figure'),
-                        'width_pct' => (int)($node['width_pct'] ?? 100),
-                    ), $actorUserId);
-                    $blocksCreated++;
-                    $imagesUploaded++;
-                }
-            }
-            $flushList();
+            $result = $this->importGroupedContentNodes(
+                $versionId,
+                $sectionId,
+                is_array($section['nodes'] ?? null) ? $section['nodes'] : array(),
+                $textTable,
+                $bookKey,
+                $versionLabel,
+                $actorUserId,
+                array(
+                    'emit_section_headings' => false,
+                    'import_tables' => false,
+                )
+            );
+            $blocksCreated += $result['blocks_created'];
+            $imagesUploaded += $result['images_uploaded'];
         }
 
         return array(
@@ -1216,6 +1320,30 @@ final class ControlledPublishingDocxImportService
 
         $colWidth = max(60, min(600, (int)floor(840 / $colCount)));
 
+        $headerRow = is_array($styleDef['header_row'] ?? null) ? $styleDef['header_row'] : array();
+        $bodyRow = is_array($styleDef['body_row'] ?? null) ? $styleDef['body_row'] : array();
+        $headerFont = $this->normalizeTableFontFamily((string)($headerRow['font_family'] ?? 'sans'));
+        $headerSize = $this->normalizeTableFontSize($headerRow['font_size'] ?? 10);
+        $headerColor = $this->normalizeTableHexColor((string)($headerRow['color'] ?? ''), '#0f172a');
+        $headerBgColor = $this->normalizeTableHexColor((string)($headerRow['bg'] ?? ''), '');
+        $bodyFont = $this->normalizeTableFontFamily((string)($bodyRow['font_family'] ?? 'sans'));
+        $bodySize = $this->normalizeTableFontSize($bodyRow['font_size'] ?? 10);
+        $bodyColor = $this->normalizeTableHexColor((string)($bodyRow['color'] ?? ''), '#0f172a');
+
+        $headerBg = $headerBgColor !== ''
+            ? array_fill(0, $colCount, $headerBgColor)
+            : array();
+
+        $cellFontFamily = array();
+        $cellFontSize = array();
+        $cellTextColor = array();
+        foreach ($normalizedRows as $row) {
+            unset($row);
+            $cellFontFamily[] = array_fill(0, $colCount, $bodyFont);
+            $cellFontSize[] = array_fill(0, $colCount, $bodySize);
+            $cellTextColor[] = array_fill(0, $colCount, $bodyColor);
+        }
+
         return array(
             'title' => '',
             'has_title_row' => false,
@@ -1225,9 +1353,45 @@ final class ControlledPublishingDocxImportService
             'border_width' => (string)($styleDef['border_width'] ?? 'medium'),
             'border_color' => (string)($styleDef['border_color'] ?? '#94a3b8'),
             'cell_bg' => (string)($styleDef['cell_bg'] ?? '#ffffff'),
+            'header_bg' => $headerBg,
+            'header_font_family' => array_fill(0, $colCount, $headerFont),
+            'header_font_size' => array_fill(0, $colCount, $headerSize),
+            'header_text_color' => array_fill(0, $colCount, $headerColor),
+            'cell_font_family' => $cellFontFamily,
+            'cell_font_size' => $cellFontSize,
+            'cell_text_color' => $cellTextColor,
             'table_style_kind' => $kind,
             'table_align' => 'left',
         );
+    }
+
+    private function normalizeTableFontFamily(string $font): string
+    {
+        $fonts = array('serif', 'sans', 'mono', 'arial', 'manuallabel', 'manualtitle', 'sectiontitle');
+        $font = strtolower(trim($font));
+
+        return in_array($font, $fonts, true) ? $font : 'sans';
+    }
+
+    private function normalizeTableFontSize(mixed $size): int
+    {
+        $allowed = array(8, 9, 10, 11, 12, 14, 16, 18);
+        $fontSize = (int)$size;
+
+        return in_array($fontSize, $allowed, true) ? $fontSize : 10;
+    }
+
+    private function normalizeTableHexColor(string $color, string $fallback): string
+    {
+        $color = trim($color);
+        if ($color === '') {
+            return $fallback;
+        }
+        if (preg_match('/^#[0-9a-fA-F]{6}$/', $color) === 1) {
+            return strtolower($color);
+        }
+
+        return $fallback;
     }
 
     private function textToHtml(string $text): string

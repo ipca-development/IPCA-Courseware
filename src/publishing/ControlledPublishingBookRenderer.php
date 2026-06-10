@@ -1387,10 +1387,16 @@ final class ControlledPublishingBookRenderer
         $cellTextColors = $table['cell_text_color'];
         $hasTitleRow = !empty($table['has_title_row']);
         $tableAlign = (string)$table['table_align'];
+        $tableStyleKind = strtolower(trim((string)($payload['table_style_kind'] ?? 'standard')));
+        if (!in_array($tableStyleKind, array('standard', 'text'), true)) {
+            $tableStyleKind = 'standard';
+        }
         $colCount = count($headers);
         $edit = $mode === self::MODE_EDIT;
 
-        $html = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '" data-table-align="' . h($tableAlign) . '">';
+        $html = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '"'
+            . ' data-table-align="' . h($tableAlign) . '"'
+            . ' data-table-style-kind="' . h($tableStyleKind) . '">';
         $html .= '<div class="cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'

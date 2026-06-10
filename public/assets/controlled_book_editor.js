@@ -397,6 +397,7 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      refreshContentTableTypographyFromBookStyles();
       if (state.isTocSection) {
         refreshTocTypographyFromBookStyles();
       }
@@ -3084,6 +3085,7 @@
       cell_font_size: cellFontSize,
       cell_text_color: cellTextColor,
       table_align: tableAlign,
+      table_style_kind: tableBlock ? (tableBlock.getAttribute('data-table-style-kind') || 'text') : 'text',
     };
   }
 
@@ -3795,6 +3797,26 @@
       row.querySelectorAll('.cpb-toc-label, .cpb-toc-page, .cpb-toc-link').forEach(function (el) {
         el.style.color = titleColor;
         el.style.fontSize = size + 'pt';
+      });
+    });
+  }
+
+  function refreshContentTableTypographyFromBookStyles() {
+    canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
+      if (blockEl.closest('.cpb-sheet--lep, .cpb-sheet--part0')) {
+        return;
+      }
+      var tableBlock = blockEl.querySelector('.cpb-table-block');
+      var kind = tableBlock ? (tableBlock.getAttribute('data-table-style-kind') || 'text') : 'text';
+      var styles = state.bookStyles || defaultBookStyles();
+      var tableStyle = (styles.table_styles && styles.table_styles[kind]) || defaultTableStyleDef();
+      var headerStyle = tableStyle.header_row || defaultTableStyleDef().header_row;
+      var bodyStyle = tableStyle.body_row || defaultTableStyleDef().body_row;
+      blockEl.querySelectorAll('.cpb-table thead th').forEach(function (cell) {
+        applyBookTableRowStyleToCell(cell, headerStyle);
+      });
+      blockEl.querySelectorAll('.cpb-table tbody td').forEach(function (cell) {
+        applyBookTableRowStyleToCell(cell, bodyStyle);
       });
     });
   }
