@@ -8,6 +8,7 @@ require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/ControlledPublishingLepService.php';
 
 /**
  * Imports Apple Pages / Word DOCX part exports into canonical excerpts and controlled book blocks.
@@ -35,6 +36,7 @@ final class ControlledPublishingDocxImportService
         private ControlledPublishingManualStructureService $manualStructure,
         private ControlledPublishingPart0PageService $part0Pages,
         private ControlledPublishingBookStyleService $styleService,
+        private ControlledPublishingLepService $lepService,
         ?ControlledPublishingDocxReader $reader = null
     ) {
         $this->reader = $reader ?? new ControlledPublishingDocxReader();
@@ -254,10 +256,10 @@ final class ControlledPublishingDocxImportService
         $count = 0;
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
-            if ($ref === '') {
+            $title = (string)($section['title'] ?? '');
+            if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, $manualPart)) {
                 continue;
             }
-            $title = (string)($section['title'] ?? '');
             $body = $this->buildCanonicalBodyText($section);
             $this->upsertCanonicalExcerpt(
                 $sourceSetId,
@@ -287,7 +289,8 @@ final class ControlledPublishingDocxImportService
         $count = 0;
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
-            if ($ref === '' || !str_starts_with($ref, '0.')) {
+            $title = (string)($section['title'] ?? '');
+            if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, 0)) {
                 continue;
             }
             $this->upsertCanonicalExcerpt(
@@ -493,7 +496,11 @@ final class ControlledPublishingDocxImportService
         $byChapter = array();
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
+            $title = (string)($section['title'] ?? '');
             if ($ref === '' || !preg_match('/^(\d+)/', $ref, $m)) {
+                continue;
+            }
+            if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, $manualPart)) {
                 continue;
             }
             $chapter = (int)$m[1];
@@ -645,6 +652,12 @@ final class ControlledPublishingDocxImportService
                 continue;
             }
 
+            if ($pageKey === 'lep') {
+                $this->importPart0LepPage($versionId, $section, $actorUserId);
+                $part0Updated++;
+                continue;
+            }
+
             $sectionId = $this->sectionIdByKey($versionId, $pageKey);
             if ($sectionId <= 0) {
                 continue;
@@ -695,15 +708,6 @@ final class ControlledPublishingDocxImportService
 
                 if ($type === 'table') {
                     $flushList();
-                    if ($pageKey === 'lep') {
-                        $payload = $this->tablePayloadFromRows(
-                            is_array($node['rows'] ?? null) ? $node['rows'] : array(),
-                            'standard',
-                            $standardTable
-                        );
-                        $this->blocks->createBlock($versionId, $sectionId, 'table', $payload, $actorUserId);
-                        $blocksCreated++;
-                    }
                     continue;
                 }
 
@@ -734,6 +738,104 @@ final class ControlledPublishingDocxImportService
             'part0_pages_updated' => $part0Updated,
             'warnings' => array(),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    private function importPart0LepPage(int $versionId, array $section, ?int $actorUserId): void
+    {
+        $existing = $this->lepService->resolveFromVersion($this->requireDraftVersion($versionId));
+        $payload = array(
+            'certification_text' => $existing['certification_text'],
+            'on_behalf_text' => $existing['on_behalf_text'],
+            'effective_parts' => $existing['effective_parts'],
+        );
+
+        $tables = array();
+        foreach (is_array($section['nodes'] ?? null) ? $section['nodes'] : array() as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (($node['type'] ?? '') === 'table') {
+                $tables[] = is_array($node['rows'] ?? null) ? $node['rows'] : array();
+                continue;
+            }
+            if (($node['type'] ?? '') !== 'paragraph' || ($node['section_ref'] ?? '') !== '') {
+                continue;
+            }
+            $text = trim((string)($node['text'] ?? ''));
+            if ($text === '' || !empty($node['is_bullet'])) {
+                continue;
+            }
+            if (stripos($text, 'certify') !== false && strlen($text) > 40) {
+                $payload['certification_text'] = $text;
+            } elseif (stripos($text, 'on behalf') !== false) {
+                $payload['on_behalf_text'] = $text;
+            }
+        }
+
+        $effectiveParts = $this->parseEffectivePartsTable($tables);
+        if ($effectiveParts !== array()) {
+            $payload['effective_parts'] = $effectiveParts;
+        }
+
+        $this->lepService->saveLepPageForVersion($versionId, $payload, $actorUserId);
+    }
+
+    /**
+     * @param list<list<list<string>>> $tables
+     * @return list<array<string,string>>
+     */
+    private function parseEffectivePartsTable(array $tables): array
+    {
+        foreach ($tables as $rows) {
+            if ($rows === array()) {
+                continue;
+            }
+            $header = array_map(static fn(string $v): string => strtoupper(trim($v)), $rows[0]);
+            $partIdx = array_search('PART', $header, true);
+            if ($partIdx === false) {
+                $partIdx = 0;
+            }
+            $pagesIdx = array_search('PAGES', $header, true);
+            if ($pagesIdx === false) {
+                $pagesIdx = 1;
+            }
+            $dateIdx = array_search('DATE', $header, true);
+            if ($dateIdx === false) {
+                $dateIdx = 2;
+            }
+            $revIdx = array_search('REVISION', $header, true);
+            if ($revIdx === false) {
+                $revIdx = 3;
+            }
+
+            if (!in_array('PART', $header, true) && !in_array('PAGES', $header, true)) {
+                continue;
+            }
+
+            $out = array();
+            for ($i = 1, $c = count($rows); $i < $c; $i++) {
+                $row = $rows[$i];
+                $part = trim((string)($row[(int)$partIdx] ?? ''));
+                if ($part === '') {
+                    continue;
+                }
+                $out[] = array(
+                    'part' => $part,
+                    'label' => '',
+                    'pages' => trim((string)($row[(int)$pagesIdx] ?? '')),
+                    'date' => trim((string)($row[(int)$dateIdx] ?? '')),
+                    'revision' => trim((string)($row[(int)$revIdx] ?? '')),
+                );
+            }
+            if ($out !== array()) {
+                return $out;
+            }
+        }
+
+        return array();
     }
 
     /**

@@ -6,6 +6,9 @@ declare(strict_types=1);
  */
 final class ControlledPublishingDocxReader
 {
+    /** Max top-level chapter number (e.g. "12. INTRODUCTION") in Parts 1–4. */
+    private const MAX_CHAPTER_NUMBER = 30;
+
     private const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     private const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
     private const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -39,6 +42,10 @@ final class ControlledPublishingDocxReader
         $zip = new ZipArchive();
         if ($zip->open($path) !== true) {
             throw new RuntimeException('Could not open DOCX archive: ' . basename($path));
+        }
+
+        if ($manualPart === null || $manualPart < 0) {
+            $manualPart = self::detectManualPartFromFilename($path);
         }
 
         $this->zip = $zip;
@@ -84,7 +91,7 @@ final class ControlledPublishingDocxReader
             }
 
             if ($child->localName === 'p') {
-                $paragraph = $this->parseParagraph($child, $xpath);
+                $paragraph = $this->parseParagraph($child, $xpath, $manualPart);
                 if ($paragraph === null) {
                     continue;
                 }
@@ -149,10 +156,6 @@ final class ControlledPublishingDocxReader
         $zip->close();
         $this->zip = null;
 
-        if ($manualPart === null) {
-            $manualPart = self::detectManualPartFromFilename($path);
-        }
-
         return array(
             'manual_part' => $manualPart,
             'nodes' => $nodes,
@@ -212,7 +215,7 @@ final class ControlledPublishingDocxReader
     /**
      * @return array<string,mixed>|null
      */
-    private function parseParagraph(DOMElement $p, DOMXPath $xpath): ?array
+    private function parseParagraph(DOMElement $p, DOMXPath $xpath, int $manualPart): ?array
     {
         $styleId = '';
         $styleName = '';
@@ -259,7 +262,7 @@ final class ControlledPublishingDocxReader
         $paragraphStyle = 'body';
         if ($text !== '') {
             $parsed = self::parseSectionHeading($text);
-            if ($parsed !== null) {
+            if ($parsed !== null && self::isPlausibleManualSectionRef($parsed['section_ref'], $parsed['title'], $manualPart)) {
                 $sectionRef = $parsed['section_ref'];
                 $sectionTitle = $parsed['title'];
                 $paragraphStyle = self::sectionRefToParagraphStyle($sectionRef);
@@ -305,6 +308,84 @@ final class ControlledPublishingDocxReader
             'section_ref' => $ref,
             'title' => $title,
         );
+    }
+
+    public static function isPlausibleManualSectionRef(string $sectionRef, string $title, int $manualPart = -1): bool
+    {
+        $sectionRef = trim($sectionRef);
+        $title = trim($title);
+        if ($sectionRef === '' || $title === '') {
+            return false;
+        }
+
+        if (preg_match('/^\d+\.\d{3,}$/', $sectionRef)) {
+            return false;
+        }
+        if (preg_match('/^\d{4,}$/', $sectionRef)) {
+            return false;
+        }
+
+        $segments = explode('.', $sectionRef);
+        foreach ($segments as $segment) {
+            if ($segment === '' || !ctype_digit($segment)) {
+                return false;
+            }
+            if (strlen($segment) > 3 || (int)$segment > 999) {
+                return false;
+            }
+        }
+
+        $top = (int)($segments[0] ?? 0);
+        $isPart0Ref = $top === 0 || str_starts_with($sectionRef, '0.');
+
+        if ($manualPart === 0 || ($manualPart < 0 && $isPart0Ref)) {
+            return $isPart0Ref;
+        }
+
+        if ($manualPart > 0) {
+            if ($top === 0 || $isPart0Ref) {
+                return false;
+            }
+            if (count($segments) === 1) {
+                if ($top < 1 || $top > self::MAX_CHAPTER_NUMBER) {
+                    return false;
+                }
+                if (!preg_match('/\p{L}/u', $title)) {
+                    return false;
+                }
+                if (preg_match('/^[\d\s.,\-\/]+$/u', $title)) {
+                    return false;
+                }
+            }
+        }
+
+        if (preg_match('/^\d+\.\d+\s*Kg$/iu', $title) || preg_match('/^Kg$/iu', $title)) {
+            return false;
+        }
+        if (preg_match('/^\d+\s*ft\b/iu', $title)) {
+            return false;
+        }
+        if (self::isLikelyMeasurementOrIdLine($sectionRef, $title)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static function isLikelyMeasurementOrIdLine(string $sectionRef, string $title): bool
+    {
+        $combined = $sectionRef . ' ' . $title;
+        if (preg_match('/\b(MHz|kHz|ft|KG|Kg|kg|NM|kt|VOR|ILS|DME|NOTAM)\b/iu', $combined)) {
+            return true;
+        }
+        if (preg_match('/^\d{10,}$/u', $sectionRef)) {
+            return true;
+        }
+        if (preg_match('/\+?\d[\d\s\-()]{8,}/u', $title)) {
+            return true;
+        }
+
+        return false;
     }
 
     public static function sectionRefToParagraphStyle(string $sectionRef): string

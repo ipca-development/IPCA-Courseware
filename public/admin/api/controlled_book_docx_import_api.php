@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionServ
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -28,6 +29,7 @@ $blocks = new ControlledPublishingBlockService($pdo);
 $sections = new ControlledPublishingSectionService($pdo);
 $styleSvc = new ControlledPublishingBookStyleService($pdo);
 $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
+$lepSvc = new ControlledPublishingLepService($pdo);
 $manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
 $importSvc = new ControlledPublishingDocxImportService(
     $pdo,
@@ -36,7 +38,8 @@ $importSvc = new ControlledPublishingDocxImportService(
     $blocks,
     $manualStructureSvc,
     $part0PageSvc,
-    $styleSvc
+    $styleSvc,
+    $lepSvc
 );
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
