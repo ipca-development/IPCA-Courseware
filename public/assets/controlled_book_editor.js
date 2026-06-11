@@ -9,6 +9,7 @@
   var apiBase = '/admin/api/controlled_book_editor_api.php';
 
   var treeEl = document.getElementById('cpbSectionTree');
+  var treeToggleAllBtn = document.getElementById('cpbTreeToggleAll');
   var canvasEl = document.getElementById('cpbCanvas');
   var toolbarEl = document.getElementById('cpbToolbar');
   var toolbarMainEl = document.getElementById('cpbToolbarMain');
@@ -447,6 +448,49 @@
     addSubBtn.setAttribute('data-parent-id', String(section.id || state.sectionId));
   }
 
+  function collectExpandableTreeNodeIds(nodes, ids) {
+    if (!nodes || !nodes.length) return ids;
+    nodes.forEach(function (node) {
+      if (!node || node.is_separator) return;
+      var nodeId = node.nav_id || String(node.id || '');
+      if (node.children && node.children.length) {
+        ids.push(nodeId);
+        collectExpandableTreeNodeIds(node.children, ids);
+      }
+    });
+    return ids;
+  }
+
+  function isTreeFullyExpanded() {
+    var ids = collectExpandableTreeNodeIds(state.sectionsTree, []);
+    if (!ids.length) return false;
+    return ids.every(function (id) { return !!state.expanded[id]; });
+  }
+
+  function updateTreeToggleAllLabel() {
+    if (!treeToggleAllBtn) return;
+    var allExpanded = isTreeFullyExpanded();
+    treeToggleAllBtn.textContent = allExpanded ? 'Collapse all' : 'Expand all';
+    treeToggleAllBtn.setAttribute('aria-pressed', allExpanded ? 'true' : 'false');
+    treeToggleAllBtn.title = allExpanded ? 'Collapse all sections' : 'Expand all sections';
+  }
+
+  function setTreeExpandedAll(expanded) {
+    var ids = collectExpandableTreeNodeIds(state.sectionsTree, []);
+    ids.forEach(function (id) {
+      state.expanded[id] = expanded;
+    });
+    renderTree(state.sectionsTree, state.sectionId);
+  }
+
+  function wireTreeToggleAll() {
+    if (!treeToggleAllBtn || treeToggleAllBtn.getAttribute('data-wired') === '1') return;
+    treeToggleAllBtn.setAttribute('data-wired', '1');
+    treeToggleAllBtn.addEventListener('click', function () {
+      setTreeExpandedAll(!isTreeFullyExpanded());
+    });
+  }
+
   function renderTree(nodes, activeId) {
     if (!treeEl) return;
     treeEl.innerHTML = '';
@@ -456,6 +500,7 @@
       ul.appendChild(renderTreeNode(node, activeId, 0));
     });
     treeEl.appendChild(ul);
+    updateTreeToggleAllLabel();
   }
 
   function renderTreeNode(node, activeId, depth) {
@@ -471,7 +516,7 @@
     var hasChildren = node.children && node.children.length > 0;
     var nodeId = node.nav_id || String(node.id || '');
     if (state.expanded[nodeId] === undefined) {
-      state.expanded[nodeId] = depth < 2 || hasChildren;
+      state.expanded[nodeId] = false;
     }
 
     var row = document.createElement('div');
@@ -5520,6 +5565,8 @@
       }
     });
   }
+
+  wireTreeToggleAll();
 
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })

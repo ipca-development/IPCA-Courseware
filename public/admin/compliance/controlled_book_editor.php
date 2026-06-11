@@ -91,6 +91,7 @@ compliance_page_open(array(
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
         <h2>Manual sections</h2>
+        <button type="button" id="cpbTreeToggleAll" class="cpb-tree-toggle-all" aria-pressed="false" title="Expand or collapse all sections">Expand all</button>
       </div>
       <div class="cpb-tree-scroll" id="cpbSectionTree">
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
