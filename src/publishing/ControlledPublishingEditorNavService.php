@@ -71,6 +71,7 @@ final class ControlledPublishingEditorNavService
         if ($sourceSetId > 0) {
             $this->manualStructure->pruneInvalidCanonicalExcerpts($versionId);
         }
+        $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
 
         $tree = array();
 
@@ -95,7 +96,8 @@ final class ControlledPublishingEditorNavService
                 $childrenByParent[$partId] ?? array(),
                 $manualCode,
                 $sourceSetId,
-                $manualPart
+                $manualPart,
+                $sectionNumberDisplay
             );
             if ($subsections !== array()) {
                 $tree[] = $this->groupNode('group_' . $partKey, (string)$partDef['title'], $subsections);
@@ -217,7 +219,8 @@ final class ControlledPublishingEditorNavService
         array $rows,
         string $manualCode,
         int $sourceSetId,
-        int $manualPart
+        int $manualPart,
+        array $sectionNumberDisplay
     ): array {
         $nodes = array();
         foreach ($rows as $row) {
@@ -229,18 +232,21 @@ final class ControlledPublishingEditorNavService
             $chapterNumber = (int)($meta['chapter_number'] ?? 0);
             $sectionId = (int)($row['id'] ?? 0);
 
-            $subtitleChildren = array();
-            if ($sourceSetId > 0 && $chapterNumber > 0 && $manualPart > 0) {
-                $subtitleChildren = $this->buildSubtitleNavTree(
-                    $sectionId,
-                    $this->manualStructure->listNavSubsectionsForChapter(
-                        $manualCode,
-                        $sourceSetId,
-                        $manualPart,
-                        $chapterNumber
-                    )
+            $navItems = $this->manualStructure->listNavSubsectionsFromChapterBlocks(
+                $sectionId,
+                $sectionNumberDisplay,
+                $manualPart
+            );
+            if ($navItems === array() && $sourceSetId > 0 && $chapterNumber > 0 && $manualPart > 0) {
+                $navItems = $this->manualStructure->listNavSubsectionsForChapter(
+                    $manualCode,
+                    $sourceSetId,
+                    $manualPart,
+                    $chapterNumber
                 );
             }
+
+            $subtitleChildren = $this->buildSubtitleNavTree($sectionId, $navItems);
 
             if ($subtitleChildren !== array()) {
                 $nodes[] = $this->groupNode(

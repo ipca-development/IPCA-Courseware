@@ -471,7 +471,7 @@
     var hasChildren = node.children && node.children.length > 0;
     var nodeId = node.nav_id || String(node.id || '');
     if (state.expanded[nodeId] === undefined) {
-      state.expanded[nodeId] = depth < 1 || hasChildren;
+      state.expanded[nodeId] = depth < 2 || hasChildren;
     }
 
     var row = document.createElement('div');

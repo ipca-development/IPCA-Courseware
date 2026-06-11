@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 
 /**
@@ -808,6 +810,89 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
+     * @return array<int,string> block_id => display number (e.g. 5.1)
+     */
+    public function computeSectionNumberDisplay(int $versionId, string $manualCode = ''): array
+    {
+        if ($this->blocks === null) {
+            return array();
+        }
+
+        $numberSvc = new ControlledPublishingSectionNumberService($this->pdo, $this->blocks);
+        $numbering = $numberSvc->computeForVersion($versionId, strtoupper(trim($manualCode)));
+
+        return is_array($numbering['display'] ?? null) ? $numbering['display'] : array();
+    }
+
+    /**
+     * Subsection nav entries from styled blocks on a chapter page (same source as the TOC).
+     *
+     * @param array<int,string> $sectionNumberDisplay
+     * @return list<array{section_ref:string,title:string,nav_label:string}>
+     */
+    public function listNavSubsectionsFromChapterBlocks(
+        int $sectionId,
+        array $sectionNumberDisplay,
+        int $manualPart = -1
+    ): array {
+        if ($this->blocks === null || $sectionId <= 0) {
+            return array();
+        }
+
+        $items = array();
+        $seen = array();
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $blockId = (int)($row['id'] ?? 0);
+            if ($blockId <= 0) {
+                continue;
+            }
+
+            $payload = $this->blocks->decodePayload($row);
+            $blockType = (string)($row['block_type'] ?? '');
+            $style = $this->navBlockParagraphStyle($blockType, $payload);
+            $depth = ControlledPublishingSectionNumberService::NUMBERED_STYLE_DEPTHS[$style] ?? 0;
+            if ($depth < 2) {
+                continue;
+            }
+
+            $text = $this->navBlockEntryText($blockType, $payload);
+            if ($text === '') {
+                continue;
+            }
+
+            $canonRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+            $displayNumber = trim((string)($sectionNumberDisplay[$blockId] ?? ''));
+            $sectionRef = rtrim($canonRef !== '' ? $canonRef : $displayNumber, '.');
+            if ($sectionRef === '' || !str_contains($sectionRef, '.')) {
+                continue;
+            }
+            if (isset($seen[$sectionRef])) {
+                continue;
+            }
+            if ($this->isSkippableNavExcerpt($sectionRef, $text, $manualPart)) {
+                continue;
+            }
+
+            $title = $this->stripLeadingSectionRef($text, $sectionRef);
+            if ($title === '') {
+                $title = $text;
+            }
+            $numberLabel = $displayNumber !== '' ? rtrim($displayNumber, '.') : $sectionRef;
+            $seen[$sectionRef] = true;
+            $items[] = array(
+                'section_ref' => $sectionRef,
+                'title' => $title,
+                'nav_label' => $numberLabel . ' ' . $title,
+            );
+        }
+
+        return $items;
+    }
+
+    /**
      * All subsection refs under a chapter for sidebar navigation (5.1, 5.1.1, …).
      *
      * @return list<array{section_ref:string,title:string,nav_label:string}>
@@ -910,6 +995,38 @@ final class ControlledPublishingManualStructureService
         }
 
         return $this->isSkippableCanonicalExcerpt($sectionRef, $title, '', $manualPart);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function navBlockParagraphStyle(string $blockType, array $payload): string
+    {
+        $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+        $style = ControlledPublishingBookStyleService::LEGACY_PARAGRAPH_STYLE_ALIASES[$style] ?? $style;
+        if ($style === '' && $blockType === 'heading') {
+            $level = max(1, min(6, (int)($payload['level'] ?? 2)));
+            return $level <= 1 ? 'subtitle_2' : ($level === 2 ? 'subtitle_3' : 'subtitle_4');
+        }
+
+        return $style;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function navBlockEntryText(string $blockType, array $payload): string
+    {
+        if ($blockType === 'heading') {
+            return trim((string)($payload['text'] ?? ''));
+        }
+        if ($blockType === 'paragraph') {
+            $html = (string)($payload['html'] ?? '');
+            $text = trim(strip_tags($html));
+            return $text !== '' ? $text : '';
+        }
+
+        return '';
     }
 
     /**
