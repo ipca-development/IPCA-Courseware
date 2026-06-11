@@ -790,8 +790,17 @@
       }
       pushUndo();
       if (action === 'add-row') tableAddRow(blockEl);
-      else if (action === 'del-row') tableDelRow(blockEl);
-      else if (action === 'add-col') tableAddColumn(blockEl);
+      else if (action === 'del-row') {
+        if (!tableDelRow(blockEl)) return;
+      } else if (action === 'move-row-up') {
+        if (!tableMoveRow(blockEl, 'up')) return;
+      } else if (action === 'move-row-down') {
+        if (!tableMoveRow(blockEl, 'down')) return;
+      } else if (action === 'merge-cells-right') {
+        if (!tableMergeCellRight(blockEl)) return;
+      } else if (action === 'unmerge-cells') {
+        if (!tableUnmergeCell(blockEl)) return;
+      } else if (action === 'add-col') tableAddColumn(blockEl);
       else if (action === 'del-col') tableDelColumn(blockEl);
       else if (action === 'toggle-title') tableToggleTitle(blockEl);
       else if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
@@ -3163,6 +3172,8 @@
     var cellFontFamily = [];
     var cellFontSize = [];
     var cellTextColor = [];
+    var headerColspans = [];
+    var rowColspans = [];
     var titleAlign = 'center';
     var titleFontFamily = '';
     var titleFontSize = 0;
@@ -3175,6 +3186,7 @@
       if (head) {
         head.querySelectorAll('th').forEach(function (th) {
           headers.push(extractCellHtml(th));
+          headerColspans.push(parseInt(th.getAttribute('colspan') || '1', 10) || 1);
           headerBg.push(extractCellBg(th));
           headerAlign.push(extractCellAlign(th));
           headerFontFamily.push(extractCellFontFamily(th));
@@ -3196,8 +3208,10 @@
         var fontLine = [];
         var sizeLine = [];
         var colorLine = [];
+        var spanLine = [];
         tr.querySelectorAll('td').forEach(function (td) {
           line.push(extractCellHtml(td));
+          spanLine.push(parseInt(td.getAttribute('colspan') || '1', 10) || 1);
           bgLine.push(extractCellBg(td));
           alignLine.push(extractCellAlign(td));
           fontLine.push(extractCellFontFamily(td));
@@ -3206,6 +3220,7 @@
         });
         if (line.length) {
           rows.push(line);
+          rowColspans.push(spanLine);
           cellBg.push(bgLine);
           cellAlign.push(alignLine);
           cellFontFamily.push(fontLine);
@@ -3223,7 +3238,9 @@
       title: title,
       has_title_row: !!blockEl.querySelector('tr[data-title-row]'),
       headers: headers,
+      header_colspans: headerColspans,
       rows: rows,
+      row_colspans: rowColspans,
       col_widths: colWidths,
       border_width: wrap ? normalizeBorderWidth(wrap.getAttribute('data-border-width') || 'medium') : 'medium',
       border_color: wrap ? (wrap.getAttribute('data-border-color') || '#94a3b8') : '#94a3b8',
@@ -3401,32 +3418,176 @@
     scheduleSave(blockEl);
   }
 
+  function setCellHtml(cell, html) {
+    if (!cell) return;
+    if (cell.tagName === 'TH') {
+      var textEl = cell.querySelector('.cpb-th-text');
+      if (textEl) {
+        textEl.innerHTML = html || '';
+      } else {
+        cell.innerHTML = html || '';
+      }
+      return;
+    }
+    cell.innerHTML = html || '';
+  }
+
+  function mergeCellHtml(left, right) {
+    left = String(left || '').trim();
+    right = String(right || '').trim();
+    if (!right) return left;
+    if (!left) return right;
+    return left + ' ' + right;
+  }
+
+  function createTableHeaderCell(colIndex) {
+    var th = document.createElement('th');
+    th.contentEditable = 'true';
+    th.setAttribute('data-col-index', String(colIndex));
+    th.innerHTML = '<span class="cpb-th-text"></span>'
+      + '<span class="cpb-col-resize" data-col-index="' + colIndex + '" title="Resize column"></span>';
+    return th;
+  }
+
+  function createTableBodyCell() {
+    var td = document.createElement('td');
+    td.contentEditable = 'true';
+    return td;
+  }
+
+  function tableMergeCellRight(blockEl) {
+    var cell = state.focusedTableCell;
+    if (!cell || !blockEl.contains(cell)) {
+      setStatus('Click a table cell first', 'error');
+      return false;
+    }
+    if (cell.closest('[data-title-row]')) {
+      setStatus('Use column tools for the title row', 'error');
+      return false;
+    }
+    var row = cell.parentElement;
+    if (!row) return false;
+    var idx = cell.cellIndex;
+    if (idx < 0 || idx >= row.cells.length - 1) {
+      setStatus('No cell to the right to merge', 'error');
+      return false;
+    }
+    var next = row.cells[idx + 1];
+    var span1 = parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
+    var span2 = parseInt(next.getAttribute('colspan') || '1', 10) || 1;
+    setCellHtml(cell, mergeCellHtml(extractCellHtml(cell), extractCellHtml(next)));
+    cell.colSpan = span1 + span2;
+    next.remove();
+    wireTableCellFocus(blockEl);
+    if (cell.tagName === 'TH') {
+      wireTableResize(blockEl);
+    }
+    setStatus('Cells merged', 'saved');
+    return true;
+  }
+
+  function tableUnmergeCell(blockEl) {
+    var cell = state.focusedTableCell;
+    if (!cell || !blockEl.contains(cell)) {
+      setStatus('Click a merged cell first', 'error');
+      return false;
+    }
+    if (cell.closest('[data-title-row]')) {
+      setStatus('Cannot unmerge the title row', 'error');
+      return false;
+    }
+    var span = parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
+    if (span <= 1) {
+      setStatus('This cell is not merged', 'error');
+      return false;
+    }
+    cell.colSpan = 1;
+    var insertAfter = cell;
+    for (var i = 1; i < span; i++) {
+      var extra = cell.tagName === 'TH'
+        ? createTableHeaderCell(cell.cellIndex + i)
+        : createTableBodyCell();
+      insertAfter.parentElement.insertBefore(extra, insertAfter.nextSibling);
+      insertAfter = extra;
+    }
+    wireTableCellFocus(blockEl);
+    if (cell.tagName === 'TH') {
+      wireTableResize(blockEl);
+    }
+    setStatus('Cell split into ' + span + ' columns', 'saved');
+    return true;
+  }
+
+  function tableMoveRow(blockEl, direction) {
+    var tbody = tableBody(blockEl);
+    if (!tbody) return false;
+    var tr = null;
+    if (state.focusedTableCell && tbody.contains(state.focusedTableCell)) {
+      tr = state.focusedTableCell.closest('tr');
+    }
+    if (!tr) {
+      setStatus('Click a row cell first', 'error');
+      return false;
+    }
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    var idx = rows.indexOf(tr);
+    if (idx < 0) return false;
+    if (direction === 'up') {
+      if (idx <= 0) {
+        setStatus('Row is already at the top', 'error');
+        return false;
+      }
+      tbody.insertBefore(tr, rows[idx - 1]);
+      setStatus('Row moved up', 'saved');
+      return true;
+    }
+    if (idx >= rows.length - 1) {
+      setStatus('Row is already at the bottom', 'error');
+      return false;
+    }
+    tbody.insertBefore(rows[idx + 1], tr);
+    setStatus('Row moved down', 'saved');
+    return true;
+  }
+
   function tableAddRow(blockEl) {
     var tbody = tableBody(blockEl);
     if (!tbody) return;
-    var cols = tableColCount(blockEl);
     var tr = document.createElement('tr');
-    for (var i = 0; i < cols; i++) {
-      var td = document.createElement('td');
-      td.contentEditable = 'true';
-      td.textContent = '';
-      tr.appendChild(td);
+    var head = tableHeaderRow(blockEl);
+    var colCount = head ? head.cells.length : tableColCount(blockEl);
+    for (var i = 0; i < colCount; i++) {
+      tr.appendChild(createTableBodyCell());
     }
     tbody.appendChild(tr);
     wireTableCellFocus(blockEl);
+    setStatus('Row added', 'saved');
   }
 
   function tableDelRow(blockEl) {
     var tbody = tableBody(blockEl);
-    if (!tbody) return;
+    if (!tbody) return false;
     var rows = tbody.querySelectorAll('tr');
-    if (rows.length <= 1) return;
+    if (rows.length <= 1) {
+      setStatus('Table must keep at least one row', 'error');
+      return false;
+    }
     var target = null;
     if (state.focusedTableCell && tbody.contains(state.focusedTableCell)) {
       target = state.focusedTableCell.closest('tr');
     }
-    if (!target) target = rows[rows.length - 1];
+    if (!target) {
+      setStatus('Click a row cell first', 'error');
+      return false;
+    }
+    var rowText = target.textContent.replace(/\s+/g, ' ').trim();
+    if (rowText && !confirm('Delete this entire table row?')) {
+      return false;
+    }
     target.remove();
+    state.focusedTableCell = null;
+    setStatus('Row deleted', 'saved');
+    return true;
   }
 
   function tableAddColumn(blockEl) {
