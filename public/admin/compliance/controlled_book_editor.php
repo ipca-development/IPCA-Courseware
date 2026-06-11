@@ -74,6 +74,11 @@ compliance_page_open(array(
     ),
     'actions' => array(
         array(
+            'label' => 'Manage annexes',
+            'href' => '/admin/compliance/controlled_book_annexes.php?version_id=' . $versionId,
+            'variant' => 'secondary',
+        ),
+        array(
             'label' => 'Governance',
             'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
             'variant' => 'secondary',

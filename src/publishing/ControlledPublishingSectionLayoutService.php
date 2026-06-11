@@ -23,8 +23,15 @@ final class ControlledPublishingSectionLayoutService
         $sectionKey = (string)($section['section_key'] ?? '');
         $defaultHide = in_array($sectionKey, ControlledPublishingPageHeaderService::HIDE_HEADER_FOOTER_SECTIONS, true);
 
+        $orientation = strtolower(trim((string)($layout['orientation'] ?? '')));
+        if ($orientation !== 'landscape') {
+            $annex = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
+            $orientation = strtolower(trim((string)($annex['page_orientation'] ?? 'portrait')));
+        }
+
         return array(
             'hide_header_footer' => (bool)($layout['hide_header_footer'] ?? $defaultHide),
+            'orientation' => $orientation === 'landscape' ? 'landscape' : 'portrait',
         );
     }
 
@@ -35,9 +42,17 @@ final class ControlledPublishingSectionLayoutService
     {
         $section = $this->requireSection($versionId, $sectionId);
         $meta = $this->decodeMeta($section);
+        $orientation = strtolower(trim((string)($layout['orientation'] ?? 'portrait')));
+        if ($orientation !== 'landscape') {
+            $orientation = 'portrait';
+        }
         $meta['page_layout'] = array(
             'hide_header_footer' => !empty($layout['hide_header_footer']),
+            'orientation' => $orientation,
         );
+        if (is_array($meta['annex'] ?? null)) {
+            $meta['annex']['page_orientation'] = $orientation;
+        }
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_sections

@@ -251,10 +251,11 @@ final class ControlledPublishingRichTextService
         }
 
         $childStmt = $this->pdo->prepare("
-            SELECT id, title, sort_order
+            SELECT id, title, sort_order, section_key, metadata_json
             FROM ipca_publishing_book_sections
             WHERE book_version_id = :version_id
               AND parent_section_id = :parent_id
+              AND section_key LIKE 'annexes_annex_%'
             ORDER BY sort_order, id
         ");
         $childStmt->execute(array(
@@ -263,20 +264,27 @@ final class ControlledPublishingRichTextService
         ));
 
         $map = array();
-        $index = 1;
         foreach ($childStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $sectionId = (int)($row['id'] ?? 0);
             $title = trim((string)($row['title'] ?? ''));
             if ($sectionId <= 0) {
                 continue;
             }
-            $parsed = self::extractAnnexNumber($title);
-            if ($parsed > 0) {
-                $map[$parsed] = $sectionId;
-            } else {
-                $map[$index] = $sectionId;
+            $metaRaw = $row['metadata_json'] ?? '{}';
+            $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
+            $annexNum = 0;
+            if (is_array($meta) && is_array($meta['annex'] ?? null)) {
+                $annexNum = (int)($meta['annex']['number'] ?? 0);
             }
-            $index++;
+            if ($annexNum <= 0) {
+                $annexNum = self::extractAnnexNumber($title);
+            }
+            if ($annexNum <= 0 && preg_match('/^annexes_annex_(\d+)$/', (string)($row['section_key'] ?? ''), $m) === 1) {
+                $annexNum = (int)$m[1];
+            }
+            if ($annexNum > 0) {
+                $map[$annexNum] = $sectionId;
+            }
         }
 
         $this->annexMapCache[$versionId] = $map;

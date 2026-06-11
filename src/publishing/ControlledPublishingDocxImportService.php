@@ -1638,6 +1638,48 @@ final class ControlledPublishingDocxImportService
     }
 
     /**
+     * Import all DOCX body content into a single annex section (no chapter routing).
+     *
+     * @return array{blocks_created:int,images_uploaded:int,warnings:list<string>}
+     */
+    public function importAnnexSectionContent(
+        int $versionId,
+        int $sectionId,
+        string $docxPath,
+        ?int $actorUserId = null
+    ): array {
+        $version = $this->requireDraftVersion($versionId);
+        $bookStyles = $this->styleService->resolveFromVersion($version);
+        $textTable = is_array($bookStyles['table_styles']['text'] ?? null)
+            ? $bookStyles['table_styles']['text']
+            : $this->styleService->resolveStandardTableStyle($bookStyles);
+
+        $parsed = $this->reader->parseFile($docxPath, -1);
+        $nodes = is_array($parsed['nodes'] ?? null) ? $parsed['nodes'] : array();
+        $warnings = is_array($parsed['warnings'] ?? null) ? $parsed['warnings'] : array();
+
+        $bookKey = strtolower((string)$version['book_key']);
+        $versionLabel = (string)$version['version_label'];
+
+        $result = $this->importGroupedContentNodes(
+            $versionId,
+            $sectionId,
+            $nodes,
+            $textTable,
+            $bookKey,
+            $versionLabel,
+            $actorUserId,
+            array('emit_section_headings' => true, 'import_tables' => true)
+        );
+
+        return array(
+            'blocks_created' => $result['blocks_created'],
+            'images_uploaded' => $result['images_uploaded'],
+            'warnings' => $warnings,
+        );
+    }
+
+    /**
      * @return array<string,mixed>
      */
     private function decodeJsonMeta(mixed $raw): array

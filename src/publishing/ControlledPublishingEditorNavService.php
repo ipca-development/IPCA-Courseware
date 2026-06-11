@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
@@ -113,9 +114,11 @@ final class ControlledPublishingEditorNavService
             $annexId = (int)($annexRow['id'] ?? 0);
             $annexChildren = $this->formatAnnexSubsections($childrenByParent[$annexId] ?? array());
             if ($annexChildren !== array()) {
-                $tree[] = $this->groupNode('group_annexes', 'Annexes', $annexChildren);
+                $tree[] = $this->groupNode('group_annexes', 'ANNEXES', $annexChildren, array(
+                    'label_style' => 'chapter_upper',
+                ));
             } else {
-                $tree[] = $this->leafNode($annexRow, 'Annexes');
+                $tree[] = $this->leafNode($annexRow, 'ANNEXES');
             }
         }
 
@@ -276,21 +279,50 @@ final class ControlledPublishingEditorNavService
      */
     private function formatAnnexSubsections(array $rows): array
     {
-        $nodes = array();
-        $index = 1;
+        $register = null;
+        $highlights = null;
+        $content = array();
+
         foreach ($rows as $row) {
-            $label = 'Annex ' . str_pad((string)$index, 2, '0', STR_PAD_LEFT);
-            $title = trim((string)($row['title'] ?? ''));
-            if ($title !== '' && stripos($title, 'annex') === false) {
-                $label .= ' – ' . $title;
-            } elseif ($title !== '') {
-                $label = $title;
+            $key = (string)($row['section_key'] ?? '');
+            if ($key === ControlledPublishingAnnexService::REGISTER_SECTION_KEY) {
+                $register = $row;
+                continue;
             }
+            if ($key === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY) {
+                $highlights = $row;
+                continue;
+            }
+            if (str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX)) {
+                $content[] = $row;
+            }
+        }
+
+        usort($content, static function (array $a, array $b): int {
+            return strcmp((string)($a['section_key'] ?? ''), (string)($b['section_key'] ?? ''));
+        });
+
+        $nodes = array();
+        if (is_array($register)) {
+            $nodes[] = $this->leafNode($register, 'Annex Register', array(
+                'label_style' => 'part0',
+                'truncate' => true,
+            ));
+        }
+        if (is_array($highlights)) {
+            $nodes[] = $this->leafNode($highlights, 'Annex Highlight of Changes', array(
+                'label_style' => 'part0',
+                'truncate' => true,
+            ));
+        }
+        foreach ($content as $row) {
+            $title = trim((string)($row['title'] ?? ''));
+            $label = $title !== '' ? $title : 'Annex';
             $nodes[] = $this->leafNode($row, $label, array(
                 'truncate' => true,
             ));
-            $index++;
         }
+
         return $nodes;
     }
 

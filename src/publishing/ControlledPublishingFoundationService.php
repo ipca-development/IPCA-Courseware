@@ -52,7 +52,7 @@ final class ControlledPublishingFoundationService
         array('section_key' => 'part_2', 'title' => 'Part 2 – Technical', 'section_type' => 'content', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 110),
         array('section_key' => 'part_3', 'title' => 'Part 3 – Route', 'section_type' => 'content', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 120),
         array('section_key' => 'part_4', 'title' => 'Part 4 – Personnel Training', 'section_type' => 'content', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 130),
-        array('section_key' => 'annexes', 'title' => 'Annexes', 'section_type' => 'annex', 'is_system_managed' => false, 'is_generated' => false, 'allow_author_blocks' => true, 'sort_order' => 140),
+        array('section_key' => 'annexes', 'title' => 'Annexes', 'section_type' => 'annex', 'is_system_managed' => true, 'is_generated' => false, 'allow_author_blocks' => false, 'sort_order' => 140),
     );
 
     /** @var array<string,array{book_key:string,title:string,manual_code:string,version_label:string}> */

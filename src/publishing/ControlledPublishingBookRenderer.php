@@ -355,6 +355,149 @@ final class ControlledPublishingBookRenderer
     }
 
     /**
+     * Annex register table page (auto-generated from annex metadata).
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    public function renderAnnexRegisterShell(
+        array $version,
+        array $section,
+        array $rows,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null
+    ): string {
+        $editable = $mode === self::MODE_EDIT;
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageHeader = is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'];
+        $pageFooter = is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'];
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
+        $overrides = is_array($pageHeaderConfig['token_overrides'] ?? null) ? $pageHeaderConfig['token_overrides'] : array();
+        if ($headerSvc !== null) {
+            $overrides = array_merge($overrides, array('part_title' => 'Annexes'));
+            $tokenContext = $headerSvc->buildTokenContext($version, $section, array_merge(
+                array('editor_preview' => $mode === self::MODE_EDIT),
+                $overrides
+            ));
+        }
+
+        $headerHtml = !empty($pageHeader['enabled'])
+            ? $this->renderPageHeaderTable($pageHeader, $tokenContext, false, $headerSvc)
+            : '';
+        $footerHtml = !empty($pageFooter['enabled'])
+            ? $this->renderPageFooterTable($pageFooter, $tokenContext, false, $headerSvc)
+            : '';
+
+        $tableHtml = $this->renderAnnexRegisterTable($rows, $editable);
+
+        return '<div class="cpb-sheet cpb-sheet--annex-admin" data-section-id="' . (int)($section['id'] ?? 0) . '">'
+            . $headerHtml
+            . '<div class="cpb-annex-admin" contenteditable="false">'
+            . '<div class="cpb-lep-heading cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">Annex Register</div>'
+            . $tableHtml
+            . '</div>'
+            . $footerHtml
+            . '</div>';
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     */
+    public function renderAnnexRegisterTable(array $rows, bool $editable = false): string
+    {
+        $tableStyle = $this->resolveStandardTableStyle();
+        $borderWidth = h((string)($tableStyle['border_width'] ?? '1'));
+        $headerRow = $tableStyle['header_row'];
+        $bodyRow = $tableStyle['body_row'];
+        $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
+        $bodyVisual = $this->tableRowVisualAttr($bodyRow, 'left');
+
+        $bodyHtml = '';
+        $rowIdx = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $num = str_pad((string)(int)($row['annex_number'] ?? 0), 2, '0', STR_PAD_LEFT);
+            $sectionId = (int)($row['section_id'] ?? 0);
+            $linkAttr = $sectionId > 0 ? ' data-annex-link="' . $sectionId . '"' : '';
+            $bodyHtml .= '<tr class="cpb-annex-register-row" data-part0-row="' . $rowIdx . '"' . $linkAttr . '>'
+                . '<td' . $bodyVisual . '>' . h($num) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['title'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['revision'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['revision_date'] ?? '')) . '</td>'
+                . '<td' . $bodyVisual . '>' . h((string)($row['updated_by'] ?? '')) . '</td>'
+                . '</tr>';
+            $rowIdx++;
+        }
+
+        $minRows = max(5, count($rows) + 2);
+        while ($rowIdx < $minRows) {
+            $bodyHtml .= '<tr class="cpb-annex-register-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
+                . '<td' . $bodyVisual . '>&nbsp;</td><td' . $bodyVisual . '>&nbsp;</td>'
+                . '<td' . $bodyVisual . '>&nbsp;</td><td' . $bodyVisual . '>&nbsp;</td>'
+                . '<td' . $bodyVisual . '>&nbsp;</td></tr>';
+            $rowIdx++;
+        }
+
+        return '<div class="cpb-annex-register cpb-table-wrap cpb-table-border-' . $borderWidth . '" contenteditable="false">'
+            . '<table class="cpb-table cpb-part0-table" data-part0-table="annex_register">'
+            . '<thead><tr class="cpb-table-header-row">'
+            . '<th' . $headerVisual . '>Annex Nr</th>'
+            . '<th' . $headerVisual . '>Annex Name / Title</th>'
+            . '<th' . $headerVisual . '>Annex Revision</th>'
+            . '<th' . $headerVisual . '>Revision Date</th>'
+            . '<th' . $headerVisual . '>Updated by</th>'
+            . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table></div>';
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     */
+    public function renderAnnexHighlightsShell(
+        array $version,
+        array $section,
+        string $blocksHtml,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null
+    ): string {
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $pageHeader = is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'];
+        $pageFooter = is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'];
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
+        if ($headerSvc !== null) {
+            $tokenContext = $headerSvc->buildTokenContext($version, $section, array(
+                'editor_preview' => $mode === self::MODE_EDIT,
+                'part_title' => 'Annexes',
+            ));
+        }
+
+        $headerHtml = !empty($pageHeader['enabled'])
+            ? $this->renderPageHeaderTable($pageHeader, $tokenContext, false, $headerSvc)
+            : '';
+        $footerHtml = !empty($pageFooter['enabled'])
+            ? $this->renderPageFooterTable($pageFooter, $tokenContext, false, $headerSvc)
+            : '';
+
+        return '<div class="cpb-sheet cpb-sheet--annex-admin" data-section-id="' . (int)($section['id'] ?? 0) . '">'
+            . $headerHtml
+            . '<div class="cpb-annex-admin" contenteditable="false">'
+            . '<div class="cpb-lep-heading cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">Annex Highlight of Changes</div>'
+            . '<div class="cpb-annex-highlights-body">' . $blocksHtml . '</div>'
+            . '</div>'
+            . $footerHtml
+            . '</div>';
+    }
+
+    /**
      * @param array<string,mixed> $heading
      */
     private function renderPart0Heading(array $heading, bool $editable): string
@@ -991,11 +1134,26 @@ final class ControlledPublishingBookRenderer
         $headerHtml = '';
         $footerHtml = '';
         $layoutToggle = '';
+        $orientation = strtolower(trim((string)($layout['orientation'] ?? 'portrait')));
+        $isLandscape = $orientation === 'landscape';
+        $sectionKey = (string)($section['section_key'] ?? '');
+        $isAnnexContent = str_starts_with($sectionKey, 'annexes_annex_');
+        $sheetClass = 'cpb-sheet' . ($isLandscape ? ' cpb-sheet--landscape' : '');
+
         if ($editable) {
             $hideChecked = !empty($layout['hide_header_footer']) ? ' checked' : '';
             $layoutToggle = '<div class="cpb-page-layout-toggle" contenteditable="false">'
                 . '<label><input type="checkbox" data-layout-toggle="hide_header_footer"' . $hideChecked . '> '
-                . 'Hide header/footer on this section</label></div>';
+                . 'Hide header/footer on this section</label>';
+            if ($isAnnexContent) {
+                $portraitChecked = !$isLandscape ? ' checked' : '';
+                $landscapeChecked = $isLandscape ? ' checked' : '';
+                $layoutToggle .= ' <span class="cpb-orientation-toggle">'
+                    . '<label><input type="radio" name="cpb_orientation_' . (int)($section['id'] ?? 0) . '" value="portrait" data-layout-toggle="orientation"' . $portraitChecked . '> Portrait</label>'
+                    . ' <label><input type="radio" name="cpb_orientation_' . (int)($section['id'] ?? 0) . '" value="landscape" data-layout-toggle="orientation"' . $landscapeChecked . '> Landscape</label>'
+                    . '</span>';
+            }
+            $layoutToggle .= '</div>';
         }
 
         if ($showHeaderFooter) {
@@ -1007,7 +1165,7 @@ final class ControlledPublishingBookRenderer
             }
         }
 
-        return '<div class="cpb-sheet" data-section-id="' . (int)($section['id'] ?? 0) . '">'
+        return '<div class="' . $sheetClass . '" data-section-id="' . (int)($section['id'] ?? 0) . '">'
             . $layoutToggle
             . $headerHtml
             . '<div class="cpb-sheet-body" data-blocks-root="1">' . $blocksHtml . '</div>'

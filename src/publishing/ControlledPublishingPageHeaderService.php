@@ -21,6 +21,9 @@ final class ControlledPublishingPageHeaderService
         'book_title' => array('label' => 'Manual title', 'description' => 'Full manual title'),
         'part_title' => array('label' => 'Part title', 'description' => 'Current manual part (e.g. Part 1 – General)'),
         'section_title' => array('label' => 'Section title', 'description' => 'Current section name'),
+        'annex_number' => array('label' => 'Annex number', 'description' => 'Annex number (e.g. 01)'),
+        'annex_title' => array('label' => 'Annex title', 'description' => 'Annex title without prefix'),
+        'annex_revision' => array('label' => 'Annex revision', 'description' => 'Annex revision label (e.g. 1.1)'),
     );
 
     public function __construct(private PDO $pdo)
@@ -208,6 +211,26 @@ final class ControlledPublishingPageHeaderService
         }
         $dateFormatted = $this->formatDate($dateRaw);
 
+        $annexNumber = '';
+        $annexTitle = '';
+        $annexRevision = '';
+        $metaRaw = $section['metadata_json'] ?? '{}';
+        $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
+        if (is_array($meta) && is_array($meta['annex'] ?? null)) {
+            $annex = $meta['annex'];
+            $num = (int)($annex['number'] ?? 0);
+            if ($num > 0) {
+                $annexNumber = str_pad((string)$num, 2, '0', STR_PAD_LEFT);
+            }
+            $annexRevision = trim((string)($annex['revision'] ?? ''));
+        }
+        $sectionTitle = (string)($section['title'] ?? '');
+        if (preg_match('/^Annex\s+\d+\s*[–\-—]\s*(.+)$/iu', $sectionTitle, $m) === 1) {
+            $annexTitle = trim($m[1]);
+        } elseif (preg_match('/^Annex\s+\d+/iu', $sectionTitle) !== 1) {
+            $annexTitle = $sectionTitle;
+        }
+
         return array(
             'page' => $editorPreview || $page === null ? '—' : (string)$page,
             'page_total' => $editorPreview || $pageTotal === null ? '—' : (string)$pageTotal,
@@ -216,7 +239,10 @@ final class ControlledPublishingPageHeaderService
             'manual_code' => $manualCode,
             'book_title' => (string)($version['book_title'] ?? $version['title'] ?? ''),
             'part_title' => trim((string)($overrides['part_title'] ?? '')),
-            'section_title' => (string)($section['title'] ?? ''),
+            'section_title' => $sectionTitle,
+            'annex_number' => $annexNumber,
+            'annex_title' => $annexTitle,
+            'annex_revision' => $annexRevision,
         );
     }
 

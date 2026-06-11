@@ -20,6 +20,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageSe
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingEditorNavService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -50,6 +52,13 @@ $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
 $manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
 $editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStructureSvc);
 $richTextSvc = new ControlledPublishingRichTextService($pdo);
+$annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, new ControlledPublishingDocxImportService(
+    $pdo,
+    $foundation,
+    $sections,
+    $blocks,
+    $manualStructureSvc
+));
 $renderer->setPageHeaderService($pageHeaderSvc);
 $renderer->setCoverPageService($coverPageSvc);
 $renderer->setLepPageService($lepPageSvc);
@@ -67,7 +76,7 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     switch ($action) {
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $uid);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $annexSvc, $uid);
             break;
         case 'recompute_section_numbers':
             cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc);
@@ -125,6 +134,12 @@ try {
             break;
         case 'regenerate_highlights':
             cp_editor_handle_regenerate_highlights($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
+            break;
+        case 'regenerate_annex_register':
+            cp_editor_handle_regenerate_annex_register($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $annexSvc, $uid);
+            break;
+        case 'regenerate_annex_highlights':
+            cp_editor_handle_regenerate_annex_highlights($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $annexSvc, $uid);
             break;
         case 'save_part0_page':
             cp_editor_handle_save_part0_page($foundation, $part0PageSvc, $uid);
@@ -264,6 +279,22 @@ function cp_editor_legacy_section_layout(array $section): ?array
     return null;
 }
 
+function cp_editor_is_annex_register_section(array $section): bool
+{
+    return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::REGISTER_SECTION_KEY;
+}
+
+function cp_editor_is_annex_highlights_section(array $section): bool
+{
+    return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY;
+}
+
+function cp_editor_is_annex_content_section(array $section): bool
+{
+    $key = (string)($section['section_key'] ?? '');
+    return str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX);
+}
+
 function cp_editor_is_toc_section(array $section): bool
 {
     return (string)($section['section_key'] ?? '') === 'toc';
@@ -312,6 +343,9 @@ function cp_editor_is_section_editable(array $version, array $section): bool
         return true;
     }
     if (cp_editor_is_part0_structured_section($section)) {
+        return true;
+    }
+    if (cp_editor_is_annex_highlights_section($section) || cp_editor_is_annex_content_section($section)) {
         return true;
     }
     return cp_editor_is_cover_section($section) || cp_editor_is_lep_section($section);
@@ -405,7 +439,8 @@ function cp_editor_render_page_html(
     ControlledPublishingLepService $lepPageSvc,
     ControlledPublishingApprovalService $approvalSvc,
     ControlledPublishingPart0PageService $part0PageSvc,
-    array $sectionBlocks = array()
+    array $sectionBlocks = array(),
+    ?ControlledPublishingAnnexService $annexSvc = null
 ): string {
     if (cp_editor_is_cover_section($section)) {
         $coverPage = $coverPageSvc->resolveFromVersion($version);
@@ -415,6 +450,36 @@ function cp_editor_render_page_html(
         $lepPage = $lepPageSvc->resolveFromVersion($version);
         $approval = $approvalSvc->resolveApproval((int)$version['id']);
         return $renderer->renderLepPageShell($version, $section, $mode, $pageHeaderConfig, $lepPage, $approval);
+    }
+    if (cp_editor_is_annex_register_section($section) && $annexSvc !== null) {
+        $register = $annexSvc->resolveRegisterPage((int)$version['id']);
+        $rows = is_array($register['rows'] ?? null) ? $register['rows'] : array();
+        $tokenConfig = $pageHeaderConfig;
+        $tokenConfig['token_overrides'] = array('part_title' => 'Annexes');
+        return $renderer->renderAnnexRegisterShell($version, $section, $rows, $mode, $tokenConfig);
+    }
+    if (cp_editor_is_annex_highlights_section($section)) {
+        $manual = array();
+        $system = array();
+        foreach ($sectionBlocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            if (!empty($block['is_system_managed'])) {
+                $system[] = $block;
+            } else {
+                $manual[] = $block;
+            }
+        }
+        $manualHtml = $renderer->renderBlocks($manual, $mode);
+        $systemHtml = $renderer->renderBlocks($system, $mode);
+        $body = $manualHtml;
+        if ($systemHtml !== '') {
+            $body = $systemHtml . ($manualHtml !== '' ? '<div class="cpb-annex-highlights-manual">' . $manualHtml . '</div>' : '');
+        }
+        $tokenConfig = $pageHeaderConfig;
+        $tokenConfig['token_overrides'] = array('part_title' => 'Annexes');
+        return $renderer->renderAnnexHighlightsShell($version, $section, $body, $mode, $tokenConfig);
     }
     if (cp_editor_is_part0_shell_section($section)) {
         $sectionKey = (string)($section['section_key'] ?? '');
@@ -479,6 +544,7 @@ function cp_editor_handle_load(
     ControlledPublishingPart0PageService $part0PageSvc,
     ControlledPublishingEditorNavService $editorNavSvc,
     ControlledPublishingManualStructureService $manualStructureSvc,
+    ControlledPublishingAnnexService $annexSvc,
     int $uid
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
@@ -496,6 +562,7 @@ function cp_editor_handle_load(
     $contentImport = null;
     if ((string)($version['lifecycle_status'] ?? '') !== 'released') {
         try {
+            $annexSvc->ensureAnnexInfrastructure($versionId, $uid);
             $structureSync = $manualStructureSvc->ensureVersionStructure($versionId, $uid);
             $contentImport = $manualStructureSvc->ensureVersionContent($versionId, $uid);
         } catch (RuntimeException $e) {
@@ -518,6 +585,32 @@ function cp_editor_handle_load(
 
     if (!empty($section['parent_section_id'])) {
         $section['allow_author_blocks'] = 1;
+    }
+
+    if (cp_editor_is_annex_register_section($section) && cp_editor_is_section_editable($version, $section)) {
+        try {
+            $annexSvc->regenerateRegister($versionId, $uid);
+        } catch (RuntimeException $e) {
+            // Keep existing register if regeneration fails.
+        }
+    }
+
+    if (cp_editor_is_annex_highlights_section($section) && cp_editor_is_section_editable($version, $section)) {
+        $hlBlocks = $blocks->listSectionBlocks($sectionId);
+        $hasSystem = false;
+        foreach ($hlBlocks as $row) {
+            if (!empty($row['is_system_managed'])) {
+                $hasSystem = true;
+                break;
+            }
+        }
+        if (!$hasSystem) {
+            try {
+                $annexSvc->regenerateHighlights($versionId, $uid);
+            } catch (RuntimeException $e) {
+                // Leave empty until manual regenerate.
+            }
+        }
     }
 
     if ((string)($section['section_key'] ?? '') === 'highlights' && cp_editor_is_section_editable($version, $section)) {
@@ -610,7 +703,7 @@ function cp_editor_handle_load(
     $editable = cp_editor_is_section_editable($version, $section);
     $mode = $editable ? ControlledPublishingBookRenderer::MODE_EDIT : ControlledPublishingBookRenderer::MODE_READ;
     $blocksHtml = $renderer->renderBlocks($sectionBlocks, $mode);
-    $pageHtml = cp_editor_render_page_html($renderer, $version, $section, $blocksHtml, $mode, $pageLayout, $pageHeaderConfig, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $sectionBlocks);
+    $pageHtml = cp_editor_render_page_html($renderer, $version, $section, $blocksHtml, $mode, $pageLayout, $pageHeaderConfig, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $sectionBlocks, $annexSvc);
     $prior = $revision->priorVersion($versionId);
     $coverPage = $coverPageSvc->resolveFromVersion($version);
     $tocSettings = $tocSvc->resolveTocSettingsFromVersion($version);
@@ -636,6 +729,9 @@ function cp_editor_handle_load(
         'is_toc_section' => cp_editor_is_toc_section($section),
         'is_lep_section' => cp_editor_is_lep_section($section),
         'is_part0_section' => cp_editor_is_part0_shell_section($section),
+        'is_annex_register_section' => cp_editor_is_annex_register_section($section),
+        'is_annex_highlights_section' => cp_editor_is_annex_highlights_section($section),
+        'is_annex_content_section' => cp_editor_is_annex_content_section($section),
         'part0_section_key' => (string)($section['section_key'] ?? ''),
         'part0_structured' => cp_editor_is_part0_structured_section($section),
         'part0_page' => cp_editor_part0_page_payload($part0PageSvc, $version, $section),
@@ -1854,6 +1950,125 @@ function cp_editor_handle_regenerate_highlights(
                 $approvalSvc,
                 $part0PageSvc,
                 $sectionBlocks
+            );
+        }
+    }
+    cp_editor_json(200, $payload);
+}
+
+function cp_editor_handle_regenerate_annex_register(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    ControlledPublishingAnnexService $annexSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    $result = $annexSvc->regenerateRegister($versionId, $uid);
+    if ($sectionId <= 0) {
+        $sectionId = (int)($result['section_id'] ?? 0);
+    }
+    $payload = array('ok' => true, 'result' => $result);
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $payload['page_html'] = cp_editor_render_page_html(
+                $renderer,
+                $version,
+                $section,
+                '',
+                ControlledPublishingBookRenderer::MODE_EDIT,
+                $layoutSvc->resolveLayout($section),
+                $pageHeaderConfig,
+                $coverPageSvc,
+                $lepPageSvc,
+                $approvalSvc,
+                $part0PageSvc,
+                array(),
+                $annexSvc
+            );
+        }
+    }
+    cp_editor_json(200, $payload);
+}
+
+function cp_editor_handle_regenerate_annex_highlights(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingSectionService $sections,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingBookRenderer $renderer,
+    ControlledPublishingRevisionService $revision,
+    ControlledPublishingSectionLayoutService $layoutSvc,
+    ControlledPublishingBookStyleService $styleSvc,
+    ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    ControlledPublishingCoverPageService $coverPageSvc,
+    ControlledPublishingLepService $lepPageSvc,
+    ControlledPublishingApprovalService $approvalSvc,
+    ControlledPublishingPart0PageService $part0PageSvc,
+    ControlledPublishingAnnexService $annexSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    $result = $annexSvc->regenerateHighlights($versionId, $uid);
+    if ($sectionId <= 0) {
+        $sectionId = (int)($result['section_id'] ?? 0);
+    }
+    $payload = array('ok' => true, 'result' => $result);
+    if ($sectionId > 0) {
+        $section = $sections->getSection($versionId, $sectionId);
+        if ($section !== null) {
+            cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
+            $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
+            $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section);
+            $blocksHtml = $renderer->renderBlocks($sectionBlocks, ControlledPublishingBookRenderer::MODE_EDIT);
+            $payload['blocks'] = $sectionBlocks;
+            $payload['page_html'] = cp_editor_render_page_html(
+                $renderer,
+                $version,
+                $section,
+                $blocksHtml,
+                ControlledPublishingBookRenderer::MODE_EDIT,
+                $layoutSvc->resolveLayout($section),
+                $pageHeaderConfig,
+                $coverPageSvc,
+                $lepPageSvc,
+                $approvalSvc,
+                $part0PageSvc,
+                $sectionBlocks,
+                $annexSvc
             );
         }
     }

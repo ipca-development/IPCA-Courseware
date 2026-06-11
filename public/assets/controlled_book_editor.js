@@ -391,6 +391,9 @@
       state.isTocSection = !!res.is_toc_section;
       state.isLepSection = !!res.is_lep_section;
       state.isPart0Section = !!res.is_part0_section;
+      state.isAnnexRegisterSection = !!res.is_annex_register_section;
+      state.isAnnexHighlightsSection = !!res.is_annex_highlights_section;
+      state.isAnnexContentSection = !!res.is_annex_content_section;
       state.part0SectionKey = res.part0_section_key || '';
       state.part0Structured = !!res.part0_structured;
       state.part0Page = res.part0_page || null;
@@ -412,6 +415,7 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      applyLayoutToDom(state.pageLayout);
       refreshContentTableTypographyFromBookStyles();
       refreshCalloutTypographyFromBookStyles();
       if (state.isTocSection) {
@@ -643,9 +647,14 @@
     var sheet = canvasEl.querySelector('.cpb-sheet');
     if (!sheet) return {};
     var cb = sheet.querySelector('[data-layout-toggle="hide_header_footer"]');
-    return {
+    var orientationEl = sheet.querySelector('[data-layout-toggle="orientation"]:checked');
+    var layout = {
       hide_header_footer: cb ? !!cb.checked : false,
     };
+    if (orientationEl) {
+      layout.orientation = orientationEl.value || 'portrait';
+    }
+    return layout;
   }
 
   function applyLayoutToDom(layout) {
@@ -654,6 +663,13 @@
     var cb = sheet.querySelector('[data-layout-toggle="hide_header_footer"]');
     if (cb && layout.hide_header_footer !== undefined) {
       cb.checked = !!layout.hide_header_footer;
+    }
+    if (layout.orientation) {
+      sheet.classList.toggle('cpb-sheet--landscape', layout.orientation === 'landscape');
+      var orientInputs = sheet.querySelectorAll('[data-layout-toggle="orientation"]');
+      orientInputs.forEach(function (input) {
+        input.checked = input.value === layout.orientation;
+      });
     }
   }
 
@@ -1065,6 +1081,15 @@
         if (files && files[0]) uploadImageFile(files[0]);
       });
     }
+
+    canvasEl.querySelectorAll('[data-annex-link]').forEach(function (row) {
+      if (row.getAttribute('data-annex-link-wired') === '1') return;
+      row.setAttribute('data-annex-link-wired', '1');
+      row.addEventListener('click', function () {
+        var sid = parseInt(row.getAttribute('data-annex-link') || '0', 10);
+        if (sid > 0) loadSection(sid);
+      });
+    });
   }
 
   function saveAllBlocks() {
@@ -1320,6 +1345,11 @@
         toolbarLepEl.setAttribute('aria-hidden', 'true');
       }
       renderPart0Toolbar();
+      return;
+    }
+    if (state.isAnnexRegisterSection) {
+      toolbarEl.style.display = 'none';
+      hideAuxToolbars();
       return;
     }
     hideAuxToolbars();

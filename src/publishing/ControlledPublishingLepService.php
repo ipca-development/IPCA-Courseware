@@ -252,14 +252,25 @@ final class ControlledPublishingLepService
 
         $annexId = $this->sectionIdByKey($versionId, 'annexes');
         if ($annexId > 0) {
-            foreach ($this->listChildSections($versionId, $annexId) as $index => $child) {
+            foreach ($this->listChildSections($versionId, $annexId) as $child) {
+                $key = (string)($child['section_key'] ?? '');
+                if (!str_starts_with($key, 'annexes_annex_')) {
+                    continue;
+                }
                 $title = trim((string)($child['title'] ?? ''));
+                $metaRaw = $child['metadata_json'] ?? '{}';
+                $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
+                $annexMeta = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
+                $annexNum = (int)($annexMeta['number'] ?? 0);
+                if ($annexNum <= 0 && preg_match('/^annexes_annex_(\d+)$/', $key, $m) === 1) {
+                    $annexNum = (int)$m[1];
+                }
                 $parts[] = array(
-                    'part' => 'A' . ($index + 1),
-                    'label' => $title !== '' ? $title : 'Annex ' . ($index + 1),
+                    'part' => 'A' . ($annexNum > 0 ? $annexNum : (count($parts) + 1)),
+                    'label' => $title !== '' ? $title : 'Annex ' . ($annexNum > 0 ? $annexNum : ''),
                     'pages' => '—',
-                    'date' => $date,
-                    'revision' => $revision,
+                    'date' => trim((string)($annexMeta['revision_date'] ?? '')) !== '' ? (string)$annexMeta['revision_date'] : $date,
+                    'revision' => trim((string)($annexMeta['revision'] ?? '')) !== '' ? (string)$annexMeta['revision'] : $revision,
                     'section_id' => (int)($child['id'] ?? 0),
                 );
             }

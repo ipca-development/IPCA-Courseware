@@ -165,6 +165,11 @@ compliance_page_open(array(
             'href' => '/admin/compliance/controlled_book_docx_import.php?version_id=' . $versionId,
             'variant' => 'secondary',
         ),
+        array(
+            'label' => 'Manage annexes',
+            'href' => '/admin/compliance/controlled_book_annexes.php?version_id=' . $versionId,
+            'variant' => 'secondary',
+        ),
     ),
 ));
 

@@ -220,14 +220,26 @@ final class ControlledPublishingTocService
                 continue;
             }
             $sectionKey = (string)($row['section_key'] ?? '');
-            if (!preg_match('/^part_(\d+)_chapter_/', $sectionKey, $match)) {
-                continue;
+            if (preg_match('/^part_(\d+)_chapter_/', $sectionKey, $match)) {
+                $partKey = 'part_' . $match[1];
+                if (!isset($grouped[$partKey])) {
+                    $grouped[$partKey] = array();
+                }
+                $grouped[$partKey][] = $row;
             }
-            $partKey = 'part_' . $match[1];
-            if (!isset($grouped[$partKey])) {
-                $grouped[$partKey] = array();
-            }
-            $grouped[$partKey][] = $row;
+        }
+
+        $annexStmt = $this->pdo->prepare("
+            SELECT id, section_key, title, stable_anchor, sort_order
+            FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id
+              AND section_key REGEXP '^annexes_annex_[0-9]+$'
+            ORDER BY section_key
+        ");
+        $annexStmt->execute(array(':version_id' => $versionId));
+        $annexRows = $annexStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($annexRows !== array()) {
+            $grouped['annexes'] = $annexRows;
         }
 
         foreach (array('part_1', 'part_2', 'part_3', 'part_4', 'annexes') as $partKey) {
