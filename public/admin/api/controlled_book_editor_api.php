@@ -495,8 +495,15 @@ function cp_editor_handle_load(
     $structureSync = null;
     $contentImport = null;
     if ((string)($version['lifecycle_status'] ?? '') !== 'released') {
-        $structureSync = $manualStructureSvc->ensureVersionStructure($versionId, $uid);
-        $contentImport = $manualStructureSvc->ensureVersionContent($versionId, $uid);
+        try {
+            $structureSync = $manualStructureSvc->ensureVersionStructure($versionId, $uid);
+            $contentImport = $manualStructureSvc->ensureVersionContent($versionId, $uid);
+        } catch (RuntimeException $e) {
+            $structureSync = array(
+                'skipped' => true,
+                'error' => $e->getMessage(),
+            );
+        }
     }
 
     $tree = $editorNavSvc->buildNavTree($versionId, (string)($version['book_key'] ?? 'OM'));
@@ -527,7 +534,11 @@ function cp_editor_handle_load(
     }
 
     if (cp_editor_is_toc_section($section)) {
-        cp_editor_purge_toc_placeholders($blocks, $sectionId);
+        try {
+            cp_editor_purge_toc_placeholders($blocks, $sectionId);
+        } catch (Throwable $e) {
+            // Never block TOC rendering when placeholder cleanup fails.
+        }
     }
 
     if (cp_editor_is_lep_section($section) && cp_editor_is_section_editable($version, $section)) {
@@ -1608,17 +1619,24 @@ function cp_editor_purge_toc_placeholders(
     int $sectionId
 ): void {
     global $pdo;
-    $stmt = $pdo->prepare("
+    $check = $pdo->prepare("
+        SELECT 1
+        FROM ipca_publishing_book_blocks
+        WHERE section_id = :section_id
+          AND block_type IN ('toc', 'heading', 'paragraph')
+        LIMIT 1
+    ");
+    $check->execute(array(':section_id' => $sectionId));
+    if ($check->fetchColumn() === false) {
+        return;
+    }
+
+    $delete = $pdo->prepare("
         DELETE FROM ipca_publishing_book_blocks
         WHERE section_id = :section_id
           AND block_type = 'generated_placeholder'
-          AND EXISTS (
-              SELECT 1 FROM ipca_publishing_book_blocks live
-              WHERE live.section_id = :section_id
-                AND live.block_type IN ('toc', 'heading', 'paragraph')
-          )
     ");
-    $stmt->execute(array(':section_id' => $sectionId));
+    $delete->execute(array(':section_id' => $sectionId));
 }
 
 function cp_editor_purge_highlights_placeholders(

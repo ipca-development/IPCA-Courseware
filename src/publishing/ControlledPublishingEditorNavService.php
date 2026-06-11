@@ -318,11 +318,12 @@ final class ControlledPublishingEditorNavService
             }
             $parentRef = $this->parentNavSectionRef($ref);
             if ($parentRef !== '' && isset($nodes[$parentRef])) {
-                $nodes[$parentRef]['children'][] = $nodes[$ref];
+                $nodes[$parentRef]['children'][] = &$nodes[$ref];
                 $nodes[$parentRef]['is_group'] = true;
                 $nodes[$parentRef]['is_navigable'] = true;
             }
         }
+        unset($item);
 
         $roots = array();
         foreach ($nodes as $ref => $node) {

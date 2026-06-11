@@ -89,6 +89,7 @@ final class ControlledPublishingManualStructureService
         $created = 0;
         $updated = 0;
         $removed = 0;
+        $canonicalChaptersFound = 0;
 
         foreach (self::PART_SECTION_KEYS[$bookKey] ?? self::PART_SECTION_KEYS['OM'] as $partIndex => $partKey) {
             $parentId = $this->resolvePartParentSectionId($versionId, $partKey);
@@ -101,6 +102,7 @@ final class ControlledPublishingManualStructureService
                 continue;
             }
 
+            $canonicalChaptersFound += count($chapters);
             $result = $this->syncChaptersUnderParent(
                 $versionId,
                 $parentId,
@@ -121,6 +123,8 @@ final class ControlledPublishingManualStructureService
             'chapters_updated' => $updated,
             'chapters_removed' => $removed,
             'invalid_excerpts_retired' => $invalidExcerptsRetired,
+            'source_set_id' => $sourceSetId,
+            'canonical_chapters_found' => $canonicalChaptersFound,
         );
     }
 

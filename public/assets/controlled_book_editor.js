@@ -322,9 +322,22 @@
     applyCanvasZoom(state.canvasZoom, false);
   }
 
+  function parseApiResponse(r) {
+    return r.text().then(function (text) {
+      if (!text) {
+        throw new Error('Empty response from server (HTTP ' + r.status + ').');
+      }
+      try {
+        return JSON.parse(text);
+      } catch (parseErr) {
+        throw new Error('Invalid server response (HTTP ' + r.status + ').');
+      }
+    });
+  }
+
   function apiGet(url) {
     return fetch(url, { credentials: 'same-origin' }).then(function (r) {
-      return r.json();
+      return parseApiResponse(r);
     });
   }
 
@@ -335,7 +348,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign({ action: action }, payload || {})),
     }).then(function (r) {
-      return r.json();
+      return parseApiResponse(r);
     });
   }
 
@@ -422,7 +435,7 @@
       if (res.prior_version_label) {
         setStatus('Ready · changes vs ' + res.prior_version_label, 'saved');
       }
-    });
+    }).catch(showError);
   }
 
   function updateAddSubsection(section) {
@@ -4956,8 +4969,19 @@
         var created = res.chapters_created !== undefined ? res.chapters_created : 0;
         var updated = res.chapters_updated !== undefined ? res.chapters_updated : 0;
         var removed = res.chapters_removed !== undefined ? res.chapters_removed : 0;
+        var retired = res.invalid_excerpts_retired !== undefined ? res.invalid_excerpts_retired : 0;
         var summary = parts + ' part(s), ' + created + ' created, ' + updated + ' updated';
         if (removed > 0) summary += ', ' + removed + ' removed';
+        if (retired > 0) summary += ', ' + retired + ' junk excerpts retired';
+        if (parts === 0 && created === 0 && updated === 0) {
+          if (res.canonical_chapters_found && res.canonical_chapters_found > 0) {
+            summary += ' — chapter sections already match canonical structure';
+          } else if (res.source_set_id) {
+            summary += ' — no canonical chapters found in source set #' + res.source_set_id;
+          } else {
+            summary += ' — no manual source set linked to this version';
+          }
+        }
         return loadSection(state.sectionId).then(function () {
           setStatus('Manual structure synced (' + summary + ')', 'saved');
         });
