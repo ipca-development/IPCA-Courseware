@@ -7,6 +7,9 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationS
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
 
@@ -26,7 +29,19 @@ $foundation = new ControlledPublishingFoundationService($pdo);
 $blocks = new ControlledPublishingBlockService($pdo);
 $sections = new ControlledPublishingSectionService($pdo);
 $manualStructure = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
-$docxImport = new ControlledPublishingDocxImportService($pdo, $foundation, $sections, $blocks, $manualStructure);
+$styleSvc = new ControlledPublishingBookStyleService($pdo);
+$part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
+$lepSvc = new ControlledPublishingLepService($pdo);
+$docxImport = new ControlledPublishingDocxImportService(
+    $pdo,
+    $foundation,
+    $sections,
+    $blocks,
+    $manualStructure,
+    $part0PageSvc,
+    $styleSvc,
+    $lepSvc
+);
 $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, $docxImport);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');

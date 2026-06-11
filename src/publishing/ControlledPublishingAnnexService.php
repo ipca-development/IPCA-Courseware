@@ -7,6 +7,9 @@ require_once __DIR__ . '/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/ControlledPublishingLepService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 
 /**
@@ -381,7 +384,10 @@ final class ControlledPublishingAnnexService
             $this->foundation,
             $this->sections,
             $this->blocks,
-            new ControlledPublishingManualStructureService($this->pdo, $this->foundation, $this->sections, $this->blocks)
+            new ControlledPublishingManualStructureService($this->pdo, $this->foundation, $this->sections, $this->blocks),
+            new ControlledPublishingPart0PageService($this->pdo, $this->blocks),
+            new ControlledPublishingBookStyleService($this->pdo),
+            new ControlledPublishingLepService($this->pdo)
         );
 
         if ($force) {

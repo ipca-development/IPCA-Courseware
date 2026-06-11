@@ -57,7 +57,10 @@ $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $
     $foundation,
     $sections,
     $blocks,
-    $manualStructureSvc
+    $manualStructureSvc,
+    $part0PageSvc,
+    $styleSvc,
+    $lepPageSvc
 ));
 $renderer->setPageHeaderService($pageHeaderSvc);
 $renderer->setCoverPageService($coverPageSvc);
