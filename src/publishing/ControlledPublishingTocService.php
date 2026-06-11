@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 
@@ -354,6 +355,9 @@ final class ControlledPublishingTocService
             $blockAnchor = (string)($row['stable_anchor'] ?? '');
             $number = $sectionNumberDisplay[$blockId] ?? '';
             $label = $number !== '' ? $number . ' ' . $text : $text;
+            if ($this->isSkippableTocEntry($number, $text, $label)) {
+                continue;
+            }
             $entries[] = array(
                 'block_id' => $blockId,
                 'section_id' => $sectionId,
@@ -556,6 +560,25 @@ final class ControlledPublishingTocService
             ':content_hash' => $hash,
             ':actor' => $actorUserId,
         ));
+    }
+
+    private function isSkippableTocEntry(string $number, string $text, string $label): bool
+    {
+        $number = trim($number);
+        $text = trim($text);
+        $label = trim($label);
+        $ref = $number !== '' ? rtrim($number, '.') : '';
+        if ($ref !== '' && ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($ref, $text)) {
+            return true;
+        }
+        if ($label !== '' && ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($ref !== '' ? $ref : '0', $label)) {
+            return true;
+        }
+        if (preg_match('/^\d{2,}$/', $ref) && (int)$ref > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

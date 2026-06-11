@@ -123,9 +123,20 @@ final class ControlledPublishingBookRenderer
      */
     public function renderBlocks(array $blocks, string $mode = self::MODE_READ): string
     {
+        $hasToc = false;
+        foreach ($blocks as $block) {
+            if (is_array($block) && (string)($block['block_type'] ?? '') === 'toc') {
+                $hasToc = true;
+                break;
+            }
+        }
+
         $html = '';
         foreach ($blocks as $block) {
             if (!is_array($block)) {
+                continue;
+            }
+            if ($hasToc && (string)($block['block_type'] ?? '') === 'generated_placeholder') {
                 continue;
             }
             $html .= $this->renderBlock($block, $mode);
@@ -1616,6 +1627,10 @@ final class ControlledPublishingBookRenderer
         $titleColorDefault = (string)($titleStyle['color'] ?? '#0f2744');
         $titleBgDefault = (string)($titleStyle['bg'] ?? '#e8eef6');
         $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), $titleFontDefault);
+        // Older DOCX imports stored serif on title rows; follow book-style default instead.
+        if ($titleFontFamily === 'serif' && $titleFontDefault !== 'serif') {
+            $titleFontFamily = $titleFontDefault;
+        }
         $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? $titleSizeDefault);
         $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), $titleColorDefault);
         if ($titleBg === '' && trim((string)($payload['title_bg'] ?? '')) === '') {

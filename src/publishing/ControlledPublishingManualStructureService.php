@@ -804,20 +804,20 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
-     * Subtitle 1 entries for sidebar under a chapter (from canonical excerpts).
+     * All subsection refs under a chapter for sidebar navigation (5.1, 5.1.1, …).
      *
      * @return list<array{section_ref:string,title:string,nav_label:string}>
      */
-    public function listSubtitle1ForChapter(
+    public function listNavSubsectionsForChapter(
         string $manualCode,
         int $sourceSetId,
         int $manualPart,
         int $chapterNumber
     ): array {
         $manualCode = strtoupper(trim($manualCode));
-        $pattern = '^' . $chapterNumber . '\\.[0-9]+$';
+        $pattern = '^' . $chapterNumber . '\\.[0-9]+(\\.[0-9]+)*$';
         $stmt = $this->pdo->prepare("
-            SELECT section_ref, title
+            SELECT section_ref, title, body_text
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
               AND manual_code = :manual_code
@@ -837,7 +837,10 @@ final class ControlledPublishingManualStructureService
         $seen = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
-            $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
+            $title = $this->resolveCanonicalExcerptTitle(
+                (string)($row['title'] ?? ''),
+                (string)($row['body_text'] ?? '')
+            );
             if ($ref === '' || isset($seen[$ref])) {
                 continue;
             }
@@ -851,7 +854,20 @@ final class ControlledPublishingManualStructureService
                 'nav_label' => $ref . ' ' . $title,
             );
         }
+
         return $items;
+    }
+
+    /**
+     * @return list<array{section_ref:string,title:string,nav_label:string}>
+     */
+    public function listSubtitle1ForChapter(
+        string $manualCode,
+        int $sourceSetId,
+        int $manualPart,
+        int $chapterNumber
+    ): array {
+        return $this->listNavSubsectionsForChapter($manualCode, $sourceSetId, $manualPart, $chapterNumber);
     }
 
     public function isValidChapterNavEntry(array $sectionRow): bool
@@ -878,8 +894,12 @@ final class ControlledPublishingManualStructureService
 
     private function isSkippableNavExcerpt(string $sectionRef, string $title, int $manualPart): bool
     {
+        $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim($title));
         if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($sectionRef, $title)) {
             return true;
+        }
+        if ($title === '') {
+            return false;
         }
         if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
             return true;
@@ -1153,11 +1173,15 @@ final class ControlledPublishingManualStructureService
     private function isSkippableCanonicalExcerpt(string $sectionRef, string $title, string $bodyText, int $manualPart = -1): bool
     {
         $sectionRef = trim($sectionRef);
-        $title = trim($title);
+        $title = $this->resolveCanonicalExcerptTitle($title, $bodyText);
         $bodyText = trim($bodyText);
 
         if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($sectionRef, $title)) {
             return true;
+        }
+
+        if ($title === '') {
+            return false;
         }
 
         if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
@@ -1228,7 +1252,7 @@ final class ControlledPublishingManualStructureService
     private function retireInvalidCanonicalExcerpts(int $sourceSetId, string $manualCode): int
     {
         $stmt = $this->pdo->prepare("
-            SELECT id, section_ref, title, body_text
+            SELECT id, section_ref, title, body_text, manual_part
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
               AND manual_code = :manual_code
@@ -1248,9 +1272,9 @@ final class ControlledPublishingManualStructureService
         ");
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
-            $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
             $body = trim((string)($row['body_text'] ?? ''));
             $part = (int)($row['manual_part'] ?? 0);
+            $title = $this->resolveCanonicalExcerptTitle((string)($row['title'] ?? ''), $body);
             if ($ref === '' || !$this->isSkippableCanonicalExcerpt($ref, $title, $body, $part)) {
                 continue;
             }
@@ -1259,5 +1283,30 @@ final class ControlledPublishingManualStructureService
         }
 
         return $retired;
+    }
+
+    private function resolveCanonicalExcerptTitle(string $title, string $bodyText): string
+    {
+        $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim($title));
+        if ($title !== '') {
+            return $title;
+        }
+
+        $bodyText = trim(str_replace('\\n', "\n", $bodyText));
+        if ($bodyText === '') {
+            return '';
+        }
+
+        $firstLine = trim(strtok($bodyText, "\n") ?: '');
+        if ($firstLine === '') {
+            return '';
+        }
+
+        $parsed = ControlledPublishingDocxReader::parseSectionHeading($firstLine);
+        if ($parsed !== null) {
+            return ControlledPublishingDocxReader::sanitizeSectionTitle((string)($parsed['title'] ?? ''));
+        }
+
+        return ControlledPublishingDocxReader::sanitizeImportedText($firstLine);
     }
 }

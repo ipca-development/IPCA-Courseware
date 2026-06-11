@@ -526,6 +526,10 @@ function cp_editor_handle_load(
         }
     }
 
+    if (cp_editor_is_toc_section($section)) {
+        cp_editor_purge_toc_placeholders($blocks, $sectionId);
+    }
+
     if (cp_editor_is_lep_section($section) && cp_editor_is_section_editable($version, $section)) {
         $lep = $lepPageSvc->resolveFromVersion($version);
         $effectiveParts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
@@ -1597,6 +1601,24 @@ function cp_editor_handle_find_abbreviation_mentions(
         'abbreviation' => strtoupper($abbreviation),
         'mentions' => $part0PageSvc->findAbbreviationMentions($versionId, $abbreviation),
     ));
+}
+
+function cp_editor_purge_toc_placeholders(
+    ControlledPublishingBlockService $blocks,
+    int $sectionId
+): void {
+    global $pdo;
+    $stmt = $pdo->prepare("
+        DELETE FROM ipca_publishing_book_blocks
+        WHERE section_id = :section_id
+          AND block_type = 'generated_placeholder'
+          AND EXISTS (
+              SELECT 1 FROM ipca_publishing_book_blocks live
+              WHERE live.section_id = :section_id
+                AND live.block_type IN ('toc', 'heading', 'paragraph')
+          )
+    ");
+    $stmt->execute(array(':section_id' => $sectionId));
 }
 
 function cp_editor_purge_highlights_placeholders(

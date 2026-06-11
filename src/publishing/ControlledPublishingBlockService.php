@@ -508,7 +508,7 @@ final class ControlledPublishingBlockService
         }
 
         $titleAlign = $this->normalizeTableCellAlign((string)($payload['title_align'] ?? ''), 'center');
-        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'serif');
+        $titleFontFamily = $this->normalizeTableCellFont((string)($payload['title_font_family'] ?? ''), 'sans');
         $titleFontSize = $this->normalizeTableCellFontSize($payload['title_font_size'] ?? 11);
         $titleTextColor = $this->normalizeTableHexColor((string)($payload['title_text_color'] ?? ''), '');
 

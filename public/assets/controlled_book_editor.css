@@ -1212,6 +1212,19 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #e8eef6;
 }
 
+.cmp-page .cpb-editor-root .cpb-table thead tr.cpb-table-title-row td.cpb-font-serif {
+  font-family: Georgia, 'Times New Roman', serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-table thead tr.cpb-table-title-row td.cpb-font-sans {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+}
+.cmp-page .cpb-editor-root .cpb-table thead tr.cpb-table-title-row td.cpb-font-mono {
+  font-family: 'Courier New', Courier, monospace !important;
+}
+.cmp-page .cpb-editor-root .cpb-table thead tr.cpb-table-title-row td.cpb-font-arial {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
 .cpb-table thead tr.cpb-table-title-row.is-empty td[data-placeholder]:empty::before,
 .cpb-table thead tr.cpb-table-title-row.is-empty td[data-placeholder]:not(:focus):empty::before {
   content: attr(data-placeholder);
@@ -2464,9 +2477,18 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-part0-def-row {
   display: flex;
   gap: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
   align-items: baseline;
   position: relative;
+}
+
+.cpb-part0-abbr-row:last-child,
+.cpb-part0-def-row:last-child {
+  border-bottom: none;
+  margin-bottom: 4px;
+  padding-bottom: 0;
 }
 
 .cpb-part0-abbr-term {
@@ -2507,6 +2529,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-part0-abbr-flag {
   flex: 0 0 auto;
   margin-left: 4px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 9px;
@@ -2547,6 +2570,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   border-radius: 4px !important;
   background: #fff !important;
   color: #334155 !important;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
   font-size: 10px !important;
   font-weight: 600 !important;
   line-height: 1 !important;

@@ -231,18 +231,15 @@ final class ControlledPublishingEditorNavService
 
             $subtitleChildren = array();
             if ($sourceSetId > 0 && $chapterNumber > 0 && $manualPart > 0) {
-                foreach ($this->manualStructure->listSubtitle1ForChapter(
-                    $manualCode,
-                    $sourceSetId,
-                    $manualPart,
-                    $chapterNumber
-                ) as $subtitle) {
-                    $subtitleChildren[] = $this->virtualSubtitleNode(
-                        $sectionId,
-                        (string)$subtitle['section_ref'],
-                        (string)$subtitle['nav_label']
-                    );
-                }
+                $subtitleChildren = $this->buildSubtitleNavTree(
+                    $sectionId,
+                    $this->manualStructure->listNavSubsectionsForChapter(
+                        $manualCode,
+                        $sourceSetId,
+                        $manualPart,
+                        $chapterNumber
+                    )
+                );
             }
 
             if ($subtitleChildren !== array()) {
@@ -289,6 +286,69 @@ final class ControlledPublishingEditorNavService
             $index++;
         }
         return $nodes;
+    }
+
+    /**
+     * @param list<array{section_ref:string,title:string,nav_label:string}> $items
+     * @return list<array<string,mixed>>
+     */
+    private function buildSubtitleNavTree(int $sectionId, array $items): array
+    {
+        if ($items === array()) {
+            return array();
+        }
+
+        $nodes = array();
+        foreach ($items as $item) {
+            $ref = (string)($item['section_ref'] ?? '');
+            if ($ref === '') {
+                continue;
+            }
+            $nodes[$ref] = $this->virtualSubtitleNode(
+                $sectionId,
+                $ref,
+                (string)($item['nav_label'] ?? $ref)
+            );
+        }
+
+        foreach ($items as $item) {
+            $ref = (string)($item['section_ref'] ?? '');
+            if ($ref === '' || !isset($nodes[$ref])) {
+                continue;
+            }
+            $parentRef = $this->parentNavSectionRef($ref);
+            if ($parentRef !== '' && isset($nodes[$parentRef])) {
+                $nodes[$parentRef]['children'][] = $nodes[$ref];
+                $nodes[$parentRef]['is_group'] = true;
+                $nodes[$parentRef]['is_navigable'] = true;
+            }
+        }
+
+        $roots = array();
+        foreach ($nodes as $ref => $node) {
+            $parentRef = $this->parentNavSectionRef((string)$ref);
+            if ($parentRef !== '' && isset($nodes[$parentRef])) {
+                continue;
+            }
+            $roots[] = $node;
+        }
+
+        return $roots;
+    }
+
+    private function parentNavSectionRef(string $sectionRef): string
+    {
+        $sectionRef = trim($sectionRef);
+        $pos = strrpos($sectionRef, '.');
+        if ($pos === false) {
+            return '';
+        }
+        $parent = substr($sectionRef, 0, $pos);
+        if ($parent === '' || !str_contains($parent, '.')) {
+            return '';
+        }
+
+        return $parent;
     }
 
     /**
