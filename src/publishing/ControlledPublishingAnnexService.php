@@ -759,7 +759,11 @@ final class ControlledPublishingAnnexService
         }
 
         $shortTitle = trim((string)($input['title'] ?? ''));
-        if ($shortTitle === '') {
+        if (array_key_exists('title', $input)) {
+            if ($shortTitle === '') {
+                throw new RuntimeException('Annex title is required.');
+            }
+        } elseif ($shortTitle === '') {
             $shortTitle = $this->annexShortTitleFromSection($section);
         }
         $navTitle = $this->formatAnnexNavTitle($number, $shortTitle, $suffix);

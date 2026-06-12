@@ -131,9 +131,13 @@ compliance_page_open(array(
     <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
 
     <div id="cp-annex-edit-panel" hidden style="margin-top:20px;padding:16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;max-width:720px;">
-      <h3 style="margin:0 0 12px;font-size:15px;">Edit annex number</h3>
+      <h3 style="margin:0 0 12px;font-size:15px;">Edit annex</h3>
       <form id="cp-annex-edit-form" style="display:grid;gap:12px;">
         <input type="hidden" name="section_id" value="">
+        <label style="display:grid;gap:6px;">
+          <span style="font-size:13px;font-weight:600;">Annex name / title</span>
+          <input type="text" name="title" required placeholder="e.g. Synthetic Device Safety Briefing AL42" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+        </label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <label style="display:grid;gap:6px;">
             <span style="font-size:13px;font-weight:600;">Base number</span>
@@ -202,7 +206,7 @@ compliance_page_open(array(
         + '<a href="' + editUrl + '">Open</a> · '
         + '<button type="button" class="cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
         + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
-        + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit nr</button>'
+        + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit</button>'
         + '</td></tr>';
     });
     html += '</tbody></table>';
@@ -230,6 +234,7 @@ compliance_page_open(array(
   function openEditDialog(annex) {
     if (!editPanel || !editForm) return;
     editForm.querySelector('input[name="section_id"]').value = String(annex.section_id || '');
+    editForm.querySelector('input[name="title"]').value = annex.annex_short_title || '';
     editForm.querySelector('input[name="annex_number"]').value = String(annex.annex_number || '');
     editForm.querySelector('input[name="annex_suffix"]').value = annex.annex_suffix || '';
     editPanel.hidden = false;
@@ -289,24 +294,26 @@ compliance_page_open(array(
     editForm.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var sectionId = parseInt(editForm.querySelector('input[name="section_id"]').value || '0', 10);
+      var title = (editForm.querySelector('input[name="title"]').value || '').trim();
       var number = parseInt(editForm.querySelector('input[name="annex_number"]').value || '0', 10);
       var suffix = (editForm.querySelector('input[name="annex_suffix"]').value || '').trim();
-      if (sectionId <= 0 || number <= 0) {
-        setStatus('Invalid annex number.', 'error');
+      if (sectionId <= 0 || number <= 0 || title === '') {
+        setStatus('Title and annex number are required.', 'error');
         return;
       }
       var fd = new FormData();
       fd.set('action', 'update_identity');
       fd.set('version_id', String(versionId));
       fd.set('section_id', String(sectionId));
+      fd.set('title', title);
       fd.set('annex_number', String(number));
       fd.set('annex_suffix', suffix);
-      setStatus('Saving annex number…');
+      setStatus('Saving annex…');
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Update failed');
-          setStatus('Annex updated to ' + (res.annex && res.annex.annex_display_number ? res.annex.annex_display_number : 'new number') + '.');
+          setStatus('Annex updated: ' + (res.annex && res.annex.title ? res.annex.title : 'saved') + '.');
           closeEditDialog();
           loadList();
         })

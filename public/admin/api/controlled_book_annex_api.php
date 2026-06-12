@@ -141,14 +141,16 @@ try {
             cp_annex_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
         }
 
+        $shortTitle = trim((string)($_POST['title'] ?? ''));
+        if ($shortTitle === '') {
+            cp_annex_json(400, array('ok' => false, 'error' => 'title required'));
+        }
+
         $input = array(
             'annex_number' => (int)($_POST['annex_number'] ?? 0),
             'annex_suffix' => trim((string)($_POST['annex_suffix'] ?? '')),
+            'title' => $shortTitle,
         );
-        $shortTitle = trim((string)($_POST['title'] ?? ''));
-        if ($shortTitle !== '') {
-            $input['title'] = $shortTitle;
-        }
 
         $result = $annexSvc->updateAnnexIdentity($versionId, $sectionId, $input, $uid);
         cp_annex_json(200, array(
