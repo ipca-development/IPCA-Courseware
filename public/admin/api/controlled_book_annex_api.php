@@ -56,11 +56,15 @@ try {
         $annexes = array();
         foreach ($annexSvc->listAnnexSections($versionId) as $row) {
             $meta = $annexSvc->decodeAnnexMeta($row);
+            $suffix = $annexSvc->annexSuffixFromSection($row);
+            $number = (int)($meta['number'] ?? 0);
             $annexes[] = array(
                 'section_id' => (int)($row['id'] ?? 0),
                 'section_key' => (string)($row['section_key'] ?? ''),
                 'title' => (string)($row['title'] ?? ''),
-                'annex_number' => (int)($meta['number'] ?? 0),
+                'annex_number' => $number,
+                'annex_suffix' => $suffix,
+                'annex_display_number' => ControlledPublishingAnnexService::formatAnnexDisplayNumber($number, $suffix),
                 'revision' => (string)($meta['revision'] ?? ''),
                 'revision_date' => (string)($meta['revision_date'] ?? ''),
                 'updated_by' => (string)($meta['updated_by_name'] ?? ''),
@@ -88,6 +92,7 @@ try {
         $revision = trim((string)($_POST['revision'] ?? '1.0'));
         $revisionDate = trim((string)($_POST['revision_date'] ?? date('Y-m-d')));
         $annexNumber = (int)($_POST['annex_number'] ?? 0);
+        $annexSuffix = trim((string)($_POST['annex_suffix'] ?? ''));
 
         $input = array(
             'title' => $title,
@@ -96,6 +101,7 @@ try {
             'revision' => $revision,
             'revision_date' => $revisionDate,
             'annex_number' => $annexNumber,
+            'annex_suffix' => $annexSuffix,
         );
 
         $tmpImage = null;

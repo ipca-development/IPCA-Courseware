@@ -8,11 +8,15 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
 $svc = new ControlledPublishingFoundationService($pdo);
+$sectionsSvc = new ControlledPublishingSectionService($pdo);
 $lepSvc = new ControlledPublishingLepService($pdo);
+$structureSvc = new ControlledPublishingManualStructureService($pdo, $svc, $sectionsSvc);
 $approvalSvc = new ControlledPublishingApprovalService($pdo, $lepSvc);
 
 function cpv_flash(string $type, string $msg): void
@@ -72,6 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $versionId > 0) {
                 'Section scaffold complete: ' . (int)$scaffold['sections_total'] . ' sections (' .
                 (int)$scaffold['sections_created'] . ' new, ' . (int)$scaffold['blocks_created'] . ' placeholders).'
             );
+        } elseif ($action === 'cleanup_invalid_sections') {
+            $cleanup = $structureSvc->pruneInvalidChapterSections($versionId);
+            cpv_flash(
+                'success',
+                'Cleanup complete: ' . (int)$cleanup['sections_removed'] . ' invalid chapter section(s) removed, ' .
+                (int)$cleanup['invalid_excerpts_retired'] . ' bad canonical excerpt(s) retired.'
+            );
         } elseif ($action === 'release_version') {
             $svc->releaseVersion($versionId, $uid);
             cpv_flash('success', 'Version ' . (string)$version['version_label'] . ' released.');
@@ -123,7 +134,8 @@ if ($version === null) {
 }
 
 $selections = $svc->getVersionSourceSelections($versionId);
-$sections = $svc->listVersionSections($versionId);
+$scaffoldSections = $svc->listVersionScaffoldSections($versionId);
+$allSections = $svc->listVersionSections($versionId);
 $validation = $svc->validateVersionReleaseFoundation($versionId);
 $canRelease = $svc->canReleaseVersion($versionId);
 $suggestedNextVersion = $svc->suggestNextVersionLabel((string)$version['version_label']);
@@ -152,7 +164,8 @@ compliance_page_open(array(
         array('label' => 'Lifecycle', 'value' => (string)$version['lifecycle_status']),
         array('label' => 'Foundation', 'value' => (string)$validation['status'], 'tone' => $validation['ok'] ? 'ok' : 'warn'),
         array('label' => 'Source sets', 'value' => (int)$validation['selected_count']),
-        array('label' => 'Sections', 'value' => count($sections)),
+        array('label' => 'Sections', 'value' => count($allSections)),
+        array('label' => 'Scaffold', 'value' => count($scaffoldSections)),
     ),
     'actions' => array(
         array(
@@ -262,15 +275,31 @@ compliance_page_open(array(
 <?php endif; ?>
 
 <section class="cmp-card" style="margin-top:16px;">
-  <h2 style="margin:0 0 12px;">Mandatory section scaffold</h2>
-  <p style="margin:0 0 12px;">Creates the governed manual skeleton (Cover, TOC, LEP, Amendment List, Main Content, Annexes, etc.) with stable anchors.</p>
-  <form method="post" style="margin-bottom:16px;">
+  <h2 style="margin:0 0 12px;">Manual skeleton (template sections)</h2>
+  <p style="margin:0 0 12px;font-size:13px;color:#64748b;max-width:720px;line-height:1.5;">
+    This is the governed <strong>outline</strong> for the manual — Cover, Table of Contents, PART&nbsp;0 admin pages, PART&nbsp;1–4, and Annexes.
+    It is created once from the template and rarely needs changing. Chapter pages (1. Introduction, 2.3 Limitations, …) are managed in the
+    <a href="/admin/compliance/controlled_book_editor.php?version_id=<?= $versionId ?>">book editor</a> via <em>Sync manual structure</em>, not here.
+  </p>
+  <form method="post" style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <input type="hidden" name="action" value="scaffold_sections">
-    <button type="submit">Scaffold sections from template</button>
+    <button type="submit">Ensure skeleton from template</button>
   </form>
+  <?php if ((string)$version['lifecycle_status'] !== 'released'): ?>
+    <form method="post" style="margin-bottom:16px;" onsubmit="return confirm('Remove invalid chapter sections (table fragments, instrument labels, etc.) from this version?');">
+      <input type="hidden" name="action" value="cleanup_invalid_sections">
+      <button type="submit" class="cmp-btn cmp-btn--secondary">Clean up invalid chapter sections</button>
+    </form>
+    <p style="margin:-8px 0 16px;font-size:12px;color:#64748b;max-width:720px;">
+      Use cleanup if stray rows such as “degrees (low pitch)” appear — these are OCR/table fragments, not real manual chapters.
+      <?= count($allSections) > count($scaffoldSections)
+        ? ('This version has ' . (count($allSections) - count($scaffoldSections)) . ' chapter/subsection page(s) beyond the skeleton.')
+        : '' ?>
+    </p>
+  <?php endif; ?>
 
-  <?php if ($sections === array()): ?>
-    <p style="margin:0;color:#64748b;">No sections scaffolded yet.</p>
+  <?php if ($scaffoldSections === array()): ?>
+    <p style="margin:0;color:#64748b;">No template sections yet. Click “Ensure skeleton from template” above.</p>
   <?php else: ?>
     <div style="overflow:auto;">
       <table class="cmp-table" style="width:100%;border-collapse:collapse;">
@@ -287,7 +316,7 @@ compliance_page_open(array(
           </tr>
         </thead>
         <tbody>
-          <?php foreach ($sections as $section): ?>
+          <?php foreach ($scaffoldSections as $section): ?>
             <tr>
               <td><?= (int)$section['sort_order'] ?></td>
               <td><?= h((string)$section['title']) ?></td>

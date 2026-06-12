@@ -43,7 +43,7 @@ if ($version === null) {
 }
 
 if ($sectionId <= 0) {
-    foreach (array('part_1', 'main_content') as $key) {
+    foreach (array('cover', 'part_1', 'main_content') as $key) {
         foreach ($sections->listFlatSections($versionId) as $row) {
             if ((string)$row['section_key'] === $key) {
                 $sectionId = (int)$row['id'];

@@ -14,15 +14,15 @@ final class ControlledPublishingEditorNavService
     /** @var array<string,list<array{section_key:string,title:string,sort_order:int}>> */
     private const BOOK_PARTS = array(
         'OM' => array(
-            array('section_key' => 'part_1', 'title' => 'Part 1 – General', 'sort_order' => 100),
-            array('section_key' => 'part_2', 'title' => 'Part 2 – Technical', 'sort_order' => 110),
-            array('section_key' => 'part_3', 'title' => 'Part 3 – Route', 'sort_order' => 120),
-            array('section_key' => 'part_4', 'title' => 'Part 4 – Personnel Training', 'sort_order' => 130),
+            array('section_key' => 'part_1', 'title' => 'PART 1 – General', 'sort_order' => 100),
+            array('section_key' => 'part_2', 'title' => 'PART 2 – Technical', 'sort_order' => 110),
+            array('section_key' => 'part_3', 'title' => 'PART 3 – Route', 'sort_order' => 120),
+            array('section_key' => 'part_4', 'title' => 'PART 4 – Personnel Training', 'sort_order' => 130),
         ),
         'OMM' => array(
-            array('section_key' => 'part_1', 'title' => 'Part 1 – General', 'sort_order' => 100),
-            array('section_key' => 'part_2', 'title' => 'Part 2 – Compliance Monitoring', 'sort_order' => 110),
-            array('section_key' => 'part_3', 'title' => 'Part 3 – Safety Management', 'sort_order' => 120),
+            array('section_key' => 'part_1', 'title' => 'PART 1 – General', 'sort_order' => 100),
+            array('section_key' => 'part_2', 'title' => 'PART 2 – Compliance Monitoring', 'sort_order' => 110),
+            array('section_key' => 'part_3', 'title' => 'PART 3 – Safety Management', 'sort_order' => 120),
         ),
     );
 

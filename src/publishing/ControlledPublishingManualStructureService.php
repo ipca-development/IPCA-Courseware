@@ -33,11 +33,11 @@ final class ControlledPublishingManualStructureService
 
     /** @var array<string,string> */
     private const PART_TITLES = array(
-        'part_1' => 'Part 1 – General',
-        'main_content' => 'Part 1 – General',
-        'part_2' => 'Part 2 – Technical',
-        'part_3' => 'Part 3 – Route',
-        'part_4' => 'Part 4 – Personnel Training',
+        'part_1' => 'PART 1 – General',
+        'main_content' => 'PART 1 – General',
+        'part_2' => 'PART 2 – Technical',
+        'part_3' => 'PART 3 – Route',
+        'part_4' => 'PART 4 – Personnel Training',
         'annexes' => 'Annexes',
     );
 
@@ -434,6 +434,10 @@ final class ControlledPublishingManualStructureService
      */
     private function canRemoveChapterSection(array $row): bool
     {
+        if ($this->chapterNumberFromSection($row) > 0 && !$this->isValidChapterNavEntry($row)) {
+            return true;
+        }
+
         $meta = $this->decodeMeta($row);
         $chapterNumber = (int)($meta['chapter_number'] ?? 0);
         if ($this->isCanonicalChapterSection($row) && $chapterNumber > 0) {
@@ -979,6 +983,48 @@ final class ControlledPublishingManualStructureService
         }
 
         return true;
+    }
+
+    /**
+     * Remove chapter sections that fail nav validation (table fragments, instrument labels, etc.).
+     *
+     * @return array{sections_removed:int,invalid_excerpts_retired:int}
+     */
+    public function pruneInvalidChapterSections(int $versionId): array
+    {
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+            throw new RuntimeException('Released versions cannot be cleaned up.');
+        }
+
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? 'OM')));
+        $invalidExcerptsRetired = $this->pruneInvalidCanonicalExcerpts($versionId);
+        $removed = 0;
+
+        foreach (self::PART_SECTION_KEYS[$bookKey] ?? self::PART_SECTION_KEYS['OM'] as $partKey) {
+            $parentId = $this->resolvePartParentSectionId($versionId, $partKey);
+            if ($parentId <= 0) {
+                continue;
+            }
+            foreach ($this->listChildSections($versionId, $parentId) as $row) {
+                if ($this->chapterNumberFromSection($row) <= 0) {
+                    continue;
+                }
+                if ($this->isValidChapterNavEntry($row)) {
+                    continue;
+                }
+                $this->deleteSection((int)$row['id']);
+                $removed++;
+            }
+        }
+
+        return array(
+            'sections_removed' => $removed,
+            'invalid_excerpts_retired' => $invalidExcerptsRetired,
+        );
     }
 
     private function isSkippableNavExcerpt(string $sectionRef, string $title, int $manualPart): bool

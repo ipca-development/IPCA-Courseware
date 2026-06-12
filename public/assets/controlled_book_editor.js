@@ -1722,7 +1722,7 @@
       abbreviations: 'Index of Abbreviations',
       definitions: 'Definitions and Terms',
     };
-    return labels[state.part0SectionKey] || 'Part 0';
+    return labels[state.part0SectionKey] || 'PART 0';
   }
 
   function renderPart0Toolbar() {
@@ -2407,7 +2407,7 @@
       { token: '{book_title}', label: 'Manual title', description: 'Full manual title' },
       { token: '{part_title}', label: 'Part title', description: 'Current manual part' },
       { token: '{section_title}', label: 'Section title', description: 'Current section name' },
-      { token: '{annex_number}', label: 'Annex number', description: 'Annex number (e.g. 01)' },
+      { token: '{annex_number}', label: 'Annex number', description: 'Annex number (e.g. 01, 02a)' },
       { token: '{annex_title}', label: 'Annex title', description: 'Annex title without prefix' },
       { token: '{annex_revision}', label: 'Annex revision', description: 'Annex revision label' },
       { token: '{annex_revision_date}', label: 'Annex revision date', description: 'Annex revision date' },

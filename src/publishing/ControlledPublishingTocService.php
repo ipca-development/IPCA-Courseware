@@ -233,7 +233,7 @@ final class ControlledPublishingTocService
             SELECT id, section_key, title, stable_anchor, sort_order
             FROM ipca_publishing_book_sections
             WHERE book_version_id = :version_id
-              AND section_key REGEXP '^annexes_annex_[0-9]+$'
+              AND section_key REGEXP '^annexes_annex_[0-9]+[a-z]?$'
             ORDER BY section_key
         ");
         $annexStmt->execute(array(':version_id' => $versionId));
@@ -269,14 +269,14 @@ final class ControlledPublishingTocService
         ));
         $title = trim((string)$stmt->fetchColumn());
         if ($title !== '') {
-            return $title;
+            return ControlledPublishingPart0PageService::formatPartLabel($title);
         }
 
         $defaults = array(
-            'part_1' => 'Part 1 – General',
-            'part_2' => 'Part 2 – Technical',
-            'part_3' => 'Part 3 – Route',
-            'part_4' => 'Part 4 – Personnel Training',
+            'part_1' => 'PART 1 – General',
+            'part_2' => 'PART 2 – Technical',
+            'part_3' => 'PART 3 – Route',
+            'part_4' => 'PART 4 – Personnel Training',
             'annexes' => 'Annexes',
         );
 

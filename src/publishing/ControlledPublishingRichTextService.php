@@ -4,13 +4,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
+require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 
 /**
  * Enriches manual body text with annex links and external URLs; detects callout prefixes.
  */
 final class ControlledPublishingRichTextService
 {
-    /** @var array<int, array<int, int>> */
+    /** @var array<int, array<string, int>> */
     private array $annexMapCache = array();
 
     public function __construct(private PDO $pdo)
@@ -121,9 +122,9 @@ final class ControlledPublishingRichTextService
                 $html .= $this->externalLinkHtml($part);
                 continue;
             }
-            $annexNumber = self::extractAnnexNumber($part);
-            if ($this->shouldEnrichAnnex($kind) && $annexNumber > 0 && isset($annexMap[$annexNumber])) {
-                $html .= $this->annexLinkHtml($part, $annexMap[$annexNumber], $versionId);
+            $annexRef = self::extractAnnexRef($part);
+            if ($this->shouldEnrichAnnex($kind) && $annexRef !== null && isset($annexMap[$annexRef])) {
+                $html .= $this->annexLinkHtml($part, $annexMap[$annexRef], $versionId);
                 continue;
             }
             $html .= htmlspecialchars($part, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -228,7 +229,7 @@ final class ControlledPublishingRichTextService
     }
 
     /**
-     * @return array<int, int> annex number => section id
+     * @return array<string, int> annex display ref (e.g. 02a) => section id
      */
     public function resolveAnnexSectionMap(int $versionId): array
     {
@@ -266,29 +267,47 @@ final class ControlledPublishingRichTextService
         $map = array();
         foreach ($childStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $sectionId = (int)($row['id'] ?? 0);
-            $title = trim((string)($row['title'] ?? ''));
             if ($sectionId <= 0) {
                 continue;
             }
             $metaRaw = $row['metadata_json'] ?? '{}';
             $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
-            $annexNum = 0;
-            if (is_array($meta) && is_array($meta['annex'] ?? null)) {
-                $annexNum = (int)($meta['annex']['number'] ?? 0);
+            $annexMeta = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
+            $annexNum = (int)($annexMeta['number'] ?? 0);
+            $suffix = array_key_exists('suffix', $annexMeta)
+                ? ControlledPublishingAnnexService::normalizeAnnexSuffix((string)$annexMeta['suffix'])
+                : '';
+            if ($annexNum <= 0) {
+                $parsed = ControlledPublishingAnnexService::parseAnnexSectionKey((string)($row['section_key'] ?? ''));
+                $annexNum = $parsed['number'];
+                if ($suffix === '') {
+                    $suffix = $parsed['suffix'];
+                }
             }
             if ($annexNum <= 0) {
-                $annexNum = self::extractAnnexNumber($title);
+                $annexNum = self::extractAnnexNumber((string)($row['title'] ?? ''));
             }
-            if ($annexNum <= 0 && preg_match('/^annexes_annex_(\d+)$/', (string)($row['section_key'] ?? ''), $m) === 1) {
-                $annexNum = (int)$m[1];
+            if ($annexNum <= 0) {
+                continue;
             }
-            if ($annexNum > 0) {
-                $map[$annexNum] = $sectionId;
-            }
+            $display = ControlledPublishingAnnexService::formatAnnexDisplayNumber($annexNum, $suffix);
+            $map[strtolower($display)] = $sectionId;
         }
 
         $this->annexMapCache[$versionId] = $map;
         return $map;
+    }
+
+    private static function extractAnnexRef(string $text): ?string
+    {
+        if (preg_match('/\bAnnex\s+(\d{1,3})([a-z])?\b/i', $text, $matches) !== 1) {
+            return null;
+        }
+
+        return strtolower(ControlledPublishingAnnexService::formatAnnexDisplayNumber(
+            (int)$matches[1],
+            strtolower((string)($matches[2] ?? ''))
+        ));
     }
 
     private static function extractAnnexNumber(string $text): int
@@ -635,12 +654,12 @@ final class ControlledPublishingRichTextService
             return '/((?:https?:\/\/|www\.)[^\s<>"\'\]]+)/iu';
         }
         if ($kind === 'annex_refs' || $kind === 'annex') {
-            return '/(\b(?:OM|OMM)\s+Annex\s+\d{1,3}(?:\s*[–\-—]\s*[^\.,;\n]+)?|\bAnnex\s+\d{1,3}(?:\s*[–\-—]\s*[^\.,;\n]+)?)/iu';
+            return '/(\b(?:OM|OMM)\s+Annex\s+\d{1,3}[a-z]?(?:\s*[–\-—]\s*[^\.,;\n]+)?|\bAnnex\s+\d{1,3}[a-z]?(?:\s*[–\-—]\s*[^\.,;\n]+)?)/iu';
         }
         if ($kind === 'both') {
             return '/('
-                . '\b(?:OM|OMM)\s+Annex\s+\d{1,3}(?:\s*[–\-—]\s*[^\.,;\n]+)?'
-                . '|\bAnnex\s+\d{1,3}(?:\s*[–\-—]\s*[^\.,;\n]+)?'
+                . '\b(?:OM|OMM)\s+Annex\s+\d{1,3}[a-z]?(?:\s*[–\-—]\s*[^\.,;\n]+)?'
+                . '|\bAnnex\s+\d{1,3}[a-z]?(?:\s*[–\-—]\s*[^\.,;\n]+)?'
                 . '|(?:https?:\/\/|www\.)[^\s<>"\'\]]+'
                 . ')/iu';
         }

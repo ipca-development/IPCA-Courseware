@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 
 /**
  * Book-level page header/footer templates stored in version metadata_json.
@@ -19,9 +20,9 @@ final class ControlledPublishingPageHeaderService
         'date' => array('label' => 'Publication date', 'description' => 'Effective or release date'),
         'manual_code' => array('label' => 'Manual code', 'description' => 'Short manual identifier (e.g. OM)'),
         'book_title' => array('label' => 'Manual title', 'description' => 'Full manual title'),
-        'part_title' => array('label' => 'Part title', 'description' => 'Current manual part (e.g. Part 1 – General)'),
+        'part_title' => array('label' => 'Part title', 'description' => 'Current manual part (e.g. PART 1 – General)'),
         'section_title' => array('label' => 'Section title', 'description' => 'Current section name'),
-        'annex_number' => array('label' => 'Annex number', 'description' => 'Annex number (e.g. 01)'),
+        'annex_number' => array('label' => 'Annex number', 'description' => 'Annex number (e.g. 01, 02a)'),
         'annex_title' => array('label' => 'Annex title', 'description' => 'Annex title without prefix'),
         'annex_revision' => array('label' => 'Annex revision', 'description' => 'Annex revision label (e.g. 1.1)'),
         'annex_revision_date' => array('label' => 'Annex revision date', 'description' => 'Annex revision date'),
@@ -361,15 +362,21 @@ final class ControlledPublishingPageHeaderService
             $annex = $meta['annex'];
             $num = (int)($annex['number'] ?? 0);
             if ($num > 0) {
-                $annexNumber = str_pad((string)$num, 2, '0', STR_PAD_LEFT);
+                $suffix = array_key_exists('suffix', $annex)
+                    ? ControlledPublishingAnnexService::normalizeAnnexSuffix((string)$annex['suffix'])
+                    : '';
+                if ($suffix === '' && preg_match('/^annexes_annex_(\d+)([a-z])?$/', (string)($section['section_key'] ?? ''), $m) === 1) {
+                    $suffix = (string)($m[2] ?? '');
+                }
+                $annexNumber = ControlledPublishingAnnexService::formatAnnexDisplayNumber($num, $suffix);
             }
             $annexRevision = trim((string)($annex['revision'] ?? ''));
             $annexRevisionDate = trim((string)($annex['revision_date'] ?? ''));
         }
         $sectionTitle = (string)($section['title'] ?? '');
-        if (preg_match('/^Annex\s+\d+\s*[–\-—]\s*(.+)$/iu', $sectionTitle, $m) === 1) {
+        if (preg_match('/^Annex\s+\d+[a-z]?\s*[–\-—]\s*(.+)$/iu', $sectionTitle, $m) === 1) {
             $annexTitle = trim($m[1]);
-        } elseif (preg_match('/^Annex\s+\d+/iu', $sectionTitle) !== 1) {
+        } elseif (preg_match('/^Annex\s+\d+[a-z]?/iu', $sectionTitle) !== 1) {
             $annexTitle = $sectionTitle;
         }
 

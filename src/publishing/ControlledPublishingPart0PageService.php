@@ -10,6 +10,15 @@ final class ControlledPublishingPart0PageService
 {
     public const PART_TITLE = 'PART 0 – Manual Administration';
 
+    public static function formatPartLabel(string $title): string
+    {
+        $title = trim($title);
+        if ($title === '') {
+            return '';
+        }
+        return (string)preg_replace('/^Part\s+(\d)/i', 'PART $1', $title);
+    }
+
     /** Tokens that are plain English words / navaid ids, not manual abbreviations. */
     private const ABBREVIATION_FALSE_POSITIVES = array(
         'ABOVE', 'AFTER', 'AGAIN', 'AIDS', 'AIR', 'ALSO', 'AMONG', 'BEEN', 'BOTH', 'CENTER', 'CENTRE',

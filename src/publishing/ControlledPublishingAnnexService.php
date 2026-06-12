@@ -119,7 +119,7 @@ final class ControlledPublishingAnnexService
         }
 
         usort($rows, function (array $a, array $b): int {
-            return $this->annexNumberFromSection($a) <=> $this->annexNumberFromSection($b);
+            return $this->compareAnnexSections($a, $b);
         });
 
         return $rows;
@@ -134,8 +134,11 @@ final class ControlledPublishingAnnexService
         foreach ($this->listAnnexSections($versionId) as $section) {
             $meta = $this->decodeAnnexMeta($section);
             $number = (int)($meta['number'] ?? 0);
+            $suffix = $this->annexSuffixFromSection($section);
             $rows[] = array(
                 'annex_number' => $number,
+                'annex_suffix' => $suffix,
+                'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
                 'section_id' => (int)($section['id'] ?? 0),
                 'title' => (string)($section['title'] ?? ''),
                 'revision' => (string)($meta['revision'] ?? ''),
@@ -167,6 +170,12 @@ final class ControlledPublishingAnnexService
             $number = $this->nextAnnexNumber($versionId);
         }
 
+        $suffix = self::normalizeAnnexSuffix((string)($input['annex_suffix'] ?? ''));
+        $baseSectionKey = $this->annexSectionKey($number, '');
+        if ($suffix === '' && $this->sectionIdByKey($versionId, $baseSectionKey) > 0) {
+            $suffix = $this->nextAvailableSuffix($versionId, $number);
+        }
+
         $revision = trim((string)($input['revision'] ?? '1.0'));
         if ($revision === '') {
             $revision = '1.0';
@@ -190,19 +199,22 @@ final class ControlledPublishingAnnexService
             throw new RuntimeException('Annexes parent section not found.');
         }
 
-        $sectionKey = $this->annexSectionKey($number);
+        $sectionKey = $this->annexSectionKey($number, $suffix);
         if ($this->sectionIdByKey($versionId, $sectionKey) > 0) {
-            throw new RuntimeException('Annex ' . str_pad((string)$number, 2, '0', STR_PAD_LEFT) . ' already exists.');
+            throw new RuntimeException(
+                'Annex ' . self::formatAnnexDisplayNumber($number, $suffix) . ' already exists.'
+            );
         }
 
-        $navTitle = $this->formatAnnexNavTitle($number, $title);
+        $navTitle = $this->formatAnnexNavTitle($number, $title, $suffix);
         $stableAnchor = $this->childAnchor((string)$parent['stable_anchor'], $sectionKey);
-        $sortOrder = 100 + ($number * 10);
+        $sortOrder = 100 + ($number * 10) + ($suffix === '' ? 0 : (ord($suffix) - ord('a') + 1));
         $updatedByName = $this->resolveUserDisplayName($actorUserId);
 
         $metadata = array(
             'annex' => array(
                 'number' => $number,
+                'suffix' => $suffix,
                 'revision' => $revision,
                 'revision_date' => $revisionDate,
                 'updated_by_user_id' => $actorUserId,
@@ -263,6 +275,8 @@ final class ControlledPublishingAnnexService
             'section_id' => $sectionId,
             'section_key' => $sectionKey,
             'annex_number' => $number,
+            'annex_suffix' => $suffix,
+            'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
             'title' => $navTitle,
             'import' => $importStats,
         );
@@ -482,6 +496,7 @@ final class ControlledPublishingAnnexService
                 }
                 $block['annex_title'] = (string)($annexSection['title'] ?? '');
                 $block['annex_number'] = $this->annexNumberFromSection($annexSection);
+                $block['annex_display_number'] = $this->annexDisplayNumberFromSection($annexSection);
                 $changes[] = $block;
             }
         }
@@ -508,7 +523,10 @@ final class ControlledPublishingAnnexService
             $created++;
         } else {
             foreach ($changes as $change) {
-                $annexNum = str_pad((string)(int)($change['annex_number'] ?? 0), 2, '0', STR_PAD_LEFT);
+                $annexNum = trim((string)($change['annex_display_number'] ?? ''));
+                if ($annexNum === '') {
+                    $annexNum = self::formatAnnexDisplayNumber((int)($change['annex_number'] ?? 0), '');
+                }
                 $title = trim((string)($change['annex_title'] ?? ''));
                 $status = (string)($change['change_status'] ?? 'modified');
                 $label = $status === 'new' ? 'New' : 'Modified';
@@ -587,17 +605,87 @@ final class ControlledPublishingAnnexService
         return $orientation === 'landscape' ? 'landscape' : 'portrait';
     }
 
-    public function formatAnnexNavTitle(int $number, string $title): string
+    public function formatAnnexNavTitle(int $number, string $title, string $suffix = ''): string
     {
-        $num = str_pad((string)$number, 2, '0', STR_PAD_LEFT);
+        $num = self::formatAnnexDisplayNumber($number, $suffix);
         $title = trim($title);
         if ($title === '') {
             return 'Annex ' . $num;
         }
-        if (preg_match('/^annex\s+\d+/i', $title) === 1) {
+        if (preg_match('/^annex\s+\d+[a-z]?/i', $title) === 1) {
             return $title;
         }
         return 'Annex ' . $num . ' – ' . $title;
+    }
+
+    public static function normalizeAnnexSuffix(string $suffix): string
+    {
+        $suffix = strtolower(trim($suffix));
+        if ($suffix === '') {
+            return '';
+        }
+        if (preg_match('/^[a-z]$/', $suffix) !== 1) {
+            throw new RuntimeException('Annex suffix must be a single letter (a–z).');
+        }
+        return $suffix;
+    }
+
+    public static function formatAnnexDisplayNumber(int $number, string $suffix = ''): string
+    {
+        $suffix = self::normalizeAnnexSuffix($suffix);
+        return str_pad((string)$number, 2, '0', STR_PAD_LEFT) . $suffix;
+    }
+
+    /**
+     * @return array{number:int,suffix:string}
+     */
+    public static function parseAnnexSectionKey(string $sectionKey): array
+    {
+        if (preg_match('/^' . preg_quote(self::ANNEX_SECTION_PREFIX, '/') . '(\d+)([a-z])?$/', $sectionKey, $m) !== 1) {
+            return array('number' => 0, 'suffix' => '');
+        }
+        return array(
+            'number' => (int)$m[1],
+            'suffix' => (string)($m[2] ?? ''),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function annexSuffixFromSection(array $section): string
+    {
+        $meta = $this->decodeAnnexMeta($section);
+        if (array_key_exists('suffix', $meta)) {
+            return self::normalizeAnnexSuffix((string)$meta['suffix']);
+        }
+        $parsed = self::parseAnnexSectionKey((string)($section['section_key'] ?? ''));
+        return $parsed['suffix'];
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function annexDisplayNumberFromSection(array $section): string
+    {
+        $number = $this->annexNumberFromSection($section);
+        if ($number <= 0) {
+            return '';
+        }
+        return self::formatAnnexDisplayNumber($number, $this->annexSuffixFromSection($section));
+    }
+
+    /**
+     * @param array<string,mixed> $a
+     * @param array<string,mixed> $b
+     */
+    public function compareAnnexSections(array $a, array $b): int
+    {
+        $numCmp = $this->annexNumberFromSection($a) <=> $this->annexNumberFromSection($b);
+        if ($numCmp !== 0) {
+            return $numCmp;
+        }
+        return strcmp($this->annexSuffixFromSection($a), $this->annexSuffixFromSection($b));
     }
 
     /**
@@ -722,15 +810,32 @@ final class ControlledPublishingAnnexService
             return (int)$meta['number'];
         }
         $key = (string)($section['section_key'] ?? '');
-        if (preg_match('/^annexes_annex_(\d+)$/', $key, $m) === 1) {
-            return (int)$m[1];
-        }
-        return 0;
+        $parsed = self::parseAnnexSectionKey($key);
+        return $parsed['number'];
     }
 
-    private function annexSectionKey(int $number): string
+    private function annexSectionKey(int $number, string $suffix = ''): string
     {
-        return self::ANNEX_SECTION_PREFIX . str_pad((string)$number, 2, '0', STR_PAD_LEFT);
+        return self::ANNEX_SECTION_PREFIX . self::formatAnnexDisplayNumber($number, $suffix);
+    }
+
+    private function nextAvailableSuffix(int $versionId, int $number): string
+    {
+        $used = array('');
+        foreach ($this->listAnnexSections($versionId) as $section) {
+            if ($this->annexNumberFromSection($section) !== $number) {
+                continue;
+            }
+            $used[] = $this->annexSuffixFromSection($section);
+        }
+        $used = array_values(array_unique($used));
+        for ($i = 0; $i < 26; $i++) {
+            $candidate = chr(ord('a') + $i);
+            if (!in_array($candidate, $used, true)) {
+                return $candidate;
+            }
+        }
+        throw new RuntimeException('No annex suffix available for annex number ' . $number . '.');
     }
 
     private function ensureChildSystemSection(
@@ -788,7 +893,8 @@ final class ControlledPublishingAnnexService
         $versionLabel = (string)$version['version_label'];
         $annexMeta = $this->decodeAnnexMeta($section);
         $number = (int)($annexMeta['number'] ?? $this->annexNumberFromSection($section));
-        $sectionRef = str_pad((string)$number, 2, '0', STR_PAD_LEFT);
+        $suffix = $this->annexSuffixFromSection($section);
+        $sectionRef = self::formatAnnexDisplayNumber($number, $suffix);
         $title = (string)($section['title'] ?? 'Annex ' . $sectionRef);
         $bodyText = trim($bodyText);
         if ($bodyText === '') {

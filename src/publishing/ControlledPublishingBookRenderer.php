@@ -414,7 +414,10 @@ final class ControlledPublishingBookRenderer
             if (!is_array($row)) {
                 continue;
             }
-            $num = str_pad((string)(int)($row['annex_number'] ?? 0), 2, '0', STR_PAD_LEFT);
+            $num = trim((string)($row['annex_display_number'] ?? ''));
+            if ($num === '') {
+                $num = str_pad((string)(int)($row['annex_number'] ?? 0), 2, '0', STR_PAD_LEFT);
+            }
             $sectionId = (int)($row['section_id'] ?? 0);
             $linkAttr = $sectionId > 0 ? ' data-annex-link="' . $sectionId . '"' : '';
             $bodyHtml .= '<tr class="cpb-annex-register-row" data-part0-row="' . $rowIdx . '"' . $linkAttr . '>'

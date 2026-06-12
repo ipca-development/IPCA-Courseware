@@ -77,16 +77,21 @@ compliance_page_open(array(
         <span style="font-size:13px;font-weight:600;">Annex title</span>
         <input type="text" name="title" required placeholder="e.g. Checklist C172SP" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
       </label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
         <label style="display:grid;gap:6px;">
           <span style="font-size:13px;font-weight:600;">Annex number (optional)</span>
           <input type="number" name="annex_number" min="1" placeholder="Auto" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+        </label>
+        <label style="display:grid;gap:6px;">
+          <span style="font-size:13px;font-weight:600;">Suffix (optional)</span>
+          <input type="text" name="annex_suffix" maxlength="1" placeholder="a, b, c…" pattern="[a-zA-Z]?" title="Single letter when multiple annexes share the same number" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
         </label>
         <label style="display:grid;gap:6px;">
           <span style="font-size:13px;font-weight:600;">Revision</span>
           <input type="text" name="revision" value="1.0" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
         </label>
       </div>
+      <p style="margin:-4px 0 0;font-size:12px;color:#64748b;">When several annexes share one number (e.g. three Annex&nbsp;02 briefings), leave suffix blank to auto-assign <strong>a</strong>, <strong>b</strong>, <strong>c</strong> after the first.</p>
       <label style="display:grid;gap:6px;">
         <span style="font-size:13px;font-weight:600;">Revision date</span>
         <input type="date" name="revision_date" value="<?= h(date('Y-m-d')) ?>" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
@@ -155,7 +160,7 @@ compliance_page_open(array(
     var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
       + '<th style="padding:8px 6px;">Nr</th><th>Title</th><th>Rev</th><th>Date</th><th>Mode</th><th></th></tr></thead><tbody>';
     annexes.forEach(function (a) {
-      var num = String(a.annex_number || 0).padStart(2, '0');
+      var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
       var editUrl = '/admin/compliance/controlled_book_editor.php?version_id=' + versionId + '&section_id=' + a.section_id;
       html += '<tr style="border-bottom:1px solid #f1f5f9;">'
         + '<td style="padding:8px 6px;">' + num + '</td>'

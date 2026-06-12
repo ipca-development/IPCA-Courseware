@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+
 /**
  * List of Effective Parts (LEP) layout, signatories, and auto-generated part rows.
  */
@@ -208,7 +211,7 @@ final class ControlledPublishingLepService
         if ($part0Id > 0) {
             $parts[] = array(
                 'part' => '0',
-                'label' => 'Part 0 – Manual Administration',
+                'label' => ControlledPublishingPart0PageService::PART_TITLE,
                 'pages' => '—',
                 'date' => $date,
                 'revision' => $revision,
@@ -227,7 +230,9 @@ final class ControlledPublishingLepService
             $partNum = $this->extractPartNumberFromKey($partKey);
             $parts[] = array(
                 'part' => (string)$partNum,
-                'label' => $title !== '' ? $title : 'Part ' . $partNum,
+                'label' => ControlledPublishingPart0PageService::formatPartLabel(
+                    $title !== '' ? $title : 'Part ' . $partNum
+                ),
                 'pages' => '—',
                 'date' => $date,
                 'revision' => $revision,
@@ -241,7 +246,9 @@ final class ControlledPublishingLepService
                 $title = $this->sectionTitleById($mainId);
                 $parts[] = array(
                     'part' => '1',
-                    'label' => $title !== '' ? $title : 'Part 1',
+                    'label' => ControlledPublishingPart0PageService::formatPartLabel(
+                        $title !== '' ? $title : 'Part 1'
+                    ),
                     'pages' => '—',
                     'date' => $date,
                     'revision' => $revision,
@@ -262,12 +269,24 @@ final class ControlledPublishingLepService
                 $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
                 $annexMeta = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
                 $annexNum = (int)($annexMeta['number'] ?? 0);
-                if ($annexNum <= 0 && preg_match('/^annexes_annex_(\d+)$/', $key, $m) === 1) {
-                    $annexNum = (int)$m[1];
+                $suffix = array_key_exists('suffix', $annexMeta)
+                    ? ControlledPublishingAnnexService::normalizeAnnexSuffix((string)$annexMeta['suffix'])
+                    : '';
+                if ($annexNum <= 0 || $suffix === '') {
+                    $parsed = ControlledPublishingAnnexService::parseAnnexSectionKey($key);
+                    if ($annexNum <= 0) {
+                        $annexNum = $parsed['number'];
+                    }
+                    if ($suffix === '') {
+                        $suffix = $parsed['suffix'];
+                    }
                 }
+                $displayNum = $annexNum > 0
+                    ? ControlledPublishingAnnexService::formatAnnexDisplayNumber($annexNum, $suffix)
+                    : '';
                 $parts[] = array(
-                    'part' => 'A' . ($annexNum > 0 ? $annexNum : (count($parts) + 1)),
-                    'label' => $title !== '' ? $title : 'Annex ' . ($annexNum > 0 ? $annexNum : ''),
+                    'part' => 'A' . ($displayNum !== '' ? $displayNum : (string)(count($parts) + 1)),
+                    'label' => $title !== '' ? $title : ('Annex ' . ($displayNum !== '' ? $displayNum : '')),
                     'pages' => '—',
                     'date' => trim((string)($annexMeta['revision_date'] ?? '')) !== '' ? (string)$annexMeta['revision_date'] : $date,
                     'revision' => trim((string)($annexMeta['revision'] ?? '')) !== '' ? (string)$annexMeta['revision'] : $revision,
