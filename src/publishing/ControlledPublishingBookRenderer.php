@@ -372,17 +372,15 @@ final class ControlledPublishingBookRenderer
             ? $headerSvc->resolveFromMetadata(array())
             : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
         $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        $pageHeader = is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'];
-        $pageFooter = is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'];
-        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
-        $overrides = is_array($pageHeaderConfig['token_overrides'] ?? null) ? $pageHeaderConfig['token_overrides'] : array();
         if ($headerSvc !== null) {
-            $overrides = array_merge($overrides, array('part_title' => 'Annexes'));
-            $tokenContext = $headerSvc->buildTokenContext($version, $section, array_merge(
-                array('editor_preview' => $mode === self::MODE_EDIT),
-                $overrides
-            ));
+            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
+                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
+                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
+            ), $section);
         }
+        $pageHeader = $config['page_header'];
+        $pageFooter = $config['page_footer'];
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
 
         $headerHtml = !empty($pageHeader['enabled'])
             ? $this->renderPageHeaderTable($pageHeader, $tokenContext, false, $headerSvc)
@@ -470,15 +468,15 @@ final class ControlledPublishingBookRenderer
             ? $headerSvc->resolveFromMetadata(array())
             : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
         $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        $pageHeader = is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'];
-        $pageFooter = is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'];
-        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
         if ($headerSvc !== null) {
-            $tokenContext = $headerSvc->buildTokenContext($version, $section, array(
-                'editor_preview' => $mode === self::MODE_EDIT,
-                'part_title' => 'Annexes',
-            ));
+            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
+                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
+                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
+            ), $section);
         }
+        $pageHeader = $config['page_header'];
+        $pageFooter = $config['page_footer'];
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
 
         $headerHtml = !empty($pageHeader['enabled'])
             ? $this->renderPageHeaderTable($pageHeader, $tokenContext, false, $headerSvc)
@@ -1114,18 +1112,21 @@ final class ControlledPublishingBookRenderer
             );
 
         $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        $pageHeader = is_array($config['page_header'] ?? null)
-            ? $config['page_header']
-            : $defaults['page_header'];
-        $pageFooter = is_array($config['page_footer'] ?? null)
-            ? $config['page_footer']
-            : $defaults['page_footer'];
+        if ($headerSvc !== null) {
+            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
+                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
+                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
+                'token_overrides' => is_array($config['token_overrides'] ?? null) ? $config['token_overrides'] : array(),
+            ), $section);
+        }
+        $pageHeader = $config['page_header'];
+        $pageFooter = $config['page_footer'];
 
         $showHeaderFooter = $headerSvc !== null
             ? $headerSvc->shouldShowHeader($section, $pageHeader, $pageFooter, $layout)
             : (!empty($pageHeader['enabled']) || !empty($pageFooter['enabled']));
 
-        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $pageHeaderConfig);
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
 
         $drop = $editable
             ? '<div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div>'

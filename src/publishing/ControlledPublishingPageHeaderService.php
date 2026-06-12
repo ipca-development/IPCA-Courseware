@@ -24,7 +24,12 @@ final class ControlledPublishingPageHeaderService
         'annex_number' => array('label' => 'Annex number', 'description' => 'Annex number (e.g. 01)'),
         'annex_title' => array('label' => 'Annex title', 'description' => 'Annex title without prefix'),
         'annex_revision' => array('label' => 'Annex revision', 'description' => 'Annex revision label (e.g. 1.1)'),
+        'annex_revision_date' => array('label' => 'Annex revision date', 'description' => 'Annex revision date'),
     );
+
+    private const ANNEX_FAMILY_SECTION_KEYS = array('annexes', 'annexes_register', 'annexes_highlights');
+    private const ANNEX_CONTENT_SECTION_PREFIX = 'annexes_annex_';
+    private const ANNEX_CENTER_TEXT = '{book_title} ({manual_code}) Annexes';
 
     public function __construct(private PDO $pdo)
     {
@@ -141,6 +146,42 @@ final class ControlledPublishingPageHeaderService
     }
 
     /**
+     * @param array<string,mixed> $section
+     */
+    public function isAnnexContentSection(array $section): bool
+    {
+        return str_starts_with((string)($section['section_key'] ?? ''), self::ANNEX_CONTENT_SECTION_PREFIX);
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function isAnnexFamilySection(array $section): bool
+    {
+        $key = (string)($section['section_key'] ?? '');
+        if (in_array($key, self::ANNEX_FAMILY_SECTION_KEYS, true)) {
+            return true;
+        }
+        return $this->isAnnexContentSection($section);
+    }
+
+    /**
+     * Apply annex-specific running-header template overrides.
+     *
+     * @param array{page_header:array<string,mixed>,page_footer:array<string,mixed>} $config
+     * @param array<string,mixed> $section
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>,token_overrides?:array<string,mixed>}
+     */
+    public function applyAnnexSectionHeaderConfig(array $config, array $section): array
+    {
+        if (!$this->isAnnexFamilySection($section)) {
+            return $config;
+        }
+        $config['page_header']['center_text'] = self::ANNEX_CENTER_TEXT;
+        return $config;
+    }
+
+    /**
      * @param array<string,mixed> $pageLayout
      * @return array<string,mixed>
      */
@@ -190,7 +231,7 @@ final class ControlledPublishingPageHeaderService
     /**
      * @param array<string,mixed> $version
      * @param array<string,mixed> $section
-     * @param array{page?:int|string,page_total?:int|string,editor_preview?:bool,part_title?:string} $overrides
+     * @param array{page?:int|string,page_total?:int|string,editor_preview?:bool,part_title?:string,revision?:string,date?:string} $overrides
      * @return array<string,string>
      */
     public function buildTokenContext(array $version, array $section, array $overrides = array()): array
@@ -198,6 +239,7 @@ final class ControlledPublishingPageHeaderService
         $editorPreview = !empty($overrides['editor_preview']);
         $page = $overrides['page'] ?? null;
         $pageTotal = $overrides['page_total'] ?? null;
+        $isAnnexContent = $this->isAnnexContentSection($section);
 
         $bookKey = (string)($version['book_key'] ?? '');
         $manualCode = trim((string)($version['manual_code'] ?? ''));
@@ -214,6 +256,7 @@ final class ControlledPublishingPageHeaderService
         $annexNumber = '';
         $annexTitle = '';
         $annexRevision = '';
+        $annexRevisionDate = '';
         $metaRaw = $section['metadata_json'] ?? '{}';
         $meta = is_array($metaRaw) ? $metaRaw : json_decode((string)$metaRaw, true);
         if (is_array($meta) && is_array($meta['annex'] ?? null)) {
@@ -223,6 +266,7 @@ final class ControlledPublishingPageHeaderService
                 $annexNumber = str_pad((string)$num, 2, '0', STR_PAD_LEFT);
             }
             $annexRevision = trim((string)($annex['revision'] ?? ''));
+            $annexRevisionDate = trim((string)($annex['revision_date'] ?? ''));
         }
         $sectionTitle = (string)($section['title'] ?? '');
         if (preg_match('/^Annex\s+\d+\s*[–\-—]\s*(.+)$/iu', $sectionTitle, $m) === 1) {
@@ -231,11 +275,35 @@ final class ControlledPublishingPageHeaderService
             $annexTitle = $sectionTitle;
         }
 
+        $revision = (string)($version['version_label'] ?? '');
+        $date = $dateFormatted;
+        if ($isAnnexContent) {
+            if ($annexRevision !== '') {
+                $revision = $annexRevision;
+            }
+            if ($annexRevisionDate !== '') {
+                $date = $this->formatDate($annexRevisionDate);
+            }
+        }
+        if (array_key_exists('revision', $overrides)) {
+            $revision = trim((string)$overrides['revision']);
+        }
+        if (array_key_exists('date', $overrides)) {
+            $date = trim((string)$overrides['date']);
+        }
+
+        if ($isAnnexContent) {
+            $pageDisplay = $editorPreview ? '—' : ($page === null ? '1' : (string)$page);
+        } else {
+            $pageDisplay = $editorPreview || $page === null ? '—' : (string)$page;
+        }
+        $pageTotalDisplay = $editorPreview || $pageTotal === null ? '—' : (string)$pageTotal;
+
         return array(
-            'page' => $editorPreview || $page === null ? '—' : (string)$page,
-            'page_total' => $editorPreview || $pageTotal === null ? '—' : (string)$pageTotal,
-            'revision' => (string)($version['version_label'] ?? ''),
-            'date' => $dateFormatted,
+            'page' => $pageDisplay,
+            'page_total' => $pageTotalDisplay,
+            'revision' => $revision,
+            'date' => $date,
             'manual_code' => $manualCode,
             'book_title' => (string)($version['book_title'] ?? $version['title'] ?? ''),
             'part_title' => trim((string)($overrides['part_title'] ?? '')),
@@ -243,6 +311,7 @@ final class ControlledPublishingPageHeaderService
             'annex_number' => $annexNumber,
             'annex_title' => $annexTitle,
             'annex_revision' => $annexRevision,
+            'annex_revision_date' => $annexRevisionDate !== '' ? $this->formatDate($annexRevisionDate) : '',
         );
     }
 

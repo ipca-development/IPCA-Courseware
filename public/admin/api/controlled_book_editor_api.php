@@ -256,11 +256,14 @@ function cp_editor_page_header_config(
         $legacyLayout = cp_editor_legacy_section_layout($section);
     }
     $config = $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
+    $config = $pageHeaderSvc->applyAnnexSectionHeaderConfig($config, $section);
     if ($manualStructure !== null && $sections !== null && $versionId !== null && $versionId > 0) {
-        $flat = $sections->listFlatSections($versionId);
-        $config['token_overrides'] = array(
-            'part_title' => $manualStructure->resolvePartTitleForSection($section, $flat),
-        );
+        if (!$pageHeaderSvc->isAnnexFamilySection($section)) {
+            $flat = $sections->listFlatSections($versionId);
+            $config['token_overrides'] = array(
+                'part_title' => $manualStructure->resolvePartTitleForSection($section, $flat),
+            );
+        }
     }
     return $config;
 }
@@ -457,9 +460,7 @@ function cp_editor_render_page_html(
     if (cp_editor_is_annex_register_section($section) && $annexSvc !== null) {
         $register = $annexSvc->resolveRegisterPage((int)$version['id']);
         $rows = is_array($register['rows'] ?? null) ? $register['rows'] : array();
-        $tokenConfig = $pageHeaderConfig;
-        $tokenConfig['token_overrides'] = array('part_title' => 'Annexes');
-        return $renderer->renderAnnexRegisterShell($version, $section, $rows, $mode, $tokenConfig);
+        return $renderer->renderAnnexRegisterShell($version, $section, $rows, $mode, $pageHeaderConfig);
     }
     if (cp_editor_is_annex_highlights_section($section)) {
         $manual = array();
@@ -480,9 +481,7 @@ function cp_editor_render_page_html(
         if ($systemHtml !== '') {
             $body = $systemHtml . ($manualHtml !== '' ? '<div class="cpb-annex-highlights-manual">' . $manualHtml . '</div>' : '');
         }
-        $tokenConfig = $pageHeaderConfig;
-        $tokenConfig['token_overrides'] = array('part_title' => 'Annexes');
-        return $renderer->renderAnnexHighlightsShell($version, $section, $body, $mode, $tokenConfig);
+        return $renderer->renderAnnexHighlightsShell($version, $section, $body, $mode, $pageHeaderConfig);
     }
     if (cp_editor_is_part0_shell_section($section)) {
         $sectionKey = (string)($section['section_key'] ?? '');
