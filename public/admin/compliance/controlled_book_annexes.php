@@ -91,7 +91,11 @@ compliance_page_open(array(
           <input type="text" name="revision" value="1.0" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
         </label>
       </div>
-      <p style="margin:-4px 0 0;font-size:12px;color:#64748b;">When several annexes share one number (e.g. three Annex&nbsp;02 briefings), leave suffix blank to auto-assign <strong>a</strong>, <strong>b</strong>, <strong>c</strong> after the first.</p>
+      <p style="margin:-4px 0 0;font-size:12px;color:#64748b;">Use letter suffixes for shared numbers (e.g. <strong>02a</strong>, <strong>02b</strong>, <strong>02c</strong>). Leave suffix blank to auto-assign the next letter.</p>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;">
+        <input type="checkbox" name="use_letter_suffix" value="1" checked>
+        <span>Use letter suffix for this annex (02a, not plain 02)</span>
+      </label>
       <label style="display:grid;gap:6px;">
         <span style="font-size:13px;font-weight:600;">Revision date</span>
         <input type="date" name="revision_date" value="<?= h(date('Y-m-d')) ?>" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
@@ -125,6 +129,28 @@ compliance_page_open(array(
       </div>
     </form>
     <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
+
+    <div id="cp-annex-edit-panel" hidden style="margin-top:20px;padding:16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;max-width:720px;">
+      <h3 style="margin:0 0 12px;font-size:15px;">Edit annex number</h3>
+      <form id="cp-annex-edit-form" style="display:grid;gap:12px;">
+        <input type="hidden" name="section_id" value="">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Base number</span>
+            <input type="number" name="annex_number" min="1" required style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Suffix letter</span>
+            <input type="text" name="annex_suffix" maxlength="1" placeholder="a, b, c…" pattern="[a-zA-Z]?" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+        </div>
+        <p style="margin:0;font-size:12px;color:#64748b;">Example: number <strong>2</strong> + suffix <strong>a</strong> → displayed as <strong>02a</strong>. Use suffix letters when several annexes share one base number.</p>
+        <div style="display:flex;gap:10px;">
+          <button type="submit">Save</button>
+          <button type="button" id="cp-annex-edit-cancel" class="cmp-btn cmp-btn--secondary">Cancel</button>
+        </div>
+      </form>
+    </div>
   <?php endif; ?>
 </section>
 
@@ -135,6 +161,9 @@ compliance_page_open(array(
   var listEl = document.getElementById('cp-annex-list');
   var statusEl = document.getElementById('cp-annex-status');
   var form = document.getElementById('cp-annex-form');
+  var editPanel = document.getElementById('cp-annex-edit-panel');
+  var editForm = document.getElementById('cp-annex-edit-form');
+  var editCancelBtn = document.getElementById('cp-annex-edit-cancel');
   var imageWrap = document.getElementById('cp-annex-upload-image');
   var docxWrap = document.getElementById('cp-annex-upload-docx');
 
@@ -162,16 +191,53 @@ compliance_page_open(array(
     annexes.forEach(function (a) {
       var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
       var editUrl = '/admin/compliance/controlled_book_editor.php?version_id=' + versionId + '&section_id=' + a.section_id;
+      var shortTitle = a.annex_short_title || '';
       html += '<tr style="border-bottom:1px solid #f1f5f9;">'
-        + '<td style="padding:8px 6px;">' + num + '</td>'
-        + '<td style="padding:8px 6px;">' + (a.title || '') + '</td>'
-        + '<td style="padding:8px 6px;">' + (a.revision || '') + '</td>'
-        + '<td style="padding:8px 6px;">' + (a.revision_date || '') + '</td>'
-        + '<td style="padding:8px 6px;">' + (a.content_mode || '') + ' / ' + (a.orientation || 'portrait') + '</td>'
-        + '<td style="padding:8px 6px;"><a href="' + editUrl + '">Open in editor</a></td></tr>';
+        + '<td style="padding:8px 6px;vertical-align:top;">' + num + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.title || '') + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision || '') + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision_date || '') + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.content_mode || '') + ' / ' + (a.orientation || 'portrait') + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">'
+        + '<a href="' + editUrl + '">Open</a> · '
+        + '<button type="button" class="cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
+        + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
+        + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit nr</button>'
+        + '</td></tr>';
     });
     html += '</tbody></table>';
     listEl.innerHTML = html;
+
+    listEl.querySelectorAll('.cp-annex-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openEditDialog({
+          section_id: parseInt(btn.getAttribute('data-section-id') || '0', 10),
+          annex_number: parseInt(btn.getAttribute('data-annex-number') || '0', 10),
+          annex_suffix: btn.getAttribute('data-annex-suffix') || '',
+          annex_short_title: btn.getAttribute('data-short-title') || '',
+        });
+      });
+    });
+  }
+
+  function escAttr(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+  }
+
+  function openEditDialog(annex) {
+    if (!editPanel || !editForm) return;
+    editForm.querySelector('input[name="section_id"]').value = String(annex.section_id || '');
+    editForm.querySelector('input[name="annex_number"]').value = String(annex.annex_number || '');
+    editForm.querySelector('input[name="annex_suffix"]').value = annex.annex_suffix || '';
+    editPanel.hidden = false;
+    editPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function closeEditDialog() {
+    if (editPanel) editPanel.hidden = true;
   }
 
   function loadList() {
@@ -199,6 +265,9 @@ compliance_page_open(array(
       setStatus('Creating annex…');
       var fd = new FormData(form);
       fd.set('action', 'create');
+      if (!form.querySelector('input[name="use_letter_suffix"]')?.checked) {
+        fd.set('use_letter_suffix', '0');
+      }
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
@@ -215,6 +284,38 @@ compliance_page_open(array(
         });
     });
   }
+
+  if (editForm) {
+    editForm.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var sectionId = parseInt(editForm.querySelector('input[name="section_id"]').value || '0', 10);
+      var number = parseInt(editForm.querySelector('input[name="annex_number"]').value || '0', 10);
+      var suffix = (editForm.querySelector('input[name="annex_suffix"]').value || '').trim();
+      if (sectionId <= 0 || number <= 0) {
+        setStatus('Invalid annex number.', 'error');
+        return;
+      }
+      var fd = new FormData();
+      fd.set('action', 'update_identity');
+      fd.set('version_id', String(versionId));
+      fd.set('section_id', String(sectionId));
+      fd.set('annex_number', String(number));
+      fd.set('annex_suffix', suffix);
+      setStatus('Saving annex number…');
+      fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Update failed');
+          setStatus('Annex updated to ' + (res.annex && res.annex.annex_display_number ? res.annex.annex_display_number : 'new number') + '.');
+          closeEditDialog();
+          loadList();
+        })
+        .catch(function (e) {
+          setStatus(e.message || 'Update failed', 'error');
+        });
+    });
+  }
+  if (editCancelBtn) editCancelBtn.addEventListener('click', closeEditDialog);
 
   var refreshBtn = document.getElementById('cp-annex-refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', loadList);

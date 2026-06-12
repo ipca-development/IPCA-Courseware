@@ -171,8 +171,9 @@ final class ControlledPublishingAnnexService
         }
 
         $suffix = self::normalizeAnnexSuffix((string)($input['annex_suffix'] ?? ''));
+        $useLetterSuffix = !empty($input['use_letter_suffix']);
         $baseSectionKey = $this->annexSectionKey($number, '');
-        if ($suffix === '' && $this->sectionIdByKey($versionId, $baseSectionKey) > 0) {
+        if ($suffix === '' && ($useLetterSuffix || $this->sectionIdByKey($versionId, $baseSectionKey) > 0)) {
             $suffix = $this->nextAvailableSuffix($versionId, $number);
         }
 
@@ -721,6 +722,111 @@ final class ControlledPublishingAnnexService
             ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
             ':id' => $sectionId,
         ));
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function updateAnnexIdentity(int $versionId, int $sectionId, array $input, ?int $actorUserId = null): array
+    {
+        $this->requireDraftVersion($versionId);
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            throw new RuntimeException('Annex section not found.');
+        }
+
+        $number = array_key_exists('annex_number', $input)
+            ? (int)$input['annex_number']
+            : $this->annexNumberFromSection($section);
+        if ($number <= 0) {
+            throw new RuntimeException('Annex number is required.');
+        }
+
+        $suffix = array_key_exists('annex_suffix', $input)
+            ? self::normalizeAnnexSuffix((string)$input['annex_suffix'])
+            : $this->annexSuffixFromSection($section);
+
+        $newSectionKey = $this->annexSectionKey($number, $suffix);
+        $currentSectionKey = (string)($section['section_key'] ?? '');
+        if ($newSectionKey !== $currentSectionKey) {
+            $conflictId = $this->sectionIdByKey($versionId, $newSectionKey);
+            if ($conflictId > 0 && $conflictId !== $sectionId) {
+                throw new RuntimeException(
+                    'Annex ' . self::formatAnnexDisplayNumber($number, $suffix) . ' already exists.'
+                );
+            }
+        }
+
+        $shortTitle = trim((string)($input['title'] ?? ''));
+        if ($shortTitle === '') {
+            $shortTitle = $this->annexShortTitleFromSection($section);
+        }
+        $navTitle = $this->formatAnnexNavTitle($number, $shortTitle, $suffix);
+        $sortOrder = 100 + ($number * 10) + ($suffix === '' ? 0 : (ord($suffix) - ord('a') + 1));
+
+        $parentId = $this->sectionIdByKey($versionId, self::PARENT_SECTION_KEY);
+        $parent = $this->sections->getSection($versionId, $parentId);
+        if ($parent === null) {
+            throw new RuntimeException('Annexes parent section not found.');
+        }
+        $stableAnchor = $this->childAnchor((string)$parent['stable_anchor'], $newSectionKey);
+
+        $meta = $this->decodeMeta($section);
+        $annex = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
+        $annex['number'] = $number;
+        $annex['suffix'] = $suffix;
+        if ($actorUserId !== null && $actorUserId > 0) {
+            $annex['updated_by_user_id'] = $actorUserId;
+            $annex['updated_by_name'] = $this->resolveUserDisplayName($actorUserId);
+        }
+        $meta['annex'] = $annex;
+
+        $this->pdo->prepare("
+            UPDATE ipca_publishing_book_sections
+            SET section_key = :section_key,
+                stable_anchor = :stable_anchor,
+                title = :title,
+                sort_order = :sort_order,
+                metadata_json = :metadata_json,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND book_version_id = :book_version_id
+        ")->execute(array(
+            ':section_key' => $newSectionKey,
+            ':stable_anchor' => $stableAnchor,
+            ':title' => $navTitle,
+            ':sort_order' => $sortOrder,
+            ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            ':id' => $sectionId,
+            ':book_version_id' => $versionId,
+        ));
+
+        $this->regenerateRegister($versionId, $actorUserId);
+
+        return array(
+            'section_id' => $sectionId,
+            'section_key' => $newSectionKey,
+            'annex_number' => $number,
+            'annex_suffix' => $suffix,
+            'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
+            'title' => $navTitle,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function annexShortTitleFromSection(array $section): string
+    {
+        $title = trim((string)($section['title'] ?? ''));
+        if (preg_match('/^Annex\s+\d+[a-z]?\s*[–\-—]\s*(.+)$/iu', $title, $matches) === 1) {
+            return trim($matches[1]);
+        }
+        if (preg_match('/^Annex\s+\d+[a-z]?\s*$/iu', $title) === 1) {
+            return '';
+        }
+        return $title;
     }
 
     /**

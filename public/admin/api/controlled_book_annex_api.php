@@ -62,6 +62,7 @@ try {
                 'section_id' => (int)($row['id'] ?? 0),
                 'section_key' => (string)($row['section_key'] ?? ''),
                 'title' => (string)($row['title'] ?? ''),
+                'annex_short_title' => $annexSvc->annexShortTitleFromSection($row),
                 'annex_number' => $number,
                 'annex_suffix' => $suffix,
                 'annex_display_number' => ControlledPublishingAnnexService::formatAnnexDisplayNumber($number, $suffix),
@@ -93,6 +94,7 @@ try {
         $revisionDate = trim((string)($_POST['revision_date'] ?? date('Y-m-d')));
         $annexNumber = (int)($_POST['annex_number'] ?? 0);
         $annexSuffix = trim((string)($_POST['annex_suffix'] ?? ''));
+        $useLetterSuffix = filter_var($_POST['use_letter_suffix'] ?? '1', FILTER_VALIDATE_BOOLEAN);
 
         $input = array(
             'title' => $title,
@@ -102,6 +104,7 @@ try {
             'revision_date' => $revisionDate,
             'annex_number' => $annexNumber,
             'annex_suffix' => $annexSuffix,
+            'use_letter_suffix' => $useLetterSuffix,
         );
 
         $tmpImage = null;
@@ -128,6 +131,30 @@ try {
             'ok' => true,
             'annex' => $result,
             'editor_url' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId . '&section_id=' . (int)$result['section_id'],
+        ));
+    }
+
+    if ($action === 'update_identity') {
+        $versionId = (int)($_POST['version_id'] ?? 0);
+        $sectionId = (int)($_POST['section_id'] ?? 0);
+        if ($versionId <= 0 || $sectionId <= 0) {
+            cp_annex_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+        }
+
+        $input = array(
+            'annex_number' => (int)($_POST['annex_number'] ?? 0),
+            'annex_suffix' => trim((string)($_POST['annex_suffix'] ?? '')),
+        );
+        $shortTitle = trim((string)($_POST['title'] ?? ''));
+        if ($shortTitle !== '') {
+            $input['title'] = $shortTitle;
+        }
+
+        $result = $annexSvc->updateAnnexIdentity($versionId, $sectionId, $input, $uid);
+        cp_annex_json(200, array(
+            'ok' => true,
+            'annex' => $result,
+            'editor_url' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId . '&section_id=' . $sectionId,
         ));
     }
 
