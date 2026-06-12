@@ -100,6 +100,7 @@
     pageHeader: null,
     pageFooter: null,
     headerTokens: [],
+    headerPreviewTokens: {},
     versionInfo: {},
     sectionTitle: '',
     calloutPresets: [],
@@ -385,6 +386,7 @@
       state.pageHeader = res.page_header || defaultPageHeader();
       state.pageFooter = res.page_footer || defaultPageFooter();
       state.headerTokens = res.header_tokens || defaultHeaderTokens();
+      state.headerPreviewTokens = res.header_preview_tokens || {};
       state.versionInfo = res.version || {};
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
@@ -426,6 +428,9 @@
       }
       if (state.isPart0Section) {
         refreshPart0TypographyFromBookStyles();
+      }
+      if (state.isAnnexRegisterSection || state.isAnnexHighlightsSection) {
+        refreshAnnexAdminTypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
       if (state.pendingScrollRef) {
@@ -2108,6 +2113,22 @@
     });
   }
 
+  function refreshAnnexAdminTypographyFromBookStyles() {
+    var sheet = canvasEl.querySelector('.cpb-sheet--annex-admin');
+    if (!sheet) return;
+    sheet.querySelectorAll('[data-paragraph-style]').forEach(function (el) {
+      refreshBlockTypographyFromBookStyles(el);
+    });
+    var tableStyle = (state.bookStyles && state.bookStyles.table_styles && state.bookStyles.table_styles.standard)
+      || defaultTableStyleDef();
+    sheet.querySelectorAll('.cpb-annex-register-table thead th').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.header_row || defaultTableStyleDef().header_row);
+    });
+    sheet.querySelectorAll('.cpb-annex-register-table tbody td').forEach(function (cell) {
+      applyBookTableRowStyleToCell(cell, tableStyle.body_row || defaultTableStyleDef().body_row);
+    });
+  }
+
   function syncLepParts(skipConfirm) {
     if (!skipConfirm && !confirm('Regenerate the Effective Parts table from the current manual structure?')) return;
     setStatus('Regenerating parts…', 'saving');
@@ -2382,14 +2403,27 @@
       { token: '{date}', label: 'Publication date', description: 'Effective or release date' },
       { token: '{manual_code}', label: 'Manual code', description: 'Short manual identifier (e.g. OM)' },
       { token: '{book_title}', label: 'Manual title', description: 'Full manual title' },
+      { token: '{part_title}', label: 'Part title', description: 'Current manual part' },
       { token: '{section_title}', label: 'Section title', description: 'Current section name' },
+      { token: '{annex_number}', label: 'Annex number', description: 'Annex number (e.g. 01)' },
+      { token: '{annex_title}', label: 'Annex title', description: 'Annex title without prefix' },
+      { token: '{annex_revision}', label: 'Annex revision', description: 'Annex revision label' },
+      { token: '{annex_revision_date}', label: 'Annex revision date', description: 'Annex revision date' },
     ];
   }
 
   function resolveHeaderTokensPreview(template) {
+    var text = String(template || '');
+    var ctx = state.headerPreviewTokens;
+    if (ctx && typeof ctx === 'object' && Object.keys(ctx).length) {
+      Object.keys(ctx).forEach(function (key) {
+        text = text.split('{' + key + '}').join(String(ctx[key] != null ? ctx[key] : ''));
+      });
+      return text;
+    }
+
     var v = state.versionInfo || {};
     var manualCode = v.manual_code || v.book_key || '';
-    var text = String(template || '');
     var map = {
       '{page}': '—',
       '{page_total}': '—',
@@ -2397,7 +2431,12 @@
       '{date}': '—',
       '{manual_code}': String(manualCode),
       '{book_title}': String(v.book_title || ''),
+      '{part_title}': '',
       '{section_title}': String(state.sectionTitle || ''),
+      '{annex_number}': '',
+      '{annex_title}': '',
+      '{annex_revision}': '',
+      '{annex_revision_date}': '',
     };
     Object.keys(map).forEach(function (token) {
       text = text.split(token).join(map[token]);

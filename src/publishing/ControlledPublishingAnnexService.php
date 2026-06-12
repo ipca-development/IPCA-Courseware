@@ -493,10 +493,9 @@ final class ControlledPublishingAnnexService
 
         $summaryPayload = array(
             'text' => 'Annex changes' . ($prior ? ' since version ' . (string)$prior['version_label'] : ''),
-            'level' => 2,
-            'paragraph_style' => 'subtitle_1',
+            'paragraph_style' => 'body',
         );
-        $this->insertHighlightBlock($versionId, $highlightsId, $stableBase, 'summary', 'heading', $summaryPayload, $sort, $actorUserId);
+        $this->insertHighlightBlock($versionId, $highlightsId, $stableBase, 'summary', 'paragraph', $summaryPayload, $sort, $actorUserId);
         $created++;
         $sort += 10;
 

@@ -390,11 +390,12 @@ final class ControlledPublishingBookRenderer
             : '';
 
         $tableHtml = $this->renderAnnexRegisterTable($rows, $editable);
+        $titleHtml = $this->renderAnnexAdminTitle('Annex Register');
 
         return '<div class="cpb-sheet cpb-sheet--annex-admin" data-section-id="' . (int)($section['id'] ?? 0) . '">'
             . $headerHtml
             . '<div class="cpb-annex-admin" contenteditable="false">'
-            . '<div class="cpb-lep-heading cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">Annex Register</div>'
+            . $titleHtml
             . $tableHtml
             . '</div>'
             . $footerHtml
@@ -423,11 +424,11 @@ final class ControlledPublishingBookRenderer
             $sectionId = (int)($row['section_id'] ?? 0);
             $linkAttr = $sectionId > 0 ? ' data-annex-link="' . $sectionId . '"' : '';
             $bodyHtml .= '<tr class="cpb-annex-register-row" data-part0-row="' . $rowIdx . '"' . $linkAttr . '>'
-                . '<td' . $bodyVisual . '>' . h($num) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['title'] ?? '')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['revision'] ?? '')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['revision_date'] ?? '')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['updated_by'] ?? '')) . '</td>'
+                . '<td class="cpb-annex-register-col-nr"' . $bodyVisual . '>' . h($num) . '</td>'
+                . '<td class="cpb-annex-register-col-title"' . $bodyVisual . '>' . h((string)($row['title'] ?? '')) . '</td>'
+                . '<td class="cpb-annex-register-col-rev"' . $bodyVisual . '>' . h((string)($row['revision'] ?? '')) . '</td>'
+                . '<td class="cpb-annex-register-col-date"' . $bodyVisual . '>' . h((string)($row['revision_date'] ?? '')) . '</td>'
+                . '<td class="cpb-annex-register-col-by"' . $bodyVisual . '>' . h((string)($row['updated_by'] ?? '')) . '</td>'
                 . '</tr>';
             $rowIdx++;
         }
@@ -435,20 +436,29 @@ final class ControlledPublishingBookRenderer
         $minRows = max(5, count($rows) + 2);
         while ($rowIdx < $minRows) {
             $bodyHtml .= '<tr class="cpb-annex-register-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
-                . '<td' . $bodyVisual . '>&nbsp;</td><td' . $bodyVisual . '>&nbsp;</td>'
-                . '<td' . $bodyVisual . '>&nbsp;</td><td' . $bodyVisual . '>&nbsp;</td>'
-                . '<td' . $bodyVisual . '>&nbsp;</td></tr>';
+                . '<td class="cpb-annex-register-col-nr"' . $bodyVisual . '>&nbsp;</td>'
+                . '<td class="cpb-annex-register-col-title"' . $bodyVisual . '>&nbsp;</td>'
+                . '<td class="cpb-annex-register-col-rev"' . $bodyVisual . '>&nbsp;</td>'
+                . '<td class="cpb-annex-register-col-date"' . $bodyVisual . '>&nbsp;</td>'
+                . '<td class="cpb-annex-register-col-by"' . $bodyVisual . '>&nbsp;</td></tr>';
             $rowIdx++;
         }
 
         return '<div class="cpb-annex-register cpb-table-wrap cpb-table-border-' . $borderWidth . '" contenteditable="false">'
-            . '<table class="cpb-table cpb-part0-table" data-part0-table="annex_register">'
+            . '<table class="cpb-table cpb-part0-table cpb-annex-register-table" data-part0-table="annex_register">'
+            . '<colgroup>'
+            . '<col class="cpb-annex-register-col-nr">'
+            . '<col class="cpb-annex-register-col-title">'
+            . '<col class="cpb-annex-register-col-rev">'
+            . '<col class="cpb-annex-register-col-date">'
+            . '<col class="cpb-annex-register-col-by">'
+            . '</colgroup>'
             . '<thead><tr class="cpb-table-header-row">'
-            . '<th' . $headerVisual . '>Annex Nr</th>'
-            . '<th' . $headerVisual . '>Annex Name / Title</th>'
-            . '<th' . $headerVisual . '>Annex Revision</th>'
-            . '<th' . $headerVisual . '>Revision Date</th>'
-            . '<th' . $headerVisual . '>Updated by</th>'
+            . '<th class="cpb-annex-register-col-nr"' . $headerVisual . '>Nr</th>'
+            . '<th class="cpb-annex-register-col-title"' . $headerVisual . '>Annex Name / Title</th>'
+            . '<th class="cpb-annex-register-col-rev"' . $headerVisual . '>Rev.</th>'
+            . '<th class="cpb-annex-register-col-date"' . $headerVisual . '>Rev. Date</th>'
+            . '<th class="cpb-annex-register-col-by"' . $headerVisual . '>Updated by</th>'
             . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table></div>';
     }
 
@@ -485,14 +495,28 @@ final class ControlledPublishingBookRenderer
             ? $this->renderPageFooterTable($pageFooter, $tokenContext, false, $headerSvc)
             : '';
 
+        $titleHtml = $this->renderAnnexAdminTitle('Annex Highlight of Changes');
+
         return '<div class="cpb-sheet cpb-sheet--annex-admin" data-section-id="' . (int)($section['id'] ?? 0) . '">'
             . $headerHtml
             . '<div class="cpb-annex-admin" contenteditable="false">'
-            . '<div class="cpb-lep-heading cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">Annex Highlight of Changes</div>'
+            . $titleHtml
             . '<div class="cpb-annex-highlights-body">' . $blocksHtml . '</div>'
             . '</div>'
             . $footerHtml
             . '</div>';
+    }
+
+    /**
+     * System-managed annex admin page title (Subtitle 1, no section numbering).
+     */
+    private function renderAnnexAdminTitle(string $text): string
+    {
+        return $this->renderPart0Heading(array(
+            'key' => 'subtitle_1',
+            'style' => 'subtitle_1',
+            'text' => $text,
+        ), false);
     }
 
     /**

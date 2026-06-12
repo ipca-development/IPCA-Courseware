@@ -269,6 +269,23 @@ function cp_editor_page_header_config(
 }
 
 /**
+ * @param array<string,mixed> $pageHeaderConfig
+ * @return array<string,string>
+ */
+function cp_editor_header_preview_tokens(
+    ControlledPublishingPageHeaderService $pageHeaderSvc,
+    array $version,
+    array $section,
+    array $pageHeaderConfig
+): array {
+    $overrides = array('editor_preview' => true);
+    if (is_array($pageHeaderConfig['token_overrides'] ?? null)) {
+        $overrides = array_merge($overrides, $pageHeaderConfig['token_overrides']);
+    }
+    return $pageHeaderSvc->buildTokenContext($version, $section, $overrides);
+}
+
+/**
  * @param array<string,mixed> $section
  * @return array<string,mixed>|null
  */
@@ -748,6 +765,7 @@ function cp_editor_handle_load(
         'page_header' => $pageHeaderConfig['page_header'],
         'page_footer' => $pageHeaderConfig['page_footer'],
         'header_tokens' => $pageHeaderSvc->tokenCatalogForApi(),
+        'header_preview_tokens' => cp_editor_header_preview_tokens($pageHeaderSvc, $version, $section, $pageHeaderConfig),
         'section_numbers' => $numbering['section_numbers'],
         'section_number_display' => $numbering['section_number_display'],
         'suggested_regulatory_refs' => $numbering['suggested_regulatory_refs'],
