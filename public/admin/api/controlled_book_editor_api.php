@@ -255,8 +255,7 @@ function cp_editor_page_header_config(
     if (!is_array($meta['page_header'] ?? null)) {
         $legacyLayout = cp_editor_legacy_section_layout($section);
     }
-    $config = $pageHeaderSvc->resolveFromVersion($version, $legacyLayout);
-    $config = $pageHeaderSvc->applyAnnexSectionHeaderConfig($config, $section);
+    $config = $pageHeaderSvc->resolveForSection($version, $section, $legacyLayout);
     if ($manualStructure !== null && $sections !== null && $versionId !== null && $versionId > 0) {
         if (!$pageHeaderSvc->isAnnexFamilySection($section)) {
             $flat = $sections->listFlatSections($versionId);
@@ -302,6 +301,24 @@ function cp_editor_legacy_section_layout(array $section): ?array
     return null;
 }
 
+function cp_editor_page_header_scope_for_section(array $section): string
+{
+    return cp_editor_is_annex_family_section($section)
+        ? ControlledPublishingPageHeaderService::SCOPE_ANNEX
+        : ControlledPublishingPageHeaderService::SCOPE_MAIN;
+}
+
+/**
+ * @param array<string,mixed> $input
+ */
+function cp_editor_page_header_scope_from_input(array $input): string
+{
+    $scope = strtolower(trim((string)($input['header_scope'] ?? '')));
+    return $scope === ControlledPublishingPageHeaderService::SCOPE_ANNEX
+        ? ControlledPublishingPageHeaderService::SCOPE_ANNEX
+        : ControlledPublishingPageHeaderService::SCOPE_MAIN;
+}
+
 function cp_editor_is_annex_register_section(array $section): bool
 {
     return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::REGISTER_SECTION_KEY;
@@ -310,6 +327,15 @@ function cp_editor_is_annex_register_section(array $section): bool
 function cp_editor_is_annex_highlights_section(array $section): bool
 {
     return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY;
+}
+
+function cp_editor_is_annex_family_section(array $section): bool
+{
+    $key = (string)($section['section_key'] ?? '');
+    if (in_array($key, array('annexes', 'annexes_register', 'annexes_highlights'), true)) {
+        return true;
+    }
+    return str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX);
 }
 
 function cp_editor_is_annex_content_section(array $section): bool
@@ -714,8 +740,10 @@ function cp_editor_handle_load(
 
     $bookStyles = $styleSvc->resolveFromVersion($version);
     $pageHeaderConfig = cp_editor_page_header_config($pageHeaderSvc, $version, $section, $manualStructureSvc, $sections, $versionId);
-    $bookStyles['page_header'] = $pageHeaderConfig['page_header'];
-    $bookStyles['page_footer'] = $pageHeaderConfig['page_footer'];
+    $mainHeaderConfig = $pageHeaderSvc->resolveFromVersion($version);
+    $bookStyles['page_header'] = $mainHeaderConfig['page_header'];
+    $bookStyles['page_footer'] = $mainHeaderConfig['page_footer'];
+    $versionMeta = cp_editor_decode_version_meta($version);
     $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
     $sectionBlocks = $revision->annotateChangeStatus($versionId, $blocks->listSectionBlocks($sectionId));
     $pageLayout = $layoutSvc->resolveLayout($section);
@@ -764,6 +792,8 @@ function cp_editor_handle_load(
         'book_styles' => $bookStyles,
         'page_header' => $pageHeaderConfig['page_header'],
         'page_footer' => $pageHeaderConfig['page_footer'],
+        'page_header_scope' => cp_editor_page_header_scope_for_section($section),
+        'has_annex_page_header_override' => $pageHeaderSvc->hasAnnexHeaderOverride($versionMeta),
         'header_tokens' => $pageHeaderSvc->tokenCatalogForApi(),
         'header_preview_tokens' => cp_editor_header_preview_tokens($pageHeaderSvc, $version, $section, $pageHeaderConfig),
         'section_numbers' => $numbering['section_numbers'],
@@ -1047,11 +1077,17 @@ function cp_editor_handle_save_page_header(
     if (is_array($in['page_footer'] ?? null)) {
         $payload['page_footer'] = $in['page_footer'];
     }
-    $saved = $pageHeaderSvc->saveForVersion($versionId, $payload, $uid);
+    $saved = $pageHeaderSvc->saveForVersion(
+        $versionId,
+        $payload,
+        $uid,
+        cp_editor_page_header_scope_from_input($in)
+    );
     cp_editor_json(200, array(
         'ok' => true,
         'page_header' => $saved['page_header'],
         'page_footer' => $saved['page_footer'],
+        'header_scope' => cp_editor_page_header_scope_from_input($in),
     ));
 }
 
@@ -1109,7 +1145,10 @@ function cp_editor_handle_upload_header_logo(
     }
 
     $alt = trim((string)($_POST['alt'] ?? 'EuroPilot Center'));
-    $existing = $pageHeaderSvc->resolveFromVersion($version);
+    $scope = cp_editor_page_header_scope_from_input($_POST);
+    $existing = $scope === ControlledPublishingPageHeaderService::SCOPE_ANNEX
+        ? $pageHeaderSvc->resolveAnnexFromMetadata(cp_editor_decode_version_meta($version))
+        : $pageHeaderSvc->resolveFromVersion($version);
     $header = $existing['page_header'];
     $header['logo_url'] = $url;
     if ($alt !== '') {
@@ -1118,13 +1157,14 @@ function cp_editor_handle_upload_header_logo(
     $saved = $pageHeaderSvc->saveForVersion($versionId, array(
         'page_header' => $header,
         'page_footer' => $existing['page_footer'],
-    ), $uid);
+    ), $uid, $scope);
 
     cp_editor_json(200, array(
         'ok' => true,
         'url' => $url,
         'page_header' => $saved['page_header'],
         'page_footer' => $saved['page_footer'],
+        'header_scope' => $scope,
     ));
 }
 

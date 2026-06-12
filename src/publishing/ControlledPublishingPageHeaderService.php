@@ -30,6 +30,8 @@ final class ControlledPublishingPageHeaderService
     private const ANNEX_FAMILY_SECTION_KEYS = array('annexes', 'annexes_register', 'annexes_highlights');
     private const ANNEX_CONTENT_SECTION_PREFIX = 'annexes_annex_';
     private const ANNEX_CENTER_TEXT = '{book_title} ({manual_code}) Annexes';
+    public const SCOPE_MAIN = 'main';
+    public const SCOPE_ANNEX = 'annex';
 
     public function __construct(private PDO $pdo)
     {
@@ -146,6 +148,68 @@ final class ControlledPublishingPageHeaderService
     }
 
     /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param array<string,mixed>|null $legacySectionLayout
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>}
+     */
+    public function resolveForSection(array $version, array $section, ?array $legacySectionLayout = null): array
+    {
+        if ($this->headerScopeForSection($section) === self::SCOPE_ANNEX) {
+            $meta = $this->decodeMeta($version);
+            return $this->resolveAnnexFromMetadata($meta, $legacySectionLayout);
+        }
+        return $this->resolveFromVersion($version, $legacySectionLayout);
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function headerScopeForSection(array $section): string
+    {
+        return $this->isAnnexFamilySection($section) ? self::SCOPE_ANNEX : self::SCOPE_MAIN;
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     * @param array<string,mixed>|null $legacySectionLayout
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>}
+     */
+    public function resolveAnnexFromMetadata(array $metadata, ?array $legacySectionLayout = null): array
+    {
+        $main = $this->resolveFromMetadata($metadata, $legacySectionLayout);
+        $hasAnnexHeader = is_array($metadata['annex_page_header'] ?? null);
+        $hasAnnexFooter = is_array($metadata['annex_page_footer'] ?? null);
+
+        if (!$hasAnnexHeader && !$hasAnnexFooter) {
+            return $this->applyAnnexSectionDefaultCenter($main);
+        }
+
+        $payload = array(
+            'page_header' => $hasAnnexHeader
+                ? $metadata['annex_page_header']
+                : $main['page_header'],
+            'page_footer' => $hasAnnexFooter
+                ? $metadata['annex_page_footer']
+                : $main['page_footer'],
+        );
+        $config = $this->resolveFromMetadata($payload);
+        if (!$hasAnnexHeader) {
+            $config = $this->applyAnnexSectionDefaultCenter($config);
+        }
+        return $config;
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
+    public function hasAnnexHeaderOverride(array $metadata): bool
+    {
+        return is_array($metadata['annex_page_header'] ?? null)
+            || is_array($metadata['annex_page_footer'] ?? null);
+    }
+
+    /**
      * @param array<string,mixed> $section
      */
     public function isAnnexContentSection(array $section): bool
@@ -166,7 +230,23 @@ final class ControlledPublishingPageHeaderService
     }
 
     /**
-     * Apply annex-specific running-header template overrides.
+     * Apply annex-specific running-header defaults when no dedicated annex template exists yet.
+     *
+     * @param array{page_header:array<string,mixed>,page_footer:array<string,mixed>} $config
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>}
+     */
+    public function applyAnnexSectionDefaultCenter(array $config): array
+    {
+        $center = trim((string)($config['page_header']['center_text'] ?? ''));
+        $defaultCenter = trim((string)$this->defaultPageHeader()['center_text']);
+        if ($center === '' || $center === $defaultCenter) {
+            $config['page_header']['center_text'] = self::ANNEX_CENTER_TEXT;
+        }
+        return $config;
+    }
+
+    /**
+     * @deprecated Use applyAnnexSectionDefaultCenter() or resolveAnnexFromMetadata().
      *
      * @param array{page_header:array<string,mixed>,page_footer:array<string,mixed>} $config
      * @param array<string,mixed> $section
@@ -177,21 +257,39 @@ final class ControlledPublishingPageHeaderService
         if (!$this->isAnnexFamilySection($section)) {
             return $config;
         }
-        $config['page_header']['center_text'] = self::ANNEX_CENTER_TEXT;
-        return $config;
+        return $this->applyAnnexSectionDefaultCenter($config);
     }
 
     /**
      * @param array<string,mixed> $pageLayout
-     * @return array<string,mixed>
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>}
      */
-    public function saveForVersion(int $versionId, array $pageLayout, ?int $actorUserId = null): array
+    public function saveForVersion(int $versionId, array $pageLayout, ?int $actorUserId = null, string $scope = self::SCOPE_MAIN): array
     {
         $version = $this->requireVersion($versionId);
         $meta = $this->decodeMeta($version);
-        $normalized = $this->resolveFromMetadata(array_merge($meta, $pageLayout));
-        $meta['page_header'] = $normalized['page_header'];
-        $meta['page_footer'] = $normalized['page_footer'];
+        $scope = $scope === self::SCOPE_ANNEX ? self::SCOPE_ANNEX : self::SCOPE_MAIN;
+
+        if ($scope === self::SCOPE_ANNEX) {
+            $base = $this->resolveAnnexFromMetadata($meta);
+            $merge = array(
+                'page_header' => is_array($pageLayout['page_header'] ?? null)
+                    ? $pageLayout['page_header']
+                    : $base['page_header'],
+                'page_footer' => is_array($pageLayout['page_footer'] ?? null)
+                    ? $pageLayout['page_footer']
+                    : $base['page_footer'],
+            );
+            $normalized = $this->resolveFromMetadata($merge);
+            $meta['annex_page_header'] = $normalized['page_header'];
+            $meta['annex_page_footer'] = $normalized['page_footer'];
+            $saved = $this->resolveAnnexFromMetadata($meta);
+        } else {
+            $normalized = $this->resolveFromMetadata(array_merge($meta, $pageLayout));
+            $meta['page_header'] = $normalized['page_header'];
+            $meta['page_footer'] = $normalized['page_footer'];
+            $saved = $normalized;
+        }
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions
@@ -203,7 +301,7 @@ final class ControlledPublishingPageHeaderService
             ':id' => $versionId,
         ));
 
-        return $normalized;
+        return $saved;
     }
 
     /**

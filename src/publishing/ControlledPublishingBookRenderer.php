@@ -371,13 +371,7 @@ final class ControlledPublishingBookRenderer
         $defaults = $headerSvc !== null
             ? $headerSvc->resolveFromMetadata(array())
             : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
-        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        if ($headerSvc !== null) {
-            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
-                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
-                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
-            ), $section);
-        }
+        $config = $this->resolvePageHeaderConfig($version, $section, $pageHeaderConfig, $defaults);
         $pageHeader = $config['page_header'];
         $pageFooter = $config['page_footer'];
         $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
@@ -477,13 +471,7 @@ final class ControlledPublishingBookRenderer
         $defaults = $headerSvc !== null
             ? $headerSvc->resolveFromMetadata(array())
             : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
-        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        if ($headerSvc !== null) {
-            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
-                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
-                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
-            ), $section);
-        }
+        $config = $this->resolvePageHeaderConfig($version, $section, $pageHeaderConfig, $defaults);
         $pageHeader = $config['page_header'];
         $pageFooter = $config['page_footer'];
         $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
@@ -1135,14 +1123,7 @@ final class ControlledPublishingBookRenderer
                 'page_footer' => array('enabled' => true),
             );
 
-        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
-        if ($headerSvc !== null) {
-            $config = $headerSvc->applyAnnexSectionHeaderConfig(array(
-                'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
-                'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
-                'token_overrides' => is_array($config['token_overrides'] ?? null) ? $config['token_overrides'] : array(),
-            ), $section);
-        }
+        $config = $this->resolvePageHeaderConfig($version, $section, $pageHeaderConfig, $defaults);
         $pageHeader = $config['page_header'];
         $pageFooter = $config['page_footer'];
 
@@ -2401,6 +2382,40 @@ final class ControlledPublishingBookRenderer
             'font_bold' => !empty($payload['font_bold']),
             'font_italic' => !empty($payload['font_italic']),
             'font_underline' => !empty($payload['font_underline']),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param array<string,mixed>|null $pageHeaderConfig
+     * @param array{page_header:array<string,mixed>,page_footer:array<string,mixed>} $defaults
+     * @return array{page_header:array<string,mixed>,page_footer:array<string,mixed>,token_overrides?:array<string,mixed>}
+     */
+    private function resolvePageHeaderConfig(
+        array $version,
+        array $section,
+        ?array $pageHeaderConfig,
+        array $defaults
+    ): array {
+        $config = is_array($pageHeaderConfig) ? $pageHeaderConfig : array();
+        $headerSvc = $this->pageHeaderService;
+        if ($headerSvc !== null
+            && is_array($config['page_header'] ?? null)
+            && is_array($config['page_footer'] ?? null)) {
+            return $config;
+        }
+        if ($headerSvc !== null) {
+            $resolved = $headerSvc->resolveForSection($version, $section);
+            if (is_array($config['token_overrides'] ?? null)) {
+                $resolved['token_overrides'] = $config['token_overrides'];
+            }
+            return $resolved;
+        }
+        return array(
+            'page_header' => is_array($config['page_header'] ?? null) ? $config['page_header'] : $defaults['page_header'],
+            'page_footer' => is_array($config['page_footer'] ?? null) ? $config['page_footer'] : $defaults['page_footer'],
+            'token_overrides' => is_array($config['token_overrides'] ?? null) ? $config['token_overrides'] : array(),
         );
     }
 

@@ -101,6 +101,7 @@
     pageFooter: null,
     headerTokens: [],
     headerPreviewTokens: {},
+    pageHeaderScope: 'main',
     versionInfo: {},
     sectionTitle: '',
     calloutPresets: [],
@@ -387,6 +388,7 @@
       state.pageFooter = res.page_footer || defaultPageFooter();
       state.headerTokens = res.header_tokens || defaultHeaderTokens();
       state.headerPreviewTokens = res.header_preview_tokens || {};
+      state.pageHeaderScope = res.page_header_scope || 'main';
       state.versionInfo = res.version || {};
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
@@ -4749,12 +4751,23 @@
     return band;
   }
 
+  function currentHeaderScope() {
+    if (state.isAnnexRegisterSection || state.isAnnexHighlightsSection || state.isAnnexContentSection) {
+      return 'annex';
+    }
+    return state.pageHeaderScope === 'annex' ? 'annex' : 'main';
+  }
+
   function openHeaderEditor() {
+    var headerScope = currentHeaderScope();
     var header = Object.assign({}, defaultPageHeader(), JSON.parse(JSON.stringify(state.pageHeader || {})));
     var footer = Object.assign({}, defaultPageFooter(), JSON.parse(JSON.stringify(state.pageFooter || {})));
     var tokens = state.headerTokens.length ? state.headerTokens : defaultHeaderTokens();
     var overlay = document.createElement('div');
     overlay.className = 'cpb-style-overlay cpb-header-overlay';
+    var scopeLead = headerScope === 'annex'
+      ? 'Configure the running header and footer for <strong>annex pages only</strong> (register, highlight of changes, and annex content). Changes here do not affect the rest of the manual.'
+      : 'Configure the running header and footer for the main manual (all parts and Part 0 pages). Open an annex page to edit annex headers separately.';
 
     var tokenButtons = tokens.map(function (t) {
       return '<button type="button" class="cpb-header-token" data-token="' + escapeHtml(t.token) + '" title="'
@@ -4764,7 +4777,7 @@
     overlay.innerHTML = ''
       + '<div class="cpb-style-dialog cpb-header-dialog" role="dialog" aria-label="Page header editor">'
       + '<h3>Page header editor</h3>'
-      + '<p class="cpb-style-lead">Configure the running header and footer for every page in this manual. '
+      + '<p class="cpb-style-lead">' + scopeLead + ' '
       + 'Use variables for dynamic content — page numbers are resolved automatically in the e-reader.</p>'
       + '<section class="cpb-header-section">'
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbHeaderEnabled"' + (header.enabled ? ' checked' : '') + '> Show page header</label>'
@@ -4905,6 +4918,7 @@
       var fd = new FormData();
       fd.append('action', 'upload_header_logo');
       fd.append('version_id', String(state.versionId));
+      fd.append('header_scope', headerScope);
       fd.append('image', file);
       fd.append('alt', overlay.querySelector('#cpbHeaderLogoAlt').value.trim());
       setStatus('Uploading logo…', 'saving');
@@ -4990,13 +5004,15 @@
       setStatus('Saving header…', 'saving');
       apiPost('save_page_header', {
         version_id: state.versionId,
+        header_scope: headerScope,
         page_header: st.header,
         page_footer: st.footer,
       }).then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Save failed');
         state.pageHeader = res.page_header || st.header;
         state.pageFooter = res.page_footer || st.footer;
-        if (state.bookStyles) {
+        state.pageHeaderScope = res.header_scope || headerScope;
+        if (state.bookStyles && headerScope === 'main') {
           state.bookStyles.page_header = state.pageHeader;
           state.bookStyles.page_footer = state.pageFooter;
         }
