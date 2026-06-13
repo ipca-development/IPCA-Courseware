@@ -103,12 +103,15 @@ final class ControlledPublishingMccfBrowserService
             SELECT
               COALESCE(NULLIF(TRIM(r.manual_part), ''), '—') AS part_label,
               COUNT(DISTINCT r.id) AS total,
-              COUNT(DISTINCT CASE WHEN l.id IS NOT NULL THEN r.id END) AS linked
+              COUNT(DISTINCT CASE WHEN e.id IS NOT NULL THEN r.id END) AS linked
             FROM ipca_canonical_requirements r
             LEFT JOIN ipca_canonical_requirement_excerpt_links l
               ON l.requirement_id = r.id
              AND l.source_set_id = r.source_set_id
              AND l.source_status = 'active'
+            LEFT JOIN ipca_canonical_excerpts e
+              ON e.id = l.excerpt_id
+             AND e.source_status = 'active'
             WHERE r.source_set_id = :source_set_id
               AND r.source_status = 'active'
             GROUP BY part_label
@@ -174,6 +177,7 @@ final class ControlledPublishingMccfBrowserService
         if ($coverage === 'linked') {
             $where[] = 'EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
+                INNER JOIN ipca_canonical_excerpts e ON e.id = l.excerpt_id AND e.source_status = \'active\'
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
@@ -181,6 +185,7 @@ final class ControlledPublishingMccfBrowserService
         } elseif ($coverage === 'unlinked') {
             $where[] = 'NOT EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
+                INNER JOIN ipca_canonical_excerpts e ON e.id = l.excerpt_id AND e.source_status = \'active\'
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
@@ -230,6 +235,7 @@ final class ControlledPublishingMccfBrowserService
               r.item_no,
               r.sub_item_no,
               r.subject,
+              r.requirement_text,
               r.regulation_ref,
               r.manual_section_ref,
               r.applicable,

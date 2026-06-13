@@ -7,11 +7,19 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfBrowserService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfRegulationLinkService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfBcaaViewService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfIntegrityService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfRegulationReviewService.php';
 
 $user = compliance_require_access($pdo);
 $svc = new ControlledPublishingMccfBrowserService($pdo);
 $regSvc = new ControlledPublishingMccfRegulationLinkService($pdo);
+$bcaaSvc = new ControlledPublishingMccfBcaaViewService($pdo);
+$integritySvc = new ControlledPublishingMccfIntegrityService();
+$reviewSvc = new ControlledPublishingMccfRegulationReviewService($pdo);
 $regLinksAvailable = ControlledPublishingMccfRegulationLinkService::regulationLinksTablePresent($pdo);
+$easaChangesPending = $reviewSvc->hasPendingEasaChanges();
+$easaMonitorChanges = $easaChangesPending ? $reviewSvc->listPendingEasaMonitorChanges() : array();
 
 $layout = strtolower(trim((string)($_GET['layout'] ?? 'bcaa')));
 if (!in_array($layout, array('bcaa', 'coverage'), true)) {
@@ -49,12 +57,27 @@ $detailRegParsed = is_array($detail)
     : array();
 
 $bcaaSections = ($sourceSetId > 0 && $layout === 'bcaa')
-    ? $regSvc->listBcaaPartSections($sourceSetId, array(
+    ? $bcaaSvc->listPartSections($sourceSetId, array(
         'part' => $part,
         'coverage' => $coverage,
         'q' => $q,
     ))
     : array();
+
+$detailIntegrity = null;
+if (is_array($detail)) {
+    $detailExcerptsForScore = array();
+    foreach ($detail['linked_excerpts'] ?? array() as $excerpt) {
+        if (!is_array($excerpt)) {
+            continue;
+        }
+        $detailExcerptsForScore[] = array(
+            'body_text' => (string)($excerpt['excerpt_preview'] ?? ''),
+            'excerpt_preview' => (string)($excerpt['excerpt_preview'] ?? ''),
+        );
+    }
+    $detailIntegrity = $integritySvc->scoreRequirement($detail, $detailExcerptsForScore, $detailRegLinks);
+}
 
 $totalPages = $search['per_page'] > 0
     ? (int)max(1, ceil($search['total'] / $search['per_page']))
@@ -94,6 +117,76 @@ function mccf_browser_query(array $overrides = array()): string
     }
     $query = http_build_query($params);
     return $query !== '' ? ('?' . $query) : '';
+}
+
+function mccf_integrity_bar_html(array $integrity, bool $compact = false): string
+{
+    $score = max(0, min(100, (int)($integrity['score'] ?? 0)));
+    $tone = (string)($integrity['tone'] ?? 'muted');
+    $label = (string)($integrity['label'] ?? '');
+    $barCls = match ($tone) {
+        'ok' => 'ok',
+        'warn' => 'warn',
+        'bad' => 'danger',
+        default => 'muted',
+    };
+    $title = h($label !== '' ? ($label . ' — ' . $score . '%') : ($score . '%'));
+
+    if ($compact) {
+        return '<div class="mccf-integrity-row" title="' . $title . '">'
+            . '<div class="mccf-integrity-bar"><span class="' . h($barCls) . '" style="width:' . $score . '%;"></span></div>'
+            . '<div class="mccf-integrity-value">' . $score . '%</div>'
+            . '</div>';
+    }
+
+    return '<div class="mccf-integrity-row" title="' . $title . '">'
+        . '<div class="mccf-integrity-bar"><span class="' . h($barCls) . '" style="width:' . $score . '%;"></span></div>'
+        . '<div class="mccf-integrity-value">' . $score . '%</div>'
+        . '<div class="mccf-integrity-label">' . h($label) . '</div>'
+        . '</div>';
+}
+
+function mccf_regulation_cell_html(array $row, bool $regLinksAvailable): string
+{
+    $ref = trim((string)($row['regulation_ref'] ?? ''));
+    if ($ref === '') {
+        return '—';
+    }
+
+    $html = '<div>' . h($ref) . '</div>';
+    $links = $row['regulation_links'] ?? array();
+    if (is_array($links) && $links !== array()) {
+        $html .= '<ul class="mccf-reg-links">';
+        foreach ($links as $regLink) {
+            if (!is_array($regLink)) {
+                continue;
+            }
+            $batchId = (int)($regLink['target_batch_id'] ?? 0);
+            $nodeUid = trim((string)($regLink['target_node_uid'] ?? ''));
+            $token = (string)($regLink['rule_token'] ?? '');
+            $resolved = ($regLink['match_confidence'] ?? '') !== 'UNRESOLVED' && $batchId > 0 && $nodeUid !== '';
+            $html .= '<li><strong>' . h($token) . '</strong> ';
+            if ($resolved) {
+                $html .= '<a href="' . h(ControlledPublishingMccfRegulationLinkService::resourceLibraryEasaHref($batchId, $nodeUid)) . '">EASA</a>';
+            } else {
+                $html .= '<a href="' . h(ControlledPublishingMccfRegulationLinkService::regulationsSearchHref($token)) . '">Search</a>';
+            }
+            $html .= '</li>';
+        }
+        $html .= '</ul>';
+    } elseif (!$regLinksAvailable) {
+        $parsed = ControlledPublishingMccfRegulationLinkService::parseRegulationRef($ref);
+        if ($parsed !== array()) {
+            $html .= '<ul class="mccf-reg-links">';
+            foreach ($parsed as $parsedRow) {
+                $token = (string)($parsedRow['token'] ?? '');
+                $html .= '<li><a href="' . h(ControlledPublishingMccfRegulationLinkService::regulationsSearchHref($token)) . '">' . h($token) . '</a></li>';
+            }
+            $html .= '</ul>';
+        }
+    }
+
+    return $html;
 }
 
 $titleSuffix = is_array($sourceSet) ? (string)($sourceSet['source_set_key'] ?? '') : '';
@@ -158,11 +251,29 @@ compliance_page_open(array(
   .mccf-excerpt-list { margin: 12px 0 0; padding-left: 18px; font-size: 13px; }
   .mccf-excerpt-list li { margin-bottom: 8px; }
   .mccf-pagination { display: flex; gap: 10px; align-items: center; font-size: 13px; margin-top: 12px; }
-  .mccf-subject { max-width: 320px; }
+  .mccf-subject { min-width: 220px; max-width: 420px; }
+  .mccf-bcaa-table .col-subject { min-width: 220px; width: 18%; }
+  .mccf-bcaa-table .col-regulation { min-width: 140px; width: 12%; }
+  .mccf-location-lines { margin: 0; padding: 0; list-style: none; }
+  .mccf-location-lines li { margin-bottom: 4px; font-size: 11px; line-height: 1.35; }
+  .mccf-location-lines li a { color: #1d4ed8; text-decoration: none; }
+  .mccf-location-lines li a:hover { text-decoration: underline; }
+  .mccf-location-lines .kind-excerpt { color: #166534; }
+  .mccf-integrity-row { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+  .mccf-integrity-bar { height: 9px; flex: 1; border-radius: 999px; background: #e7edf4; overflow: hidden; min-width: 64px; }
+  .mccf-integrity-bar span { display: block; height: 100%; border-radius: 999px; }
+  .mccf-integrity-bar span.ok { background: linear-gradient(90deg,#166534 0%,#22c55e 100%); }
+  .mccf-integrity-bar span.warn { background: linear-gradient(90deg,#d97706 0%,#f59e0b 100%); }
+  .mccf-integrity-bar span.danger { background: linear-gradient(90deg,#b91c1c 0%,#ef4444 100%); }
+  .mccf-integrity-bar span.muted { background: #94a3b8; }
+  .mccf-integrity-value { font-size: 11px; font-weight: 800; color: #102845; min-width: 34px; text-align: right; }
+  .mccf-integrity-label { font-size: 10px; color: #64748b; max-width: 120px; line-height: 1.2; }
+  .mccf-review-banner { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: #92400e; }
+  .mccf-review-flag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700; }
   .mccf-key { font-family: ui-monospace, monospace; font-size: 11px; color: #475569; }
   .mccf-bcaa-part { margin-bottom: 20px; }
   .mccf-bcaa-part h3 { margin: 0 0 10px; font-size: 15px; color: #0f172a; }
-  .mccf-bcaa-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1100px; }
+  .mccf-bcaa-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1280px; }
   .mccf-bcaa-table th, .mccf-bcaa-table td { border: 1px solid #cbd5e1; padding: 7px 8px; vertical-align: top; }
   .mccf-bcaa-table th { background: #f1f5f9; font-size: 11px; text-align: left; }
   .mccf-bcaa-table .col-item { width: 48px; }
@@ -181,6 +292,20 @@ compliance_page_open(array(
     </section>
   <?php else: ?>
 
+    <?php if ($easaChangesPending): ?>
+      <section class="mccf-review-banner cmp-card" style="padding:12px 14px;">
+        <strong>EASA source updates detected.</strong>
+        Requirements with linked regulation sources may need manual review before the next controlled release.
+        <?php if ($easaMonitorChanges !== array()): ?>
+          <ul style="margin:8px 0 0;padding-left:18px;">
+            <?php foreach ($easaMonitorChanges as $change): ?>
+              <li><?= h((string)($change['label'] ?? $change['url'] ?? 'EASA monitor')) ?></li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </section>
+    <?php endif; ?>
+
     <?php if (is_array($detail)): ?>
       <section class="mccf-detail cmp-card" style="padding:16px 18px;">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
@@ -197,6 +322,12 @@ compliance_page_open(array(
           </div>
           <a href="<?= h(mccf_browser_query(array('req' => 0))) ?>" style="font-size:13px;">Close detail</a>
         </div>
+        <?php if (is_array($detailIntegrity)): ?>
+          <div style="margin:0 0 12px;max-width:420px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Integrity score</div>
+            <?= mccf_integrity_bar_html($detailIntegrity) ?>
+          </div>
+        <?php endif; ?>
         <?php if (trim((string)($detail['manual_section_ref'] ?? '')) !== ''): ?>
           <p style="margin:0 0 10px;font-size:13px;"><strong>Manual section ref:</strong> <?= h((string)$detail['manual_section_ref']) ?></p>
         <?php endif; ?>
@@ -342,7 +473,7 @@ compliance_page_open(array(
       <h2 style="margin:0 0 12px;"><?= $layout === 'bcaa' ? 'MCCF checklist (BCAA format)' : 'Requirements' ?></h2>
       <p style="margin:0 0 12px;font-size:13px;color:#64748b;">
         <?php if ($layout === 'bcaa'): ?>
-          Columns match the BCAA Word MCCF: Item, Subject, Sub-item, Description, Location, Applicable, Revision abstract, BCAA check, Finding.
+          Columns match the BCAA Word MCCF: Item, Subject, Sub-item, Description, Location, Applicable, Revision abstract, Integrity (BCAA check), Finding, Regulation.
           Canonical database rows are sourced from the same BCAA document used for compliance submission.
         <?php else: ?>
           Showing <?= count($search['rows']) ?> of <?= (int)$search['total'] ?> matching rows
@@ -366,35 +497,61 @@ compliance_page_open(array(
                   <thead>
                     <tr>
                       <th class="col-item">Item #</th>
-                      <th>Subject</th>
+                      <th class="col-subject">Subject</th>
                       <th class="col-sub">Sub item#</th>
                       <th>Description / supplementary information</th>
                       <th>Location (Section/Chapter/Page/§)</th>
                       <th>Applicable (Yes/No)</th>
                       <th>Revision abstract / reason if N/A</th>
-                      <th>BCAA Check</th>
+                      <th>Integrity</th>
                       <th>See finding N°</th>
+                      <th class="col-regulation">Regulation</th>
                     </tr>
                   </thead>
                   <tbody>
                     <?php foreach ($section['rows'] as $row): ?>
                       <?php
                       $rid = (int)($row['id'] ?? 0);
-                      $itemNo = trim((string)($row['item_no'] ?? ''));
-                      $subNo = trim((string)($row['sub_item_no'] ?? ''));
+                      $showGroup = !empty($row['bcaa_show_group']);
+                      $needsRegReview = $reviewSvc->rowNeedsRegulationReview(
+                          $row,
+                          is_array($row['regulation_links'] ?? null) ? $row['regulation_links'] : array(),
+                          $easaChangesPending
+                      );
                       ?>
-                      <tr>
-                        <td><?= h($itemNo !== '' ? $itemNo : '—') ?></td>
-                        <td><?= h((string)($row['subject'] ?? '')) ?></td>
-                        <td><?= h($subNo !== '' ? $subNo : '—') ?></td>
+                      <tr class="<?= $showGroup ? '' : 'mccf-bcaa-continuation' ?>">
+                        <td class="col-item"><?= h((string)($row['bcaa_item_label'] ?? '—')) ?></td>
+                        <td class="col-subject"><?= $showGroup ? h((string)($row['subject'] ?? '')) : '' ?></td>
+                        <td><?= h((string)($row['bcaa_sub_label'] ?? '—')) ?></td>
                         <td>
                           <a href="<?= h(mccf_browser_query(array('req' => $rid))) ?>"><?= h((string)($row['requirement_text'] ?? '')) ?></a>
                         </td>
-                        <td><?= h((string)($row['manual_section_ref'] ?? '')) ?></td>
+                        <td>
+                          <ul class="mccf-location-lines">
+                            <?php foreach ($row['location_lines'] ?? array() as $loc): ?>
+                              <?php if (!is_array($loc)) { continue; } ?>
+                              <li class="<?= ($loc['kind'] ?? '') === 'excerpt' ? 'kind-excerpt' : '' ?>">
+                                <?php if (!empty($loc['href'])): ?>
+                                  <a href="<?= h((string)$loc['href']) ?>"><?= h((string)($loc['label'] ?? '')) ?></a>
+                                <?php else: ?>
+                                  <?= h((string)($loc['label'] ?? '')) ?>
+                                <?php endif; ?>
+                              </li>
+                            <?php endforeach; ?>
+                          </ul>
+                        </td>
                         <td><?= h((string)($row['applicable'] ?? '')) ?></td>
                         <td><?= h((string)($row['remarks'] ?? '')) ?></td>
-                        <td></td>
+                        <td>
+                          <?php if (is_array($row['integrity'] ?? null)): ?>
+                            <?= mccf_integrity_bar_html($row['integrity'], true) ?>
+                          <?php endif; ?>
+                          <?php if ($needsRegReview): ?>
+                            <span class="mccf-review-flag">Reg review</span>
+                          <?php endif; ?>
+                        </td>
                         <td><?= h((string)($row['finding_ref'] ?? '')) ?></td>
+                        <td class="col-regulation"><?= mccf_regulation_cell_html($row, $regLinksAvailable) ?></td>
                       </tr>
                     <?php endforeach; ?>
                   </tbody>
