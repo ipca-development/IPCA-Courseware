@@ -228,6 +228,15 @@ return [
                 'href' => '/admin/compliance/canonical_sources.php',
             ],
             [
+                'key' => 'compliance_mccf_browser',
+                'label' => 'MCCF Browser',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/mccf_browser.php',
+                'match_paths' => [
+                    '/admin/compliance/mccf_browser.php',
+                ],
+            ],
+            [
                 'key' => 'compliance_controlled_books',
                 'label' => 'Controlled Books',
                 'icon' => 'documents',

@@ -39,6 +39,13 @@ compliance_page_open(array(
         array('label' => 'Source sets', 'value' => count($inventory)),
         array('label' => 'Broken links', 'value' => count($broken), 'tone' => count($broken) > 0 ? 'warn' : 'ok'),
     ),
+    'actions' => array(
+        array(
+            'label' => 'MCCF Browser',
+            'href' => '/admin/compliance/mccf_browser.php',
+            'variant' => 'secondary',
+        ),
+    ),
 ));
 
 ?>
@@ -58,10 +65,15 @@ compliance_page_open(array(
             <th align="right">Excerpts</th>
             <th align="right">Links</th>
             <th align="left">Status</th>
+            <th align="left"></th>
           </tr>
         </thead>
         <tbody>
           <?php foreach ($inventory as $row): ?>
+            <?php
+            $isMccf = strtolower((string)($row['source_family'] ?? '')) === 'mccf'
+                || str_starts_with((string)($row['source_set_key'] ?? ''), 'MCCF:');
+            ?>
             <tr>
               <td><?= h((string)$row['source_set_key']) ?></td>
               <td><?= h((string)$row['source_family']) ?></td>
@@ -70,6 +82,13 @@ compliance_page_open(array(
               <td align="right"><?= (int)$row['excerpts'] ?></td>
               <td align="right"><?= (int)$row['requirement_excerpt_links'] ?></td>
               <td><?= h((string)$row['status']) ?></td>
+              <td>
+                <?php if ($isMccf): ?>
+                  <a href="/admin/compliance/mccf_browser.php?source_set_id=<?= (int)($row['id'] ?? 0) ?>">Browse</a>
+                <?php else: ?>
+                  —
+                <?php endif; ?>
+              </td>
             </tr>
           <?php endforeach; ?>
         </tbody>

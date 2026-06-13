@@ -20,6 +20,18 @@ compliance_page_open(array(
     'stats' => array(
         array('label' => 'Rows', 'value' => count($rows)),
     ),
+    'actions' => array(
+        array(
+            'label' => 'MCCF Browser',
+            'href' => '/admin/compliance/mccf_browser.php',
+            'variant' => 'secondary',
+        ),
+        array(
+            'label' => 'Canonical Sources',
+            'href' => '/admin/compliance/canonical_sources.php',
+            'variant' => 'secondary',
+        ),
+    ),
 ));
 
 ?>
