@@ -233,6 +233,8 @@ final class ControlledPublishingMccfBrowserService
               r.regulation_ref,
               r.manual_section_ref,
               r.applicable,
+              r.remarks,
+              r.finding_ref,
               r.legacy_excerpt_id,
               (
                 SELECT COUNT(*)
