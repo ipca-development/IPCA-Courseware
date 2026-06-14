@@ -51,7 +51,9 @@ final class ControlledPublishingMccfBcaaViewService
                 $row['regulation_links']
             );
             $row['book_version_id'] = $bookVersionId;
-            $row['location_lines'] = self::formatLocationLines($row, $bookVersionId);
+            $row['book_version_label'] = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
+            $row['location_lines'] = self::formatLocationLines($row, $bookVersionId, $row['linked_excerpts']);
+            $row['row_state'] = self::rowState($row);
 
             $part = trim((string)($row['manual_part'] ?? ''));
             if ($part === '') {
@@ -122,10 +124,45 @@ final class ControlledPublishingMccfBcaaViewService
         return $out;
     }
 
+    public static function bookVersionLabel(string $manualCode): string
+    {
+        $manualCode = strtoupper(trim($manualCode));
+
+        return $manualCode . ' Rev ' . ($manualCode === 'OMM' ? '4.0' : '6.0');
+    }
+
     /**
-     * @return list<array{label:string,href:?string,kind:string}>
+     * @return array{is_not_required:bool,missing_book_ref:bool,has_book_link:bool}
      */
-    public static function formatLocationLines(array $row, int $bookVersionId = 0): array
+    public static function rowState(array $row): array
+    {
+        $applicable = strtoupper(trim((string)($row['applicable'] ?? '')));
+        $isNotRequired = in_array($applicable, array('NO', 'N', 'NA', 'N/A', 'NOT APPLICABLE'), true);
+        $linkedExcerpts = is_array($row['linked_excerpts'] ?? null) ? $row['linked_excerpts'] : array();
+        $hasBookLink = $linkedExcerpts !== array();
+
+        return array(
+            'is_not_required' => $isNotRequired,
+            'missing_book_ref' => !$hasBookLink && !$isNotRequired,
+            'has_book_link' => $hasBookLink,
+        );
+    }
+
+    public static function isUnlinkableHeaderRow(array $row): bool
+    {
+        $manualRef = trim((string)($row['manual_section_ref'] ?? ''));
+        if ($manualRef === '' || strcasecmp($manualRef, 'No procedure') === 0) {
+            return true;
+        }
+
+        return stripos($manualRef, 'Headers Parts') === 0;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $linkedExcerpts
+     * @return list<array{label:string,excerpt_key:string,section_ref:string,kind:string,clickable:bool}>
+     */
+    public static function formatLocationLines(array $row, int $bookVersionId = 0, array $linkedExcerpts = array()): array
     {
         $lines = array();
         $manualRef = trim((string)($row['manual_section_ref'] ?? ''));
@@ -137,37 +174,43 @@ final class ControlledPublishingMccfBcaaViewService
                 }
                 $lines[] = array(
                     'label' => $line,
-                    'href' => $bookVersionId > 0
-                        ? '/admin/compliance/controlled_book_editor.php?version_id=' . $bookVersionId
-                        : null,
+                    'excerpt_key' => '',
+                    'section_ref' => '',
                     'kind' => 'manual_ref',
+                    'clickable' => $linkedExcerpts !== array(),
                 );
             }
         }
 
-        foreach ($row['linked_excerpts'] ?? array() as $excerpt) {
+        foreach ($linkedExcerpts !== array() ? $linkedExcerpts : ($row['linked_excerpts'] ?? array()) as $excerpt) {
             if (!is_array($excerpt)) {
                 continue;
             }
             $part = trim((string)($excerpt['manual_part'] ?? ''));
             $sec = trim((string)($excerpt['section_ref'] ?? ''));
             $title = trim((string)($excerpt['title'] ?? ''));
-            $label = 'OM Part ' . $part . ' §' . $sec;
+            $bookLabel = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
+            $label = $bookLabel . ' Part ' . $part . ' §' . $sec;
             if ($title !== '') {
                 $label .= ' — ' . $title;
             }
-            $href = $bookVersionId > 0
-                ? '/admin/compliance/controlled_book_editor.php?version_id=' . $bookVersionId
-                : null;
             $lines[] = array(
                 'label' => $label,
-                'href' => $href,
+                'excerpt_key' => (string)($excerpt['excerpt_key'] ?? ''),
+                'section_ref' => $sec,
                 'kind' => 'excerpt',
+                'clickable' => true,
             );
         }
 
         if ($lines === array()) {
-            return array(array('label' => '—', 'href' => null, 'kind' => 'empty'));
+            return array(array(
+                'label' => '—',
+                'excerpt_key' => '',
+                'section_ref' => '',
+                'kind' => 'empty',
+                'clickable' => false,
+            ));
         }
 
         return $lines;
