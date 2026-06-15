@@ -10,6 +10,12 @@ require_once __DIR__ . '/ControlledPublishingBlockService.php';
  */
 final class ControlledPublishingMccfIntegrityContentService
 {
+    /** @var array<string,list<string>> */
+    private static array $chapterBodyCache = array();
+
+    /** @var array<string,string> */
+    private static array $bookTextCache = array();
+
     /** @var list<string> */
     private const STOPWORDS = array(
         'that', 'this', 'with', 'from', 'have', 'been', 'will', 'shall', 'should', 'would',
@@ -35,7 +41,8 @@ final class ControlledPublishingMccfIntegrityContentService
         array $linkedExcerpts,
         array $regulationLinks,
         int $bookVersionId = 0,
-        bool $resolveEasa = true
+        bool $resolveEasa = true,
+        bool $lightweight = false
     ): array {
         $applicable = strtoupper(trim((string)($requirement['applicable'] ?? '')));
         $isApplicable = ($applicable === '' || $applicable === 'YES' || $applicable === 'Y');
@@ -63,7 +70,7 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         $obligation = $this->regulationObligationText($requirement, $regulationLinks, $resolveEasa);
-        $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId);
+        $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId, !$lightweight);
 
         if ($obligation !== '') {
             $breakdown['regulation_obligation'] = 15;
@@ -178,8 +185,12 @@ final class ControlledPublishingMccfIntegrityContentService
      * @param array<string,mixed> $requirement
      * @param list<array<string,mixed>> $linkedExcerpts
      */
-    public function manualCoverageText(array $requirement, array $linkedExcerpts, int $bookVersionId): string
-    {
+    public function manualCoverageText(
+        array $requirement,
+        array $linkedExcerpts,
+        int $bookVersionId,
+        bool $includeBookBlocks = true
+    ): string {
         $chunks = array();
         $sectionRefs = array();
 
@@ -210,7 +221,7 @@ final class ControlledPublishingMccfIntegrityContentService
             ));
         }
 
-        if ($bookVersionId > 0 && $sectionRefs !== array()) {
+        if ($includeBookBlocks && $bookVersionId > 0 && $sectionRefs !== array()) {
             $bookText = $this->bookPlainTextForSectionRefs($bookVersionId, array_keys($sectionRefs));
             if ($bookText !== '') {
                 $chunks[] = $bookText;
@@ -368,6 +379,13 @@ final class ControlledPublishingMccfIntegrityContentService
             return array();
         }
 
+        $manualCode = strtoupper(trim($manualCode));
+        sort($chapterNums);
+        $cacheKey = $manualCode . ':' . implode(',', $chapterNums);
+        if (isset(self::$chapterBodyCache[$cacheKey])) {
+            return self::$chapterBodyCache[$cacheKey];
+        }
+
         try {
             $conditions = array();
             $params = array(':manual_code' => strtoupper(trim($manualCode)));
@@ -394,6 +412,8 @@ final class ControlledPublishingMccfIntegrityContentService
                     $out[] = $body;
                 }
             }
+
+            self::$chapterBodyCache[$cacheKey] = $out;
 
             return $out;
         } catch (Throwable) {
@@ -470,6 +490,16 @@ final class ControlledPublishingMccfIntegrityContentService
      */
     private function bookPlainTextForSectionRefs(int $bookVersionId, array $sectionRefs): string
     {
+        if ($sectionRefs === array()) {
+            return '';
+        }
+
+        sort($sectionRefs);
+        $cacheKey = $bookVersionId . ':' . implode('|', $sectionRefs);
+        if (isset(self::$bookTextCache[$cacheKey])) {
+            return self::$bookTextCache[$cacheKey];
+        }
+
         $blocksSvc = new ControlledPublishingBlockService($this->pdo);
         $stmt = $this->pdo->prepare("
             SELECT b.section_id, b.payload_json, b.block_type
@@ -516,7 +546,7 @@ final class ControlledPublishingMccfIntegrityContentService
             }
         }
 
-        return trim(implode("\n", $chunks));
+        return self::$bookTextCache[$cacheKey] = trim(implode("\n", $chunks));
     }
 
     /**

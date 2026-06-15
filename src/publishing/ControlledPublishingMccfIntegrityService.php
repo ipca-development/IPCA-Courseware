@@ -23,11 +23,12 @@ final class ControlledPublishingMccfIntegrityService
         array $linkedExcerpts,
         array $regulationLinks,
         int $bookVersionId = 0,
-        bool $resolveEasa = true
+        bool $resolveEasa = true,
+        bool $lightweight = false
     ): array {
         if ($this->pdo instanceof PDO) {
             return (new ControlledPublishingMccfIntegrityContentService($this->pdo))
-                ->scoreRequirement($requirement, $linkedExcerpts, $regulationLinks, $bookVersionId, $resolveEasa);
+                ->scoreRequirement($requirement, $linkedExcerpts, $regulationLinks, $bookVersionId, $resolveEasa, $lightweight);
         }
 
         return array(

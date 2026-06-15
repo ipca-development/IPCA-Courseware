@@ -50,7 +50,8 @@ final class ControlledPublishingMccfBcaaViewService
                 $row['linked_excerpts'],
                 $row['regulation_links'],
                 $bookVersionId,
-                false
+                false,
+                true
             );
             $row['book_version_id'] = $bookVersionId;
             $row['book_version_label'] = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
