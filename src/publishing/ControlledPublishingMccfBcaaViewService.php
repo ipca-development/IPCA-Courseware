@@ -204,7 +204,7 @@ final class ControlledPublishingMccfBcaaViewService
             $part = trim((string)($excerpt['manual_part'] ?? ''));
             $sec = trim((string)($excerpt['section_ref'] ?? ''));
             $title = trim((string)($excerpt['title'] ?? ''));
-            $bookLabel = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
+            $bookLabel = self::bookVersionLabel((string)($excerpt['manual_code'] ?? $row['manual_code'] ?? 'OM'));
             $label = $bookLabel . ' Part ' . $part . ' §' . $sec;
             if ($title !== '') {
                 $label .= ' — ' . $title;
@@ -248,6 +248,7 @@ final class ControlledPublishingMccfBcaaViewService
               e.title,
               e.section_ref,
               e.manual_part,
+              e.manual_code,
               e.body_text
             FROM ipca_canonical_requirement_excerpt_links l
             INNER JOIN ipca_canonical_excerpts e

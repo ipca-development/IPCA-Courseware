@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfPreviewService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfManualLinkService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -16,6 +17,7 @@ function mccf_api_json(int $code, array $payload): void
 
 $user = compliance_require_access($pdo);
 $preview = new ControlledPublishingMccfPreviewService($pdo);
+$manualLinks = new ControlledPublishingMccfManualLinkService($pdo);
 
 $raw = file_get_contents('php://input');
 $input = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
@@ -49,6 +51,94 @@ try {
                 mccf_api_json(400, array('ok' => false, 'error' => 'requirement_id is required.'));
             }
             mccf_api_json(200, $preview->coveragePair($requirementId));
+            break;
+
+        case 'manual_link_context':
+            if ($requirementId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'requirement_id is required.'));
+            }
+            $context = $manualLinks->getRequirementEditorContext($requirementId);
+            if ($context === null) {
+                mccf_api_json(404, array('ok' => false, 'error' => 'Requirement not found.'));
+            }
+            mccf_api_json(200, array('ok' => true) + $context);
+            break;
+
+        case 'manual_link_parts':
+            mccf_api_json(200, array(
+                'ok' => true,
+                'parts' => $manualLinks->listParts(trim((string)($input['manual_code'] ?? 'OM'))),
+            ));
+            break;
+
+        case 'manual_link_chapters':
+            mccf_api_json(200, array(
+                'ok' => true,
+                'chapters' => $manualLinks->listChapters(
+                    trim((string)($input['manual_code'] ?? 'OM')),
+                    trim((string)($input['part'] ?? ''))
+                ),
+            ));
+            break;
+
+        case 'manual_link_sections':
+            mccf_api_json(200, array(
+                'ok' => true,
+                'sections' => $manualLinks->listSections(
+                    trim((string)($input['manual_code'] ?? 'OM')),
+                    trim((string)($input['part'] ?? '')),
+                    trim((string)($input['chapter'] ?? '')),
+                    trim((string)($input['parent_section_ref'] ?? '')) ?: null
+                ),
+            ));
+            break;
+
+        case 'manual_link_add':
+            if ($requirementId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'requirement_id is required.'));
+            }
+            mccf_api_json(200, $manualLinks->addLink(
+                $requirementId,
+                (int)($input['excerpt_id'] ?? 0),
+                trim((string)($input['link_type'] ?? 'PRIMARY')),
+                isset($input['notes']) ? (string)$input['notes'] : null
+            ));
+            break;
+
+        case 'manual_link_update':
+            $linkId = (int)($input['link_id'] ?? 0);
+            if ($linkId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'link_id is required.'));
+            }
+            $fields = array();
+            if (isset($input['excerpt_id'])) {
+                $fields['excerpt_id'] = (int)$input['excerpt_id'];
+            }
+            if (isset($input['link_type'])) {
+                $fields['link_type'] = (string)$input['link_type'];
+            }
+            if (array_key_exists('notes', $input)) {
+                $fields['notes'] = (string)$input['notes'];
+            }
+            mccf_api_json(200, $manualLinks->updateLink($linkId, $fields));
+            break;
+
+        case 'manual_link_delete':
+            $linkId = (int)($input['link_id'] ?? 0);
+            if ($linkId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'link_id is required.'));
+            }
+            mccf_api_json(200, $manualLinks->deleteLink($linkId));
+            break;
+
+        case 'manual_section_ref_update':
+            if ($requirementId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'requirement_id is required.'));
+            }
+            mccf_api_json(200, $manualLinks->updateManualSectionRef(
+                $requirementId,
+                (string)($input['manual_section_ref'] ?? '')
+            ));
             break;
 
         default:

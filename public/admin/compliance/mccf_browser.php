@@ -491,6 +491,40 @@ compliance_page_open(array(
     font-weight: 400 !important;
     box-shadow: none !important;
   }
+  .mccf-link-editor-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none; align-items: center; justify-content: center; z-index: 1300; padding: 20px; }
+  .mccf-link-editor-backdrop.is-open { display: flex; }
+  .mccf-link-editor { width: min(820px, 96vw); max-height: 92vh; background: #fff; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.28); }
+  .mccf-link-editor-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+  .mccf-link-editor-head h3 { margin: 0; font-size: 15px; color: #0f172a; }
+  .mccf-link-editor-sub { margin-top: 4px; font-size: 11px; color: #64748b; line-height: 1.4; }
+  .mccf-link-editor-body { padding: 14px 16px 18px; overflow: auto; flex: 1; display: grid; gap: 16px; }
+  .mccf-link-editor-section h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+  .mccf-link-current-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .mccf-link-current-item { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; font-size: 12px; }
+  .mccf-link-current-item strong { display: block; color: #0f172a; margin-bottom: 2px; }
+  .mccf-link-current-meta { font-size: 10px; color: #64748b; }
+  .mccf-link-current-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .mccf-link-btn { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .mccf-link-btn:hover { background: #f8fafc; }
+  .mccf-link-btn--primary { background: #0f172a; border-color: #0f172a; color: #fff; }
+  .mccf-link-btn--primary:hover { background: #1e293b; }
+  .mccf-link-btn--danger { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+  .mccf-link-btn--danger:hover { background: #fee2e2; }
+  .mccf-link-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 720px) { .mccf-link-picker-grid { grid-template-columns: 1fr; } }
+  .mccf-link-picker-grid label { display: grid; gap: 5px; font-size: 11px; font-weight: 700; color: #475569; }
+  .mccf-link-picker-grid select, .mccf-link-ref-input, .mccf-link-notes { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12px; }
+  .mccf-link-section-list { margin: 10px 0 0; padding: 0; list-style: none; border: 1px solid #e2e8f0; border-radius: 10px; max-height: 220px; overflow: auto; }
+  .mccf-link-section-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #f1f5f9; background: #fff; padding: 8px 10px; cursor: pointer; font-size: 12px; color: #0f172a; }
+  .mccf-link-section-item:last-child { border-bottom: 0; }
+  .mccf-link-section-item:hover { background: #f8fafc; }
+  .mccf-link-section-item.is-selected { background: #eff6ff; box-shadow: inset 0 0 0 1px #93c5fd; }
+  .mccf-link-section-item small { display: block; margin-top: 3px; color: #64748b; font-size: 10px; line-height: 1.35; }
+  .mccf-link-section-item .mccf-link-drill { margin-left: 6px; font-size: 10px; color: #2563eb; text-decoration: underline; }
+  .mccf-link-preview { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11px; color: #475569; line-height: 1.45; min-height: 48px; }
+  .mccf-link-editor-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+  .mccf-link-edit-inline { margin-left: 8px; font-size: 10px; vertical-align: middle; }
+  .mccf-excerpt-list .mccf-link-edit-actions { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
 </style>
 
 <div class="mccf-layout">
@@ -539,6 +573,9 @@ compliance_page_open(array(
         <?php if (trim((string)($detail['manual_section_ref'] ?? '')) !== ''): ?>
           <p style="margin:0 0 10px;font-size:13px;"><strong>Manual section ref:</strong> <?= h((string)$detail['manual_section_ref']) ?></p>
         <?php endif; ?>
+        <div style="margin:0 0 12px;">
+          <button type="button" class="mccf-link-btn mccf-link-btn--primary" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Edit manual references</button>
+        </div>
         <div class="mccf-detail-text"><?= h((string)($detail['requirement_text'] ?? '')) ?></div>
         <?php if (trim((string)($detail['remarks'] ?? '')) !== ''): ?>
           <p style="margin:12px 0 0;font-size:13px;color:#64748b;"><strong>Remarks / revision abstract:</strong> <?= h((string)$detail['remarks']) ?></p>
@@ -586,15 +623,25 @@ compliance_page_open(array(
         <?php if (!empty($detail['linked_excerpts']) && is_array($detail['linked_excerpts'])): ?>
           <ul class="mccf-excerpt-list">
             <?php foreach ($detail['linked_excerpts'] as $excerpt): ?>
+              <?php
+              $exManual = strtoupper(trim((string)($excerpt['excerpt_manual_code'] ?? $detail['manual_code'] ?? 'OM')));
+              $exPart = trim((string)($excerpt['excerpt_manual_part'] ?? ''));
+              $exSec = trim((string)($excerpt['excerpt_section_ref'] ?? ''));
+              $exTitle = trim((string)($excerpt['excerpt_title'] ?? ''));
+              $exLabel = ControlledPublishingMccfBcaaViewService::bookVersionLabel($exManual)
+                  . ' Part ' . $exPart . ' §' . $exSec
+                  . ($exTitle !== '' ? (' — ' . $exTitle) : '');
+              ?>
               <li>
-                <strong><?= h((string)($excerpt['excerpt_key'] ?? '')) ?></strong>
-                <?php if (trim((string)($excerpt['excerpt_title'] ?? '')) !== ''): ?>
-                  — <?= h((string)$excerpt['excerpt_title']) ?>
-                <?php endif; ?>
-                <?php if (trim((string)($excerpt['excerpt_section_ref'] ?? '')) !== ''): ?>
-                  <span style="color:#64748b;"> (§<?= h((string)$excerpt['excerpt_section_ref']) ?>)</span>
-                <?php endif; ?>
+                <strong><?= h($exLabel) ?></strong>
                 <span class="mccf-badge mccf-badge--linked" style="margin-left:6px;"><?= h((string)($excerpt['link_type'] ?? 'PRIMARY')) ?></span>
+                <?php if (trim((string)($excerpt['confidence'] ?? '')) === 'MANUAL'): ?>
+                  <span class="mccf-badge mccf-badge--legacy" style="margin-left:4px;">Manual</span>
+                <?php endif; ?>
+                <div class="mccf-link-edit-actions">
+                  <button type="button" class="mccf-link-btn" data-mccf-action="manual" data-req="<?= (int)$requirementId ?>" data-excerpt="<?= h((string)($excerpt['excerpt_key'] ?? '')) ?>">Preview</button>
+                  <button type="button" class="mccf-link-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>" data-link-id="<?= (int)($excerpt['link_id'] ?? 0) ?>">Edit</button>
+                </div>
               </li>
             <?php endforeach; ?>
           </ul>
@@ -602,6 +649,7 @@ compliance_page_open(array(
           <p style="margin:0;font-size:13px;color:#64748b;">No active link row, but legacy inline excerpt id: <code><?= h((string)$detail['legacy_excerpt_id']) ?></code></p>
         <?php else: ?>
           <p style="margin:0;font-size:13px;color:#b45309;">No manual excerpt linked to this requirement.</p>
+          <p style="margin:8px 0 0;"><button type="button" class="mccf-link-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Add manual reference</button></p>
         <?php endif; ?>
       </section>
     <?php endif; ?>
@@ -752,6 +800,7 @@ compliance_page_open(array(
                             </li>
                           <?php endforeach; ?>
                         </ul>
+                        <button type="button" class="mccf-link-btn mccf-link-edit-inline" data-mccf-action="edit-links" data-req="<?= $rid ?>">Edit refs</button>
                       </td>
                       <td class="mccf-col-applicable"><?= mccf_applicable_pill_html($row) ?></td>
                       <td class="mccf-col-remarks"><?= h((string)($row['remarks'] ?? '')) ?></td>
@@ -865,6 +914,19 @@ compliance_page_open(array(
       <button type="button" class="mccf-modal-close" id="mccfModalClose" aria-label="Close">×</button>
     </div>
     <div class="mccf-modal-body" id="mccfModalBody"></div>
+  </div>
+</div>
+
+<div class="mccf-link-editor-backdrop" id="mccfLinkEditorBackdrop" aria-hidden="true">
+  <div class="mccf-link-editor" role="dialog" aria-modal="true" aria-labelledby="mccfLinkEditorTitle">
+    <div class="mccf-link-editor-head">
+      <div>
+        <h3 id="mccfLinkEditorTitle">Edit manual references</h3>
+        <div class="mccf-link-editor-sub" id="mccfLinkEditorSub"></div>
+      </div>
+      <button type="button" class="mccf-modal-close" id="mccfLinkEditorClose" aria-label="Close">×</button>
+    </div>
+    <div class="mccf-link-editor-body" id="mccfLinkEditorBody"></div>
   </div>
 </div>
 
@@ -1037,6 +1099,363 @@ compliance_page_open(array(
     });
   }
 
+  var linkBackdrop = document.getElementById('mccfLinkEditorBackdrop');
+  var linkEditorBody = document.getElementById('mccfLinkEditorBody');
+  var linkEditorSub = document.getElementById('mccfLinkEditorSub');
+  var linkEditorClose = document.getElementById('mccfLinkEditorClose');
+  var linkEditorState = null;
+
+  function closeLinkEditor() {
+    if (!linkBackdrop) return;
+    linkBackdrop.classList.remove('is-open');
+    linkBackdrop.setAttribute('aria-hidden', 'true');
+    if (linkEditorBody) linkEditorBody.innerHTML = '';
+    linkEditorState = null;
+    document.body.style.overflow = '';
+  }
+
+  function openLinkEditorShell(title, subtitle) {
+    if (!linkBackdrop || !linkEditorBody) return;
+    document.getElementById('mccfLinkEditorTitle').textContent = title || 'Edit manual references';
+    if (linkEditorSub) linkEditorSub.textContent = subtitle || '';
+    linkEditorBody.innerHTML = '<p style="margin:0;color:#64748b;">Loading…</p>';
+    linkBackdrop.classList.add('is-open');
+    linkBackdrop.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function renderCurrentLinks(links) {
+    if (!links || !links.length) {
+      return '<p style="margin:0;font-size:12px;color:#64748b;">No manual references linked yet.</p>';
+    }
+    var html = '<ul class="mccf-link-current-list">';
+    links.forEach(function (link) {
+      html += '<li class="mccf-link-current-item">'
+        + '<div><strong>' + escapeHtml(link.display_label || link.excerpt_key || 'Section') + '</strong>'
+        + '<div class="mccf-link-current-meta">' + escapeHtml(link.link_type || 'PRIMARY')
+        + (link.confidence ? (' · ' + escapeHtml(link.confidence)) : '') + '</div></div>'
+        + '<div class="mccf-link-current-actions">'
+        + '<button type="button" class="mccf-link-btn" data-link-action="edit" data-link-id="' + link.id + '">Change</button>'
+        + '<button type="button" class="mccf-link-btn mccf-link-btn--danger" data-link-action="delete" data-link-id="' + link.id + '">Remove</button>'
+        + '</div></li>';
+    });
+    html += '</ul>';
+    return html;
+  }
+
+  function renderSectionOptions(sections, selectedId) {
+    if (!sections || !sections.length) {
+      return '<p style="margin:10px 0 0;font-size:12px;color:#64748b;">No sections found at this level.</p>';
+    }
+    var html = '<ul class="mccf-link-section-list">';
+    sections.forEach(function (section) {
+      var selected = selectedId && parseInt(selectedId, 10) === parseInt(section.id, 10);
+      html += '<li><button type="button" class="mccf-link-section-item' + (selected ? ' is-selected' : '') + '" data-section-id="' + section.id + '" data-section-ref="' + escapeHtml(section.section_ref || '') + '" data-has-children="' + (section.has_children ? '1' : '0') + '">'
+        + escapeHtml(section.label || ('§' + section.section_ref))
+        + (section.has_children ? '<span class="mccf-link-drill" data-drill-ref="' + escapeHtml(section.section_ref || '') + '">Open sub-sections →</span>' : '')
+        + (section.preview ? ('<small>' + escapeHtml(section.preview) + '</small>') : '')
+        + '</button></li>';
+    });
+    html += '</ul>';
+    return html;
+  }
+
+  function renderLinkEditorForm() {
+    if (!linkEditorState || !linkEditorBody) return;
+    var state = linkEditorState;
+    var editing = state.editingLinkId ? state.links.find(function (l) { return parseInt(l.id, 10) === parseInt(state.editingLinkId, 10); }) : null;
+    var pickerTitle = editing ? 'Change linked section' : 'Add manual reference';
+    var bookOptions = (state.books || []).map(function (book) {
+      var selected = book.manual_code === state.picker.manual_code ? ' selected' : '';
+      return '<option value="' + escapeHtml(book.manual_code) + '"' + selected + '>' + escapeHtml(book.label) + '</option>';
+    }).join('');
+    var partOptions = (state.parts || []).map(function (part) {
+      var selected = String(part.part) === String(state.picker.part) ? ' selected' : '';
+      return '<option value="' + escapeHtml(part.part) + '"' + selected + '>' + escapeHtml(part.label) + '</option>';
+    }).join('');
+    var chapterOptions = (state.chapters || []).map(function (chapter) {
+      var selected = String(chapter.chapter) === String(state.picker.chapter) ? ' selected' : '';
+      return '<option value="' + escapeHtml(chapter.chapter) + '"' + selected + '>' + escapeHtml(chapter.label) + '</option>';
+    }).join('');
+
+    var breadcrumb = 'Part ' + (state.picker.part || '—') + ' · Chapter ' + (state.picker.chapter || '—');
+    if (state.picker.parent_section_ref) {
+      breadcrumb += ' · §' + state.picker.parent_section_ref;
+    }
+
+    linkEditorBody.innerHTML = ''
+      + '<section class="mccf-link-editor-section"><h4>Current references</h4>' + renderCurrentLinks(state.links) + '</section>'
+      + '<section class="mccf-link-editor-section"><h4>MCCF manual section ref (display text)</h4>'
+      + '<textarea class="mccf-link-ref-input" id="mccfManualSectionRef" rows="2" placeholder="e.g. Part 1 – Ch. 8.6">' + escapeHtml(state.manual_section_ref || '') + '</textarea>'
+      + '<div class="mccf-link-editor-foot" style="margin-top:8px;"><button type="button" class="mccf-link-btn" data-link-action="save-ref">Save display ref</button></div>'
+      + '</section>'
+      + '<section class="mccf-link-editor-section"><h4>' + pickerTitle + '</h4>'
+      + '<div class="mccf-link-picker-grid">'
+      + '<label>Book<select id="mccfPickBook">' + bookOptions + '</select></label>'
+      + '<label>Part<select id="mccfPickPart">' + (partOptions || '<option value="">Select part</option>') + '</select></label>'
+      + '<label>Chapter<select id="mccfPickChapter">' + (chapterOptions || '<option value="">Select chapter</option>') + '</select></label>'
+      + '<label>Link type<select id="mccfPickLinkType"><option value="PRIMARY"' + ((!editing || editing.link_type === 'PRIMARY') ? ' selected' : '') + '>Primary</option><option value="SUPPORTING"' + ((editing && editing.link_type === 'SUPPORTING') ? ' selected' : '') + '>Supporting</option></select></label>'
+      + '</div>'
+      + '<div style="margin-top:8px;font-size:11px;color:#64748b;">' + escapeHtml(breadcrumb) + '</div>'
+      + '<div id="mccfSectionList">' + renderSectionOptions(state.sections, state.picker.selected_excerpt_id) + '</div>'
+      + '<div class="mccf-link-preview" id="mccfSectionPreview">' + (state.picker.preview ? escapeHtml(state.picker.preview) : 'Select a section to preview its text.') + '</div>'
+      + '<div class="mccf-link-editor-foot"><button type="button" class="mccf-link-btn" data-link-action="cancel-edit">Cancel</button><button type="button" class="mccf-link-btn mccf-link-btn--primary" data-link-action="save-link"' + (state.picker.selected_excerpt_id ? '' : ' disabled') + '>' + (editing ? 'Save change' : 'Add reference') + '</button></div>'
+      + '</section>';
+  }
+
+  function loadLinkEditorParts() {
+    if (!linkEditorState) return Promise.resolve();
+    return apiCall('manual_link_parts', { manual_code: linkEditorState.picker.manual_code }).then(function (data) {
+      if (data.ok) linkEditorState.parts = data.parts || [];
+    });
+  }
+
+  function loadLinkEditorChapters() {
+    if (!linkEditorState) return Promise.resolve();
+    return apiCall('manual_link_chapters', {
+      manual_code: linkEditorState.picker.manual_code,
+      part: linkEditorState.picker.part
+    }).then(function (data) {
+      if (data.ok) linkEditorState.chapters = data.chapters || [];
+    });
+  }
+
+  function loadLinkEditorSections() {
+    if (!linkEditorState) return Promise.resolve();
+    return apiCall('manual_link_sections', {
+      manual_code: linkEditorState.picker.manual_code,
+      part: linkEditorState.picker.part,
+      chapter: linkEditorState.picker.chapter,
+      parent_section_ref: linkEditorState.picker.parent_section_ref || ''
+    }).then(function (data) {
+      if (data.ok) {
+        linkEditorState.sections = data.sections || [];
+        if (linkEditorState.picker.selected_excerpt_id) {
+          var selected = linkEditorState.sections.find(function (s) {
+            return parseInt(s.id, 10) === parseInt(linkEditorState.picker.selected_excerpt_id, 10);
+          });
+          linkEditorState.picker.preview = selected ? selected.preview : linkEditorState.picker.preview;
+        }
+      }
+    });
+  }
+
+  function applyEditingLinkPicker() {
+    if (!linkEditorState || !linkEditorState.editingLinkId) return Promise.resolve();
+    var editing = (linkEditorState.links || []).find(function (link) {
+      return parseInt(link.id, 10) === parseInt(linkEditorState.editingLinkId, 10);
+    });
+    if (!editing) return Promise.resolve();
+    linkEditorState.picker.manual_code = (editing.manual_code || linkEditorState.picker.manual_code || 'OM').toUpperCase();
+    linkEditorState.picker.part = String(editing.manual_part || linkEditorState.picker.part || '');
+    var ref = String(editing.section_ref || '');
+    var refParts = ref.split('.').filter(Boolean);
+    if (refParts.length) {
+      linkEditorState.picker.chapter = refParts[0];
+      linkEditorState.picker.parent_section_ref = refParts.length > 2 ? refParts.slice(0, -1).join('.') : '';
+    }
+    linkEditorState.picker.selected_excerpt_id = parseInt(editing.excerpt_id || '0', 10) || null;
+    linkEditorState.picker.preview = editing.excerpt_preview || '';
+    return loadLinkEditorParts().then(function () {
+      return loadLinkEditorChapters();
+    }).then(function () {
+      return loadLinkEditorSections();
+    });
+  }
+
+  function reloadLinkEditorContext(reqId, focusLinkId) {
+    return apiCall('manual_link_context', { requirement_id: reqId }).then(function (data) {
+      if (!data.ok) {
+        if (linkEditorBody) linkEditorBody.innerHTML = '<p>' + escapeHtml(data.error || 'Could not load editor.') + '</p>';
+        return;
+      }
+      var defaultBook = (data.manual_code || 'OM').toUpperCase();
+      var books = data.books || [];
+      if (!books.some(function (b) { return b.manual_code === defaultBook; }) && books.length) {
+        defaultBook = books[0].manual_code;
+      }
+      linkEditorState = {
+        requirement_id: reqId,
+        subject: data.subject || '',
+        manual_code: data.manual_code || '',
+        manual_section_ref: data.manual_section_ref || '',
+        links: data.links || [],
+        books: books,
+        parts: [],
+        chapters: [],
+        sections: [],
+        editingLinkId: focusLinkId || null,
+        picker: {
+          manual_code: defaultBook,
+          part: '',
+          chapter: '',
+          parent_section_ref: '',
+          selected_excerpt_id: null,
+          preview: ''
+        }
+      };
+      if (linkEditorSub) {
+        linkEditorSub.textContent = (data.requirement_key || '') + (data.subject ? (' — ' + data.subject) : '');
+      }
+      return loadLinkEditorParts().then(function () {
+        if (linkEditorState.editingLinkId) {
+          return applyEditingLinkPicker();
+        }
+        if (linkEditorState.parts.length) {
+          linkEditorState.picker.part = linkEditorState.parts[0].part;
+        }
+        return loadLinkEditorChapters();
+      }).then(function () {
+        if (linkEditorState.editingLinkId) {
+          return null;
+        }
+        if (linkEditorState.chapters.length) {
+          linkEditorState.picker.chapter = linkEditorState.chapters[0].chapter;
+        }
+        return loadLinkEditorSections();
+      }).then(function () {
+        if (linkEditorState.editingLinkId && (!linkEditorState.sections || !linkEditorState.sections.length)) {
+          return loadLinkEditorSections();
+        }
+        return null;
+      }).then(function () {
+        renderLinkEditorForm();
+      });
+    });
+  }
+
+  function openLinkEditor(reqId, focusLinkId) {
+    openLinkEditorShell('Edit manual references', 'Loading…');
+    reloadLinkEditorContext(reqId, focusLinkId).catch(function () {
+      if (linkEditorBody) linkEditorBody.innerHTML = '<p>Could not load manual reference editor.</p>';
+    });
+  }
+
+  if (linkEditorBody) {
+    linkEditorBody.addEventListener('change', function (event) {
+      if (!linkEditorState) return;
+      if (event.target.id === 'mccfPickBook') {
+        linkEditorState.picker.manual_code = event.target.value;
+        linkEditorState.picker.part = '';
+        linkEditorState.picker.chapter = '';
+        linkEditorState.picker.parent_section_ref = '';
+        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.preview = '';
+        loadLinkEditorParts().then(function () {
+          if (linkEditorState.parts.length) linkEditorState.picker.part = linkEditorState.parts[0].part;
+          return loadLinkEditorChapters();
+        }).then(function () {
+          if (linkEditorState.chapters.length) linkEditorState.picker.chapter = linkEditorState.chapters[0].chapter;
+          return loadLinkEditorSections();
+        }).then(renderLinkEditorForm);
+      } else if (event.target.id === 'mccfPickPart') {
+        linkEditorState.picker.part = event.target.value;
+        linkEditorState.picker.chapter = '';
+        linkEditorState.picker.parent_section_ref = '';
+        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.preview = '';
+        loadLinkEditorChapters().then(function () {
+          if (linkEditorState.chapters.length) linkEditorState.picker.chapter = linkEditorState.chapters[0].chapter;
+          return loadLinkEditorSections();
+        }).then(renderLinkEditorForm);
+      } else if (event.target.id === 'mccfPickChapter') {
+        linkEditorState.picker.chapter = event.target.value;
+        linkEditorState.picker.parent_section_ref = '';
+        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.preview = '';
+        loadLinkEditorSections().then(renderLinkEditorForm);
+      }
+    });
+
+    linkEditorBody.addEventListener('click', function (event) {
+      if (!linkEditorState) return;
+      var drill = event.target.closest('[data-drill-ref]');
+      if (drill) {
+        event.preventDefault();
+        event.stopPropagation();
+        linkEditorState.picker.parent_section_ref = drill.getAttribute('data-drill-ref') || '';
+        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.preview = '';
+        loadLinkEditorSections().then(renderLinkEditorForm);
+        return;
+      }
+
+      var sectionBtn = event.target.closest('.mccf-link-section-item');
+      if (sectionBtn) {
+        event.preventDefault();
+        linkEditorState.picker.selected_excerpt_id = parseInt(sectionBtn.getAttribute('data-section-id') || '0', 10);
+        var selected = (linkEditorState.sections || []).find(function (s) {
+          return parseInt(s.id, 10) === linkEditorState.picker.selected_excerpt_id;
+        });
+        linkEditorState.picker.preview = selected ? selected.preview : '';
+        renderLinkEditorForm();
+        return;
+      }
+
+      var actionBtn = event.target.closest('[data-link-action]');
+      if (!actionBtn) return;
+      var action = actionBtn.getAttribute('data-link-action');
+      if (action === 'cancel-edit') {
+        linkEditorState.editingLinkId = null;
+        renderLinkEditorForm();
+      } else if (action === 'edit') {
+        linkEditorState.editingLinkId = parseInt(actionBtn.getAttribute('data-link-id') || '0', 10);
+        applyEditingLinkPicker().then(renderLinkEditorForm);
+      } else if (action === 'delete') {
+        if (!window.confirm('Remove this manual reference?')) return;
+        apiCall('manual_link_delete', { link_id: parseInt(actionBtn.getAttribute('data-link-id') || '0', 10) }).then(function (data) {
+          if (!data.ok) {
+            window.alert(data.error || 'Could not remove reference.');
+            return;
+          }
+          reloadLinkEditorContext(linkEditorState.requirement_id).then(function () {
+            window.location.reload();
+          });
+        });
+      } else if (action === 'save-ref') {
+        var refInput = document.getElementById('mccfManualSectionRef');
+        apiCall('manual_section_ref_update', {
+          requirement_id: linkEditorState.requirement_id,
+          manual_section_ref: refInput ? refInput.value : ''
+        }).then(function (data) {
+          if (!data.ok) {
+            window.alert(data.error || 'Could not save manual section ref.');
+            return;
+          }
+          window.location.reload();
+        });
+      } else if (action === 'save-link') {
+        if (!linkEditorState.picker.selected_excerpt_id) return;
+        var linkTypeEl = document.getElementById('mccfPickLinkType');
+        var linkType = linkTypeEl ? linkTypeEl.value : 'PRIMARY';
+        var payload = {
+          excerpt_id: linkEditorState.picker.selected_excerpt_id,
+          link_type: linkType
+        };
+        var promise;
+        if (linkEditorState.editingLinkId) {
+          promise = apiCall('manual_link_update', Object.assign({ link_id: linkEditorState.editingLinkId }, payload));
+        } else {
+          promise = apiCall('manual_link_add', Object.assign({ requirement_id: linkEditorState.requirement_id }, payload));
+        }
+        promise.then(function (data) {
+          if (!data.ok) {
+            window.alert(data.error || 'Could not save reference.');
+            return;
+          }
+          window.location.reload();
+        });
+      }
+    });
+  }
+
+  if (linkEditorClose) linkEditorClose.addEventListener('click', closeLinkEditor);
+  if (linkBackdrop) {
+    linkBackdrop.addEventListener('click', function (event) {
+      if (event.target === linkBackdrop) closeLinkEditor();
+    });
+  }
+
   function fillPairCard(card) {
     if (!card || card.getAttribute('data-loaded') === '1') return;
     var reqId = parseInt(card.getAttribute('data-req-id') || '0', 10);
@@ -1071,6 +1490,12 @@ compliance_page_open(array(
     if (!btn) return;
     var action = btn.getAttribute('data-mccf-action');
     var reqId = parseInt(btn.getAttribute('data-req') || '0', 10);
+    if (action === 'edit-links') {
+      event.preventDefault();
+      if (!reqId) return;
+      openLinkEditor(reqId, parseInt(btn.getAttribute('data-link-id') || '0', 10) || null);
+      return;
+    }
     if (!reqId) return;
     if (action === 'regulation') {
       event.preventDefault();
@@ -1089,7 +1514,10 @@ compliance_page_open(array(
     if (event.target === backdrop) closeModal();
   });
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') closeModal();
+    if (event.key === 'Escape') {
+      if (linkBackdrop && linkBackdrop.classList.contains('is-open')) closeLinkEditor();
+      else closeModal();
+    }
   });
 
   var pairsGrid = document.getElementById('mccfPairsGrid');

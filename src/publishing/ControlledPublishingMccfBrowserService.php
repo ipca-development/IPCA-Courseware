@@ -303,12 +303,13 @@ final class ControlledPublishingMccfBrowserService
 
         $linkStmt = $this->pdo->prepare("
             SELECT
-              l.id,
+              l.id AS link_id,
               l.link_type,
               l.confidence,
               l.notes,
               l.excerpt_key,
               e.id AS excerpt_id,
+              e.manual_code AS excerpt_manual_code,
               e.title AS excerpt_title,
               e.section_ref AS excerpt_section_ref,
               e.manual_part AS excerpt_manual_part,
