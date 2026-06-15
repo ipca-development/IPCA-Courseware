@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
+
 /**
- * Browse canonical MCCF requirements and manual excerpt coverage links.
+ * Browse canonical MCCF requirements and manual section coverage links.
  */
 final class ControlledPublishingMccfBrowserService
 {
@@ -103,15 +105,12 @@ final class ControlledPublishingMccfBrowserService
             SELECT
               COALESCE(NULLIF(TRIM(r.manual_part), ''), '—') AS part_label,
               COUNT(DISTINCT r.id) AS total,
-              COUNT(DISTINCT CASE WHEN e.id IS NOT NULL THEN r.id END) AS linked
+              COUNT(DISTINCT CASE WHEN l.id IS NOT NULL THEN r.id END) AS linked
             FROM ipca_canonical_requirements r
             LEFT JOIN ipca_canonical_requirement_excerpt_links l
               ON l.requirement_id = r.id
              AND l.source_set_id = r.source_set_id
              AND l.source_status = 'active'
-            LEFT JOIN ipca_canonical_excerpts e
-              ON e.id = l.excerpt_id
-             AND e.source_status = 'active'
             WHERE r.source_set_id = :source_set_id
               AND r.source_status = 'active'
             GROUP BY part_label
@@ -177,18 +176,26 @@ final class ControlledPublishingMccfBrowserService
         if ($coverage === 'linked') {
             $where[] = 'EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
-                INNER JOIN ipca_canonical_excerpts e ON e.id = l.excerpt_id AND e.source_status = \'active\'
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
+                  AND (
+                    NULLIF(TRIM(l.section_ref), \'\') IS NOT NULL
+                    OR NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
+                    OR l.excerpt_id IS NOT NULL
+                  )
             )';
         } elseif ($coverage === 'unlinked') {
             $where[] = 'NOT EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
-                INNER JOIN ipca_canonical_excerpts e ON e.id = l.excerpt_id AND e.source_status = \'active\'
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
+                  AND (
+                    NULLIF(TRIM(l.section_ref), \'\') IS NOT NULL
+                    OR NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
+                    OR l.excerpt_id IS NOT NULL
+                  )
             )';
         }
 
@@ -308,21 +315,17 @@ final class ControlledPublishingMccfBrowserService
               l.confidence,
               l.notes,
               l.excerpt_key,
-              e.id AS excerpt_id,
-              e.manual_code AS excerpt_manual_code,
-              e.title AS excerpt_title,
-              e.section_ref AS excerpt_section_ref,
-              e.manual_part AS excerpt_manual_part,
-              LEFT(e.body_text, 400) AS excerpt_preview
+              l.excerpt_id
             FROM ipca_canonical_requirement_excerpt_links l
-            INNER JOIN ipca_canonical_excerpts e ON e.id = l.excerpt_id
             WHERE l.requirement_id = :requirement_id
               AND l.source_status = 'active'
-              AND e.source_status = 'active'
-            ORDER BY l.link_type, e.manual_part, e.section_ref, e.excerpt_key
+            ORDER BY l.link_type, l.excerpt_key
         ");
         $linkStmt->execute(array(':requirement_id' => $requirementId));
-        $row['linked_excerpts'] = $linkStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $linkRows = $linkStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $row['linked_excerpts'] = (new ControlledPublishingMccfLinkedManualService($this->pdo))
+            ->linkedSectionsForRequirement($requirementId);
+        $row['links'] = $linkRows;
 
         return $row;
     }

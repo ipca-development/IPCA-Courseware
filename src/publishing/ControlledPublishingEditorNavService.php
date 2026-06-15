@@ -68,10 +68,6 @@ final class ControlledPublishingEditorNavService
 
         $version = $this->manualStructure->resolveVersion($versionId);
         $manualCode = strtoupper(trim((string)(($version['manual_code'] ?? '') !== '' ? $version['manual_code'] : $bookKey)));
-        $sourceSetId = $this->manualStructure->resolveManualSourceSetIdPublic($versionId);
-        if ($sourceSetId > 0) {
-            $this->manualStructure->pruneInvalidCanonicalExcerpts($versionId);
-        }
         $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
 
         $tree = array();
@@ -240,14 +236,6 @@ final class ControlledPublishingEditorNavService
                 $sectionNumberDisplay,
                 $manualPart
             );
-            if ($navItems === array() && $sourceSetId > 0 && $chapterNumber > 0 && $manualPart > 0) {
-                $navItems = $this->manualStructure->listNavSubsectionsForChapter(
-                    $manualCode,
-                    $sourceSetId,
-                    $manualPart,
-                    $chapterNumber
-                );
-            }
 
             $subtitleChildren = $this->buildSubtitleNavTree($sectionId, $navItems);
 

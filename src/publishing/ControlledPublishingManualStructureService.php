@@ -99,7 +99,7 @@ final class ControlledPublishingManualStructureService
                 continue;
             }
 
-            $chapters = $this->listChaptersForPart($manualCode, $sourceSetId, $partIndex + 1);
+            $chapters = $this->listChaptersFromBookVersion($versionId, $partIndex + 1);
             if ($chapters === array()) {
                 continue;
             }
@@ -186,6 +186,37 @@ final class ControlledPublishingManualStructureService
         }
 
         return false;
+    }
+
+    /**
+     * @return list<array{chapter_number:int,title:string,nav_label:string}>
+     */
+    public function listChaptersFromBookVersion(int $versionId, int $manualPart): array
+    {
+        if ($versionId <= 0 || $manualPart <= 0) {
+            return array();
+        }
+
+        $chapters = array();
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
+            if (!$this->isCanonicalChapterSection($row)) {
+                continue;
+            }
+            $meta = $this->decodeMeta($row);
+            if ((int)($meta['manual_part'] ?? 0) !== $manualPart) {
+                continue;
+            }
+            $number = (int)($meta['chapter_number'] ?? 0);
+            if ($number <= 0) {
+                continue;
+            }
+            $title = $this->formatChapterTitle((string)($row['title'] ?? ''));
+            $chapters[$number] = $this->chapterDef($number, $title);
+        }
+
+        ksort($chapters, SORT_NUMERIC);
+
+        return array_values($chapters);
     }
 
     /**
@@ -977,48 +1008,9 @@ final class ControlledPublishingManualStructureService
         int $manualPart,
         int $chapterNumber
     ): array {
-        $manualCode = strtoupper(trim($manualCode));
-        $pattern = '^' . $chapterNumber . '\\.[0-9]+(\\.[0-9]+)*$';
-        $stmt = $this->pdo->prepare("
-            SELECT section_ref, title, body_text
-            FROM ipca_canonical_excerpts
-            WHERE source_set_id = :source_set_id
-              AND manual_code = :manual_code
-              AND manual_part = :manual_part
-              AND source_status = 'active'
-              AND section_ref REGEXP :pattern
-            ORDER BY section_ref
-        ");
-        $stmt->execute(array(
-            ':source_set_id' => $sourceSetId,
-            ':manual_code' => $manualCode,
-            ':manual_part' => (string)$manualPart,
-            ':pattern' => $pattern,
-        ));
+        unset($manualCode, $sourceSetId, $manualPart, $chapterNumber);
 
-        $items = array();
-        $seen = array();
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-            $ref = trim((string)($row['section_ref'] ?? ''));
-            $title = $this->resolveCanonicalExcerptTitle(
-                (string)($row['title'] ?? ''),
-                (string)($row['body_text'] ?? '')
-            );
-            if ($ref === '' || isset($seen[$ref])) {
-                continue;
-            }
-            if ($this->isSkippableNavExcerpt($ref, $title, $manualPart)) {
-                continue;
-            }
-            $seen[$ref] = true;
-            $items[] = array(
-                'section_ref' => $ref,
-                'title' => $title,
-                'nav_label' => $ref . ' ' . $title,
-            );
-        }
-
-        return $items;
+        return array();
     }
 
     /**

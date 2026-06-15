@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingMccfBrowserService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
+require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
+require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
 require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
@@ -365,18 +367,8 @@ final class ControlledPublishingMccfPreviewService
      */
     private function linkedExcerpts(int $requirementId): array
     {
-        $stmt = $this->pdo->prepare("
-            SELECT e.excerpt_key, e.title, e.section_ref, e.manual_part, e.body_text
-            FROM ipca_canonical_requirement_excerpt_links l
-            INNER JOIN ipca_canonical_excerpts e
-              ON e.id = l.excerpt_id AND e.source_status = 'active'
-            WHERE l.requirement_id = :requirement_id
-              AND l.source_status = 'active'
-            ORDER BY e.manual_part, e.section_ref, e.excerpt_key
-        ");
-        $stmt->execute(array(':requirement_id' => $requirementId));
-
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return (new ControlledPublishingMccfLinkedManualService($this->pdo))
+            ->linkedSectionsForRequirement($requirementId);
     }
 
     /**
@@ -415,7 +407,8 @@ final class ControlledPublishingMccfPreviewService
         $html = '';
 
         if ($bookVersionId > 0 && $sectionRef !== '') {
-            $match = $this->findBookSectionForRef($bookVersionId, $sectionRef);
+            $match = (new ControlledPublishingBookSectionIndexService($this->pdo))
+                ->findScrollTarget($bookVersionId, $sectionRef);
             if ($match !== null) {
                 $scrollAnchor = (string)($match['scroll_anchor'] ?? '');
                 $html = $this->renderBookSectionHtml($bookVersionId, (int)$match['section_id'], $scrollAnchor, $sectionRef);

@@ -3,19 +3,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
-require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
 
 /**
  * Resolve regulation obligation + manual coverage text and score semantic alignment.
  */
 final class ControlledPublishingMccfIntegrityContentService
 {
-    /** @var array<string,list<string>> */
-    private static array $chapterBodyCache = array();
-
-    /** @var array<string,string> */
-    private static array $bookTextCache = array();
-
     /** @var list<string> */
     private const STOPWORDS = array(
         'that', 'this', 'with', 'from', 'have', 'been', 'will', 'shall', 'should', 'would',
@@ -191,46 +185,32 @@ final class ControlledPublishingMccfIntegrityContentService
         int $bookVersionId,
         bool $includeBookBlocks = true
     ): string {
-        $chunks = array();
+        $index = new ControlledPublishingBookSectionIndexService($this->pdo);
+        $manualCode = strtoupper(trim((string)($requirement['manual_code'] ?? 'OM')));
+        if ($bookVersionId <= 0) {
+            $bookVersionId = $index->resolveBookVersionId($manualCode);
+        }
+
         $sectionRefs = array();
-
-        foreach ($linkedExcerpts as $excerpt) {
-            $ref = trim((string)($excerpt['section_ref'] ?? ''));
+        foreach ($linkedExcerpts as $section) {
+            $ref = rtrim(trim((string)($section['section_ref'] ?? '')), '.');
             if ($ref !== '') {
-                $sectionRefs[$ref] = true;
-            }
-            $body = trim((string)($excerpt['body_text'] ?? ''));
-            if ($body !== '') {
-                $chunks[] = $body;
+                $sectionRefs[] = $ref;
             }
         }
 
-        $chapterNums = $this->chapterNumbersFromManualRef((string)($requirement['manual_section_ref'] ?? ''));
-        if ($chapterNums !== array()) {
-            $chunks = array_merge($chunks, $this->canonicalExcerptBodiesForChapter(
-                (string)($requirement['manual_code'] ?? 'OM'),
-                $chapterNums
-            ));
-            foreach ($chapterNums as $num) {
-                $sectionRefs['__chapter__' . $num] = true;
-            }
-        } elseif ($sectionRefs !== array()) {
-            $chunks = array_merge($chunks, $this->canonicalExcerptBodiesForRefs(
-                (string)($requirement['manual_code'] ?? 'OM'),
-                array_keys($sectionRefs)
-            ));
+        if ($sectionRefs === array() || !$includeBookBlocks || $bookVersionId <= 0) {
+            $fallback = trim(implode("\n\n", array_filter(array_map(
+                static fn(array $row): string => trim((string)($row['body_text'] ?? '')),
+                $linkedExcerpts
+            ))));
+
+            return $fallback !== '' ? $fallback : trim((string)($requirement['manual_section_ref'] ?? ''));
         }
 
-        if ($includeBookBlocks && $bookVersionId > 0 && $sectionRefs !== array()) {
-            $bookText = $this->bookPlainTextForSectionRefs($bookVersionId, array_keys($sectionRefs));
-            if ($bookText !== '') {
-                $chunks[] = $bookText;
-            }
-        }
-
-        $merged = trim(preg_replace('/\s+/u', ' ', implode("\n\n", array_unique(array_filter($chunks)))) ?? '');
-        if ($merged !== '') {
-            return $merged;
+        $bookText = $index->plainTextForSectionRefs($bookVersionId, $sectionRefs, true);
+        if ($bookText !== '') {
+            return $bookText;
         }
 
         return trim((string)($requirement['manual_section_ref'] ?? ''));
@@ -367,233 +347,6 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         return trim(implode("\n", array_unique(array_filter($lines))));
-    }
-
-    /**
-     * @param list<int> $chapterNums
-     * @return list<string>
-     */
-    private function canonicalExcerptBodiesForChapter(string $manualCode, array $chapterNums): array
-    {
-        if ($chapterNums === array()) {
-            return array();
-        }
-
-        $manualCode = strtoupper(trim($manualCode));
-        sort($chapterNums);
-        $cacheKey = $manualCode . ':' . implode(',', $chapterNums);
-        if (isset(self::$chapterBodyCache[$cacheKey])) {
-            return self::$chapterBodyCache[$cacheKey];
-        }
-
-        try {
-            $conditions = array();
-            $params = array(':manual_code' => strtoupper(trim($manualCode)));
-            $i = 0;
-            foreach ($chapterNums as $num) {
-                $key = ':prefix' . $i++;
-                $conditions[] = 'section_ref LIKE ' . $key;
-                $params[$key] = (int)$num . '.%';
-            }
-            $stmt = $this->pdo->prepare('
-                SELECT body_text
-                FROM ipca_canonical_excerpts
-                WHERE manual_code = :manual_code
-                  AND source_status = \'active\'
-                  AND (' . implode(' OR ', $conditions) . ')
-                ORDER BY manual_part, section_ref
-            ');
-            $stmt->execute($params);
-
-            $out = array();
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-                $body = trim((string)($row['body_text'] ?? ''));
-                if ($body !== '') {
-                    $out[] = $body;
-                }
-            }
-
-            self::$chapterBodyCache[$cacheKey] = $out;
-
-            return $out;
-        } catch (Throwable) {
-            return array();
-        }
-    }
-
-    /**
-     * @param list<string> $sectionRefs
-     * @return list<string>
-     */
-    private function canonicalExcerptBodiesForRefs(string $manualCode, array $sectionRefs): array
-    {
-        if ($sectionRefs === array()) {
-            return array();
-        }
-
-        $chapterPrefixes = array();
-        foreach ($sectionRefs as $ref) {
-            if (preg_match('/^(\d+)\./', $ref, $m)) {
-                $chapterPrefixes[$m[1] . '.'] = true;
-            }
-        }
-
-        try {
-            if ($chapterPrefixes !== array()) {
-                $conditions = array();
-                $params = array(':manual_code' => strtoupper(trim($manualCode)));
-                $i = 0;
-                foreach (array_keys($chapterPrefixes) as $prefix) {
-                    $key = ':prefix' . $i++;
-                    $conditions[] = 'section_ref LIKE ' . $key;
-                    $params[$key] = $prefix . '%';
-                }
-                $sql = '
-                    SELECT body_text, section_ref
-                    FROM ipca_canonical_excerpts
-                    WHERE manual_code = :manual_code
-                      AND source_status = \'active\'
-                      AND (' . implode(' OR ', $conditions) . ')
-                    ORDER BY manual_part, section_ref
-                ';
-                $stmt = $this->pdo->prepare($sql);
-                $stmt->execute($params);
-            } else {
-                $in = implode(',', array_fill(0, count($sectionRefs), '?'));
-                $stmt = $this->pdo->prepare("
-                    SELECT body_text, section_ref
-                    FROM ipca_canonical_excerpts
-                    WHERE manual_code = ?
-                      AND source_status = 'active'
-                      AND section_ref IN ({$in})
-                    ORDER BY section_ref
-                ");
-                $stmt->execute(array_merge(array(strtoupper(trim($manualCode))), $sectionRefs));
-            }
-
-            $out = array();
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-                $body = trim((string)($row['body_text'] ?? ''));
-                if ($body !== '') {
-                    $out[] = $body;
-                }
-            }
-
-            return $out;
-        } catch (Throwable) {
-            return array();
-        }
-    }
-
-    /**
-     * @param list<string> $sectionRefs
-     */
-    private function bookPlainTextForSectionRefs(int $bookVersionId, array $sectionRefs): string
-    {
-        if ($sectionRefs === array()) {
-            return '';
-        }
-
-        sort($sectionRefs);
-        $cacheKey = $bookVersionId . ':' . implode('|', $sectionRefs);
-        if (isset(self::$bookTextCache[$cacheKey])) {
-            return self::$bookTextCache[$cacheKey];
-        }
-
-        $blocksSvc = new ControlledPublishingBlockService($this->pdo);
-        $stmt = $this->pdo->prepare("
-            SELECT b.section_id, b.payload_json, b.block_type
-            FROM ipca_publishing_book_blocks b
-            WHERE b.book_version_id = :version_id
-            ORDER BY b.section_id, b.sort_order, b.id
-        ");
-        $stmt->execute(array(':version_id' => $bookVersionId));
-
-        $refsWanted = array();
-        foreach ($sectionRefs as $ref) {
-            $refsWanted[strtolower(rtrim($ref, '.'))] = true;
-            if (preg_match('/^(\d+)\./', $ref, $m)) {
-                $refsWanted['__chapter__' . $m[1]] = true;
-            }
-        }
-
-        $sectionIds = array();
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-            $payload = json_decode((string)($row['payload_json'] ?? ''), true);
-            if (!is_array($payload)) {
-                continue;
-            }
-            $canonRef = strtolower(rtrim(trim((string)($payload['canonical_section_ref'] ?? '')), '.'));
-            if ($canonRef === '') {
-                continue;
-            }
-            $match = isset($refsWanted[$canonRef]);
-            if (!$match && preg_match('/^(\d+)\./', $canonRef, $m)) {
-                $match = isset($refsWanted['__chapter__' . $m[1]]);
-            }
-            if ($match) {
-                $sectionIds[(int)$row['section_id']] = true;
-            }
-        }
-
-        $chunks = array();
-        foreach (array_keys($sectionIds) as $sectionId) {
-            foreach ($blocksSvc->listSectionBlocks($sectionId) as $block) {
-                $text = $this->plainTextFromBlock($block);
-                if ($text !== '') {
-                    $chunks[] = $text;
-                }
-            }
-        }
-
-        return self::$bookTextCache[$cacheKey] = trim(implode("\n", $chunks));
-    }
-
-    /**
-     * @param array<string,mixed> $block
-     */
-    private function plainTextFromBlock(array $block): string
-    {
-        $payload = json_decode((string)($block['payload_json'] ?? ''), true);
-        if (!is_array($payload)) {
-            return '';
-        }
-
-        $type = (string)($block['block_type'] ?? $payload['type'] ?? '');
-        if ($type === 'heading' || $type === 'paragraph') {
-            return trim(strip_tags((string)($payload['text'] ?? $payload['text_html'] ?? '')));
-        }
-        if ($type === 'list') {
-            $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
-            $lines = array();
-            foreach ($items as $item) {
-                if (is_string($item)) {
-                    $lines[] = trim(strip_tags($item));
-                } elseif (is_array($item)) {
-                    $lines[] = trim(strip_tags((string)($item['text'] ?? $item['text_html'] ?? '')));
-                }
-            }
-
-            return trim(implode("\n", array_filter($lines)));
-        }
-
-        return trim(strip_tags((string)($payload['text'] ?? $payload['text_html'] ?? '')));
-    }
-
-    /**
-     * @return list<int>
-     */
-    private function chapterNumbersFromManualRef(string $manualRef): array
-    {
-        $manualRef = trim($manualRef);
-        if ($manualRef === '') {
-            return array();
-        }
-        if (!preg_match('/\bch(?:apter)?\.?\s*(\d+)\b/iu', $manualRef, $m)) {
-            return array();
-        }
-
-        return array((int)$m[1]);
     }
 
     /**

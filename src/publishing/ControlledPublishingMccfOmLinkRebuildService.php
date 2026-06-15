@@ -22,6 +22,14 @@ final class ControlledPublishingMccfOmLinkRebuildService
      */
     public function rebuild(bool $apply = false, bool $activateExcerpts = false): array
     {
+        return array(
+            'ok' => false,
+            'error' => 'Deprecated: OM excerpt link rebuild uses legacy canonical excerpts. '
+                . 'MCCF manual links are maintained against the live published book via MCCF browser.',
+            'apply' => $apply,
+            'activate_excerpts' => $activateExcerpts,
+        );
+
         $ctx = $this->resolveContext();
         if ($ctx === null) {
             return array(

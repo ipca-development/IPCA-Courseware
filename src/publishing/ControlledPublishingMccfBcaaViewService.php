@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingMccfBrowserService.php';
 require_once __DIR__ . '/ControlledPublishingMccfIntegrityService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
+require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
 
 /**
  * BCAA MCCF checklist presentation: formatting, enrichment, merged rows.
@@ -237,35 +238,8 @@ final class ControlledPublishingMccfBcaaViewService
      */
     private function loadLinkedExcerpts(array $requirementIds): array
     {
-        if ($requirementIds === array()) {
-            return array();
-        }
-        $in = implode(',', array_map('intval', $requirementIds));
-        $stmt = $this->pdo->query("
-            SELECT
-              l.requirement_id,
-              e.excerpt_key,
-              e.title,
-              e.section_ref,
-              e.manual_part,
-              e.manual_code,
-              e.body_text
-            FROM ipca_canonical_requirement_excerpt_links l
-            INNER JOIN ipca_canonical_excerpts e
-              ON e.id = l.excerpt_id AND e.source_status = 'active'
-            WHERE l.requirement_id IN ({$in})
-              AND l.source_status = 'active'
-            ORDER BY l.requirement_id, e.manual_part, e.section_ref
-        ");
-
-        $map = array();
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-            $rid = (int)$row['requirement_id'];
-            unset($row['requirement_id']);
-            $map[$rid][] = $row;
-        }
-
-        return $map;
+        return (new ControlledPublishingMccfLinkedManualService($this->pdo))
+            ->linkedSectionsForRequirements($requirementIds);
     }
 
     /**

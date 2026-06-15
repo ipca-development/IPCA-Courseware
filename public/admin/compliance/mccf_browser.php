@@ -83,18 +83,9 @@ $manualDisplayTitle = ControlledPublishingMccfBcaaViewService::manualDisplayTitl
 
 $detailIntegrity = null;
 if (is_array($detail)) {
-    $detailExcerptsForScore = array();
-    $detailStmt = $pdo->prepare("
-        SELECT e.excerpt_key, e.title, e.section_ref, e.manual_part, e.body_text
-        FROM ipca_canonical_requirement_excerpt_links l
-        INNER JOIN ipca_canonical_excerpts e
-          ON e.id = l.excerpt_id AND e.source_status = 'active'
-        WHERE l.requirement_id = :requirement_id
-          AND l.source_status = 'active'
-        ORDER BY e.manual_part, e.section_ref
-    ");
-    $detailStmt->execute(array(':requirement_id' => $requirementId));
-    $detailExcerptsForScore = $detailStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    require_once __DIR__ . '/../../src/publishing/ControlledPublishingMccfLinkedManualService.php';
+    $detailExcerptsForScore = (new ControlledPublishingMccfLinkedManualService($pdo))
+        ->linkedSectionsForRequirement($requirementId);
 
     $detailManualCode = strtoupper(trim((string)($detail['manual_code'] ?? 'OM')));
     $detailVersionLabel = $detailManualCode === 'OMM' ? '4.0' : '6.0';
@@ -623,7 +614,7 @@ compliance_page_open(array(
 <div class="mccf-layout">
   <?php if ($sourceSets === array()): ?>
     <section class="cmp-card">
-      <p style="margin:0;">No MCCF source sets found. Run the legacy canonical sync first (<code>php scripts/sync_legacy_compliance_canonical_sources.php --apply</code>).</p>
+      <p style="margin:0;">No MCCF source sets found. Import the BCAA MCCF checklist (DOCX) into canonical requirements first.</p>
     </section>
   <?php else: ?>
 
@@ -1247,14 +1238,15 @@ compliance_page_open(array(
     return html;
   }
 
-  function renderSectionOptions(sections, selectedId) {
+  function renderSectionOptions(sections, selectedPickerId) {
     if (!sections || !sections.length) {
       return '<p style="margin:10px;padding:0 2px;font-size:11px;color:#64748b;">No sections at this level.</p>';
     }
     var html = '<ul class="mccf-link-section-list">';
     sections.forEach(function (section) {
-      var selected = selectedId && parseInt(selectedId, 10) === parseInt(section.id, 10);
-      html += '<li class="mccf-link-section-row' + (selected ? ' is-selected' : '') + '" data-section-id="' + section.id + '" data-section-ref="' + escapeHtml(section.section_ref || '') + '">'
+      var pickerId = section.id || '';
+      var selected = selectedPickerId && String(selectedPickerId) === String(pickerId);
+      html += '<li class="mccf-link-section-row' + (selected ? ' is-selected' : '') + '" data-section-id="' + escapeHtml(pickerId) + '" data-section-ref="' + escapeHtml(section.section_ref || '') + '">'
         + '<div class="mccf-link-section-pick">'
         + '<span class="mccf-link-section-title">' + escapeHtml(section.label || ('§' + section.section_ref)) + '</span>'
         + (section.preview ? ('<span class="mccf-link-section-snippet">' + escapeHtml(section.preview) + '</span>') : '')
@@ -1305,7 +1297,7 @@ compliance_page_open(array(
       + '<div class="mccf-link-picker-main">'
       + '<div class="mccf-link-section-panel">'
       + '<div class="mccf-link-panel-head"><strong>Sections</strong>' + renderBreadcrumb(state) + '</div>'
-      + '<div id="mccfSectionList">' + renderSectionOptions(state.sections, state.picker.selected_excerpt_id) + '</div>'
+      + '<div id="mccfSectionList">' + renderSectionOptions(state.sections, state.picker.selected_section_picker_id) + '</div>'
       + '</div>'
       + '<div class="mccf-link-preview-panel">'
       + '<div class="mccf-link-panel-head"><strong>Preview</strong></div>'
@@ -1314,7 +1306,7 @@ compliance_page_open(array(
       + '</div>'
       + '<div class="mccf-link-editor-foot">'
       + (state.editingLinkId ? '<button type="button" class="mccf-pair-btn" data-link-action="cancel-edit">Cancel edit</button>' : '')
-      + '<button type="button" class="mccf-pair-btn" data-link-action="save-link"' + (state.picker.selected_excerpt_id ? '' : ' disabled') + '>' + (editing ? 'Save change' : 'Add reference') + '</button>'
+      + '<button type="button" class="mccf-pair-btn" data-link-action="save-link"' + (state.picker.selected_section_ref ? '' : ' disabled') + '>' + (editing ? 'Save change' : 'Add reference') + '</button>'
       + '</div>'
       + '</section>';
   }
@@ -1346,9 +1338,9 @@ compliance_page_open(array(
     }).then(function (data) {
       if (data.ok) {
         linkEditorState.sections = data.sections || [];
-        if (linkEditorState.picker.selected_excerpt_id) {
+        if (linkEditorState.picker.selected_section_picker_id) {
           var selected = linkEditorState.sections.find(function (s) {
-            return parseInt(s.id, 10) === parseInt(linkEditorState.picker.selected_excerpt_id, 10);
+            return String(s.id) === String(linkEditorState.picker.selected_section_picker_id);
           });
           linkEditorState.picker.preview = selected ? selected.preview : linkEditorState.picker.preview;
         }
@@ -1370,7 +1362,8 @@ compliance_page_open(array(
       linkEditorState.picker.chapter = refParts[0];
       linkEditorState.picker.parent_section_ref = refParts.length > 2 ? refParts.slice(0, -1).join('.') : '';
     }
-    linkEditorState.picker.selected_excerpt_id = parseInt(editing.excerpt_id || '0', 10) || null;
+    linkEditorState.picker.selected_section_picker_id = editing.section_picker_id || null;
+    linkEditorState.picker.selected_section_ref = editing.section_ref || null;
     linkEditorState.picker.preview = editing.excerpt_preview || '';
     return loadLinkEditorParts().then(function () {
       return loadLinkEditorChapters();
@@ -1406,7 +1399,8 @@ compliance_page_open(array(
           part: '',
           chapter: '',
           parent_section_ref: '',
-          selected_excerpt_id: null,
+          selected_section_picker_id: null,
+          selected_section_ref: null,
           preview: ''
         }
       };
@@ -1455,7 +1449,8 @@ compliance_page_open(array(
         linkEditorState.picker.part = '';
         linkEditorState.picker.chapter = '';
         linkEditorState.picker.parent_section_ref = '';
-        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.selected_section_picker_id = null;
+        linkEditorState.picker.selected_section_ref = null;
         linkEditorState.picker.preview = '';
         loadLinkEditorParts().then(function () {
           if (linkEditorState.parts.length) linkEditorState.picker.part = linkEditorState.parts[0].part;
@@ -1468,7 +1463,8 @@ compliance_page_open(array(
         linkEditorState.picker.part = event.target.value;
         linkEditorState.picker.chapter = '';
         linkEditorState.picker.parent_section_ref = '';
-        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.selected_section_picker_id = null;
+        linkEditorState.picker.selected_section_ref = null;
         linkEditorState.picker.preview = '';
         loadLinkEditorChapters().then(function () {
           if (linkEditorState.chapters.length) linkEditorState.picker.chapter = linkEditorState.chapters[0].chapter;
@@ -1477,7 +1473,8 @@ compliance_page_open(array(
       } else if (event.target.id === 'mccfPickChapter') {
         linkEditorState.picker.chapter = event.target.value;
         linkEditorState.picker.parent_section_ref = '';
-        linkEditorState.picker.selected_excerpt_id = null;
+        linkEditorState.picker.selected_section_picker_id = null;
+        linkEditorState.picker.selected_section_ref = null;
         linkEditorState.picker.preview = '';
         loadLinkEditorSections().then(renderLinkEditorForm);
       }
@@ -1493,7 +1490,8 @@ compliance_page_open(array(
           event.preventDefault();
           event.stopPropagation();
           linkEditorState.picker.parent_section_ref = actionBtn.getAttribute('data-drill-ref') || '';
-          linkEditorState.picker.selected_excerpt_id = null;
+          linkEditorState.picker.selected_section_picker_id = null;
+        linkEditorState.picker.selected_section_ref = null;
           linkEditorState.picker.preview = '';
           loadLinkEditorSections().then(renderLinkEditorForm);
           return;
@@ -1507,7 +1505,8 @@ compliance_page_open(array(
           } else {
             linkEditorState.picker.parent_section_ref = '';
           }
-          linkEditorState.picker.selected_excerpt_id = null;
+          linkEditorState.picker.selected_section_picker_id = null;
+        linkEditorState.picker.selected_section_ref = null;
           linkEditorState.picker.preview = '';
           loadLinkEditorSections().then(renderLinkEditorForm);
           return;
@@ -1517,9 +1516,10 @@ compliance_page_open(array(
       var sectionRow = event.target.closest('.mccf-link-section-row');
       if (sectionRow && !event.target.closest('[data-link-action="drill"]')) {
         event.preventDefault();
-        linkEditorState.picker.selected_excerpt_id = parseInt(sectionRow.getAttribute('data-section-id') || '0', 10);
+        linkEditorState.picker.selected_section_picker_id = sectionRow.getAttribute('data-section-id') || null;
+        linkEditorState.picker.selected_section_ref = sectionRow.getAttribute('data-section-ref') || null;
         var selected = (linkEditorState.sections || []).find(function (s) {
-          return parseInt(s.id, 10) === linkEditorState.picker.selected_excerpt_id;
+          return String(s.id) === String(linkEditorState.picker.selected_section_picker_id);
         });
         linkEditorState.picker.preview = selected ? selected.preview : '';
         renderLinkEditorForm();
@@ -1558,11 +1558,14 @@ compliance_page_open(array(
           window.location.reload();
         });
       } else if (action === 'save-link') {
-        if (!linkEditorState.picker.selected_excerpt_id) return;
+        if (!linkEditorState.picker.selected_section_ref) return;
         var linkTypeEl = document.getElementById('mccfPickLinkType');
         var linkType = linkTypeEl ? linkTypeEl.value : 'PRIMARY';
         var payload = {
-          excerpt_id: linkEditorState.picker.selected_excerpt_id,
+          manual_code: linkEditorState.picker.manual_code,
+          part: linkEditorState.picker.part,
+          section_ref: linkEditorState.picker.selected_section_ref,
+          section_picker_id: linkEditorState.picker.selected_section_picker_id,
           link_type: linkType
         };
         var promise;

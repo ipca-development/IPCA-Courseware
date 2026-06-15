@@ -97,6 +97,19 @@ try {
             if ($requirementId <= 0) {
                 mccf_api_json(400, array('ok' => false, 'error' => 'requirement_id is required.'));
             }
+            $manualCode = trim((string)($input['manual_code'] ?? 'OM'));
+            $part = trim((string)($input['part'] ?? ''));
+            $sectionRef = trim((string)($input['section_ref'] ?? ''));
+            if ($sectionRef !== '') {
+                mccf_api_json(200, $manualLinks->addLinkBySection(
+                    $requirementId,
+                    $manualCode,
+                    $part,
+                    $sectionRef,
+                    trim((string)($input['link_type'] ?? 'PRIMARY')),
+                    isset($input['notes']) ? (string)$input['notes'] : null
+                ));
+            }
             mccf_api_json(200, $manualLinks->addLink(
                 $requirementId,
                 (int)($input['excerpt_id'] ?? 0),
@@ -111,8 +124,17 @@ try {
                 mccf_api_json(400, array('ok' => false, 'error' => 'link_id is required.'));
             }
             $fields = array();
-            if (isset($input['excerpt_id'])) {
-                $fields['excerpt_id'] = (int)$input['excerpt_id'];
+            if (isset($input['manual_code'])) {
+                $fields['manual_code'] = (string)$input['manual_code'];
+            }
+            if (isset($input['part'])) {
+                $fields['part'] = (string)$input['part'];
+            }
+            if (isset($input['section_ref'])) {
+                $fields['section_ref'] = (string)$input['section_ref'];
+            }
+            if (isset($input['section_picker_id'])) {
+                $fields['section_picker_id'] = (string)$input['section_picker_id'];
             }
             if (isset($input['link_type'])) {
                 $fields['link_type'] = (string)$input['link_type'];
