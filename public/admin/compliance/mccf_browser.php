@@ -887,10 +887,11 @@ compliance_page_open(array(
                       </td>
                       <td class="mccf-col-applicable"><?= mccf_applicable_pill_html($row) ?></td>
                       <td class="mccf-col-remarks"><?= h((string)($row['remarks'] ?? '')) ?></td>
-                      <td class="mccf-col-integrity">
-                        <?php if (is_array($row['integrity'] ?? null)): ?>
-                          <?= mccf_integrity_bar_html($row['integrity'], true) ?>
-                        <?php endif; ?>
+                      <td class="mccf-col-integrity" data-integrity-req="<?= $rid ?>"<?= $needsRegReview ? ' data-needs-reg-review="1"' : '' ?>>
+                        <div class="mccf-integrity-row" title="Loading integrity…">
+                          <div class="mccf-integrity-bar"><span class="muted" style="width:0;"></span></div>
+                          <div class="mccf-integrity-value">…</div>
+                        </div>
                         <?php if ($needsRegReview): ?>
                           <span class="mccf-review-flag">Reg review</span>
                         <?php endif; ?>
@@ -1037,16 +1038,18 @@ compliance_page_open(array(
     return div.innerHTML;
   }
 
-  function integrityBarHtml(integrity) {
+  function integrityBarHtml(integrity, compact) {
     if (!integrity) return '';
     var score = Math.max(0, Math.min(100, parseInt(integrity.score || 0, 10)));
     var tone = integrity.tone || 'muted';
     var barCls = tone === 'ok' ? 'ok' : (tone === 'warn' ? 'warn' : (tone === 'bad' ? 'danger' : 'muted'));
-    return '<div class="mccf-integrity-row" title="' + escapeHtml((integrity.label || '') + ' — ' + score + '%') + '">'
+    var html = '<div class="mccf-integrity-row" title="' + escapeHtml((integrity.label || '') + ' — ' + score + '%') + '">'
       + '<div class="mccf-integrity-bar"><span class="' + barCls + '" style="width:' + score + '%;"></span></div>'
-      + '<div class="mccf-integrity-value">' + score + '%</div>'
-      + '<div class="mccf-integrity-label">' + escapeHtml(integrity.label || '') + '</div>'
-      + '</div>';
+      + '<div class="mccf-integrity-value">' + score + '%</div>';
+    if (!compact) {
+      html += '<div class="mccf-integrity-label">' + escapeHtml(integrity.label || '') + '</div>';
+    }
+    return html + '</div>';
   }
 
   function requirementContextHtml(req, integrity) {
@@ -1071,7 +1074,7 @@ compliance_page_open(array(
     if (integrity) {
       html += '<div class="mccf-modal-integrity">';
       html += '<div class="mccf-modal-integrity-head"><strong>AI integrity</strong></div>';
-      html += integrityBarHtml(integrity);
+      html += integrityBarHtml(integrity, false);
       if (integrity.reasons && integrity.reasons.length) {
         html += '<ul class="mccf-modal-integrity-reasons">';
         integrity.reasons.forEach(function (reason) {
@@ -1666,6 +1669,50 @@ compliance_page_open(array(
   } else if (pairsGrid) {
     pairsGrid.querySelectorAll('.mccf-pair-card').forEach(fillPairCard);
   }
+
+  function loadIntegrityScoresAsync() {
+    var cells = document.querySelectorAll('[data-integrity-req]');
+    if (!cells.length) return;
+    var ids = [];
+    cells.forEach(function (cell) {
+      var id = parseInt(cell.getAttribute('data-integrity-req') || '0', 10);
+      if (id > 0) ids.push(id);
+    });
+    if (!ids.length) return;
+
+    var batchSize = 40;
+    var offset = 0;
+    function loadBatch() {
+      var batch = ids.slice(offset, offset + batchSize);
+      if (!batch.length) return;
+      apiCall('integrity_scores', { requirement_ids: batch }).then(function (data) {
+        if (data.ok && data.scores) {
+          Object.keys(data.scores).forEach(function (rid) {
+            var cell = document.querySelector('[data-integrity-req="' + rid + '"]');
+            if (!cell) return;
+            var needsReview = cell.getAttribute('data-needs-reg-review') === '1';
+            cell.innerHTML = integrityBarHtml(data.scores[rid], true);
+            if (needsReview) {
+              var flag = document.createElement('span');
+              flag.className = 'mccf-review-flag';
+              flag.textContent = 'Reg review';
+              cell.appendChild(flag);
+            }
+          });
+        }
+        offset += batchSize;
+        if (offset < ids.length) {
+          loadBatch();
+        }
+      }).catch(function () {
+        offset += batchSize;
+        if (offset < ids.length) loadBatch();
+      });
+    }
+    loadBatch();
+  }
+
+  loadIntegrityScoresAsync();
 })();
 </script>
 <?php
