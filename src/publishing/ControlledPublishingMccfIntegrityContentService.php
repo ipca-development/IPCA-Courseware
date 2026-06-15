@@ -4,8 +4,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
-require_once __DIR__ . '/../easa_erules_xml_import.php';
-require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
 /**
  * Resolve regulation obligation + manual coverage text and score semantic alignment.
@@ -36,7 +34,8 @@ final class ControlledPublishingMccfIntegrityContentService
         array $requirement,
         array $linkedExcerpts,
         array $regulationLinks,
-        int $bookVersionId = 0
+        int $bookVersionId = 0,
+        bool $resolveEasa = true
     ): array {
         $applicable = strtoupper(trim((string)($requirement['applicable'] ?? '')));
         $isApplicable = ($applicable === '' || $applicable === 'YES' || $applicable === 'Y');
@@ -63,7 +62,7 @@ final class ControlledPublishingMccfIntegrityContentService
             ));
         }
 
-        $obligation = $this->regulationObligationText($requirement, $regulationLinks);
+        $obligation = $this->regulationObligationText($requirement, $regulationLinks, $resolveEasa);
         $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId);
 
         if ($obligation !== '') {
@@ -105,29 +104,34 @@ final class ControlledPublishingMccfIntegrityContentService
      * @param array<string,mixed> $requirement
      * @param list<array<string,mixed>> $regulationLinks
      */
-    public function regulationObligationText(array $requirement, array $regulationLinks): string
-    {
+    public function regulationObligationText(
+        array $requirement,
+        array $regulationLinks,
+        bool $resolveEasa = true
+    ): string {
         $parts = array();
         $regRef = trim((string)($requirement['regulation_ref'] ?? ''));
         $parsed = ControlledPublishingMccfRegulationLinkService::parseRegulationRef($regRef);
 
-        foreach ($regulationLinks as $link) {
-            if (($link['match_confidence'] ?? '') === 'UNRESOLVED') {
-                continue;
-            }
-            $batchId = (int)($link['target_batch_id'] ?? 0);
-            $nodeUid = trim((string)($link['target_node_uid'] ?? ''));
-            if ($batchId <= 0 || $nodeUid === '') {
-                continue;
-            }
-            $token = (string)($link['rule_token'] ?? '');
-            $text = $this->obligationFromEasaNode($batchId, $nodeUid, $token);
-            if ($text !== '') {
-                $parts[] = $text;
+        if ($resolveEasa) {
+            foreach ($regulationLinks as $link) {
+                if (($link['match_confidence'] ?? '') === 'UNRESOLVED') {
+                    continue;
+                }
+                $batchId = (int)($link['target_batch_id'] ?? 0);
+                $nodeUid = trim((string)($link['target_node_uid'] ?? ''));
+                if ($batchId <= 0 || $nodeUid === '') {
+                    continue;
+                }
+                $token = (string)($link['rule_token'] ?? '');
+                $text = $this->obligationFromEasaNode($batchId, $nodeUid, $token);
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
             }
         }
 
-        if ($parts === array() && $parsed !== array()) {
+        if ($parts === array() && $parsed !== array() && $resolveEasa) {
             $regSvc = new ControlledPublishingMccfRegulationLinkService($this->pdo);
             foreach ($parsed as $tokenRow) {
                 $resolved = $regSvc->resolveEasaNode(
@@ -305,6 +309,9 @@ final class ControlledPublishingMccfIntegrityContentService
         if ($batchId <= 0 || $nodeUid === '') {
             return '';
         }
+
+        require_once __DIR__ . '/../easa_erules_xml_import.php';
+        require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
         try {
             $detail = rl_easa_api_node_detail_build($this->pdo, $batchId, $nodeUid);
@@ -662,7 +669,7 @@ final class ControlledPublishingMccfIntegrityContentService
     /**
      * @return list<string>
      */
-    private function markerPathFromToken(string $token, string $nodeTitle): string
+    private function markerPathFromToken(string $token, string $nodeTitle): array
     {
         preg_match_all('/\(([A-Za-z0-9]+)\)/', strtoupper($token), $matches);
         $path = $matches[1] ?? array();
