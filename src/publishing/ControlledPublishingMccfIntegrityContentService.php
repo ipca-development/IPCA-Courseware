@@ -1,0 +1,732 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
+require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
+require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/../easa_erules_xml_import.php';
+require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
+
+/**
+ * Resolve regulation obligation + manual coverage text and score semantic alignment.
+ */
+final class ControlledPublishingMccfIntegrityContentService
+{
+    /** @var list<string> */
+    private const STOPWORDS = array(
+        'that', 'this', 'with', 'from', 'have', 'been', 'will', 'shall', 'should', 'would',
+        'their', 'there', 'which', 'when', 'what', 'where', 'while', 'about', 'into', 'upon',
+        'under', 'over', 'after', 'before', 'through', 'during', 'within', 'without', 'other',
+        'also', 'only', 'such', 'than', 'then', 'them', 'they', 'your', 'must', 'required',
+        'requirements', 'requirement', 'manual', 'operations', 'training', 'approved', 'following',
+        'accordance', 'accordance', 'organization', 'organisation', 'center', 'centre',
+        'trained',
+    );
+
+    public function __construct(private PDO $pdo)
+    {
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @param list<array<string,mixed>> $linkedExcerpts
+     * @return array{score:int,label:string,tone:string,breakdown:array<string,int>,reasons:list<string>}
+     */
+    public function scoreRequirement(
+        array $requirement,
+        array $linkedExcerpts,
+        array $regulationLinks,
+        int $bookVersionId = 0
+    ): array {
+        $applicable = strtoupper(trim((string)($requirement['applicable'] ?? '')));
+        $isApplicable = ($applicable === '' || $applicable === 'YES' || $applicable === 'Y');
+        $manualRef = trim((string)($requirement['manual_section_ref'] ?? ''));
+        $unlinkable = $manualRef === ''
+            || strcasecmp($manualRef, 'No procedure') === 0
+            || stripos($manualRef, 'Headers Parts') === 0;
+
+        $breakdown = array(
+            'regulation_obligation' => 0,
+            'manual_coverage' => 0,
+            'content_alignment' => 0,
+        );
+
+        if ($unlinkable && !$isApplicable) {
+            return $this->pack(85, 'N/A — not applicable', 'muted', $breakdown, array(
+                'Marked not applicable on the MCCF checklist.',
+            ));
+        }
+
+        if ($unlinkable && $isApplicable) {
+            return $this->pack(25, 'Header / scope item', 'warn', $breakdown, array(
+                'Scope/header row without a linkable OM section reference.',
+            ));
+        }
+
+        $obligation = $this->regulationObligationText($requirement, $regulationLinks);
+        $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId);
+
+        if ($obligation !== '') {
+            $breakdown['regulation_obligation'] = 15;
+        }
+        if (strlen(trim($manualText)) >= 120) {
+            $breakdown['manual_coverage'] = 15;
+        } elseif (strlen(trim($manualText)) >= 40) {
+            $breakdown['manual_coverage'] = 8;
+        }
+
+        $alignment = $this->scoreContentAlignment($obligation, $manualText, $requirement);
+        $breakdown['content_alignment'] = $alignment['score'];
+
+        $score = min(100, array_sum($breakdown));
+        if (!$isApplicable) {
+            $score = max($score, 70);
+        }
+
+        $reasons = $alignment['reasons'];
+        if ($obligation === '') {
+            $reasons[] = 'Could not extract the specific regulatory obligation text for comparison.';
+        }
+        if (trim($manualText) === '') {
+            $reasons[] = 'No manual text could be loaded for the linked OM section(s).';
+        }
+
+        if ($score >= 80) {
+            return $this->pack($score, 'Strong coverage', 'ok', $breakdown, $reasons);
+        }
+        if ($score >= 55) {
+            return $this->pack($score, 'Partial coverage', 'warn', $breakdown, $reasons);
+        }
+
+        return $this->pack($score, 'Gap — review required', 'bad', $breakdown, $reasons);
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @param list<array<string,mixed>> $regulationLinks
+     */
+    public function regulationObligationText(array $requirement, array $regulationLinks): string
+    {
+        $parts = array();
+        $regRef = trim((string)($requirement['regulation_ref'] ?? ''));
+        $parsed = ControlledPublishingMccfRegulationLinkService::parseRegulationRef($regRef);
+
+        foreach ($regulationLinks as $link) {
+            if (($link['match_confidence'] ?? '') === 'UNRESOLVED') {
+                continue;
+            }
+            $batchId = (int)($link['target_batch_id'] ?? 0);
+            $nodeUid = trim((string)($link['target_node_uid'] ?? ''));
+            if ($batchId <= 0 || $nodeUid === '') {
+                continue;
+            }
+            $token = (string)($link['rule_token'] ?? '');
+            $text = $this->obligationFromEasaNode($batchId, $nodeUid, $token);
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+
+        if ($parts === array() && $parsed !== array()) {
+            $regSvc = new ControlledPublishingMccfRegulationLinkService($this->pdo);
+            foreach ($parsed as $tokenRow) {
+                $resolved = $regSvc->resolveEasaNode(
+                    (string)$tokenRow['token'],
+                    $tokenRow['prefix'] ?? null,
+                    (string)($tokenRow['role'] ?? 'PRIMARY'),
+                    (string)($tokenRow['citation'] ?? '')
+                );
+                if ($resolved === null) {
+                    continue;
+                }
+                $text = $this->obligationFromEasaNode(
+                    (int)($resolved['batch_id'] ?? 0),
+                    (string)($resolved['node_uid'] ?? ''),
+                    (string)$tokenRow['token']
+                );
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
+            }
+        }
+
+        if ($parts === array()) {
+            $fallback = array();
+            if ($regRef !== '') {
+                $fallback[] = $regRef;
+            }
+            $subject = trim((string)($requirement['subject'] ?? ''));
+            if ($subject !== '') {
+                $fallback[] = $subject;
+            }
+            $reqText = trim((string)($requirement['requirement_text'] ?? ''));
+            if ($reqText !== '') {
+                $fallback[] = $reqText;
+            }
+
+            return implode("\n", $fallback);
+        }
+
+        return implode("\n", array_unique($parts));
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @param list<array<string,mixed>> $linkedExcerpts
+     */
+    public function manualCoverageText(array $requirement, array $linkedExcerpts, int $bookVersionId): string
+    {
+        $chunks = array();
+        $sectionRefs = array();
+
+        foreach ($linkedExcerpts as $excerpt) {
+            $ref = trim((string)($excerpt['section_ref'] ?? ''));
+            if ($ref !== '') {
+                $sectionRefs[$ref] = true;
+            }
+            $body = trim((string)($excerpt['body_text'] ?? ''));
+            if ($body !== '') {
+                $chunks[] = $body;
+            }
+        }
+
+        $chapterNums = $this->chapterNumbersFromManualRef((string)($requirement['manual_section_ref'] ?? ''));
+        if ($chapterNums !== array()) {
+            $chunks = array_merge($chunks, $this->canonicalExcerptBodiesForChapter(
+                (string)($requirement['manual_code'] ?? 'OM'),
+                $chapterNums
+            ));
+            foreach ($chapterNums as $num) {
+                $sectionRefs['__chapter__' . $num] = true;
+            }
+        } elseif ($sectionRefs !== array()) {
+            $chunks = array_merge($chunks, $this->canonicalExcerptBodiesForRefs(
+                (string)($requirement['manual_code'] ?? 'OM'),
+                array_keys($sectionRefs)
+            ));
+        }
+
+        if ($bookVersionId > 0 && $sectionRefs !== array()) {
+            $bookText = $this->bookPlainTextForSectionRefs($bookVersionId, array_keys($sectionRefs));
+            if ($bookText !== '') {
+                $chunks[] = $bookText;
+            }
+        }
+
+        $merged = trim(preg_replace('/\s+/u', ' ', implode("\n\n", array_unique(array_filter($chunks)))) ?? '');
+        if ($merged !== '') {
+            return $merged;
+        }
+
+        return trim((string)($requirement['manual_section_ref'] ?? ''));
+    }
+
+    /**
+     * @return array{score:int,reasons:list<string>}
+     */
+    public function scoreContentAlignment(string $obligation, string $manual, array $requirement): array
+    {
+        $obligation = trim($obligation);
+        $manual = trim($manual);
+        $reasons = array();
+
+        if ($obligation === '' || $manual === '') {
+            return array(
+                'score' => 0,
+                'reasons' => array('Insufficient regulation or manual text to compare content.'),
+            );
+        }
+
+        $concepts = $this->extractConcepts($obligation, $requirement);
+        if ($concepts === array()) {
+            return array(
+                'score' => 20,
+                'reasons' => array('Regulation obligation parsed but no comparable concepts were extracted.'),
+            );
+        }
+
+        $manualNorm = $this->normalizeText($manual);
+        $matched = array();
+        $missing = array();
+
+        foreach ($concepts as $concept) {
+            if ($this->conceptPresent($concept, $manualNorm)) {
+                $matched[] = $concept;
+            } else {
+                $missing[] = $concept;
+            }
+        }
+
+        $matchRatio = count($matched) / max(1, count($concepts));
+        $score = (int)round(min(70, $matchRatio * 70));
+
+        if (strlen($manualNorm) >= 800 && $matchRatio >= 0.55) {
+            $score = min(70, $score + 10);
+            $reasons[] = 'Manual section contains substantial text addressing the regulatory topic.';
+        } elseif (strlen($manualNorm) >= 400 && $matchRatio >= 0.45) {
+            $score = min(70, $score + 5);
+        }
+
+        if ($matchRatio >= 0.75) {
+            $reasons[] = 'Manual content closely implements the regulatory obligation ('
+                . count($matched) . '/' . count($concepts) . ' key concepts matched).';
+            if ($matched !== array()) {
+                $reasons[] = 'Matched concepts include: ' . implode(', ', array_slice($matched, 0, 6))
+                    . (count($matched) > 6 ? '…' : '') . '.';
+            }
+        } elseif ($matchRatio >= 0.5) {
+            $reasons[] = 'Manual partially addresses the regulation but some expected topics are thin or missing.';
+            if ($missing !== array()) {
+                $reasons[] = 'Weak or missing in manual: ' . implode(', ', array_slice($missing, 0, 5))
+                    . (count($missing) > 5 ? '…' : '') . '.';
+            }
+        } else {
+            $reasons[] = 'Manual text does not adequately cover what the regulation item requires.';
+            if ($missing !== array()) {
+                $reasons[] = 'Not found in manual: ' . implode(', ', array_slice($missing, 0, 6))
+                    . (count($missing) > 6 ? '…' : '') . '.';
+            }
+        }
+
+        $reqText = trim((string)($requirement['requirement_text'] ?? ''));
+        if ($reqText !== '' && $this->phrasePresent($this->normalizeText($reqText), $manualNorm)) {
+            $score = min(70, $score + 8);
+            $reasons[] = 'Manual text aligns with the MCCF audit question for this row.';
+        }
+
+        return array(
+            'score' => max(0, min(70, $score)),
+            'reasons' => array_values(array_unique($reasons)),
+        );
+    }
+
+    private function obligationFromEasaNode(int $batchId, string $nodeUid, string $ruleToken): string
+    {
+        if ($batchId <= 0 || $nodeUid === '') {
+            return '';
+        }
+
+        try {
+            $detail = rl_easa_api_node_detail_build($this->pdo, $batchId, $nodeUid);
+        } catch (Throwable) {
+            return '';
+        }
+        if (!is_array($detail) || empty($detail['ok']) || !is_array($detail['node'] ?? null)) {
+            return '';
+        }
+
+        $node = $detail['node'];
+        $title = trim((string)($node['title'] ?? ''));
+        $blocks = $node['structured_blocks'] ?? null;
+        if (!is_array($blocks) || $blocks === array()) {
+            return trim($title . "\n" . (string)($node['plain_text_effective'] ?? $node['plain_text'] ?? ''));
+        }
+
+        $markerPath = $this->markerPathFromToken($ruleToken, $title);
+        $stack = array();
+        $lines = array($title);
+        foreach ($blocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            if (($block['type'] ?? '') !== 'list_item') {
+                continue;
+            }
+            $marker = trim((string)($block['marker'] ?? ''));
+            $stack = $this->advanceMarkerStack($stack, $marker);
+            if ($this->listItemMatchesMarkerPath($stack, $markerPath)) {
+                $lines[] = trim($marker . ' ' . (string)($block['text'] ?? ''));
+            }
+        }
+
+        if (count($lines) === 1 && $markerPath !== array()) {
+            foreach ($blocks as $block) {
+                if (!is_array($block) || ($block['type'] ?? '') !== 'list_item') {
+                    continue;
+                }
+                $lines[] = trim((string)($block['marker'] ?? '') . ' ' . (string)($block['text'] ?? ''));
+            }
+        }
+
+        return trim(implode("\n", array_unique(array_filter($lines))));
+    }
+
+    /**
+     * @param list<int> $chapterNums
+     * @return list<string>
+     */
+    private function canonicalExcerptBodiesForChapter(string $manualCode, array $chapterNums): array
+    {
+        if ($chapterNums === array()) {
+            return array();
+        }
+
+        try {
+            $conditions = array();
+            $params = array(':manual_code' => strtoupper(trim($manualCode)));
+            $i = 0;
+            foreach ($chapterNums as $num) {
+                $key = ':prefix' . $i++;
+                $conditions[] = 'section_ref LIKE ' . $key;
+                $params[$key] = (int)$num . '.%';
+            }
+            $stmt = $this->pdo->prepare('
+                SELECT body_text
+                FROM ipca_canonical_excerpts
+                WHERE manual_code = :manual_code
+                  AND source_status = \'active\'
+                  AND (' . implode(' OR ', $conditions) . ')
+                ORDER BY manual_part, section_ref
+            ');
+            $stmt->execute($params);
+
+            $out = array();
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+                $body = trim((string)($row['body_text'] ?? ''));
+                if ($body !== '') {
+                    $out[] = $body;
+                }
+            }
+
+            return $out;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    /**
+     * @param list<string> $sectionRefs
+     * @return list<string>
+     */
+    private function canonicalExcerptBodiesForRefs(string $manualCode, array $sectionRefs): array
+    {
+        if ($sectionRefs === array()) {
+            return array();
+        }
+
+        $chapterPrefixes = array();
+        foreach ($sectionRefs as $ref) {
+            if (preg_match('/^(\d+)\./', $ref, $m)) {
+                $chapterPrefixes[$m[1] . '.'] = true;
+            }
+        }
+
+        try {
+            if ($chapterPrefixes !== array()) {
+                $conditions = array();
+                $params = array(':manual_code' => strtoupper(trim($manualCode)));
+                $i = 0;
+                foreach (array_keys($chapterPrefixes) as $prefix) {
+                    $key = ':prefix' . $i++;
+                    $conditions[] = 'section_ref LIKE ' . $key;
+                    $params[$key] = $prefix . '%';
+                }
+                $sql = '
+                    SELECT body_text, section_ref
+                    FROM ipca_canonical_excerpts
+                    WHERE manual_code = :manual_code
+                      AND source_status = \'active\'
+                      AND (' . implode(' OR ', $conditions) . ')
+                    ORDER BY manual_part, section_ref
+                ';
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute($params);
+            } else {
+                $in = implode(',', array_fill(0, count($sectionRefs), '?'));
+                $stmt = $this->pdo->prepare("
+                    SELECT body_text, section_ref
+                    FROM ipca_canonical_excerpts
+                    WHERE manual_code = ?
+                      AND source_status = 'active'
+                      AND section_ref IN ({$in})
+                    ORDER BY section_ref
+                ");
+                $stmt->execute(array_merge(array(strtoupper(trim($manualCode))), $sectionRefs));
+            }
+
+            $out = array();
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+                $body = trim((string)($row['body_text'] ?? ''));
+                if ($body !== '') {
+                    $out[] = $body;
+                }
+            }
+
+            return $out;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    /**
+     * @param list<string> $sectionRefs
+     */
+    private function bookPlainTextForSectionRefs(int $bookVersionId, array $sectionRefs): string
+    {
+        $blocksSvc = new ControlledPublishingBlockService($this->pdo);
+        $stmt = $this->pdo->prepare("
+            SELECT b.section_id, b.payload_json, b.block_type
+            FROM ipca_publishing_book_blocks b
+            WHERE b.book_version_id = :version_id
+            ORDER BY b.section_id, b.sort_order, b.id
+        ");
+        $stmt->execute(array(':version_id' => $bookVersionId));
+
+        $refsWanted = array();
+        foreach ($sectionRefs as $ref) {
+            $refsWanted[strtolower(rtrim($ref, '.'))] = true;
+            if (preg_match('/^(\d+)\./', $ref, $m)) {
+                $refsWanted['__chapter__' . $m[1]] = true;
+            }
+        }
+
+        $sectionIds = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $payload = json_decode((string)($row['payload_json'] ?? ''), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $canonRef = strtolower(rtrim(trim((string)($payload['canonical_section_ref'] ?? '')), '.'));
+            if ($canonRef === '') {
+                continue;
+            }
+            $match = isset($refsWanted[$canonRef]);
+            if (!$match && preg_match('/^(\d+)\./', $canonRef, $m)) {
+                $match = isset($refsWanted['__chapter__' . $m[1]]);
+            }
+            if ($match) {
+                $sectionIds[(int)$row['section_id']] = true;
+            }
+        }
+
+        $chunks = array();
+        foreach (array_keys($sectionIds) as $sectionId) {
+            foreach ($blocksSvc->listSectionBlocks($sectionId) as $block) {
+                $text = $this->plainTextFromBlock($block);
+                if ($text !== '') {
+                    $chunks[] = $text;
+                }
+            }
+        }
+
+        return trim(implode("\n", $chunks));
+    }
+
+    /**
+     * @param array<string,mixed> $block
+     */
+    private function plainTextFromBlock(array $block): string
+    {
+        $payload = json_decode((string)($block['payload_json'] ?? ''), true);
+        if (!is_array($payload)) {
+            return '';
+        }
+
+        $type = (string)($block['block_type'] ?? $payload['type'] ?? '');
+        if ($type === 'heading' || $type === 'paragraph') {
+            return trim(strip_tags((string)($payload['text'] ?? $payload['text_html'] ?? '')));
+        }
+        if ($type === 'list') {
+            $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
+            $lines = array();
+            foreach ($items as $item) {
+                if (is_string($item)) {
+                    $lines[] = trim(strip_tags($item));
+                } elseif (is_array($item)) {
+                    $lines[] = trim(strip_tags((string)($item['text'] ?? $item['text_html'] ?? '')));
+                }
+            }
+
+            return trim(implode("\n", array_filter($lines)));
+        }
+
+        return trim(strip_tags((string)($payload['text'] ?? $payload['text_html'] ?? '')));
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function chapterNumbersFromManualRef(string $manualRef): array
+    {
+        $manualRef = trim($manualRef);
+        if ($manualRef === '') {
+            return array();
+        }
+        if (!preg_match('/\bch(?:apter)?\.?\s*(\d+)\b/iu', $manualRef, $m)) {
+            return array();
+        }
+
+        return array((int)$m[1]);
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @return list<string>
+     */
+    private function extractConcepts(string $obligation, array $requirement): array
+    {
+        $blob = $obligation . "\n"
+            . (string)($requirement['subject'] ?? '') . "\n"
+            . (string)($requirement['requirement_text'] ?? '');
+
+        $concepts = array();
+        $push = static function (string $term) use (&$concepts): void {
+            $term = strtolower(trim($term));
+            if ($term === '' || strlen($term) < 4 || in_array($term, self::STOPWORDS, true)) {
+                return;
+            }
+            $concepts[$term] = true;
+        };
+
+        if (preg_match_all('/\b[a-z]{4,}\b/iu', strtolower($blob), $matches)) {
+            foreach ($matches[0] as $word) {
+                $push($word);
+            }
+        }
+
+        foreach (array('student discipline', 'disciplinary action', 'corrective action', 'poor weather') as $phrase) {
+            if (stripos($blob, $phrase) !== false) {
+                foreach (preg_split('/\s+/u', $phrase) ?: array() as $part) {
+                    $push($part);
+                }
+            }
+        }
+
+        return array_keys($concepts);
+    }
+
+    private function normalizeText(string $text): string
+    {
+        $text = strtolower($text);
+        $text = preg_replace('/[^a-z0-9\s]/u', ' ', $text) ?? $text;
+
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    }
+
+    private function conceptPresent(string $concept, string $manualNorm): bool
+    {
+        if ($concept === '') {
+            return false;
+        }
+        if (str_contains($manualNorm, $concept)) {
+            return true;
+        }
+        if (strlen($concept) > 5 && str_ends_with($concept, 's')) {
+            if (str_contains($manualNorm, substr($concept, 0, -1))) {
+                return true;
+            }
+        }
+        if (str_ends_with($concept, 'ion') && str_contains($manualNorm, substr($concept, 0, -3))) {
+            return true;
+        }
+
+        $stems = array(
+            'disciplinary' => 'disciplin',
+            'discipline' => 'disciplin',
+            'authorization' => 'authori',
+            'authorised' => 'authori',
+            'authorized' => 'authori',
+            'cancellation' => 'cancel',
+            'cancellations' => 'cancel',
+            'supervision' => 'supervis',
+            'supervise' => 'supervis',
+        );
+        foreach ($stems as $from => $stem) {
+            if ($concept === $from || str_starts_with($concept, $stem)) {
+                return str_contains($manualNorm, $stem);
+            }
+        }
+
+        return false;
+    }
+
+    private function phrasePresent(string $phrase, string $manualNorm): bool
+    {
+        $words = array_values(array_filter(explode(' ', $phrase)));
+        if (count($words) < 3) {
+            return false;
+        }
+        $hits = 0;
+        foreach ($words as $word) {
+            if (strlen($word) < 4 || in_array($word, self::STOPWORDS, true)) {
+                continue;
+            }
+            if (str_contains($manualNorm, $word)) {
+                $hits++;
+            }
+        }
+
+        return $hits >= max(2, (int)ceil(count($words) * 0.45));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function markerPathFromToken(string $token, string $nodeTitle): string
+    {
+        preg_match_all('/\(([A-Za-z0-9]+)\)/', strtoupper($token), $matches);
+        $path = $matches[1] ?? array();
+        preg_match_all('/\(([A-Za-z0-9]+)\)/', strtoupper($nodeTitle), $titleMatches);
+        $titlePath = $titleMatches[1] ?? array();
+        while ($path !== array() && $titlePath !== array() && $path[0] === $titlePath[0]) {
+            array_shift($path);
+            array_shift($titlePath);
+        }
+
+        return $path;
+    }
+
+    /**
+     * @param list<string> $stack
+     * @return list<string>
+     */
+    private function advanceMarkerStack(array $stack, string $marker): array
+    {
+        $marker = strtoupper(trim($marker));
+        if (preg_match('/^\(([^)]+)\)$/', $marker, $m)) {
+            $norm = strtoupper(trim($m[1]));
+        } else {
+            $norm = $marker;
+        }
+        if ($norm === '') {
+            return $stack;
+        }
+        if (preg_match('/^[A-Z]$/', $norm)) {
+            return array($norm);
+        }
+        if (preg_match('/^\d+$/', $norm) && $stack !== array() && preg_match('/^[A-Z]$/', $stack[0])) {
+            return array($stack[0], $norm);
+        }
+
+        return array($norm);
+    }
+
+    /**
+     * @param list<string> $stack
+     * @param list<string> $markerPath
+     */
+    private function listItemMatchesMarkerPath(array $stack, array $markerPath): bool
+    {
+        if ($markerPath === array() || $stack === array() || count($stack) < count($markerPath)) {
+            return false;
+        }
+
+        return array_slice($stack, -count($markerPath)) === $markerPath;
+    }
+
+    /**
+     * @param array<string,int> $breakdown
+     * @param list<string> $reasons
+     * @return array{score:int,label:string,tone:string,breakdown:array<string,int>,reasons:list<string>}
+     */
+    private function pack(int $score, string $label, string $tone, array $breakdown, array $reasons): array
+    {
+        return array(
+            'score' => max(0, min(100, $score)),
+            'label' => $label,
+            'tone' => $tone,
+            'breakdown' => $breakdown,
+            'reasons' => array_values(array_unique(array_filter($reasons))),
+        );
+    }
+}

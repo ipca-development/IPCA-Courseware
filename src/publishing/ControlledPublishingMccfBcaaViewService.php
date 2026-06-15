@@ -14,7 +14,7 @@ final class ControlledPublishingMccfBcaaViewService
 
     public function __construct(private PDO $pdo)
     {
-        $this->integrity = new ControlledPublishingMccfIntegrityService();
+        $this->integrity = new ControlledPublishingMccfIntegrityService($pdo);
     }
 
     /**
@@ -48,7 +48,8 @@ final class ControlledPublishingMccfBcaaViewService
             $row['integrity'] = $this->integrity->scoreRequirement(
                 $row,
                 $row['linked_excerpts'],
-                $row['regulation_links']
+                $row['regulation_links'],
+                $bookVersionId
             );
             $row['book_version_id'] = $bookVersionId;
             $row['book_version_label'] = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
@@ -245,7 +246,7 @@ final class ControlledPublishingMccfBcaaViewService
               e.title,
               e.section_ref,
               e.manual_part,
-              LEFT(e.body_text, 600) AS body_text
+              e.body_text
             FROM ipca_canonical_requirement_excerpt_links l
             INNER JOIN ipca_canonical_excerpts e
               ON e.id = l.excerpt_id AND e.source_status = 'active'

@@ -558,7 +558,11 @@ final class ControlledPublishingMccfPreviewService
     {
         $excerpts = $this->linkedExcerpts($requirementId);
         $regLinks = $this->allRegulationLinks($requirementId);
-        $score = (new ControlledPublishingMccfIntegrityService())->scoreRequirement($requirement, $excerpts, $regLinks);
+        $manualCode = strtoupper(trim((string)($requirement['manual_code'] ?? 'OM')));
+        $versionLabel = $manualCode === 'OMM' ? '4.0' : '6.0';
+        $bookVersionId = $this->resolveBookVersionId($manualCode, $versionLabel);
+        $score = (new ControlledPublishingMccfIntegrityService($this->pdo))
+            ->scoreRequirement($requirement, $excerpts, $regLinks, $bookVersionId);
 
         return array(
             'score' => (int)($score['score'] ?? 0),

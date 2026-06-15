@@ -15,7 +15,7 @@ $user = compliance_require_access($pdo);
 $svc = new ControlledPublishingMccfBrowserService($pdo);
 $regSvc = new ControlledPublishingMccfRegulationLinkService($pdo);
 $bcaaSvc = new ControlledPublishingMccfBcaaViewService($pdo);
-$integritySvc = new ControlledPublishingMccfIntegrityService();
+$integritySvc = new ControlledPublishingMccfIntegrityService($pdo);
 $reviewSvc = new ControlledPublishingMccfRegulationReviewService($pdo);
 $regLinksAvailable = ControlledPublishingMccfRegulationLinkService::regulationLinksTablePresent($pdo);
 $easaChangesPending = $reviewSvc->hasPendingEasaChanges();
@@ -84,16 +84,46 @@ $manualDisplayTitle = ControlledPublishingMccfBcaaViewService::manualDisplayTitl
 $detailIntegrity = null;
 if (is_array($detail)) {
     $detailExcerptsForScore = array();
-    foreach ($detail['linked_excerpts'] ?? array() as $excerpt) {
-        if (!is_array($excerpt)) {
-            continue;
-        }
-        $detailExcerptsForScore[] = array(
-            'body_text' => (string)($excerpt['excerpt_preview'] ?? ''),
-            'excerpt_preview' => (string)($excerpt['excerpt_preview'] ?? ''),
-        );
+    $detailStmt = $pdo->prepare("
+        SELECT e.excerpt_key, e.title, e.section_ref, e.manual_part, e.body_text
+        FROM ipca_canonical_requirement_excerpt_links l
+        INNER JOIN ipca_canonical_excerpts e
+          ON e.id = l.excerpt_id AND e.source_status = 'active'
+        WHERE l.requirement_id = :requirement_id
+          AND l.source_status = 'active'
+        ORDER BY e.manual_part, e.section_ref
+    ");
+    $detailStmt->execute(array(':requirement_id' => $requirementId));
+    $detailExcerptsForScore = $detailStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+    $detailManualCode = strtoupper(trim((string)($detail['manual_code'] ?? 'OM')));
+    $detailVersionLabel = $detailManualCode === 'OMM' ? '4.0' : '6.0';
+    $detailBookVersionId = 0;
+    try {
+        $bvStmt = $pdo->prepare("
+            SELECT bv.id
+            FROM ipca_publishing_book_versions bv
+            INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+            WHERE b.book_key = :book_key
+              AND bv.version_label = :version_label
+            ORDER BY bv.id DESC
+            LIMIT 1
+        ");
+        $bvStmt->execute(array(
+            ':book_key' => $detailManualCode,
+            ':version_label' => $detailVersionLabel,
+        ));
+        $detailBookVersionId = (int)$bvStmt->fetchColumn();
+    } catch (Throwable) {
+        $detailBookVersionId = 0;
     }
-    $detailIntegrity = $integritySvc->scoreRequirement($detail, $detailExcerptsForScore, $detailRegLinks);
+
+    $detailIntegrity = $integritySvc->scoreRequirement(
+        $detail,
+        $detailExcerptsForScore,
+        $detailRegLinks,
+        $detailBookVersionId
+    );
 }
 
 $totalPages = $search['per_page'] > 0
