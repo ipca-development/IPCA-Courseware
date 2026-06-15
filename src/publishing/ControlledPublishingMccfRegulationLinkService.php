@@ -34,8 +34,11 @@ final class ControlledPublishingMccfRegulationLinkService
         }
     }
 
+    /** Rule token pattern (parentheses allowed; no trailing \\b — it truncates refs like …(6)). */
+    private const RULE_TOKEN_PATTERN = '/\b(FCL\.\d+[A-Z]?(?:\([A-Za-z0-9]+\))*|(?:ORA|CAT|DTO|ARA|MED|NCO|SPO)(?:\.[A-Za-z0-9]+(?:\([A-Za-z0-9]+\))*+)+)/u';
+
     /**
-     * @return list<array{token:string,role:string,prefix:?string}>
+     * @return list<array{token:string,role:string,prefix:?string,citation:string}>
      */
     public static function parseRegulationRef(string $regulationRef): array
     {
@@ -53,19 +56,19 @@ final class ControlledPublishingMccfRegulationLinkService
             }
 
             $role = 'PRIMARY';
+            $rolePrefix = '';
             if (preg_match('/^(AMC\d*)\s+/iu', $segment, $m)) {
                 $role = 'AMC';
+                $rolePrefix = strtoupper($m[1]);
                 $segment = trim(substr($segment, strlen($m[0])));
             } elseif (preg_match('/^(GM\d*)\s+/iu', $segment, $m)) {
                 $role = 'GM';
+                $rolePrefix = strtoupper($m[1]);
                 $segment = trim(substr($segment, strlen($m[0])));
             }
 
-            if (preg_match_all(
-                '/\b(FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED|NCO|SPO)(?:\.[A-Za-z0-9()]+)+)\b/u',
-                $segment,
-                $matches
-            )) {
+            $citation = $segment;
+            if (preg_match_all(self::RULE_TOKEN_PATTERN, $segment, $matches)) {
                 foreach ($matches[1] as $raw) {
                     $token = self::normalizeRuleToken((string)$raw);
                     if ($token === '' || isset($seen[$token])) {
@@ -77,12 +80,90 @@ final class ControlledPublishingMccfRegulationLinkService
                         'token' => $token,
                         'role' => $role,
                         'prefix' => $prefix,
+                        'citation' => $rolePrefix !== '' ? ($rolePrefix . ' ' . $citation) : $citation,
                     );
                 }
             }
         }
 
         return $out;
+    }
+
+    /**
+     * Search phrases to try when resolving a parsed rule token (AMC labels, parent rules, etc.).
+     *
+     * @return list<string>
+     */
+    public static function ruleTokenSearchVariants(
+        string $token,
+        string $role = 'PRIMARY',
+        string $citation = ''
+    ): array {
+        /** @var list<string> */
+        $variants = array();
+        $pushToken = static function (string $value) use (&$variants): void {
+            $normalized = self::normalizeRuleToken($value);
+            if ($normalized === '' || in_array($normalized, $variants, true)) {
+                return;
+            }
+            $variants[] = $normalized;
+        };
+        $pushPhrase = static function (string $value) use (&$variants): void {
+            $phrase = strtoupper(trim($value));
+            $phrase = preg_replace('/\s+/u', ' ', $phrase) ?? $phrase;
+            if ($phrase === '' || in_array($phrase, $variants, true)) {
+                return;
+            }
+            $variants[] = $phrase;
+        };
+
+        $token = self::normalizeRuleToken($token);
+        if ($token === '') {
+            return array();
+        }
+
+        $pushToken($token);
+
+        if (preg_match('/\(\w+$/u', $token)) {
+            $pushToken($token . ')');
+        }
+
+        $base = $token;
+        while ($base !== '' && preg_match('/\([^)]*\)$/u', $base)) {
+            $next = preg_replace('/\([^)]*\)$/u', '', $base);
+            if (!is_string($next) || $next === '' || $next === $base) {
+                break;
+            }
+            $base = $next;
+            $pushToken($base);
+        }
+
+        $citation = trim($citation);
+        if ($citation !== '') {
+            $pushPhrase($citation);
+            if (preg_match('/^(AMC\d*|GM\d*)\s+(.+)$/iu', $citation, $m)) {
+                $pushPhrase(strtoupper($m[1]) . ' ' . $m[2]);
+            }
+        }
+
+        if ($role === 'AMC') {
+            $amcLabel = 'AMC1';
+            if ($citation !== '' && preg_match('/^(AMC\d*)/iu', $citation, $m)) {
+                $amcLabel = strtoupper($m[1]);
+            }
+            $pushPhrase($amcLabel . ' ' . $token);
+            if ($base !== '' && $base !== $token) {
+                $pushPhrase($amcLabel . ' ' . $base);
+            }
+        } elseif ($role === 'GM') {
+            $gmLabel = 'GM1';
+            if ($citation !== '' && preg_match('/^(GM\d*)/iu', $citation, $m)) {
+                $gmLabel = strtoupper($m[1]);
+            }
+            $pushPhrase($gmLabel . ' ' . $token);
+        }
+
+        return $variants;
     }
 
     public static function normalizeRuleToken(string $token): string
@@ -115,8 +196,12 @@ final class ControlledPublishingMccfRegulationLinkService
     /**
      * @return array<string,mixed>|null
      */
-    public function resolveEasaNode(string $ruleToken, ?string $prefix = null): ?array
-    {
+    public function resolveEasaNode(
+        string $ruleToken,
+        ?string $prefix = null,
+        string $role = 'PRIMARY',
+        string $citation = ''
+    ): ?array {
         if (!ComplianceRegulatoryLinkEngine::easaStagingPresent($this->pdo)) {
             return null;
         }
@@ -132,12 +217,22 @@ final class ControlledPublishingMccfRegulationLinkService
             $batchIds = $this->publishedBatchIds();
         }
 
-        $candidates = $this->searchNodes($ruleToken, $batchIds);
+        $variants = self::ruleTokenSearchVariants($ruleToken, $role, $citation);
+        $candidates = array();
+        $matchedVariant = $ruleToken;
+        foreach ($variants as $variant) {
+            $hits = $this->searchNodes($variant, $batchIds);
+            if ($hits !== array()) {
+                $candidates = $hits;
+                $matchedVariant = $variant;
+                break;
+            }
+        }
         if ($candidates === array()) {
             return null;
         }
 
-        return $this->pickBestCandidate($ruleToken, $candidates);
+        return $this->pickBestCandidate($matchedVariant, $candidates, $role);
     }
 
     /**
@@ -203,7 +298,12 @@ final class ControlledPublishingMccfRegulationLinkService
                     continue;
                 }
 
-                $node = $this->resolveEasaNode($token, $tokenRow['prefix'] ?? null);
+                $node = $this->resolveEasaNode(
+                    $token,
+                    $tokenRow['prefix'] ?? null,
+                    (string)($tokenRow['role'] ?? 'PRIMARY'),
+                    (string)($tokenRow['citation'] ?? '')
+                );
                 if ($node === null) {
                     if ($apply) {
                         $this->insertUnresolvedLink($sourceSetId, $requirementId, $token, (string)$tokenRow['role']);
@@ -372,10 +472,11 @@ final class ControlledPublishingMccfRegulationLinkService
      * @param list<array<string,mixed>> $candidates
      * @return array<string,mixed>|null
      */
-    private function pickBestCandidate(string $ruleToken, array $candidates): ?array
+    private function pickBestCandidate(string $ruleToken, array $candidates, string $role = 'PRIMARY'): ?array
     {
         $best = null;
         $bestScore = -1;
+        $wantAmcGm = in_array(strtoupper($role), array('AMC', 'GM'), true);
         foreach ($candidates as $row) {
             $score = 0;
             $title = strtoupper(trim((string)($row['title'] ?? '')));
@@ -393,7 +494,10 @@ final class ControlledPublishingMccfRegulationLinkService
             if (str_contains($erules, $ruleToken)) {
                 $score += 40;
             }
-            if (preg_match('/\b(AMC|GM)\d*\b/u', $firstLine)) {
+            $hasAmcGmLabel = preg_match('/\b(AMC|GM)\d*\b/u', $firstLine) === 1;
+            if ($hasAmcGmLabel && $wantAmcGm) {
+                $score += 25;
+            } elseif ($hasAmcGmLabel && !$wantAmcGm) {
                 $score -= 15;
             }
             $depth = (int)($row['depth'] ?? 0);

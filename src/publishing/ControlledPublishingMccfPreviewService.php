@@ -11,6 +11,7 @@ require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingRevisionService.php';
+require_once __DIR__ . '/../easa_erules_xml_import.php';
 require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
 /**
@@ -160,6 +161,7 @@ final class ControlledPublishingMccfPreviewService
                     'token' => $hintNorm,
                     'role' => 'PRIMARY',
                     'prefix' => ControlledPublishingMccfRegulationLinkService::rulePrefix($hintNorm),
+                    'citation' => $hint,
                 ));
             }
 
@@ -200,7 +202,9 @@ final class ControlledPublishingMccfPreviewService
         foreach ($tokens as $tokenRow) {
             $resolved = $regSvc->resolveEasaNode(
                 (string)$tokenRow['token'],
-                $tokenRow['prefix'] ?? null
+                $tokenRow['prefix'] ?? null,
+                (string)($tokenRow['role'] ?? 'PRIMARY'),
+                (string)($tokenRow['citation'] ?? '')
             );
             if ($resolved === null) {
                 continue;
@@ -215,16 +219,23 @@ final class ControlledPublishingMccfPreviewService
         }
 
         foreach ($tokens as $tokenRow) {
-            $hit = $this->searchStagingByToken((string)$tokenRow['token']);
-            if ($hit === null) {
-                continue;
-            }
-            $detail = $this->nodeDetailFromIds(
-                (int)($hit['batch_id'] ?? 0),
-                (string)($hit['node_uid'] ?? '')
+            $variants = ControlledPublishingMccfRegulationLinkService::ruleTokenSearchVariants(
+                (string)$tokenRow['token'],
+                (string)($tokenRow['role'] ?? 'PRIMARY'),
+                (string)($tokenRow['citation'] ?? '')
             );
-            if ($detail !== null) {
-                return $detail;
+            foreach ($variants as $variant) {
+                $hit = $this->searchStagingByToken($variant);
+                if ($hit === null) {
+                    continue;
+                }
+                $detail = $this->nodeDetailFromIds(
+                    (int)($hit['batch_id'] ?? 0),
+                    (string)($hit['node_uid'] ?? '')
+                );
+                if ($detail !== null) {
+                    return $detail;
+                }
             }
         }
 
@@ -253,7 +264,8 @@ final class ControlledPublishingMccfPreviewService
      */
     private function searchStagingByToken(string $token): ?array
     {
-        $token = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($token);
+        $token = strtoupper(trim($token));
+        $token = preg_replace('/\s+/u', ' ', $token) ?? $token;
         if ($token === '') {
             return null;
         }
