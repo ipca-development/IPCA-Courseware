@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfRegulat
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfBcaaViewService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfIntegrityService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfRegulationReviewService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfIntegrityJobService.php';
 
 $user = compliance_require_access($pdo);
 $svc = new ControlledPublishingMccfBrowserService($pdo);
@@ -17,6 +18,8 @@ $regSvc = new ControlledPublishingMccfRegulationLinkService($pdo);
 $bcaaSvc = new ControlledPublishingMccfBcaaViewService($pdo);
 $integritySvc = new ControlledPublishingMccfIntegrityService($pdo);
 $reviewSvc = new ControlledPublishingMccfRegulationReviewService($pdo);
+$integrityJobSvc = new ControlledPublishingMccfIntegrityJobService($pdo);
+$integrityJobsAvailable = ControlledPublishingMccfIntegrityJobService::tablesPresent($pdo);
 $regLinksAvailable = ControlledPublishingMccfRegulationLinkService::regulationLinksTablePresent($pdo);
 $easaChangesPending = $reviewSvc->hasPendingEasaChanges();
 $easaMonitorChanges = $easaChangesPending ? $reviewSvc->listPendingEasaMonitorChanges() : array();
@@ -32,6 +35,9 @@ $sourceSetId = $svc->resolveSourceSetId(
     trim((string)($_GET['source_set'] ?? ''))
 );
 $sourceSet = $svc->sourceSetById($sourceSetId);
+$integrityJobStatus = ($sourceSetId > 0 && $integrityJobsAvailable)
+    ? $integrityJobSvc->statusForSourceSet($sourceSetId)
+    : array('ok' => true, 'run' => null);
 
 $part = trim((string)($_GET['part'] ?? ''));
 $coverage = trim((string)($_GET['coverage'] ?? 'all'));
@@ -451,7 +457,37 @@ compliance_page_open(array(
   .mccf-modal-integrity-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
   .mccf-modal-integrity-head strong { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
   .mccf-modal-integrity-reasons { margin: 0; padding-left: 16px; color: #475569; }
-  .mccf-modal-integrity-reasons li { margin-bottom: 4px; }
+  .mccf-integrity-job {
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);
+  }
+  .mccf-integrity-job-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .mccf-integrity-job-head strong { font-size: 13px; color: #0f172a; }
+  .mccf-integrity-job-meta { font-size: 12px; color: #64748b; }
+  .mccf-integrity-job-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+  }
+  .mccf-integrity-job-bar span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%);
+    transition: width .3s ease;
+  }
+  .mccf-integrity-job-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .mccf-integrity-pending { color: #94a3b8; font-size: 11px; font-weight: 700; }
   .mccf-modal-content { }
   .mccf-modal-content .mccf-pair-split { min-height: 240px; }
   .mccf-easa-preview .rl-easa-detail-meta { font-size: 11px; color: #475569; margin: 0; padding: 12px 16px 0; white-space: pre-wrap; word-break: break-word; }
@@ -805,6 +841,34 @@ compliance_page_open(array(
       </section>
     <?php endif; ?>
 
+    <?php if ($sourceSetId > 0 && in_array($layout, array('bcaa', 'pairs'), true)): ?>
+      <section class="cmp-card mccf-integrity-job" id="mccfIntegrityJobPanel">
+        <div class="mccf-integrity-job-head">
+          <div>
+            <strong>AI integrity scoring</strong>
+            <div class="mccf-integrity-job-meta" id="mccfIntegrityJobMeta">
+              <?php if (!$integrityJobsAvailable): ?>
+                Apply <code>scripts/sql/2026_06_17_mccf_integrity_jobs.sql</code> to enable background scoring.
+              <?php else: ?>
+                Scores are computed in the background and cached. Use Refresh to re-score all requirements.
+              <?php endif; ?>
+            </div>
+          </div>
+          <?php if ($integrityJobsAvailable): ?>
+            <div class="mccf-integrity-job-actions">
+              <button type="button" class="mccf-pair-btn" id="mccfIntegrityRefreshBtn">Refresh scores</button>
+              <button type="button" class="mccf-pair-btn" id="mccfIntegrityCancelBtn" hidden>Cancel</button>
+            </div>
+          <?php endif; ?>
+        </div>
+        <?php if ($integrityJobsAvailable): ?>
+          <div class="mccf-integrity-job-bar" aria-hidden="true">
+            <span id="mccfIntegrityJobBar" style="width:0%;"></span>
+          </div>
+        <?php endif; ?>
+      </section>
+    <?php endif; ?>
+
     <section class="cmp-card">
       <div class="mccf-layout-toggle">
         <a href="<?= h(mccf_browser_query(array('layout' => 'bcaa', 'page' => 1, 'req' => 0))) ?>" class="<?= $layout === 'bcaa' ? 'is-active' : '' ?>">CAA Checklist View</a>
@@ -888,10 +952,11 @@ compliance_page_open(array(
                       <td class="mccf-col-applicable"><?= mccf_applicable_pill_html($row) ?></td>
                       <td class="mccf-col-remarks"><?= h((string)($row['remarks'] ?? '')) ?></td>
                       <td class="mccf-col-integrity" data-integrity-req="<?= $rid ?>"<?= $needsRegReview ? ' data-needs-reg-review="1"' : '' ?>>
-                        <div class="mccf-integrity-row" title="Loading integrity…">
-                          <div class="mccf-integrity-bar"><span class="muted" style="width:0;"></span></div>
-                          <div class="mccf-integrity-value">…</div>
-                        </div>
+                        <?php if (is_array($row['integrity'] ?? null)): ?>
+                          <?= mccf_integrity_bar_html($row['integrity'], true) ?>
+                        <?php else: ?>
+                          <span class="mccf-integrity-pending" title="Awaiting background integrity scoring">—</span>
+                        <?php endif; ?>
                         <?php if ($needsRegReview): ?>
                           <span class="mccf-review-flag">Reg review</span>
                         <?php endif; ?>
@@ -1017,6 +1082,9 @@ compliance_page_open(array(
 <script>
 (function () {
   var apiUrl = '/admin/api/mccf_browser_api.php';
+  var mccfSourceSetId = <?= (int)$sourceSetId ?>;
+  var mccfIntegrityJobsAvailable = <?= $integrityJobsAvailable ? 'true' : 'false' ?>;
+  var mccfInitialIntegrityRun = <?= json_encode($integrityJobStatus['run'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   var backdrop = document.getElementById('mccfModalBackdrop');
   var modalTitle = document.getElementById('mccfModalTitle');
   var modalSub = document.getElementById('mccfModalSub');
@@ -1670,49 +1738,163 @@ compliance_page_open(array(
     pairsGrid.querySelectorAll('.mccf-pair-card').forEach(fillPairCard);
   }
 
-  function loadIntegrityScoresAsync() {
-    var cells = document.querySelectorAll('[data-integrity-req]');
-    if (!cells.length) return;
+  function applyIntegrityScoresToTable(scores) {
+    if (!scores) return;
+    Object.keys(scores).forEach(function (rid) {
+      var cell = document.querySelector('[data-integrity-req="' + rid + '"]');
+      if (!cell) return;
+      var needsReview = cell.getAttribute('data-needs-reg-review') === '1';
+      cell.innerHTML = integrityBarHtml(scores[rid], true);
+      if (needsReview) {
+        var flag = document.createElement('span');
+        flag.className = 'mccf-review-flag';
+        flag.textContent = 'Reg review';
+        cell.appendChild(flag);
+      }
+    });
+  }
+
+  function collectIntegrityRequirementIds() {
     var ids = [];
-    cells.forEach(function (cell) {
+    document.querySelectorAll('[data-integrity-req]').forEach(function (cell) {
       var id = parseInt(cell.getAttribute('data-integrity-req') || '0', 10);
       if (id > 0) ids.push(id);
     });
-    if (!ids.length) return;
-
-    var batchSize = 40;
-    var offset = 0;
-    function loadBatch() {
-      var batch = ids.slice(offset, offset + batchSize);
-      if (!batch.length) return;
-      apiCall('integrity_scores', { requirement_ids: batch }).then(function (data) {
-        if (data.ok && data.scores) {
-          Object.keys(data.scores).forEach(function (rid) {
-            var cell = document.querySelector('[data-integrity-req="' + rid + '"]');
-            if (!cell) return;
-            var needsReview = cell.getAttribute('data-needs-reg-review') === '1';
-            cell.innerHTML = integrityBarHtml(data.scores[rid], true);
-            if (needsReview) {
-              var flag = document.createElement('span');
-              flag.className = 'mccf-review-flag';
-              flag.textContent = 'Reg review';
-              cell.appendChild(flag);
-            }
-          });
-        }
-        offset += batchSize;
-        if (offset < ids.length) {
-          loadBatch();
-        }
-      }).catch(function () {
-        offset += batchSize;
-        if (offset < ids.length) loadBatch();
-      });
-    }
-    loadBatch();
+    return ids;
   }
 
-  loadIntegrityScoresAsync();
+  function refreshCachedIntegrityScores() {
+    var ids = collectIntegrityRequirementIds();
+    if (!ids.length) return Promise.resolve();
+    var batchSize = 200;
+    var offset = 0;
+    function nextBatch() {
+      var batch = ids.slice(offset, offset + batchSize);
+      if (!batch.length) return Promise.resolve();
+      return apiCall('integrity_job_scores', { requirement_ids: batch }).then(function (data) {
+        if (data.ok) applyIntegrityScoresToTable(data.scores || {});
+        offset += batchSize;
+        return nextBatch();
+      });
+    }
+    return nextBatch();
+  }
+
+  var integrityPollTimer = null;
+  var integrityJobPanel = document.getElementById('mccfIntegrityJobPanel');
+  var integrityJobMeta = document.getElementById('mccfIntegrityJobMeta');
+  var integrityJobBar = document.getElementById('mccfIntegrityJobBar');
+  var integrityRefreshBtn = document.getElementById('mccfIntegrityRefreshBtn');
+  var integrityCancelBtn = document.getElementById('mccfIntegrityCancelBtn');
+  var activeIntegrityRun = mccfInitialIntegrityRun || null;
+  var integrityWorkerFailed = false;
+
+  function renderIntegrityJobStatus(run) {
+    activeIntegrityRun = run || null;
+    if (!integrityJobMeta || !integrityJobBar) return;
+
+    if (!run) {
+      integrityJobMeta.textContent = 'No scoring run yet. Click Refresh scores to compute integrity for all requirements.';
+      integrityJobBar.style.width = '0%';
+      if (integrityCancelBtn) integrityCancelBtn.hidden = true;
+      if (integrityRefreshBtn) integrityRefreshBtn.disabled = false;
+      return;
+    }
+
+    var processed = parseInt(run.processed_count || 0, 10);
+    var total = parseInt(run.total_count || 0, 10);
+    var pct = parseInt(run.percent || 0, 10);
+    var status = String(run.status || '');
+
+    if (status === 'running' || status === 'queued') {
+      integrityJobMeta.textContent = 'Background scoring: ' + processed + ' / ' + total + ' requirements (' + pct + '%). You can leave this page — progress is saved server-side.';
+      integrityJobBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      if (integrityCancelBtn) integrityCancelBtn.hidden = false;
+      if (integrityRefreshBtn) integrityRefreshBtn.disabled = true;
+    } else if (status === 'completed') {
+      integrityJobMeta.textContent = 'Last run completed — ' + total + ' requirements scored'
+        + (run.completed_at ? (' · ' + run.completed_at) : '') + '.';
+      integrityJobBar.style.width = '100%';
+      if (integrityCancelBtn) integrityCancelBtn.hidden = true;
+      if (integrityRefreshBtn) integrityRefreshBtn.disabled = false;
+    } else if (status === 'failed') {
+      integrityJobMeta.textContent = 'Scoring failed: ' + (run.error_message || 'Unknown error') + '. Click Refresh to retry.';
+      integrityJobBar.style.width = '0%';
+      if (integrityCancelBtn) integrityCancelBtn.hidden = true;
+      if (integrityRefreshBtn) integrityRefreshBtn.disabled = false;
+    } else if (status === 'cancelled') {
+      integrityJobMeta.textContent = 'Scoring cancelled at ' + processed + ' / ' + total + '. Click Refresh to run again.';
+      integrityJobBar.style.width = total > 0 ? ((processed / total) * 100) + '%' : '0%';
+      if (integrityCancelBtn) integrityCancelBtn.hidden = true;
+      if (integrityRefreshBtn) integrityRefreshBtn.disabled = false;
+    }
+  }
+
+  function pollIntegrityJobStatus() {
+    if (!mccfIntegrityJobsAvailable || mccfSourceSetId <= 0) return Promise.resolve();
+    var tickPromise = Promise.resolve();
+    if (integrityWorkerFailed && activeIntegrityRun && activeIntegrityRun.is_active && activeIntegrityRun.id) {
+      tickPromise = apiCall('integrity_job_tick', { run_id: activeIntegrityRun.id });
+    }
+    return tickPromise.then(function () {
+      return apiCall('integrity_job_status', { source_set_id: mccfSourceSetId });
+    }).then(function (data) {
+      if (!data.ok) return;
+      var prevProcessed = activeIntegrityRun ? parseInt(activeIntegrityRun.processed_count || 0, 10) : -1;
+      renderIntegrityJobStatus(data.run || null);
+      var nextProcessed = data.run ? parseInt(data.run.processed_count || 0, 10) : prevProcessed;
+      if (nextProcessed !== prevProcessed) {
+        return refreshCachedIntegrityScores();
+      }
+      if (data.run && data.run.status === 'completed') {
+        return refreshCachedIntegrityScores();
+      }
+    });
+  }
+
+  function startIntegrityPolling() {
+    if (integrityPollTimer) clearInterval(integrityPollTimer);
+    pollIntegrityJobStatus();
+    integrityPollTimer = setInterval(pollIntegrityJobStatus, 3000);
+  }
+
+  if (mccfIntegrityJobsAvailable && mccfSourceSetId > 0 && integrityJobPanel) {
+    renderIntegrityJobStatus(mccfInitialIntegrityRun);
+    refreshCachedIntegrityScores().finally(startIntegrityPolling);
+
+    if (integrityRefreshBtn) {
+      integrityRefreshBtn.addEventListener('click', function () {
+        integrityRefreshBtn.disabled = true;
+        apiCall('integrity_job_start', { source_set_id: mccfSourceSetId }).then(function (data) {
+          if (!data.ok) {
+            window.alert(data.error || 'Could not start integrity scoring.');
+            integrityRefreshBtn.disabled = false;
+            return;
+          }
+          if (!data.worker_spawned) {
+            integrityWorkerFailed = true;
+            window.alert('Background worker could not be started; scoring will continue while this page stays open. For fully independent runs use: php scripts/run_mccf_integrity_job.php --run-id=' + (data.run_id || ''));
+          } else {
+            integrityWorkerFailed = false;
+          }
+          pollIntegrityJobStatus();
+        });
+      });
+    }
+
+    if (integrityCancelBtn) {
+      integrityCancelBtn.addEventListener('click', function () {
+        if (!activeIntegrityRun || !activeIntegrityRun.id) return;
+        apiCall('integrity_job_cancel', { run_id: activeIntegrityRun.id }).then(function (data) {
+          if (!data.ok) {
+            window.alert(data.error || 'Could not cancel run.');
+            return;
+          }
+          pollIntegrityJobStatus();
+        });
+      });
+    }
+  }
 })();
 </script>
 <?php

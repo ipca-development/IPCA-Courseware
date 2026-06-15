@@ -5,7 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfPreviewService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfManualLinkService.php';
-require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfBcaaViewService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingMccfIntegrityJobService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -19,7 +19,7 @@ function mccf_api_json(int $code, array $payload): void
 $user = compliance_require_access($pdo);
 $preview = new ControlledPublishingMccfPreviewService($pdo);
 $manualLinks = new ControlledPublishingMccfManualLinkService($pdo);
-$bcaaView = new ControlledPublishingMccfBcaaViewService($pdo);
+$integrityJobs = new ControlledPublishingMccfIntegrityJobService($pdo);
 
 $raw = file_get_contents('php://input');
 $input = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
@@ -55,21 +55,49 @@ try {
             mccf_api_json(200, $preview->coveragePair($requirementId));
             break;
 
-        case 'integrity_scores':
+        case 'integrity_job_start':
+            $sourceSetId = (int)($input['source_set_id'] ?? 0);
+            if ($sourceSetId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'source_set_id is required.'));
+            }
+            mccf_api_json(200, array(
+                'ok' => true,
+            ) + $integrityJobs->startRun($sourceSetId, (int)($user['id'] ?? 0)));
+            break;
+
+        case 'integrity_job_status':
+            $sourceSetId = (int)($input['source_set_id'] ?? 0);
+            if ($sourceSetId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'source_set_id is required.'));
+            }
+            mccf_api_json(200, $integrityJobs->statusForSourceSet($sourceSetId));
+            break;
+
+        case 'integrity_job_cancel':
+            $runId = (int)($input['run_id'] ?? 0);
+            if ($runId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'run_id is required.'));
+            }
+            mccf_api_json(200, $integrityJobs->cancelRun($runId));
+            break;
+
+        case 'integrity_job_tick':
+            $runId = (int)($input['run_id'] ?? 0);
+            if ($runId <= 0) {
+                mccf_api_json(400, array('ok' => false, 'error' => 'run_id is required.'));
+            }
+            mccf_api_json(200, array('ok' => true) + $integrityJobs->processBatch($runId));
+            break;
+
+        case 'integrity_job_scores':
             $rawIds = $input['requirement_ids'] ?? array();
             if (!is_array($rawIds)) {
                 mccf_api_json(400, array('ok' => false, 'error' => 'requirement_ids must be an array.'));
             }
             $ids = array_values(array_unique(array_filter(array_map('intval', $rawIds), static fn(int $id): bool => $id > 0)));
-            if ($ids === array()) {
-                mccf_api_json(400, array('ok' => false, 'error' => 'At least one requirement_id is required.'));
-            }
-            if (count($ids) > 60) {
-                mccf_api_json(400, array('ok' => false, 'error' => 'Maximum 60 requirement_ids per request.'));
-            }
             mccf_api_json(200, array(
                 'ok' => true,
-                'scores' => $bcaaView->integrityScoresForRequirements($ids),
+                'scores' => $integrityJobs->getCachedScores($ids),
             ));
             break;
 

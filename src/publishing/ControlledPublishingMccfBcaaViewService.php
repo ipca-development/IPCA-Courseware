@@ -2,20 +2,17 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingMccfBrowserService.php';
-require_once __DIR__ . '/ControlledPublishingMccfIntegrityService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
+require_once __DIR__ . '/ControlledPublishingMccfIntegrityJobService.php';
 
 /**
  * BCAA MCCF checklist presentation: formatting, enrichment, merged rows.
  */
 final class ControlledPublishingMccfBcaaViewService
 {
-    private ControlledPublishingMccfIntegrityService $integrity;
-
     public function __construct(private PDO $pdo)
     {
-        $this->integrity = new ControlledPublishingMccfIntegrityService($pdo);
     }
 
     /**
@@ -39,6 +36,8 @@ final class ControlledPublishingMccfBcaaViewService
         $excerptMap = $this->loadLinkedExcerpts($reqIds);
         $regLinkMap = $this->loadRegulationLinks($reqIds);
         $bookVersionId = $this->resolveBookVersionId($rows[0]['manual_code'] ?? 'OM', $sourceSetId);
+        $integrityJob = new ControlledPublishingMccfIntegrityJobService($this->pdo);
+        $cachedIntegrity = $integrityJob->getCachedScores($reqIds);
 
         /** @var array<string,list<array<string,mixed>>> $grouped */
         $grouped = array();
@@ -46,6 +45,7 @@ final class ControlledPublishingMccfBcaaViewService
             $rid = (int)$row['id'];
             $row['linked_excerpts'] = $excerptMap[$rid] ?? array();
             $row['regulation_links'] = $regLinkMap[$rid] ?? array();
+            $row['integrity'] = $cachedIntegrity[$rid] ?? null;
             $row['book_version_id'] = $bookVersionId;
             $row['book_version_label'] = self::bookVersionLabel((string)($row['manual_code'] ?? 'OM'));
             $row['location_lines'] = self::formatLocationLines($row, $bookVersionId, $row['linked_excerpts']);
@@ -70,75 +70,6 @@ final class ControlledPublishingMccfBcaaViewService
         }
 
         return $sections;
-    }
-
-    /**
-     * Score integrity for a batch of requirements (used by async MCCF table loading).
-     *
-     * @param list<int> $requirementIds
-     * @return array<int,array{score:int,label:string,tone:string,reasons:list<string>}>
-     */
-    public function integrityScoresForRequirements(array $requirementIds): array
-    {
-        $requirementIds = array_values(array_filter(array_map('intval', $requirementIds), static fn(int $id): bool => $id > 0));
-        if ($requirementIds === array()) {
-            return array();
-        }
-
-        $in = implode(',', $requirementIds);
-        $stmt = $this->pdo->query("
-            SELECT *
-            FROM ipca_canonical_requirements
-            WHERE id IN ({$in})
-              AND source_status = 'active'
-        ");
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
-        if ($rows === array()) {
-            return array();
-        }
-
-        $excerptMap = $this->loadLinkedExcerpts($requirementIds);
-        $regLinkMap = $this->loadRegulationLinks($requirementIds);
-        $bookVersionId = $this->resolveBookVersionId($rows[0]['manual_code'] ?? 'OM', 0);
-
-        $sectionRefs = array();
-        foreach ($excerptMap as $sections) {
-            foreach ($sections as $section) {
-                $ref = rtrim(trim((string)($section['section_ref'] ?? '')), '.');
-                if ($ref !== '') {
-                    $sectionRefs[] = $ref;
-                }
-            }
-        }
-        if ($bookVersionId > 0 && $sectionRefs !== array()) {
-            require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
-            $index = new ControlledPublishingBookSectionIndexService($this->pdo);
-            foreach (array_unique($sectionRefs) as $sectionRef) {
-                $index->plainTextForSectionRefs($bookVersionId, array($sectionRef), true);
-            }
-        }
-
-        $scores = array();
-        foreach ($rows as $row) {
-            $rid = (int)($row['id'] ?? 0);
-            if ($rid <= 0) {
-                continue;
-            }
-            $result = $this->integrity->scoreRequirement(
-                $row,
-                $excerptMap[$rid] ?? array(),
-                $regLinkMap[$rid] ?? array(),
-                $bookVersionId
-            );
-            $scores[$rid] = array(
-                'score' => (int)($result['score'] ?? 0),
-                'label' => (string)($result['label'] ?? ''),
-                'tone' => (string)($result['tone'] ?? 'muted'),
-                'reasons' => is_array($result['reasons'] ?? null) ? $result['reasons'] : array(),
-            );
-        }
-
-        return $scores;
     }
 
     public static function formatBcaaItemLabel(array $row, bool $show): string
