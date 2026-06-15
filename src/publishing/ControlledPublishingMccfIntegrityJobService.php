@@ -12,7 +12,7 @@ require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
  */
 final class ControlledPublishingMccfIntegrityJobService
 {
-    private const BATCH_SIZE = 12;
+    private const BATCH_SIZE = 5;
     private const STALE_MINUTES = 15;
 
     private ControlledPublishingMccfIntegrityService $integrity;
@@ -87,72 +87,99 @@ final class ControlledPublishingMccfIntegrityJobService
             return array('ok' => false, 'done' => true, 'error' => 'Integrity job tables missing.');
         }
 
-        $run = $this->loadRun($runId);
-        if ($run === null) {
-            return array('ok' => false, 'done' => true, 'error' => 'Run not found.');
-        }
-
-        $status = (string)($run['status'] ?? '');
-        if ($status === 'completed' || $status === 'cancelled') {
-            return array(
-                'ok' => true,
-                'done' => true,
-                'processed_count' => (int)($run['processed_count'] ?? 0),
-                'total_count' => (int)($run['total_count'] ?? 0),
-            );
-        }
-        if ($status === 'failed') {
-            return array('ok' => false, 'done' => true, 'error' => (string)($run['error_message'] ?? 'Run failed.'));
-        }
-
-        if ($status === 'queued') {
-            $this->pdo->prepare("
-                UPDATE ipca_mccf_integrity_runs
-                SET status = 'running',
-                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            ")->execute(array(':id' => $runId));
-        }
-
-        $sourceSetId = (int)($run['source_set_id'] ?? 0);
-        $offset = (int)($run['processed_count'] ?? 0);
-        $total = (int)($run['total_count'] ?? 0);
-        if ($total <= 0) {
-            $total = $this->countRequirements($sourceSetId);
-        }
-
-        if ($offset >= $total) {
-            $this->finishRun($runId, 'completed');
-
-            return array('ok' => true, 'done' => true, 'processed_count' => $total, 'total_count' => $total);
-        }
-
+        $this->pdo->beginTransaction();
         try {
-            $rows = $this->loadRequirementBatch($sourceSetId, $offset, max(1, min(50, $batchSize)));
-            if ($rows === array()) {
+            $stmt = $this->pdo->prepare('SELECT * FROM ipca_mccf_integrity_runs WHERE id = :id FOR UPDATE');
+            $stmt->execute(array(':id' => $runId));
+            $run = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($run)) {
+                $this->pdo->rollBack();
+
+                return array('ok' => false, 'done' => true, 'error' => 'Run not found.');
+            }
+
+            $status = (string)($run['status'] ?? '');
+            if ($status === 'completed' || $status === 'cancelled') {
+                $this->pdo->commit();
+
+                return array(
+                    'ok' => true,
+                    'done' => true,
+                    'processed_count' => (int)($run['processed_count'] ?? 0),
+                    'total_count' => (int)($run['total_count'] ?? 0),
+                );
+            }
+            if ($status === 'failed') {
+                $this->pdo->commit();
+
+                return array('ok' => false, 'done' => true, 'error' => (string)($run['error_message'] ?? 'Run failed.'));
+            }
+
+            if ($status === 'queued') {
+                $this->pdo->prepare("
+                    UPDATE ipca_mccf_integrity_runs
+                    SET status = 'running',
+                        started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                ")->execute(array(':id' => $runId));
+            }
+
+            $sourceSetId = (int)($run['source_set_id'] ?? 0);
+            $offset = (int)($run['processed_count'] ?? 0);
+            $total = (int)($run['total_count'] ?? 0);
+            if ($total <= 0) {
+                $total = $this->countRequirements($sourceSetId);
+            }
+
+            if ($offset >= $total) {
                 $this->finishRun($runId, 'completed');
+                $this->pdo->commit();
 
                 return array('ok' => true, 'done' => true, 'processed_count' => $total, 'total_count' => $total);
             }
 
-            $reqIds = array_map(static fn(array $row): int => (int)$row['id'], $rows);
-            $scores = $this->scoreRequirements($rows, $reqIds, $sourceSetId);
-            $this->persistScores($sourceSetId, $runId, $scores);
+            $rows = $this->loadRequirementBatch($sourceSetId, $offset, max(1, min(50, $batchSize)));
+            if ($rows === array()) {
+                $this->finishRun($runId, 'completed');
+                $this->pdo->commit();
 
-            $processed = $offset + count($rows);
-            $this->pdo->prepare("
-                UPDATE ipca_mccf_integrity_runs
-                SET processed_count = :processed_count,
-                    total_count = :total_count,
-                    status = 'running',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            ")->execute(array(
-                ':processed_count' => $processed,
-                ':total_count' => max($total, $processed),
-                ':id' => $runId,
-            ));
+                return array('ok' => true, 'done' => true, 'processed_count' => $total, 'total_count' => $total);
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            return array('ok' => false, 'done' => true, 'error' => $e->getMessage());
+        }
+
+        try {
+            $processed = $offset;
+            foreach ($rows as $row) {
+                $rid = (int)($row['id'] ?? 0);
+                if ($rid <= 0) {
+                    continue;
+                }
+                $scores = $this->scoreRequirements(array($row), array($rid), $sourceSetId);
+                $this->persistScores($sourceSetId, $runId, $scores);
+                $processed++;
+
+                $this->pdo->prepare("
+                    UPDATE ipca_mccf_integrity_runs
+                    SET processed_count = :processed_count,
+                        total_count = :total_count,
+                        status = 'running',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                ")->execute(array(
+                    ':processed_count' => $processed,
+                    ':total_count' => max($total, $processed),
+                    ':id' => $runId,
+                ));
+            }
 
             $done = $processed >= max($total, $processed);
             if ($done) {

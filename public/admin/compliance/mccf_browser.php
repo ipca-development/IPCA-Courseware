@@ -1787,7 +1787,7 @@ compliance_page_open(array(
   var integrityRefreshBtn = document.getElementById('mccfIntegrityRefreshBtn');
   var integrityCancelBtn = document.getElementById('mccfIntegrityCancelBtn');
   var activeIntegrityRun = mccfInitialIntegrityRun || null;
-  var integrityWorkerFailed = false;
+  var integrityTickInFlight = false;
 
   function renderIntegrityJobStatus(run) {
     activeIntegrityRun = run || null;
@@ -1807,7 +1807,9 @@ compliance_page_open(array(
     var status = String(run.status || '');
 
     if (status === 'running' || status === 'queued') {
-      integrityJobMeta.textContent = 'Background scoring: ' + processed + ' / ' + total + ' requirements (' + pct + '%). You can leave this page — progress is saved server-side.';
+      integrityJobMeta.textContent = 'Background scoring: ' + processed + ' / ' + total + ' requirements (' + pct + '%).'
+        + (processed === 0 ? ' First item can take up to a minute while EASA text is loaded.' : '')
+        + ' Progress continues while this page is open.';
       integrityJobBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
       if (integrityCancelBtn) integrityCancelBtn.hidden = false;
       if (integrityRefreshBtn) integrityRefreshBtn.disabled = true;
@@ -1833,8 +1835,11 @@ compliance_page_open(array(
   function pollIntegrityJobStatus() {
     if (!mccfIntegrityJobsAvailable || mccfSourceSetId <= 0) return Promise.resolve();
     var tickPromise = Promise.resolve();
-    if (integrityWorkerFailed && activeIntegrityRun && activeIntegrityRun.is_active && activeIntegrityRun.id) {
-      tickPromise = apiCall('integrity_job_tick', { run_id: activeIntegrityRun.id });
+    if (activeIntegrityRun && activeIntegrityRun.is_active && activeIntegrityRun.id && !integrityTickInFlight) {
+      integrityTickInFlight = true;
+      tickPromise = apiCall('integrity_job_tick', { run_id: activeIntegrityRun.id }).finally(function () {
+        integrityTickInFlight = false;
+      });
     }
     return tickPromise.then(function () {
       return apiCall('integrity_job_status', { source_set_id: mccfSourceSetId });
@@ -1872,10 +1877,7 @@ compliance_page_open(array(
             return;
           }
           if (!data.worker_spawned) {
-            integrityWorkerFailed = true;
-            window.alert('Background worker could not be started; scoring will continue while this page stays open. For fully independent runs use: php scripts/run_mccf_integrity_job.php --run-id=' + (data.run_id || ''));
-          } else {
-            integrityWorkerFailed = false;
+            window.alert('Server background worker could not be started; scoring continues via this page. For fully independent runs: php scripts/run_mccf_integrity_job.php --run-id=' + (data.run_id || ''));
           }
           pollIntegrityJobStatus();
         });
