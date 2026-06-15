@@ -304,8 +304,71 @@ compliance_page_open(array(
   .mccf-row--na .mccf-ref-btn { color: #94a3b8; }
   .mccf-location-lines { margin: 0; padding: 0; list-style: none; }
   .mccf-location-lines li { margin-bottom: 3px; }
-  .mccf-ref-btn { display: inline; padding: 0; margin: 0; border: 0; background: none; color: #1d4ed8; font: inherit; font-size: 10px; line-height: 1.25; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-  .mccf-ref-btn:hover { color: #1e3a8a; }
+  .cmp-page .mccf-bcaa-table .mccf-ref-btn,
+  .cmp-page .mccf-pair-pane .mccf-ref-btn,
+  .cmp-page .mccf-modal-body .mccf-ref-btn {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    display: inline !important;
+    align-items: unset !important;
+    justify-content: unset !important;
+    gap: 0 !important;
+    background: none !important;
+    color: #1d4ed8 !important;
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    letter-spacing: normal !important;
+    box-shadow: none !important;
+    white-space: normal !important;
+    text-align: left !important;
+    line-height: 1.25 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px !important;
+    cursor: pointer !important;
+    transform: none !important;
+  }
+  .cmp-page .mccf-bcaa-table .mccf-ref-btn:hover,
+  .cmp-page .mccf-pair-pane .mccf-ref-btn:hover,
+  .cmp-page .mccf-modal-body .mccf-ref-btn:hover {
+    background: none !important;
+    color: #1e3a8a !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+  .cmp-page .mccf-bcaa-table .mccf-pair-btn,
+  .cmp-page .mccf-pair-head .mccf-pair-btn {
+    height: auto !important;
+    min-height: 18px !important;
+    padding: 1px 6px !important;
+    border-radius: 6px !important;
+    border: 1px solid #cbd5e1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+    font-size: 9px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+    box-shadow: none !important;
+    white-space: nowrap !important;
+    line-height: 1.2 !important;
+    cursor: pointer !important;
+    transform: none !important;
+    margin-top: 3px !important;
+  }
+  .cmp-page .mccf-bcaa-table .mccf-pair-btn:hover,
+  .cmp-page .mccf-pair-head .mccf-pair-btn:hover {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
   .mccf-reg-links { margin: 0; padding: 0; list-style: none; }
   .mccf-integrity-row { display: flex; align-items: center; gap: 6px; }
   .mccf-integrity-bar { height: 7px; flex: 1; border-radius: 999px; background: #e7edf4; overflow: hidden; min-width: 48px; }
@@ -343,7 +406,19 @@ compliance_page_open(array(
   .mccf-modal-body .mccf-reader-fallback { padding: 12px 14px 18px; }
   .mccf-modal-body .mccf-reader-fallback h4 { margin: 0 0 8px; font-size: 12px; }
   .mccf-hl, .mccf-hl-line mark.mccf-hl, [data-mccf-highlight="1"] { background: #fef08a !important; box-shadow: inset 0 0 0 1px #facc15; border-radius: 2px; }
-  .mccf-pair-btn { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 4px 8px; font-size: 10px; cursor: pointer; color: #334155; }
+  .cmp-page .mccf-modal-close {
+    height: 32px !important;
+    min-height: 32px !important;
+    width: 32px !important;
+    padding: 0 !important;
+    border-radius: 8px !important;
+    border: 0 !important;
+    background: #e2e8f0 !important;
+    color: #334155 !important;
+    font-size: 18px !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
+  }
 </style>
 
 <div class="mccf-layout">
@@ -586,7 +661,7 @@ compliance_page_open(array(
                       <td class="mccf-col-sub"><?= h((string)($row['bcaa_sub_label'] ?? '—')) ?></td>
                       <td class="mccf-col-desc">
                         <a href="<?= h(mccf_browser_query(array('req' => $rid))) ?>"><?= h((string)($row['requirement_text'] ?? '')) ?></a>
-                        <button type="button" class="mccf-pair-btn" style="display:block;margin-top:4px;" data-mccf-action="pair" data-req="<?= $rid ?>">Compare ↔</button>
+                        <button type="button" class="mccf-pair-btn" data-mccf-action="pair" data-req="<?= $rid ?>">Compare ↔</button>
                       </td>
                       <td class="mccf-col-location">
                         <ul class="mccf-location-lines">
