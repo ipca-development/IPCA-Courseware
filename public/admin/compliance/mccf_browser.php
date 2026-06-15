@@ -421,6 +421,19 @@ compliance_page_open(array(
   .mccf-modal-body .mccf-reader-fallback { padding: 12px 14px 18px; }
   .mccf-modal-body .mccf-reader-fallback h4 { margin: 0 0 8px; font-size: 12px; }
   .mccf-hl, .mccf-hl-line mark.mccf-hl, [data-mccf-highlight="1"] { background: #fef08a !important; box-shadow: inset 0 0 0 1px #facc15; border-radius: 2px; }
+  .mccf-easa-preview .rl-easa-bl-li.mccf-hl-line { background: #fef08a !important; box-shadow: inset 0 0 0 1px #facc15; border-radius: 4px; padding: 4px 6px; margin-left: -6px; margin-right: -6px; }
+  .mccf-easa-preview mark.mccf-hl { background: #fef08a !important; color: inherit; box-shadow: inset 0 0 0 1px #facc15; border-radius: 2px; padding: 0 1px; }
+  .mccf-modal-context { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; font-size: 11px; line-height: 1.45; color: #334155; }
+  .mccf-modal-context-kicker { font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #64748b; margin: 0 0 4px; }
+  .mccf-modal-context-subject { font-size: 12px; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
+  .mccf-modal-context-desc { margin: 0; white-space: pre-wrap; }
+  .mccf-modal-integrity { margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+  .mccf-modal-integrity-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .mccf-modal-integrity-head strong { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+  .mccf-modal-integrity-reasons { margin: 0; padding-left: 16px; color: #475569; }
+  .mccf-modal-integrity-reasons li { margin-bottom: 4px; }
+  .mccf-modal-content { }
+  .mccf-modal-content .mccf-pair-split { min-height: 240px; }
   .mccf-easa-preview .rl-easa-detail-meta { font-size: 11px; color: #475569; margin: 0; padding: 12px 16px 0; white-space: pre-wrap; word-break: break-word; }
   .mccf-easa-preview .rl-easa-detail-body { font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0, "calt" 0, "dlig" 0; white-space: normal; word-break: break-word; margin: 0; font-size: 13px; line-height: 1.65; color: #1e293b; padding: 14px 16px; background: #fff; border: none; border-radius: 0; max-height: none; overflow: visible; }
   .mccf-easa-preview .rl-easa-bl-article { max-width: 100%; min-width: 0; }
@@ -843,6 +856,64 @@ compliance_page_open(array(
     }).then(function (res) { return res.json(); });
   }
 
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+  }
+
+  function integrityBarHtml(integrity) {
+    if (!integrity) return '';
+    var score = Math.max(0, Math.min(100, parseInt(integrity.score || 0, 10)));
+    var tone = integrity.tone || 'muted';
+    var barCls = tone === 'ok' ? 'ok' : (tone === 'warn' ? 'warn' : (tone === 'bad' ? 'danger' : 'muted'));
+    return '<div class="mccf-integrity-row" title="' + escapeHtml((integrity.label || '') + ' — ' + score + '%') + '">'
+      + '<div class="mccf-integrity-bar"><span class="' + barCls + '" style="width:' + score + '%;"></span></div>'
+      + '<div class="mccf-integrity-value">' + score + '%</div>'
+      + '<div class="mccf-integrity-label">' + escapeHtml(integrity.label || '') + '</div>'
+      + '</div>';
+  }
+
+  function requirementContextHtml(req, integrity) {
+    if (!req) return '';
+    var html = '<div class="mccf-modal-context">';
+    html += '<div class="mccf-modal-context-kicker">MCCF description / supplementary information</div>';
+    if (req.subject) {
+      html += '<div class="mccf-modal-context-subject">' + escapeHtml(req.subject) + '</div>';
+    }
+    if (req.requirement_text) {
+      html += '<div class="mccf-modal-context-desc">' + escapeHtml(req.requirement_text) + '</div>';
+    } else {
+      html += '<div class="mccf-modal-context-desc" style="color:#94a3b8;font-style:italic;">No description text on this requirement.</div>';
+    }
+    if (req.item_ref || req.regulation_ref) {
+      html += '<div style="margin-top:8px;font-size:10px;color:#64748b;">';
+      if (req.item_ref) html += 'Item ' + escapeHtml(req.item_ref);
+      if (req.item_ref && req.regulation_ref) html += ' · ';
+      if (req.regulation_ref) html += escapeHtml(req.regulation_ref);
+      html += '</div>';
+    }
+    if (integrity) {
+      html += '<div class="mccf-modal-integrity">';
+      html += '<div class="mccf-modal-integrity-head"><strong>AI integrity</strong></div>';
+      html += integrityBarHtml(integrity);
+      if (integrity.reasons && integrity.reasons.length) {
+        html += '<ul class="mccf-modal-integrity-reasons">';
+        integrity.reasons.forEach(function (reason) {
+          html += '<li>' + escapeHtml(reason) + '</li>';
+        });
+        html += '</ul>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function wrapModalContent(contextHtml, bodyHtml) {
+    return (contextHtml || '') + '<div class="mccf-modal-content">' + (bodyHtml || '') + '</div>';
+  }
+
   function scrollHighlight(root) {
     if (!root) return;
     var target = root.querySelector('[data-mccf-highlight="1"], .mccf-hl-line, mark.mccf-hl');
@@ -872,10 +943,14 @@ compliance_page_open(array(
     openModal('Regulation', 'Loading…', '<p>Loading regulation source…</p>');
     apiCall('regulation_preview', { requirement_id: reqId, rule_token: ruleToken }).then(function (data) {
       if (!data.ok) {
-        openModal('Regulation', '', '<p>' + (data.error || 'Could not load regulation preview.') + '</p>');
+        openModal('Regulation', '', wrapModalContent(requirementContextHtml(data.requirement), '<p>' + escapeHtml(data.error || 'Could not load regulation preview.') + '</p>'));
         return;
       }
-      openModal(data.title || 'Regulation', data.subtitle || '', data.html || '');
+      openModal(
+        data.title || 'Regulation',
+        data.subtitle || '',
+        wrapModalContent(requirementContextHtml(data.requirement), data.html || '')
+      );
     }).catch(function () {
       openModal('Regulation', '', '<p>Could not load regulation preview.</p>');
     });
@@ -885,14 +960,18 @@ compliance_page_open(array(
     openModal('Manual section', 'Loading…', '<p>Loading manual section…</p>');
     apiCall('manual_preview', { requirement_id: reqId, excerpt_key: excerptKey || '' }).then(function (data) {
       if (!data.ok) {
-        openModal('Manual section', data.book_label || '', '<p>' + (data.error || 'Could not load manual preview.') + '</p>');
+        openModal('Manual section', data.book_label || '', wrapModalContent(requirementContextHtml(data.requirement), '<p>' + escapeHtml(data.error || 'Could not load manual preview.') + '</p>'));
         return;
       }
       var html = '';
       (data.sections || []).forEach(function (section) {
         html += section.html || '';
       });
-      openModal(data.book_label || 'Manual section', (data.sections && data.sections[0] && data.sections[0].label) || '', html || '<p>No manual content available.</p>');
+      openModal(
+        data.book_label || 'Manual section',
+        (data.sections && data.sections[0] && data.sections[0].label) || '',
+        wrapModalContent(requirementContextHtml(data.requirement), html || '<p>No manual content available.</p>')
+      );
     }).catch(function () {
       openModal('Manual section', '', '<p>Could not load manual preview.</p>');
     });
@@ -905,19 +984,23 @@ compliance_page_open(array(
         openModal('Regulation ↔ Manual', '', '<p>Could not load coverage pair.</p>');
         return;
       }
-      var regHtml = (data.regulation && data.regulation.ok) ? (data.regulation.html || '') : '<p>' + ((data.regulation && data.regulation.error) || 'No regulation text.') + '</p>';
+      var regHtml = (data.regulation && data.regulation.ok) ? (data.regulation.html || '') : '<p>' + escapeHtml((data.regulation && data.regulation.error) || 'No regulation text.') + '</p>';
       var manualHtml = '';
       if (data.manual && data.manual.ok && data.manual.sections) {
         data.manual.sections.forEach(function (section) { manualHtml += section.html || ''; });
       } else {
-        manualHtml = '<p>' + ((data.manual && data.manual.error) || 'No linked manual section.') + '</p>';
+        manualHtml = '<p>' + escapeHtml((data.manual && data.manual.error) || 'No linked manual section.') + '</p>';
       }
       var subtitle = (data.item_ref || '') + (data.subject ? (' — ' + data.subject) : '');
-      var html = '<div class="mccf-pair-split">'
+      var pairHtml = '<div class="mccf-pair-split">'
         + '<div class="mccf-pair-pane"><h4>Regulation</h4>' + regHtml + '</div>'
         + '<div class="mccf-pair-pane"><h4>Manual coverage</h4>' + manualHtml + '</div>'
         + '</div>';
-      openModal('Regulation ↔ Manual', subtitle, html);
+      openModal(
+        'Regulation ↔ Manual',
+        subtitle,
+        wrapModalContent(requirementContextHtml(data.requirement, data.integrity), pairHtml)
+      );
       scrollHighlight(modalBody);
     }).catch(function () {
       openModal('Regulation ↔ Manual', '', '<p>Could not load coverage pair.</p>');

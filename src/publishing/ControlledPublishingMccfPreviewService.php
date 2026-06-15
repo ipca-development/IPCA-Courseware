@@ -11,6 +11,7 @@ require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingRevisionService.php';
+require_once __DIR__ . '/ControlledPublishingMccfIntegrityService.php';
 require_once __DIR__ . '/../easa_erules_xml_import.php';
 require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
@@ -32,10 +33,11 @@ final class ControlledPublishingMccfPreviewService
         if ($requirement === null) {
             return array('ok' => false, 'error' => 'Requirement not found.');
         }
+        $summary = $this->requirementSummary($requirement);
 
         $tokens = $this->resolveRuleTokens($requirement, $ruleToken);
         if ($tokens === array()) {
-            return array('ok' => false, 'error' => 'No regulation reference on this requirement.');
+            return array('ok' => false, 'error' => 'No regulation reference on this requirement.', 'requirement' => $summary);
         }
 
         $detail = $this->resolveRegulationNodeDetail($requirementId, $tokens);
@@ -43,6 +45,7 @@ final class ControlledPublishingMccfPreviewService
             return array(
                 'ok' => false,
                 'error' => 'Could not load regulation source from EASA Resource Library.',
+                'requirement' => $summary,
             );
         }
 
@@ -61,6 +64,7 @@ final class ControlledPublishingMccfPreviewService
             'highlight' => $highlight,
             'batch_id' => (int)($node['batch_id'] ?? 0),
             'node_uid' => (string)($node['node_uid'] ?? ''),
+            'requirement' => $summary,
         );
     }
 
@@ -73,12 +77,14 @@ final class ControlledPublishingMccfPreviewService
         if ($requirement === null) {
             return array('ok' => false, 'error' => 'Requirement not found.');
         }
+        $summary = $this->requirementSummary($requirement);
 
         $excerpts = $this->linkedExcerpts($requirementId);
         if ($excerpts === array()) {
             return array(
                 'ok' => false,
                 'error' => 'No linked OM section for this requirement.',
+                'requirement' => $summary,
             );
         }
 
@@ -112,6 +118,7 @@ final class ControlledPublishingMccfPreviewService
             'ok' => true,
             'book_label' => $manualCode . ' Rev ' . $versionLabel,
             'sections' => $sections,
+            'requirement' => $summary,
         );
     }
 
@@ -131,6 +138,8 @@ final class ControlledPublishingMccfPreviewService
             'item_ref' => is_array($requirement)
                 ? ControlledPublishingMccfBrowserService::formatItemRef($requirement)
                 : '',
+            'requirement' => is_array($requirement) ? $this->requirementSummary($requirement) : array(),
+            'integrity' => is_array($requirement) ? $this->integrityForRequirement($requirementId, $requirement) : null,
             'regulation' => $reg,
             'manual' => $manual,
         );
@@ -303,6 +312,20 @@ final class ControlledPublishingMccfPreviewService
     {
         if ($ruleTokenHint !== '') {
             return ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($ruleTokenHint);
+        }
+
+        $best = '';
+        $bestDepth = -1;
+        foreach ($tokens as $tokenRow) {
+            $token = (string)($tokenRow['token'] ?? '');
+            $depth = substr_count($token, '(');
+            if ($depth > $bestDepth) {
+                $bestDepth = $depth;
+                $best = $token;
+            }
+        }
+        if ($best !== '') {
+            return $best;
         }
 
         foreach ($tokens as $tokenRow) {
@@ -509,6 +532,40 @@ final class ControlledPublishingMccfPreviewService
         }
 
         return $html;
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @return array<string,mixed>
+     */
+    private function requirementSummary(array $requirement): array
+    {
+        return array(
+            'subject' => trim((string)($requirement['subject'] ?? '')),
+            'requirement_text' => trim((string)($requirement['requirement_text'] ?? '')),
+            'applicable' => trim((string)($requirement['applicable'] ?? '')),
+            'regulation_ref' => trim((string)($requirement['regulation_ref'] ?? '')),
+            'manual_section_ref' => trim((string)($requirement['manual_section_ref'] ?? '')),
+            'item_ref' => ControlledPublishingMccfBrowserService::formatItemRef($requirement),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $requirement
+     * @return array<string,mixed>
+     */
+    private function integrityForRequirement(int $requirementId, array $requirement): array
+    {
+        $excerpts = $this->linkedExcerpts($requirementId);
+        $regLinks = $this->allRegulationLinks($requirementId);
+        $score = (new ControlledPublishingMccfIntegrityService())->scoreRequirement($requirement, $excerpts, $regLinks);
+
+        return array(
+            'score' => (int)($score['score'] ?? 0),
+            'label' => (string)($score['label'] ?? ''),
+            'tone' => (string)($score['tone'] ?? 'muted'),
+            'reasons' => is_array($score['reasons'] ?? null) ? $score['reasons'] : array(),
+        );
     }
 
     private function resolveBookVersionId(string $manualCode, string $versionLabel): int
