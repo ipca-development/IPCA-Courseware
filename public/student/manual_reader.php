@@ -43,11 +43,11 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title><?= mr_page_h($bookTitle) ?> · Manual Reader</title>
+  <title><?= mr_page_h($bookTitle) ?> · Reader</title>
   <link rel="stylesheet" href="/assets/controlled_book_editor.css?v=<?= (int)$bookCssVersion ?>">
   <link rel="stylesheet" href="/assets/manual_reader.css?v=<?= (int)$cssVersion ?>">
 </head>
-<body class="mr-body">
+<body class="mr-body" data-mr-theme="light">
   <div
     id="manualReader"
     class="mr-app"
@@ -57,9 +57,14 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
   >
     <header class="mr-topbar">
       <div class="mr-topbar-left">
-        <a class="mr-back-btn" href="/student/manuals.php" aria-label="Back to manuals">
+        <button type="button" class="mr-icon-btn" id="mrBackBtn" aria-label="Back">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <a class="mr-icon-btn mr-library-btn" href="/student/manuals.php" aria-label="Library" title="Library">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 19V5M4 19h16M4 19l2-14h5l1 9h6l1-5h3v10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </a>
         <div class="mr-topbar-titles">
@@ -70,58 +75,104 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
         </div>
       </div>
       <div class="mr-topbar-actions">
-        <button type="button" class="mr-icon-btn" id="mrSearchToggle" aria-label="Search sections" title="Search">
+        <button type="button" class="mr-icon-btn" id="mrSearchToggle" aria-label="Search" title="Search">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
             <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
-        <button type="button" class="mr-icon-btn" id="mrTocToggle" aria-label="Table of contents" title="Contents">
+        <button type="button" class="mr-icon-btn" id="mrTocToggle" aria-label="Contents" title="Contents">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button type="button" class="mr-icon-btn" id="mrSettingsToggle" aria-label="Reader settings" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
     </header>
 
-    <div class="mr-search-panel" id="mrSearchPanel" hidden>
-      <input type="search" id="mrSearchInput" class="mr-search-input" placeholder="Search section titles…" autocomplete="off">
-      <div class="mr-search-results" id="mrSearchResults"></div>
+    <div class="mr-panel mr-search-panel" id="mrSearchPanel" hidden>
+      <div class="mr-panel-inner">
+        <input type="search" id="mrSearchInput" class="mr-search-input" placeholder="Search section titles…" autocomplete="off">
+        <div class="mr-search-results" id="mrSearchResults"></div>
+      </div>
     </div>
 
-    <div class="mr-layout">
-      <aside class="mr-toc-drawer" id="mrTocDrawer" aria-label="Table of contents">
-        <div class="mr-toc-head">
-          <h2 class="mr-toc-title">Contents</h2>
-          <button type="button" class="mr-icon-btn mr-toc-close" id="mrTocClose" aria-label="Close contents">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+    <aside class="mr-toc-drawer" id="mrTocDrawer" aria-label="Table of contents" hidden>
+      <div class="mr-toc-head">
+        <h2 class="mr-toc-title">Contents</h2>
+        <button type="button" class="mr-icon-btn" id="mrTocClose" aria-label="Close contents">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <nav class="mr-toc-nav" id="mrTocNav"></nav>
+    </aside>
+
+    <div class="mr-panel mr-settings-panel" id="mrSettingsPanel" hidden>
+      <div class="mr-panel-inner mr-settings-inner">
+        <h2 class="mr-panel-title">Reader Settings</h2>
+        <label class="mr-setting">
+          <span>Font size</span>
+          <select id="mrSettingFontSize">
+            <option value="small">Small</option>
+            <option value="normal" selected>Normal</option>
+            <option value="large">Large</option>
+          </select>
+        </label>
+        <label class="mr-setting">
+          <span>Theme</span>
+          <select id="mrSettingTheme">
+            <option value="light" selected>Light</option>
+            <option value="sepia">Sepia</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label class="mr-setting">
+          <span>Page width</span>
+          <select id="mrSettingPageWidth">
+            <option value="narrow">Narrow</option>
+            <option value="normal" selected>Normal</option>
+            <option value="wide">Wide</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <main class="mr-stage" id="mrStage">
+      <?php if (!$hasReleased): ?>
+        <div class="mr-empty-state">
+          <h1>No released manual available</h1>
+          <p>This manual has not been released yet. Check back after publishing completes.</p>
+          <a class="mr-empty-link" href="/student/manuals.php">Back to Library</a>
+        </div>
+      <?php else: ?>
+        <div class="mr-page-viewport" id="mrPageViewport">
+          <button type="button" class="mr-page-nav mr-page-nav--prev" id="mrPagePrev" aria-label="Previous page">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+
+          <div class="mr-page-frame" id="mrPageFrame">
+            <div class="mr-page-meta" id="mrPageMeta"></div>
+            <div class="mr-page-content" id="mrPageContent">
+              <div class="mr-loading">Opening manual…</div>
+            </div>
+            <div class="mr-page-footer-bar" id="mrPageFooter"></div>
+          </div>
+
+          <button type="button" class="mr-page-nav mr-page-nav--next" id="mrPageNext" aria-label="Next page">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
-        <nav class="mr-toc-nav" id="mrTocNav"></nav>
-      </aside>
 
-      <main class="mr-main" id="mrMain">
-        <?php if (!$hasReleased): ?>
-          <div class="mr-empty-state">
-            <h1>No released manual available</h1>
-            <p>This manual has not been released yet. Check back after publishing completes.</p>
-            <a class="mr-empty-link" href="/student/manuals.php">Back to Manuals</a>
-          </div>
-        <?php else: ?>
-          <div class="mr-reading-column">
-            <div class="mr-nav-row">
-              <button type="button" class="mr-nav-btn" id="mrPrevBtn" disabled>Previous</button>
-              <button type="button" class="mr-nav-btn" id="mrNextBtn" disabled>Next</button>
-            </div>
-            <div class="mr-content-shell cpb-editor-root" id="mrContent">
-              <div class="mr-loading">Loading…</div>
-            </div>
-          </div>
-        <?php endif; ?>
-      </main>
-    </div>
+        <div class="mr-measure-host" id="mrMeasureHost" aria-hidden="true"></div>
+      <?php endif; ?>
+    </main>
 
     <div class="mr-overlay" id="mrOverlay" hidden></div>
   </div>

@@ -23,7 +23,7 @@ function manuals_fmt_date(?string $value): string
 {
     $value = trim((string)$value);
     if ($value === '') {
-        return '—';
+        return '';
     }
 
     try {
@@ -35,53 +35,91 @@ function manuals_fmt_date(?string $value): string
     }
 }
 
+$userId = (int)($u['id'] ?? 0);
 $reader = new ControlledPublishingReaderService($pdo);
-$library = $reader->listActiveReleasedLibrary();
+$library = $reader->listActiveReleasedLibrary($userId);
+
+$shelfCssVersion = @filemtime(__DIR__ . '/../assets/manual_shelf.css') ?: time();
 
 cw_header('Manuals');
 ?>
-<div class="page manuals-shelf-page">
-  <div class="page-head">
-    <div>
-      <h1 class="page-title">Manuals</h1>
-      <p class="page-subtitle">Official IPCA operations and management manuals — released editions only.</p>
-    </div>
-  </div>
+<link rel="stylesheet" href="/assets/manual_shelf.css?v=<?= (int)$shelfCssVersion ?>">
+
+<div class="ms-page">
+  <header class="ms-hero">
+    <p class="ms-kicker">Library</p>
+    <h1 class="ms-title">Manuals</h1>
+    <p class="ms-subtitle">Official operations and management manuals — released editions only.</p>
+  </header>
 
   <?php if ($library === array()): ?>
-    <div class="card manuals-empty-card">
-      <h2 class="manuals-empty-title">No released manuals available</h2>
-      <p class="manuals-empty-text">
+    <div class="ms-empty">
+      <div class="ms-empty-icon" aria-hidden="true">📚</div>
+      <h2 class="ms-empty-title">No released manuals available</h2>
+      <p class="ms-empty-text">
         When a manual version is released through controlled publishing, it will appear here for reading.
       </p>
     </div>
   <?php else: ?>
-    <div class="manuals-shelf-grid">
+    <div class="ms-grid">
       <?php foreach ($library as $book): ?>
         <?php
-          $bookKey = manuals_h((string)($book['book_key'] ?? ''));
-          $bookTitle = manuals_h((string)($book['book_title'] ?? ''));
+          $bookKeyRaw = (string)($book['book_key'] ?? '');
+          $bookKey = manuals_h($bookKeyRaw);
+          $fallback = is_array($book['cover_fallback'] ?? null) ? $book['cover_fallback'] : array();
+          $displayTitle = manuals_h((string)($fallback['book_title'] ?? $book['book_title'] ?? ''));
+          $manualCode = manuals_h((string)($fallback['manual_code'] ?? $book['manual_code'] ?? $bookKeyRaw));
           $versionLabel = manuals_h((string)($book['version_label'] ?? ''));
-          $effectiveDate = manuals_fmt_date($book['effective_date'] ?? null);
+          $coverUrl = trim((string)($book['cover_url'] ?? ''));
           $releasedAt = manuals_fmt_date($book['released_at'] ?? null);
+          $effectiveDate = manuals_fmt_date($book['effective_date'] ?? null);
+          $hasProgress = !empty($book['has_progress']);
+          $continueAnchor = trim((string)($book['continue_stable_anchor'] ?? ''));
+          $readerUrl = '/student/manual_reader.php?book=' . urlencode($bookKeyRaw);
+          $continueUrl = $readerUrl . ($continueAnchor !== '' ? '#' . urlencode($continueAnchor) : '');
         ?>
-        <article class="card manual-shelf-card">
-          <div class="manual-shelf-cover" aria-hidden="true">
-            <span class="manual-shelf-cover-key"><?= $bookKey ?></span>
+        <article class="ms-card">
+          <div class="ms-cover-wrap">
+            <?php if ($coverUrl !== ''): ?>
+              <img
+                class="ms-cover-img"
+                src="<?= manuals_h($coverUrl) ?>"
+                alt="<?= $displayTitle ?> cover"
+                loading="lazy"
+              >
+            <?php else: ?>
+              <div class="ms-cover-fallback" aria-hidden="true">
+                <div class="ms-cover-fallback-top">
+                  <span class="ms-cover-code"><?= $manualCode ?></span>
+                </div>
+                <div class="ms-cover-fallback-body">
+                  <h2 class="ms-cover-fallback-title"><?= $displayTitle ?></h2>
+                  <?php if ($versionLabel !== ''): ?>
+                    <span class="ms-cover-fallback-rev">Rev <?= $versionLabel ?></span>
+                  <?php endif; ?>
+                  <?php if ($releasedAt !== ''): ?>
+                    <span class="ms-cover-fallback-date"><?= manuals_h($releasedAt) ?></span>
+                  <?php elseif ($effectiveDate !== ''): ?>
+                    <span class="ms-cover-fallback-date"><?= manuals_h($effectiveDate) ?></span>
+                  <?php endif; ?>
+                </div>
+              </div>
+            <?php endif; ?>
           </div>
-          <div class="manual-shelf-body">
-            <h2 class="manual-shelf-title"><?= $bookTitle ?></h2>
-            <div class="manual-shelf-meta">
-              <span class="manual-shelf-badge">v<?= $versionLabel ?></span>
-              <span class="manual-shelf-meta-item">Effective <?= $effectiveDate ?></span>
-              <?php if (($book['released_at'] ?? '') !== ''): ?>
-                <span class="manual-shelf-meta-item">Released <?= $releasedAt ?></span>
+
+          <div class="ms-card-body">
+            <h3 class="ms-card-title"><?= $displayTitle ?></h3>
+            <div class="ms-card-meta">
+              <span class="ms-badge"><?= $manualCode ?> · v<?= $versionLabel ?></span>
+              <?php if ($releasedAt !== ''): ?>
+                <span class="ms-meta-item">Released <?= manuals_h($releasedAt) ?></span>
               <?php endif; ?>
             </div>
-            <div class="manual-shelf-actions">
-              <a class="mini-action primary" href="/student/manual_reader.php?book=<?= urlencode((string)($book['book_key'] ?? '')) ?>">
-                Open Reader
-              </a>
+            <div class="ms-card-actions">
+              <a class="ms-btn ms-btn-primary" href="<?= manuals_h($readerUrl) ?>">Open Manual</a>
+              <?php if ($hasProgress): ?>
+                <a class="ms-btn ms-btn-secondary" href="<?= manuals_h($continueUrl) ?>">Continue Reading</a>
+              <?php endif; ?>
             </div>
           </div>
         </article>
@@ -89,96 +127,5 @@ cw_header('Manuals');
     </div>
   <?php endif; ?>
 </div>
-
-<style>
-.manuals-shelf-page .page-subtitle {
-  margin-top: 6px;
-  color: var(--text-muted, #64748b);
-  max-width: 52ch;
-}
-
-.manuals-shelf-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 18px;
-  margin-top: 20px;
-}
-
-.manual-shelf-card {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 0;
-}
-
-.manual-shelf-cover {
-  background: linear-gradient(145deg, #0f2744 0%, #1e3a5f 55%, #334155 100%);
-  color: #fff;
-  min-height: 120px;
-  display: flex;
-  align-items: flex-end;
-  padding: 18px 20px;
-}
-
-.manual-shelf-cover-key {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
-.manual-shelf-body {
-  padding: 18px 20px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-}
-
-.manual-shelf-title {
-  margin: 0;
-  font-size: 1.05rem;
-  line-height: 1.35;
-}
-
-.manual-shelf-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: center;
-  color: var(--text-muted, #64748b);
-  font-size: 0.875rem;
-}
-
-.manual-shelf-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(15, 39, 68, 0.08);
-  color: #0f2744;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.manual-shelf-actions {
-  margin-top: auto;
-  padding-top: 4px;
-}
-
-.manuals-empty-card {
-  margin-top: 20px;
-  padding: 28px 24px;
-}
-
-.manuals-empty-title {
-  margin: 0 0 8px;
-  font-size: 1.1rem;
-}
-
-.manuals-empty-text {
-  margin: 0;
-  color: var(--text-muted, #64748b);
-}
-</style>
 
 <?php cw_footer(); ?>

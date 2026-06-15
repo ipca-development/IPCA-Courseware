@@ -58,7 +58,7 @@ try {
         case 'library':
             mr_json(200, array(
                 'ok' => true,
-                'books' => $reader->listActiveReleasedLibrary(),
+                'books' => $reader->listActiveReleasedLibrary($userId),
             ));
 
         case 'nav':

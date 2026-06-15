@@ -17,6 +17,8 @@ require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingEditorNavService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/ControlledPublishingReaderTokenResolver.php';
+require_once __DIR__ . '/ControlledPublishingReaderCoverService.php';
 
 /**
  * Read-only manual e-reader backed by released ipca_publishing_* content only.
@@ -39,6 +41,8 @@ final class ControlledPublishingReaderService
     private ?ControlledPublishingEditorNavService $editorNavSvc = null;
     private ?ControlledPublishingManualStructureService $manualStructureSvc = null;
     private ?ControlledPublishingAnnexService $annexSvc = null;
+    private ?ControlledPublishingReaderTokenResolver $tokenResolver = null;
+    private ?ControlledPublishingReaderCoverService $coverSvc = null;
 
     private static ?bool $progressTableReady = null;
 
@@ -49,7 +53,7 @@ final class ControlledPublishingReaderService
     /**
      * @return list<array<string,mixed>>
      */
-    public function listActiveReleasedLibrary(): array
+    public function listActiveReleasedLibrary(?int $userId = null): array
     {
         $stmt = $this->pdo->query("
             SELECT id, book_key, title, manual_code, status
@@ -66,6 +70,12 @@ final class ControlledPublishingReaderService
             if ($version === null) {
                 continue;
             }
+
+            $cover = $this->cover()->resolveCoverForVersion($version);
+            $progress = ($userId !== null && $userId > 0)
+                ? $this->getReadingProgress($userId, $bookKey)
+                : null;
+
             $library[] = array(
                 'book_id' => (int)($book['id'] ?? 0),
                 'book_key' => $bookKey,
@@ -75,6 +85,13 @@ final class ControlledPublishingReaderService
                 'version_label' => (string)($version['version_label'] ?? ''),
                 'effective_date' => $version['effective_date'] ?? null,
                 'released_at' => $version['released_at'] ?? null,
+                'cover_url' => $cover['cover_url'],
+                'cover_image_url' => $cover['cover_image_url'],
+                'logo_url' => $cover['logo_url'],
+                'cover_fallback' => $cover['fallback'],
+                'has_progress' => is_array($progress),
+                'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
+                'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
             );
         }
 
@@ -147,7 +164,19 @@ final class ControlledPublishingReaderService
 
         $sectionId = (int)$section['id'];
         $nav = $this->prevNextSectionIds($versionId, $sectionId);
-        $html = $this->renderSectionHtml($version, $section);
+        $isCover = $this->isCoverSection($section);
+        $pageHeaderConfig = $this->pageHeaderConfig($version, $section, $versionId);
+        $partTitle = '';
+        if (is_array($pageHeaderConfig['token_overrides'] ?? null)) {
+            $partTitle = trim((string)($pageHeaderConfig['token_overrides']['part_title'] ?? ''));
+        }
+        $tokenContext = $this->tokens()->buildContext($version, $section, array(
+            'page' => 1,
+            'page_total' => 1,
+            'part_title' => $partTitle,
+        ));
+        $html = $this->renderSectionHtml($version, $section, $tokenContext, $pageHeaderConfig);
+        $layout = $this->layoutSvc()->resolveLayout($section);
 
         return array(
             'html' => $html,
@@ -155,6 +184,10 @@ final class ControlledPublishingReaderService
             'section_title' => (string)($section['title'] ?? ''),
             'stable_anchor' => (string)($section['stable_anchor'] ?? ''),
             'section_key' => (string)($section['section_key'] ?? ''),
+            'section_type' => (string)($section['section_type'] ?? ''),
+            'is_cover' => $isCover,
+            'hide_header_footer' => $isCover || !empty($layout['hide_header_footer']),
+            'token_context' => $this->tokens()->contextForApi($tokenContext),
             'prev_section_id' => $nav['prev'],
             'next_section_id' => $nav['next'],
             'version_id' => $versionId,
@@ -320,20 +353,41 @@ final class ControlledPublishingReaderService
     /**
      * @param array<string,mixed> $version
      * @param array<string,mixed> $section
+     * @param array<string,string> $tokenContext
+     * @param array<string,mixed> $pageHeaderConfig
      */
-    private function renderSectionHtml(array $version, array $section): string
-    {
+    private function renderSectionHtml(
+        array $version,
+        array $section,
+        array $tokenContext,
+        array $pageHeaderConfig
+    ): string {
         $versionId = (int)$version['id'];
         $sectionId = (int)$section['id'];
         $mode = ControlledPublishingBookRenderer::MODE_READ;
 
         $this->configureRenderer($version);
-        $pageHeaderConfig = $this->pageHeaderConfig($version, $section, $versionId);
+        if (is_array($pageHeaderConfig['token_overrides'] ?? null)) {
+            $pageHeaderConfig['token_overrides'] = array_merge(
+                $pageHeaderConfig['token_overrides'],
+                array(
+                    'page' => (int)($tokenContext['page'] ?? 1),
+                    'page_total' => (int)($tokenContext['page_total'] ?? 1),
+                )
+            );
+        } else {
+            $pageHeaderConfig['token_overrides'] = array(
+                'part_title' => (string)($tokenContext['part_title'] ?? ''),
+                'page' => (int)($tokenContext['page'] ?? 1),
+                'page_total' => (int)($tokenContext['page_total'] ?? 1),
+            );
+        }
+
         $sectionBlocks = $this->revision()->annotateChangeStatus($versionId, $this->blocks()->listSectionBlocks($sectionId));
         $pageLayout = $this->layoutSvc()->resolveLayout($section);
         $blocksHtml = $this->renderer()->renderBlocks($sectionBlocks, $mode);
 
-        return $this->renderPageHtml(
+        $html = $this->renderPageHtml(
             $version,
             $section,
             $blocksHtml,
@@ -342,6 +396,8 @@ final class ControlledPublishingReaderService
             $pageHeaderConfig,
             $sectionBlocks
         );
+
+        return $this->tokens()->resolveHtml($html, $tokenContext);
     }
 
     /**
@@ -351,9 +407,12 @@ final class ControlledPublishingReaderService
     {
         $versionId = (int)$version['id'];
         $bookStyles = $this->styleSvc()->resolveFromVersion($version);
-        $this->renderer()->setBookStyles($bookStyles, $this->styleSvc());
+        $renderer = $this->renderer();
+        $renderer->setBookStyles($bookStyles, $this->styleSvc());
+        $renderer->setPageHeaderService($this->pageHeaderSvc());
+        $renderer->setCoverPageService($this->coverPageSvc());
         $computed = $this->numberSvc()->computeForVersion($versionId, (string)($version['manual_code'] ?? ''));
-        $this->renderer()->setSectionNumbers(
+        $renderer->setSectionNumbers(
             $computed['display'],
             $computed['suggested_regulatory_refs'],
             $this->numberSvc()
@@ -778,6 +837,21 @@ final class ControlledPublishingReaderService
         return $this->annexSvc ??= new ControlledPublishingAnnexService(
             $this->pdo,
             $this->foundation(),
+            $this->sections(),
+            $this->blocks()
+        );
+    }
+
+    private function tokens(): ControlledPublishingReaderTokenResolver
+    {
+        return $this->tokenResolver ??= new ControlledPublishingReaderTokenResolver($this->pageHeaderSvc());
+    }
+
+    private function cover(): ControlledPublishingReaderCoverService
+    {
+        return $this->coverSvc ??= new ControlledPublishingReaderCoverService(
+            $this->pdo,
+            $this->coverPageSvc(),
             $this->sections(),
             $this->blocks()
         );

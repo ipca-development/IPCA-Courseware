@@ -1,0 +1,238 @@
+/* Manual bookshelf — premium cover-card layout */
+
+.ms-page {
+  padding-bottom: 32px;
+}
+
+.ms-hero {
+  margin-bottom: 28px;
+}
+
+.ms-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #64748b);
+}
+
+.ms-title {
+  margin: 0;
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.ms-subtitle {
+  margin: 10px 0 0;
+  max-width: 52ch;
+  color: var(--text-muted, #64748b);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.ms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 28px 24px;
+}
+
+.ms-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ms-cover-wrap {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 2px 8px rgba(15, 39, 68, 0.12),
+    0 12px 32px rgba(15, 39, 68, 0.14);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.ms-card:hover .ms-cover-wrap {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow:
+    0 4px 12px rgba(15, 39, 68, 0.16),
+    0 20px 40px rgba(15, 39, 68, 0.18);
+}
+
+.ms-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ms-cover-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(165deg, #0a1f38 0%, #0f2744 38%, #1a3d66 100%);
+  color: #fff;
+  padding: 20px 18px;
+}
+
+.ms-cover-fallback-top {
+  flex: 0 0 auto;
+}
+
+.ms-cover-code {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.ms-cover-fallback-body {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ms-cover-fallback-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.ms-cover-fallback-rev {
+  font-size: 0.82rem;
+  font-weight: 600;
+  opacity: 0.88;
+}
+
+.ms-cover-fallback-date {
+  font-size: 0.75rem;
+  opacity: 0.65;
+}
+
+.ms-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.ms-card-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ms-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+}
+
+.ms-badge {
+  display: inline-flex;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(15, 39, 68, 0.08);
+  color: #0f2744;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.ms-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ms-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ms-btn-primary {
+  background: #0f2744;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(15, 39, 68, 0.22);
+}
+
+.ms-btn-primary:hover {
+  background: #1a3d66;
+  color: #fff;
+}
+
+.ms-btn-secondary {
+  background: transparent;
+  color: #0f2744;
+  border: 1px solid rgba(15, 39, 68, 0.2);
+}
+
+.ms-btn-secondary:hover {
+  background: rgba(15, 39, 68, 0.06);
+  color: #0f2744;
+}
+
+.ms-empty {
+  margin-top: 24px;
+  padding: 48px 32px;
+  text-align: center;
+  background: var(--panel-bg, #fff);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: 20px;
+  box-shadow: var(--card-shadow, 0 10px 28px rgba(15, 23, 42, 0.06));
+}
+
+.ms-empty-icon {
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.ms-empty-title {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+
+.ms-empty-text {
+  margin: 0 auto;
+  max-width: 42ch;
+  color: var(--text-muted, #64748b);
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .ms-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 14px;
+  }
+
+  .ms-card-actions {
+    flex-direction: column;
+  }
+
+  .ms-btn {
+    width: 100%;
+  }
+}
