@@ -91,8 +91,6 @@ final class ControlledPublishingEditorNavService
             $manualPart = $this->manualPartIndexFromKey($partKey);
             $subsections = $this->formatChapterSubsections(
                 $childrenByParent[$partId] ?? array(),
-                $manualCode,
-                $sourceSetId,
                 $manualPart,
                 $sectionNumberDisplay
             );
@@ -216,8 +214,6 @@ final class ControlledPublishingEditorNavService
      */
     private function formatChapterSubsections(
         array $rows,
-        string $manualCode,
-        int $sourceSetId,
         int $manualPart,
         array $sectionNumberDisplay
     ): array {
