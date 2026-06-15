@@ -5,6 +5,7 @@ require_once __DIR__ . '/ControlledPublishingMccfBrowserService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
 require_once __DIR__ . '/ControlledPublishingMccfIntegrityJobService.php';
+require_once __DIR__ . '/ControlledPublishingMccfManualRefService.php';
 
 /**
  * BCAA MCCF checklist presentation: formatting, enrichment, merged rows.
@@ -148,22 +149,23 @@ final class ControlledPublishingMccfBcaaViewService
         $isNotRequired = in_array($applicable, array('NO', 'N', 'NA', 'N/A', 'NOT APPLICABLE'), true);
         $linkedExcerpts = is_array($row['linked_excerpts'] ?? null) ? $row['linked_excerpts'] : array();
         $hasBookLink = $linkedExcerpts !== array();
+        $manualRef = trim((string)($row['manual_section_ref'] ?? ''));
+        $hasParsedRef = ControlledPublishingMccfManualRefService::hasSpecificSectionTarget($manualRef);
 
         return array(
             'is_not_required' => $isNotRequired,
-            'missing_book_ref' => !$hasBookLink && !$isNotRequired,
+            'missing_book_ref' => !$hasBookLink && !$hasParsedRef && !$isNotRequired,
             'has_book_link' => $hasBookLink,
+            'has_parsed_ref' => $hasParsedRef,
         );
     }
 
     public static function isUnlinkableHeaderRow(array $row): bool
     {
         $manualRef = trim((string)($row['manual_section_ref'] ?? ''));
-        if ($manualRef === '' || strcasecmp($manualRef, 'No procedure') === 0) {
-            return true;
-        }
+        $linkedExcerpts = is_array($row['linked_excerpts'] ?? null) ? $row['linked_excerpts'] : array();
 
-        return stripos($manualRef, 'Headers Parts') === 0;
+        return ControlledPublishingMccfManualRefService::isUnlinkableManualRef($manualRef, $linkedExcerpts);
     }
 
     /**

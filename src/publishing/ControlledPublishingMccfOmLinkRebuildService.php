@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingMccfManualRefService.php';
+
 /**
  * Rebuild MCCF OM requirement → manual excerpt links against current MANUAL:OM:6_0 rows.
  *
@@ -453,18 +455,9 @@ final class ControlledPublishingMccfOmLinkRebuildService
 
     private function isUnlinkableRequirement(array $requirement): bool
     {
-        $ref = trim((string)($requirement['manual_section_ref'] ?? ''));
-        if ($ref === '') {
-            return true;
-        }
-        if (strcasecmp($ref, 'No procedure') === 0) {
-            return true;
-        }
-        if (stripos($ref, 'Headers Parts') === 0) {
-            return true;
-        }
-
-        return false;
+        return ControlledPublishingMccfManualRefService::isUnlinkableManualRef(
+            (string)($requirement['manual_section_ref'] ?? '')
+        );
     }
 
     /**
@@ -472,30 +465,7 @@ final class ControlledPublishingMccfOmLinkRebuildService
      */
     public static function parseManualSectionRef(string $manualSectionRef): array
     {
-        $manualSectionRef = trim($manualSectionRef);
-        if ($manualSectionRef === '') {
-            return array();
-        }
-
-        $refs = array();
-        foreach (preg_split('/\R+/u', $manualSectionRef) ?: array() as $line) {
-            $line = trim((string)$line);
-            if ($line === '' || stripos($line, 'Headers Parts') === 0) {
-                continue;
-            }
-            if (preg_match(
-                '/Part\s*(\d+)\s*[–—-]\s*(?:Ch\.?\s*|Ch\s+)?([0-9]+(?:\.[0-9]+)*)/iu',
-                $line,
-                $m
-            )) {
-                $refs[] = array(
-                    'part' => (int)$m[1],
-                    'section' => self::normalizeSectionRef((string)$m[2]),
-                );
-            }
-        }
-
-        return $refs;
+        return ControlledPublishingMccfManualRefService::parseSectionTargets($manualSectionRef);
     }
 
     /**
@@ -535,11 +505,7 @@ final class ControlledPublishingMccfOmLinkRebuildService
 
     public static function normalizeSectionRef(string $sectionRef): string
     {
-        $sectionRef = trim($sectionRef);
-        $sectionRef = preg_replace('/\s+/u', '', $sectionRef) ?? $sectionRef;
-        $sectionRef = rtrim($sectionRef, '.');
-
-        return $sectionRef;
+        return ControlledPublishingMccfManualRefService::normalizeSectionRef($sectionRef);
     }
 
     /**

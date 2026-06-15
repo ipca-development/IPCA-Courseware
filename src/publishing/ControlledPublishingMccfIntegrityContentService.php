@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
 require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
+require_once __DIR__ . '/ControlledPublishingMccfManualRefService.php';
 
 /**
  * Resolve regulation obligation + manual coverage text and score semantic alignment.
@@ -20,8 +21,10 @@ final class ControlledPublishingMccfIntegrityContentService
         'under', 'over', 'after', 'before', 'through', 'during', 'within', 'without', 'other',
         'also', 'only', 'such', 'than', 'then', 'them', 'they', 'your', 'must', 'required',
         'requirements', 'requirement', 'manual', 'operations', 'training', 'approved', 'following',
-        'accordance', 'accordance', 'organization', 'organisation', 'center', 'centre',
-        'trained',
+        'accordance', 'organization', 'organisation', 'center', 'centre', 'trained',
+        // Common BCAA MCCF audit-question boilerplate (not regulatory substance).
+        'rules', 'rule', 'school', 'schools', 'concerning', 'regarding', 'activities', 'activity',
+        'describe', 'explain', 'audit', 'checklist', 'ato', 'operator', 'policy', 'policies',
     );
 
     public function __construct(private PDO $pdo)
@@ -44,9 +47,7 @@ final class ControlledPublishingMccfIntegrityContentService
         $applicable = strtoupper(trim((string)($requirement['applicable'] ?? '')));
         $isApplicable = ($applicable === '' || $applicable === 'YES' || $applicable === 'Y');
         $manualRef = trim((string)($requirement['manual_section_ref'] ?? ''));
-        $unlinkable = $manualRef === ''
-            || strcasecmp($manualRef, 'No procedure') === 0
-            || stripos($manualRef, 'Headers Parts') === 0;
+        $unlinkable = ControlledPublishingMccfManualRefService::isUnlinkableManualRef($manualRef, $linkedExcerpts);
 
         $breakdown = array(
             'regulation_obligation' => 0,
@@ -87,6 +88,11 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         $reasons = $alignment['reasons'];
+        if (ControlledPublishingMccfManualRefService::isHeadersPartsScope($manualRef)
+            && ControlledPublishingMccfManualRefService::hasSpecificSectionTarget($manualRef)
+            && $linkedExcerpts === array()) {
+            $reasons[] = 'Scored using the specific Part/Ch line from the MCCF location (Headers Parts scope line ignored).';
+        }
         if ($obligation === '') {
             $reasons[] = 'Could not extract the specific regulatory obligation text for comparison.';
         }
@@ -194,13 +200,10 @@ final class ControlledPublishingMccfIntegrityContentService
             $bookVersionId = $index->resolveBookVersionId($manualCode);
         }
 
-        $sectionRefs = array();
-        foreach ($linkedExcerpts as $section) {
-            $ref = rtrim(trim((string)($section['section_ref'] ?? '')), '.');
-            if ($ref !== '') {
-                $sectionRefs[] = $ref;
-            }
-        }
+        $sectionRefs = ControlledPublishingMccfManualRefService::collectSectionRefsForScoring(
+            $requirement,
+            $linkedExcerpts
+        );
 
         if ($sectionRefs === array() || !$includeBookBlocks || $bookVersionId <= 0) {
             $fallback = trim(implode("\n\n", array_filter(array_map(
@@ -244,6 +247,16 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         $manualNorm = $this->normalizeText($manual);
+        $subjectNorm = $this->normalizeText((string)($requirement['subject'] ?? ''));
+        if ($subjectNorm !== '' && str_contains($manualNorm, $subjectNorm)) {
+            return array(
+                'score' => 70,
+                'reasons' => array(
+                    'Manual section title/content matches the MCCF subject line.',
+                ),
+            );
+        }
+
         $matched = array();
         $missing = array();
 
@@ -363,9 +376,22 @@ final class ControlledPublishingMccfIntegrityContentService
      */
     private function extractConcepts(string $obligation, array $requirement): array
     {
-        $blob = $obligation . "\n"
-            . (string)($requirement['subject'] ?? '') . "\n"
-            . (string)($requirement['requirement_text'] ?? '');
+        $obligation = trim($obligation);
+        $subject = trim((string)($requirement['subject'] ?? ''));
+
+        // Compare regulation obligation + MCCF subject — not the audit-question wording.
+        $blob = $obligation;
+        if ($subject !== '' && stripos($blob, $subject) === false) {
+            $blob .= ($blob !== '' ? "\n" : '') . $subject;
+        }
+
+        // Only fall back to the audit question when regulation/subject text is too thin.
+        if (mb_strlen(preg_replace('/\s+/u', '', $blob) ?: '') < 12) {
+            $auditTopic = $this->auditQuestionTopicText($requirement);
+            if ($auditTopic !== '') {
+                $blob .= ($blob !== '' ? "\n" : '') . $auditTopic;
+            }
+        }
 
         $concepts = array();
         $push = static function (string $term) use (&$concepts): void {
@@ -382,7 +408,7 @@ final class ControlledPublishingMccfIntegrityContentService
             }
         }
 
-        foreach (array('student discipline', 'disciplinary action', 'corrective action', 'poor weather') as $phrase) {
+        foreach (array('student discipline', 'disciplinary action', 'corrective action', 'poor weather', 'carriage of passengers') as $phrase) {
             if (stripos($blob, $phrase) !== false) {
                 foreach (preg_split('/\s+/u', $phrase) ?: array() as $part) {
                     $push($part);
@@ -391,6 +417,36 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         return array_keys($concepts);
+    }
+
+    /**
+     * Strip BCAA audit-question boilerplate and return the underlying topic phrase.
+     *
+     * @param array<string,mixed> $requirement
+     */
+    private function auditQuestionTopicText(array $requirement): string
+    {
+        $text = trim((string)($requirement['requirement_text'] ?? ''));
+        if ($text === '') {
+            return '';
+        }
+
+        $patterns = array(
+            '/^what are the (?:rules|procedures|policy|policies) of the (?:school|organisation|organization|ato|operator) (?:concerning|regarding|on|about)\s+/iu',
+            '/^describe the (?:rules|procedures|policy|policies) (?:concerning|regarding|on|about)\s+/iu',
+            '/^explain how the (?:school|organisation|organization|ato)\s+/iu',
+        );
+        foreach ($patterns as $pattern) {
+            $stripped = preg_replace($pattern, '', $text);
+            if (is_string($stripped) && $stripped !== $text) {
+                $text = $stripped;
+                break;
+            }
+        }
+
+        $text = preg_replace('/\bduring training activities\b/iu', '', $text) ?? $text;
+
+        return rtrim(trim($text), " \t\n\r\0\x0B?.");
     }
 
     private function normalizeText(string $text): string
@@ -406,16 +462,10 @@ final class ControlledPublishingMccfIntegrityContentService
         if ($concept === '') {
             return false;
         }
-        if (str_contains($manualNorm, $concept)) {
-            return true;
-        }
-        if (strlen($concept) > 5 && str_ends_with($concept, 's')) {
-            if (str_contains($manualNorm, substr($concept, 0, -1))) {
+        foreach ($this->conceptLookupVariants($concept) as $variant) {
+            if ($variant !== '' && str_contains($manualNorm, $variant)) {
                 return true;
             }
-        }
-        if (str_ends_with($concept, 'ion') && str_contains($manualNorm, substr($concept, 0, -3))) {
-            return true;
         }
 
         $stems = array(
@@ -428,6 +478,8 @@ final class ControlledPublishingMccfIntegrityContentService
             'cancellations' => 'cancel',
             'supervision' => 'supervis',
             'supervise' => 'supervis',
+            'passengers' => 'passenger',
+            'activities' => 'activ',
         );
         foreach ($stems as $from => $stem) {
             if ($concept === $from || str_starts_with($concept, $stem)) {
@@ -436,6 +488,27 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function conceptLookupVariants(string $concept): array
+    {
+        $concept = strtolower(trim($concept));
+        if ($concept === '') {
+            return array();
+        }
+
+        $variants = array($concept);
+        if (str_ends_with($concept, 'ies') && strlen($concept) > 4) {
+            $variants[] = substr($concept, 0, -3) . 'y';
+        }
+        if (str_ends_with($concept, 's') && !str_ends_with($concept, 'ss') && strlen($concept) >= 4) {
+            $variants[] = substr($concept, 0, -1);
+        }
+
+        return array_values(array_unique(array_filter($variants)));
     }
 
     private function phrasePresent(string $phrase, string $manualNorm): bool

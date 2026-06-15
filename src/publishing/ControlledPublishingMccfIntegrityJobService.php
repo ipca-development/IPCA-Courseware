@@ -6,6 +6,7 @@ require_once __DIR__ . '/ControlledPublishingMccfIntegrityService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
 require_once __DIR__ . '/ControlledPublishingMccfLinkedManualService.php';
 require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
+require_once __DIR__ . '/ControlledPublishingMccfManualRefService.php';
 
 /**
  * Background MCCF integrity scoring with DB-backed progress and cached scores.
@@ -348,6 +349,14 @@ final class ControlledPublishingMccfIntegrityJobService
                 if ($ref !== '') {
                     $sectionRefs[] = $ref;
                 }
+            }
+        }
+        foreach ($rows as $row) {
+            foreach (ControlledPublishingMccfManualRefService::collectSectionRefsForScoring(
+                $row,
+                $excerptMap[(int)($row['id'] ?? 0)] ?? array()
+            ) as $ref) {
+                $sectionRefs[] = $ref;
             }
         }
         if ($bookVersionId > 0 && $sectionRefs !== array()) {
