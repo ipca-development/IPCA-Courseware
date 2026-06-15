@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingMccfBcaaViewService.php';
+require_once __DIR__ . '/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 
 /**
  * Browse controlled manuals and maintain MCCF requirement → manual excerpt links.
@@ -120,7 +122,7 @@ final class ControlledPublishingMccfManualLinkService
             }
             $title = trim((string)($chapter['title'] ?? ''));
             $label = 'Chapter ' . $number;
-            if ($title !== '') {
+            if ($title !== '' && !preg_match('/^Chapter\s+' . $number . '$/i', $title)) {
                 $label .= ' — ' . $title;
             }
             $out[] = array(
@@ -189,7 +191,7 @@ final class ControlledPublishingMccfManualLinkService
                 }
             }
 
-            $title = trim((string)($row['title'] ?? ''));
+            $title = $this->resolveSectionTitle($row);
             $label = '§' . $ref;
             if ($title !== '') {
                 $label .= ' — ' . $title;
@@ -204,6 +206,7 @@ final class ControlledPublishingMccfManualLinkService
                 'has_children' => $hasChildren,
                 'depth' => $depth,
                 'preview' => mb_substr(trim(preg_replace('/\s+/u', ' ', (string)($row['body_text'] ?? '')) ?? ''), 0, 220),
+                'source_status' => (string)($row['source_status'] ?? 'active'),
             );
         }
 
@@ -274,10 +277,12 @@ final class ControlledPublishingMccfManualLinkService
             return array('ok' => false, 'error' => 'Requirement not found.');
         }
 
-        $excerpt = $this->loadExcerpt($excerptId);
+        $excerpt = $this->loadExcerpt($excerptId, true);
         if ($excerpt === null) {
             return array('ok' => false, 'error' => 'Manual section not found.');
         }
+
+        $this->reactivateExcerptIfRetired($excerptId);
 
         $linkType = $this->normalizeLinkType($linkType);
         $existing = $this->findLink($requirementId, $excerptId, $linkType);
@@ -328,10 +333,12 @@ final class ControlledPublishingMccfManualLinkService
         $linkType = isset($fields['link_type']) ? $this->normalizeLinkType((string)$fields['link_type']) : (string)$link['link_type'];
         $notes = array_key_exists('notes', $fields) ? $fields['notes'] : ($link['notes'] ?? null);
 
-        $excerpt = $this->loadExcerpt($excerptId);
+        $excerpt = $this->loadExcerpt($excerptId, true);
         if ($excerpt === null) {
             return array('ok' => false, 'error' => 'Manual section not found.');
         }
+
+        $this->reactivateExcerptIfRetired($excerptId);
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_canonical_requirement_excerpt_links
@@ -445,42 +452,204 @@ final class ControlledPublishingMccfManualLinkService
     }
 
     /**
-     * @return list<array{id:int,excerpt_key:string,section_ref:string,title:string,body_text:string}>
+     * @return list<array{id:int,excerpt_key:string,section_ref:string,title:string,body_text:string,source_status:string}>
      */
     private function loadSectionRefsForChapter(int $sourceSetId, string $manualCode, string $part, string $chapter): array
     {
+        $chapter = trim($chapter);
+        $pattern = '^' . preg_quote($chapter, '/') . '(\\.[0-9]+)*$';
         $stmt = $this->pdo->prepare("
-            SELECT id, excerpt_key, section_ref, title, body_text
+            SELECT id, excerpt_key, section_ref, title, body_text, source_status
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
               AND manual_code = :manual_code
               AND manual_part = :manual_part
-              AND source_status = 'active'
-              AND (
-                section_ref = :chapter
-                OR section_ref LIKE :chapter_prefix
-              )
-            ORDER BY section_ref, id
+              AND source_status IN ('active', 'retired')
+              AND section_ref REGEXP :chapter_pattern
+            ORDER BY section_ref, FIELD(source_status, 'active', 'retired'), id
         ");
         $stmt->execute(array(
             ':source_set_id' => $sourceSetId,
-            ':manual_code' => $manualCode,
+            ':manual_code' => strtoupper(trim($manualCode)),
             ':manual_part' => $part,
-            ':chapter' => $chapter,
-            ':chapter_prefix' => $chapter . '.%',
+            ':chapter_pattern' => $pattern,
         ));
 
-        $rows = array();
+        /** @var array<string,array{id:int,excerpt_key:string,section_ref:string,title:string,body_text:string,source_status:string}> $byRef */
+        $byRef = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
             if ($ref === '') {
                 continue;
             }
             $row['section_ref'] = $ref;
-            $rows[] = $row;
+            if (!isset($byRef[$ref]) || (string)($byRef[$ref]['source_status'] ?? '') !== 'active') {
+                $byRef[$ref] = $row;
+            }
         }
 
-        return $rows;
+        $this->supplementSectionRefsFromBookBlocks($manualCode, $part, $chapter, $byRef);
+
+        return array_values($byRef);
+    }
+
+    /**
+     * Fill missing subsection refs from published book blocks (canonical_section_ref).
+     *
+     * @param array<string,array{id:int,excerpt_key:string,section_ref:string,title:string,body_text:string,source_status:string}> $byRef
+     */
+    private function supplementSectionRefsFromBookBlocks(string $manualCode, string $part, string $chapter, array &$byRef): void
+    {
+        $bookVersionId = $this->resolveBookVersionId($manualCode);
+        if ($bookVersionId <= 0) {
+            return;
+        }
+
+        $chapterPattern = '/^' . preg_quote($chapter, '/') . '(?:\.[0-9]+)*$/';
+        $stmt = $this->pdo->prepare("
+            SELECT b.payload_json
+            FROM ipca_publishing_book_blocks b
+            WHERE b.book_version_id = :version_id
+            ORDER BY b.section_id, b.sort_order, b.id
+        ");
+        $stmt->execute(array(':version_id' => $bookVersionId));
+
+        $refsWanted = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $payload = json_decode((string)($row['payload_json'] ?? ''), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $ref = trim((string)($payload['canonical_section_ref'] ?? ''));
+            if ($ref === '' || !preg_match($chapterPattern, $ref)) {
+                continue;
+            }
+            $refsWanted[$ref] = true;
+        }
+
+        if ($refsWanted === array()) {
+            return;
+        }
+
+        $sourceSetId = $this->resolveManualSourceSetId($manualCode);
+        if ($sourceSetId <= 0) {
+            return;
+        }
+
+        foreach (array_keys($refsWanted) as $ref) {
+            if (isset($byRef[$ref])) {
+                continue;
+            }
+            $excerpt = $this->findExcerptBySectionRef($sourceSetId, $manualCode, $part, $ref, true);
+            if ($excerpt !== null) {
+                $byRef[$ref] = $excerpt;
+            }
+        }
+    }
+
+    /**
+     * @return array{id:int,excerpt_key:string,section_ref:string,title:string,body_text:string,source_status:string}|null
+     */
+    private function findExcerptBySectionRef(
+        int $sourceSetId,
+        string $manualCode,
+        string $preferredPart,
+        string $sectionRef,
+        bool $includeRetired = false
+    ): ?array {
+        $statusSql = $includeRetired ? "source_status IN ('active', 'retired')" : "source_status = 'active'";
+        $stmt = $this->pdo->prepare("
+            SELECT id, excerpt_key, section_ref, title, body_text, source_status, manual_part
+            FROM ipca_canonical_excerpts
+            WHERE source_set_id = :source_set_id
+              AND manual_code = :manual_code
+              AND section_ref = :section_ref
+              AND {$statusSql}
+            ORDER BY
+              CASE WHEN manual_part <=> :preferred_part THEN 0 ELSE 1 END,
+              FIELD(source_status, 'active', 'retired'),
+              manual_part,
+              id
+            LIMIT 1
+        ");
+        $stmt->execute(array(
+            ':source_set_id' => $sourceSetId,
+            ':manual_code' => strtoupper(trim($manualCode)),
+            ':section_ref' => trim($sectionRef),
+            ':preferred_part' => trim($preferredPart),
+        ));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    private function resolveBookVersionId(string $manualCode): int
+    {
+        $manualCode = strtoupper(trim($manualCode));
+        $versionLabel = self::MANUAL_BOOKS[$manualCode]['version_label'] ?? '6.0';
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT bv.id
+                FROM ipca_publishing_book_versions bv
+                INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+                WHERE b.book_key = :book_key
+                  AND bv.version_label = :version_label
+                ORDER BY bv.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute(array(
+                ':book_key' => $manualCode,
+                ':version_label' => $versionLabel,
+            ));
+
+            return (int)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function resolveSectionTitle(array $row): string
+    {
+        $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($row['title'] ?? '')));
+        if ($title !== '') {
+            return $title;
+        }
+
+        $bodyText = trim(str_replace('\\n', "\n", (string)($row['body_text'] ?? '')));
+        if ($bodyText === '') {
+            return '';
+        }
+
+        $firstLine = trim(strtok($bodyText, "\n") ?: '');
+        if ($firstLine === '') {
+            return '';
+        }
+
+        $parsed = ControlledPublishingDocxReader::parseSectionHeading($firstLine);
+        if ($parsed !== null) {
+            return ControlledPublishingDocxReader::sanitizeSectionTitle((string)($parsed['title'] ?? ''));
+        }
+
+        return ControlledPublishingDocxReader::sanitizeImportedText($firstLine);
+    }
+
+    private function reactivateExcerptIfRetired(int $excerptId): void
+    {
+        if ($excerptId <= 0) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_canonical_excerpts
+            SET source_status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND source_status = 'retired'
+        ");
+        $stmt->execute(array(':id' => $excerptId));
     }
 
     /**
@@ -503,13 +672,14 @@ final class ControlledPublishingMccfManualLinkService
     /**
      * @return array<string,mixed>|null
      */
-    private function loadExcerpt(int $excerptId): ?array
+    private function loadExcerpt(int $excerptId, bool $includeRetired = false): ?array
     {
+        $statusSql = $includeRetired ? "source_status IN ('active', 'retired')" : "source_status = 'active'";
         $stmt = $this->pdo->prepare("
             SELECT id, excerpt_key, manual_code, manual_part, section_ref, title, source_status
             FROM ipca_canonical_excerpts
             WHERE id = :id
-              AND source_status = 'active'
+              AND {$statusSql}
             LIMIT 1
         ");
         $stmt->execute(array(':id' => $excerptId));

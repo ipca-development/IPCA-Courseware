@@ -262,6 +262,7 @@ final class ControlledPublishingManualStructureService
 
         $chapterNumbers = array();
         $headingTitles = array();
+        $embeddedChapterTitles = $this->collectEmbeddedOmChapterTitles($rows);
 
         foreach ($rows as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
@@ -284,7 +285,7 @@ final class ControlledPublishingManualStructureService
             }
 
             $text = str_replace('\\n', "\n", (string)($row['body_text'] ?? ''));
-            if (preg_match_all('/(?:^|\n\n)(\d+)\.\s+([A-Z][A-Z0-9 ,\-\/&()]+)\s*(?:\n|$)/', $text, $headingMatches, PREG_SET_ORDER)) {
+            if (preg_match_all('/(?:^|\n\n+|\n)(\d{1,2})\.\s+([A-Z][A-Z0-9 ,\-\/&()]+)\s*(?:\n|$)/', $text, $headingMatches, PREG_SET_ORDER)) {
                 foreach ($headingMatches as $headingMatch) {
                     $candidate = trim($headingMatch[2]);
                     if ($candidate === '' || preg_match('/[a-z]/', $candidate)) {
@@ -319,13 +320,82 @@ final class ControlledPublishingManualStructureService
                 $title = self::OM_DEFAULT_CHAPTER_TITLES[$number];
             } elseif (isset($headingTitles[$number])) {
                 $title = $headingTitles[$number];
+            } elseif (isset($embeddedChapterTitles[$number])) {
+                $title = $embeddedChapterTitles[$number];
             } else {
+                $title = $this->resolveOmChapterTitleFromRows($number, $rows);
+            }
+            if ($title === '' || preg_match('/^Chapter\s+' . $number . '$/i', $title)) {
                 $title = 'Chapter ' . $number;
             }
             $chapters[] = $this->chapterDef($number, $title);
         }
 
         return $chapters;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<int,string>
+     */
+    private function collectEmbeddedOmChapterTitles(array $rows): array
+    {
+        $titles = array();
+        foreach ($rows as $row) {
+            $text = str_replace('\\n', "\n", (string)($row['body_text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+
+            $patterns = array(
+                '/(?:^|\n\n+|\n)(\d{1,2})\.\s+([A-Z][A-Z0-9 ,\-\/&()]+)\s*(?:\n|$)/',
+                '/\n(\d{1,2})\.\s+([A-Z][A-Z0-9 ,\-\/&()]+)\s*$/',
+            );
+            foreach ($patterns as $pattern) {
+                if (!preg_match_all($pattern, $text, $headingMatches, PREG_SET_ORDER)) {
+                    continue;
+                }
+                foreach ($headingMatches as $headingMatch) {
+                    $candidate = trim((string)($headingMatch[2] ?? ''));
+                    $headingNum = (int)($headingMatch[1] ?? 0);
+                    if ($headingNum <= 0 || $headingNum > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+                        continue;
+                    }
+                    if ($candidate === '' || !ControlledPublishingDocxReader::isChapterLevelTitle($candidate)) {
+                        continue;
+                    }
+                    if ($this->isSkippableCanonicalExcerpt((string)$headingNum, $candidate, '')) {
+                        continue;
+                    }
+                    $titles[$headingNum] = $this->formatChapterTitle($candidate);
+                }
+            }
+        }
+
+        return $titles;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     */
+    private function resolveOmChapterTitleFromRows(int $chapterNumber, array $rows): string
+    {
+        $chapterRef = (string)$chapterNumber;
+        foreach ($rows as $row) {
+            $ref = trim((string)($row['section_ref'] ?? ''));
+            if ($ref !== $chapterRef) {
+                continue;
+            }
+            $title = $this->resolveCanonicalExcerptTitle(
+                (string)($row['title'] ?? ''),
+                (string)($row['body_text'] ?? '')
+            );
+            if ($title !== '' && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)) {
+                return $this->formatChapterTitle($title);
+            }
+        }
+
+        return 'Chapter ' . $chapterNumber;
     }
 
     /**
@@ -1385,11 +1455,13 @@ final class ControlledPublishingManualStructureService
         if (preg_match('/Chapter\s+\d+,\s*Page\s+\d+/i', $bodyText) && strlen($bodyText) < 120) {
             return true;
         }
-        if (preg_match('/Take\s+Off/i', $title . ' ' . $bodyText) && !preg_match('/Route|Planning|NCO\.OP/i', $title . ' ' . $bodyText)) {
-            return true;
-        }
-        if (preg_match('/Cruise\s+performance|Landing\s+performance|Enroute\s+\/\s+Cruise/i', $title . ' ' . $bodyText)) {
-            return true;
+        if ($manualPart === 2 || $manualPart === 3) {
+            if (preg_match('/Take\s+Off/i', $title . ' ' . $bodyText) && !preg_match('/Route|Planning|NCO\.OP/i', $title . ' ' . $bodyText)) {
+                return true;
+            }
+            if (preg_match('/Cruise\s+performance|Landing\s+performance|Enroute\s+\/\s+Cruise/i', $title . ' ' . $bodyText)) {
+                return true;
+            }
         }
 
         return false;
