@@ -151,9 +151,6 @@ final class ControlledPublishingMccfLinkedManualService
         $linkKey = ControlledPublishingBookSectionIndexService::makeLinkKey($manualCode, $versionLabel, $part, $sectionRef);
         $title = is_array($indexed) ? trim((string)($indexed['title'] ?? '')) : '';
         $bodyText = is_array($indexed) ? trim((string)($indexed['body_text'] ?? '')) : '';
-        if ($bodyText === '' && $bookVersionId > 0) {
-            $bodyText = $this->index->plainTextForSectionRefs($bookVersionId, array($sectionRef), true);
-        }
 
         return array(
             'link_id' => (int)($row['link_id'] ?? 0),

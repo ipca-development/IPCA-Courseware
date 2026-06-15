@@ -83,7 +83,6 @@ $manualDisplayTitle = ControlledPublishingMccfBcaaViewService::manualDisplayTitl
 
 $detailIntegrity = null;
 if (is_array($detail)) {
-    require_once __DIR__ . '/../../src/publishing/ControlledPublishingMccfLinkedManualService.php';
     $detailExcerptsForScore = (new ControlledPublishingMccfLinkedManualService($pdo))
         ->linkedSectionsForRequirement($requirementId);
 
@@ -708,10 +707,10 @@ compliance_page_open(array(
           <ul class="mccf-excerpt-list">
             <?php foreach ($detail['linked_excerpts'] as $excerpt): ?>
               <?php
-              $exManual = strtoupper(trim((string)($excerpt['excerpt_manual_code'] ?? $detail['manual_code'] ?? 'OM')));
-              $exPart = trim((string)($excerpt['excerpt_manual_part'] ?? ''));
-              $exSec = trim((string)($excerpt['excerpt_section_ref'] ?? ''));
-              $exTitle = trim((string)($excerpt['excerpt_title'] ?? ''));
+              $exManual = strtoupper(trim((string)($excerpt['manual_code'] ?? $detail['manual_code'] ?? 'OM')));
+              $exPart = trim((string)($excerpt['manual_part'] ?? ''));
+              $exSec = trim((string)($excerpt['section_ref'] ?? ''));
+              $exTitle = trim((string)($excerpt['title'] ?? ''));
               $exLabel = ControlledPublishingMccfBcaaViewService::bookVersionLabel($exManual)
                   . ' Part ' . $exPart . ' §' . $exSec
                   . ($exTitle !== '' ? (' — ' . $exTitle) : '');

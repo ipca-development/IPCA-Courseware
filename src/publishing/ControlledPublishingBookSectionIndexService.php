@@ -450,14 +450,18 @@ final class ControlledPublishingBookSectionIndexService
             return self::$chapterCache[$cacheKey] = array();
         }
 
-        $version = $this->pdo->prepare('SELECT manual_code, version_label, book_id FROM ipca_publishing_book_versions WHERE id = :id LIMIT 1');
+        $version = $this->pdo->prepare('
+            SELECT bv.version_label, bv.book_id, b.book_key
+            FROM ipca_publishing_book_versions bv
+            INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+            WHERE bv.id = :id
+            LIMIT 1
+        ');
         $version->execute(array(':id' => $bookVersionId));
         $versionRow = $version->fetch(PDO::FETCH_ASSOC) ?: array();
-        $manualCode = strtoupper(trim((string)($versionRow['manual_code'] ?? 'OM')));
+        $manualCode = strtoupper(trim((string)($versionRow['book_key'] ?? 'OM')));
         if ($manualCode === '') {
-            $bookStmt = $this->pdo->prepare('SELECT book_key FROM ipca_publishing_books WHERE id = :id LIMIT 1');
-            $bookStmt->execute(array(':id' => (int)($versionRow['book_id'] ?? 0)));
-            $manualCode = strtoupper(trim((string)$bookStmt->fetchColumn()));
+            $manualCode = 'OM';
         }
         $versionLabel = trim((string)($versionRow['version_label'] ?? $this->versionLabelForManual($manualCode)));
 

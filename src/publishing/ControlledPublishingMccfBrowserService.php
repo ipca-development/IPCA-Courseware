@@ -174,28 +174,40 @@ final class ControlledPublishingMccfBrowserService
 
         $coverage = strtolower(trim((string)($filters['coverage'] ?? 'all')));
         if ($coverage === 'linked') {
+            $linkedSql = ControlledPublishingMccfLinkedManualService::bookLinkColumnsPresent($this->pdo)
+                ? '(
+                    NULLIF(TRIM(l.section_ref), \'\') IS NOT NULL
+                    OR NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
+                    OR l.excerpt_id IS NOT NULL
+                  )'
+                : '(
+                    NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
+                    OR l.excerpt_id IS NOT NULL
+                  )';
             $where[] = 'EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
-                  AND (
+                  AND ' . $linkedSql . '
+            )';
+        } elseif ($coverage === 'unlinked') {
+            $linkedSql = ControlledPublishingMccfLinkedManualService::bookLinkColumnsPresent($this->pdo)
+                ? '(
                     NULLIF(TRIM(l.section_ref), \'\') IS NOT NULL
                     OR NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
                     OR l.excerpt_id IS NOT NULL
-                  )
-            )';
-        } elseif ($coverage === 'unlinked') {
+                  )'
+                : '(
+                    NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
+                    OR l.excerpt_id IS NOT NULL
+                  )';
             $where[] = 'NOT EXISTS (
                 SELECT 1 FROM ipca_canonical_requirement_excerpt_links l
                 WHERE l.requirement_id = r.id
                   AND l.source_set_id = r.source_set_id
                   AND l.source_status = \'active\'
-                  AND (
-                    NULLIF(TRIM(l.section_ref), \'\') IS NOT NULL
-                    OR NULLIF(TRIM(l.excerpt_key), \'\') LIKE \'BOOK|%\'
-                    OR l.excerpt_id IS NOT NULL
-                  )
+                  AND ' . $linkedSql . '
             )';
         }
 
