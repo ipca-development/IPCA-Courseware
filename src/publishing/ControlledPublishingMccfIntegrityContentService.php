@@ -10,6 +10,9 @@ require_once __DIR__ . '/ControlledPublishingBookSectionIndexService.php';
  */
 final class ControlledPublishingMccfIntegrityContentService
 {
+    /** @var array<string,string> */
+    private static array $easaObligationCache = array();
+
     /** @var list<string> */
     private const STOPWORDS = array(
         'that', 'this', 'with', 'from', 'have', 'been', 'will', 'shall', 'should', 'would',
@@ -64,7 +67,7 @@ final class ControlledPublishingMccfIntegrityContentService
         }
 
         $obligation = $this->regulationObligationText($requirement, $regulationLinks, $resolveEasa);
-        $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId, !$lightweight);
+        $manualText = $this->manualCoverageText($requirement, $linkedExcerpts, $bookVersionId, true);
 
         if ($obligation !== '') {
             $breakdown['regulation_obligation'] = 15;
@@ -301,23 +304,28 @@ final class ControlledPublishingMccfIntegrityContentService
             return '';
         }
 
+        $cacheKey = $batchId . '|' . $nodeUid . '|' . strtoupper(trim($ruleToken));
+        if (isset(self::$easaObligationCache[$cacheKey])) {
+            return self::$easaObligationCache[$cacheKey];
+        }
+
         require_once __DIR__ . '/../easa_erules_xml_import.php';
         require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
         try {
             $detail = rl_easa_api_node_detail_build($this->pdo, $batchId, $nodeUid);
         } catch (Throwable) {
-            return '';
+            return self::$easaObligationCache[$cacheKey] = '';
         }
         if (!is_array($detail) || empty($detail['ok']) || !is_array($detail['node'] ?? null)) {
-            return '';
+            return self::$easaObligationCache[$cacheKey] = '';
         }
 
         $node = $detail['node'];
         $title = trim((string)($node['title'] ?? ''));
         $blocks = $node['structured_blocks'] ?? null;
         if (!is_array($blocks) || $blocks === array()) {
-            return trim($title . "\n" . (string)($node['plain_text_effective'] ?? $node['plain_text'] ?? ''));
+            return self::$easaObligationCache[$cacheKey] = trim($title . "\n" . (string)($node['plain_text_effective'] ?? $node['plain_text'] ?? ''));
         }
 
         $markerPath = $this->markerPathFromToken($ruleToken, $title);
@@ -346,7 +354,7 @@ final class ControlledPublishingMccfIntegrityContentService
             }
         }
 
-        return trim(implode("\n", array_unique(array_filter($lines))));
+        return self::$easaObligationCache[$cacheKey] = trim(implode("\n", array_unique(array_filter($lines))));
     }
 
     /**
