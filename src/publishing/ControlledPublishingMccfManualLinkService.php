@@ -161,6 +161,12 @@ final class ControlledPublishingMccfManualLinkService
         if ($requirement === null) {
             return array('ok' => false, 'error' => 'Requirement not found.');
         }
+        if (!ControlledPublishingMccfLinkedManualService::bookLinksReady($this->pdo)) {
+            return array(
+                'ok' => false,
+                'error' => ControlledPublishingMccfLinkedManualService::bookLinksMigrationHint(),
+            );
+        }
 
         $manualCode = strtoupper(trim($manualCode));
         $part = trim($part);
@@ -224,6 +230,12 @@ final class ControlledPublishingMccfManualLinkService
         if ($link === null) {
             return array('ok' => false, 'error' => 'Link not found.');
         }
+        if (!ControlledPublishingMccfLinkedManualService::bookLinksReady($this->pdo)) {
+            return array(
+                'ok' => false,
+                'error' => ControlledPublishingMccfLinkedManualService::bookLinksMigrationHint(),
+            );
+        }
 
         $manualCode = strtoupper(trim((string)($fields['manual_code'] ?? $link['manual_code'] ?? 'OM')));
         $part = trim((string)($fields['part'] ?? $link['manual_part'] ?? ''));
@@ -253,47 +265,36 @@ final class ControlledPublishingMccfManualLinkService
             $sectionRef
         );
 
-        $sql = ControlledPublishingMccfLinkedManualService::bookLinkColumnsPresent($this->pdo)
-            ? "UPDATE ipca_canonical_requirement_excerpt_links
-               SET excerpt_key = :excerpt_key,
-                   book_version_id = :book_version_id,
-                   manual_code = :manual_code,
-                   manual_part = :manual_part,
-                   section_ref = :section_ref,
-                   stable_anchor = :stable_anchor,
-                   link_type = :link_type,
-                   confidence = 'MANUAL',
-                   notes = :notes,
-                   source_status = 'active',
-                   last_synced_at = CURRENT_TIMESTAMP,
-                   updated_at = CURRENT_TIMESTAMP
-               WHERE id = :id"
-            : "UPDATE ipca_canonical_requirement_excerpt_links
-               SET excerpt_key = :excerpt_key,
-                   link_type = :link_type,
-                   confidence = 'MANUAL',
-                   notes = :notes,
-                   source_status = 'active',
-                   last_synced_at = CURRENT_TIMESTAMP,
-                   updated_at = CURRENT_TIMESTAMP
-               WHERE id = :id";
-
-        $params = array(
-            ':id' => $linkId,
-            ':excerpt_key' => $linkKey,
-            ':link_type' => $linkType,
-            ':notes' => is_string($notes) && trim($notes) !== '' ? trim($notes) : 'Updated manually in MCCF browser',
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_canonical_requirement_excerpt_links
+            SET excerpt_key = :excerpt_key,
+                excerpt_id = NULL,
+                book_version_id = :book_version_id,
+                manual_code = :manual_code,
+                manual_part = :manual_part,
+                section_ref = :section_ref,
+                stable_anchor = :stable_anchor,
+                link_type = :link_type,
+                confidence = 'MANUAL',
+                notes = :notes,
+                source_status = 'active',
+                last_synced_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        ");
+        $stmt->bindValue(':id', $linkId, PDO::PARAM_INT);
+        $stmt->bindValue(':excerpt_key', $linkKey);
+        $stmt->bindValue(':book_version_id', $bookVersionId, PDO::PARAM_INT);
+        $stmt->bindValue(':manual_code', $manualCode);
+        $stmt->bindValue(':manual_part', $part);
+        $stmt->bindValue(':section_ref', $sectionRef);
+        $stmt->bindValue(':stable_anchor', (string)($section['stable_anchor'] ?? ''));
+        $stmt->bindValue(':link_type', $linkType);
+        $stmt->bindValue(
+            ':notes',
+            is_string($notes) && trim($notes) !== '' ? trim($notes) : 'Updated manually in MCCF browser'
         );
-        if (ControlledPublishingMccfLinkedManualService::bookLinkColumnsPresent($this->pdo)) {
-            $params[':book_version_id'] = $bookVersionId;
-            $params[':manual_code'] = $manualCode;
-            $params[':manual_part'] = $part;
-            $params[':section_ref'] = $sectionRef;
-            $params[':stable_anchor'] = (string)($section['stable_anchor'] ?? '');
-        }
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute();
 
         return array('ok' => true, 'link' => $this->getLinkById($linkId));
     }
@@ -383,60 +384,45 @@ final class ControlledPublishingMccfManualLinkService
         string $sectionRef,
         string $stableAnchor
     ): void {
-        if (ControlledPublishingMccfLinkedManualService::bookLinkColumnsPresent($this->pdo)) {
-            $stmt = $this->pdo->prepare("
-                INSERT INTO ipca_canonical_requirement_excerpt_links (
-                  source_set_id, source_document_id, requirement_id, excerpt_id,
-                  book_version_id, manual_code, manual_part, section_ref, stable_anchor,
-                  requirement_key, excerpt_key, link_type, confidence, notes,
-                  source_link_id, source_hash, source_status, last_synced_at
-                ) VALUES (
-                  :source_set_id, :source_document_id, :requirement_id, NULL,
-                  :book_version_id, :manual_code, :manual_part, :section_ref, :stable_anchor,
-                  :requirement_key, :excerpt_key, :link_type, 'MANUAL', :notes,
-                  NULL, :source_hash, 'active', CURRENT_TIMESTAMP
-                )
-            ");
-            $stmt->execute(array(
-                ':source_set_id' => (int)$requirement['source_set_id'],
-                ':source_document_id' => (int)$requirement['source_document_id'],
-                ':requirement_id' => $requirementId,
-                ':book_version_id' => $bookVersionId,
-                ':manual_code' => $manualCode,
-                ':manual_part' => $part,
-                ':section_ref' => $sectionRef,
-                ':stable_anchor' => $stableAnchor !== '' ? $stableAnchor : null,
-                ':requirement_key' => (string)$requirement['requirement_key'],
-                ':excerpt_key' => $linkKey,
-                ':link_type' => $linkType,
-                ':notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : 'Added manually in MCCF browser',
-                ':source_hash' => $hash,
-            ));
-
-            return;
+        if (!ControlledPublishingMccfLinkedManualService::bookLinksReady($this->pdo)) {
+            throw new RuntimeException(ControlledPublishingMccfLinkedManualService::bookLinksMigrationHint());
         }
 
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_canonical_requirement_excerpt_links (
               source_set_id, source_document_id, requirement_id, excerpt_id,
+              book_version_id, manual_code, manual_part, section_ref, stable_anchor,
               requirement_key, excerpt_key, link_type, confidence, notes,
               source_link_id, source_hash, source_status, last_synced_at
             ) VALUES (
-              :source_set_id, :source_document_id, :requirement_id, 0,
+              :source_set_id, :source_document_id, :requirement_id, :excerpt_id,
+              :book_version_id, :manual_code, :manual_part, :section_ref, :stable_anchor,
               :requirement_key, :excerpt_key, :link_type, 'MANUAL', :notes,
               NULL, :source_hash, 'active', CURRENT_TIMESTAMP
             )
         ");
-        $stmt->execute(array(
-            ':source_set_id' => (int)$requirement['source_set_id'],
-            ':source_document_id' => (int)$requirement['source_document_id'],
-            ':requirement_id' => $requirementId,
-            ':requirement_key' => (string)$requirement['requirement_key'],
-            ':excerpt_key' => $linkKey,
-            ':link_type' => $linkType,
-            ':notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : 'Added manually in MCCF browser',
-            ':source_hash' => $hash,
-        ));
+        $stmt->bindValue(':source_set_id', (int)$requirement['source_set_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':source_document_id', (int)$requirement['source_document_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':requirement_id', $requirementId, PDO::PARAM_INT);
+        $stmt->bindValue(':excerpt_id', null, PDO::PARAM_NULL);
+        $stmt->bindValue(':book_version_id', $bookVersionId, PDO::PARAM_INT);
+        $stmt->bindValue(':manual_code', $manualCode);
+        $stmt->bindValue(':manual_part', $part);
+        $stmt->bindValue(':section_ref', $sectionRef);
+        $stmt->bindValue(
+            ':stable_anchor',
+            $stableAnchor !== '' ? $stableAnchor : null,
+            $stableAnchor !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->bindValue(':requirement_key', (string)$requirement['requirement_key']);
+        $stmt->bindValue(':excerpt_key', $linkKey);
+        $stmt->bindValue(':link_type', $linkType);
+        $stmt->bindValue(
+            ':notes',
+            $notes !== null && trim($notes) !== '' ? trim($notes) : 'Added manually in MCCF browser'
+        );
+        $stmt->bindValue(':source_hash', $hash);
+        $stmt->execute();
     }
 
     /**
@@ -530,6 +516,7 @@ final class ControlledPublishingMccfManualLinkService
             $stmt = $this->pdo->prepare("
                 UPDATE ipca_canonical_requirement_excerpt_links
                 SET excerpt_key = :excerpt_key,
+                    excerpt_id = NULL,
                     book_version_id = :book_version_id,
                     manual_code = :manual_code,
                     manual_part = :manual_part,

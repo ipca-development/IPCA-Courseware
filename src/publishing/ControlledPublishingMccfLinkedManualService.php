@@ -14,11 +14,17 @@ final class ControlledPublishingMccfLinkedManualService
     /** @var bool|null */
     private static ?bool $bookLinkColumnsPresent = null;
 
+    /** @var bool|null */
+    private static ?bool $bookLinksReady = null;
+
     public function __construct(private PDO $pdo)
     {
         $this->index = new ControlledPublishingBookSectionIndexService($this->pdo);
     }
 
+    /**
+     * True when live book link columns exist (read paths).
+     */
     public static function bookLinkColumnsPresent(PDO $pdo): bool
     {
         if (self::$bookLinkColumnsPresent !== null) {
@@ -33,6 +39,37 @@ final class ControlledPublishingMccfLinkedManualService
         }
 
         return self::$bookLinkColumnsPresent;
+    }
+
+    /**
+     * True when book links can be inserted without a legacy excerpt row
+     * (excerpt_id nullable + book section columns present).
+     */
+    public static function bookLinksReady(PDO $pdo): bool
+    {
+        if (self::$bookLinksReady !== null) {
+            return self::$bookLinksReady;
+        }
+
+        if (!self::bookLinkColumnsPresent($pdo)) {
+            return self::$bookLinksReady = false;
+        }
+
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM ipca_canonical_requirement_excerpt_links WHERE Field = 'excerpt_id'");
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            self::$bookLinksReady = is_array($row)
+                && strtoupper((string)($row['Null'] ?? 'NO')) === 'YES';
+        } catch (Throwable) {
+            self::$bookLinksReady = false;
+        }
+
+        return self::$bookLinksReady;
+    }
+
+    public static function bookLinksMigrationHint(): string
+    {
+        return 'Apply scripts/sql/2026_06_16_mccf_manual_book_links.sql on the database to enable live book manual links.';
     }
 
     /**
