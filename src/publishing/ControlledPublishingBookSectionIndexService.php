@@ -286,11 +286,12 @@ final class ControlledPublishingBookSectionIndexService
 
         $refsWanted = array();
         foreach ($sectionRefs as $ref) {
-            $ref = rtrim(trim($ref), '.');
+            $ref = rtrim(trim((string)$ref), '.');
             if ($ref === '') {
                 continue;
             }
-            $refsWanted[strtolower($ref)] = true;
+            // Prefix keys so numeric refs like "10" are not stored as int array keys.
+            $refsWanted['=' . strtolower($ref)] = true;
             if ($includeDescendants) {
                 $refsWanted['__prefix__' . strtolower($ref)] = true;
             }
@@ -657,13 +658,18 @@ final class ControlledPublishingBookSectionIndexService
      */
     private function refMatchesWanted(string $ref, array $refsWanted, bool $includeDescendants): bool
     {
-        if (isset($refsWanted[$ref])) {
+        $ref = strtolower(rtrim(trim($ref), '.'));
+        if ($ref === '') {
+            return false;
+        }
+        if (isset($refsWanted['=' . $ref])) {
             return true;
         }
         if (!$includeDescendants) {
             return false;
         }
         foreach ($refsWanted as $key => $_true) {
+            $key = (string)$key;
             if (!str_starts_with($key, '__prefix__')) {
                 continue;
             }
