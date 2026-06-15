@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingMccfBrowserService.php';
 require_once __DIR__ . '/ControlledPublishingMccfRegulationLinkService.php';
+require_once __DIR__ . '/ControlledPublishingMccfEasaPreviewRenderer.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
@@ -10,6 +11,7 @@ require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingRevisionService.php';
+require_once __DIR__ . '/../resource_library_easa_node_detail_build.php';
 
 /**
  * Read-only regulation and manual previews for the MCCF browser modals.
@@ -30,51 +32,34 @@ final class ControlledPublishingMccfPreviewService
             return array('ok' => false, 'error' => 'Requirement not found.');
         }
 
-        $ruleToken = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken(
-            $ruleToken !== '' ? $ruleToken : (string)($requirement['regulation_ref'] ?? '')
-        );
-        if ($ruleToken === '') {
+        $tokens = $this->resolveRuleTokens($requirement, $ruleToken);
+        if ($tokens === array()) {
             return array('ok' => false, 'error' => 'No regulation reference on this requirement.');
         }
 
-        $link = $this->resolveRegulationLink($requirementId, $ruleToken);
-        $node = null;
-        if ($link !== null) {
-            $node = $this->loadEasaNode(
-                (int)($link['target_batch_id'] ?? 0),
-                (string)($link['target_node_uid'] ?? '')
+        $detail = $this->resolveRegulationNodeDetail($requirementId, $tokens);
+        if ($detail === null) {
+            return array(
+                'ok' => false,
+                'error' => 'Could not load regulation source from EASA Resource Library.',
             );
         }
-        if ($node === null) {
-            $regSvc = new ControlledPublishingMccfRegulationLinkService($this->pdo);
-            $resolved = $regSvc->resolveEasaNode($ruleToken);
-            if ($resolved !== null) {
-                $node = $this->loadEasaNode(
-                    (int)($resolved['batch_id'] ?? 0),
-                    (string)($resolved['node_uid'] ?? '')
-                );
-            }
-        }
 
-        $title = $ruleToken;
-        $body = '';
-        if ($node !== null) {
-            $title = trim((string)($node['title'] ?? $ruleToken));
-            $body = trim((string)($node['plain_text'] ?? ''));
-            if ($body === '') {
-                $body = trim((string)($node['breadcrumb'] ?? ''));
-            }
-        }
-        if ($body === '') {
-            $body = 'Regulation source text is not available in the EASA staging library yet.';
+        $node = $detail['node'];
+        $highlight = $this->pickHighlightToken($tokens, $ruleToken);
+        $title = trim((string)($node['title'] ?? $highlight));
+        if ($title === '') {
+            $title = $highlight;
         }
 
         return array(
             'ok' => true,
             'title' => $title,
-            'subtitle' => (string)($requirement['regulation_ref'] ?? $ruleToken),
-            'html' => $this->highlightPlainText($body, $ruleToken),
-            'highlight' => $ruleToken,
+            'subtitle' => (string)($requirement['regulation_ref'] ?? $highlight),
+            'html' => ControlledPublishingMccfEasaPreviewRenderer::renderNodeDetail($node, $highlight),
+            'highlight' => $highlight,
+            'batch_id' => (int)($node['batch_id'] ?? 0),
+            'node_uid' => (string)($node['node_uid'] ?? ''),
         );
     }
 
@@ -115,7 +100,7 @@ final class ControlledPublishingMccfPreviewService
                 'excerpt_key' => (string)($excerpt['excerpt_key'] ?? ''),
                 'section_ref' => $sectionRef,
                 'title' => trim((string)($excerpt['title'] ?? '')),
-                'label' => 'OM ' . $versionLabel . ' Part ' . trim((string)($excerpt['manual_part'] ?? '')) . ' §' . $sectionRef,
+                'label' => $manualCode . ' ' . $versionLabel . ' Part ' . trim((string)($excerpt['manual_part'] ?? '')) . ' §' . $sectionRef,
                 'html' => $rendered['html'],
                 'scroll_anchor' => $rendered['scroll_anchor'],
                 'highlight' => $sectionRef,
@@ -151,6 +136,184 @@ final class ControlledPublishingMccfPreviewService
     }
 
     /**
+     * @param array<string,mixed> $requirement
+     * @return list<array{token:string,role:string,prefix:?string}>
+     */
+    private function resolveRuleTokens(array $requirement, string $ruleTokenHint): array
+    {
+        $parsed = ControlledPublishingMccfRegulationLinkService::parseRegulationRef(
+            (string)($requirement['regulation_ref'] ?? '')
+        );
+
+        $hint = trim($ruleTokenHint);
+        if ($hint !== '') {
+            $hintNorm = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($hint);
+            $matched = false;
+            foreach ($parsed as $row) {
+                if ($this->tokensMatch((string)$row['token'], $hintNorm)) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if (!$matched && $hintNorm !== '') {
+                array_unshift($parsed, array(
+                    'token' => $hintNorm,
+                    'role' => 'PRIMARY',
+                    'prefix' => ControlledPublishingMccfRegulationLinkService::rulePrefix($hintNorm),
+                ));
+            }
+
+            usort($parsed, function (array $a, array $b) use ($hintNorm): int {
+                $aMatch = $this->tokensMatch((string)$a['token'], $hintNorm) ? 0 : 1;
+                $bMatch = $this->tokensMatch((string)$b['token'], $hintNorm) ? 0 : 1;
+                if ($aMatch !== $bMatch) {
+                    return $aMatch <=> $bMatch;
+                }
+                $roleOrder = array('PRIMARY' => 0, 'AMC' => 1, 'GM' => 2);
+                return ($roleOrder[$a['role'] ?? 'PRIMARY'] ?? 9) <=> ($roleOrder[$b['role'] ?? 'PRIMARY'] ?? 9);
+            });
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * @param list<array{token:string,role:string,prefix:?string}> $tokens
+     * @return array{ok:true,node:array<string,mixed>}|null
+     */
+    private function resolveRegulationNodeDetail(int $requirementId, array $tokens): ?array
+    {
+        foreach ($this->allRegulationLinks($requirementId) as $link) {
+            if (($link['match_confidence'] ?? '') === 'UNRESOLVED') {
+                continue;
+            }
+            $detail = $this->nodeDetailFromIds(
+                (int)($link['target_batch_id'] ?? 0),
+                (string)($link['target_node_uid'] ?? '')
+            );
+            if ($detail !== null) {
+                return $detail;
+            }
+        }
+
+        $regSvc = new ControlledPublishingMccfRegulationLinkService($this->pdo);
+        foreach ($tokens as $tokenRow) {
+            $resolved = $regSvc->resolveEasaNode(
+                (string)$tokenRow['token'],
+                $tokenRow['prefix'] ?? null
+            );
+            if ($resolved === null) {
+                continue;
+            }
+            $detail = $this->nodeDetailFromIds(
+                (int)($resolved['batch_id'] ?? 0),
+                (string)($resolved['node_uid'] ?? '')
+            );
+            if ($detail !== null) {
+                return $detail;
+            }
+        }
+
+        foreach ($tokens as $tokenRow) {
+            $hit = $this->searchStagingByToken((string)$tokenRow['token']);
+            if ($hit === null) {
+                continue;
+            }
+            $detail = $this->nodeDetailFromIds(
+                (int)($hit['batch_id'] ?? 0),
+                (string)($hit['node_uid'] ?? '')
+            );
+            if ($detail !== null) {
+                return $detail;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{ok:true,node:array<string,mixed>}|null
+     */
+    private function nodeDetailFromIds(int $batchId, string $nodeUid): ?array
+    {
+        if ($batchId <= 0 || $nodeUid === '') {
+            return null;
+        }
+
+        $detail = rl_easa_api_node_detail_build($this->pdo, $batchId, $nodeUid);
+        if (!is_array($detail) || empty($detail['ok']) || !is_array($detail['node'] ?? null)) {
+            return null;
+        }
+
+        return $detail;
+    }
+
+    /**
+     * @return array{batch_id:int,node_uid:string}|null
+     */
+    private function searchStagingByToken(string $token): ?array
+    {
+        $token = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($token);
+        if ($token === '') {
+            return null;
+        }
+
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT batch_id, node_uid
+                FROM easa_erules_import_nodes_staging
+                WHERE title LIKE :like
+                   OR source_erules_id LIKE :like
+                   OR breadcrumb LIKE :like
+                ORDER BY
+                  CASE WHEN UPPER(title) LIKE :prefix THEN 0 ELSE 1 END,
+                  depth ASC,
+                  id ASC
+                LIMIT 1
+            ");
+            $like = '%' . $token . '%';
+            $stmt->execute(array(
+                ':like' => $like,
+                ':prefix' => strtoupper($token) . '%',
+            ));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            return is_array($row) ? $row : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param list<array{token:string,role:string,prefix:?string}> $tokens
+     */
+    private function pickHighlightToken(array $tokens, string $ruleTokenHint): string
+    {
+        if ($ruleTokenHint !== '') {
+            return ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($ruleTokenHint);
+        }
+
+        foreach ($tokens as $tokenRow) {
+            if (($tokenRow['role'] ?? '') === 'PRIMARY') {
+                return (string)$tokenRow['token'];
+            }
+        }
+
+        return (string)($tokens[0]['token'] ?? '');
+    }
+
+    private function tokensMatch(string $a, string $b): bool
+    {
+        $a = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($a);
+        $b = ControlledPublishingMccfRegulationLinkService::normalizeRuleToken($b);
+        if ($a === '' || $b === '') {
+            return false;
+        }
+
+        return $a === $b || str_starts_with($a, $b) || str_starts_with($b, $a);
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     private function requirement(int $requirementId): ?array
@@ -182,57 +345,24 @@ final class ControlledPublishingMccfPreviewService
     }
 
     /**
-     * @return array<string,mixed>|null
+     * @return list<array<string,mixed>>
      */
-    private function resolveRegulationLink(int $requirementId, string $ruleToken): ?array
+    private function allRegulationLinks(int $requirementId): array
     {
         if (!ControlledPublishingMccfRegulationLinkService::regulationLinksTablePresent($this->pdo)) {
-            return null;
+            return array();
         }
 
         $stmt = $this->pdo->prepare("
             SELECT *
             FROM ipca_canonical_requirement_regulation_links
             WHERE requirement_id = :requirement_id
-              AND rule_token = :rule_token
               AND source_status = 'active'
-            LIMIT 1
+            ORDER BY FIELD(link_role, 'PRIMARY', 'AMC', 'GM', 'SUPPORTING'), rule_token
         ");
-        $stmt->execute(array(
-            ':requirement_id' => $requirementId,
-            ':rule_token' => $ruleToken,
-        ));
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute(array(':requirement_id' => $requirementId));
 
-        return is_array($row) ? $row : null;
-    }
-
-    /**
-     * @return array<string,mixed>|null
-     */
-    private function loadEasaNode(int $batchId, string $nodeUid): ?array
-    {
-        if ($batchId <= 0 || $nodeUid === '') {
-            return null;
-        }
-
-        try {
-            $stmt = $this->pdo->prepare("
-                SELECT batch_id, node_uid, title, breadcrumb, plain_text, source_erules_id
-                FROM easa_erules_import_nodes_staging
-                WHERE batch_id = :batch_id AND node_uid = :node_uid
-                LIMIT 1
-            ");
-            $stmt->execute(array(
-                ':batch_id' => $batchId,
-                ':node_uid' => $nodeUid,
-            ));
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            return is_array($row) ? $row : null;
-        } catch (Throwable) {
-            return null;
-        }
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
     }
 
     /**
@@ -264,7 +394,7 @@ final class ControlledPublishingMccfPreviewService
             $scrollAnchor = 'excerpt-' . preg_replace('/[^a-z0-9]+/i', '-', $sectionRef);
             $html = '<article class="mccf-reader-fallback" id="' . h($scrollAnchor) . '">'
                 . '<h4>' . h($label) . '</h4>'
-                . '<div class="mccf-reader-fallback-body">' . $this->highlightPlainText($body, $sectionRef) . '</div>'
+                . '<div class="mccf-reader-fallback-body">' . ControlledPublishingMccfEasaPreviewRenderer::plainTextHtml($body) . '</div>'
                 . '</article>';
         }
 
@@ -363,53 +493,10 @@ final class ControlledPublishingMccfPreviewService
         }
 
         if ($sectionRef !== '') {
-            return $this->highlightHtmlToken($html, $sectionRef);
+            return ControlledPublishingMccfEasaPreviewRenderer::highlightToken($html, $sectionRef);
         }
 
         return $html;
-    }
-
-    private function highlightPlainText(string $text, string $token): string
-    {
-        $escaped = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $lines = preg_split('/\R/u', $escaped) ?: array($escaped);
-        $out = array();
-        $tokenNorm = strtoupper(trim($token));
-        foreach ($lines as $line) {
-            if ($tokenNorm !== '' && stripos(html_entity_decode($line, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), $tokenNorm) !== false) {
-                $out[] = '<p class="mccf-reader-line mccf-hl-line">' . $this->wrapToken($line, $token) . '</p>';
-            } else {
-                $out[] = '<p class="mccf-reader-line">' . $line . '</p>';
-            }
-        }
-
-        return implode("\n", $out);
-    }
-
-    private function wrapToken(string $escapedLine, string $token): string
-    {
-        if ($token === '') {
-            return $escapedLine;
-        }
-
-        return preg_replace(
-            '/(' . preg_quote($token, '/') . ')/iu',
-            '<mark class="mccf-hl">$1</mark>',
-            $escapedLine
-        ) ?? $escapedLine;
-    }
-
-    private function highlightHtmlToken(string $html, string $token): string
-    {
-        if ($token === '') {
-            return $html;
-        }
-
-        return preg_replace(
-            '/(' . preg_quote($token, '/') . ')/iu',
-            '<mark class="mccf-hl">$1</mark>',
-            $html
-        ) ?? $html;
     }
 
     private function resolveBookVersionId(string $manualCode, string $versionLabel): int

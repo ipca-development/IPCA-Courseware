@@ -15,7 +15,7 @@ final class ControlledPublishingMccfIntegrityService
     public function scoreRequirement(array $requirement, array $linkedExcerpts, array $regulationLinks): array
     {
         $applicable = strtoupper(trim((string)($requirement['applicable'] ?? '')));
-        $isApplicable = $applicable === '' || $applicable === 'YES';
+        $isApplicable = ($applicable === '' || $applicable === 'YES' || $applicable === 'Y');
         $manualRef = trim((string)($requirement['manual_section_ref'] ?? ''));
         $unlinkable = $manualRef === ''
             || strcasecmp($manualRef, 'No procedure') === 0

@@ -274,10 +274,16 @@ final class ControlledPublishingMccfRegulationLinkService
                 4 => 'Personnel training',
             );
 
-            return 'Part ' . $n . ' – ' . ($names[$n] ?? $manualPart);
+            return 'PART ' . $n . ' - ' . ($names[$n] ?? $manualPart);
         }
 
-        return $manualPart;
+        if (preg_match('/^part\s*(\d+)/iu', $manualPart, $m)) {
+            $n = (int)$m[1];
+
+            return 'PART ' . $n . ' - ' . trim(preg_replace('/^part\s*\d+\s*[–-]\s*/iu', '', $manualPart) ?? $manualPart);
+        }
+
+        return strtoupper($manualPart);
     }
 
     /**

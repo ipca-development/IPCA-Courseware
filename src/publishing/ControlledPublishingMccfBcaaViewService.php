@@ -124,6 +124,18 @@ final class ControlledPublishingMccfBcaaViewService
         return $out;
     }
 
+    public static function manualDisplayTitle(string $manualCode): string
+    {
+        $manualCode = strtoupper(trim($manualCode));
+        $titles = array(
+            'OM' => 'EuroPilot Center Operations Manual',
+            'OMM' => 'EuroPilot Center Organization Management Manual',
+        );
+        $rev = $manualCode === 'OMM' ? '4.0' : '6.0';
+
+        return ($titles[$manualCode] ?? ($manualCode . ' Manual')) . ' Rev ' . $rev;
+    }
+
     public static function bookVersionLabel(string $manualCode): string
     {
         $manualCode = strtoupper(trim($manualCode));

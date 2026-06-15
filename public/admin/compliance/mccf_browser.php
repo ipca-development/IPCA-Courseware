@@ -56,13 +56,30 @@ $detailRegParsed = is_array($detail)
     ? ControlledPublishingMccfRegulationLinkService::parseRegulationRef((string)($detail['regulation_ref'] ?? ''))
     : array();
 
-$bcaaSections = ($sourceSetId > 0 && $layout === 'bcaa')
+$bcaaSections = ($sourceSetId > 0 && in_array($layout, array('bcaa', 'pairs'), true))
     ? $bcaaSvc->listPartSections($sourceSetId, array(
         'part' => $part,
         'coverage' => $coverage,
         'q' => $q,
     ))
     : array();
+
+$manualCode = 'OM';
+if (is_array($sourceSet) && str_contains(strtoupper((string)($sourceSet['source_set_key'] ?? '')), 'OMM')) {
+    $manualCode = 'OMM';
+} elseif ($bcaaSections !== array()) {
+    foreach ($bcaaSections as $section) {
+        foreach ($section['rows'] ?? array() as $row) {
+            $mc = strtoupper(trim((string)($row['manual_code'] ?? '')));
+            if ($mc !== '') {
+                $manualCode = $mc;
+                break 2;
+            }
+        }
+    }
+}
+$manualRefColumn = strtoupper($manualCode) . ' REF.';
+$manualDisplayTitle = ControlledPublishingMccfBcaaViewService::manualDisplayTitle($manualCode);
 
 $detailIntegrity = null;
 if (is_array($detail)) {
@@ -111,9 +128,6 @@ function mccf_browser_query(array $overrides = array()): string
     }
     if ((int)$params['req'] <= 0) {
         unset($params['req']);
-    }
-    if (($params['layout'] ?? 'bcaa') === 'bcaa') {
-        unset($params['layout']);
     }
     $query = http_build_query($params);
     return $query !== '' ? ('?' . $query) : '';
@@ -193,8 +207,8 @@ function mccf_regulation_cell_html(array $row, int $requirementId): string
 
     $html = '';
     foreach (array_keys($tokens) as $token) {
-        $html .= '<button type="button" class="mccf-ref-btn" data-mccf-action="regulation" data-req="'
-            . $requirementId . '" data-rule="' . h($token) . '">' . h($token) . '</button>';
+        $html .= '<div class="mccf-reg-token-line"><button type="button" class="mccf-ref-btn" data-mccf-action="regulation" data-req="'
+            . $requirementId . '" data-rule="' . h($token) . '">' . h($token) . '</button></div>';
     }
 
     return $html;
@@ -282,23 +296,24 @@ compliance_page_open(array(
   .mccf-key { font-family: ui-monospace, monospace; font-size: 10px; color: #475569; }
   .mccf-pill-sm { min-height: 20px !important; padding: 0 7px !important; font-size: 10px !important; font-weight: 720 !important; }
   .mccf-bcaa-section-card { border: 1px solid rgba(15,23,42,.08); border-radius: 12px; overflow: hidden; background: #fff; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-  .mccf-bcaa-section-head { padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 12px; font-weight: 700; color: #0f172a; }
+  .mccf-bcaa-section-head { padding: 10px 12px; background: linear-gradient(180deg,#17345d 0%,#102440 100%); border-bottom: 1px solid rgba(255,255,255,.08); font-size: 11px; font-weight: 700; color: #fff; letter-spacing: .04em; text-transform: uppercase; }
   .mccf-bcaa-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 10px; line-height: 1.25; color: #1e293b; }
   .mccf-bcaa-table th, .mccf-bcaa-table td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 5px 6px; vertical-align: top; }
   .mccf-bcaa-table th:last-child, .mccf-bcaa-table td:last-child { border-right: none; }
   .mccf-bcaa-table tbody tr:last-child td { border-bottom: none; }
   .mccf-bcaa-table th { background: #f1f5f9; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #475569; line-height: 1.2; }
   .mccf-bcaa-table td { font-size: 10px; }
-  .mccf-col-item { width: 4%; }
+  .mccf-col-item { width: 3%; }
   .mccf-col-subject { width: 11%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mccf-col-sub { width: 6%; white-space: nowrap; }
-  .mccf-col-desc { width: 21%; }
-  .mccf-col-location { width: 14%; }
-  .mccf-col-applicable { width: 5%; text-align: center; }
-  .mccf-col-remarks { width: 10%; }
+  .mccf-col-sub { width: 5%; white-space: nowrap; }
+  .mccf-col-desc { width: 20%; }
+  .mccf-col-location { width: 13%; }
+  .mccf-col-applicable { width: 4%; text-align: center; }
+  .mccf-col-remarks { width: 9%; }
   .mccf-col-integrity { width: 8%; }
-  .mccf-col-finding { width: 5%; }
-  .mccf-col-regulation { width: 11%; }
+  .mccf-col-finding { width: 8%; }
+  .mccf-col-regulation { width: 12%; word-break: break-word; }
+  .mccf-manual-title { margin: 0 0 14px; font-size: 14px; font-weight: 700; color: #0f172a; }
   .mccf-row--missing-ref td { background: #fff7ed; }
   .mccf-row--na td { background: #f8fafc; color: #94a3b8; }
   .mccf-row--na .mccf-ref-btn { color: #94a3b8; }
@@ -406,6 +421,20 @@ compliance_page_open(array(
   .mccf-modal-body .mccf-reader-fallback { padding: 12px 14px 18px; }
   .mccf-modal-body .mccf-reader-fallback h4 { margin: 0 0 8px; font-size: 12px; }
   .mccf-hl, .mccf-hl-line mark.mccf-hl, [data-mccf-highlight="1"] { background: #fef08a !important; box-shadow: inset 0 0 0 1px #facc15; border-radius: 2px; }
+  .mccf-easa-preview .rl-easa-detail-meta { font-size: 11px; color: #475569; margin: 0; padding: 12px 16px 0; white-space: pre-wrap; word-break: break-word; }
+  .mccf-easa-preview .rl-easa-detail-body { font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0, "calt" 0, "dlig" 0; white-space: normal; word-break: break-word; margin: 0; font-size: 13px; line-height: 1.65; color: #1e293b; padding: 14px 16px; background: #fff; border: none; border-radius: 0; max-height: none; overflow: visible; }
+  .mccf-easa-preview .rl-easa-bl-article { max-width: 100%; min-width: 0; }
+  .mccf-easa-preview .rl-easa-bl-h { margin: 0.85rem 0 0.4rem; font-weight: 700; line-height: 1.35; color: #0f172a; }
+  .mccf-easa-preview .rl-easa-bl-h:first-child { margin-top: 0; }
+  .mccf-easa-preview .rl-easa-bl-p { margin: 0.35rem 0 0; }
+  .mccf-easa-preview .rl-easa-bl-li { margin: 0.35rem 0 0; display: flex; gap: 8px; align-items: baseline; max-width: 100%; }
+  .mccf-easa-preview .rl-easa-bl-marker { flex: 0 0 auto; min-width: 1.6rem; color: #475569; font-weight: 600; }
+  .mccf-easa-preview .rl-easa-bl-litext { flex: 1; min-width: 0; }
+  .mccf-easa-preview .rl-easa-bl-tbl { width: 100%; border-collapse: collapse; margin: 0.5rem 0 0; font-size: 12px; }
+  .mccf-easa-preview .rl-easa-bl-tbl td, .mccf-easa-preview .rl-easa-bl-tbl th { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: top; }
+  .mccf-easa-preview .rl-easa-bl-tbl th { background: #f8fafc; font-weight: 700; }
+  .mccf-col-regulation .mccf-ref-btn { display: inline; word-break: break-word; white-space: normal; }
+  .mccf-reg-token-line { margin-bottom: 2px; }
   .cmp-page .mccf-modal-close {
     height: 32px !important;
     min-height: 32px !important;
@@ -588,6 +617,7 @@ compliance_page_open(array(
             $partTotal = (int)($partRow['total'] ?? 0);
             $partHref = mccf_browser_query(array(
                 'part' => $partLabel === '—' ? '' : $partLabel,
+                'layout' => $layout,
                 'page' => 1,
                 'req' => 0,
             ));
@@ -603,11 +633,11 @@ compliance_page_open(array(
 
     <section class="cmp-card">
       <div class="mccf-layout-toggle">
-        <a href="<?= h(mccf_browser_query(array('layout' => 'bcaa', 'page' => 1))) ?>" class="<?= $layout === 'bcaa' ? 'is-active' : '' ?>">BCAA checklist layout</a>
-        <a href="<?= h(mccf_browser_query(array('layout' => 'pairs', 'page' => 1))) ?>" class="<?= $layout === 'pairs' ? 'is-active' : '' ?>">Regulation ↔ Manual pairs</a>
-        <a href="<?= h(mccf_browser_query(array('layout' => 'coverage', 'page' => 1))) ?>" class="<?= $layout === 'coverage' ? 'is-active' : '' ?>">Coverage view</a>
+        <a href="<?= h(mccf_browser_query(array('layout' => 'bcaa', 'page' => 1, 'req' => 0))) ?>" class="<?= $layout === 'bcaa' ? 'is-active' : '' ?>">CAA Checklist View</a>
+        <a href="<?= h(mccf_browser_query(array('layout' => 'pairs', 'page' => 1, 'req' => 0))) ?>" class="<?= $layout === 'pairs' ? 'is-active' : '' ?>">Regulation ↔ Manual pairs</a>
+        <a href="<?= h(mccf_browser_query(array('layout' => 'coverage', 'page' => 1, 'req' => 0))) ?>" class="<?= $layout === 'coverage' ? 'is-active' : '' ?>">Coverage view</a>
       </div>
-      <h2 style="margin:0 0 12px;"><?= $layout === 'bcaa' ? 'MCCF checklist (BCAA format)' : ($layout === 'pairs' ? 'Regulation ↔ Manual coverage' : 'Requirements') ?></h2>
+      <h2 style="margin:0 0 12px;"><?= $layout === 'bcaa' ? 'MCCF Checklist (CAA Format)' : ($layout === 'pairs' ? 'Regulation ↔ Manual coverage' : 'Requirements') ?></h2>
       <p style="margin:0 0 12px;font-size:13px;color:#64748b;">
         <?php if ($layout === 'bcaa'): ?>
           Columns match the BCAA Word MCCF. Rows without a linked <?= h(is_array($sourceSet) && str_contains((string)($sourceSet['source_set_key'] ?? ''), 'OMM') ? 'OMM 4.0' : 'OM 6.0') ?> excerpt are highlighted. Click regulation or location references to open read-only previews.
@@ -623,6 +653,9 @@ compliance_page_open(array(
           · Regulation auto-links: apply <code>scripts/sql/2026_06_06_mccf_regulation_links.sql</code> then run <code>php scripts/link_mccf_regulation_sources.php --apply</code>
         <?php endif; ?>
       </p>
+      <?php if ($layout === 'bcaa' || $layout === 'pairs'): ?>
+        <p class="mccf-manual-title"><?= h($manualDisplayTitle) ?></p>
+      <?php endif; ?>
       <?php if ($layout === 'bcaa'): ?>
         <?php if ($bcaaSections === array()): ?>
           <p style="margin:0;">No requirements match the current filters.</p>
@@ -633,15 +666,15 @@ compliance_page_open(array(
               <table class="mccf-bcaa-table">
                 <thead>
                   <tr>
-                    <th class="mccf-col-item">Item #</th>
+                    <th class="mccf-col-item">#</th>
                     <th class="mccf-col-subject">Subject</th>
-                    <th class="mccf-col-sub">Sub item#</th>
+                    <th class="mccf-col-sub">Sub #</th>
                     <th class="mccf-col-desc">Description / supplementary information</th>
-                    <th class="mccf-col-location">Location (Section/Chapter/Page/§)</th>
-                    <th class="mccf-col-applicable">Applicable (Yes/No)</th>
-                    <th class="mccf-col-remarks">Revision abstract / reason if N/A</th>
-                    <th class="mccf-col-integrity">Integrity</th>
-                    <th class="mccf-col-finding">See finding N°</th>
+                    <th class="mccf-col-location"><?= h($manualRefColumn) ?></th>
+                    <th class="mccf-col-applicable">Appl.</th>
+                    <th class="mccf-col-remarks">Rev.</th>
+                    <th class="mccf-col-integrity">AI Integrity</th>
+                    <th class="mccf-col-finding">Finding</th>
                     <th class="mccf-col-regulation">Regulation</th>
                   </tr>
                 </thead>
@@ -909,7 +942,7 @@ compliance_page_open(array(
       }
       regPane.classList.remove('is-loading');
       manualPane.classList.remove('is-loading');
-      regPane.innerHTML = '<h4>Regulation</h4>' + ((data.regulation && data.regulation.ok) ? (data.regulation.html || '') : '<p>No regulation text.</p>');
+      regPane.innerHTML = '<h4>Regulation</h4>' + ((data.regulation && data.regulation.ok) ? (data.regulation.html || '') : '<p>' + ((data.regulation && data.regulation.error) || 'No regulation text.') + '</p>');
       var manualHtml = '';
       if (data.manual && data.manual.ok && data.manual.sections) {
         data.manual.sections.forEach(function (section) { manualHtml += section.html || ''; });
