@@ -68,6 +68,16 @@ return [
         'label' => 'Operations',
     ],
     [
+        'key' => 'manuals',
+        'label' => 'Manuals',
+        'icon' => 'documents',
+        'href' => '/student/manuals.php',
+        'match_paths' => [
+            '/student/manuals.php',
+            '/student/manual_reader.php',
+        ],
+    ],
+    [
         'key' => 'operations',
         'label' => 'Operations',
         'icon' => 'operations',

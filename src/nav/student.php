@@ -86,8 +86,11 @@ return [
         'key' => 'documents',
         'label' => 'Documents',
         'icon' => 'documents',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/student/manuals.php',
+        'match_paths' => [
+            '/student/manuals.php',
+            '/student/manual_reader.php',
+        ],
     ],
 
     [
