@@ -493,38 +493,131 @@ compliance_page_open(array(
   }
   .mccf-link-editor-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none; align-items: center; justify-content: center; z-index: 1300; padding: 20px; }
   .mccf-link-editor-backdrop.is-open { display: flex; }
-  .mccf-link-editor { width: min(820px, 96vw); max-height: 92vh; background: #fff; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.28); }
+  .mccf-link-editor { width: min(760px, 96vw); max-height: 92vh; background: #fff; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.28); }
   .mccf-link-editor-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
   .mccf-link-editor-head h3 { margin: 0; font-size: 15px; color: #0f172a; }
   .mccf-link-editor-sub { margin-top: 4px; font-size: 11px; color: #64748b; line-height: 1.4; }
-  .mccf-link-editor-body { padding: 14px 16px 18px; overflow: auto; flex: 1; display: grid; gap: 16px; }
-  .mccf-link-editor-section h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
-  .mccf-link-current-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-  .mccf-link-current-item { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; font-size: 12px; }
-  .mccf-link-current-item strong { display: block; color: #0f172a; margin-bottom: 2px; }
+  .mccf-link-editor-body { padding: 14px 16px 16px; overflow: auto; flex: 1; display: grid; gap: 14px; font-size: 12px; }
+  .mccf-link-editor-section h4 { margin: 0 0 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; font-weight: 800; }
+  .mccf-link-current-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .mccf-link-current-item { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 11px; }
+  .mccf-link-current-item strong { display: block; color: #0f172a; margin-bottom: 2px; font-size: 11px; }
   .mccf-link-current-meta { font-size: 10px; color: #64748b; }
-  .mccf-link-current-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .mccf-link-btn { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
-  .mccf-link-btn:hover { background: #f8fafc; }
-  .mccf-link-btn--primary { background: #0f172a; border-color: #0f172a; color: #fff; }
-  .mccf-link-btn--primary:hover { background: #1e293b; }
-  .mccf-link-btn--danger { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
-  .mccf-link-btn--danger:hover { background: #fee2e2; }
-  .mccf-link-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  @media (max-width: 720px) { .mccf-link-picker-grid { grid-template-columns: 1fr; } }
-  .mccf-link-picker-grid label { display: grid; gap: 5px; font-size: 11px; font-weight: 700; color: #475569; }
-  .mccf-link-picker-grid select, .mccf-link-ref-input, .mccf-link-notes { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12px; }
-  .mccf-link-section-list { margin: 10px 0 0; padding: 0; list-style: none; border: 1px solid #e2e8f0; border-radius: 10px; max-height: 220px; overflow: auto; }
-  .mccf-link-section-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #f1f5f9; background: #fff; padding: 8px 10px; cursor: pointer; font-size: 12px; color: #0f172a; }
-  .mccf-link-section-item:last-child { border-bottom: 0; }
-  .mccf-link-section-item:hover { background: #f8fafc; }
-  .mccf-link-section-item.is-selected { background: #eff6ff; box-shadow: inset 0 0 0 1px #93c5fd; }
-  .mccf-link-section-item small { display: block; margin-top: 3px; color: #64748b; font-size: 10px; line-height: 1.35; }
-  .mccf-link-section-item .mccf-link-drill { margin-left: 6px; font-size: 10px; color: #2563eb; text-decoration: underline; }
-  .mccf-link-preview { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 11px; color: #475569; line-height: 1.45; min-height: 48px; }
-  .mccf-link-editor-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
-  .mccf-link-edit-inline { margin-left: 8px; font-size: 10px; vertical-align: middle; }
+  .mccf-link-current-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+  .mccf-link-picker-grid { display: grid; grid-template-columns: 1.4fr .8fr 1.4fr .8fr; gap: 8px; }
+  @media (max-width: 720px) { .mccf-link-picker-grid { grid-template-columns: 1fr 1fr; } }
+  .mccf-link-picker-grid label { display: grid; gap: 4px; font-size: 10px; font-weight: 700; color: #475569; }
+  .mccf-link-picker-grid select, .mccf-link-ref-input { width: 100%; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 11px; background: #fff; color: #0f172a; }
+  .mccf-link-ref-input { resize: vertical; min-height: 52px; line-height: 1.4; font-family: inherit; }
+  .mccf-link-picker-main { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 10px; margin-top: 10px; }
+  @media (max-width: 720px) { .mccf-link-picker-main { grid-template-columns: 1fr; } }
+  .mccf-link-section-panel, .mccf-link-preview-panel { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; min-height: 180px; display: flex; flex-direction: column; overflow: hidden; }
+  .mccf-link-panel-head { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; font-size: 10px; color: #64748b; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .mccf-link-breadcrumb { font-size: 10px; color: #64748b; }
+  .mccf-link-breadcrumb button { border: 0; background: none; padding: 0; color: #2563eb; font-size: 10px; cursor: pointer; text-decoration: underline; }
+  .mccf-link-section-list { margin: 0; padding: 0; list-style: none; overflow: auto; flex: 1; max-height: 220px; }
+  .mccf-link-section-row { display: flex; align-items: flex-start; gap: 6px; padding: 7px 10px; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+  .mccf-link-section-row:last-child { border-bottom: 0; }
+  .mccf-link-section-row:hover { background: #f8fafc; }
+  .mccf-link-section-row.is-selected { background: #eff6ff; box-shadow: inset 0 0 0 1px #bfdbfe; }
+  .mccf-link-section-pick { flex: 1; min-width: 0; }
+  .mccf-link-section-title { display: block; font-size: 11px; color: #0f172a; line-height: 1.3; }
+  .mccf-link-section-snippet { display: block; margin-top: 3px; color: #64748b; font-size: 10px; line-height: 1.35; }
+  .mccf-link-preview { padding: 10px 12px; overflow: auto; flex: 1; font-size: 11px; color: #475569; line-height: 1.45; white-space: pre-wrap; }
+  .mccf-link-preview.is-empty { color: #94a3b8; font-style: italic; }
+  .mccf-link-editor-foot { display: flex; justify-content: flex-end; gap: 6px; padding-top: 10px; flex-wrap: wrap; }
+  .mccf-link-ref-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
   .mccf-excerpt-list .mccf-link-edit-actions { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .cmp-page .mccf-link-editor .mccf-pair-btn,
+  .cmp-page .mccf-link-editor-foot .mccf-pair-btn,
+  .cmp-page .mccf-link-current-actions .mccf-pair-btn,
+  .cmp-page .mccf-link-ref-actions .mccf-pair-btn,
+  .cmp-page .mccf-link-section-row .mccf-pair-btn,
+  .mccf-link-editor-backdrop .mccf-pair-btn {
+    height: auto !important;
+    min-height: 18px !important;
+    padding: 1px 6px !important;
+    border-radius: 6px !important;
+    border: 1px solid #cbd5e1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+    font-size: 9px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+    box-shadow: none !important;
+    white-space: nowrap !important;
+    line-height: 1.2 !important;
+    cursor: pointer !important;
+    transform: none !important;
+    margin: 0 !important;
+    width: auto !important;
+  }
+  .cmp-page .mccf-link-editor .mccf-pair-btn:hover,
+  .cmp-page .mccf-link-editor-foot .mccf-pair-btn:hover,
+  .cmp-page .mccf-link-current-actions .mccf-pair-btn:hover,
+  .cmp-page .mccf-link-ref-actions .mccf-pair-btn:hover,
+  .cmp-page .mccf-link-section-row .mccf-pair-btn:hover,
+  .mccf-link-editor-backdrop .mccf-pair-btn:hover {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+  .cmp-page .mccf-link-editor .mccf-pair-btn[disabled],
+  .mccf-link-editor-backdrop .mccf-pair-btn[disabled] {
+    opacity: .45 !important;
+    cursor: not-allowed !important;
+  }
+  .cmp-page .mccf-link-editor button:not(.mccf-pair-btn):not(.mccf-modal-close),
+  .mccf-link-editor-backdrop button:not(.mccf-pair-btn):not(.mccf-modal-close) {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    display: inline !important;
+    background: none !important;
+    color: #2563eb !important;
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
+    width: auto !important;
+    transform: none !important;
+  }
+  .cmp-page .mccf-excerpt-list .mccf-pair-btn,
+  .cmp-page .mccf-detail .mccf-pair-btn {
+    height: auto !important;
+    min-height: 18px !important;
+    padding: 1px 6px !important;
+    border-radius: 6px !important;
+    border: 1px solid #cbd5e1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+    font-size: 9px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+    box-shadow: none !important;
+    white-space: nowrap !important;
+    line-height: 1.2 !important;
+    cursor: pointer !important;
+    transform: none !important;
+    margin-top: 3px !important;
+  }
+  .cmp-page .mccf-excerpt-list .mccf-pair-btn:hover,
+  .cmp-page .mccf-detail .mccf-pair-btn:hover {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
 </style>
 
 <div class="mccf-layout">
@@ -574,7 +667,7 @@ compliance_page_open(array(
           <p style="margin:0 0 10px;font-size:13px;"><strong>Manual section ref:</strong> <?= h((string)$detail['manual_section_ref']) ?></p>
         <?php endif; ?>
         <div style="margin:0 0 12px;">
-          <button type="button" class="mccf-link-btn mccf-link-btn--primary" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Edit manual references</button>
+          <button type="button" class="mccf-pair-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Edit manual references</button>
         </div>
         <div class="mccf-detail-text"><?= h((string)($detail['requirement_text'] ?? '')) ?></div>
         <?php if (trim((string)($detail['remarks'] ?? '')) !== ''): ?>
@@ -639,8 +732,8 @@ compliance_page_open(array(
                   <span class="mccf-badge mccf-badge--legacy" style="margin-left:4px;">Manual</span>
                 <?php endif; ?>
                 <div class="mccf-link-edit-actions">
-                  <button type="button" class="mccf-link-btn" data-mccf-action="manual" data-req="<?= (int)$requirementId ?>" data-excerpt="<?= h((string)($excerpt['excerpt_key'] ?? '')) ?>">Preview</button>
-                  <button type="button" class="mccf-link-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>" data-link-id="<?= (int)($excerpt['link_id'] ?? 0) ?>">Edit</button>
+                  <button type="button" class="mccf-pair-btn" data-mccf-action="manual" data-req="<?= (int)$requirementId ?>" data-excerpt="<?= h((string)($excerpt['excerpt_key'] ?? '')) ?>">Preview</button>
+                  <button type="button" class="mccf-pair-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>" data-link-id="<?= (int)($excerpt['link_id'] ?? 0) ?>">Edit</button>
                 </div>
               </li>
             <?php endforeach; ?>
@@ -649,7 +742,7 @@ compliance_page_open(array(
           <p style="margin:0;font-size:13px;color:#64748b;">No active link row, but legacy inline excerpt id: <code><?= h((string)$detail['legacy_excerpt_id']) ?></code></p>
         <?php else: ?>
           <p style="margin:0;font-size:13px;color:#b45309;">No manual excerpt linked to this requirement.</p>
-          <p style="margin:8px 0 0;"><button type="button" class="mccf-link-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Add manual reference</button></p>
+          <p style="margin:8px 0 0;"><button type="button" class="mccf-pair-btn" data-mccf-action="edit-links" data-req="<?= (int)$requirementId ?>">Add manual reference</button></p>
         <?php endif; ?>
       </section>
     <?php endif; ?>
@@ -800,7 +893,7 @@ compliance_page_open(array(
                             </li>
                           <?php endforeach; ?>
                         </ul>
-                        <button type="button" class="mccf-link-btn mccf-link-edit-inline" data-mccf-action="edit-links" data-req="<?= $rid ?>">Edit refs</button>
+                        <button type="button" class="mccf-pair-btn" data-mccf-action="edit-links" data-req="<?= $rid ?>">Edit refs</button>
                       </td>
                       <td class="mccf-col-applicable"><?= mccf_applicable_pill_html($row) ?></td>
                       <td class="mccf-col-remarks"><?= h((string)($row['remarks'] ?? '')) ?></td>
@@ -1135,26 +1228,41 @@ compliance_page_open(array(
         + '<div class="mccf-link-current-meta">' + escapeHtml(link.link_type || 'PRIMARY')
         + (link.confidence ? (' · ' + escapeHtml(link.confidence)) : '') + '</div></div>'
         + '<div class="mccf-link-current-actions">'
-        + '<button type="button" class="mccf-link-btn" data-link-action="edit" data-link-id="' + link.id + '">Change</button>'
-        + '<button type="button" class="mccf-link-btn mccf-link-btn--danger" data-link-action="delete" data-link-id="' + link.id + '">Remove</button>'
+        + '<button type="button" class="mccf-pair-btn" data-link-action="edit" data-link-id="' + link.id + '">Change</button>'
+        + '<button type="button" class="mccf-pair-btn" data-link-action="delete" data-link-id="' + link.id + '">Remove</button>'
         + '</div></li>';
     });
     html += '</ul>';
     return html;
   }
 
+  function renderBreadcrumb(state) {
+    var html = '<span class="mccf-link-breadcrumb">';
+    html += 'Part ' + escapeHtml(String(state.picker.part || '—')) + ' · Ch. ' + escapeHtml(String(state.picker.chapter || '—'));
+    if (state.picker.parent_section_ref) {
+      html += ' · §' + escapeHtml(state.picker.parent_section_ref);
+      html += ' <button type="button" data-link-action="breadcrumb-up">↑ Up</button>';
+    }
+    html += '</span>';
+    return html;
+  }
+
   function renderSectionOptions(sections, selectedId) {
     if (!sections || !sections.length) {
-      return '<p style="margin:10px 0 0;font-size:12px;color:#64748b;">No sections found at this level.</p>';
+      return '<p style="margin:10px;padding:0 2px;font-size:11px;color:#64748b;">No sections at this level.</p>';
     }
     var html = '<ul class="mccf-link-section-list">';
     sections.forEach(function (section) {
       var selected = selectedId && parseInt(selectedId, 10) === parseInt(section.id, 10);
-      html += '<li><button type="button" class="mccf-link-section-item' + (selected ? ' is-selected' : '') + '" data-section-id="' + section.id + '" data-section-ref="' + escapeHtml(section.section_ref || '') + '" data-has-children="' + (section.has_children ? '1' : '0') + '">'
-        + escapeHtml(section.label || ('§' + section.section_ref))
-        + (section.has_children ? '<span class="mccf-link-drill" data-drill-ref="' + escapeHtml(section.section_ref || '') + '">Open sub-sections →</span>' : '')
-        + (section.preview ? ('<small>' + escapeHtml(section.preview) + '</small>') : '')
-        + '</button></li>';
+      html += '<li class="mccf-link-section-row' + (selected ? ' is-selected' : '') + '" data-section-id="' + section.id + '" data-section-ref="' + escapeHtml(section.section_ref || '') + '">'
+        + '<div class="mccf-link-section-pick">'
+        + '<span class="mccf-link-section-title">' + escapeHtml(section.label || ('§' + section.section_ref)) + '</span>'
+        + (section.preview ? ('<span class="mccf-link-section-snippet">' + escapeHtml(section.preview) + '</span>') : '')
+        + '</div>';
+      if (section.has_children) {
+        html += '<button type="button" class="mccf-pair-btn" data-link-action="drill" data-drill-ref="' + escapeHtml(section.section_ref || '') + '">Sub →</button>';
+      }
+      html += '</li>';
     });
     html += '</ul>';
     return html;
@@ -1178,16 +1286,14 @@ compliance_page_open(array(
       return '<option value="' + escapeHtml(chapter.chapter) + '"' + selected + '>' + escapeHtml(chapter.label) + '</option>';
     }).join('');
 
-    var breadcrumb = 'Part ' + (state.picker.part || '—') + ' · Chapter ' + (state.picker.chapter || '—');
-    if (state.picker.parent_section_ref) {
-      breadcrumb += ' · §' + state.picker.parent_section_ref;
-    }
+    var previewText = state.picker.preview ? escapeHtml(state.picker.preview) : 'Select a section to preview its text.';
+    var previewClass = state.picker.preview ? 'mccf-link-preview' : 'mccf-link-preview is-empty';
 
     linkEditorBody.innerHTML = ''
       + '<section class="mccf-link-editor-section"><h4>Current references</h4>' + renderCurrentLinks(state.links) + '</section>'
-      + '<section class="mccf-link-editor-section"><h4>MCCF manual section ref (display text)</h4>'
+      + '<section class="mccf-link-editor-section"><h4>MCCF display ref</h4>'
       + '<textarea class="mccf-link-ref-input" id="mccfManualSectionRef" rows="2" placeholder="e.g. Part 1 – Ch. 8.6">' + escapeHtml(state.manual_section_ref || '') + '</textarea>'
-      + '<div class="mccf-link-editor-foot" style="margin-top:8px;"><button type="button" class="mccf-link-btn" data-link-action="save-ref">Save display ref</button></div>'
+      + '<div class="mccf-link-ref-actions"><button type="button" class="mccf-pair-btn" data-link-action="save-ref">Save display ref</button></div>'
       + '</section>'
       + '<section class="mccf-link-editor-section"><h4>' + pickerTitle + '</h4>'
       + '<div class="mccf-link-picker-grid">'
@@ -1196,10 +1302,20 @@ compliance_page_open(array(
       + '<label>Chapter<select id="mccfPickChapter">' + (chapterOptions || '<option value="">Select chapter</option>') + '</select></label>'
       + '<label>Link type<select id="mccfPickLinkType"><option value="PRIMARY"' + ((!editing || editing.link_type === 'PRIMARY') ? ' selected' : '') + '>Primary</option><option value="SUPPORTING"' + ((editing && editing.link_type === 'SUPPORTING') ? ' selected' : '') + '>Supporting</option></select></label>'
       + '</div>'
-      + '<div style="margin-top:8px;font-size:11px;color:#64748b;">' + escapeHtml(breadcrumb) + '</div>'
+      + '<div class="mccf-link-picker-main">'
+      + '<div class="mccf-link-section-panel">'
+      + '<div class="mccf-link-panel-head"><strong>Sections</strong>' + renderBreadcrumb(state) + '</div>'
       + '<div id="mccfSectionList">' + renderSectionOptions(state.sections, state.picker.selected_excerpt_id) + '</div>'
-      + '<div class="mccf-link-preview" id="mccfSectionPreview">' + (state.picker.preview ? escapeHtml(state.picker.preview) : 'Select a section to preview its text.') + '</div>'
-      + '<div class="mccf-link-editor-foot"><button type="button" class="mccf-link-btn" data-link-action="cancel-edit">Cancel</button><button type="button" class="mccf-link-btn mccf-link-btn--primary" data-link-action="save-link"' + (state.picker.selected_excerpt_id ? '' : ' disabled') + '>' + (editing ? 'Save change' : 'Add reference') + '</button></div>'
+      + '</div>'
+      + '<div class="mccf-link-preview-panel">'
+      + '<div class="mccf-link-panel-head"><strong>Preview</strong></div>'
+      + '<div class="' + previewClass + '" id="mccfSectionPreview">' + previewText + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="mccf-link-editor-foot">'
+      + (state.editingLinkId ? '<button type="button" class="mccf-pair-btn" data-link-action="cancel-edit">Cancel edit</button>' : '')
+      + '<button type="button" class="mccf-pair-btn" data-link-action="save-link"' + (state.picker.selected_excerpt_id ? '' : ' disabled') + '>' + (editing ? 'Save change' : 'Add reference') + '</button>'
+      + '</div>'
       + '</section>';
   }
 
@@ -1369,21 +1485,39 @@ compliance_page_open(array(
 
     linkEditorBody.addEventListener('click', function (event) {
       if (!linkEditorState) return;
-      var drill = event.target.closest('[data-drill-ref]');
-      if (drill) {
-        event.preventDefault();
-        event.stopPropagation();
-        linkEditorState.picker.parent_section_ref = drill.getAttribute('data-drill-ref') || '';
-        linkEditorState.picker.selected_excerpt_id = null;
-        linkEditorState.picker.preview = '';
-        loadLinkEditorSections().then(renderLinkEditorForm);
-        return;
+
+      var actionBtn = event.target.closest('[data-link-action]');
+      if (actionBtn) {
+        var action = actionBtn.getAttribute('data-link-action');
+        if (action === 'drill') {
+          event.preventDefault();
+          event.stopPropagation();
+          linkEditorState.picker.parent_section_ref = actionBtn.getAttribute('data-drill-ref') || '';
+          linkEditorState.picker.selected_excerpt_id = null;
+          linkEditorState.picker.preview = '';
+          loadLinkEditorSections().then(renderLinkEditorForm);
+          return;
+        }
+        if (action === 'breadcrumb-up') {
+          event.preventDefault();
+          var ref = String(linkEditorState.picker.parent_section_ref || '');
+          var parts = ref.split('.').filter(Boolean);
+          if (parts.length > 1) {
+            linkEditorState.picker.parent_section_ref = parts.slice(0, -1).join('.');
+          } else {
+            linkEditorState.picker.parent_section_ref = '';
+          }
+          linkEditorState.picker.selected_excerpt_id = null;
+          linkEditorState.picker.preview = '';
+          loadLinkEditorSections().then(renderLinkEditorForm);
+          return;
+        }
       }
 
-      var sectionBtn = event.target.closest('.mccf-link-section-item');
-      if (sectionBtn) {
+      var sectionRow = event.target.closest('.mccf-link-section-row');
+      if (sectionRow && !event.target.closest('[data-link-action="drill"]')) {
         event.preventDefault();
-        linkEditorState.picker.selected_excerpt_id = parseInt(sectionBtn.getAttribute('data-section-id') || '0', 10);
+        linkEditorState.picker.selected_excerpt_id = parseInt(sectionRow.getAttribute('data-section-id') || '0', 10);
         var selected = (linkEditorState.sections || []).find(function (s) {
           return parseInt(s.id, 10) === linkEditorState.picker.selected_excerpt_id;
         });
@@ -1392,7 +1526,6 @@ compliance_page_open(array(
         return;
       }
 
-      var actionBtn = event.target.closest('[data-link-action]');
       if (!actionBtn) return;
       var action = actionBtn.getAttribute('data-link-action');
       if (action === 'cancel-edit') {
