@@ -157,11 +157,9 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
           </button>
 
           <div class="mr-page-frame" id="mrPageFrame">
-            <div class="mr-page-meta" id="mrPageMeta"></div>
             <div class="mr-page-content" id="mrPageContent">
               <div class="mr-loading">Opening manual…</div>
             </div>
-            <div class="mr-page-footer-bar" id="mrPageFooter"></div>
           </div>
 
           <button type="button" class="mr-page-nav mr-page-nav--next" id="mrPageNext" aria-label="Next page">

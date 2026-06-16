@@ -29,7 +29,7 @@ final class ControlledPublishingPaginationService
     );
 
     /** @var list<string> */
-    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'list', 'shell');
+    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'list');
 
     /** @var list<string> */
     private const SPLITTABLE_BLOCK_TYPES = array('paragraph', 'heading');
@@ -110,6 +110,7 @@ final class ControlledPublishingPaginationService
                 'header_template' => $headerFooter['header_template'],
                 'footer_template' => $headerFooter['footer_template'],
                 'show_header_footer' => $headerFooter['show_bands'],
+                'sheet_open' => '',
                 'token_context' => $this->reader->paginationTokenContext($version, $section, array(
                     'part_title' => $partTitle,
                     'page' => '—',
@@ -118,33 +119,52 @@ final class ControlledPublishingPaginationService
             );
 
             if ($flags['is_cover']) {
-                $coverHtml = $this->reader->paginationRenderSectionShellHtml(
-                    $version,
-                    $section,
-                    $sectionBlocks,
-                    $pageHeaderConfig,
-                    $this->reader->paginationTokenContext($version, $section, array(
-                        'part_title' => $partTitle,
-                        'page' => '1',
-                        'page_total' => '1',
-                    ))
+                $coverHtml = $this->stripEditorChrome(
+                    $this->reader->paginationRenderSectionShellHtml(
+                        $version,
+                        $section,
+                        $sectionBlocks,
+                        $pageHeaderConfig,
+                        $this->reader->paginationTokenContext($version, $section, array(
+                            'part_title' => $partTitle,
+                            'page' => '1',
+                            'page_total' => '1',
+                        ))
+                    )
                 );
                 $entry['content_mode'] = 'cover';
                 $entry['cover_html'] = $coverHtml;
+                $entry['sheet_open'] = '';
                 $entry['units'] = array();
             } elseif ($this->shouldSkipEmptyContainer($section, $sectionBlocks, $byId)) {
                 continue;
             } else {
+                $shellHtml = $this->stripEditorChrome(
+                    $this->reader->paginationResolveHtml(
+                        $this->reader->paginationRenderSectionShellHtml(
+                            $version,
+                            $section,
+                            $sectionBlocks,
+                            $pageHeaderConfig,
+                            $tokenContext
+                        ),
+                        $tokenContext
+                    )
+                );
+                $parsed = $this->parseRenderedSheet($shellHtml);
                 $entry['content_mode'] = 'units';
                 $entry['cover_html'] = null;
-                $entry['units'] = $this->buildContentUnits(
-                    $version,
-                    $section,
-                    $sectionBlocks,
-                    $pageHeaderConfig,
-                    $tokenContext,
-                    $flags
-                );
+                $entry['sheet_open'] = $parsed['sheet_open'];
+                $entry['uses_sheet_body'] = $parsed['uses_sheet_body'];
+                if ($headerFooter['show_bands']) {
+                    if ($parsed['header'] !== '') {
+                        $entry['header_template'] = $parsed['header'];
+                    }
+                    if ($parsed['footer'] !== '') {
+                        $entry['footer_template'] = $parsed['footer'];
+                    }
+                }
+                $entry['units'] = $this->unitsFromRenderedBody($parsed['body'], $section, $flags);
             }
 
             if ($entry['content_mode'] === 'cover' || ($entry['units'] ?? array()) !== array()) {
@@ -314,204 +334,156 @@ final class ControlledPublishingPaginationService
         );
     }
 
-    /**
-     * @param array<string,mixed> $version
-     * @param array<string,mixed> $section
-     * @param list<array<string,mixed>> $sectionBlocks
-     * @param array<string,mixed> $pageHeaderConfig
-     * @param array<string,string> $tokenContext
-     * @param array<string,mixed> $flags
-     * @return list<array<string,mixed>>
-     */
-    private function buildContentUnits(
-        array $version,
-        array $section,
-        array $sectionBlocks,
-        array $pageHeaderConfig,
-        array $tokenContext,
-        array $flags
-    ): array {
-        if ($this->reader->paginationIsPart0ShellSection($section)
-            || in_array((string)($section['section_key'] ?? ''), array('lep', 'toc'), true)
-            || str_starts_with((string)($section['section_key'] ?? ''), 'annexes_')
-        ) {
-            return $this->unitsFromShellHtml(
-                $version,
-                $section,
-                $sectionBlocks,
-                $pageHeaderConfig,
-                $tokenContext,
-                $flags
-            );
-        }
+    private function stripEditorChrome(string $html): string
+    {
+        $html = preg_replace('/<div class="cpb-page-layout-toggle"[^>]*>.*?<\/div>/s', '', $html) ?? $html;
+        $html = preg_replace('/<div class="cpb-dropzone"[^>]*>.*?<\/div>/s', '', $html) ?? $html;
+        $html = preg_replace('/\scontenteditable="(?:true|false)"/i', '', $html) ?? $html;
 
-        $units = array();
-        $first = true;
-        foreach ($sectionBlocks as $block) {
-            if (!is_array($block)) {
-                continue;
-            }
-            $type = (string)($block['block_type'] ?? 'paragraph');
-            if ($type === 'generated_placeholder') {
-                continue;
-            }
-
-            $html = $this->reader->paginationResolveHtml(
-                $this->reader->paginationRenderBlock($block),
-                $tokenContext
-            );
-            if (trim(strip_tags($html)) === '' && $type !== 'image') {
-                continue;
-            }
-
-            $isHeading = $type === 'heading';
-            $units[] = array(
-                'unit_key' => 'b' . (int)($block['id'] ?? 0),
-                'block_id' => (int)($block['id'] ?? 0),
-                'block_type' => $type,
-                'html' => $html,
-                'splittable' => in_array($type, self::SPLITTABLE_BLOCK_TYPES, true),
-                'atomic' => in_array($type, self::ATOMIC_BLOCK_TYPES, true) || $isHeading,
-                'force_break_before' => $first && !empty($flags['force_page_break_before']),
-                'is_heading' => $isHeading,
-            );
-            $first = false;
-        }
-
-        return $units;
+        return $html;
     }
 
     /**
-     * @param array<string,mixed> $version
+     * @return array{sheet_open:string,header:string,body:string,footer:string,uses_sheet_body:bool}
+     */
+    private function parseRenderedSheet(string $shellHtml): array
+    {
+        $sheetOpen = '';
+        if (preg_match('/<div class="cpb-sheet[^"]*"[^>]*>/', $shellHtml, $m) === 1) {
+            $sheetOpen = $m[0];
+        }
+
+        $header = '';
+        if (preg_match('/<header class="cpb-page-header"[^>]*>.*?<\/header>/s', $shellHtml, $m) === 1) {
+            $header = $m[0];
+        }
+
+        $footer = '';
+        if (preg_match('/<footer class="cpb-page-footer"[^>]*>.*?<\/footer>/s', $shellHtml, $m) === 1) {
+            $footer = $m[0];
+        }
+
+        $usesSheetBody = str_contains($shellHtml, 'cpb-sheet-body');
+        $body = '';
+
+        if ($usesSheetBody && preg_match('/<div class="cpb-sheet-body"[^>]*>(.*)<\/div>\s*(?:<footer)/s', $shellHtml, $m) === 1) {
+            $body = $m[1];
+        } elseif (preg_match('/<div class="cpb-sheet[^"]*"[^>]*>(.*)<\/div>\s*$/s', trim($shellHtml), $m) === 1) {
+            $inner = $m[1];
+            if ($header !== '') {
+                $inner = preg_replace('/^\s*' . preg_quote($header, '/') . '/s', '', $inner) ?? $inner;
+            }
+            if ($footer !== '') {
+                $inner = preg_replace('/\s*' . preg_quote($footer, '/') . '\s*$/s', '', $inner) ?? $inner;
+            }
+            $body = trim($inner);
+        }
+
+        return array(
+            'sheet_open' => $sheetOpen,
+            'header' => $header,
+            'body' => $body,
+            'footer' => $footer,
+            'uses_sheet_body' => $usesSheetBody,
+        );
+    }
+
+    /**
+     * Extract pagination units from canonical MODE_READ body HTML without rebuilding markup.
+     *
      * @param array<string,mixed> $section
-     * @param list<array<string,mixed>> $sectionBlocks
-     * @param array<string,mixed> $pageHeaderConfig
-     * @param array<string,string> $tokenContext
      * @param array<string,mixed> $flags
      * @return list<array<string,mixed>>
      */
-    private function unitsFromShellHtml(
-        array $version,
-        array $section,
-        array $sectionBlocks,
-        array $pageHeaderConfig,
-        array $tokenContext,
-        array $flags
-    ): array {
-        $shellHtml = $this->reader->paginationResolveHtml(
-            $this->reader->paginationRenderSectionShellHtml(
-                $version,
-                $section,
-                $sectionBlocks,
-                $pageHeaderConfig,
-                $tokenContext
-            ),
-            $tokenContext
-        );
-        $shellHtml = $this->stripEmbeddedPageBands($shellHtml);
-
-        $bodyHtml = $shellHtml;
-        if (preg_match('/<div class="cpb-sheet-body"[^>]*>(.*)<\/div>\s*(?:<div class="cpb-dropzone|<footer)/s', $shellHtml, $m) === 1) {
-            $bodyHtml = $m[1];
-        } elseif (preg_match('/<div class="cpb-part0-admin-body"[^>]*>(.*)<\/div>/s', $shellHtml, $m) === 1) {
-            $bodyHtml = $m[1];
-        } elseif (preg_match('/<div class="cpb-lep-body"[^>]*>(.*)<\/div>/s', $shellHtml, $m) === 1) {
-            $bodyHtml = $m[1];
+    private function unitsFromRenderedBody(string $bodyHtml, array $section, array $flags): array
+    {
+        $sectionId = (int)($section['id'] ?? 0);
+        $sectionKey = (string)($section['section_key'] ?? '');
+        $bodyHtml = trim($bodyHtml);
+        if ($bodyHtml === '' || trim(strip_tags($bodyHtml)) === '') {
+            return array();
         }
-        $bodyHtml = $this->stripEmbeddedPageBands($bodyHtml);
+
+        if ($sectionKey === 'toc' && str_contains($bodyHtml, 'cpb-toc-row')) {
+            return $this->unitsFromTocBody($bodyHtml, $sectionId, $flags);
+        }
 
         $units = array();
-        $wrap = '<div id="mr-shell-root">' . $bodyHtml . '</div>';
-        if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $wrap, $matches) >= 1) {
+        if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $bodyHtml, $matches) >= 1) {
             $idx = 0;
             foreach ($matches[0] as $articleHtml) {
                 $type = 'paragraph';
                 if (preg_match('/cpb-block--([a-z_]+)/', $articleHtml, $tm) === 1) {
                     $type = $tm[1];
                 }
+                $isHeading = $type === 'heading';
                 $units[] = array(
-                    'unit_key' => 's' . (int)$section['id'] . '_' . $idx,
+                    'unit_key' => 'b' . $sectionId . '_' . $idx,
                     'block_id' => 0,
                     'block_type' => $type,
                     'html' => $articleHtml,
                     'splittable' => in_array($type, self::SPLITTABLE_BLOCK_TYPES, true),
-                    'atomic' => in_array($type, self::ATOMIC_BLOCK_TYPES, true) || $type === 'heading',
+                    'atomic' => in_array($type, self::ATOMIC_BLOCK_TYPES, true) || $isHeading,
                     'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
-                    'is_heading' => $type === 'heading',
+                    'is_heading' => $isHeading,
                 );
                 $idx++;
             }
+
+            return $units;
         }
 
-        if ($units === array() && trim(strip_tags($bodyHtml)) !== '') {
-            $units = $this->splitShellBodyIntoUnits($bodyHtml, $section, $flags);
-        }
+        $units[] = array(
+            'unit_key' => 's' . $sectionId . '_0',
+            'block_id' => 0,
+            'block_type' => 'shell',
+            'html' => $bodyHtml,
+            'splittable' => false,
+            'atomic' => true,
+            'force_break_before' => !empty($flags['force_page_break_before']),
+            'is_heading' => false,
+        );
 
         return $units;
     }
 
-    private function stripEmbeddedPageBands(string $html): string
-    {
-        $html = preg_replace('/<header class="cpb-page-header"[^>]*>.*?<\/header>/s', '', $html) ?? $html;
-        $html = preg_replace('/<footer class="cpb-page-footer"[^>]*>.*?<\/footer>/s', '', $html) ?? $html;
-
-        return $html;
-    }
-
     /**
-     * @param array<string,mixed> $section
+     * Split TOC at row boundaries while preserving editor nav markup.
+     *
      * @param array<string,mixed> $flags
      * @return list<array<string,mixed>>
      */
-    private function splitShellBodyIntoUnits(string $bodyHtml, array $section, array $flags): array
+    private function unitsFromTocBody(string $bodyHtml, int $sectionId, array $flags): array
     {
-        $sectionKey = (string)($section['section_key'] ?? '');
-        $sectionId = (int)($section['id'] ?? 0);
-
-        if ($sectionKey === 'toc' && preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $bodyHtml, $rows) >= 1) {
-            return $this->shellUnitsFromChunks($rows[0], 'toc', $sectionId, $flags, static function (string $chunk): string {
-                return '<nav class="cpb-toc" aria-label="Table of contents">' . $chunk . '</nav>';
-            });
+        if (preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $bodyHtml, $rows) < 1) {
+            return array();
         }
 
-        if (preg_match('/<table/i', $bodyHtml) === 1) {
-            $tableUnits = $this->splitTableHtmlIntoUnits($bodyHtml, $sectionId, $flags);
-            if ($tableUnits !== array()) {
-                return $tableUnits;
-            }
+        $navPrefix = '';
+        if (preg_match('/<nav class="cpb-toc"[^>]*>/', $bodyHtml, $navOpen) === 1) {
+            $navPrefix = $navOpen[0];
         }
 
-        return $this->shellUnitsFromHeightChunks($bodyHtml, $sectionId, $flags);
-    }
-
-    /**
-     * @param list<string> $chunks
-     * @param array<string,mixed> $flags
-     * @return list<array<string,mixed>>
-     */
-    private function shellUnitsFromChunks(
-        array $chunks,
-        string $blockType,
-        int $sectionId,
-        array $flags,
-        callable $wrapChunk
-    ): array {
         $profile = ControlledPublishingReaderLayoutProfile::spec();
         $bodyCapacity = (int)$profile['body_capacity_px'];
         $units = array();
         $idx = 0;
         $batch = array();
 
-        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $blockType, $flags, $wrapChunk): void {
+        $wrapNav = static function (array $rowBatch) use ($navPrefix): string {
+            $open = $navPrefix !== '' ? $navPrefix : '<nav class="cpb-toc" aria-label="Table of contents">';
+            return $open . implode('', $rowBatch) . '</nav>';
+        };
+
+        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $flags, $wrapNav): void {
             if ($batch === array()) {
                 return;
             }
-            $html = $wrapChunk(implode('', $batch));
             $units[] = array(
-                'unit_key' => 's' . $sectionId . '_' . $idx,
+                'unit_key' => 'toc' . $sectionId . '_' . $idx,
                 'block_id' => 0,
-                'block_type' => $blockType,
-                'html' => $html,
+                'block_type' => 'toc',
+                'html' => $wrapNav($batch),
                 'splittable' => false,
                 'atomic' => true,
                 'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
@@ -521,82 +493,8 @@ final class ControlledPublishingPaginationService
             $batch = array();
         };
 
-        foreach ($chunks as $chunk) {
-            $trial = $wrapChunk(implode('', array_merge($batch, array($chunk))));
-            if ($batch !== array() && $this->estimateHtmlHeight($trial) > $bodyCapacity) {
-                $flush();
-            }
-            $batch[] = $chunk;
-        }
-        $flush();
-
-        return $units;
-    }
-
-    /**
-     * @param array<string,mixed> $flags
-     * @return list<array<string,mixed>>
-     */
-    private function splitTableHtmlIntoUnits(string $bodyHtml, int $sectionId, array $flags): array
-    {
-        if (preg_match('/<table[^>]*>.*?<\/table>/is', $bodyHtml, $tableMatch) !== 1) {
-            return array();
-        }
-
-        $fullTable = $tableMatch[0];
-        if (preg_match('/<table[^>]*>/i', $fullTable, $tagMatch) !== 1) {
-            return array();
-        }
-        $tableTag = $tagMatch[0];
-
-        if (preg_match('/<table[^>]*>(.*)<\/table>/is', $fullTable, $innerMatch) !== 1) {
-            return array();
-        }
-        $inner = $innerMatch[1];
-        $thead = '';
-        if (preg_match('/<thead[^>]*>.*?<\/thead>/is', $inner, $theadMatch) === 1) {
-            $thead = $theadMatch[0];
-        }
-
-        preg_match_all('/<tr[^>]*>.*?<\/tr>/is', $inner, $rowMatches);
-        $rows = $rowMatches[0] ?? array();
-        if ($rows === array()) {
-            return array();
-        }
-
-        $profile = ControlledPublishingReaderLayoutProfile::spec();
-        $bodyCapacity = (int)$profile['body_capacity_px'];
-        $units = array();
-        $idx = 0;
-        $batch = array();
-
-        $wrapTable = static function (array $rowBatch) use ($tableTag, $thead): string {
-            return $tableTag . $thead . '<tbody>' . implode('', $rowBatch) . '</tbody></table>';
-        };
-
-        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $flags, $wrapTable): void {
-            if ($batch === array()) {
-                return;
-            }
-            $units[] = array(
-                'unit_key' => 's' . $sectionId . '_' . $idx,
-                'block_id' => 0,
-                'block_type' => 'table',
-                'html' => '<div class="mr-shell-block">' . $wrapTable($batch) . '</div>',
-                'splittable' => false,
-                'atomic' => true,
-                'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
-                'is_heading' => false,
-            );
-            $idx++;
-            $batch = array();
-        };
-
-        foreach ($rows as $row) {
-            if ($thead !== '' && str_contains($row, '<th')) {
-                continue;
-            }
-            $trial = $wrapTable(array_merge($batch, array($row)));
+        foreach ($rows[0] as $row) {
+            $trial = $wrapNav(array_merge($batch, array($row)));
             if ($batch !== array() && $this->estimateHtmlHeight($trial) > $bodyCapacity) {
                 $flush();
             }
@@ -605,31 +503,6 @@ final class ControlledPublishingPaginationService
         $flush();
 
         return $units;
-    }
-
-    /**
-     * @param array<string,mixed> $flags
-     * @return list<array<string,mixed>>
-     */
-    private function shellUnitsFromHeightChunks(string $bodyHtml, int $sectionId, array $flags): array
-    {
-        $profile = ControlledPublishingReaderLayoutProfile::spec();
-        $bodyCapacity = (int)$profile['body_capacity_px'];
-        $segments = preg_split('/(?=<(?:p|div|table|ul|ol|nav|h[1-6])\b)/i', $bodyHtml) ?: array($bodyHtml);
-        $chunks = array();
-        foreach ($segments as $segment) {
-            $segment = trim($segment);
-            if ($segment !== '') {
-                $chunks[] = $segment;
-            }
-        }
-        if ($chunks === array()) {
-            $chunks = array($bodyHtml);
-        }
-
-        return $this->shellUnitsFromChunks($chunks, 'shell', $sectionId, $flags, static function (string $chunk): string {
-            return '<div class="mr-shell-block">' . $chunk . '</div>';
-        });
     }
 
     /**
@@ -669,42 +542,6 @@ final class ControlledPublishingPaginationService
 
         $total = count($draftPages);
 
-        // #region agent log
-        $part0Keys = array();
-        $duplicateFooters = 0;
-        $tocEmDashes = 0;
-        foreach ($draftPages as $page) {
-            $key = (string)($page['section_key'] ?? '');
-            if (in_array($key, self::PART0_SECTION_KEYS, true)) {
-                $part0Keys[$key] = true;
-            }
-            $body = (string)($page['body_html'] ?? '');
-            $duplicateFooters += max(0, (preg_match_all('/<footer class="cpb-page-footer"/', $body) ?: 0) - 0);
-            if (str_contains($body, 'cpb-toc-row')) {
-                $tocEmDashes += substr_count($body, 'data-toc-page="—"');
-            }
-        }
-        @file_put_contents(
-            dirname(__DIR__, 2) . '/.cursor/debug-310362.log',
-            json_encode(array(
-                'sessionId' => '310362',
-                'runId' => 'post-fix',
-                'hypothesisId' => 'H1-H5',
-                'location' => 'ControlledPublishingPaginationService.php:generateFrozenPageMap',
-                'message' => 'page map generation summary',
-                'data' => array(
-                    'page_count' => $total,
-                    'section_count' => count($source['sections'] ?? array()),
-                    'part0_present' => array_keys($part0Keys),
-                    'duplicate_footer_tags_in_body' => $duplicateFooters,
-                    'toc_em_dash_count' => $tocEmDashes,
-                ),
-                'timestamp' => (int)round(microtime(true) * 1000),
-            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
-            FILE_APPEND
-        );
-        // #endregion
-
         $stored = array();
         foreach ($draftPages as $idx => $page) {
             $pageNum = $idx + 1;
@@ -718,7 +555,7 @@ final class ControlledPublishingPaginationService
                 'is_section_start' => !empty($page['is_section_start']),
                 'is_major_section_start' => !empty($page['is_major_section_start']),
                 'page_html' => $pageHtml,
-                'thumbnail_html' => $this->buildThumbnailHtml($page, $pageNum, $total),
+                'thumbnail_html' => null,
                 'metadata' => array(
                     'section_title' => (string)($page['section_title'] ?? ''),
                     'manual_part' => $page['manual_part'] ?? null,
@@ -757,6 +594,8 @@ final class ControlledPublishingPaginationService
                 'section_title' => (string)($section['title'] ?? ''),
                 'manual_part' => $section['manual_part'] ?? null,
                 'part_title' => (string)($section['part_title'] ?? ''),
+                'sheet_open' => (string)($section['sheet_open'] ?? '<div class="cpb-sheet">'),
+                'uses_sheet_body' => !empty($section['uses_sheet_body']),
                 'is_cover' => false,
                 'is_section_start' => !empty($flags['is_section_start']),
                 'is_major_section_start' => !empty($flags['is_major_section_start']),
@@ -885,53 +724,31 @@ final class ControlledPublishingPaginationService
     private function assembleFrozenPageHtml(array $page, int $pageNum, int $total): string
     {
         if (!empty($page['is_cover'])) {
-            $style = ControlledPublishingReaderLayoutProfile::frozenCoverInlineStyle();
-
-            return '<div class="mr-frozen-page mr-frozen-page--cover" data-page="' . $pageNum . '" style="' . $style . '">'
-                . (string)($page['body_html'] ?? '')
-                . '</div>';
+            return $this->applyPageTokens((string)($page['body_html'] ?? ''), $pageNum, $total);
         }
 
-        $style = ControlledPublishingReaderLayoutProfile::frozenPageInlineStyle();
+        $sheetOpen = (string)($page['sheet_open'] ?? '<div class="cpb-sheet">');
+        if (preg_match('/\bdata-reader-page="/', $sheetOpen) !== 1) {
+            $sheetOpen = preg_replace(
+                '/^<div /',
+                '<div data-reader-page="' . $pageNum . '" ',
+                $sheetOpen,
+                1
+            ) ?? $sheetOpen;
+        }
+
         $header = $this->applyPageTokens((string)($page['header_template'] ?? ''), $pageNum, $total);
         $body = (string)($page['body_html'] ?? '');
         $footer = $this->applyPageTokens((string)($page['footer_template'] ?? ''), $pageNum, $total);
 
-        return '<div class="mr-frozen-page" data-page="' . $pageNum . '" style="' . $style . '">'
-            . '<div class="cpb-sheet mr-frozen-sheet">'
-            . ($header !== '' ? $header : '')
-            . '<div class="cpb-sheet-body">' . $body . '</div>'
-            . ($footer !== '' ? $footer : '')
-            . '</div></div>';
-    }
-
-    /**
-     * Compact filmstrip thumbnail (does not duplicate full page_html — keeps row size small).
-     *
-     * @param array<string,mixed> $page
-     */
-    private function buildThumbnailHtml(array $page, int $pageNum, int $total): string
-    {
-        $profile = ControlledPublishingReaderLayoutProfile::spec();
-        $w = (int)round((int)$profile['page_width_px'] * 0.12);
-        $h = (int)round((int)$profile['page_height_px'] * 0.12);
-        $title = htmlspecialchars(
-            mb_substr((string)($page['section_title'] ?? ''), 0, 36, 'UTF-8'),
-            ENT_QUOTES | ENT_HTML5,
-            'UTF-8'
-        );
-
-        if (!empty($page['is_cover'])) {
-            return '<div class="mr-frozen-thumb mr-frozen-thumb--cover" style="width:100%;height:100%;'
-                . 'display:flex;align-items:center;justify-content:center;font-size:9px;'
-                . 'background:linear-gradient(165deg,#dbeafe,#eff6ff);color:#0f172a;">Cover</div>';
+        if (!empty($page['uses_sheet_body'])) {
+            $body = '<div class="cpb-sheet-body" data-blocks-root="1">' . $body . '</div>';
         }
 
-        return '<div class="mr-frozen-thumb" style="width:100%;height:100%;'
-            . 'display:flex;flex-direction:column;justify-content:space-between;padding:4px;'
-            . 'box-sizing:border-box;background:#fff;border:1px solid #ddd;font-size:8px;line-height:1.2;color:#1e293b;">'
-            . '<span style="opacity:0.7;">' . $title . '</span>'
-            . '<span style="text-align:right;font-weight:600;">' . $pageNum . ' / ' . $total . '</span>'
+        return $sheetOpen
+            . $header
+            . $body
+            . $footer
             . '</div>';
     }
 

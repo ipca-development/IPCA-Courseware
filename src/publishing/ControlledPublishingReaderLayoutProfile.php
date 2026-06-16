@@ -4,9 +4,8 @@ declare(strict_types=1);
 /**
  * Fixed layout profile for authoritative OM/OMM reader page maps.
  *
- * Matches the controlled manual template (US Letter) scaled to the reader
- * viewport unit (680×880 px). All official page breaks are computed against
- * these constants — never against the student browser viewport.
+ * Matches the controlled book editor .cpb-sheet dimensions (US Letter).
+ * Pagination height estimates use these constants — never the browser viewport.
  */
 final class ControlledPublishingReaderLayoutProfile
 {
@@ -16,20 +15,22 @@ final class ControlledPublishingReaderLayoutProfile
     private const SPEC = array(
         'layout_profile' => self::PROFILE_KEY,
         'paper_size' => 'Letter',
-        'page_width_px' => 680,
-        'page_height_px' => 880,
-        'content_padding_x' => 28,
-        'content_padding_y' => 16,
-        'header_band_px' => 72,
-        'footer_band_px' => 48,
-        'body_width_px' => 624,
-        'body_capacity_px' => 736,
+        'page_width_px' => 816,
+        'page_height_px' => 1056,
+        'sheet_padding_top_px' => 48,
+        'sheet_padding_bottom_px' => 64,
+        'sheet_padding_x_px' => 56,
+        'header_band_px' => 96,
+        'footer_band_px' => 72,
+        'header_margin_bottom_px' => 20,
+        'footer_margin_top_px' => 24,
+        'body_capacity_px' => 732,
         'font_family' => "Georgia, 'Times New Roman', serif",
         'font_size_pt' => 11,
         'line_height' => 1.55,
         'line_height_px' => 17,
-        'chars_per_line' => 78,
-        'split_words_per_chunk' => 12,
+        'chars_per_line' => 92,
+        'split_words_per_chunk' => 16,
     );
 
     /**
@@ -47,7 +48,6 @@ final class ControlledPublishingReaderLayoutProfile
 
     /**
      * SHA-256 of canonical layout JSON (sorted keys, stable encoding).
-     * Binds stored page maps to a specific layout definition.
      */
     public static function layoutHash(): string
     {
@@ -55,42 +55,5 @@ final class ControlledPublishingReaderLayoutProfile
         ksort($payload);
 
         return hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-    }
-
-    /**
-     * Inline CSS for frozen page shells (official dimensions — not responsive).
-     */
-    public static function frozenPageInlineStyle(): string
-    {
-        $s = self::SPEC;
-
-        return sprintf(
-            'width:%dpx;height:%dpx;max-width:%dpx;max-height:%dpx;'
-            . 'font-family:%s;font-size:%dpt;line-height:%s;box-sizing:border-box;'
-            . 'display:flex;flex-direction:column;overflow:hidden;',
-            (int)$s['page_width_px'],
-            (int)$s['page_height_px'],
-            (int)$s['page_width_px'],
-            (int)$s['page_height_px'],
-            (string)$s['font_family'],
-            (int)$s['font_size_pt'],
-            (string)$s['line_height']
-        );
-    }
-
-    public static function frozenCoverInlineStyle(): string
-    {
-        $s = self::SPEC;
-
-        return sprintf(
-            'width:%dpx;min-height:%dpx;max-width:%dpx;'
-            . 'font-family:%s;font-size:%dpt;line-height:%s;box-sizing:border-box;overflow:visible;',
-            (int)$s['page_width_px'],
-            (int)$s['page_height_px'],
-            (int)$s['page_width_px'],
-            (string)$s['font_family'],
-            (int)$s['font_size_pt'],
-            (string)$s['line_height']
-        );
     }
 }

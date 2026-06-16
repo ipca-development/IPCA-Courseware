@@ -112,8 +112,7 @@ function has_header(string $html, bool $isCover): bool
         return true;
     }
 
-    return preg_match('/<header class="cpb-page-header"/', $html) === 1
-        || preg_match('/class="mr-gen-header"/', $html) === 1;
+    return preg_match('/<header class="cpb-page-header"/', $html) === 1;
 }
 
 function has_footer(string $html, bool $isCover): bool
@@ -122,8 +121,7 @@ function has_footer(string $html, bool $isCover): bool
         return true;
     }
 
-    return preg_match('/<footer class="cpb-page-footer"/', $html) === 1
-        || preg_match('/class="mr-gen-footer"/', $html) === 1;
+    return preg_match('/<footer class="cpb-page-footer"/', $html) === 1;
 }
 
 function table_looks_broken(string $html): bool

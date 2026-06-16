@@ -15,8 +15,6 @@
   var tocDrawer = document.getElementById('mrTocDrawer');
   var pageContent = document.getElementById('mrPageContent');
   var pageFrame = document.getElementById('mrPageFrame');
-  var pageMeta = document.getElementById('mrPageMeta');
-  var pageFooter = document.getElementById('mrPageFooter');
   var pagePrev = document.getElementById('mrPagePrev');
   var pageNext = document.getElementById('mrPageNext');
   var measureHost = document.getElementById('mrMeasureHost');
@@ -165,15 +163,8 @@
     pageContent.innerHTML = '<div class="mr-loading">Loading page…</div>';
     fetchFrozenPage(page.page_number).then(function (data) {
       pageContent.innerHTML =
-        '<div class="mr-frozen-viewport">' + (data.page_html || '') + '</div>';
-      if (pageMeta) {
-        pageMeta.textContent = page.is_cover ? '' : (data.section_title || page.section_title || '');
-      }
-      if (pageFooter) {
-        pageFooter.textContent = page.is_cover
-          ? ''
-          : ('Page ' + page.page_number + ' of ' + state.pageCount);
-      }
+        '<div class="mr-page-scale">' + (data.page_html || '') + '</div>';
+      bindInPageLinks(pageContent);
       if (pagePrev) pagePrev.disabled = state.pageIndex <= 0;
       if (pageNext) pageNext.disabled = state.pageIndex >= state.pages.length - 1;
       highlightFilmstrip();
@@ -261,10 +252,40 @@
     });
   }
 
+  function bindInPageLinks(container) {
+    if (!container) return;
+    container.querySelectorAll('.cpb-toc-link[data-section-id]').forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        var sid = parseInt(link.getAttribute('data-section-id') || '0', 10);
+        if (sid > 0) {
+          goToSection(sid);
+          closeAllPanels();
+        }
+      });
+    });
+  }
+
+  function loadFilmstripThumb(pageNumber, container) {
+    fetchFrozenPage(pageNumber).then(function (data) {
+      container.innerHTML = data.page_html || '';
+    }).catch(function () {
+      container.innerHTML = '';
+    });
+  }
+
   function buildFilmstrip() {
     if (!filmstripTrack) return;
     filmstripTrack.innerHTML = '';
-    state.pages.forEach(function (page, idx) {
+    var sorted = state.pages.slice().sort(function (a, b) {
+      return (a.page_number || 0) - (b.page_number || 0);
+    });
+    sorted.forEach(function (page) {
+      var idx = state.pages.findIndex(function (p) {
+        return p.page_number === page.page_number;
+      });
+      if (idx < 0) idx = page.page_number - 1;
+
       var item = document.createElement('button');
       item.type = 'button';
       item.className = 'mr-filmstrip-item';
@@ -274,19 +295,9 @@
       if (page.is_major_section_start) item.classList.add('is-major-start');
 
       var mini = document.createElement('div');
-      if (page.thumbnail_html && page.thumbnail_html.indexOf('mr-frozen-thumb') >= 0) {
-        mini.className = 'mr-filmstrip-compact';
-      } else {
-        mini.className = 'mr-filmstrip-mini';
-      }
-      if (page.thumbnail_html) {
-        mini.innerHTML = page.thumbnail_html;
-      } else if (page.is_cover) {
-        mini.innerHTML = '<div class="mr-filmstrip-cover-label">Cover</div>';
-      } else {
-        mini.innerHTML = '<div class="mr-filmstrip-cover-label">' + page.page_number + '</div>';
-      }
+      mini.className = 'mr-filmstrip-mini';
       item.appendChild(mini);
+      loadFilmstripThumb(page.page_number, mini);
 
       var num = document.createElement('span');
       num.className = 'mr-filmstrip-num';
