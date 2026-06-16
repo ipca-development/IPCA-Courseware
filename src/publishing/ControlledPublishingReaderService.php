@@ -90,6 +90,7 @@ final class ControlledPublishingReaderService
                 'logo_url' => $cover['logo_url'],
                 'cover_fallback' => $cover['fallback'],
                 'has_progress' => is_array($progress),
+                'has_page_map' => $this->hasApprovedFrozenPageMap($bookKey),
                 'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
                 'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
             );
@@ -306,7 +307,7 @@ final class ControlledPublishingReaderService
             throw new RuntimeException('Section not found.');
         }
 
-        $scrollPct = max(0, min(100, $scrollPct));
+        $scrollPct = max(0, min(9999, $scrollPct));
         $anchor = trim((string)($stableAnchor ?? ''));
         if ($anchor === '') {
             $anchor = (string)($section['stable_anchor'] ?? '');
@@ -854,6 +855,370 @@ final class ControlledPublishingReaderService
             $this->coverPageSvc(),
             $this->sections(),
             $this->blocks()
+        );
+    }
+
+    /**
+     * Pagination layer entry point (released content only).
+     *
+     * @return array<string,mixed>
+     */
+    public function buildPaginateSource(string $bookKey): array
+    {
+        require_once __DIR__ . '/ControlledPublishingPaginationService.php';
+
+        return (new ControlledPublishingPaginationService($this))->buildPaginateSource($bookKey);
+    }
+
+    public function pageMapStore(): ControlledPublishingReaderPageMapStore
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderPageMapStore.php';
+
+        return $this->pageMapStore ??= new ControlledPublishingReaderPageMapStore($this->pdo);
+    }
+
+    public function hasApprovedFrozenPageMap(string $bookKey): bool
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $version = $this->resolveLatestReleasedVersion($bookKey);
+        if ($version === null) {
+            return false;
+        }
+
+        return $this->pageMapStore()->isApproved(
+            (int)$version['id'],
+            ControlledPublishingReaderLayoutProfile::profileKey()
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function loadFrozenPageMap(string $bookKey): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $version = $this->requireReleasedVersion($bookKey);
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
+            throw new RuntimeException('No approved page map for this manual. Contact compliance.');
+        }
+
+        $summary = $this->pageMapStore()->loadPageMapSummary($versionId, $profile);
+
+        return array_merge($summary, array(
+            'ok' => true,
+            'book_key' => $bookKey,
+            'version_id' => $versionId,
+            'version_label' => (string)($version['version_label'] ?? ''),
+            'book_title' => (string)($version['book_title'] ?? ''),
+        ));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function loadFrozenPage(string $bookKey, int $pageNumber): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $version = $this->requireReleasedVersion($bookKey);
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
+            throw new RuntimeException('No approved page map for this manual.');
+        }
+        if ($pageNumber <= 0) {
+            throw new RuntimeException('page_number required.');
+        }
+
+        $page = $this->pageMapStore()->loadPage($versionId, $profile, $pageNumber);
+        if ($page === null) {
+            throw new RuntimeException('Page not found.');
+        }
+
+        return array_merge($page, array(
+            'ok' => true,
+            'book_key' => $bookKey,
+            'version_id' => $versionId,
+        ));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function loadTocWithPages(string $bookKey): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $version = $this->requireReleasedVersion($bookKey);
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
+            throw new RuntimeException('No approved page map for this manual.');
+        }
+
+        $sectionPages = $this->pageMapStore()->sectionPageIndex($versionId, $profile);
+        $nav = $this->buildReaderNavTree($bookKey);
+        $this->annotateNavWithPageNumbers($nav, $sectionPages);
+
+        return array(
+            'ok' => true,
+            'book_key' => $bookKey,
+            'version_id' => $versionId,
+            'nav' => $nav,
+            'section_page_index' => $sectionPages,
+            'page_count' => $this->pageMapStore()->pageCount($versionId, $profile),
+        );
+    }
+
+    /**
+     * Admin: generate and persist draft page map for a released version.
+     *
+     * @return array<string,mixed>
+     */
+    public function generateFrozenPageMapDraft(string $bookKey, int $generatedByUserId): array
+    {
+        require_once __DIR__ . '/ControlledPublishingPaginationService.php';
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+
+        $version = $this->requireReleasedVersion($bookKey);
+        $pagination = new ControlledPublishingPaginationService($this);
+        $pages = $pagination->generateFrozenPageMap($bookKey);
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $hash = ControlledPublishingReaderLayoutProfile::layoutHash();
+        $count = $this->pageMapStore()->replaceDraftPages(
+            (int)$version['id'],
+            $profile,
+            $hash,
+            $pages,
+            $generatedByUserId
+        );
+
+        return array(
+            'book_key' => $bookKey,
+            'version_id' => (int)$version['id'],
+            'version_label' => (string)($version['version_label'] ?? ''),
+            'layout_profile' => $profile,
+            'layout_hash' => $hash,
+            'page_count' => $count,
+            'status' => 'draft',
+        );
+    }
+
+    /**
+     * Admin: preview without persisting.
+     *
+     * @return array<string,mixed>
+     */
+    public function previewFrozenPageMap(string $bookKey): array
+    {
+        require_once __DIR__ . '/ControlledPublishingPaginationService.php';
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+
+        $version = $this->requireReleasedVersion($bookKey);
+        $pages = (new ControlledPublishingPaginationService($this))->generateFrozenPageMap($bookKey);
+
+        return array(
+            'book_key' => $bookKey,
+            'version_id' => (int)$version['id'],
+            'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
+            'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
+            'page_count' => count($pages),
+            'pages' => array_map(static function (array $p): array {
+                return array(
+                    'page_number' => (int)$p['page_number'],
+                    'section_id' => $p['section_id'],
+                    'stable_anchor' => $p['stable_anchor'],
+                    'is_cover' => !empty($p['is_cover']),
+                    'section_title' => is_array($p['metadata'] ?? null)
+                        ? (string)($p['metadata']['section_title'] ?? '') : '',
+                );
+            }, $pages),
+        );
+    }
+
+    /**
+     * @param array<int,int> $sectionPages
+     */
+    private function annotateNavWithPageNumbers(array &$nav, array $sectionPages): void
+    {
+        foreach ($nav as &$node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $id = (int)($node['id'] ?? 0);
+            if ($id > 0 && isset($sectionPages[$id])) {
+                $node['page_number'] = $sectionPages[$id];
+            }
+            if (!empty($node['children']) && is_array($node['children'])) {
+                $this->annotateNavWithPageNumbers($node['children'], $sectionPages);
+            }
+        }
+        unset($node);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function requireReleasedVersionById(int $bookVersionId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT bv.*, b.book_key, b.title AS book_title, b.manual_code
+               FROM ipca_publishing_book_versions bv
+               INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+              WHERE bv.id = ?
+              LIMIT 1'
+        );
+        $stmt->execute(array($bookVersionId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if ((string)($row['lifecycle_status'] ?? '') !== 'released') {
+            throw new RuntimeException('Only released versions can receive a page map.');
+        }
+
+        return $row;
+    }
+
+    private ?ControlledPublishingReaderPageMapStore $pageMapStore = null;
+
+    /**
+     * @param array<string,mixed> $version
+     */
+    public function paginationConfigureRenderer(array $version): void
+    {
+        $this->configureRenderer($version);
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @return array<string,mixed>
+     */
+    public function paginationPageHeaderConfig(array $version, array $section): array
+    {
+        return $this->pageHeaderConfig($version, $section, (int)$version['id']);
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @return array<string,string>
+     */
+    public function paginationTokenContext(array $version, array $section, array $overrides = array()): array
+    {
+        return $this->tokens()->buildContext($version, $section, $overrides);
+    }
+
+    /**
+     * @param array<string,string> $context
+     */
+    public function paginationResolveHtml(string $html, array $context): string
+    {
+        return $this->tokens()->resolveHtml($html, $context);
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param list<array<string,mixed>> $sectionBlocks
+     */
+    public function paginationRenderSectionShellHtml(
+        array $version,
+        array $section,
+        array $sectionBlocks,
+        array $pageHeaderConfig,
+        array $tokenContext
+    ): string {
+        $mode = ControlledPublishingBookRenderer::MODE_READ;
+        $pageLayout = $this->layoutSvc()->resolveLayout($section);
+        $blocksHtml = $this->renderer()->renderBlocks($sectionBlocks, $mode);
+
+        return $this->paginationResolveHtml(
+            $this->renderPageHtml(
+                $version,
+                $section,
+                $blocksHtml,
+                $mode,
+                $pageLayout,
+                $pageHeaderConfig,
+                $sectionBlocks
+            ),
+            $tokenContext
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $block
+     */
+    public function paginationRenderBlock(array $block): string
+    {
+        return $this->renderer()->renderBlock($block, ControlledPublishingBookRenderer::MODE_READ);
+    }
+
+    public function paginationSections(): ControlledPublishingSectionService
+    {
+        return $this->sections();
+    }
+
+    public function paginationBlocks(): ControlledPublishingBlockService
+    {
+        return $this->blocks();
+    }
+
+    public function paginationRevision(): ControlledPublishingRevisionService
+    {
+        return $this->revision();
+    }
+
+    public function paginationLayout(): ControlledPublishingSectionLayoutService
+    {
+        return $this->layoutSvc();
+    }
+
+    public function paginationPageHeader(): ControlledPublishingPageHeaderService
+    {
+        return $this->pageHeaderSvc();
+    }
+
+    public function paginationManualStructure(): ControlledPublishingManualStructureService
+    {
+        return $this->manualStructure();
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function paginationIsCoverSection(array $section): bool
+    {
+        return $this->isCoverSection($section);
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function paginationIsPart0ShellSection(array $section): bool
+    {
+        return $this->isPart0ShellSection($section);
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $section
+     * @param list<array<string,mixed>> $sectionBlocks
+     */
+    public function paginationBuildPart0BodyHtml(
+        array $version,
+        array $section,
+        string $blocksHtml,
+        array $sectionBlocks
+    ): string {
+        return $this->buildPart0BodyHtml(
+            $version,
+            $section,
+            $blocksHtml,
+            $sectionBlocks,
+            ControlledPublishingBookRenderer::MODE_READ
         );
     }
 }

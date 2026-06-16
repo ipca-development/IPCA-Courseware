@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPaginationService.php';
 
 cw_require_login();
 
@@ -74,7 +75,21 @@ try {
                 'version_label' => (string)($version['version_label'] ?? ''),
                 'book_title' => (string)($version['book_title'] ?? ''),
                 'nav' => $reader->buildReaderNavTree($bookKey),
+                'has_page_map' => $reader->hasApprovedFrozenPageMap($bookKey),
             ));
+
+        case 'page_map':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            mr_json(200, $reader->loadFrozenPageMap($bookKey));
+
+        case 'page':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $pageNumber = (int)($_GET['page_number'] ?? $_GET['page'] ?? 0);
+            mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
+
+        case 'toc_with_pages':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            mr_json(200, $reader->loadTocWithPages($bookKey));
 
         case 'section':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
@@ -117,6 +132,10 @@ try {
             }
             $stableAnchor = trim((string)($in['stable_anchor'] ?? ''));
             $scrollPct = (int)($in['scroll_pct'] ?? 0);
+            $pageNumber = (int)($in['page_number'] ?? 0);
+            if ($pageNumber > 0) {
+                $scrollPct = $pageNumber;
+            }
             $reader->saveReadingProgress($userId, $bookKey, $sectionId, $stableAnchor, $scrollPct);
             mr_json(200, array('ok' => true));
 

@@ -117,14 +117,7 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
     <div class="mr-panel mr-settings-panel" id="mrSettingsPanel" hidden>
       <div class="mr-panel-inner mr-settings-inner">
         <h2 class="mr-panel-title">Reader Settings</h2>
-        <label class="mr-setting">
-          <span>Font size</span>
-          <select id="mrSettingFontSize">
-            <option value="small">Small</option>
-            <option value="normal" selected>Normal</option>
-            <option value="large">Large</option>
-          </select>
-        </label>
+        <p class="mr-settings-note">Official page layout is fixed. Theme and zoom affect the viewport only.</p>
         <label class="mr-setting">
           <span>Theme</span>
           <select id="mrSettingTheme">
@@ -134,12 +127,18 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
           </select>
         </label>
         <label class="mr-setting">
-          <span>Page width</span>
-          <select id="mrSettingPageWidth">
-            <option value="narrow">Narrow</option>
-            <option value="normal" selected>Normal</option>
-            <option value="wide">Wide</option>
+          <span>View zoom</span>
+          <select id="mrSettingZoom">
+            <option value="fit-width" selected>Fit width</option>
+            <option value="fit-page">Fit page</option>
+            <option value="75">75%</option>
+            <option value="100">100%</option>
+            <option value="125">125%</option>
           </select>
+        </label>
+        <label class="mr-setting mr-setting--checkbox">
+          <span>Page filmstrip</span>
+          <input type="checkbox" id="mrSettingFilmstrip" checked>
         </label>
       </div>
     </div>
@@ -171,6 +170,12 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
         </div>
 
         <div class="mr-measure-host" id="mrMeasureHost" aria-hidden="true"></div>
+
+        <div class="mr-filmstrip-wrap" id="mrFilmstripWrap">
+          <div class="mr-filmstrip" id="mrFilmstrip" role="listbox" aria-label="Page thumbnails">
+            <div class="mr-filmstrip-track" id="mrFilmstripTrack"></div>
+          </div>
+        </div>
       <?php endif; ?>
     </main>
 

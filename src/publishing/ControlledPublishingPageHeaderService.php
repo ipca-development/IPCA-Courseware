@@ -397,12 +397,18 @@ final class ControlledPublishingPageHeaderService
             $date = trim((string)$overrides['date']);
         }
 
-        if ($isAnnexContent) {
+        if (is_string($page) && preg_match('/^\{(page|page_total)\}$/', trim($page))) {
+            $pageDisplay = trim($page);
+        } elseif ($isAnnexContent) {
             $pageDisplay = $editorPreview ? '—' : ($page === null ? '1' : (string)$page);
         } else {
             $pageDisplay = $editorPreview || $page === null ? '—' : (string)$page;
         }
-        $pageTotalDisplay = $editorPreview || $pageTotal === null ? '—' : (string)$pageTotal;
+        if (is_string($pageTotal) && preg_match('/^\{(page|page_total)\}$/', trim($pageTotal))) {
+            $pageTotalDisplay = trim($pageTotal);
+        } else {
+            $pageTotalDisplay = $editorPreview || $pageTotal === null ? '—' : (string)$pageTotal;
+        }
 
         return array(
             'page' => $pageDisplay,
