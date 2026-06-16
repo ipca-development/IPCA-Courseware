@@ -81,8 +81,24 @@ return [
         'key' => 'flight_training',
         'label' => 'Flight Training',
         'icon' => 'flight',
-        'href' => null,
-        'coming_soon' => true,
+        'items' => [
+            [
+                'key' => 'flight_training_form_manager',
+                'label' => 'Forms / Form Manager',
+                'icon' => 'documents',
+                'href' => '/admin/flight_training/forms/index.php',
+                'match_paths' => [
+                    '/admin/flight_training/forms/index.php',
+                ],
+            ],
+            [
+                'key' => 'flight_training_admin_logbook',
+                'label' => 'Admin Logbook',
+                'icon' => 'flight',
+                'href' => null,
+                'coming_soon' => true,
+            ],
+        ],
     ],
 
     [
