@@ -753,16 +753,18 @@ final class ControlledPublishingPaginationService
                     && in_array((string)($unit['block_type'] ?? ''), self::SPLITTABLE_BLOCK_TYPES, true);
 
                 if ($splittable) {
-                    foreach ($this->splitParagraphHtml($html) as $frag) {
-                        if (!$tryAppendHtml($current, $frag)) {
-                            $finalizePage($current);
-                            $current = $newContentPage($section, array(
-                                'is_section_start' => false,
-                                'is_major_section_start' => false,
-                            ));
+                    if (!$tryAppendHtml($current, $html)) {
+                        foreach ($this->splitParagraphHtml($html) as $frag) {
                             if (!$tryAppendHtml($current, $frag)) {
-                                $current['body_parts'][] = $frag;
-                                $current['body_html'] = $frag;
+                                $finalizePage($current);
+                                $current = $newContentPage($section, array(
+                                    'is_section_start' => false,
+                                    'is_major_section_start' => false,
+                                ));
+                                if (!$tryAppendHtml($current, $frag)) {
+                                    $current['body_parts'][] = $frag;
+                                    $current['body_html'] = $frag;
+                                }
                             }
                         }
                     }
@@ -836,6 +838,8 @@ final class ControlledPublishingPaginationService
     }
 
     /**
+     * Split overflow paragraph/heading HTML for pagination without breaking cpb-block markup.
+     *
      * @return list<string>
      */
     private function splitParagraphHtml(string $html): array
@@ -847,22 +851,66 @@ final class ControlledPublishingPaginationService
             return array($html);
         }
 
-        if (preg_match('/<p[^>]*>/i', $html) === 1) {
-            $parts = array();
-            $segments = preg_split('/<\/p>/i', $html) ?: array();
-            foreach ($segments as $chunk) {
-                $chunk = trim($chunk);
-                if ($chunk === '') {
-                    continue;
-                }
-                $piece = stripos($chunk, '<p') !== false ? $chunk . '</p>' : '<p>' . $chunk . '</p>';
-                $parts[] = $piece;
-            }
-            if ($parts !== array()) {
-                return $parts;
+        if (preg_match('/<article class="cpb-block[^"]*"/i', $html) === 1) {
+            return $this->splitCpbArticleHtml($html, $chunkSize);
+        }
+
+        return $this->splitPlainParagraphHtml($html, $chunkSize);
+    }
+
+    /**
+     * Split a rendered cpb-block article at inner paragraph boundaries only.
+     *
+     * @return list<string>
+     */
+    private function splitCpbArticleHtml(string $html, int $chunkSize): array
+    {
+        if (!preg_match('/(<div class="cpb-paragraph[^"]*"[^>]*>)(.*?)(<\/div>)/is', $html, $match)) {
+            return $this->splitHtmlByWords($html, $chunkSize, true);
+        }
+
+        $paragraphInner = $match[2];
+        if (preg_match_all('/<p[^>]*>.*?<\/p>/is', $paragraphInner, $paragraphs) < 1 || $paragraphs[0] === array()) {
+            return $this->splitHtmlByWords($html, $chunkSize, true);
+        }
+
+        if (count($paragraphs[0]) === 1) {
+            return $this->splitHtmlByWords($html, $chunkSize, true);
+        }
+
+        $frags = array();
+        foreach ($paragraphs[0] as $paragraphHtml) {
+            $rebuilt = preg_replace(
+                '/(<div class="cpb-paragraph[^"]*"[^>]*>).*?(<\/div>)/is',
+                '$1' . $paragraphHtml . '$2',
+                $html,
+                1
+            );
+            if (is_string($rebuilt) && trim($rebuilt) !== '') {
+                $frags[] = $rebuilt;
             }
         }
 
+        return $frags !== array() ? $frags : array($html);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function splitPlainParagraphHtml(string $html, int $chunkSize): array
+    {
+        if (preg_match_all('/<p[^>]*>.*?<\/p>/is', $html, $paragraphs) >= 1 && count($paragraphs[0]) > 1) {
+            return $paragraphs[0];
+        }
+
+        return $this->splitHtmlByWords($html, $chunkSize, false);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function splitHtmlByWords(string $html, int $chunkSize, bool $preserveBlockShell): array
+    {
         $plain = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $plain = preg_replace('/\s+/u', ' ', trim($plain)) ?? '';
         if ($plain === '') {
@@ -870,7 +918,7 @@ final class ControlledPublishingPaginationService
         }
 
         $words = preg_split('/\s+/u', $plain) ?: array();
-        if (count($words) <= 1) {
+        if (count($words) <= $chunkSize) {
             return array($html);
         }
 
@@ -890,7 +938,7 @@ final class ControlledPublishingPaginationService
         $parts = array();
         foreach ($segments as $seg) {
             $escaped = htmlspecialchars($seg, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            if (preg_match('/class="[^"]*cpb-block[^"]*"/', $html) === 1) {
+            if ($preserveBlockShell || preg_match('/class="[^"]*cpb-block[^"]*"/', $html) === 1) {
                 $parts[] = preg_replace('/>([^<]*)<\//', '>' . $escaped . '</', $html, 1) ?? $html;
             } else {
                 $parts[] = '<p>' . $escaped . '</p>';
