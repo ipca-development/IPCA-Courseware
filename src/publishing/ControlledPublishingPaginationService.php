@@ -367,17 +367,22 @@ final class ControlledPublishingPaginationService
         $body = '';
 
         if ($usesSheetBody && preg_match('/<div class="cpb-sheet-body"[^>]*>(.*)<\/div>\s*(?:<footer)/s', $shellHtml, $m) === 1) {
-            $body = $m[1];
-        } elseif (preg_match('/<div class="cpb-sheet[^"]*"[^>]*>(.*)<\/div>\s*$/s', trim($shellHtml), $m) === 1) {
-            $inner = $m[1];
+            $body = trim($m[1]);
+        } else {
+            $body = $shellHtml;
+            if ($sheetOpen !== '') {
+                $body = preg_replace('/^[\s\S]*?<div class="cpb-sheet[^"]*"[^>]*>/', '', $body, 1) ?? $body;
+            }
             if ($header !== '') {
-                $inner = preg_replace('/^\s*' . preg_quote($header, '/') . '/s', '', $inner) ?? $inner;
+                $body = str_replace($header, '', $body);
             }
             if ($footer !== '') {
-                $inner = preg_replace('/\s*' . preg_quote($footer, '/') . '\s*$/s', '', $inner) ?? $inner;
+                $body = str_replace($footer, '', $body);
             }
-            $body = trim($inner);
+            $body = preg_replace('/<\/div>\s*$/s', '', trim($body)) ?? trim($body);
         }
+
+        $body = $this->sanitizeBodyHtml($body);
 
         return array(
             'sheet_open' => $sheetOpen,
@@ -455,11 +460,31 @@ final class ControlledPublishingPaginationService
      */
     private function unitsFromTocBody(string $bodyHtml, int $sectionId, array $flags): array
     {
-        if (preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $bodyHtml, $rows) < 1) {
+        $preamble = '';
+        $navInner = $bodyHtml;
+        if (preg_match('/^(.*?)<nav class="cpb-toc"[^>]*>(.*)<\/nav>/s', $bodyHtml, $parts) === 1) {
+            $preamble = trim($parts[1]);
+            $navInner = $parts[2];
+        }
+
+        if (preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $navInner, $rows) < 1) {
+            if ($preamble !== '') {
+                return array(array(
+                    'unit_key' => 'toc' . $sectionId . '_0',
+                    'block_id' => 0,
+                    'block_type' => 'toc',
+                    'html' => $preamble,
+                    'splittable' => false,
+                    'atomic' => true,
+                    'force_break_before' => !empty($flags['force_page_break_before']),
+                    'is_heading' => false,
+                ));
+            }
+
             return array();
         }
 
-        $navPrefix = '';
+        $navPrefix = '<nav class="cpb-toc" aria-label="Table of contents">';
         if (preg_match('/<nav class="cpb-toc"[^>]*>/', $bodyHtml, $navOpen) === 1) {
             $navPrefix = $navOpen[0];
         }
@@ -469,21 +494,35 @@ final class ControlledPublishingPaginationService
         $units = array();
         $idx = 0;
         $batch = array();
+        $isFirstBatch = true;
 
         $wrapNav = static function (array $rowBatch) use ($navPrefix): string {
-            $open = $navPrefix !== '' ? $navPrefix : '<nav class="cpb-toc" aria-label="Table of contents">';
-            return $open . implode('', $rowBatch) . '</nav>';
+            return $navPrefix . implode('', $rowBatch) . '</nav>';
         };
 
-        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $flags, $wrapNav): void {
+        $flush = function () use (
+            &$units,
+            &$idx,
+            &$batch,
+            &$isFirstBatch,
+            $sectionId,
+            $flags,
+            $wrapNav,
+            $preamble
+        ): void {
             if ($batch === array()) {
                 return;
+            }
+            $html = $wrapNav($batch);
+            if ($isFirstBatch && $preamble !== '') {
+                $html = $preamble . $html;
+                $isFirstBatch = false;
             }
             $units[] = array(
                 'unit_key' => 'toc' . $sectionId . '_' . $idx,
                 'block_id' => 0,
                 'block_type' => 'toc',
-                'html' => $wrapNav($batch),
+                'html' => $html,
                 'splittable' => false,
                 'atomic' => true,
                 'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
@@ -495,7 +534,11 @@ final class ControlledPublishingPaginationService
 
         foreach ($rows[0] as $row) {
             $trial = $wrapNav(array_merge($batch, array($row)));
-            if ($batch !== array() && $this->estimateHtmlHeight($trial) > $bodyCapacity) {
+            $trialHeight = $this->estimateHtmlHeight($trial);
+            if ($isFirstBatch && $preamble !== '') {
+                $trialHeight += $this->estimateHtmlHeight($preamble);
+            }
+            if ($batch !== array() && $trialHeight > $bodyCapacity) {
                 $flush();
             }
             $batch[] = $row;
@@ -528,16 +571,41 @@ final class ControlledPublishingPaginationService
     public function generateFrozenPageMap(string $bookKey): array
     {
         $source = $this->buildPaginateSource($bookKey);
-        $draftPages = $this->paginateSourceDeterministic($source);
+
+        $tocSection = null;
+        $sectionsWithoutToc = array();
+        foreach ($source['sections'] ?? array() as $section) {
+            if (($section['section_key'] ?? '') === 'toc') {
+                $tocSection = $section;
+            } else {
+                $sectionsWithoutToc[] = $section;
+            }
+        }
+
+        $pass1Source = $source;
+        $pass1Source['sections'] = $sectionsWithoutToc;
+        $draftPages = $this->paginateSourceDeterministic($pass1Source);
         $sectionPageIndex = $this->buildSectionFirstPageIndex($draftPages);
 
-        foreach ($draftPages as $idx => $page) {
-            if (str_contains((string)($page['body_html'] ?? ''), 'cpb-toc-row')) {
-                $draftPages[$idx]['body_html'] = $this->injectTocPageNumbers(
-                    (string)$page['body_html'],
-                    $sectionPageIndex
-                );
+        $tocPages = array();
+        if ($tocSection !== null) {
+            $tocSection = $this->rebuildTocSectionEntry($source, $tocSection, $sectionPageIndex);
+            $tocSource = $source;
+            $tocSource['sections'] = array($tocSection);
+            $tocPages = $this->paginateSourceDeterministic($tocSource);
+            $tocOffset = count($tocPages);
+
+            if ($tocOffset > 0) {
+                $shiftedIndex = array();
+                foreach ($sectionPageIndex as $sectionId => $pageNum) {
+                    $shiftedIndex[(int)$sectionId] = (int)$pageNum + $tocOffset;
+                }
+                $tocSection = $this->rebuildTocSectionEntry($source, $tocSection, $shiftedIndex);
+                $tocSource['sections'] = array($tocSection);
+                $tocPages = $this->paginateSourceDeterministic($tocSource);
             }
+
+            $draftPages = $this->insertTocPagesAfterCover($draftPages, $tocPages);
         }
 
         $total = count($draftPages);
@@ -582,6 +650,7 @@ final class ControlledPublishingPaginationService
             if ($page === null || (($page['body_html'] ?? '') === '' && empty($page['is_cover']))) {
                 return;
             }
+            $page['body_html'] = $this->sanitizeBodyHtml((string)($page['body_html'] ?? ''));
             $pages[] = $page;
         };
 
@@ -738,7 +807,7 @@ final class ControlledPublishingPaginationService
         }
 
         $header = $this->applyPageTokens((string)($page['header_template'] ?? ''), $pageNum, $total);
-        $body = (string)($page['body_html'] ?? '');
+        $body = $this->sanitizeBodyHtml((string)($page['body_html'] ?? ''));
         $footer = $this->applyPageTokens((string)($page['footer_template'] ?? ''), $pageNum, $total);
 
         if (!empty($page['uses_sheet_body'])) {
@@ -956,5 +1025,136 @@ final class ControlledPublishingPaginationService
         );
 
         return is_string($updated) ? $updated : $html;
+    }
+
+    private function sanitizeBodyHtml(string $html): string
+    {
+        if ($html === '') {
+            return '';
+        }
+        $html = preg_replace('/<header class="cpb-page-header"[^>]*>.*?<\/header>/s', '', $html) ?? $html;
+        $html = preg_replace('/<footer class="cpb-page-footer"[^>]*>.*?<\/footer>/s', '', $html) ?? $html;
+
+        return trim($html);
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @param array<string,mixed> $tocSection
+     * @param array<int,int> $sectionPageIndex
+     * @return array<string,mixed>
+     */
+    private function rebuildTocSectionEntry(
+        array $source,
+        array $tocSection,
+        array $sectionPageIndex
+    ): array {
+        $bookKey = (string)($source['book_key'] ?? 'OM');
+        $version = $this->reader->requireReleasedVersion($bookKey);
+        $versionId = (int)$version['id'];
+        $sectionId = (int)($tocSection['section_id'] ?? 0);
+        if ($sectionId <= 0) {
+            return $tocSection;
+        }
+
+        $section = null;
+        foreach ($this->reader->paginationSections()->listFlatSections($versionId) as $row) {
+            if ((int)($row['id'] ?? 0) === $sectionId) {
+                $section = $row;
+                break;
+            }
+        }
+        if ($section === null) {
+            return $tocSection;
+        }
+
+        $blocks = $this->reader->paginationRevision()->annotateChangeStatus(
+            $versionId,
+            $this->reader->paginationBlocks()->listSectionBlocks($sectionId)
+        );
+        $blockSvc = $this->reader->paginationBlocks();
+        foreach ($blocks as &$block) {
+            if ((string)($block['block_type'] ?? '') !== 'toc') {
+                continue;
+            }
+            $payload = $blockSvc->decodePayload($block);
+            if (!isset($payload['entries']) || !is_array($payload['entries'])) {
+                continue;
+            }
+            foreach ($payload['entries'] as &$entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $sid = (int)($entry['section_id'] ?? 0);
+                if ($sid > 0 && isset($sectionPageIndex[$sid])) {
+                    $entry['page'] = $sectionPageIndex[$sid];
+                }
+            }
+            unset($entry);
+            $block['payload_json'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        unset($block);
+
+        $pageHeaderConfig = $this->reader->paginationPageHeaderConfig($version, $section);
+        $tokenContext = is_array($tocSection['token_context'] ?? null)
+            ? $tocSection['token_context']
+            : array();
+        $shellHtml = $this->stripEditorChrome(
+            $this->reader->paginationResolveHtml(
+                $this->reader->paginationRenderSectionShellHtml(
+                    $version,
+                    $section,
+                    $blocks,
+                    $pageHeaderConfig,
+                    $tokenContext
+                ),
+                $tokenContext
+            )
+        );
+        $parsed = $this->parseRenderedSheet($shellHtml);
+        $tocSection['sheet_open'] = $parsed['sheet_open'];
+        $tocSection['uses_sheet_body'] = $parsed['uses_sheet_body'];
+        if (!empty($tocSection['show_header_footer'])) {
+            if ($parsed['header'] !== '') {
+                $tocSection['header_template'] = $parsed['header'];
+            }
+            if ($parsed['footer'] !== '') {
+                $tocSection['footer_template'] = $parsed['footer'];
+            }
+        }
+        $flags = is_array($tocSection['flags'] ?? null) ? $tocSection['flags'] : array();
+        $tocSection['units'] = $this->unitsFromRenderedBody($parsed['body'], $section, $flags);
+
+        return $tocSection;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pages
+     * @param list<array<string,mixed>> $tocPages
+     * @return list<array<string,mixed>>
+     */
+    private function insertTocPagesAfterCover(array $pages, array $tocPages): array
+    {
+        if ($tocPages === array()) {
+            return $pages;
+        }
+
+        $out = array();
+        $inserted = false;
+        foreach ($pages as $page) {
+            $out[] = $page;
+            if (!$inserted && !empty($page['is_cover'])) {
+                foreach ($tocPages as $tocPage) {
+                    $out[] = $tocPage;
+                }
+                $inserted = true;
+            }
+        }
+
+        if (!$inserted) {
+            return array_merge($tocPages, $pages);
+        }
+
+        return $out;
     }
 }

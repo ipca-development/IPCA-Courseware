@@ -290,6 +290,7 @@
       item.type = 'button';
       item.className = 'mr-filmstrip-item';
       item.dataset.pageIndex = String(idx);
+      item.dataset.pageNumber = String(page.page_number);
       if (page.is_cover) item.classList.add('is-cover');
       if (page.is_section_start) item.classList.add('is-section-start');
       if (page.is_major_section_start) item.classList.add('is-major-start');
@@ -313,8 +314,11 @@
 
   function highlightFilmstrip() {
     if (!filmstripTrack) return;
+    var current = state.pages[state.pageIndex];
+    var currentPageNum = current ? current.page_number : 0;
     filmstripTrack.querySelectorAll('.mr-filmstrip-item').forEach(function (el) {
-      el.classList.toggle('is-active', parseInt(el.dataset.pageIndex, 10) === state.pageIndex);
+      var match = parseInt(el.dataset.pageNumber, 10) === currentPageNum;
+      el.classList.toggle('is-active', match);
     });
   }
 
@@ -469,7 +473,16 @@
     initialAnchor = window.location.hash.replace(/^#/, '');
   }
 
-  initReader().catch(function (err) {
-    if (pageContent) pageContent.innerHTML = '<div class="mr-error">' + (err.message || 'Failed to load manual') + '</div>';
+  initReader().then(function () {
+    if (state.pageMap && state.pageMap.layout && state.pageMap.layout.header_footprint_scale) {
+      document.documentElement.style.setProperty(
+        '--mr-header-footprint-scale',
+        String(state.pageMap.layout.header_footprint_scale)
+      );
+    }
+  }).catch(function (err) {
+    if (pageContent) {
+      pageContent.innerHTML = '<div class="mr-error">' + (err.message || 'Failed to load manual') + '</div>';
+    }
   });
 })();
