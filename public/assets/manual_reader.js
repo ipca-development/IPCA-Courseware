@@ -274,7 +274,11 @@
       if (page.is_major_section_start) item.classList.add('is-major-start');
 
       var mini = document.createElement('div');
-      mini.className = 'mr-filmstrip-mini';
+      if (page.thumbnail_html && page.thumbnail_html.indexOf('mr-frozen-thumb') >= 0) {
+        mini.className = 'mr-filmstrip-compact';
+      } else {
+        mini.className = 'mr-filmstrip-mini';
+      }
       if (page.thumbnail_html) {
         mini.innerHTML = page.thumbnail_html;
       } else if (page.is_cover) {

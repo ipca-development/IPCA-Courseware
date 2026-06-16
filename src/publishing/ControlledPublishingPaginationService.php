@@ -17,7 +17,19 @@ final class ControlledPublishingPaginationService
     private const PART_KEYS = array('part_1', 'part_2', 'part_3', 'part_4', 'main_content');
 
     /** @var list<string> */
-    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'list');
+    private const PART0_SECTION_KEYS = array(
+        'toc',
+        'lep',
+        'revision_system',
+        'amendment_list',
+        'distribution_list',
+        'abbreviations',
+        'definitions',
+        'highlights',
+    );
+
+    /** @var list<string> */
+    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'list', 'shell');
 
     /** @var list<string> */
     private const SPLITTABLE_BLOCK_TYPES = array('paragraph', 'heading');
@@ -41,8 +53,15 @@ final class ControlledPublishingPaginationService
             $byId[(int)$row['id']] = $row;
         }
 
+        $bookKeyResolved = (string)($version['book_key'] ?? $bookKey);
+        $orderedSections = $this->reader->paginationEditorNav()->flattenNavigableSectionRows(
+            $versionId,
+            $bookKeyResolved,
+            $flat
+        );
+
         $sectionsOut = array();
-        foreach ($flat as $section) {
+        foreach ($orderedSections as $section) {
             $sectionId = (int)($section['id'] ?? 0);
             if ($sectionId <= 0) {
                 continue;
@@ -167,6 +186,7 @@ final class ControlledPublishingPaginationService
         $parentKey = is_array($parent) ? (string)($parent['section_key'] ?? '') : '';
 
         $isCover = $key === 'cover';
+        $isPart0 = in_array($key, self::PART0_SECTION_KEYS, true);
         $isPartStart = in_array($key, self::PART_KEYS, true);
         $isChapterStart = false;
         $isMajorSectionStart = false;
@@ -193,14 +213,16 @@ final class ControlledPublishingPaginationService
         $pageBreakBefore = !empty($meta['page_break_before'])
             || $isCover
             || $isPartStart
-            || $isChapterStart;
+            || $isChapterStart
+            || $isPart0;
 
         return array(
             'is_cover' => $isCover,
+            'is_part0' => $isPart0,
             'is_part_start' => $isPartStart,
             'is_chapter_start' => $isChapterStart,
             'is_major_section_start' => $isMajorSectionStart,
-            'is_section_start' => $isPartStart || $isChapterStart || $isCover,
+            'is_section_start' => $isPartStart || $isChapterStart || $isCover || $isPart0,
             'force_page_break_before' => $pageBreakBefore,
             'manual_part' => $manualPart,
         );
@@ -386,6 +408,7 @@ final class ControlledPublishingPaginationService
             ),
             $tokenContext
         );
+        $shellHtml = $this->stripEmbeddedPageBands($shellHtml);
 
         $bodyHtml = $shellHtml;
         if (preg_match('/<div class="cpb-sheet-body"[^>]*>(.*)<\/div>\s*(?:<div class="cpb-dropzone|<footer)/s', $shellHtml, $m) === 1) {
@@ -395,6 +418,7 @@ final class ControlledPublishingPaginationService
         } elseif (preg_match('/<div class="cpb-lep-body"[^>]*>(.*)<\/div>/s', $shellHtml, $m) === 1) {
             $bodyHtml = $m[1];
         }
+        $bodyHtml = $this->stripEmbeddedPageBands($bodyHtml);
 
         $units = array();
         $wrap = '<div id="mr-shell-root">' . $bodyHtml . '</div>';
@@ -420,19 +444,192 @@ final class ControlledPublishingPaginationService
         }
 
         if ($units === array() && trim(strip_tags($bodyHtml)) !== '') {
-            $units[] = array(
-                'unit_key' => 's' . (int)$section['id'] . '_0',
-                'block_id' => 0,
-                'block_type' => 'shell',
-                'html' => '<div class="mr-shell-block">' . $bodyHtml . '</div>',
-                'splittable' => true,
-                'atomic' => false,
-                'force_break_before' => !empty($flags['force_page_break_before']),
-                'is_heading' => false,
-            );
+            $units = $this->splitShellBodyIntoUnits($bodyHtml, $section, $flags);
         }
 
         return $units;
+    }
+
+    private function stripEmbeddedPageBands(string $html): string
+    {
+        $html = preg_replace('/<header class="cpb-page-header"[^>]*>.*?<\/header>/s', '', $html) ?? $html;
+        $html = preg_replace('/<footer class="cpb-page-footer"[^>]*>.*?<\/footer>/s', '', $html) ?? $html;
+
+        return $html;
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     * @param array<string,mixed> $flags
+     * @return list<array<string,mixed>>
+     */
+    private function splitShellBodyIntoUnits(string $bodyHtml, array $section, array $flags): array
+    {
+        $sectionKey = (string)($section['section_key'] ?? '');
+        $sectionId = (int)($section['id'] ?? 0);
+
+        if ($sectionKey === 'toc' && preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $bodyHtml, $rows) >= 1) {
+            return $this->shellUnitsFromChunks($rows[0], 'toc', $sectionId, $flags, static function (string $chunk): string {
+                return '<nav class="cpb-toc" aria-label="Table of contents">' . $chunk . '</nav>';
+            });
+        }
+
+        if (preg_match('/<table/i', $bodyHtml) === 1) {
+            $tableUnits = $this->splitTableHtmlIntoUnits($bodyHtml, $sectionId, $flags);
+            if ($tableUnits !== array()) {
+                return $tableUnits;
+            }
+        }
+
+        return $this->shellUnitsFromHeightChunks($bodyHtml, $sectionId, $flags);
+    }
+
+    /**
+     * @param list<string> $chunks
+     * @param array<string,mixed> $flags
+     * @return list<array<string,mixed>>
+     */
+    private function shellUnitsFromChunks(
+        array $chunks,
+        string $blockType,
+        int $sectionId,
+        array $flags,
+        callable $wrapChunk
+    ): array {
+        $profile = ControlledPublishingReaderLayoutProfile::spec();
+        $bodyCapacity = (int)$profile['body_capacity_px'];
+        $units = array();
+        $idx = 0;
+        $batch = array();
+
+        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $blockType, $flags, $wrapChunk): void {
+            if ($batch === array()) {
+                return;
+            }
+            $html = $wrapChunk(implode('', $batch));
+            $units[] = array(
+                'unit_key' => 's' . $sectionId . '_' . $idx,
+                'block_id' => 0,
+                'block_type' => $blockType,
+                'html' => $html,
+                'splittable' => false,
+                'atomic' => true,
+                'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
+                'is_heading' => false,
+            );
+            $idx++;
+            $batch = array();
+        };
+
+        foreach ($chunks as $chunk) {
+            $trial = $wrapChunk(implode('', array_merge($batch, array($chunk))));
+            if ($batch !== array() && $this->estimateHtmlHeight($trial) > $bodyCapacity) {
+                $flush();
+            }
+            $batch[] = $chunk;
+        }
+        $flush();
+
+        return $units;
+    }
+
+    /**
+     * @param array<string,mixed> $flags
+     * @return list<array<string,mixed>>
+     */
+    private function splitTableHtmlIntoUnits(string $bodyHtml, int $sectionId, array $flags): array
+    {
+        if (preg_match('/<table[^>]*>.*?<\/table>/is', $bodyHtml, $tableMatch) !== 1) {
+            return array();
+        }
+
+        $fullTable = $tableMatch[0];
+        if (preg_match('/<table[^>]*>/i', $fullTable, $tagMatch) !== 1) {
+            return array();
+        }
+        $tableTag = $tagMatch[0];
+
+        if (preg_match('/<table[^>]*>(.*)<\/table>/is', $fullTable, $innerMatch) !== 1) {
+            return array();
+        }
+        $inner = $innerMatch[1];
+        $thead = '';
+        if (preg_match('/<thead[^>]*>.*?<\/thead>/is', $inner, $theadMatch) === 1) {
+            $thead = $theadMatch[0];
+        }
+
+        preg_match_all('/<tr[^>]*>.*?<\/tr>/is', $inner, $rowMatches);
+        $rows = $rowMatches[0] ?? array();
+        if ($rows === array()) {
+            return array();
+        }
+
+        $profile = ControlledPublishingReaderLayoutProfile::spec();
+        $bodyCapacity = (int)$profile['body_capacity_px'];
+        $units = array();
+        $idx = 0;
+        $batch = array();
+
+        $wrapTable = static function (array $rowBatch) use ($tableTag, $thead): string {
+            return $tableTag . $thead . '<tbody>' . implode('', $rowBatch) . '</tbody></table>';
+        };
+
+        $flush = function () use (&$units, &$idx, &$batch, $sectionId, $flags, $wrapTable): void {
+            if ($batch === array()) {
+                return;
+            }
+            $units[] = array(
+                'unit_key' => 's' . $sectionId . '_' . $idx,
+                'block_id' => 0,
+                'block_type' => 'table',
+                'html' => '<div class="mr-shell-block">' . $wrapTable($batch) . '</div>',
+                'splittable' => false,
+                'atomic' => true,
+                'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
+                'is_heading' => false,
+            );
+            $idx++;
+            $batch = array();
+        };
+
+        foreach ($rows as $row) {
+            if ($thead !== '' && str_contains($row, '<th')) {
+                continue;
+            }
+            $trial = $wrapTable(array_merge($batch, array($row)));
+            if ($batch !== array() && $this->estimateHtmlHeight($trial) > $bodyCapacity) {
+                $flush();
+            }
+            $batch[] = $row;
+        }
+        $flush();
+
+        return $units;
+    }
+
+    /**
+     * @param array<string,mixed> $flags
+     * @return list<array<string,mixed>>
+     */
+    private function shellUnitsFromHeightChunks(string $bodyHtml, int $sectionId, array $flags): array
+    {
+        $profile = ControlledPublishingReaderLayoutProfile::spec();
+        $bodyCapacity = (int)$profile['body_capacity_px'];
+        $segments = preg_split('/(?=<(?:p|div|table|ul|ol|nav|h[1-6])\b)/i', $bodyHtml) ?: array($bodyHtml);
+        $chunks = array();
+        foreach ($segments as $segment) {
+            $segment = trim($segment);
+            if ($segment !== '') {
+                $chunks[] = $segment;
+            }
+        }
+        if ($chunks === array()) {
+            $chunks = array($bodyHtml);
+        }
+
+        return $this->shellUnitsFromChunks($chunks, 'shell', $sectionId, $flags, static function (string $chunk): string {
+            return '<div class="mr-shell-block">' . $chunk . '</div>';
+        });
     }
 
     /**
@@ -459,7 +656,54 @@ final class ControlledPublishingPaginationService
     {
         $source = $this->buildPaginateSource($bookKey);
         $draftPages = $this->paginateSourceDeterministic($source);
+        $sectionPageIndex = $this->buildSectionFirstPageIndex($draftPages);
+
+        foreach ($draftPages as $idx => $page) {
+            if (str_contains((string)($page['body_html'] ?? ''), 'cpb-toc-row')) {
+                $draftPages[$idx]['body_html'] = $this->injectTocPageNumbers(
+                    (string)$page['body_html'],
+                    $sectionPageIndex
+                );
+            }
+        }
+
         $total = count($draftPages);
+
+        // #region agent log
+        $part0Keys = array();
+        $duplicateFooters = 0;
+        $tocEmDashes = 0;
+        foreach ($draftPages as $page) {
+            $key = (string)($page['section_key'] ?? '');
+            if (in_array($key, self::PART0_SECTION_KEYS, true)) {
+                $part0Keys[$key] = true;
+            }
+            $body = (string)($page['body_html'] ?? '');
+            $duplicateFooters += max(0, (preg_match_all('/<footer class="cpb-page-footer"/', $body) ?: 0) - 0);
+            if (str_contains($body, 'cpb-toc-row')) {
+                $tocEmDashes += substr_count($body, 'data-toc-page="—"');
+            }
+        }
+        @file_put_contents(
+            dirname(__DIR__, 2) . '/.cursor/debug-310362.log',
+            json_encode(array(
+                'sessionId' => '310362',
+                'runId' => 'post-fix',
+                'hypothesisId' => 'H1-H5',
+                'location' => 'ControlledPublishingPaginationService.php:generateFrozenPageMap',
+                'message' => 'page map generation summary',
+                'data' => array(
+                    'page_count' => $total,
+                    'section_count' => count($source['sections'] ?? array()),
+                    'part0_present' => array_keys($part0Keys),
+                    'duplicate_footer_tags_in_body' => $duplicateFooters,
+                    'toc_em_dash_count' => $tocEmDashes,
+                ),
+                'timestamp' => (int)round(microtime(true) * 1000),
+            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+            FILE_APPEND
+        );
+        // #endregion
 
         $stored = array();
         foreach ($draftPages as $idx => $page) {
@@ -508,6 +752,7 @@ final class ControlledPublishingPaginationService
             return array(
                 'book_version_id' => (int)($source['version_id'] ?? 0),
                 'section_id' => (int)$section['section_id'],
+                'section_key' => (string)($section['section_key'] ?? ''),
                 'section_stable_anchor' => (string)($section['stable_anchor'] ?? ''),
                 'section_title' => (string)($section['title'] ?? ''),
                 'manual_part' => $section['manual_part'] ?? null,
@@ -541,6 +786,7 @@ final class ControlledPublishingPaginationService
                 $pages[] = array(
                     'book_version_id' => (int)($source['version_id'] ?? 0),
                     'section_id' => (int)$section['section_id'],
+                    'section_key' => (string)($section['section_key'] ?? ''),
                     'section_stable_anchor' => (string)($section['stable_anchor'] ?? ''),
                     'section_title' => (string)($section['title'] ?? ''),
                     'manual_part' => $section['manual_part'] ?? null,
@@ -566,6 +812,11 @@ final class ControlledPublishingPaginationService
                     continue;
                 }
 
+                if ($unitIdx === 0 && $current !== null && trim((string)($current['body_html'] ?? '')) !== '') {
+                    $finalizePage($current);
+                    $current = null;
+                }
+
                 $forceBreak = !empty($unit['force_break_before'])
                     || ($unitIdx === 0 && !empty($section['flags']['force_page_break_before']));
                 if ($forceBreak && $current !== null) {
@@ -578,22 +829,29 @@ final class ControlledPublishingPaginationService
                     'is_major_section_start' => $unitIdx === 0 && !empty($section['flags']['is_major_section_start']),
                 );
 
-                if (!empty($unit['is_heading']) && !empty($unit['atomic']) && $unitIdx === 0) {
-                    $finalizePage($current);
-                    $current = $newContentPage($section, $sectionFlags);
-                } elseif ($current === null) {
+                if (!empty($unit['is_heading']) && !empty($unit['atomic'])) {
+                    if ($current !== null && !$tryAppendHtml($current, (string)($unit['html'] ?? ''))) {
+                        $finalizePage($current);
+                        $current = null;
+                    }
+                }
+
+                if ($current === null) {
                     $current = $newContentPage($section, $sectionFlags);
                 }
 
                 $html = (string)($unit['html'] ?? '');
                 $splittable = !empty($unit['splittable'])
-                    && in_array((string)($unit['block_type'] ?? ''), array('paragraph', 'heading', 'shell'), true);
+                    && in_array((string)($unit['block_type'] ?? ''), self::SPLITTABLE_BLOCK_TYPES, true);
 
                 if ($splittable) {
                     foreach ($this->splitParagraphHtml($html) as $frag) {
                         if (!$tryAppendHtml($current, $frag)) {
                             $finalizePage($current);
-                            $current = $newContentPage($section, $sectionFlags);
+                            $current = $newContentPage($section, array(
+                                'is_section_start' => false,
+                                'is_major_section_start' => false,
+                            ));
                             if (!$tryAppendHtml($current, $frag)) {
                                 $current['body_parts'][] = $frag;
                                 $current['body_html'] = $frag;
@@ -601,9 +859,12 @@ final class ControlledPublishingPaginationService
                         }
                     }
                 } else {
-                    if (!$tryAppendHtml($current, $html)) {
-                        $finalizePage($current);
-                        $current = $newContentPage($section, $sectionFlags);
+                if (!$tryAppendHtml($current, $html)) {
+                    $finalizePage($current);
+                    $current = $newContentPage($section, array(
+                        'is_section_start' => false,
+                        'is_major_section_start' => false,
+                    ));
                         if (!$tryAppendHtml($current, $html)) {
                             $current['body_parts'][] = $html;
                             $current['body_html'] = $html;
@@ -623,24 +884,25 @@ final class ControlledPublishingPaginationService
      */
     private function assembleFrozenPageHtml(array $page, int $pageNum, int $total): string
     {
-        $style = ControlledPublishingReaderLayoutProfile::frozenPageInlineStyle();
-        $coverClass = !empty($page['is_cover']) ? ' mr-frozen-page--cover' : '';
-
         if (!empty($page['is_cover'])) {
-            return '<div class="mr-frozen-page' . $coverClass . '" data-page="' . $pageNum . '" style="' . $style . '">'
-                . '<div class="mr-gen-body mr-gen-body--cover">' . (string)($page['body_html'] ?? '') . '</div>'
+            $style = ControlledPublishingReaderLayoutProfile::frozenCoverInlineStyle();
+
+            return '<div class="mr-frozen-page mr-frozen-page--cover" data-page="' . $pageNum . '" style="' . $style . '">'
+                . (string)($page['body_html'] ?? '')
                 . '</div>';
         }
 
+        $style = ControlledPublishingReaderLayoutProfile::frozenPageInlineStyle();
         $header = $this->applyPageTokens((string)($page['header_template'] ?? ''), $pageNum, $total);
         $body = (string)($page['body_html'] ?? '');
         $footer = $this->applyPageTokens((string)($page['footer_template'] ?? ''), $pageNum, $total);
 
-        return '<div class="mr-frozen-page' . $coverClass . '" data-page="' . $pageNum . '" style="' . $style . '">'
-            . ($header !== '' ? '<div class="mr-gen-header">' . $header . '</div>' : '')
-            . '<div class="mr-gen-body">' . $body . '</div>'
-            . ($footer !== '' ? '<div class="mr-gen-footer">' . $footer . '</div>' : '')
-            . '</div>';
+        return '<div class="mr-frozen-page" data-page="' . $pageNum . '" style="' . $style . '">'
+            . '<div class="cpb-sheet mr-frozen-sheet">'
+            . ($header !== '' ? $header : '')
+            . '<div class="cpb-sheet-body">' . $body . '</div>'
+            . ($footer !== '' ? $footer : '')
+            . '</div></div>';
     }
 
     /**
@@ -660,13 +922,14 @@ final class ControlledPublishingPaginationService
         );
 
         if (!empty($page['is_cover'])) {
-            return '<div class="mr-frozen-thumb mr-frozen-thumb--cover" style="width:' . $w . 'px;height:' . $h
-                . 'px;display:flex;align-items:center;justify-content:center;font-size:9px;background:#fff;">Cover</div>';
+            return '<div class="mr-frozen-thumb mr-frozen-thumb--cover" style="width:100%;height:100%;'
+                . 'display:flex;align-items:center;justify-content:center;font-size:9px;'
+                . 'background:linear-gradient(165deg,#dbeafe,#eff6ff);color:#0f172a;">Cover</div>';
         }
 
-        return '<div class="mr-frozen-thumb" style="width:' . $w . 'px;height:' . $h
-            . 'px;display:flex;flex-direction:column;justify-content:space-between;padding:4px;'
-            . 'box-sizing:border-box;background:#fff;border:1px solid #ddd;font-size:8px;line-height:1.2;">'
+        return '<div class="mr-frozen-thumb" style="width:100%;height:100%;'
+            . 'display:flex;flex-direction:column;justify-content:space-between;padding:4px;'
+            . 'box-sizing:border-box;background:#fff;border:1px solid #ddd;font-size:8px;line-height:1.2;color:#1e293b;">'
             . '<span style="opacity:0.7;">' . $title . '</span>'
             . '<span style="text-align:right;font-weight:600;">' . $pageNum . ' / ' . $total . '</span>'
             . '</div>';
@@ -760,6 +1023,12 @@ final class ControlledPublishingPaginationService
         $profile = ControlledPublishingReaderLayoutProfile::spec();
         $lineHeight = (int)$profile['line_height_px'];
 
+        if (preg_match('/cpb-toc-row/i', $html) === 1) {
+            $rows = preg_match_all('/cpb-toc-row/i', $html) ?: 1;
+
+            return max(1, $rows) * 22 + 8;
+        }
+
         if (preg_match('/<table/i', $html) === 1) {
             $rows = preg_match_all('/<tr/i', $html) ?: 0;
 
@@ -817,5 +1086,58 @@ final class ControlledPublishingPaginationService
         }
 
         return (int)ceil(mb_strlen($text, 'UTF-8') / max(1, $charsPerLine));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pages
+     * @return array<int,int>
+     */
+    private function buildSectionFirstPageIndex(array $pages): array
+    {
+        $index = array();
+        foreach ($pages as $idx => $page) {
+            $sectionId = (int)($page['section_id'] ?? 0);
+            if ($sectionId <= 0 || isset($index[$sectionId])) {
+                continue;
+            }
+            $index[$sectionId] = $idx + 1;
+        }
+
+        return $index;
+    }
+
+    /**
+     * @param array<int,int> $sectionPageIndex
+     */
+    private function injectTocPageNumbers(string $html, array $sectionPageIndex): string
+    {
+        if (!str_contains($html, 'cpb-toc-row')) {
+            return $html;
+        }
+
+        $updated = preg_replace_callback(
+            '/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s',
+            function (array $match) use ($sectionPageIndex): string {
+                $row = $match[0];
+                $pageText = '—';
+                if (preg_match('/data-section-id="(\d+)"/', $row, $sid) === 1) {
+                    $pageNum = $sectionPageIndex[(int)$sid[1]] ?? null;
+                    if ($pageNum !== null && $pageNum > 0) {
+                        $pageText = (string)$pageNum;
+                    }
+                }
+                $escaped = htmlspecialchars($pageText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $replaced = preg_replace(
+                    '/(<span class="cpb-toc-page" data-toc-page=")[^"]*(">)[^<]*(<\/span>)/s',
+                    '$1' . $escaped . '$2' . $escaped . '$3',
+                    $row
+                );
+
+                return is_string($replaced) ? $replaced : $row;
+            },
+            $html
+        );
+
+        return is_string($updated) ? $updated : $html;
     }
 }

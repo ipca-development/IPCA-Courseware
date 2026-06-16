@@ -483,4 +483,62 @@ final class ControlledPublishingEditorNavService
         $decoded = json_decode((string)$raw, true);
         return is_array($decoded) ? $decoded : array();
     }
+
+    /**
+     * Flat section rows in editor reading order (cover → Part 0 → parts → annexes).
+     *
+     * @param list<array<string,mixed>> $flatRows
+     * @return list<array<string,mixed>>
+     */
+    public function flattenNavigableSectionRows(int $versionId, string $bookKey, array $flatRows): array
+    {
+        $byId = array();
+        foreach ($flatRows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (int)($row['id'] ?? 0);
+            if ($id > 0) {
+                $byId[$id] = $row;
+            }
+        }
+
+        $orderedIds = array();
+        $this->collectNavigableSectionIds($this->buildNavTree($versionId, $bookKey), $orderedIds);
+
+        $ordered = array();
+        $seen = array();
+        foreach ($orderedIds as $id) {
+            if (isset($seen[$id]) || !isset($byId[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $ordered[] = $byId[$id];
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $nodes
+     * @param list<int> $ids
+     */
+    private function collectNavigableSectionIds(array $nodes, array &$ids): void
+    {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (!empty($node['is_separator'])) {
+                continue;
+            }
+            if (!empty($node['children']) && is_array($node['children'])) {
+                $this->collectNavigableSectionIds($node['children'], $ids);
+            }
+            $id = (int)($node['id'] ?? 0);
+            if ($id > 0 && empty($node['is_group']) && empty($node['is_separator']) && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+    }
 }

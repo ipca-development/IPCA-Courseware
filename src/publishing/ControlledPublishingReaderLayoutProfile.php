@@ -66,11 +66,28 @@ final class ControlledPublishingReaderLayoutProfile
 
         return sprintf(
             'width:%dpx;height:%dpx;max-width:%dpx;max-height:%dpx;'
-            . 'font-family:%s;font-size:%dpt;line-height:%s;box-sizing:border-box;overflow:hidden;',
+            . 'font-family:%s;font-size:%dpt;line-height:%s;box-sizing:border-box;'
+            . 'display:flex;flex-direction:column;overflow:hidden;',
             (int)$s['page_width_px'],
             (int)$s['page_height_px'],
             (int)$s['page_width_px'],
             (int)$s['page_height_px'],
+            (string)$s['font_family'],
+            (int)$s['font_size_pt'],
+            (string)$s['line_height']
+        );
+    }
+
+    public static function frozenCoverInlineStyle(): string
+    {
+        $s = self::SPEC;
+
+        return sprintf(
+            'width:%dpx;min-height:%dpx;max-width:%dpx;'
+            . 'font-family:%s;font-size:%dpt;line-height:%s;box-sizing:border-box;overflow:visible;',
+            (int)$s['page_width_px'],
+            (int)$s['page_height_px'],
+            (int)$s['page_width_px'],
             (string)$s['font_family'],
             (int)$s['font_size_pt'],
             (string)$s['line_height']

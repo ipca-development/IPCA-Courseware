@@ -1161,6 +1161,11 @@ final class ControlledPublishingReaderService
         return $this->sections();
     }
 
+    public function paginationEditorNav(): ControlledPublishingEditorNavService
+    {
+        return $this->editorNav();
+    }
+
     public function paginationBlocks(): ControlledPublishingBlockService
     {
         return $this->blocks();
