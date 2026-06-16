@@ -1582,13 +1582,26 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '">';
-        $totalWidth = array_sum($colWidths);
-        $html .= '<table class="cpb-table" data-field="table" style="width:' . max(1, $totalWidth) . 'px">';
-        $html .= '<colgroup>';
-        foreach ($colWidths as $width) {
-            $html .= '<col style="width:' . (int)$width . 'px">';
+        $totalWidth = max(1, array_sum($colWidths));
+        if ($edit) {
+            $html .= '<table class="cpb-table" data-field="table" style="width:' . $totalWidth . 'px">';
+            $html .= '<colgroup>';
+            foreach ($colWidths as $width) {
+                $html .= '<col style="width:' . (int)$width . 'px">';
+            }
+            $html .= '</colgroup>';
+        } else {
+            // Read/published: fill the table frame — fixed px widths leave blank space in full-width wraps.
+            $html .= '<table class="cpb-table" data-field="table" style="width:100%">';
+            if ($colCount > 1) {
+                $html .= '<colgroup>';
+                foreach ($colWidths as $width) {
+                    $pct = round(((int)$width / $totalWidth) * 100, 4);
+                    $html .= '<col style="width:' . $pct . '%">';
+                }
+                $html .= '</colgroup>';
+            }
         }
-        $html .= '</colgroup>';
 
         $html .= '<thead>';
         if ($hasTitleRow) {

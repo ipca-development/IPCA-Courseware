@@ -69,6 +69,30 @@
   zoom: 1;
 }
 
+/* Frozen pages may carry editor px table widths — stretch to the frame in reader */
+.mr-app .cpb-table-wrap {
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+.mr-app .cpb-table-wrap > .cpb-table[data-field="table"] {
+  width: 100% !important;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.mr-app .cpb-table-wrap > .cpb-table col {
+  min-width: 0 !important;
+}
+
+.mr-app .cpb-table-wrap > .cpb-table col:only-child {
+  width: 100% !important;
+}
+
+.mr-app .cpb-table-wrap > .cpb-table col[style*="px"] {
+  width: auto !important;
+}
+
 .mr-app .cpb-page-header[contenteditable="false"]:hover,
 .mr-app .cpb-page-footer[contenteditable="false"]:hover {
   outline: none;
@@ -418,7 +442,6 @@
 
 .mr-page-scale .cpb-sheet-body {
   max-width: 100%;
-  overflow-x: hidden;
 }
 
 .mr-page-scale .cpb-sheet--cover {

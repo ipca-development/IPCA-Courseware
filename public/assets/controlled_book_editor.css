@@ -893,6 +893,12 @@ body.cpb-browser-fullscreen .cpb-workspace {
   padding-left: 10px;
 }
 
+.cpb-block--image {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .cpb-change-marker {
   position: absolute;
   left: 0;
@@ -1188,7 +1194,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
   --cpb-table-border-color: #94a3b8;
   --cpb-table-border-width: 1px;
   border-radius: var(--cpb-frame-radius, 4px);
@@ -1216,12 +1223,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-table-wrap > .cpb-table,
 .cpb-table-wrap .cpb-table {
-  width: 100%;
+  width: 100% !important;
+  max-width: 100%;
+  min-width: 0;
   border-collapse: separate;
   border-spacing: 0;
   border: 0;
   margin: 0;
   background: transparent;
+  table-layout: fixed;
+}
+
+.cpb-table-wrap col {
+  min-width: 0;
+}
+
+.cpb-table-wrap > .cpb-table[data-field="table"] col[style*="px"] {
+  width: auto !important;
 }
 
 .cpb-table th,
@@ -1234,9 +1252,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-table-wrap .cpb-table th,
 .cpb-table-wrap .cpb-table td {
+  box-sizing: border-box;
   border: 0;
   border-right: var(--cpb-table-border-width) solid var(--cpb-table-border-color);
   border-bottom: var(--cpb-table-border-width) solid var(--cpb-table-border-color);
+  overflow-wrap: anywhere;
 }
 
 .cpb-table-wrap .cpb-table tr > :last-child {
@@ -1438,15 +1458,19 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-image {
-  margin: 0.8em auto;
+  display: block;
+  flex: 0 0 auto;
+  margin: 0.8em 0;
   text-align: center;
   max-width: 100%;
 }
 
 .cpb-image-frame {
   position: relative;
-  display: inline-block;
+  display: block;
+  width: 100%;
   max-width: 100%;
+  margin: 0 auto;
   line-height: 0;
   overflow: visible;
 }
@@ -1506,6 +1530,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   font-size: 9pt;
   color: #64748b;
   margin-top: 6px;
+  text-align: center;
 }
 
 .cpb-image--empty {
