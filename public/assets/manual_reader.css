@@ -15,7 +15,6 @@
   --mr-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
   --mr-official-page-w: 816px;
   --mr-official-page-h: 1056px;
-  --mr-header-footprint-scale: 0.94;
 }
 
 [data-mr-theme="sepia"] {
@@ -417,24 +416,9 @@
   margin: 0 auto;
 }
 
-.mr-page-scale .cpb-page-header {
-  transform: scale(var(--mr-header-footprint-scale));
-  transform-origin: top center;
-}
-
 .mr-page-scale .cpb-sheet-body {
   max-width: 100%;
   overflow-x: hidden;
-}
-
-.mr-page-scale .cpb-table-block,
-.mr-page-scale .cpb-table-wrap {
-  max-width: 100%;
-}
-
-.mr-page-scale .cpb-table-wrap > .cpb-table,
-.mr-page-scale .cpb-table-wrap .cpb-table {
-  max-width: 100%;
 }
 
 .mr-page-scale .cpb-sheet--cover {

@@ -473,14 +473,7 @@
     initialAnchor = window.location.hash.replace(/^#/, '');
   }
 
-  initReader().then(function () {
-    if (state.pageMap && state.pageMap.layout && state.pageMap.layout.header_footprint_scale) {
-      document.documentElement.style.setProperty(
-        '--mr-header-footprint-scale',
-        String(state.pageMap.layout.header_footprint_scale)
-      );
-    }
-  }).catch(function (err) {
+  initReader().catch(function (err) {
     if (pageContent) {
       pageContent.innerHTML = '<div class="mr-error">' + (err.message || 'Failed to load manual') + '</div>';
     }
