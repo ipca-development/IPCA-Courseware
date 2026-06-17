@@ -19,7 +19,7 @@ if ($recordingId <= 0) {
 $service = new CockpitRecorderService($pdo);
 
 try {
-    $result = $service->processStubTranscription($recordingId);
+    $result = $service->processTranscription($recordingId);
     if (!($result['ok'] ?? false)) {
         $error = (string)($result['error'] ?? 'Unknown transcription error.');
         $service->markTranscriptionFailed($recordingId, $error);

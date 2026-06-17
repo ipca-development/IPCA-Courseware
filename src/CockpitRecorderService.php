@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/openai.php';
+
 /**
  * Cockpit Recorder POC storage, upload metadata, and stub transcription workflow.
  */
@@ -279,7 +281,7 @@ final class CockpitRecorderService
     /**
      * @return array<string,mixed>
      */
-    public function processStubTranscription(int $recordingId): array
+    public function processTranscription(int $recordingId): array
     {
         $this->requireTables();
         if ($recordingId <= 0) {
@@ -300,16 +302,15 @@ final class CockpitRecorderService
         $this->pdo->prepare("
             UPDATE " . self::TABLE . "
             SET transcription_status = 'transcribing',
-                transcription_progress = 25,
+                transcription_progress = 10,
                 transcription_started_at = COALESCE(transcription_started_at, CURRENT_TIMESTAMP),
                 error_message = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ")->execute(array($recordingId));
 
-        usleep(250000);
+        $transcript = $this->transcribeWithOpenAI($recording);
 
-        $transcript = $this->buildStubTranscript($recording);
         $this->pdo->prepare("
             UPDATE " . self::TABLE . "
             SET transcription_status = 'ready',
@@ -327,6 +328,16 @@ final class CockpitRecorderService
             'done' => true,
             'recording' => $updated ? $this->publicRecordingPayload($updated) : null,
         );
+    }
+
+    /**
+     * Backward-compatible method name retained for deployed status/worker callers.
+     *
+     * @return array<string,mixed>
+     */
+    public function processStubTranscription(int $recordingId): array
+    {
+        return $this->processTranscription($recordingId);
     }
 
     public function markTranscriptionFailed(int $recordingId, string $error): void
@@ -408,22 +419,79 @@ final class CockpitRecorderService
     /**
      * @param array<string,mixed> $recording
      */
-    private function buildStubTranscript(array $recording): string
+    private function transcribeWithOpenAI(array $recording): string
     {
-        $uid = (string)($recording['recording_uid'] ?? '');
-        $language = (string)($recording['language'] ?? 'en');
-        $inputDevice = (string)($recording['input_device'] ?? 'Unknown input');
-        $duration = number_format((float)($recording['duration_seconds'] ?? 0), 1);
-        $startedAt = (string)($recording['started_at'] ?? '');
+        $relativePath = (string)($recording['storage_path'] ?? '');
+        $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
+        $realPath = realpath($path);
+        $audioRoot = realpath(self::audioRoot());
+        if ($audioRoot === false || $realPath === false || !str_starts_with($realPath, $audioRoot) || !is_file($realPath)) {
+            throw new RuntimeException('Uploaded audio file is missing.');
+        }
 
-        return "Stub transcript for Cockpit Recorder POC\n\n"
-            . "Recording ID: {$uid}\n"
-            . "Language: {$language}\n"
-            . "Started at: {$startedAt}\n"
-            . "Duration: {$duration} seconds\n"
-            . "Input device: {$inputDevice}\n\n"
-            . "This is placeholder transcription text. Replace CockpitRecorderService::processStubTranscription() "
-            . "with the production transcription provider when the POC is ready for real ASR.";
+        $model = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: ''));
+        if ($model === '') {
+            $model = 'gpt-4o-transcribe';
+        }
+
+        $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
+        $prompt = self::transcriptionPrompt();
+        $mime = mime_content_type($realPath) ?: ((string)($recording['mime_type'] ?? '') ?: 'audio/mp4');
+
+        $postFields = array(
+            'file' => new CURLFile($realPath, $mime, basename($realPath)),
+            'model' => $model,
+            'prompt' => $prompt,
+            'response_format' => 'json',
+        );
+        if ($language !== '') {
+            $postFields['language'] = $language;
+        }
+
+        $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+            'Authorization: Bearer ' . cw_openai_key(),
+        ));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 900);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+
+        $resp = curl_exec($ch);
+        $err = curl_error($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($resp === false) {
+            throw new RuntimeException('OpenAI transcription request failed: ' . $err);
+        }
+
+        $json = json_decode((string)$resp, true);
+        if (!is_array($json)) {
+            throw new RuntimeException('OpenAI transcription returned non-JSON. HTTP ' . $code . ' Body: ' . substr((string)$resp, 0, 800));
+        }
+
+        if ($code < 200 || $code >= 300) {
+            $msg = (string)($json['error']['message'] ?? ('HTTP ' . $code));
+            throw new RuntimeException('OpenAI transcription error: ' . $msg);
+        }
+
+        $text = trim((string)($json['text'] ?? ''));
+        if ($text === '') {
+            throw new RuntimeException('OpenAI transcription returned no text.');
+        }
+
+        return $text;
+    }
+
+    private static function transcriptionPrompt(): string
+    {
+        return "You are transcribing cockpit audio for flight training analysis.\n\n"
+            . "The audio may contain ATC radio transmissions, cockpit intercom speech, aircraft noise, static, clicks, clipped transmissions, and accented English.\n"
+            . "Preserve aviation phraseology, callsigns, runway numbers, headings, altitudes, frequencies, readbacks, airport names, and short radio transmissions as accurately as possible.\n"
+            . "Do not invent words when unclear; mark unclear speech as [unclear] when necessary.";
     }
 
     private static function uploadErrorText(int $code): string
