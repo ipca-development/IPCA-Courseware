@@ -26,6 +26,15 @@ try {
 
     $service = new CockpitRecorderService($pdo);
     $payload = $service->status($id);
+    if (!empty($payload['ok']) && is_array($payload['recording'] ?? null)) {
+        $recording = $payload['recording'];
+        $status = (string)($recording['transcription_status'] ?? '');
+        $progress = (int)($recording['progress'] ?? 0);
+        if ($status === 'queued' || ($status === 'transcribing' && $progress === 0)) {
+            $service->processStubTranscription((int)($recording['id'] ?? 0));
+            $payload = $service->status($id);
+        }
+    }
     cockpit_status_json(!empty($payload['ok']) ? 200 : 404, $payload);
 } catch (Throwable $e) {
     cockpit_status_json(500, array('ok' => false, 'error' => $e->getMessage()));
