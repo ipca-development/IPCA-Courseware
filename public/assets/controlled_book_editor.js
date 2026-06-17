@@ -5780,7 +5780,6 @@
   }
 
   function formFieldDefaults(type, variableKey) {
-    var key = (variableKey || type + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
     var variableLabels = {
       'student.full_name': 'Student full name',
       'student.phone': 'Student phone',
@@ -5793,14 +5792,17 @@
       'knowledge_test.score': 'Knowledge test score',
       'knowledge_test.deficient_codes': 'Knowledge test deficient codes',
     };
+    var keyBase = (variableKey || type).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    var key = (keyBase || 'field') + '_' + Date.now();
+    var label = variableKey && variableLabels[variableKey] ? variableLabels[variableKey] : (type === 'checkbox' ? 'Checkbox' : (type === 'date' ? 'Date' : (type === 'signature' ? 'Signature' : (type === 'initial' ? 'Initial' : 'Text Field'))));
     return {
       field_key: key || ('field_' + Date.now()),
       field_type: type === 'field' ? 'text' : type,
-      label: variableKey && variableLabels[variableKey] ? variableLabels[variableKey] : (type === 'checkbox' ? 'Checkbox' : (type === 'date' ? 'Date' : (type === 'signature' ? 'Signature' : (type === 'initial' ? 'Initial' : 'Text Field')))),
+      label: label,
       required: false,
       assigned_role: 'instructor',
       variable_key: variableKey || '',
-      placeholder: '',
+      placeholder: variableKey ? '{{' + variableKey + '}}' : '',
     };
   }
 
@@ -5924,10 +5926,23 @@
           var field = block.querySelector('[data-form-field="1"]');
           if (field) {
             field.setAttribute('data-variable-key', key);
+            field.setAttribute('data-placeholder', '{{' + key + '}}');
+            var labelText = variableSelect.querySelector('option[value="' + key.replace(/"/g, '\\"') + '"]');
+            if (labelText && !field.getAttribute('data-label')) {
+              field.setAttribute('data-label', labelText.textContent || key);
+            }
+            var placeholder = field.querySelector('.cpb-form-input-line');
+            if (placeholder) placeholder.textContent = '{{' + key + '}}';
             flushSave(block);
+            setStatus('Variable bound', 'saved');
           }
         } else {
-          createBlock('field', formFieldDefaults('field', key)).catch(showError);
+          createBlock('field', formFieldDefaults('field', key)).then(function () {
+            var body = canvasEl.querySelector('[data-blocks-root]');
+            var lastBlock = body ? body.querySelector('.cpb-block:last-child') : null;
+            if (lastBlock) lastBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setStatus('Variable field added', 'saved');
+          }).catch(showError);
         }
       });
     }
@@ -5937,6 +5952,8 @@
       var type = block.getAttribute('data-block-type') || '';
       if (['field', 'checkbox', 'date', 'signature', 'initial'].indexOf(type) >= 0) {
         formSelectedBlockId = parseInt(block.getAttribute('data-block-id') || '0', 10) || 0;
+      } else {
+        formSelectedBlockId = 0;
       }
     });
     canvasEl.addEventListener('dblclick', function (e) {
