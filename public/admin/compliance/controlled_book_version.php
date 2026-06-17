@@ -86,6 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $versionId > 0) {
         } elseif ($action === 'release_version') {
             $svc->releaseVersion($versionId, $uid);
             cpv_flash('success', 'Version ' . (string)$version['version_label'] . ' released.');
+        } elseif ($action === 'reopen_to_draft') {
+            $svc->reopenVersionToDraft($versionId, $uid);
+            cpv_flash('success', 'Version ' . (string)$version['version_label'] . ' reopened to draft.');
         } elseif ($action === 'create_next_draft') {
             $newLabel = trim((string)($_POST['new_version_label'] ?? ''));
             if ($newLabel === '') {
@@ -216,6 +219,15 @@ compliance_page_open(array(
     <?php endif; ?>
   <?php else: ?>
     <p style="margin:0 0 12px;"><strong>Released</strong><?= !empty($version['released_at']) ? (' · ' . h((string)$version['released_at'])) : '' ?></p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+      <form method="post" style="display:inline;">
+        <input type="hidden" name="action" value="reopen_to_draft">
+        <button type="submit" onclick="return confirm('Reopen <?= h((string)$version['version_label']) ?> to draft? The student reader will stop serving this version until it is released again.');">
+          Reopen <?= h((string)$version['version_label']) ?> to draft
+        </button>
+      </form>
+      <span style="font-size:13px;color:#64748b;">Edit this version again without creating a new label.</span>
+    </div>
     <form method="post" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <input type="hidden" name="action" value="create_next_draft">
       <label style="font-size:13px;">Next draft label</label>

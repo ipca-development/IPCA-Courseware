@@ -392,6 +392,59 @@ final class ControlledPublishingFoundationService
         }
     }
 
+    /**
+     * Reopen a released version for editing without creating a new version label.
+     */
+    public function reopenVersionToDraft(int $versionId, ?int $actorUserId = null): void
+    {
+        $version = $this->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if ((string)$version['lifecycle_status'] !== 'released') {
+            throw new RuntimeException('Only released versions can be reopened to draft.');
+        }
+
+        $meta = $this->decodeVersionMetadata($version);
+        $meta['lifecycle_reopen'] = array(
+            'reopened_at' => date('c'),
+            'reopened_by_user_id' => $actorUserId,
+            'previous_released_at' => (string)($version['released_at'] ?? ''),
+            'previous_released_by' => isset($version['released_by']) ? (int)$version['released_by'] : null,
+        );
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_versions
+            SET lifecycle_status = 'draft',
+                metadata_json = :metadata_json,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND lifecycle_status = 'released'
+        ");
+        $stmt->execute(array(
+            ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            ':id' => $versionId,
+        ));
+        if ($stmt->rowCount() === 0) {
+            throw new RuntimeException('Version could not be reopened to draft.');
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    private function decodeVersionMetadata(array $version): array
+    {
+        $raw = $version['metadata_json'] ?? '{}';
+        if (is_array($raw)) {
+            return $raw;
+        }
+        $decoded = json_decode((string)$raw, true);
+
+        return is_array($decoded) ? $decoded : array();
+    }
+
     public function suggestNextVersionLabel(string $currentLabel): string
     {
         $currentLabel = trim($currentLabel);
