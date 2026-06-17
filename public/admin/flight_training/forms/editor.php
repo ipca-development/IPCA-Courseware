@@ -137,15 +137,6 @@ cw_header('Flight Training · Form Template Editor');
                 <option value="annex_refs_all">Annex (all)</option>
               </select>
             </div>
-            <div class="cpb-toolbar-group cpb-form-toolbar-group">
-              <button type="button" class="cpb-tool-btn" data-form-tool="field" title="Insert field">Field</button>
-              <button type="button" class="cpb-tool-btn" data-form-tool="checkbox" title="Insert checkbox">Checkbox</button>
-              <button type="button" class="cpb-tool-btn" data-form-tool="date" title="Insert date field">Date Field</button>
-              <button type="button" class="cpb-tool-btn" data-form-tool="signature" title="Insert signature">Signature</button>
-              <button type="button" class="cpb-tool-btn" data-form-tool="initial" title="Insert initial">Initial</button>
-              <button type="button" class="cpb-tool-btn" id="cpbFormVariablePicker" title="Insert variable">Variable</button>
-              <button type="button" class="cpb-tool-btn" id="cpbFormFieldSettings" title="Field settings">Field Settings</button>
-            </div>
             </div>
             <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>
             <div class="cpb-toolbar-lep" id="cpbToolbarLep" hidden aria-hidden="true"></div>
@@ -167,6 +158,18 @@ cw_header('Flight Training · Form Template Editor');
             </div>
             </div>
             <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
+            <div class="cpb-form-toolbar-row" aria-label="Form editor tools">
+              <div class="cpb-toolbar-group cpb-form-toolbar-group">
+                <span class="cpb-form-toolbar-label">Form tools</span>
+                <button type="button" class="cpb-tool-btn" data-form-tool="field" title="Insert field">Field</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="checkbox" title="Insert checkbox">Checkbox</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="date" title="Insert date field">Date Field</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="signature" title="Insert signature">Signature</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="initial" title="Insert initial">Initial</button>
+                <button type="button" class="cpb-tool-btn" id="cpbFormVariablePicker" title="Insert variable">Variable</button>
+                <button type="button" class="cpb-tool-btn" id="cpbFormFieldSettings" title="Field settings">Field Settings</button>
+              </div>
+            </div>
           </div>
 
           <div class="cpb-canvas-scroll" id="cpbCanvas">
