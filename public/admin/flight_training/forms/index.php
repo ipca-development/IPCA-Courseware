@@ -253,7 +253,7 @@ cw_header('Flight Training · Form Manager');
                 <td><?= h(ftfm_date($template['updated_at'] ?? null)) ?></td>
                 <td>
                   <div class="ftfm-row-actions">
-                    <button class="ftfm-btn ftfm-btn--ghost" type="button" disabled title="Template editor is not part of Phase 1">Edit</button>
+                    <a class="ftfm-btn ftfm-btn--ghost" href="/admin/flight_training/forms/editor.php?template_id=<?= $templateId ?>">Edit</a>
                     <?php if ($versionId > 0 && $versionStatus !== 'active' && $status !== 'archived'): ?>
                       <form method="post">
                         <input type="hidden" name="action" value="activate_version">

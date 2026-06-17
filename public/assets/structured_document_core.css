@@ -1,0 +1,39 @@
+.sdoc-editor-shell{display:grid;grid-template-columns:280px minmax(0,1fr)320px;gap:16px;align-items:start}
+.sdoc-panel{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:20px;box-shadow:0 10px 26px rgba(15,23,42,.06);overflow:hidden}
+.sdoc-panel-head{padding:14px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#f8fafc}
+.sdoc-panel-title{margin:0;font-size:14px;font-weight:900;color:#102845}
+.sdoc-panel-body{padding:14px 16px}
+.sdoc-toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;margin-bottom:12px;border:1px solid rgba(15,23,42,.08);border-radius:16px;background:#fff;box-shadow:0 8px 20px rgba(15,23,42,.06)}
+.sdoc-tool-btn{border:1px solid rgba(15,23,42,.1);border-radius:999px;background:#f8fafc;color:#102845;padding:8px 11px;font:inherit;font-size:12px;font-weight:900;cursor:pointer}
+.sdoc-tool-btn:hover{background:#e0f2fe}
+.sdoc-save-status{margin-left:auto;font-size:12px;font-weight:900;color:#64748b}
+.sdoc-save-status.is-saving{color:#92400e}
+.sdoc-save-status.is-saved{color:#047857}
+.sdoc-save-status.is-error{color:#be123c}
+.sdoc-canvas-scroll{min-height:760px;overflow:auto;padding:24px;border:1px solid rgba(15,23,42,.08);border-radius:22px;background:linear-gradient(180deg,#e2e8f0,#f8fafc)}
+.sdoc-sheet{width:816px;min-height:1056px;margin:0 auto;background:#fff;border:1px solid rgba(15,23,42,.12);box-shadow:0 20px 55px rgba(15,23,42,.18)}
+.sdoc-sheet-body{padding:72px 70px;font-family:Arial,Helvetica,sans-serif;color:#0f172a}
+.sdoc-document-title{margin:0 0 24px;font-size:24px;line-height:1.2;color:#102845}
+.sdoc-empty{padding:32px;text-align:center;border:1px dashed #cbd5e1;border-radius:18px;color:#64748b;background:#f8fafc}
+.sdoc-block{position:relative;margin:0 0 14px;padding:8px;border:1px solid transparent;border-radius:12px}
+.sdoc-block:hover,.sdoc-block:focus-within,.sdoc-block.is-selected{border-color:#bfdbfe;background:#f8fbff}
+.sdoc-block-chrome{position:absolute;right:8px;top:-16px;display:none;gap:4px;background:#fff;border:1px solid rgba(15,23,42,.1);border-radius:999px;padding:3px;box-shadow:0 8px 18px rgba(15,23,42,.12)}
+.sdoc-block:hover .sdoc-block-chrome,.sdoc-block:focus-within .sdoc-block-chrome,.sdoc-block.is-selected .sdoc-block-chrome{display:flex}
+.sdoc-block-btn{border:0;border-radius:999px;background:#f1f5f9;color:#334155;padding:4px 7px;font-size:10px;font-weight:900;cursor:pointer}
+.sdoc-block-btn--danger{color:#be123c;background:#fff1f2}
+.sdoc-heading{margin:0;color:#102845}
+.sdoc-paragraph{min-height:22px;font-size:13px;line-height:1.55}
+.sdoc-table-wrap{overflow:auto}
+.sdoc-table-title{padding:8px 10px;border:1px solid #94a3b8;border-bottom:0;background:#e8eef6;font-size:13px;font-weight:900;text-align:center;color:#102845}
+.sdoc-table{width:100%;border-collapse:collapse;font-size:12px}
+.sdoc-table th,.sdoc-table td{border:1px solid #94a3b8;padding:7px 8px;min-width:80px;vertical-align:top}
+.sdoc-table th{background:#f1f5f9;font-weight:900}
+.sdoc-field{display:grid;grid-template-columns:minmax(130px,.7fr) 1fr auto;gap:10px;align-items:center;padding:9px 10px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc}
+.sdoc-field-label{font-size:12px;font-weight:900;color:#102845}
+.sdoc-required{color:#be123c}
+.sdoc-input-line{display:inline-flex;min-height:28px;align-items:center;border-bottom:1px solid #334155;color:#64748b;font-size:12px}
+.sdoc-checkbox-box{width:18px;height:18px;border:2px solid #334155;background:#fff;display:inline-block}
+.sdoc-signature-box{display:inline-flex;align-items:flex-end;min-height:46px;border:1px dashed #94a3b8;border-radius:8px;padding:8px;color:#64748b}
+.sdoc-initial-box{display:inline-flex;align-items:center;justify-content:center;width:80px;min-height:34px;border:1px dashed #94a3b8;border-radius:8px;color:#64748b}
+.sdoc-field-edit{border:0;border-radius:999px;background:#dbeafe;color:#1e3a8a;padding:6px 9px;font-size:11px;font-weight:900;cursor:pointer}
+@media (max-width:1180px){.sdoc-editor-shell{grid-template-columns:1fr}.sdoc-sheet{width:100%;min-height:720px}.sdoc-sheet-body{padding:36px 28px}}
