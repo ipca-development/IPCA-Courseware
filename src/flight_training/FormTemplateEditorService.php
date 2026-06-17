@@ -156,6 +156,42 @@ final class FormTemplateEditorService
                 array('key' => 'knowledge_test.score', 'token' => '{{knowledge_test.score}}', 'label' => 'Knowledge test score'),
                 array('key' => 'knowledge_test.deficient_codes', 'token' => '{{knowledge_test.deficient_codes}}', 'label' => 'Knowledge test deficient codes'),
             )),
+            array('group' => 'Flight totals', 'variables' => array(
+                array('key' => 'flight.total_time', 'token' => '{{flight.total_time}}', 'label' => 'Total time'),
+                array('key' => 'flight.pic_time', 'token' => '{{flight.pic_time}}', 'label' => 'PIC time'),
+                array('key' => 'flight.dual_time', 'token' => '{{flight.dual_time}}', 'label' => 'Dual received time'),
+                array('key' => 'flight.solo_time', 'token' => '{{flight.solo_time}}', 'label' => 'Solo time'),
+                array('key' => 'flight.cross_country_time', 'token' => '{{flight.cross_country_time}}', 'label' => 'Cross-country time'),
+                array('key' => 'flight.night_time', 'token' => '{{flight.night_time}}', 'label' => 'Night time'),
+                array('key' => 'flight.instrument_time', 'token' => '{{flight.instrument_time}}', 'label' => 'Instrument time'),
+                array('key' => 'flight.basic_instrument_flying', 'token' => '{{flight.basic_instrument_flying}}', 'label' => 'Basic instrument flying'),
+                array('key' => 'flight.day_landings', 'token' => '{{flight.day_landings}}', 'label' => 'Day landings'),
+                array('key' => 'flight.night_landings', 'token' => '{{flight.night_landings}}', 'label' => 'Night landings'),
+                array('key' => 'flight.instructor_time', 'token' => '{{flight.instructor_time}}', 'label' => 'Instructor time'),
+            )),
+            array('group' => 'FAA Part 61 PPL', 'variables' => array(
+                array('key' => 'faa61.ppl.first_solo.status', 'token' => '{{faa61.ppl.first_solo.status}}', 'label' => 'First solo status'),
+                array('key' => 'faa61.ppl.long_solo_cross_country.status', 'token' => '{{faa61.ppl.long_solo_cross_country.status}}', 'label' => 'Long solo cross-country status'),
+                array('key' => 'faa61.ppl.solo_cross_country_150_nm.status', 'token' => '{{faa61.ppl.solo_cross_country_150_nm.status}}', 'label' => 'Solo cross-country 150 NM status'),
+                array('key' => 'faa61.ppl.towered_airport_landings.value', 'token' => '{{faa61.ppl.towered_airport_landings.value}}', 'label' => 'Towered airport landings'),
+                array('key' => 'faa61.ppl.basic_instrument_flying.status', 'token' => '{{faa61.ppl.basic_instrument_flying.status}}', 'label' => 'Basic instrument flying status'),
+            )),
+            array('group' => 'EASA PPL', 'variables' => array(
+                array('key' => 'easa.ppl.dual_instruction.status', 'token' => '{{easa.ppl.dual_instruction.status}}', 'label' => 'Dual instruction status'),
+                array('key' => 'easa.ppl.solo_flight.status', 'token' => '{{easa.ppl.solo_flight.status}}', 'label' => 'Solo flight status'),
+                array('key' => 'easa.ppl.navigation_flight.status', 'token' => '{{easa.ppl.navigation_flight.status}}', 'label' => 'Navigation flight status'),
+                array('key' => 'easa.ppl.basic_instrument_flying.status', 'token' => '{{easa.ppl.basic_instrument_flying.status}}', 'label' => 'Basic instrument flying status'),
+            )),
+            array('group' => 'IACRA / FAA 8710', 'variables' => array(
+                array('key' => 'iacra.total_time', 'token' => '{{iacra.total_time}}', 'label' => 'IACRA total time'),
+                array('key' => 'iacra.pic_time', 'token' => '{{iacra.pic_time}}', 'label' => 'IACRA PIC time'),
+                array('key' => 'iacra.solo_time', 'token' => '{{iacra.solo_time}}', 'label' => 'IACRA solo time'),
+                array('key' => 'iacra.cross_country_time', 'token' => '{{iacra.cross_country_time}}', 'label' => 'IACRA cross-country time'),
+                array('key' => 'iacra.night_time', 'token' => '{{iacra.night_time}}', 'label' => 'IACRA night time'),
+                array('key' => 'iacra.instrument_time', 'token' => '{{iacra.instrument_time}}', 'label' => 'IACRA instrument time'),
+                array('key' => 'iacra.basic_instrument_flying', 'token' => '{{iacra.basic_instrument_flying}}', 'label' => 'IACRA basic instrument flying'),
+                array('key' => 'iacra.dual_received', 'token' => '{{iacra.dual_received}}', 'label' => 'IACRA dual received'),
+            )),
         );
     }
 

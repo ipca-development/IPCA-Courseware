@@ -95,8 +95,20 @@ return [
                 'key' => 'flight_training_admin_logbook',
                 'label' => 'Admin Logbook',
                 'icon' => 'flight',
-                'href' => null,
-                'coming_soon' => true,
+                'href' => '/admin/flight_training/logbooks/index.php',
+                'match_paths' => [
+                    '/admin/flight_training/logbooks/index.php',
+                    '/admin/flight_training/logbooks/view.php',
+                ],
+            ],
+            [
+                'key' => 'flight_training_requirement_categories',
+                'label' => 'Requirement Categories',
+                'icon' => 'documents',
+                'href' => '/admin/flight_training/requirements/index.php',
+                'match_paths' => [
+                    '/admin/flight_training/requirements/index.php',
+                ],
             ],
         ],
     ],
