@@ -950,29 +950,56 @@ function ft_form_render_header_band(array $header, array $ctx, array $section): 
 {
     if (empty($header['enabled'])) return '';
     $logo = trim((string)($header['logo_url'] ?? ''));
+    $rowHeight = max(20, min(120, (int)($header['row_height'] ?? 32)));
     $left = $logo !== ''
         ? '<img class="cpb-page-header-logo" src="' . h($logo) . '" alt="' . h((string)($header['logo_alt'] ?? '')) . '" style="max-height:' . max(16, min(120, (int)($header['logo_max_height'] ?? 40))) . 'px;">'
         : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
     $center = nl2br(h(ft_form_resolve_header_tokens((string)($header['center_text'] ?? ''), $ctx, $section)));
     $right = nl2br(h(ft_form_resolve_header_tokens((string)($header['right_text'] ?? ''), $ctx, $section)));
-    return '<table class="cpb-page-header-table" contenteditable="false"><tbody><tr>'
-        . '<td class="cpb-page-header-left">' . $left . '</td>'
-        . '<td class="cpb-page-header-center">' . $center . '</td>'
-        . '<td class="cpb-page-header-right">' . $right . '</td>'
-        . '</tr></tbody></table>';
+    $editAttr = !empty($ctx['editable']) ? ' data-open-header-editor="1" title="Click to edit page header"' : '';
+    return '<header class="cpb-page-header"' . $editAttr . ' contenteditable="false">'
+        . '<table class="cpb-page-header-table" role="presentation"><tr>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--left"' . ft_form_page_band_row_style_attr($rowHeight) . '>' . $left . '</td>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--center ' . ft_form_page_band_font_class($header, 'center') . '"' . ft_form_page_band_cell_style_attr($header, 'center', $rowHeight) . '>' . $center . '</td>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--right ' . ft_form_page_band_font_class($header, 'right') . '"' . ft_form_page_band_cell_style_attr($header, 'right', $rowHeight) . '>' . $right . '</td>'
+        . '</tr></table></header>';
 }
 
 function ft_form_render_footer_band(array $footer, array $ctx, array $section): string
 {
     if (empty($footer['enabled'])) return '';
+    $rowHeight = max(20, min(120, (int)($footer['row_height'] ?? 26)));
     $left = nl2br(h(ft_form_resolve_header_tokens((string)($footer['left_text'] ?? ''), $ctx, $section)));
     $center = nl2br(h(ft_form_resolve_header_tokens((string)($footer['center_text'] ?? ''), $ctx, $section)));
     $right = nl2br(h(ft_form_resolve_header_tokens((string)($footer['right_text'] ?? ''), $ctx, $section)));
-    return '<table class="cpb-page-footer-table" contenteditable="false"><tbody><tr>'
-        . '<td class="cpb-page-footer-left">' . $left . '</td>'
-        . '<td class="cpb-page-footer-center">' . $center . '</td>'
-        . '<td class="cpb-page-footer-right">' . $right . '</td>'
-        . '</tr></tbody></table>';
+    $editAttr = !empty($ctx['editable']) ? ' data-open-header-editor="1" title="Click to edit page footer"' : '';
+    return '<footer class="cpb-page-footer"' . $editAttr . ' contenteditable="false">'
+        . '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--left ' . ft_form_page_band_font_class($footer, 'left') . '"' . ft_form_page_band_cell_style_attr($footer, 'left', $rowHeight) . '>' . $left . '</td>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--center ' . ft_form_page_band_font_class($footer, 'center') . '"' . ft_form_page_band_cell_style_attr($footer, 'center', $rowHeight) . '>' . $center . '</td>'
+        . '<td class="cpb-page-header-cell cpb-page-header-cell--right ' . ft_form_page_band_font_class($footer, 'right') . '"' . ft_form_page_band_cell_style_attr($footer, 'right', $rowHeight) . '>' . $right . '</td>'
+        . '</tr></table></footer>';
+}
+
+function ft_form_page_band_font_class(array $band, string $column): string
+{
+    $font = (string)($band[$column . '_font_family'] ?? 'sans');
+    return in_array($font, array('serif', 'sans', 'mono', 'arial'), true) ? 'cpb-font-' . $font : 'cpb-font-sans';
+}
+
+function ft_form_page_band_row_style_attr(int $rowHeight): string
+{
+    return ' style="height:' . $rowHeight . 'px;min-height:' . $rowHeight . 'px;"';
+}
+
+function ft_form_page_band_cell_style_attr(array $band, string $column, int $rowHeight): string
+{
+    $align = $column === 'left' ? 'left' : ($column === 'right' ? 'left' : 'center');
+    $fontSize = max(6, min(48, (int)($band[$column . '_font_size'] ?? 10)));
+    $weight = !empty($band[$column . '_font_bold']) ? '700' : '400';
+    $style = !empty($band[$column . '_font_italic']) ? 'italic' : 'normal';
+    $underline = !empty($band[$column . '_font_underline']) ? 'underline' : 'none';
+    return ' style="height:' . $rowHeight . 'px;min-height:' . $rowHeight . 'px;text-align:' . $align . ';font-size:' . $fontSize . 'pt;font-weight:' . $weight . ';font-style:' . $style . ';text-decoration:' . $underline . ';"';
 }
 
 function ft_form_resolve_header_tokens(string $text, array $ctx, array $section): string

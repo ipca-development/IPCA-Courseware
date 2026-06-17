@@ -1,0 +1,10 @@
+php_value upload_max_filesize 2048M
+php_value post_max_size 2048M
+php_value memory_limit 512M
+php_value max_execution_time 0
+php_value max_input_time 0
+
+RewriteEngine On
+RewriteRule ^upload/?$ upload.php [L]
+RewriteRule ^([A-Za-z0-9._-]+)/status/?$ status.php?id=$1 [QSA,L]
+RewriteRule ^([A-Za-z0-9._-]+)/transcript/?$ transcript.php?id=$1 [QSA,L]
