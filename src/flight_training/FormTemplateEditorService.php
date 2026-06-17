@@ -2,7 +2,6 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../document/StructuredDocumentPayload.php';
-require_once __DIR__ . '/../document/StructuredDocumentRenderer.php';
 require_once __DIR__ . '/FormTemplateService.php';
 
 /**
@@ -11,12 +10,10 @@ require_once __DIR__ . '/FormTemplateService.php';
 final class FormTemplateEditorService
 {
     private FormTemplateService $templates;
-    private StructuredDocumentRenderer $renderer;
 
     public function __construct(private PDO $pdo)
     {
         $this->templates = new FormTemplateService($pdo);
-        $this->renderer = new StructuredDocumentRenderer();
     }
 
     /**
@@ -47,7 +44,6 @@ final class FormTemplateEditorService
             'document' => $document,
             'fields' => $fields,
             'variables' => self::variableCatalog(),
-            'rendered_html' => $this->renderer->renderDocument($document, StructuredDocumentRenderer::MODE_EDIT),
             'editable' => $editable,
         );
     }
@@ -116,7 +112,6 @@ final class FormTemplateEditorService
             'document' => $document,
             'fields' => $this->listFields($templateVersionId),
             'content_hash' => $contentHash,
-            'rendered_html' => $this->renderer->renderDocument($document, StructuredDocumentRenderer::MODE_EDIT),
         );
     }
 

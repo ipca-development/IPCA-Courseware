@@ -20,72 +20,81 @@ try {
 }
 
 $assetPaths = array(
-    'core_css' => __DIR__ . '/../../../../public/assets/structured_document_core.css',
-    'form_css' => __DIR__ . '/../../../../public/assets/flight_form_editor.css',
-    'core_js' => __DIR__ . '/../../../../public/assets/structured_document_core.js',
-    'form_js' => __DIR__ . '/../../../../public/assets/flight_form_editor.js',
+    'book_css' => __DIR__ . '/../../../../public/assets/controlled_book_editor.css',
+    'form_css' => __DIR__ . '/../../../../public/assets/controlled_form_editor.css',
+    'form_js' => __DIR__ . '/../../../../public/assets/controlled_form_editor.js',
 );
 
 cw_header('Flight Training · Form Template Editor');
 ?>
-<link rel="stylesheet" href="/assets/structured_document_core.css?v=<?= h((string)(is_file($assetPaths['core_css']) ? filemtime($assetPaths['core_css']) : time())) ?>">
-<link rel="stylesheet" href="/assets/flight_form_editor.css?v=<?= h((string)(is_file($assetPaths['form_css']) ? filemtime($assetPaths['form_css']) : time())) ?>">
-
-<div class="ffed-page" id="flightFormEditorRoot" data-template-id="<?= (int)$templateId ?>">
-  <header class="ffed-hero">
-    <div>
-      <p class="ffed-kicker">Admin · Flight Training · Forms</p>
-      <h1 class="ffed-title">Form Template Editor</h1>
-      <p class="ffed-subtitle">Structured editor foundation for reusable checkride and training forms.</p>
-    </div>
-    <a class="ffed-btn ffed-btn--secondary" href="/admin/flight_training/forms/index.php">Back to Form Manager</a>
-  </header>
+<link rel="stylesheet" href="/assets/controlled_book_editor.css?v=<?= h((string)(is_file($assetPaths['book_css']) ? filemtime($assetPaths['book_css']) : time())) ?>">
+<link rel="stylesheet" href="/assets/controlled_form_editor.css?v=<?= h((string)(is_file($assetPaths['form_css']) ? filemtime($assetPaths['form_css']) : time())) ?>">
 
   <?php if ($pageError !== ''): ?>
-    <div class="ffed-error"><?= h($pageError) ?></div>
+    <section class="cpb-form-editor-error"><?= h($pageError) ?></section>
   <?php elseif ($templateId <= 0): ?>
-    <div class="ffed-error">Missing template_id.</div>
+    <section class="cpb-form-editor-error">Missing template_id.</section>
   <?php else: ?>
-    <div class="sdoc-toolbar">
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="heading">Heading</button>
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="paragraph">Text</button>
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="table">Table</button>
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="checkbox">Checkbox</button>
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="field">Input</button>
-      <button type="button" class="sdoc-tool-btn" data-ffed-add="date">Date</button>
-      <button type="button" class="sdoc-tool-btn" id="ffedSave">Save</button>
-      <span class="sdoc-save-status" id="ffedSaveStatus">Loading...</span>
-    </div>
+    <div class="cpb-editor-root cpb-form-editor-root" id="flightFormEditorRoot"
+         data-template-id="<?= (int)$templateId ?>">
+      <div class="cpb-editor-shell">
+        <aside class="cpb-tree-panel">
+          <div class="cpb-tree-head">
+            <h2>Form outline</h2>
+            <a class="cpb-form-back-link" href="/admin/flight_training/forms/index.php">Form Manager</a>
+          </div>
+          <div class="cpb-tree-scroll" id="cffBlockTree">
+            <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline...</p>
+          </div>
+          <div class="cpb-tree-actions">
+            <span class="cpb-tree-add" id="cffAddParagraph" role="button" tabindex="0">+ Add paragraph</span>
+          </div>
+        </aside>
 
-    <div class="sdoc-editor-shell">
-      <aside class="sdoc-panel">
-        <div class="sdoc-panel-head">
-          <h2 class="sdoc-panel-title">Template</h2>
-        </div>
-        <div class="sdoc-panel-body">
-          <dl class="ffed-meta" id="ffedTemplateMeta"></dl>
-        </div>
-        <div class="sdoc-panel-head">
-          <h2 class="sdoc-panel-title">Fields</h2>
-        </div>
-        <div class="sdoc-panel-body">
-          <div class="ffed-field-list" id="ffedFieldList"></div>
-        </div>
-      </aside>
+        <div class="cpb-workspace">
+          <div class="cpb-toolbar" id="cffToolbar">
+            <div class="cpb-toolbar-main" id="cffToolbarMain">
+              <div class="cpb-toolbar-group">
+                <button type="button" class="cpb-tool-btn" data-add-block="heading" title="Add heading">Heading</button>
+                <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add text block">Text</button>
+                <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>
+              </div>
+              <div class="cpb-toolbar-group">
+                <button type="button" class="cpb-tool-btn" data-form-tool="field" title="Insert input field">Field</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="checkbox" title="Insert checkbox field">Checkbox</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="date" title="Insert date field">Date Field</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="signature" title="Insert signature field">Signature</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="initial" title="Insert initial field">Initial</button>
+                <button type="button" class="cpb-tool-btn" id="cffVariablePickerBtn" title="Insert variable">Variable</button>
+              </div>
+              <div class="cpb-toolbar-group">
+                <button type="button" class="cpb-tool-btn" id="cffFieldSettingsBtn" title="Field settings" disabled>Field Settings</button>
+                <button type="button" class="cpb-tool-btn" id="cffSaveBtn" title="Save template">Save</button>
+              </div>
+            </div>
+            <div class="cpb-toolbar-shared" id="cffToolbarShared">
+              <div class="cpb-toolbar-group">
+                <button type="button" class="cpb-tool-btn" id="cffZoomOut" title="Zoom out">-</button>
+                <span class="cpb-zoom-label" id="cffZoomLabel">100%</span>
+                <button type="button" class="cpb-tool-btn" id="cffZoomIn" title="Zoom in">+</button>
+              </div>
+            </div>
+            <span class="cpb-save-status" id="cffSaveStatus">Loading...</span>
+          </div>
 
-      <main class="sdoc-canvas-scroll" id="ffedCanvas">
-        <p class="ffed-loading">Loading editor...</p>
-      </main>
-
-      <aside class="sdoc-panel">
-        <div class="sdoc-panel-head">
-          <h2 class="sdoc-panel-title">Selected Field</h2>
+          <div class="cpb-canvas-scroll" id="cffCanvas">
+            <p style="text-align:center;color:#64748b;font-family:system-ui,sans-serif;">Loading form template...</p>
+          </div>
         </div>
-        <div class="sdoc-panel-body">
-          <form class="ffed-field-settings" id="ffedFieldSettings">
-            <label><span>Field key</span><input type="text" name="field_key"></label>
-            <label><span>Label</span><input type="text" name="label"></label>
-            <label><span>Type</span><select name="field_type">
+      </div>
+
+      <div class="cpb-form-modal" id="cffFieldModal" hidden aria-hidden="true">
+        <div class="cpb-form-modal__dialog" role="dialog" aria-labelledby="cffFieldModalTitle">
+          <h3 id="cffFieldModalTitle">Field Settings</h3>
+          <form id="cffFieldForm" class="cpb-form-modal__form">
+            <label><span>Field key</span><input type="text" name="field_key" required></label>
+            <label><span>Label</span><input type="text" name="label" required></label>
+            <label><span>Field type</span><select name="field_type">
               <option value="text">Text</option>
               <option value="textarea">Textarea</option>
               <option value="checkbox">Checkbox</option>
@@ -101,29 +110,33 @@ cw_header('Flight Training · Form Template Editor');
               <option value="examiner">Examiner / External Party</option>
               <option value="external_party">External Party</option>
             </select></label>
-            <label><span>Variable</span><input type="text" name="variable_key" placeholder="student.full_name"></label>
-            <label class="ffed-check"><input type="checkbox" name="required"> Required</label>
-            <button type="submit" class="ffed-btn ffed-btn--primary">Apply Field Settings</button>
+            <label><span>Variable binding</span><input type="text" name="variable_key" placeholder="student.full_name"></label>
+            <label class="cpb-form-check"><input type="checkbox" name="required"> Required field</label>
+            <div class="cpb-form-modal__actions">
+              <button type="button" class="cpb-tool-btn" data-modal-close>Cancel</button>
+              <button type="submit" class="cpb-tool-btn cpb-form-primary">Apply</button>
+            </div>
           </form>
         </div>
+      </div>
 
-        <div class="sdoc-panel-head">
-          <h2 class="sdoc-panel-title">Variables</h2>
+      <div class="cpb-form-modal" id="cffVariableModal" hidden aria-hidden="true">
+        <div class="cpb-form-modal__dialog cpb-form-modal__dialog--wide" role="dialog" aria-labelledby="cffVariableModalTitle">
+          <h3 id="cffVariableModalTitle">Insert Variable</h3>
+          <div class="cpb-form-variable-grid" id="cffVariableList"></div>
+          <div class="cpb-form-modal__actions">
+            <button type="button" class="cpb-tool-btn" data-modal-close>Close</button>
+          </div>
         </div>
-        <div class="sdoc-panel-body">
-          <div class="ffed-variable-list" id="ffedVariableList"></div>
-        </div>
-      </aside>
+      </div>
     </div>
   <?php endif; ?>
-</div>
 
 <?php if ($pageError === '' && $templateId > 0): ?>
 <script>
 window.flightFormInitialData = <?= json_encode($initial, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 </script>
-<script src="/assets/structured_document_core.js?v=<?= h((string)(is_file($assetPaths['core_js']) ? filemtime($assetPaths['core_js']) : time())) ?>"></script>
-<script src="/assets/flight_form_editor.js?v=<?= h((string)(is_file($assetPaths['form_js']) ? filemtime($assetPaths['form_js']) : time())) ?>"></script>
+<script src="/assets/controlled_form_editor.js?v=<?= h((string)(is_file($assetPaths['form_js']) ? filemtime($assetPaths['form_js']) : time())) ?>"></script>
 <?php endif; ?>
 
 <?php cw_footer(); ?>
