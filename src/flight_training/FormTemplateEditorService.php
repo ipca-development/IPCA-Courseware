@@ -138,38 +138,23 @@ final class FormTemplateEditorService
         return array(
             array('group' => 'Student profile', 'variables' => array(
                 array('key' => 'student.full_name', 'token' => '{{student.full_name}}', 'label' => 'Student full name'),
-                array('key' => 'student.email', 'token' => '{{student.email}}', 'label' => 'Student email'),
                 array('key' => 'student.phone', 'token' => '{{student.phone}}', 'label' => 'Student phone'),
+                array('key' => 'student.email', 'token' => '{{student.email}}', 'label' => 'Student email'),
             )),
             array('group' => 'Instructor profile', 'variables' => array(
                 array('key' => 'instructor.full_name', 'token' => '{{instructor.full_name}}', 'label' => 'Instructor full name'),
-                array('key' => 'instructor.email', 'token' => '{{instructor.email}}', 'label' => 'Instructor email'),
                 array('key' => 'instructor.phone', 'token' => '{{instructor.phone}}', 'label' => 'Instructor phone'),
-                array('key' => 'instructor.cfi_number', 'token' => '{{instructor.cfi_number}}', 'label' => 'CFI number'),
+                array('key' => 'instructor.email', 'token' => '{{instructor.email}}', 'label' => 'Instructor email'),
             )),
             array('group' => 'Course enrollment', 'variables' => array(
                 array('key' => 'course.name', 'token' => '{{course.name}}', 'label' => 'Course name'),
-                array('key' => 'cohort.name', 'token' => '{{cohort.name}}', 'label' => 'Cohort name'),
+            )),
+            array('group' => 'Theory / groundschool', 'variables' => array(
+                array('key' => 'theory.completion', 'token' => '{{theory.completion}}', 'label' => 'Theory completion'),
             )),
             array('group' => 'Knowledge test', 'variables' => array(
                 array('key' => 'knowledge_test.score', 'token' => '{{knowledge_test.score}}', 'label' => 'Knowledge test score'),
-                array('key' => 'knowledge_test.deficient_codes', 'token' => '{{knowledge_test.deficient_codes}}', 'label' => 'Deficient codes'),
-            )),
-            array('group' => 'Flight training', 'variables' => array(
-                array('key' => 'flight.total_time', 'token' => '{{flight.total_time}}', 'label' => 'Total time'),
-                array('key' => 'flight.dual_time', 'token' => '{{flight.dual_time}}', 'label' => 'Dual time'),
-                array('key' => 'flight.solo_time', 'token' => '{{flight.solo_time}}', 'label' => 'Solo time'),
-            )),
-            array('group' => 'Aircraft', 'variables' => array(
-                array('key' => 'aircraft.registration', 'token' => '{{aircraft.registration}}', 'label' => 'Aircraft registration'),
-                array('key' => 'aircraft.type', 'token' => '{{aircraft.type}}', 'label' => 'Aircraft type'),
-            )),
-            array('group' => 'Examiner', 'variables' => array(
-                array('key' => 'examiner.name', 'token' => '{{examiner.name}}', 'label' => 'Examiner name'),
-            )),
-            array('group' => 'Dates', 'variables' => array(
-                array('key' => 'date.today', 'token' => '{{date.today}}', 'label' => 'Today'),
-                array('key' => 'date.checkride', 'token' => '{{date.checkride}}', 'label' => 'Checkride date'),
+                array('key' => 'knowledge_test.deficient_codes', 'token' => '{{knowledge_test.deficient_codes}}', 'label' => 'Knowledge test deficient codes'),
             )),
         );
     }

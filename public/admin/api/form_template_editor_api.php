@@ -63,13 +63,16 @@ try {
             ft_form_handle_recompute($service, $actorUserId);
             break;
 
+        case 'save_section_layout':
+            ft_form_handle_save_section_layout($service, $actorUserId);
+            break;
+
         case 'get_callout_presets':
-            ft_form_editor_json(200, array('ok' => true, 'presets' => array(
-                array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
-                array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
-                array('callout_type' => 'info', 'title' => 'INFO', 'text' => ''),
-                array('callout_type' => 'note', 'title' => 'NOTE', 'text' => ''),
-            )));
+            ft_form_handle_get_callout_presets($service, $actorUserId);
+            break;
+
+        case 'save_callout_presets':
+            ft_form_handle_save_callout_presets($service, $actorUserId);
             break;
 
         case 'get_book_styles':
@@ -78,6 +81,31 @@ try {
 
         case 'save_book_styles':
             ft_form_handle_save_book_styles($service, $actorUserId);
+            break;
+
+        case 'save_page_header':
+            ft_form_handle_save_page_header($service, $actorUserId);
+            break;
+
+        case 'upload_header_logo':
+            ft_form_handle_upload_header_logo($service, $actorUserId);
+            break;
+
+        case 'upload_image':
+            ft_form_handle_upload_image($service, $actorUserId);
+            break;
+
+        case 'create_subsection':
+            ft_form_handle_create_subsection($service, $actorUserId);
+            break;
+
+        case 'detect_callouts':
+        case 'detect_hyperlinks':
+        case 'detect_annex_refs':
+        case 'regenerate_toc':
+        case 'sync_manual_structure':
+        case 'regenerate_highlights':
+            ft_form_handle_manual_only_noop($action);
             break;
 
         case 'save_content':
@@ -244,6 +272,45 @@ function ft_form_handle_recompute(FormTemplateEditorService $service, int $actor
     ));
 }
 
+function ft_form_handle_save_section_layout(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $in = ft_form_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $layout = is_array($in['layout'] ?? null) ? $in['layout'] : array();
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    foreach ($doc['sections'] as &$section) {
+        if ((int)($section['id'] ?? 0) === $sectionId) {
+            $section['layout'] = $layout;
+            break;
+        }
+    }
+    unset($section);
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'layout' => $layout));
+}
+
+function ft_form_handle_get_callout_presets(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $styles = ft_form_resolve_book_styles($doc);
+    ft_form_editor_json(200, array('ok' => true, 'presets' => $styles['callout_presets'] ?? array()));
+}
+
+function ft_form_handle_save_callout_presets(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $in = ft_form_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $presets = is_array($in['presets'] ?? null) ? $in['presets'] : array();
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $styles = ft_form_resolve_book_styles($doc);
+    $styles['callout_presets'] = $presets;
+    $doc['book_styles'] = $styles;
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'presets' => $presets));
+}
+
 function ft_form_handle_get_book_styles(FormTemplateEditorService $service, int $actorUserId): void
 {
     $versionId = (int)($_GET['version_id'] ?? 0);
@@ -260,6 +327,95 @@ function ft_form_handle_save_book_styles(FormTemplateEditorService $service, int
     $doc['book_styles'] = $bookStyles;
     $service->saveContent($templateId, $versionId, $doc, $actorUserId);
     ft_form_editor_json(200, array('ok' => true, 'book_styles' => ft_form_resolve_book_styles($doc)));
+}
+
+function ft_form_handle_save_page_header(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $in = ft_form_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $pageHeader = is_array($in['page_header'] ?? null) ? $in['page_header'] : array();
+    $pageFooter = is_array($in['page_footer'] ?? null) ? $in['page_footer'] : array();
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $doc['page_header'] = $pageHeader;
+    $doc['page_footer'] = $pageFooter;
+    $styles = ft_form_resolve_book_styles($doc);
+    $styles['page_header'] = $pageHeader;
+    $styles['page_footer'] = $pageFooter;
+    $doc['book_styles'] = $styles;
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array(
+        'ok' => true,
+        'page_header' => $pageHeader,
+        'page_footer' => $pageFooter,
+        'header_scope' => 'main',
+    ));
+}
+
+function ft_form_handle_upload_header_logo(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $versionId = (int)($_POST['version_id'] ?? 0);
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $url = ft_form_store_uploaded_image('image', 'headers');
+    $header = is_array($doc['page_header'] ?? null) ? $doc['page_header'] : ft_form_default_page_header($ctx);
+    $footer = is_array($doc['page_footer'] ?? null) ? $doc['page_footer'] : ft_form_default_page_footer();
+    $header['logo_url'] = $url;
+    $alt = trim((string)($_POST['alt'] ?? 'EuroPilot Center'));
+    if ($alt !== '') {
+        $header['logo_alt'] = $alt;
+    }
+    $doc['page_header'] = $header;
+    $doc['page_footer'] = $footer;
+    $styles = ft_form_resolve_book_styles($doc);
+    $styles['page_header'] = $header;
+    $styles['page_footer'] = $footer;
+    $doc['book_styles'] = $styles;
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'url' => $url, 'page_header' => $header, 'page_footer' => $footer, 'header_scope' => 'main'));
+}
+
+function ft_form_handle_upload_image(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $versionId = (int)($_POST['version_id'] ?? 0);
+    $sectionId = (int)($_POST['section_id'] ?? 1);
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $url = ft_form_store_uploaded_image('image', 'blocks');
+    $block = ft_form_new_block('image', array('url' => $url, 'alt' => '', 'width_pct' => 100, 'rotation_deg' => 0), $doc, $sectionId);
+    $doc['blocks'][] = $block;
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'block_html' => ft_form_render_block($block, true)));
+}
+
+function ft_form_handle_create_subsection(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $in = ft_form_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $parentId = (int)($in['parent_section_id'] ?? 0);
+    $title = trim((string)($in['title'] ?? 'New section'));
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $nextId = 1;
+    foreach ($doc['sections'] as $section) {
+        $nextId = max($nextId, (int)($section['id'] ?? 0) + 1);
+    }
+    $doc['sections'][] = array(
+        'id' => $nextId,
+        'section_key' => 'section_' . $nextId,
+        'title' => $title !== '' ? $title : 'New section',
+        'sort_order' => $nextId * 10,
+        'parent_section_id' => $parentId > 0 ? $parentId : null,
+        'layout' => array(),
+    );
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'section_id' => $nextId, 'sections_tree' => ft_form_sections_tree($doc['sections'])));
+}
+
+function ft_form_handle_manual_only_noop(string $action): void
+{
+    $countKey = match ($action) {
+        'regenerate_toc' => 'entries_count',
+        'regenerate_highlights' => 'changes_count',
+        default => 'updated_count',
+    };
+    ft_form_editor_json(200, array('ok' => true, 'result' => array($countKey => 0, 'sections_updated' => 0)));
 }
 
 function ft_form_version_id_for_block(int $blockId): int
@@ -306,6 +462,8 @@ function ft_form_document_with_sections(array $document, string $title): array
     $document['document_type'] = 'form';
     $document['schema_version'] = 1;
     $document['title'] = (string)($document['title'] ?? $title);
+    $document['page_header'] = is_array($document['page_header'] ?? null) ? $document['page_header'] : ft_form_default_page_header(array('template' => array('title' => $title)));
+    $document['page_footer'] = is_array($document['page_footer'] ?? null) ? $document['page_footer'] : ft_form_default_page_footer();
     $document['sections'] = $sections;
     $document['blocks'] = $blocks;
     return $document;
@@ -345,7 +503,9 @@ function ft_form_next_block_id(array $doc): int
 function ft_form_default_payload(string $type, array $payload): array
 {
     if ($type === 'heading') return array('text' => (string)($payload['text'] ?? 'Heading'), 'level' => (int)($payload['level'] ?? 2), 'paragraph_style' => 'subtitle_2');
+    if ($type === 'list') return array('ordered' => !empty($payload['ordered']), 'items' => $payload['items'] ?? array('List item'), 'paragraph_style' => 'body');
     if ($type === 'table') return array('title' => (string)($payload['title'] ?? ''), 'headers' => $payload['headers'] ?? array('Column 1', 'Column 2'), 'rows' => $payload['rows'] ?? array(array('', '')));
+    if ($type === 'image') return array('url' => (string)($payload['url'] ?? ''), 'alt' => (string)($payload['alt'] ?? ''), 'width_pct' => (int)($payload['width_pct'] ?? 100), 'rotation_deg' => (int)($payload['rotation_deg'] ?? 0));
     if ($type === 'callout') {
         $calloutType = (string)($payload['callout_type'] ?? 'warning');
         if (!in_array($calloutType, array('warning', 'caution', 'info', 'note'), true)) {
@@ -393,11 +553,35 @@ function ft_form_section_row(array $section): array
         'stable_anchor' => (string)$section['section_key'],
         'title' => (string)$section['title'],
         'section_type' => 'content',
+        'parent_section_id' => !empty($section['parent_section_id']) ? (int)$section['parent_section_id'] : null,
         'allow_author_blocks' => 1,
         'is_system_managed' => 0,
         'is_generated' => 0,
-        'metadata_json' => '{}',
+        'metadata_json' => json_encode(array('layout' => is_array($section['layout'] ?? null) ? $section['layout'] : array())),
+        'layout' => is_array($section['layout'] ?? null) ? $section['layout'] : array(),
     );
+}
+
+function ft_form_sections_tree(array $sections, ?int $parentId = null): array
+{
+    $tree = array();
+    foreach ($sections as $section) {
+        $sectionParent = !empty($section['parent_section_id']) ? (int)$section['parent_section_id'] : null;
+        if ($sectionParent !== $parentId) {
+            continue;
+        }
+        $id = (int)($section['id'] ?? 0);
+        $tree[] = array(
+            'id' => $id,
+            'title' => (string)($section['title'] ?? 'Section'),
+            'section_key' => (string)($section['section_key'] ?? ''),
+            'children' => ft_form_sections_tree($sections, $id),
+        );
+    }
+    usort($tree, static function (array $a, array $b): int {
+        return ((int)($a['id'] ?? 0)) <=> ((int)($b['id'] ?? 0));
+    });
+    return $tree;
 }
 
 function ft_form_load_payload(array $ctx, array $doc, array $section, string $pageHtml): array
@@ -407,10 +591,10 @@ function ft_form_load_payload(array $ctx, array $doc, array $section, string $pa
         'version' => array('id' => (int)$ctx['version']['id'], 'book_key' => 'FORM', 'book_title' => (string)$ctx['template']['title'], 'version_label' => (string)$ctx['version']['version_label'], 'lifecycle_status' => (string)$ctx['version']['lifecycle_status']),
         'section_id' => (int)$section['id'],
         'section' => $section,
-        'sections_tree' => array_map(static fn(array $s): array => array('id' => (int)$s['id'], 'title' => (string)$s['title'], 'children' => array()), $doc['sections']),
+        'sections_tree' => ft_form_sections_tree($doc['sections']),
         'blocks' => array_values(array_filter($doc['blocks'], static fn(array $b): bool => (int)($b['section_id'] ?? 1) === (int)$section['id'])),
         'page_html' => $pageHtml,
-        'page_layout' => array('orientation' => 'portrait'),
+        'page_layout' => is_array($section['layout'] ?? null) ? $section['layout'] : array('orientation' => 'portrait'),
         'editable' => (bool)$ctx['editable'],
         'is_cover_section' => false,
         'is_toc_section' => false,
@@ -428,8 +612,8 @@ function ft_form_load_payload(array $ctx, array $doc, array $section, string $pa
         'toc_settings' => array(),
         'toc_settings_catalog' => array(),
         'book_styles' => ft_form_resolve_book_styles($doc),
-        'page_header' => array('enabled' => false),
-        'page_footer' => array('enabled' => false),
+        'page_header' => is_array($doc['page_header'] ?? null) ? $doc['page_header'] : ft_form_default_page_header($ctx),
+        'page_footer' => is_array($doc['page_footer'] ?? null) ? $doc['page_footer'] : ft_form_default_page_footer(),
         'header_tokens' => array(),
         'header_preview_tokens' => array(),
         'page_header_scope' => 'main',
@@ -447,7 +631,18 @@ function ft_form_render_page(array $ctx, array $doc, array $section): string
             $html .= ft_form_render_block($block, (bool)$ctx['editable']);
         }
     }
-    return '<div class="cpb-sheet" data-section-id="' . (int)$section['id'] . '"><div class="cpb-sheet-body" data-blocks-root="1">' . $html . '</div><div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div></div>';
+    $layout = is_array($section['layout'] ?? null) ? $section['layout'] : array();
+    $isLandscape = (string)($layout['orientation'] ?? '') === 'landscape';
+    $sheetClass = 'cpb-sheet' . ($isLandscape ? ' cpb-sheet--landscape' : '');
+    $layoutToggle = '';
+    if (!empty($ctx['editable'])) {
+        $hideChecked = !empty($layout['hide_header_footer']) ? ' checked' : '';
+        $layoutToggle = '<div class="cpb-page-layout-toggle" contenteditable="false"><label><input type="checkbox" data-layout-toggle="hide_header_footer"' . $hideChecked . '> Hide header/footer on this section</label></div>';
+    }
+    $hideHeaderFooter = !empty($layout['hide_header_footer']);
+    $header = !$hideHeaderFooter && is_array($doc['page_header'] ?? null) ? ft_form_render_header_band($doc['page_header'], $ctx, $section) : '';
+    $footer = !$hideHeaderFooter && is_array($doc['page_footer'] ?? null) ? ft_form_render_footer_band($doc['page_footer'], $ctx, $section) : '';
+    return '<div class="' . $sheetClass . '" data-section-id="' . (int)$section['id'] . '">' . $layoutToggle . $header . '<div class="cpb-sheet-body" data-blocks-root="1">' . $html . '</div><div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div>' . $footer . '</div>';
 }
 
 function ft_form_render_block(array $block, bool $editable): string
@@ -462,19 +657,141 @@ function ft_form_render_block(array $block, bool $editable): string
 function ft_form_render_inner(string $type, array $payload, bool $editable): string
 {
     $ce = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
-    if ($type === 'heading') return '<h2 class="cpb-heading cpb-ps-subtitle_2" data-paragraph-style="subtitle_2" data-level="2"' . $ce . '>' . h((string)($payload['text'] ?? 'Heading')) . '</h2>';
+    if ($type === 'heading') {
+        $styleKey = ft_form_style_key($payload, 'subtitle_2');
+        $level = max(1, min(6, (int)($payload['level'] ?? 2)));
+        return '<h' . $level . ' class="cpb-heading cpb-ps-' . h($styleKey) . ft_form_align_class($payload) . '" data-paragraph-style="' . h($styleKey) . '" data-level="' . $level . '"' . ft_form_text_data_attrs($payload) . ft_form_text_style_attr($payload) . $ce . '>' . h((string)($payload['text'] ?? 'Heading')) . '</h' . $level . '>';
+    }
+    if ($type === 'list') {
+        $tag = !empty($payload['ordered']) ? 'ol' : 'ul';
+        $styleKey = ft_form_style_key($payload, 'body');
+        $items = (array)($payload['items'] ?? array('List item'));
+        $itemsHtml = '';
+        foreach ($items as $item) {
+            $itemsHtml .= '<li>' . h((string)$item) . '</li>';
+        }
+        return '<' . $tag . ' class="cpb-list cpb-ps-' . h($styleKey) . ft_form_align_class($payload) . '" data-paragraph-style="' . h($styleKey) . '"' . ft_form_text_data_attrs($payload) . ft_form_text_style_attr($payload) . $ce . '>' . $itemsHtml . '</' . $tag . '>';
+    }
     if ($type === 'table') {
         $headers = (array)($payload['headers'] ?? array('Column 1', 'Column 2'));
         $rows = (array)($payload['rows'] ?? array(array('', '')));
-        $out = '<div class="cpb-table-block cpb-table-block--align-left" data-table-align="left"><div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium" data-border-color="#94a3b8"><table class="cpb-table"><thead><tr class="cpb-table-header-row">';
-        foreach ($headers as $header) $out .= '<th' . $ce . '>' . h((string)$header) . '</th>';
-        $out .= '</tr></thead><tbody>';
-        foreach ($rows as $row) {
+        $borderWidth = in_array((string)($payload['border_width'] ?? 'medium'), array('thin', 'medium', 'thick'), true) ? (string)$payload['border_width'] : 'medium';
+        $borderColor = (string)($payload['border_color'] ?? '#94a3b8');
+        $tableAlign = in_array((string)($payload['table_align'] ?? 'left'), array('left', 'center', 'right'), true) ? (string)$payload['table_align'] : 'left';
+        $tableStyleKind = (string)($payload['table_style_kind'] ?? 'standard');
+        $colWidths = (array)($payload['col_widths'] ?? array());
+        $out = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '" data-table-align="' . h($tableAlign) . '" data-table-style-kind="' . h($tableStyleKind) . '"><div class="cpb-table-wrap cpb-table-border-' . h($borderWidth) . '" data-border-width="' . h($borderWidth) . '" data-border-color="' . h($borderColor) . '" style="--cpb-table-border-color:' . h($borderColor) . '"><table class="cpb-table" data-field="table"><colgroup>';
+        foreach ($headers as $idx => $_) {
+            $out .= '<col style="width:' . max(40, (int)($colWidths[$idx] ?? 120)) . 'px">';
+        }
+        $out .= '</colgroup><thead>';
+        if (!empty($payload['has_title_row'])) {
+            $title = (string)($payload['title'] ?? '');
+            $out .= '<tr class="cpb-table-title-row' . (trim(strip_tags($title)) === '' ? ' is-empty' : '') . '" data-title-row="1">'
+                . '<td colspan="' . max(1, count($headers)) . '"' . $ce . ft_form_table_cell_attrs(
+                    (string)($payload['title_bg'] ?? ''),
+                    (string)($payload['title_align'] ?? 'center'),
+                    (string)($payload['title_font_family'] ?? ''),
+                    (int)($payload['title_font_size'] ?? 0),
+                    (string)($payload['title_text_color'] ?? '')
+                ) . ' data-placeholder="Table title (spans all columns)">' . $title . '</td></tr>';
+        }
+        $out .= '<tr class="cpb-table-header-row">';
+        $headerBg = (array)($payload['header_bg'] ?? array());
+        $headerAlign = (array)($payload['header_align'] ?? array());
+        $headerFontFamily = (array)($payload['header_font_family'] ?? array());
+        $headerFontSize = (array)($payload['header_font_size'] ?? array());
+        $headerTextColor = (array)($payload['header_text_color'] ?? array());
+        $headerColspans = (array)($payload['header_colspans'] ?? array());
+        foreach ($headers as $idx => $header) {
+            $colspan = max(1, (int)($headerColspans[$idx] ?? 1));
+            $out .= '<th colspan="' . $colspan . '"' . $ce . ft_form_table_cell_attrs(
+                (string)($headerBg[$idx] ?? ''),
+                (string)($headerAlign[$idx] ?? 'left'),
+                (string)($headerFontFamily[$idx] ?? ''),
+                (int)($headerFontSize[$idx] ?? 0),
+                (string)($headerTextColor[$idx] ?? '')
+            ) . ' data-col-index="' . (int)$idx . '"><span class="cpb-th-text">' . (string)$header . '</span>';
+            if ($editable) {
+                $out .= '<span class="cpb-col-resize" data-col-index="' . (int)$idx . '" title="Resize column"></span>';
+            }
+            $out .= '</th>';
+        }
+        $out .= '</tr></thead><tbody data-table-part="body">';
+        $cellBg = (array)($payload['cell_bg'] ?? array());
+        $cellAlign = (array)($payload['cell_align'] ?? array());
+        $cellFontFamily = (array)($payload['cell_font_family'] ?? array());
+        $cellFontSize = (array)($payload['cell_font_size'] ?? array());
+        $cellTextColor = (array)($payload['cell_text_color'] ?? array());
+        $rowColspans = (array)($payload['row_colspans'] ?? array());
+        foreach ($rows as $rowIdx => $row) {
             $out .= '<tr>';
-            foreach ($headers as $idx => $_) $out .= '<td' . $ce . '>' . h((string)($row[$idx] ?? '')) . '</td>';
+            foreach ((array)$row as $idx => $cellValue) {
+                $colspan = max(1, (int)($rowColspans[$rowIdx][$idx] ?? 1));
+                $rawCell = (string)$cellValue;
+                $formulaAttr = (!$editable && str_starts_with($rawCell, '='))
+                    ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
+                    : '';
+                $out .= '<td colspan="' . $colspan . '"' . $ce . ft_form_table_cell_attrs(
+                    (string)($cellBg[$rowIdx][$idx] ?? ''),
+                    (string)($cellAlign[$rowIdx][$idx] ?? 'left'),
+                    (string)($cellFontFamily[$rowIdx][$idx] ?? ''),
+                    (int)($cellFontSize[$rowIdx][$idx] ?? 0),
+                    (string)($cellTextColor[$rowIdx][$idx] ?? '')
+                ) . $formulaAttr . '>' . $rawCell . '</td>';
+            }
             $out .= '</tr>';
         }
-        return $out . '</tbody></table></div></div>';
+        $out .= '</tbody></table></div>';
+        if ($editable) {
+            $out .= '<div class="cpb-table-tools" contenteditable="false">'
+                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Align</span>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">L</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">C</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">R</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Rows</span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-up" title="Move selected row up">↑ Row</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-down" title="Move selected row down">↓ Row</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="add-row" title="Add row at bottom">+ Row</button>'
+                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="del-row" title="Delete selected row">Delete row</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="add-col" title="Add column at right">+ Column</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="del-col" title="Remove rightmost column">− Column</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Cells</span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="merge-cells-right" title="Merge with cell to the right">Merge →</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="unmerge-cells" title="Split merged cell into columns">Unmerge</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">+ Title row</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Border</span>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thin' ? ' is-active' : '') . '" data-table-action="border-thin" title="Thin border">─</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'medium' ? ' is-active' : '') . '" data-table-action="border-medium" title="Medium border">━</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thick' ? ' is-active' : '') . '" data-table-action="border-thick" title="Thick border">▬</button>'
+                . '<input type="color" class="cpb-table-color" data-table-action="border-color" value="' . h($borderColor) . '" title="Border color">'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Cell fill</span>'
+                . '<input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background (select a cell first)">'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Text</span>'
+                . '<input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color (select a cell first)">'
+                . '<span class="cpb-table-style-sep"></span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
+                . '<span class="cpb-table-style-sep"></span><span class="cpb-table-style-label">Calc</span>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-sum" title="Insert SUM formula">SUM</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-avg" title="Insert AVG formula">AVG</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-custom" title="Insert custom formula">fx</button>'
+                . '</div>';
+        }
+        return $out . '</div>';
+    }
+    if ($type === 'image') {
+        $url = trim((string)($payload['url'] ?? ''));
+        $alt = (string)($payload['alt'] ?? '');
+        $width = max(20, min(100, (int)($payload['width_pct'] ?? 100)));
+        $rotation = (int)($payload['rotation_deg'] ?? 0);
+        if ($url === '') {
+            return '<div class="cpb-image cpb-image--empty" contenteditable="false">Image missing</div>';
+        }
+        $tools = $editable ? '<button type="button" class="cpb-image-rotate" data-image-action="rotate" title="Rotate image">↻</button><span class="cpb-image-resize" title="Resize image"></span>' : '';
+        return '<figure class="cpb-image cpb-image--editable" data-width-pct="' . $width . '" data-rotation-deg="' . $rotation . '" style="width:' . $width . '%;transform:rotate(' . $rotation . 'deg);" contenteditable="false"><span class="cpb-image-frame"><img src="' . h($url) . '" alt="' . h($alt) . '">' . $tools . '</span><figcaption' . $ce . '>' . h($alt) . '</figcaption></figure>';
     }
     if ($type === 'callout') {
         $calloutType = (string)($payload['callout_type'] ?? 'warning');
@@ -508,7 +825,203 @@ function ft_form_render_inner(string $type, array $payload, bool $editable): str
         if ($fieldType === 'initial') $control = '<span class="cpb-form-initial-box">Initial</span>';
         return '<div class="cpb-form-field" contenteditable="false" data-form-field="1" data-field-key="' . h((string)($payload['field_key'] ?? '')) . '" data-field-type="' . h($fieldType) . '" data-label="' . h((string)($payload['label'] ?? 'Field')) . '" data-required="' . (!empty($payload['required']) ? '1' : '0') . '" data-assigned-role="' . h((string)($payload['assigned_role'] ?? 'instructor')) . '" data-variable-key="' . h((string)($payload['variable_key'] ?? '')) . '" data-placeholder="' . h((string)($payload['placeholder'] ?? '')) . '"><span class="cpb-form-field-label">' . h((string)($payload['label'] ?? 'Field')) . '</span>' . $control . '<span class="cpb-form-role">' . h((string)($payload['assigned_role'] ?? 'instructor')) . '</span></div>';
     }
-    return '<div class="cpb-paragraph cpb-ps-body" data-paragraph-style="body"' . $ce . '>' . (string)($payload['html'] ?? 'Text block') . '</div>';
+    $styleKey = ft_form_style_key($payload, 'body');
+    return '<div class="cpb-paragraph cpb-ps-' . h($styleKey) . ft_form_align_class($payload) . '" data-paragraph-style="' . h($styleKey) . '"' . ft_form_text_data_attrs($payload) . ft_form_text_style_attr($payload) . $ce . '>' . (string)($payload['html'] ?? 'Text block') . '</div>';
+}
+
+function ft_form_style_key(array $payload, string $default): string
+{
+    $key = trim((string)($payload['paragraph_style'] ?? $default));
+    return $key !== '' ? $key : $default;
+}
+
+function ft_form_align_class(array $payload): string
+{
+    $align = trim((string)($payload['text_align'] ?? ''));
+    return in_array($align, array('left', 'center', 'right', 'justify'), true) ? ' cpb-align-' . $align : '';
+}
+
+function ft_form_text_data_attrs(array $payload): string
+{
+    $attrs = '';
+    foreach (array('font_family', 'text_align', 'text_color', 'regulatory_ref') as $key) {
+        if (isset($payload[$key]) && (string)$payload[$key] !== '') {
+            $attrs .= ' data-' . str_replace('_', '-', $key) . '="' . h((string)$payload[$key]) . '"';
+        }
+    }
+    foreach (array('font_size', 'indent_level') as $key) {
+        if (isset($payload[$key]) && (int)$payload[$key] > 0) {
+            $attrs .= ' data-' . str_replace('_', '-', $key) . '="' . (int)$payload[$key] . '"';
+        }
+    }
+    return $attrs;
+}
+
+function ft_form_text_style_attr(array $payload): string
+{
+    $style = '';
+    if (!empty($payload['font_size'])) $style .= 'font-size:' . (int)$payload['font_size'] . 'pt;';
+    if (!empty($payload['text_color'])) $style .= 'color:' . h((string)$payload['text_color']) . ';';
+    if (!empty($payload['text_align'])) $style .= 'text-align:' . h((string)$payload['text_align']) . ';';
+    return $style !== '' ? ' style="' . $style . '"' : '';
+}
+
+function ft_form_table_cell_attrs(string $bg, string $align, string $fontFamily, int $fontSize, string $textColor): string
+{
+    $attrs = '';
+    $style = '';
+    if ($bg !== '') {
+        $attrs .= ' data-cell-bg="' . h($bg) . '"';
+        $style .= 'background-color:' . h($bg) . ';';
+    }
+    if ($align !== '') {
+        $attrs .= ' data-cell-align="' . h($align) . '"';
+        $style .= 'text-align:' . h($align) . ';';
+    }
+    if ($fontFamily !== '') {
+        $attrs .= ' data-font-family="' . h($fontFamily) . '"';
+        $attrs .= ' class="cpb-font-' . h($fontFamily) . '"';
+    }
+    if ($fontSize > 0) {
+        $attrs .= ' data-font-size="' . $fontSize . '"';
+        $style .= 'font-size:' . $fontSize . 'pt;';
+    }
+    if ($textColor !== '') {
+        $attrs .= ' data-text-color="' . h($textColor) . '"';
+        $style .= 'color:' . h($textColor) . ';';
+    }
+    if ($style !== '') {
+        $attrs .= ' style="' . $style . '"';
+    }
+    return $attrs;
+}
+
+function ft_form_default_page_header(array $ctx): array
+{
+    return array(
+        'enabled' => false,
+        'left_type' => 'logo',
+        'logo_url' => '',
+        'logo_alt' => 'EuroPilot Center',
+        'logo_max_height' => 40,
+        'row_height' => 32,
+        'center_text' => (string)($ctx['template']['title'] ?? 'Form Template'),
+        'center_font_family' => 'sans',
+        'center_font_size' => 11,
+        'center_font_bold' => true,
+        'center_font_italic' => false,
+        'center_font_underline' => false,
+        'right_text' => "Version: {revision}\nDate: {date}",
+        'right_font_family' => 'sans',
+        'right_font_size' => 10,
+        'right_font_bold' => true,
+        'right_font_italic' => false,
+        'right_font_underline' => false,
+    );
+}
+
+function ft_form_default_page_footer(): array
+{
+    return array(
+        'enabled' => false,
+        'row_height' => 26,
+        'left_text' => '',
+        'center_text' => 'Controlled form template',
+        'right_text' => '',
+        'left_font_family' => 'sans',
+        'center_font_family' => 'sans',
+        'right_font_family' => 'sans',
+        'left_font_size' => 9,
+        'center_font_size' => 9,
+        'right_font_size' => 9,
+        'left_font_bold' => false,
+        'center_font_bold' => false,
+        'right_font_bold' => false,
+        'left_font_italic' => false,
+        'center_font_italic' => false,
+        'right_font_italic' => false,
+        'left_font_underline' => false,
+        'center_font_underline' => false,
+        'right_font_underline' => false,
+    );
+}
+
+function ft_form_render_header_band(array $header, array $ctx, array $section): string
+{
+    if (empty($header['enabled'])) return '';
+    $logo = trim((string)($header['logo_url'] ?? ''));
+    $left = $logo !== ''
+        ? '<img class="cpb-page-header-logo" src="' . h($logo) . '" alt="' . h((string)($header['logo_alt'] ?? '')) . '" style="max-height:' . max(16, min(120, (int)($header['logo_max_height'] ?? 40))) . 'px;">'
+        : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
+    $center = nl2br(h(ft_form_resolve_header_tokens((string)($header['center_text'] ?? ''), $ctx, $section)));
+    $right = nl2br(h(ft_form_resolve_header_tokens((string)($header['right_text'] ?? ''), $ctx, $section)));
+    return '<table class="cpb-page-header-table" contenteditable="false"><tbody><tr>'
+        . '<td class="cpb-page-header-left">' . $left . '</td>'
+        . '<td class="cpb-page-header-center">' . $center . '</td>'
+        . '<td class="cpb-page-header-right">' . $right . '</td>'
+        . '</tr></tbody></table>';
+}
+
+function ft_form_render_footer_band(array $footer, array $ctx, array $section): string
+{
+    if (empty($footer['enabled'])) return '';
+    $left = nl2br(h(ft_form_resolve_header_tokens((string)($footer['left_text'] ?? ''), $ctx, $section)));
+    $center = nl2br(h(ft_form_resolve_header_tokens((string)($footer['center_text'] ?? ''), $ctx, $section)));
+    $right = nl2br(h(ft_form_resolve_header_tokens((string)($footer['right_text'] ?? ''), $ctx, $section)));
+    return '<table class="cpb-page-footer-table" contenteditable="false"><tbody><tr>'
+        . '<td class="cpb-page-footer-left">' . $left . '</td>'
+        . '<td class="cpb-page-footer-center">' . $center . '</td>'
+        . '<td class="cpb-page-footer-right">' . $right . '</td>'
+        . '</tr></tbody></table>';
+}
+
+function ft_form_resolve_header_tokens(string $text, array $ctx, array $section): string
+{
+    $replacements = array(
+        '{book_title}' => (string)($ctx['template']['title'] ?? 'Form Template'),
+        '{manual_code}' => 'FORM',
+        '{part_title}' => (string)($section['title'] ?? ''),
+        '{revision}' => (string)($ctx['version']['version_label'] ?? ''),
+        '{date}' => date('Y-m-d'),
+        '{page}' => '—',
+    );
+    return strtr($text, $replacements);
+}
+
+function ft_form_store_uploaded_image(string $field, string $bucket): string
+{
+    if (empty($_FILES[$field]) || !is_array($_FILES[$field])) {
+        throw new RuntimeException('image file required');
+    }
+    $file = $_FILES[$field];
+    $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($err !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Upload failed (code ' . $err . ')');
+    }
+    $tmp = (string)($file['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        throw new RuntimeException('Invalid upload');
+    }
+    $mime = (string)($file['type'] ?? '');
+    $ext = match ($mime) {
+        'image/jpeg', 'image/jpg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        default => '',
+    };
+    if ($ext === '') {
+        throw new RuntimeException('Only JPG, PNG, or WEBP images are allowed');
+    }
+    $dir = dirname(__DIR__, 3) . '/public/uploads/flight_training_forms/' . preg_replace('/[^a-z0-9_-]+/i', '_', $bucket);
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not create upload directory');
+    }
+    $name = bin2hex(random_bytes(12)) . '.' . $ext;
+    $target = $dir . '/' . $name;
+    if (!move_uploaded_file($tmp, $target)) {
+        throw new RuntimeException('Could not store upload');
+    }
+    return '/uploads/flight_training_forms/' . preg_replace('/[^a-z0-9_-]+/i', '_', $bucket) . '/' . $name;
 }
 
 function ft_form_resolve_book_styles(array $doc): array

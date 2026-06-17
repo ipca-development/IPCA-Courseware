@@ -161,12 +161,24 @@ cw_header('Flight Training · Form Template Editor');
             <div class="cpb-form-toolbar-row" aria-label="Form editor tools">
               <div class="cpb-toolbar-group cpb-form-toolbar-group">
                 <span class="cpb-form-toolbar-label">Form tools</span>
-                <button type="button" class="cpb-tool-btn" data-form-tool="field" title="Insert field">Field</button>
+                <button type="button" class="cpb-tool-btn" data-form-tool="field" title="Insert text field">Text Field</button>
                 <button type="button" class="cpb-tool-btn" data-form-tool="checkbox" title="Insert checkbox">Checkbox</button>
                 <button type="button" class="cpb-tool-btn" data-form-tool="date" title="Insert date field">Date Field</button>
                 <button type="button" class="cpb-tool-btn" data-form-tool="signature" title="Insert signature">Signature</button>
                 <button type="button" class="cpb-tool-btn" data-form-tool="initial" title="Insert initial">Initial</button>
-                <button type="button" class="cpb-tool-btn" id="cpbFormVariablePicker" title="Insert variable">Variable</button>
+                <select id="cpbFormVariableSelect" class="cpb-tool-select cpb-tool-select--form-variable" title="Insert variable">
+                  <option value="" selected>Variable</option>
+                  <option value="student.full_name">Student full name</option>
+                  <option value="student.phone">Student phone</option>
+                  <option value="student.email">Student email</option>
+                  <option value="instructor.full_name">Instructor full name</option>
+                  <option value="instructor.phone">Instructor phone</option>
+                  <option value="instructor.email">Instructor email</option>
+                  <option value="course.name">Course name</option>
+                  <option value="theory.completion">Theory completion</option>
+                  <option value="knowledge_test.score">Knowledge test score</option>
+                  <option value="knowledge_test.deficient_codes">Knowledge test deficient codes</option>
+                </select>
                 <button type="button" class="cpb-tool-btn" id="cpbFormFieldSettings" title="Field settings">Field Settings</button>
               </div>
             </div>

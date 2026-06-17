@@ -6,7 +6,7 @@ declare(strict_types=1);
  */
 final class StructuredDocumentPayload
 {
-    private const BLOCK_TYPES = array('heading', 'paragraph', 'table', 'callout', 'checkbox', 'field', 'date', 'signature', 'initial');
+    private const BLOCK_TYPES = array('heading', 'paragraph', 'list', 'table', 'image', 'callout', 'checkbox', 'field', 'date', 'signature', 'initial');
     private const FIELD_BLOCK_TYPES = array('checkbox', 'field', 'date', 'signature', 'initial');
     private const ROLES = array('admin', 'instructor', 'student', 'other_instructor', 'examiner', 'external_party');
 
@@ -27,6 +27,8 @@ final class StructuredDocumentPayload
                     'section_key' => self::cleanKey((string)($section['section_key'] ?? 'section')),
                     'title' => trim((string)($section['title'] ?? 'Section')),
                     'sort_order' => (int)($section['sort_order'] ?? 10),
+                    'parent_section_id' => !empty($section['parent_section_id']) ? (int)$section['parent_section_id'] : null,
+                    'layout' => is_array($section['layout'] ?? null) ? $section['layout'] : array(),
                 );
             }
         }
@@ -46,6 +48,8 @@ final class StructuredDocumentPayload
             'title' => trim((string)($document['title'] ?? '')),
             'layout' => is_array($document['layout'] ?? null) ? $document['layout'] : array('page' => 'letter', 'orientation' => 'portrait'),
             'book_styles' => is_array($document['book_styles'] ?? null) ? $document['book_styles'] : array(),
+            'page_header' => is_array($document['page_header'] ?? null) ? $document['page_header'] : array(),
+            'page_footer' => is_array($document['page_footer'] ?? null) ? $document['page_footer'] : array(),
             'sections' => $sections,
             'blocks' => $blocks,
         );
@@ -117,15 +121,57 @@ final class StructuredDocumentPayload
     private static function normalizePayload(string $type, array $payload): array
     {
         return match ($type) {
-            'heading' => array(
-                'text' => trim((string)($payload['text'] ?? 'Heading')),
-                'level' => max(1, min(6, (int)($payload['level'] ?? 2))),
-            ),
+            'heading' => self::normalizeTextPayload($payload, true),
+            'list' => self::normalizeList($payload),
             'table' => self::normalizeTable($payload),
+            'image' => self::normalizeImage($payload),
             'callout' => self::normalizeCallout($payload),
             'checkbox', 'field', 'date', 'signature', 'initial' => self::normalizeFieldPayload($type, $payload),
-            default => array('html' => self::sanitizeInline((string)($payload['html'] ?? $payload['text'] ?? ''))),
+            default => self::normalizeTextPayload($payload, false),
         };
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private static function normalizeTextPayload(array $payload, bool $heading): array
+    {
+        $out = $heading
+            ? array(
+                'text' => trim((string)($payload['text'] ?? 'Heading')),
+                'level' => max(1, min(6, (int)($payload['level'] ?? 2))),
+            )
+            : array('html' => (string)($payload['html'] ?? $payload['text'] ?? ''));
+
+        foreach (array('paragraph_style', 'font_family', 'text_align', 'text_color', 'regulatory_ref', 'html') as $key) {
+            if (array_key_exists($key, $payload)) {
+                $out[$key] = (string)$payload[$key];
+            }
+        }
+        foreach (array('font_size', 'indent_level', 'font_bold', 'font_italic', 'font_underline') as $key) {
+            if (array_key_exists($key, $payload)) {
+                $out[$key] = is_bool($payload[$key]) ? $payload[$key] : (int)$payload[$key];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private static function normalizeList(array $payload): array
+    {
+        $out = $payload;
+        $items = array();
+        foreach ((array)($payload['items'] ?? array()) as $item) {
+            $items[] = (string)$item;
+        }
+        return array_merge($out, self::normalizeTextPayload($payload, false), array(
+            'ordered' => !empty($payload['ordered']),
+            'items' => $items !== array() ? $items : array('List item'),
+        ));
     }
 
     /**
@@ -134,9 +180,10 @@ final class StructuredDocumentPayload
      */
     private static function normalizeTable(array $payload): array
     {
+        $out = $payload;
         $headers = array();
         foreach ((array)($payload['headers'] ?? array('Column 1', 'Column 2')) as $cell) {
-            $headers[] = self::sanitizeCell((string)$cell);
+            $headers[] = (string)$cell;
         }
         if ($headers === array()) {
             $headers = array('Column 1', 'Column 2');
@@ -149,18 +196,55 @@ final class StructuredDocumentPayload
             }
             $line = array();
             foreach ($row as $cell) {
-                $line[] = self::sanitizeCell((string)$cell);
+                $line[] = (string)$cell;
             }
-            $rows[] = array_pad(array_slice($line, 0, count($headers)), count($headers), '');
+            $rows[] = $line;
         }
         if ($rows === array()) {
             $rows = array(array_fill(0, count($headers), ''));
         }
 
-        return array(
+        return array_merge($out, array(
             'title' => trim((string)($payload['title'] ?? '')),
             'headers' => $headers,
             'rows' => $rows,
+            'border_width' => trim((string)($payload['border_width'] ?? 'medium')),
+            'border_color' => trim((string)($payload['border_color'] ?? '#94a3b8')),
+            'table_align' => trim((string)($payload['table_align'] ?? 'left')),
+            'col_widths' => is_array($payload['col_widths'] ?? null) ? $payload['col_widths'] : array(),
+            'header_bg' => is_array($payload['header_bg'] ?? null) ? $payload['header_bg'] : array(),
+            'cell_bg' => is_array($payload['cell_bg'] ?? null) ? $payload['cell_bg'] : array(),
+            'header_align' => is_array($payload['header_align'] ?? null) ? $payload['header_align'] : array(),
+            'cell_align' => is_array($payload['cell_align'] ?? null) ? $payload['cell_align'] : array(),
+            'header_font_family' => is_array($payload['header_font_family'] ?? null) ? $payload['header_font_family'] : array(),
+            'header_font_size' => is_array($payload['header_font_size'] ?? null) ? $payload['header_font_size'] : array(),
+            'header_text_color' => is_array($payload['header_text_color'] ?? null) ? $payload['header_text_color'] : array(),
+            'cell_font_family' => is_array($payload['cell_font_family'] ?? null) ? $payload['cell_font_family'] : array(),
+            'cell_font_size' => is_array($payload['cell_font_size'] ?? null) ? $payload['cell_font_size'] : array(),
+            'cell_text_color' => is_array($payload['cell_text_color'] ?? null) ? $payload['cell_text_color'] : array(),
+            'header_colspans' => is_array($payload['header_colspans'] ?? null) ? $payload['header_colspans'] : array(),
+            'row_colspans' => is_array($payload['row_colspans'] ?? null) ? $payload['row_colspans'] : array(),
+            'has_title_row' => !empty($payload['has_title_row']),
+            'title_bg' => trim((string)($payload['title_bg'] ?? '')),
+            'title_align' => trim((string)($payload['title_align'] ?? 'center')),
+            'title_font_family' => trim((string)($payload['title_font_family'] ?? '')),
+            'title_font_size' => (int)($payload['title_font_size'] ?? 0),
+            'title_text_color' => trim((string)($payload['title_text_color'] ?? '')),
+            'table_style_kind' => trim((string)($payload['table_style_kind'] ?? 'standard')),
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private static function normalizeImage(array $payload): array
+    {
+        return array(
+            'url' => trim((string)($payload['url'] ?? '')),
+            'alt' => trim((string)($payload['alt'] ?? '')),
+            'width_pct' => max(20, min(100, (int)($payload['width_pct'] ?? 100))),
+            'rotation_deg' => (int)($payload['rotation_deg'] ?? 0),
         );
     }
 
@@ -189,21 +273,22 @@ final class StructuredDocumentPayload
      */
     private static function normalizeCallout(array $payload): array
     {
+        $out = $payload;
         $type = strtolower(trim((string)($payload['callout_type'] ?? 'warning')));
         if (!in_array($type, array('warning', 'caution', 'info', 'note'), true)) {
             $type = 'warning';
         }
-        return array(
+        return array_merge($out, array(
             'callout_type' => $type,
-            'title' => self::sanitizeInline((string)($payload['title'] ?? strtoupper($type))),
-            'text' => self::sanitizeInline((string)($payload['text'] ?? '')),
+            'title' => (string)($payload['title'] ?? strtoupper($type)),
+            'text' => (string)($payload['text'] ?? ''),
             'title_font_family' => trim((string)($payload['title_font_family'] ?? '')),
             'title_font_size' => (int)($payload['title_font_size'] ?? 0),
             'title_text_color' => trim((string)($payload['title_text_color'] ?? '')),
             'text_font_family' => trim((string)($payload['text_font_family'] ?? '')),
             'text_font_size' => (int)($payload['text_font_size'] ?? 0),
             'text_text_color' => trim((string)($payload['text_text_color'] ?? '')),
-        );
+        ));
     }
 
     private static function normalizeBlockType(string $type): string

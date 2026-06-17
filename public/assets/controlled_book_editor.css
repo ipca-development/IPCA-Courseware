@@ -410,6 +410,11 @@
   white-space: nowrap;
 }
 
+.cpb-form-editor-root .cpb-toolbar select.cpb-tool-select--form-variable {
+  width: 162px;
+  min-width: 162px;
+}
+
 .cpb-toolbar-group {
   display: flex;
   gap: 2px;

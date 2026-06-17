@@ -456,7 +456,8 @@
     if (!addSubBtn || !section) return;
     var key = section.section_key || '';
     var isNestable = ['part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'].indexOf(key) >= 0
-      || !!section.parent_section_id;
+      || !!section.parent_section_id
+      || documentType === 'form';
     addSubBtn.style.display = state.editable && isNestable ? 'block' : 'none';
     addSubBtn.setAttribute('data-parent-id', String(section.id || state.sectionId));
   }
@@ -881,6 +882,7 @@
       if (!text) return;
       e.preventDefault();
       state.tableClipboard = text;
+      state.tableClipboardStyles = buildCopyStyles(blockEl, cell);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).catch(function () {});
       }
@@ -3411,6 +3413,58 @@
     return anchorCell.textContent.trim();
   }
 
+  function cellStyleSnapshot(cell) {
+    return {
+      bg: extractCellBg(cell),
+      align: extractCellAlign(cell),
+      font_family: extractCellFontFamily(cell),
+      font_size: extractCellFontSize(cell),
+      text_color: extractCellTextColor(cell),
+      colspan: parseInt(cell.getAttribute('colspan') || '1', 10) || 1,
+    };
+  }
+
+  function buildCopyStyles(blockEl, anchorCell) {
+    var coords = getTableCellCoords(blockEl, anchorCell);
+    if (!coords) return [[cellStyleSnapshot(anchorCell)]];
+    var styles = [];
+    var tbody = tableBody(blockEl);
+    if (coords.row < 0) {
+      var head = tableHeaderRow(blockEl);
+      if (head && head.cells[coords.col]) styles.push([cellStyleSnapshot(head.cells[coords.col])]);
+      if (tbody) {
+        tbody.querySelectorAll('tr').forEach(function (tr) {
+          if (tr.cells[coords.col]) styles.push([cellStyleSnapshot(tr.cells[coords.col])]);
+        });
+      }
+      return styles;
+    }
+    if (tbody) {
+      var tr = tbody.querySelectorAll('tr')[coords.row];
+      if (tr) {
+        var line = [];
+        tr.querySelectorAll('td').forEach(function (td) {
+          line.push(cellStyleSnapshot(td));
+        });
+        styles.push(line);
+      }
+    }
+    return styles;
+  }
+
+  function applyCellStyleSnapshot(cell, style) {
+    if (!cell || !style) return;
+    applyTableCellBg(null, cell, style.bg || '');
+    if (style.align) applyStyleToTableCell(cell, { align: style.align });
+    if (style.font_family) applyFontToTableCell(cell, style.font_family);
+    if (style.font_size) {
+      cell.setAttribute('data-font-size', String(style.font_size));
+      cell.style.setProperty('font-size', style.font_size + 'pt', 'important');
+    }
+    if (style.text_color) applyColorToTableCell(cell, style.text_color);
+    if (style.colspan && style.colspan > 1) cell.setAttribute('colspan', String(style.colspan));
+  }
+
   function copyTableCells(blockEl) {
     if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
       setStatus('Click a table cell first', 'error');
@@ -3418,6 +3472,7 @@
     }
     var text = buildCopyText(blockEl, state.focusedTableCell);
     state.tableClipboard = text;
+    state.tableClipboardStyles = buildCopyStyles(blockEl, state.focusedTableCell);
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
         setStatus('Copied', 'saved');
@@ -3461,6 +3516,9 @@
             var thText = head.cells[col].querySelector('.cpb-th-text');
             if (thText) thText.textContent = val;
             else head.cells[col].textContent = val;
+            if (state.tableClipboardStyles && state.tableClipboardStyles[rIndex] && state.tableClipboardStyles[rIndex][cIndex]) {
+              applyCellStyleSnapshot(head.cells[col], state.tableClipboardStyles[rIndex][cIndex]);
+            }
           }
         });
         return;
@@ -3473,7 +3531,12 @@
       cells.forEach(function (val, cIndex) {
         var col = coords.col + cIndex;
         while (col >= tableColCount(blockEl)) tableAddColumn(blockEl);
-        if (tr.cells[col]) tr.cells[col].textContent = val;
+        if (tr.cells[col]) {
+          tr.cells[col].textContent = val;
+          if (state.tableClipboardStyles && state.tableClipboardStyles[rIndex] && state.tableClipboardStyles[rIndex][cIndex]) {
+            applyCellStyleSnapshot(tr.cells[col], state.tableClipboardStyles[rIndex][cIndex]);
+          }
+        }
       });
     });
     wireTableCellFocus(blockEl);
@@ -4573,13 +4636,33 @@
     if (!preset) {
       preset = {
         callout_type: type,
-        title: type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : 'WARNING'),
+        title: type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : (type === 'note' ? 'NOTE' : 'WARNING')),
         text: '',
       };
     }
+    var focusedBlock = getFocusedBlock();
+    if (focusedBlock && (focusedBlock.getAttribute('data-block-type') || '') === 'callout') {
+      var callout = focusedBlock.querySelector('.cpb-callout');
+      var title = focusedBlock.querySelector('.cpb-callout-title');
+      if (callout) {
+        pushUndo();
+        ['warning', 'caution', 'info', 'note'].forEach(function (name) {
+          callout.classList.remove('cpb-callout--' + name);
+        });
+        callout.classList.add('cpb-callout--' + type);
+        callout.setAttribute('data-callout-type', type);
+        if (title) {
+          title.innerHTML = preset.title || (type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : (type === 'note' ? 'NOTE' : 'WARNING')));
+        }
+        refreshCalloutTypographyFromBookStyles();
+        scheduleSave(focusedBlock);
+        flushSave(focusedBlock);
+        return;
+      }
+    }
     createBlock('callout', {
       callout_type: type,
-      title: preset.title || (type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : 'WARNING')),
+      title: preset.title || (type === 'caution' ? 'CAUTION' : (type === 'info' ? 'INFO' : (type === 'note' ? 'NOTE' : 'WARNING'))),
       text: preset.text || 'Enter callout text…',
     }).catch(showError);
   }
@@ -5698,10 +5781,22 @@
 
   function formFieldDefaults(type, variableKey) {
     var key = (variableKey || type + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    var variableLabels = {
+      'student.full_name': 'Student full name',
+      'student.phone': 'Student phone',
+      'student.email': 'Student email',
+      'instructor.full_name': 'Instructor full name',
+      'instructor.phone': 'Instructor phone',
+      'instructor.email': 'Instructor email',
+      'course.name': 'Course name',
+      'theory.completion': 'Theory completion',
+      'knowledge_test.score': 'Knowledge test score',
+      'knowledge_test.deficient_codes': 'Knowledge test deficient codes',
+    };
     return {
       field_key: key || ('field_' + Date.now()),
       field_type: type === 'field' ? 'text' : type,
-      label: type === 'checkbox' ? 'Checkbox' : (type === 'date' ? 'Date' : (type === 'signature' ? 'Signature' : (type === 'initial' ? 'Initial' : 'Field'))),
+      label: variableKey && variableLabels[variableKey] ? variableLabels[variableKey] : (type === 'checkbox' ? 'Checkbox' : (type === 'date' ? 'Date' : (type === 'signature' ? 'Signature' : (type === 'initial' ? 'Initial' : 'Text Field')))),
       required: false,
       assigned_role: 'instructor',
       variable_key: variableKey || '',
@@ -5816,6 +5911,24 @@
       variableBtn.addEventListener('click', function (e) {
         e.preventDefault();
         openFormVariablePicker();
+      });
+    }
+    var variableSelect = document.getElementById('cpbFormVariableSelect');
+    if (variableSelect) {
+      variableSelect.addEventListener('change', function () {
+        var key = variableSelect.value || '';
+        variableSelect.value = '';
+        if (!key) return;
+        var block = selectedFormFieldBlock();
+        if (block) {
+          var field = block.querySelector('[data-form-field="1"]');
+          if (field) {
+            field.setAttribute('data-variable-key', key);
+            flushSave(block);
+          }
+        } else {
+          createBlock('field', formFieldDefaults('field', key)).catch(showError);
+        }
       });
     }
     canvasEl.addEventListener('click', function (e) {
