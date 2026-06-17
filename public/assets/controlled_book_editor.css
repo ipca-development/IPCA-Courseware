@@ -339,10 +339,9 @@
 }
 
 .cpb-form-editor-root .cpb-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-rows: var(--cpb-panel-head-height) 34px;
-  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: 0;
   min-height: calc(var(--cpb-panel-head-height) + 34px);
   max-height: calc(var(--cpb-panel-head-height) + 34px);
@@ -354,8 +353,9 @@
 .cpb-form-editor-root .cpb-toolbar-toc,
 .cpb-form-editor-root .cpb-toolbar-lep,
 .cpb-form-editor-root .cpb-toolbar-part0 {
-  grid-column: 1;
-  grid-row: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--cpb-panel-head-height);
   padding-left: 12px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -363,21 +363,22 @@
 }
 
 .cpb-form-editor-root .cpb-toolbar-shared {
-  grid-column: 2;
-  grid-row: 1;
+  flex: 0 0 auto;
+  height: var(--cpb-panel-head-height);
   padding: 0 8px;
   margin-left: 0;
 }
 
 .cpb-form-editor-root .cpb-save-status {
-  grid-column: 3;
-  grid-row: 1;
+  flex: 0 0 auto;
+  height: var(--cpb-panel-head-height);
+  display: inline-flex;
+  align-items: center;
   padding-right: 12px;
 }
 
 .cpb-form-toolbar-row {
-  grid-column: 1 / -1;
-  grid-row: 2;
+  flex: 0 0 100%;
   display: flex;
   align-items: center;
   gap: 4px;
