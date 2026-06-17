@@ -10,8 +10,8 @@ struct RecorderView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    inputCard
                     recordingCard
+                    inputCard
                     lastRecordingCard
                 }
                 .padding()
@@ -27,17 +27,15 @@ struct RecorderView: View {
 
     private var inputCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Audio Input").font(.headline)
-            LabeledContent("Selected input", value: audio.selectedInputName)
-            HStack {
-                Label(audio.isUSBActive ? "USB Audio Device active" : "USB Audio Device not active",
-                      systemImage: audio.isUSBActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(audio.isUSBActive ? .green : .orange)
-            }
+            Text("Audio Input Details").font(.headline)
+            LabeledContent("Active recording input", value: audio.selectedInputName)
+            LabeledContent("Active input type", value: audio.selectedInputPortType)
+            LabeledContent("Preferred input", value: audio.preferredInputName)
             if audio.isInternalMicWarning {
-                Text("Warning: recording would use the iPad internal microphone. Connect/select the USB audio interface before recording cockpit audio.")
+                Text("Warning: the current audio route is the iPad microphone. Connect the USB interface, then tap Refresh Inputs before recording cockpit audio.")
                     .foregroundStyle(.red)
             }
+            inputList
             if !audio.lastError.isEmpty {
                 Text(audio.lastError).foregroundStyle(.red)
             }
@@ -46,32 +44,98 @@ struct RecorderView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
+    private var sourceBanner: some View {
+        Label(audio.sourceSummary, systemImage: audio.isUSBActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(audio.isUSBActive ? .green : .red)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((audio.isUSBActive ? Color.green : Color.red).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var inputList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Detected Inputs").font(.subheadline.weight(.semibold))
+            if audio.availableInputs.isEmpty {
+                Text("No inputs reported. Tap Refresh Inputs after connecting the USB interface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(audio.availableInputs) { input in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(input.name)
+                            .font(.subheadline)
+                        Text(input.portType)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if input.id == audio.selectedInputID {
+                        Text("ACTIVE")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.blue)
+                    }
+                    if input.isUSB {
+                        Text("USB")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.green)
+                    }
+                    if input.isBuiltInMic {
+                        Text("IPAD MIC")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(8)
+                .background(input.id == audio.selectedInputID ? Color.blue.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
     private var recordingCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Recording").font(.headline)
+            sourceBanner
             LabeledContent("Status", value: statusText)
+            LabeledContent("Recording source", value: audio.selectedInputName)
             LabeledContent("Elapsed", value: Formatters.duration(audio.elapsed))
             LabeledContent("File size", value: Formatters.bytes(audio.fileSize))
-            LevelMeterView(level: audio.level)
-
+            LevelMeterView(level: audio.level, peakLevel: audio.peakLevel)
             HStack {
+                Text("Average \(Formatters.decibels(audio.averagePowerDB))")
+                Spacer()
+                Text("Peak \(Formatters.decibels(audio.peakPowerDB))")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if audio.isRecording && audio.level < 0.02 && audio.peakLevel < 0.02 {
+                Text("No meaningful input level detected yet. Check the USB interface gain, cabling, and selected input.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                 Button("Record") {
                     Task { _ = await audio.startRecording(language: settings.language) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(audio.isRecording)
+                .frame(maxWidth: .infinity)
 
                 Button("Pause Recording") {
                     audio.pauseRecording()
                 }
                 .buttonStyle(.bordered)
                 .disabled(!audio.isRecording || audio.isPaused)
+                .frame(maxWidth: .infinity)
 
                 Button("Resume Recording") {
                     audio.resumeRecording()
                 }
                 .buttonStyle(.bordered)
                 .disabled(!audio.isRecording || !audio.isPaused)
+                .frame(maxWidth: .infinity)
 
                 Button("Stop") {
                     stopAndUpload()
@@ -79,6 +143,7 @@ struct RecorderView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .disabled(!audio.isRecording)
+                .frame(maxWidth: .infinity)
             }
         }
         .padding()
@@ -90,6 +155,7 @@ struct RecorderView: View {
             Text("Last Recording Status").font(.headline)
             if let recording = store.recordings.first {
                 LabeledContent("Recording", value: recording.id)
+                LabeledContent("Input used", value: recording.inputDeviceName)
                 LabeledContent("Upload", value: "\(recording.uploadStatus.label) \(Int(recording.uploadProgress * 100))%")
                 LabeledContent("Transcript", value: "\(recording.transcriptStatus.label) \(recording.transcriptProgress)%")
                 if !recording.lastError.isEmpty {
@@ -97,6 +163,10 @@ struct RecorderView: View {
                 }
             } else {
                 Text("No recordings yet.").foregroundStyle(.secondary)
+            }
+            if !settings.isServerURLConfigured {
+                Text("Set the backend server URL in Settings before recording. Use the site origin only, for example https://courseware.example.com.")
+                    .foregroundStyle(.orange)
             }
         }
         .padding()
@@ -131,5 +201,12 @@ enum Formatters {
         if bytes >= 1_048_576 { return String(format: "%.1f MB", value / 1_048_576) }
         if bytes >= 1024 { return String(format: "%.1f KB", value / 1024) }
         return "\(bytes) B"
+    }
+
+    static func decibels(_ value: Float) -> String {
+        if value <= -159 {
+            return "-inf dB"
+        }
+        return String(format: "%.1f dB", value)
     }
 }

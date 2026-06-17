@@ -15,10 +15,10 @@ final class UploadManager: ObservableObject {
 
     func upload(recordingID: String, store: RecordingStore, settings: SettingsStore) {
         guard !activeUploads.contains(recordingID) else { return }
-        guard settings.normalizedServerURL != nil else {
+        guard settings.isServerURLConfigured else {
             store.update(recordingID) {
                 $0.uploadStatus = .failed
-                $0.lastError = "Server URL is invalid."
+                $0.lastError = "Server URL is not configured. Open Settings and enter the IPCA Courseware site URL, for example https://your-domain.com."
             }
             return
         }

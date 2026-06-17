@@ -12,9 +12,15 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                    Text("Example: https://courseware.example.com")
+                    Text(settings.serverURLHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    LabeledContent("Normalized server", value: settings.normalizedServerURL?.absoluteString ?? "Invalid")
+                    LabeledContent("Upload endpoint", value: settings.uploadEndpointPreview)
+                    if !settings.isServerURLConfigured {
+                        Text("Server URL is not configured yet. Use your actual IPCA Courseware domain, not the example placeholder.")
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 Section("Language") {
@@ -39,6 +45,9 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(input.name).font(.headline)
+                                if input.id == audio.selectedInputID {
+                                    Text("ACTIVE").font(.caption).foregroundStyle(.blue)
+                                }
                                 if input.isUSB {
                                     Text("USB").font(.caption).foregroundStyle(.green)
                                 }

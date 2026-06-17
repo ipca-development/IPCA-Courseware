@@ -5,7 +5,10 @@ import Foundation
 @MainActor
 final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published private(set) var availableInputs: [AudioInputInfo] = []
+    @Published private(set) var selectedInputID: String = ""
     @Published private(set) var selectedInputName: String = "Unknown"
+    @Published private(set) var selectedInputPortType: String = "Unknown"
+    @Published private(set) var preferredInputName: String = "None"
     @Published private(set) var isUSBActive = false
     @Published private(set) var isInternalMicWarning = false
     @Published private(set) var isRecording = false
@@ -13,7 +16,20 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var fileSize: Int64 = 0
     @Published private(set) var level: Float = 0
+    @Published private(set) var peakLevel: Float = 0
+    @Published private(set) var averagePowerDB: Float = -160
+    @Published private(set) var peakPowerDB: Float = -160
     @Published var lastError: String = ""
+
+    var sourceSummary: String {
+        if isUSBActive {
+            return "Recording source: USB audio interface"
+        }
+        if isInternalMicWarning {
+            return "Recording source: iPad internal microphone"
+        }
+        return "Recording source: unknown"
+    }
 
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
@@ -36,12 +52,14 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         timer?.invalidate()
     }
 
-    func refreshInputs() async {
+    func refreshInputs(activateSession: Bool = true) async {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
-            try session.setActive(true)
-            try preferUSBInputIfAvailable()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP])
+            if activateSession {
+                try session.setActive(true)
+                try preferUSBInputIfAvailable()
+            }
             updateInputState()
         } catch {
             lastError = error.localizedDescription
@@ -58,7 +76,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             }
 
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP])
             try session.setActive(true)
             try preferUSBInputIfAvailable()
             updateInputState()
@@ -89,6 +107,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             elapsed = 0
             fileSize = 0
             level = 0
+            peakLevel = 0
+            averagePowerDB = -160
+            peakPowerDB = -160
             isRecording = true
             isPaused = false
             startTimer()
@@ -147,8 +168,14 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
 
     private func requestMicrophonePermission() async -> Bool {
         return await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+            if #available(iOS 17.0, *) {
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            } else {
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
             }
         }
     }
@@ -175,8 +202,12 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
 
         let active = session.currentRoute.inputs.first
-        selectedInputName = active?.portName ?? session.preferredInput?.portName ?? "Unknown"
-        isUSBActive = active?.portType == .usbAudio || session.preferredInput?.portType == .usbAudio
+        let preferred = session.preferredInput
+        selectedInputID = active?.uid ?? preferred?.uid ?? ""
+        selectedInputName = active?.portName ?? preferred?.portName ?? "Unknown"
+        selectedInputPortType = active?.portType.rawValue ?? preferred?.portType.rawValue ?? "Unknown"
+        preferredInputName = preferred?.portName ?? "None"
+        isUSBActive = active?.portType == .usbAudio
         isInternalMicWarning = active?.portType == .builtInMic || (!isUSBActive && active == nil)
     }
 
@@ -199,7 +230,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         recorder.updateMeters()
         elapsed = recorder.currentTime
         let average = recorder.averagePower(forChannel: 0)
+        let peak = recorder.peakPower(forChannel: 0)
+        averagePowerDB = average
+        peakPowerDB = peak
         level = Self.normalizedPowerLevel(average)
+        peakLevel = Self.normalizedPowerLevel(peak)
         if let recordingURL {
             fileSize = fileSizeFor(url: recordingURL)
         }

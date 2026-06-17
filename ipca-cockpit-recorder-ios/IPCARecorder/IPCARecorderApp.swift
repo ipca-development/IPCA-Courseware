@@ -16,7 +16,6 @@ struct IPCARecorderApp: App {
                 .environmentObject(uploadManager)
                 .task {
                     await recordingStore.load()
-                    await audioRecorder.refreshInputs()
                 }
         }
     }
