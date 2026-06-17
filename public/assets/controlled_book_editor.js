@@ -6,7 +6,9 @@
 
   var versionId = parseInt(root.getAttribute('data-version-id') || '0', 10);
   var initialSectionId = parseInt(root.getAttribute('data-section-id') || '0', 10);
-  var apiBase = '/admin/api/controlled_book_editor_api.php';
+  var apiBase = root.getAttribute('data-api-base') || '/admin/api/controlled_book_editor_api.php';
+  var documentType = root.getAttribute('data-document-type') || 'manual';
+  var formSelectedBlockId = 0;
 
   var treeEl = document.getElementById('cpbSectionTree');
   var treeToggleAllBtn = document.getElementById('cpbTreeToggleAll');
@@ -801,7 +803,7 @@
       if (action === 'delete-table') {
         if (!confirm('Delete this entire table?')) return;
         var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-        apiPost('delete_block', { block_id: blockId }).then(function (res) {
+        apiPost('delete_block', { version_id: state.versionId, block_id: blockId }).then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Delete failed');
           clearPendingForBlock(blockId);
           clearStyleTargetForBlock(blockEl);
@@ -1019,7 +1021,7 @@
         } else if (action === 'delete') {
           if (!confirm('Delete this block?')) return;
           pushUndo();
-          apiPost('delete_block', { block_id: blockId }).then(function (res) {
+          apiPost('delete_block', { version_id: state.versionId, block_id: blockId }).then(function (res) {
             if (!res.ok) throw new Error(res.error || 'Delete failed');
             clearPendingForBlock(blockId);
             clearStyleTargetForBlock(blockEl);
@@ -1030,6 +1032,7 @@
         } else if (action === 'move-up' || action === 'move-down') {
           pushUndo();
           apiPost('move_block', {
+            version_id: state.versionId,
             block_id: blockId,
             direction: action === 'move-up' ? 'up' : 'down',
             section_id: state.sectionId,
@@ -1130,7 +1133,7 @@
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var payload = extractPayload(blockEl, blockType);
     setStatus('Saving…', 'saving');
-    apiPost('update_block', { block_id: blockId, payload: payload }).then(function (res) {
+    apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Save failed');
       applyNumberingState(res);
       setStatus('Saved', 'saved');
@@ -2890,6 +2893,18 @@
         text_font_family: textEl ? (textEl.getAttribute('data-font-family') || '') : '',
         text_font_size: textEl && textEl.getAttribute('data-font-size') ? parseInt(textEl.getAttribute('data-font-size'), 10) : 0,
         text_text_color: textEl ? extractCellTextColor(textEl) : '',
+      };
+    }
+    if (['field', 'checkbox', 'date', 'signature', 'initial'].indexOf(blockType) >= 0) {
+      var fieldRoot = blockEl.querySelector('[data-form-field="1"]');
+      return {
+        field_key: fieldRoot ? (fieldRoot.getAttribute('data-field-key') || '') : '',
+        field_type: fieldRoot ? (fieldRoot.getAttribute('data-field-type') || blockType) : blockType,
+        label: fieldRoot ? (fieldRoot.getAttribute('data-label') || '') : '',
+        required: fieldRoot ? fieldRoot.getAttribute('data-required') === '1' : false,
+        assigned_role: fieldRoot ? (fieldRoot.getAttribute('data-assigned-role') || 'instructor') : 'instructor',
+        variable_key: fieldRoot ? (fieldRoot.getAttribute('data-variable-key') || '') : '',
+        placeholder: fieldRoot ? (fieldRoot.getAttribute('data-placeholder') || '') : '',
       };
     }
     return {};
@@ -5676,6 +5691,145 @@
       if (action === 'toc') syncToc();
       else if (action === 'structure') syncManualStructure();
       else if (action === 'highlights') syncHighlights();
+    });
+  }
+
+  function formFieldDefaults(type, variableKey) {
+    var key = (variableKey || type + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    return {
+      field_key: key || ('field_' + Date.now()),
+      field_type: type === 'field' ? 'text' : type,
+      label: type === 'checkbox' ? 'Checkbox' : (type === 'date' ? 'Date' : (type === 'signature' ? 'Signature' : (type === 'initial' ? 'Initial' : 'Field'))),
+      required: false,
+      assigned_role: 'instructor',
+      variable_key: variableKey || '',
+      placeholder: '',
+    };
+  }
+
+  function selectedFormFieldBlock() {
+    var block = formSelectedBlockId ? canvasEl.querySelector('.cpb-block[data-block-id="' + formSelectedBlockId + '"]') : null;
+    if (!block) block = getFocusedBlock();
+    if (!block) return null;
+    var type = block.getAttribute('data-block-type') || '';
+    return ['field', 'checkbox', 'date', 'signature', 'initial'].indexOf(type) >= 0 ? block : null;
+  }
+
+  function openFormFieldSettings(blockEl) {
+    blockEl = blockEl || selectedFormFieldBlock();
+    if (!blockEl) return;
+    var field = blockEl.querySelector('[data-form-field="1"]');
+    if (!field) return;
+    var overlay = document.createElement('div');
+    overlay.className = 'cpb-callout-overlay';
+    overlay.innerHTML = ''
+      + '<div class="cpb-callout-dialog" role="dialog" aria-label="Field settings">'
+      + '<h3>Field settings</h3>'
+      + '<div class="cpb-callout-field"><label>Field key</label><input type="text" id="cffFieldKey" value="' + escapeAttr(field.getAttribute('data-field-key') || '') + '"></div>'
+      + '<div class="cpb-callout-field"><label>Label</label><input type="text" id="cffFieldLabel" value="' + escapeAttr(field.getAttribute('data-label') || '') + '"></div>'
+      + '<div class="cpb-callout-field"><label>Assigned role</label><select id="cffAssignedRole">'
+      + ['admin', 'instructor', 'student', 'other_instructor', 'examiner', 'external_party'].map(function (role) {
+        var selected = role === (field.getAttribute('data-assigned-role') || 'instructor') ? ' selected' : '';
+        return '<option value="' + role + '"' + selected + '>' + role.replace(/_/g, ' ') + '</option>';
+      }).join('')
+      + '</select></div>'
+      + '<div class="cpb-callout-field"><label>Variable binding</label><input type="text" id="cffVariableKey" value="' + escapeAttr(field.getAttribute('data-variable-key') || '') + '"></div>'
+      + '<div class="cpb-callout-field"><label>Placeholder</label><input type="text" id="cffPlaceholder" value="' + escapeAttr(field.getAttribute('data-placeholder') || '') + '"></div>'
+      + '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:13px;font-weight:800;color:#334155;"><input type="checkbox" id="cffRequired"' + (field.getAttribute('data-required') === '1' ? ' checked' : '') + '> Required</label>'
+      + '<div class="cpb-callout-dialog-actions"><button type="button" class="cpb-callout-cancel">Cancel</button><button type="button" class="cpb-callout-save">Apply</button></div>'
+      + '</div>';
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.querySelector('.cpb-callout-cancel').addEventListener('click', close);
+    overlay.querySelector('.cpb-callout-save').addEventListener('click', function () {
+      field.setAttribute('data-field-key', overlay.querySelector('#cffFieldKey').value.trim());
+      field.setAttribute('data-label', overlay.querySelector('#cffFieldLabel').value.trim());
+      field.setAttribute('data-assigned-role', overlay.querySelector('#cffAssignedRole').value);
+      field.setAttribute('data-variable-key', overlay.querySelector('#cffVariableKey').value.trim());
+      field.setAttribute('data-placeholder', overlay.querySelector('#cffPlaceholder').value.trim());
+      field.setAttribute('data-required', overlay.querySelector('#cffRequired').checked ? '1' : '0');
+      var label = field.querySelector('.cpb-form-field-label');
+      if (label) label.textContent = field.getAttribute('data-label') || 'Field';
+      var role = field.querySelector('.cpb-form-role');
+      if (role) role.textContent = field.getAttribute('data-assigned-role') || 'instructor';
+      flushSave(blockEl);
+      close();
+    });
+    document.body.appendChild(overlay);
+  }
+
+  function openFormVariablePicker() {
+    apiGet(apiBase + '?action=variables&version_id=' + state.versionId).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Variables failed');
+      var groups = res.variables || [];
+      var overlay = document.createElement('div');
+      overlay.className = 'cpb-callout-overlay';
+      overlay.innerHTML = '<div class="cpb-callout-dialog" role="dialog" aria-label="Insert variable"><h3>Insert variable</h3><div id="cffVariableList"></div><div class="cpb-callout-dialog-actions"><button type="button" class="cpb-callout-cancel">Close</button></div></div>';
+      var list = overlay.querySelector('#cffVariableList');
+      list.innerHTML = groups.map(function (group) {
+        return '<div class="cpb-callout-field"><label>' + escapeHtml(group.group || '') + '</label>'
+          + (group.variables || []).map(function (item) {
+            return '<button type="button" class="cpb-tool-btn" style="margin:3px 4px 3px 0;" data-form-variable="' + escapeAttr(item.key || '') + '">' + escapeHtml(item.label || item.key || '') + '</button>';
+          }).join('')
+          + '</div>';
+      }).join('');
+      function close() { overlay.remove(); }
+      overlay.querySelector('.cpb-callout-cancel').addEventListener('click', close);
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) close();
+        var btn = e.target.closest('[data-form-variable]');
+        if (!btn) return;
+        var key = btn.getAttribute('data-form-variable') || '';
+        var block = selectedFormFieldBlock();
+        if (block) {
+          var field = block.querySelector('[data-form-field="1"]');
+          if (field) field.setAttribute('data-variable-key', key);
+          flushSave(block);
+        } else {
+          createBlock('field', formFieldDefaults('field', key)).catch(showError);
+        }
+        close();
+      });
+      document.body.appendChild(overlay);
+    }).catch(showError);
+  }
+
+  if (documentType === 'form') {
+    root.querySelectorAll('[data-form-tool]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var type = btn.getAttribute('data-form-tool') || 'field';
+        createBlock(type, formFieldDefaults(type)).catch(showError);
+      });
+    });
+    var fieldSettingsBtn = document.getElementById('cpbFormFieldSettings');
+    if (fieldSettingsBtn) {
+      fieldSettingsBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        openFormFieldSettings();
+      });
+    }
+    var variableBtn = document.getElementById('cpbFormVariablePicker');
+    if (variableBtn) {
+      variableBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        openFormVariablePicker();
+      });
+    }
+    canvasEl.addEventListener('click', function (e) {
+      var block = e.target.closest('.cpb-block');
+      if (!block) return;
+      var type = block.getAttribute('data-block-type') || '';
+      if (['field', 'checkbox', 'date', 'signature', 'initial'].indexOf(type) >= 0) {
+        formSelectedBlockId = parseInt(block.getAttribute('data-block-id') || '0', 10) || 0;
+      }
+    });
+    canvasEl.addEventListener('dblclick', function (e) {
+      var block = e.target.closest('.cpb-block');
+      if (block) {
+        formSelectedBlockId = parseInt(block.getAttribute('data-block-id') || '0', 10) || 0;
+        openFormFieldSettings(block);
+      }
     });
   }
 

@@ -1,4 +1,88 @@
 /* Single compliance panel — same width/margins as hero, no nested cmp-card */
+.cpb-form-editor-error {
+  padding: 14px 16px;
+  border: 1px solid #fecdd3;
+  border-radius: 16px;
+  background: #fff1f2;
+  color: #be123c;
+  font-weight: 800;
+}
+
+.cpb-form-toolbar-group {
+  border-left: 1px solid rgba(15, 23, 42, .08);
+  padding-left: 8px;
+}
+
+.cpb-form-field {
+  display: grid;
+  grid-template-columns: minmax(140px, .6fr) 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+}
+
+.cpb-form-field-label {
+  font-weight: 700;
+  color: #102845;
+}
+
+.cpb-form-required {
+  color: #be123c;
+}
+
+.cpb-form-role {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.cpb-form-input-line {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-bottom: 1px solid #334155;
+  color: #64748b;
+}
+
+.cpb-form-checkbox-box {
+  width: 17px;
+  height: 17px;
+  border: 2px solid #334155;
+  background: #fff;
+}
+
+.cpb-form-signature-box,
+.cpb-form-initial-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border: 1px dashed #94a3b8;
+  border-radius: 6px;
+  color: #64748b;
+  background: #fff;
+}
+
+.cpb-form-signature-box {
+  min-width: 190px;
+}
+
+.cpb-form-initial-box {
+  min-width: 72px;
+}
+
 .cmp-page .cpb-editor-root {
   margin: 0 0 18px 0;
   padding: 0;

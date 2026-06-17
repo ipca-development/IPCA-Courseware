@@ -16,6 +16,21 @@ final class StructuredDocumentPayload
      */
     public static function normalizeDocument(array $document): array
     {
+        $sections = array();
+        if (is_array($document['sections'] ?? null)) {
+            foreach ($document['sections'] as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $sections[] = array(
+                    'id' => max(1, (int)($section['id'] ?? 1)),
+                    'section_key' => self::cleanKey((string)($section['section_key'] ?? 'section')),
+                    'title' => trim((string)($section['title'] ?? 'Section')),
+                    'sort_order' => (int)($section['sort_order'] ?? 10),
+                );
+            }
+        }
+
         $blocks = array();
         if (is_array($document['blocks'] ?? null)) {
             foreach ($document['blocks'] as $block) {
@@ -30,6 +45,7 @@ final class StructuredDocumentPayload
             'schema_version' => max(1, (int)($document['schema_version'] ?? 1)),
             'title' => trim((string)($document['title'] ?? '')),
             'layout' => is_array($document['layout'] ?? null) ? $document['layout'] : array('page' => 'letter', 'orientation' => 'portrait'),
+            'sections' => $sections,
             'blocks' => $blocks,
         );
     }
@@ -47,9 +63,14 @@ final class StructuredDocumentPayload
         }
 
         return array(
+            'id' => max(0, (int)($block['id'] ?? 0)),
+            'section_id' => max(1, (int)($block['section_id'] ?? 1)),
             'block_key' => $key,
+            'stable_anchor' => trim((string)($block['stable_anchor'] ?? '')),
             'block_type' => $type,
             'payload' => self::normalizePayload($type, is_array($block['payload'] ?? null) ? $block['payload'] : $block),
+            'sort_order' => (int)($block['sort_order'] ?? 10),
+            'is_system_managed' => !empty($block['is_system_managed']) ? 1 : 0,
         );
     }
 
