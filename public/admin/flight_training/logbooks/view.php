@@ -47,14 +47,13 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(15,23,42,.07)}
 .alogw-panel-title{margin:0;font-size:15px;color:#102845}.alogw-panel-text{margin:3px 0 0;color:#64748b;font-size:12px}
 .alogw-cards{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px}.alogw-card{padding:13px 14px;border-radius:17px;background:#fff;border:1px solid rgba(15,23,42,.08);box-shadow:0 8px 20px rgba(15,23,42,.05)}.alogw-card-label{font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b}.alogw-card-value{margin-top:4px;font-size:20px;font-weight:900;color:#102845}
-.alogw-workspace{display:grid;grid-template-columns:minmax(320px,.82fr) minmax(520px,1.18fr);gap:16px;align-items:start}
-.alogw-image-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px}.alogw-input,.alogw-select{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#102845}
-.alogw-image-box{min-height:520px;background:#0f172a;display:flex;align-items:center;justify-content:center;overflow:auto}.alogw-image-box img{max-width:100%;transform-origin:center;transition:transform .15s ease}.alogw-image-empty{color:#cbd5e1;text-align:center;padding:28px;font-size:13px}
-.alogw-grid-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07)}
-.alogw-table-wrap{overflow:auto;max-height:620px}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;min-width:1800px}.alogw-table th{position:sticky;top:0;z-index:1;padding:9px 8px;background:#f8fafc;border-bottom:1px solid rgba(15,23,42,.09);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;text-align:left}.alogw-table td{padding:7px;border-bottom:1px solid rgba(15,23,42,.06);vertical-align:top}.alogw-table input,.alogw-table textarea,.alogw-table select{width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.1);border-radius:10px;padding:7px;font:inherit;font-size:12px;color:#102845}.alogw-table textarea{height:34px;resize:vertical}.alogw-table input[type=checkbox]{width:auto}
+.alogw-import{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#f8fafc}.alogw-input,.alogw-select{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#102845}.alogw-extract-status{margin-left:auto;font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}
+.alogw-grid-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#fff}
+.alogw-table-wrap{overflow:auto;max-height:720px;background:#fff8ed}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;min-width:2200px;background:#fffdf7}.alogw-table th{position:sticky;top:0;z-index:1;padding:10px 8px;background:#f1e4c7;border-right:1px solid #d8c7a2;border-bottom:2px solid #b99b61;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#5b4630;text-align:center}.alogw-table td{padding:6px;border-right:1px solid #ead9b5;border-bottom:1px solid #ead9b5;vertical-align:top;background:#fffdf7}.alogw-table tr:nth-child(even) td{background:#fff9ec}.alogw-table input,.alogw-table textarea,.alogw-table select{width:100%;box-sizing:border-box;border:1px solid rgba(91,70,48,.16);border-radius:7px;padding:7px;font:inherit;font-size:12px;color:#102845;background:#fffef9}.alogw-table textarea{height:34px;resize:vertical}.alogw-table input[type=checkbox]{width:auto}
+.alogw-modal{position:fixed;inset:0;z-index:9999;display:none;background:rgba(15,23,42,.62);padding:28px}.alogw-modal.is-open{display:flex;align-items:center;justify-content:center}.alogw-modal-card{width:min(1100px,96vw);height:min(820px,92vh);border-radius:22px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden}.alogw-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(15,23,42,.08)}.alogw-modal-body{flex:1;background:#0f172a;overflow:auto;display:flex;align-items:center;justify-content:center}.alogw-modal-body img{max-width:100%;transform-origin:center;transition:transform .15s ease}.alogw-image-empty{color:#cbd5e1;text-align:center;padding:28px;font-size:13px}
 .alogw-bottom{display:grid;grid-template-columns:1fr 1fr;gap:16px}.alogw-req-list{max-height:360px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:86px 1fr 70px;gap:10px;padding:10px 16px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
 .alogw-vars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:12px 16px;max-height:360px;overflow:auto}.alogw-var{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:7px;color:#334155}
-@media(max-width:1200px){.alogw-workspace,.alogw-bottom{grid-template-columns:1fr}.alogw-cards{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+@media(max-width:1200px){.alogw-bottom{grid-template-columns:1fr}.alogw-cards{grid-template-columns:repeat(2,minmax(120px,1fr))}.alogw-extract-status{margin-left:0}}
 </style>
 
 <div class="alogw" id="alogWorkspace" data-logbook-id="<?= (int)$logbookId ?>">
@@ -71,50 +70,40 @@ cw_header('Flight Training · Admin Logbook Workspace');
 
   <section class="alogw-cards" id="alogTotalsCards"></section>
 
-  <section class="alogw-workspace">
-    <div class="alogw-panel">
-      <div class="alogw-panel-head">
-        <div>
-          <h2 class="alogw-panel-title">Original Logbook Image</h2>
-          <p class="alogw-panel-text">Upload source pages, then transcribe rows on the right. OCR stays deferred.</p>
-        </div>
+  <section class="alogw-panel">
+    <div class="alogw-panel-head">
+      <div>
+        <h2 class="alogw-panel-title">Electronic Logbook</h2>
+        <p class="alogw-panel-text">Upload source scans, attempt extraction, review candidate rows, then save accepted trusted entries.</p>
       </div>
-      <form class="alogw-image-tools" id="alogUploadForm" enctype="multipart/form-data">
-        <input type="hidden" name="action" value="upload_page">
-        <input type="hidden" name="logbook_id" value="<?= (int)$logbookId ?>">
-        <input class="alogw-input" type="file" name="image" accept="image/jpeg,image/png,image/webp">
-        <button class="alogw-btn alogw-btn--primary" type="submit">Upload Page</button>
-        <select class="alogw-select" id="alogPageSelect"></select>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogZoomOut">-</button>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogZoomIn">+</button>
-      </form>
-      <div class="alogw-image-box" id="alogImageBox"></div>
+      <span class="alogw-status" id="alogStatus">Ready</span>
     </div>
-
-    <div class="alogw-panel">
-      <div class="alogw-panel-head">
-        <div>
-          <h2 class="alogw-panel-title">Editable Flight Rows</h2>
-          <p class="alogw-panel-text">Add, edit, split, merge, flag, and tag structured flights.</p>
-        </div>
-        <span class="alogw-status" id="alogStatus">Ready</span>
-      </div>
-      <div class="alogw-grid-tools">
-        <button class="alogw-btn alogw-btn--primary" type="button" id="alogAddRow">Add Row</button>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSaveRows">Save Changed Rows</button>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSplitRow">Split Selected</button>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogMergeRows">Merge Selected</button>
-        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogFlagRows">Flag Selected</button>
-        <button class="alogw-btn alogw-btn--danger" type="button" id="alogDeleteRows">Delete Selected</button>
-        <select class="alogw-select" id="alogRequirementSelect"></select>
-        <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Assign Requirement</button>
-      </div>
-      <div class="alogw-table-wrap">
-        <table class="alogw-table">
-          <thead id="alogTableHead"></thead>
-          <tbody id="alogTableBody"></tbody>
-        </table>
-      </div>
+    <form class="alogw-import" id="alogUploadForm" enctype="multipart/form-data">
+      <input type="hidden" name="action" value="upload_page">
+      <input type="hidden" name="logbook_id" value="<?= (int)$logbookId ?>">
+      <input class="alogw-input" type="file" name="image" accept="image/jpeg,image/png,image/webp">
+      <button class="alogw-btn alogw-btn--primary" type="submit">Upload Logbook Page</button>
+      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogExtractPage">Import / Extract</button>
+      <select class="alogw-select" id="alogPageSelect"></select>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogViewImage">View Source Image</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogCompareImage">Compare With Image</button>
+      <span class="alogw-extract-status" id="alogExtractionStatus">Extraction status: no page</span>
+    </form>
+    <div class="alogw-grid-tools">
+      <button class="alogw-btn alogw-btn--primary" type="button" id="alogAddRow">Add Row</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSaveRows">Save Changed Rows</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSplitRow">Split Selected</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogMergeRows">Merge Selected</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogFlagRows">Flag Selected</button>
+      <button class="alogw-btn alogw-btn--danger" type="button" id="alogDeleteRows">Delete Selected</button>
+      <select class="alogw-select" id="alogRequirementSelect"></select>
+      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Assign Requirement</button>
+    </div>
+    <div class="alogw-table-wrap">
+      <table class="alogw-table">
+        <thead id="alogTableHead"></thead>
+        <tbody id="alogTableBody"></tbody>
+      </table>
     </div>
   </section>
 
@@ -138,6 +127,23 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <div class="alogw-vars" id="alogVariables"></div>
     </div>
   </section>
+</div>
+
+<div class="alogw-modal" id="alogImageModal" aria-hidden="true">
+  <div class="alogw-modal-card">
+    <div class="alogw-modal-head">
+      <div>
+        <h2 class="alogw-panel-title">Source Logbook Image</h2>
+        <p class="alogw-panel-text">Use as source evidence while reviewing extracted or edited rows.</p>
+      </div>
+      <div>
+        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogZoomOut">-</button>
+        <button class="alogw-btn alogw-btn--ghost" type="button" id="alogZoomIn">+</button>
+        <button class="alogw-btn alogw-btn--danger" type="button" id="alogCloseImage">Close</button>
+      </div>
+    </div>
+    <div class="alogw-modal-body" id="alogImageBox"></div>
+  </div>
 </div>
 
 <script>
@@ -178,13 +184,25 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   function renderPages(){
     const pages = data.pages || [];
     const select = document.getElementById('alogPageSelect');
-    select.innerHTML = pages.length ? pages.map(p => `<option value="${esc(p.image_url)}">Page ${esc(p.page_number)}</option>`).join('') : '<option value="">No image pages</option>';
+    const previous = select.value;
+    select.innerHTML = pages.length ? pages.map(p => `<option value="${esc(p.id)}"${String(p.id) === previous ? ' selected' : ''}>Page ${esc(p.page_number)}</option>`).join('') : '<option value="">No source pages</option>';
+    renderExtractionStatus();
     renderImage();
   }
+  function currentPage(){
+    const id = document.getElementById('alogPageSelect').value;
+    return (data.pages || []).find(p => String(p.id) === String(id)) || null;
+  }
+  function renderExtractionStatus(){
+    const page = currentPage();
+    const label = page ? `Extraction status: ${page.extraction_status || 'manual'}` : 'Extraction status: no page';
+    document.getElementById('alogExtractionStatus').textContent = label;
+  }
   function renderImage(){
-    const url = document.getElementById('alogPageSelect').value;
+    const page = currentPage();
+    const url = page ? page.image_url : '';
     const box = document.getElementById('alogImageBox');
-    box.innerHTML = url ? `<img src="${esc(url)}" style="transform:scale(${zoom})">` : '<div class="alogw-image-empty">No uploaded source image yet.<br>Upload a page image, then manually transcribe rows.</div>';
+    box.innerHTML = url ? `<img src="${esc(url)}" style="transform:scale(${zoom})">` : '<div class="alogw-image-empty">No uploaded source image yet.<br>Upload scans, run import/extract, then review candidate rows in the logbook table.</div>';
   }
   function renderTable(){
     document.getElementById('alogTableHead').innerHTML = '<tr>' + cols.map(([,label]) => `<th>${esc(label)}</th>`).join('') + '</tr>';
@@ -223,10 +241,32 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     }
   });
   document.addEventListener('change', e => {
-    if(e.target.id === 'alogPageSelect') renderImage();
+    if(e.target.id === 'alogPageSelect') { renderExtractionStatus(); renderImage(); }
   });
+  function openImageModal(){
+    document.getElementById('alogImageModal').classList.add('is-open');
+    document.getElementById('alogImageModal').setAttribute('aria-hidden','false');
+    renderImage();
+  }
+  function closeImageModal(){
+    document.getElementById('alogImageModal').classList.remove('is-open');
+    document.getElementById('alogImageModal').setAttribute('aria-hidden','true');
+  }
+  document.getElementById('alogViewImage').addEventListener('click', openImageModal);
+  document.getElementById('alogCompareImage').addEventListener('click', openImageModal);
+  document.getElementById('alogCloseImage').addEventListener('click', closeImageModal);
   document.getElementById('alogZoomIn').addEventListener('click', () => { zoom += .1; renderImage(); });
   document.getElementById('alogZoomOut').addEventListener('click', () => { zoom = Math.max(.4, zoom - .1); renderImage(); });
+  document.getElementById('alogExtractPage').addEventListener('click', async () => {
+    try {
+      const page = currentPage();
+      if(!page) { setStatus('Upload a source page first'); return; }
+      setStatus('Running import/extract...');
+      const json = await post({action:'attempt_extract_page', logbook_id:logbookId, page_id:page.id});
+      const count = json.result ? Number(json.result.candidate_count || 0) : 0;
+      setStatus(count > 0 ? `Imported ${count} candidate row${count === 1 ? '' : 's'} for review` : 'Extraction attempted: no candidate rows returned yet');
+    } catch(err){ setStatus(err.message); }
+  });
   document.getElementById('alogAddRow').addEventListener('click', () => { entries.push({review_status:'ok', _dirty:true}); renderTable(); setStatus('New row added'); });
   document.getElementById('alogSaveRows').addEventListener('click', async () => {
     try {

@@ -326,6 +326,63 @@ final class AdminLogbookService
     }
 
     /**
+     * Import candidate rows already present in a page's extracted_json payload.
+     * OCR/AI population can be added later without changing this review workflow.
+     *
+     * @return array<string,mixed>
+     */
+    public function attemptPageExtraction(int $logbookId, int $pageId, int $actorUserId): array
+    {
+        $this->requireSchema();
+        $page = $this->getPage($pageId);
+        if ($page === null || (int)$page['logbook_id'] !== $logbookId) {
+            throw new RuntimeException('Logbook page not found.');
+        }
+
+        $payload = $this->decodeJson((string)($page['extracted_json'] ?? '{}'));
+        $candidateRows = is_array($payload['rows'] ?? null) ? $payload['rows'] : array();
+        $created = array();
+        foreach ($candidateRows as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+            $candidate['source_page_id'] = $pageId;
+            $candidate['review_status'] = 'flagged';
+            $candidate['metadata'] = array(
+                'source' => 'extraction_candidate',
+                'accepted' => false,
+            );
+            $created[] = $this->saveEntry($logbookId, $candidate, $actorUserId);
+        }
+
+        $status = $created !== array() ? 'review' : 'no_candidates';
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_admin_logbook_pages
+            SET extraction_status = :status,
+                extracted_json = JSON_SET(COALESCE(extracted_json, JSON_OBJECT()), '$.last_attempt_at', :attempted_at)
+            WHERE id = :id AND logbook_id = :logbook_id
+        ");
+        $stmt->execute(array(
+            ':status' => $status,
+            ':attempted_at' => date('c'),
+            ':id' => $pageId,
+            ':logbook_id' => $logbookId,
+        ));
+
+        $after = $this->getPage($pageId);
+        $this->writeAudit($logbookId, null, $actorUserId, 'logbook_extraction_attempted', $page, array(
+            'page' => $after,
+            'candidate_count' => count($created),
+        ));
+
+        return array(
+            'page' => $after ?? array(),
+            'candidate_count' => count($created),
+            'candidates' => $created,
+        );
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     public function listRequirementCategories(): array

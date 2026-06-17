@@ -106,6 +106,12 @@ try {
             $page = $service->addPageFromUpload($logbookId, $_FILES['image'], $actorUserId);
             alog_json(200, array('ok' => true, 'page' => $page, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'attempt_extract_page':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $result = $service->attemptPageExtraction($logbookId, (int)($input['page_id'] ?? 0), $actorUserId);
+            alog_json(200, array('ok' => true, 'result' => $result, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'assign_requirement':
             $input = alog_input();
             $logbookId = (int)($input['logbook_id'] ?? 0);
