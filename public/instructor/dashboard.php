@@ -9,7 +9,7 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $userId = (int)($u['id'] ?? 0);
-$role   = (string)($u['role'] ?? '');
+$role   = strtolower(trim((string)($u['role'] ?? '')));
 
 $engine = new CoursewareProgressionV2($pdo);
 
@@ -46,7 +46,7 @@ function dash_fmt_datetime(?string $value): string
 
 function can_view_instructor_dashboard(PDO $pdo, CoursewareProgressionV2 $engine, int $userId, string $role): bool
 {
-    if (in_array($role, ['admin', 'instructor', 'chief_instructor'], true)) {
+    if (in_array($role, ['admin', 'supervisor', 'instructor', 'chief_instructor'], true)) {
         return true;
     }
 
