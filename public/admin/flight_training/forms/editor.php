@@ -114,7 +114,7 @@ cw_header('Flight Training · Form Template Editor');
               <button type="button" class="cpb-tool-btn" id="cpbIndent" title="Increase indent (Tab)">⇥</button>
             </div>
             <div class="cpb-toolbar-group">
-              <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Book style editor">Styles</button>
+              <button type="button" class="cpb-tool-btn" id="cpbOpenStyleEditor" title="Form Style Editor">Styles</button>
               <button type="button" class="cpb-tool-btn" id="cpbOpenHeaderEditor" title="Page header editor">Header</button>
               <button type="button" class="cpb-tool-btn" data-add-block="paragraph" title="Add paragraph">¶</button>
               <button type="button" class="cpb-tool-btn" data-add-block="table" title="Add table">Table</button>

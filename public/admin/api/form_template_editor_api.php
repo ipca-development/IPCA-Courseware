@@ -73,7 +73,11 @@ try {
             break;
 
         case 'get_book_styles':
-            ft_form_editor_json(200, array('ok' => true, 'book_styles' => ft_form_default_book_styles()));
+            ft_form_handle_get_book_styles($service, $actorUserId);
+            break;
+
+        case 'save_book_styles':
+            ft_form_handle_save_book_styles($service, $actorUserId);
             break;
 
         case 'save_content':
@@ -240,6 +244,24 @@ function ft_form_handle_recompute(FormTemplateEditorService $service, int $actor
     ));
 }
 
+function ft_form_handle_get_book_styles(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'book_styles' => ft_form_resolve_book_styles($doc)));
+}
+
+function ft_form_handle_save_book_styles(FormTemplateEditorService $service, int $actorUserId): void
+{
+    $in = ft_form_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $bookStyles = is_array($in['book_styles'] ?? null) ? $in['book_styles'] : array();
+    [$templateId, $ctx, $doc] = ft_form_load_context($service, $versionId, $actorUserId);
+    $doc['book_styles'] = $bookStyles;
+    $service->saveContent($templateId, $versionId, $doc, $actorUserId);
+    ft_form_editor_json(200, array('ok' => true, 'book_styles' => ft_form_resolve_book_styles($doc)));
+}
+
 function ft_form_version_id_for_block(int $blockId): int
 {
     global $pdo;
@@ -324,6 +346,23 @@ function ft_form_default_payload(string $type, array $payload): array
 {
     if ($type === 'heading') return array('text' => (string)($payload['text'] ?? 'Heading'), 'level' => (int)($payload['level'] ?? 2), 'paragraph_style' => 'subtitle_2');
     if ($type === 'table') return array('title' => (string)($payload['title'] ?? ''), 'headers' => $payload['headers'] ?? array('Column 1', 'Column 2'), 'rows' => $payload['rows'] ?? array(array('', '')));
+    if ($type === 'callout') {
+        $calloutType = (string)($payload['callout_type'] ?? 'warning');
+        if (!in_array($calloutType, array('warning', 'caution', 'info', 'note'), true)) {
+            $calloutType = 'warning';
+        }
+        return array(
+            'callout_type' => $calloutType,
+            'title' => (string)($payload['title'] ?? strtoupper($calloutType)),
+            'text' => (string)($payload['text'] ?? ''),
+            'title_font_family' => (string)($payload['title_font_family'] ?? ''),
+            'title_font_size' => (int)($payload['title_font_size'] ?? 0),
+            'title_text_color' => (string)($payload['title_text_color'] ?? ''),
+            'text_font_family' => (string)($payload['text_font_family'] ?? ''),
+            'text_font_size' => (int)($payload['text_font_size'] ?? 0),
+            'text_text_color' => (string)($payload['text_text_color'] ?? ''),
+        );
+    }
     if (in_array($type, array('field', 'checkbox', 'date', 'signature', 'initial'), true)) {
         return array(
             'field_key' => (string)($payload['field_key'] ?? $type . '_' . time()),
@@ -388,7 +427,7 @@ function ft_form_load_payload(array $ctx, array $doc, array $section, string $pa
         'lep_approval_url' => '',
         'toc_settings' => array(),
         'toc_settings_catalog' => array(),
-        'book_styles' => ft_form_default_book_styles(),
+        'book_styles' => ft_form_resolve_book_styles($doc),
         'page_header' => array('enabled' => false),
         'page_footer' => array('enabled' => false),
         'header_tokens' => array(),
@@ -437,6 +476,30 @@ function ft_form_render_inner(string $type, array $payload, bool $editable): str
         }
         return $out . '</tbody></table></div></div>';
     }
+    if ($type === 'callout') {
+        $calloutType = (string)($payload['callout_type'] ?? 'warning');
+        if (!in_array($calloutType, array('warning', 'caution', 'info', 'note'), true)) {
+            $calloutType = 'warning';
+        }
+        $titleStyle = '';
+        if (!empty($payload['title_font_size'])) {
+            $titleStyle .= 'font-size:' . (int)$payload['title_font_size'] . 'pt;';
+        }
+        if (!empty($payload['title_text_color'])) {
+            $titleStyle .= 'color:' . h((string)$payload['title_text_color']) . ';';
+        }
+        $textStyle = '';
+        if (!empty($payload['text_font_size'])) {
+            $textStyle .= 'font-size:' . (int)$payload['text_font_size'] . 'pt;';
+        }
+        if (!empty($payload['text_text_color'])) {
+            $textStyle .= 'color:' . h((string)$payload['text_text_color']) . ';';
+        }
+        return '<div class="cpb-callout cpb-callout--' . h($calloutType) . '" data-callout-type="' . h($calloutType) . '" contenteditable="false">'
+            . '<div class="cpb-callout-title" data-font-family="' . h((string)($payload['title_font_family'] ?? '')) . '" data-font-size="' . (int)($payload['title_font_size'] ?? 0) . '" style="' . h($titleStyle) . '"' . $ce . '>' . (string)($payload['title'] ?? strtoupper($calloutType)) . '</div>'
+            . '<div class="cpb-callout-text" data-font-family="' . h((string)($payload['text_font_family'] ?? '')) . '" data-font-size="' . (int)($payload['text_font_size'] ?? 0) . '" style="' . h($textStyle) . '"' . $ce . '>' . (string)($payload['text'] ?? '') . '</div>'
+            . '</div>';
+    }
     if (in_array($type, array('field', 'checkbox', 'date', 'signature', 'initial'), true)) {
         $fieldType = (string)($payload['field_type'] ?? $type);
         $control = '<span class="cpb-form-input-line">' . h((string)($payload['placeholder'] ?? '')) . '</span>';
@@ -448,7 +511,25 @@ function ft_form_render_inner(string $type, array $payload, bool $editable): str
     return '<div class="cpb-paragraph cpb-ps-body" data-paragraph-style="body"' . $ce . '>' . (string)($payload['html'] ?? 'Text block') . '</div>';
 }
 
+function ft_form_resolve_book_styles(array $doc): array
+{
+    $stored = is_array($doc['book_styles'] ?? null) ? $doc['book_styles'] : array();
+    return array_replace_recursive(ft_form_default_book_styles(), $stored);
+}
+
 function ft_form_default_book_styles(): array
 {
-    return array('paragraph_styles' => array(), 'table_styles' => array(), 'callout_presets' => array(), 'callout_styles' => array(), 'page_header' => array('enabled' => false), 'page_footer' => array('enabled' => false));
+    return array(
+        'paragraph_styles' => array(),
+        'table_styles' => array(),
+        'callout_presets' => array(
+            array('callout_type' => 'warning', 'title' => 'WARNING', 'text' => ''),
+            array('callout_type' => 'caution', 'title' => 'CAUTION', 'text' => ''),
+            array('callout_type' => 'info', 'title' => 'INFO', 'text' => ''),
+            array('callout_type' => 'note', 'title' => 'NOTE', 'text' => ''),
+        ),
+        'callout_styles' => array(),
+        'page_header' => array('enabled' => false),
+        'page_footer' => array('enabled' => false),
+    );
 }

@@ -5043,6 +5043,8 @@
     var styles = JSON.parse(JSON.stringify(state.bookStyles || defaultBookStyles()));
     var overlay = document.createElement('div');
     overlay.className = 'cpb-style-overlay';
+    var styleEditorTitle = documentType === 'form' ? 'Form Style Editor' : 'Book style editor';
+    var styleSavedStatus = documentType === 'form' ? 'Form styles saved' : 'Book styles saved';
 
     var paragraphRows = PARAGRAPH_STYLE_KEYS.map(function (key) {
       var def = styles.paragraph_styles[key] || {};
@@ -5123,8 +5125,8 @@
     }
 
     overlay.innerHTML = ''
-      + '<div class="cpb-style-dialog" role="dialog" aria-label="Book style editor">'
-      + '<h3>Book style editor</h3>'
+      + '<div class="cpb-style-dialog" role="dialog" aria-label="' + escapeAttr(styleEditorTitle) + '">'
+      + '<h3>' + escapeHtml(styleEditorTitle) + '</h3>'
       + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering '
       + '(Title 1. · Subtitle 1 1.1 · Subtitle 2 1.1.1 · …). '
       + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived or entered manually in the toolbar.</p>'
@@ -5207,7 +5209,7 @@
           state.bookStyles = res.book_styles || payload;
           state.calloutPresets = state.bookStyles.callout_presets || state.calloutPresets;
           close();
-          setStatus('Book styles saved', 'saved');
+          setStatus(styleSavedStatus, 'saved');
           return loadSection(state.sectionId).then(function () {
             canvasEl.querySelectorAll('.cpb-paragraph, .cpb-heading, .cpb-list').forEach(function (el) {
               refreshBlockTypographyFromBookStyles(el);

@@ -6,7 +6,7 @@ declare(strict_types=1);
  */
 final class StructuredDocumentPayload
 {
-    private const BLOCK_TYPES = array('heading', 'paragraph', 'table', 'checkbox', 'field', 'date', 'signature', 'initial');
+    private const BLOCK_TYPES = array('heading', 'paragraph', 'table', 'callout', 'checkbox', 'field', 'date', 'signature', 'initial');
     private const FIELD_BLOCK_TYPES = array('checkbox', 'field', 'date', 'signature', 'initial');
     private const ROLES = array('admin', 'instructor', 'student', 'other_instructor', 'examiner', 'external_party');
 
@@ -45,6 +45,7 @@ final class StructuredDocumentPayload
             'schema_version' => max(1, (int)($document['schema_version'] ?? 1)),
             'title' => trim((string)($document['title'] ?? '')),
             'layout' => is_array($document['layout'] ?? null) ? $document['layout'] : array('page' => 'letter', 'orientation' => 'portrait'),
+            'book_styles' => is_array($document['book_styles'] ?? null) ? $document['book_styles'] : array(),
             'sections' => $sections,
             'blocks' => $blocks,
         );
@@ -121,6 +122,7 @@ final class StructuredDocumentPayload
                 'level' => max(1, min(6, (int)($payload['level'] ?? 2))),
             ),
             'table' => self::normalizeTable($payload),
+            'callout' => self::normalizeCallout($payload),
             'checkbox', 'field', 'date', 'signature', 'initial' => self::normalizeFieldPayload($type, $payload),
             default => array('html' => self::sanitizeInline((string)($payload['html'] ?? $payload['text'] ?? ''))),
         };
@@ -178,6 +180,29 @@ final class StructuredDocumentPayload
             'assigned_role' => self::normalizeRole((string)($payload['assigned_role'] ?? 'instructor')),
             'variable_key' => trim((string)($payload['variable_key'] ?? '')),
             'validation' => is_array($payload['validation'] ?? null) ? $payload['validation'] : array(),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private static function normalizeCallout(array $payload): array
+    {
+        $type = strtolower(trim((string)($payload['callout_type'] ?? 'warning')));
+        if (!in_array($type, array('warning', 'caution', 'info', 'note'), true)) {
+            $type = 'warning';
+        }
+        return array(
+            'callout_type' => $type,
+            'title' => self::sanitizeInline((string)($payload['title'] ?? strtoupper($type))),
+            'text' => self::sanitizeInline((string)($payload['text'] ?? '')),
+            'title_font_family' => trim((string)($payload['title_font_family'] ?? '')),
+            'title_font_size' => (int)($payload['title_font_size'] ?? 0),
+            'title_text_color' => trim((string)($payload['title_text_color'] ?? '')),
+            'text_font_family' => trim((string)($payload['text_font_family'] ?? '')),
+            'text_font_size' => (int)($payload['text_font_size'] ?? 0),
+            'text_text_color' => trim((string)($payload['text_text_color'] ?? '')),
         );
     }
 
