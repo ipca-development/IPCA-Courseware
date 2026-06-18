@@ -5,6 +5,7 @@ require_once __DIR__ . '/FlightTotalsService.php';
 require_once __DIR__ . '/FlightRequirementEngine.php';
 require_once __DIR__ . '/FlightVariableService.php';
 require_once __DIR__ . '/LogbookImageExtractionService.php';
+require_once __DIR__ . '/AirportDataService.php';
 
 final class AdminLogbookService
 {
@@ -18,6 +19,8 @@ final class AdminLogbookService
         'ipca_flight_requirement_assignment_entries',
         'ipca_flight_requirement_evaluations',
         'ipca_flight_variable_snapshots',
+        'ipca_airports',
+        'ipca_airport_runways',
     );
 
     private const REQUIRED_ENTRY_COLUMNS = array(
@@ -58,6 +61,7 @@ final class AdminLogbookService
     private FlightRequirementEngine $requirements;
     private FlightVariableService $variables;
     private LogbookImageExtractionService $extractor;
+    private AirportDataService $airports;
 
     public function __construct(private PDO $pdo)
     {
@@ -65,6 +69,7 @@ final class AdminLogbookService
         $this->requirements = new FlightRequirementEngine($this->totals);
         $this->variables = new FlightVariableService();
         $this->extractor = new LogbookImageExtractionService();
+        $this->airports = new AirportDataService($pdo);
     }
 
     public function schemaReady(): bool
@@ -192,6 +197,15 @@ final class AdminLogbookService
     }
 
     /**
+     * @return array<string,mixed>|null
+     */
+    public function lookupAirport(string $icaoIdentifier, bool $allowAiLookup = false): ?array
+    {
+        $this->requireSchema();
+        return $this->airports->lookupAirport($icaoIdentifier, $allowAiLookup);
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public function saveEntry(int $logbookId, array $data, int $actorUserId): array
@@ -201,6 +215,7 @@ final class AdminLogbookService
         $entryId = (int)($data['id'] ?? 0);
         $before = $entryId > 0 ? $this->getEntry($entryId) : null;
         $row = $this->normalizeEntry($data);
+        $row = $this->resolveAirportDataForEntry($row, true);
         $row['logbook_id'] = $logbookId;
         if ($before !== null && $row['external_system'] === null && trim((string)($before['external_system'] ?? '')) !== '') {
             $row['external_system'] = (string)$before['external_system'];
@@ -760,6 +775,12 @@ final class AdminLogbookService
     {
         $source = $this->decodeJson((string)($row['source_json'] ?? '{}'));
         if ($source === array()) {
+            if ((float)($row['cross_country_time'] ?? 0) > 0) {
+                $derivedDistance = $this->straightLineDistanceNm((string)($row['departure_airport'] ?? ''), (string)($row['arrival_airport'] ?? ''));
+                if ($derivedDistance !== null) {
+                    $row['cross_country_distance_nm'] = $derivedDistance;
+                }
+            }
             $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
             return $row;
         }
@@ -840,8 +861,38 @@ final class AdminLogbookService
                 $row['day_landings'] = $landings;
             }
         }
+        if ((float)($row['cross_country_time'] ?? 0) > 0) {
+            $derivedDistance = $this->straightLineDistanceNm((string)($row['departure_airport'] ?? ''), (string)($row['arrival_airport'] ?? ''));
+            if ($derivedDistance !== null) {
+                $row['cross_country_distance_nm'] = $derivedDistance;
+            }
+        }
 
         $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
+        return $row;
+    }
+
+    private function straightLineDistanceNm(string $departure, string $arrival): ?float
+    {
+        return $this->airports->straightLineDistanceNm($departure, $arrival);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function resolveAirportDataForEntry(array $row, bool $allowAiLookup): array
+    {
+        $this->airports->lookupAirport((string)($row['departure_airport'] ?? ''), $allowAiLookup);
+        $this->airports->lookupAirport((string)($row['arrival_airport'] ?? ''), $allowAiLookup);
+        if ((float)($row['cross_country_time'] ?? 0) > 0) {
+            $derivedDistance = $this->straightLineDistanceNm((string)($row['departure_airport'] ?? ''), (string)($row['arrival_airport'] ?? ''));
+            if ($derivedDistance !== null) {
+                $row['cross_country_distance_nm'] = $derivedDistance;
+            }
+        } else {
+            $row['cross_country_distance_nm'] = 0;
+        }
         return $row;
     }
 

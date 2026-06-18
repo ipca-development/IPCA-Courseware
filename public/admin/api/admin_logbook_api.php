@@ -69,6 +69,12 @@ try {
                 'calculated_at' => date('c'),
             ));
 
+        case 'airport_lookup':
+            $input = alog_input();
+            $icao = (string)($input['icao'] ?? $_GET['icao'] ?? '');
+            $allowAi = (bool)($input['allow_ai'] ?? $_GET['allow_ai'] ?? false);
+            alog_json(200, array('ok' => true, 'airport' => $service->lookupAirport($icao, $allowAi)));
+
         case 'save_entry':
             $input = alog_input();
             $entry = $service->saveEntry((int)($input['logbook_id'] ?? 0), is_array($input['entry'] ?? null) ? $input['entry'] : array(), $actorUserId);

@@ -50,7 +50,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-egle-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px}.alogw-egle-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.alogw-egle-field{display:flex;flex-direction:column;gap:5px}.alogw-egle-field--wide{grid-column:1/-1}.alogw-egle-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b}.alogw-egle-input{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-egle-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.alogw-egle-status{font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}.alogw-egle-candidates{display:flex;flex-direction:column;gap:7px;max-height:210px;overflow:auto}.alogw-egle-candidate{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid rgba(15,23,42,.08);border-radius:13px;padding:8px;background:#f8fafc}.alogw-egle-candidate strong{font-size:12px;color:#102845}.alogw-egle-candidate span{font-size:11px;color:#64748b}
 .alogw-import{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#f8fafc}.alogw-import-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.alogw-input,.alogw-select{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#102845}.alogw-extract-status{margin-left:auto;font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}
 .alogw-grid-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#fff}
-.alogw-table-wrap{overflow-x:hidden;overflow-y:auto;max-height:720px;background:#fff}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;background:#fff}.alogw-table th{position:sticky;top:0;z-index:1;padding:6px 3px;background:#f8fafc;border-right:1px solid #e2e8f0;border-bottom:1px solid #cbd5e1;font-size:8px;line-height:1;white-space:nowrap;text-transform:uppercase;letter-spacing:0;color:#475569;text-align:center}.alogw-table td{padding:5px 3px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;vertical-align:middle;background:#fff;font-size:9px;line-height:1.1;color:#102845;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-table tr:nth-child(even) td{background:#f8fafc}.alogw-table input[type=checkbox]{width:auto;height:auto}.alogw-row-actions{display:flex;gap:4px;justify-content:center}.alogw-mini-btn{border:0;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;cursor:pointer}.alogw-mini-btn--edit{background:#eef2ff;color:#1e3a8a}.alogw-mini-btn--delete{background:#fff1f2;color:#be123c}.alogw-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e2e8f0;color:#475569}.alogw-status-pill--accepted,.alogw-status-pill--ok{background:#dcfce7;color:#166534}.alogw-status-pill--imported,.alogw-status-pill--needs_review,.alogw-status-pill--flagged{background:#fef3c7;color:#92400e}.alogw-status-pill--rejected{background:#fee2e2;color:#991b1b}
+.alogw-table-wrap{overflow-x:hidden;overflow-y:auto;max-height:720px;background:#fff}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;background:#fff}.alogw-table th{position:sticky;top:0;z-index:1;padding:6px 6px 6px 3px;background:#f8fafc;border-right:1px solid #e2e8f0;border-bottom:1px solid #cbd5e1;font-size:8px;line-height:1;white-space:nowrap;text-transform:uppercase;letter-spacing:0;color:#475569;text-align:center;overflow:hidden;text-overflow:ellipsis}.alogw-table th .alogw-col-resizer{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none;touch-action:none}.alogw-table th .alogw-col-resizer:hover{background:rgba(37,99,235,.18)}.alogw-table td{padding:5px 3px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;vertical-align:middle;background:#fff;font-size:9px;line-height:1.1;color:#102845;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-table td.alogw-num{text-align:center;font-variant-numeric:tabular-nums}.alogw-table tr:nth-child(even) td{background:#f8fafc}.alogw-table input[type=checkbox]{width:auto;height:auto}.alogw-row-actions{display:flex;gap:4px;justify-content:center}.alogw-mini-btn{border:0;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;cursor:pointer}.alogw-mini-btn--edit{background:#eef2ff;color:#1e3a8a}.alogw-mini-btn--delete{background:#fff1f2;color:#be123c}.alogw-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e2e8f0;color:#475569}.alogw-status-pill--accepted,.alogw-status-pill--ok{background:#dcfce7;color:#166534}.alogw-status-pill--imported,.alogw-status-pill--needs_review,.alogw-status-pill--flagged{background:#fef3c7;color:#92400e}.alogw-status-pill--rejected{background:#fee2e2;color:#991b1b}
 .alogw-modal{position:fixed;inset:0;z-index:9999;display:none;background:rgba(15,23,42,.62);padding:18px}.alogw-modal.is-open{display:flex;align-items:center;justify-content:center}.alogw-modal-card{width:min(1100px,96vw);height:min(760px,92vh);border-radius:22px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden}.alogw-modal-head{flex:0 0 auto;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.08)}.alogw-modal-body{flex:1;background:#0f172a;overflow:auto;display:flex;align-items:center;justify-content:center}.alogw-modal-body img{max-width:100%;transform-origin:center;transition:transform .15s ease}.alogw-image-empty{color:#cbd5e1;text-align:center;padding:28px;font-size:13px}
 .alogw-edit-body{flex:1 1 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 14px;overflow:auto;background:#fff}.alogw-edit-field{display:flex;flex-direction:column;gap:3px}.alogw-edit-field--wide{grid-column:1/-1}.alogw-edit-label{font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.alogw-edit-input,.alogw-edit-textarea,.alogw-edit-select{border:1px solid rgba(15,23,42,.13);border-radius:9px;padding:6px 8px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-edit-textarea{min-height:52px;resize:vertical}.alogw-edit-actions{flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid rgba(15,23,42,.08);background:#f8fafc}
 .alogw-modal-card form{min-height:0;display:flex;flex-direction:column;flex:1 1 auto}
@@ -145,6 +145,15 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogMergeRows">Merge Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogFlagRows">Flag Selected</button>
       <button class="alogw-btn alogw-btn--danger" type="button" id="alogDeleteRows">Delete Selected</button>
+      <select class="alogw-select" id="alogTimeZoneSelect" title="Time display">
+        <option value="UTC">UTC</option>
+        <option value="Europe/Brussels">Belgium Local</option>
+        <option value="America/Los_Angeles">California Local</option>
+        <option value="America/New_York">Eastern US Local</option>
+        <option value="America/Phoenix">Arizona Local</option>
+        <option value="Europe/London">United Kingdom Local</option>
+        <option value="browser">Browser Local</option>
+      </select>
       <select class="alogw-select" id="alogRequirementSelect"></select>
       <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Assign Requirement</button>
     </div>
@@ -281,12 +290,17 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   let data = window.IPCA_ADMIN_LOGBOOK || {};
   let entries = (data.entries || []).map(row => ({...row, _dirty:false}));
   let zoom = 1;
+  const columnWidthStorageKey = `ipca.adminLogbook.${logbookId}.columnWidths.v1`;
+  const timeZoneStorageKey = `ipca.adminLogbook.timeZone.v1`;
+  const defaultColumnWidths = {select:24,actions:52,entry_date:64,departure_airport:52,departure_time:40,arrival_airport:52,arrival_time:40,aircraft_registration:58,aircraft_type:48,single_engine_time:34,multi_engine_time:34,pic_time:36,copilot_time:42,dual_received_time:38,solo_time:38,cross_country_time:34,cross_country_distance_nm:44,day_time:38,night_time:42,instrument_time:42,basic_instrument_flying_time:48,fnpt_simulator_time:44,day_landings:38,night_landings:38,instructor_name:74,total_flight_time:44,remarks:78,review_status:58};
+  let columnWidths = loadColumnWidths();
+  let selectedTimeZone = loadTimeZone();
   const cols = [
-    ['select',''],['actions','Actions'],['entry_date','Date'],['departure_airport','Departure'],['arrival_airport','Arrival'],
-    ['aircraft_registration','Aircraft Reg'],['aircraft_type','Aircraft Type'],['single_engine_time','SE'],['multi_engine_time','ME'],
+    ['select',''],['actions','Actions'],['entry_date','Date'],['departure_airport','DEP AD'],['departure_time','DEP T'],['arrival_airport','ARR AD'],['arrival_time','ARR T'],
+    ['aircraft_registration','AC REG'],['aircraft_type','AC TYP'],['single_engine_time','SE'],['multi_engine_time','ME'],
     ['pic_time','PIC'],['copilot_time','Co-Pilot'],['dual_received_time','Dual'],['solo_time','Solo'],['cross_country_time','XC'],
-    ['cross_country_distance_nm','XC NM'],['day_time','Day Time'],['night_time','Night Time'],['instrument_time','Instrument'],['basic_instrument_flying_time','Basic Instr'],
-    ['fnpt_simulator_time','FNPT / Sim'],['day_landings','Day Ldg'],['night_landings','Night Ldg'],['instructor_name','Instructor'],
+    ['cross_country_distance_nm','XC NM'],['day_time','DAY'],['night_time','NIGHT'],['instrument_time','INSTR'],['basic_instrument_flying_time','B INSTR'],
+    ['fnpt_simulator_time','FSTD'],['day_landings','LD D'],['night_landings','LD N'],['instructor_name','Instructor'],
     ['total_flight_time','Total'],['remarks','Remarks'],['review_status','Status']
   ];
   const editFields = [
@@ -298,7 +312,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     ['day_time','Day Time','number'],['day_landings','Day Landings','number'],['night_landings','Night Landings','number'],['towered_airport_landings','Towered Landings','number'],['instructor_name','Instructor','text'],
     ['total_flight_time','Total Time','number'],['remarks','Remarks','textarea'],['endorsements','Endorsements','textarea'],['review_status','Status','status']
   ];
-  const numeric = new Set(['single_engine_time','multi_engine_time','pic_time','copilot_time','dual_received_time','solo_time','cross_country_time','cross_country_distance_nm','night_time','instrument_time','actual_instrument_time','simulated_instrument_time','basic_instrument_flying_time','fnpt_simulator_time','day_landings','night_landings','towered_airport_landings','total_flight_time']);
+  const numeric = new Set(['single_engine_time','multi_engine_time','pic_time','copilot_time','dual_received_time','solo_time','cross_country_time','cross_country_distance_nm','day_time','night_time','instrument_time','actual_instrument_time','simulated_instrument_time','basic_instrument_flying_time','fnpt_simulator_time','day_landings','night_landings','towered_airport_landings','total_flight_time']);
   const textareas = new Set(['remarks','endorsements']);
   function setStatus(msg){ statusEl.textContent = msg; }
   async function post(payload){
@@ -322,6 +336,39 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   }
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
   function renderAll(){ renderCards(); renderPages(); renderTable(); renderRequirements(); renderVariables(); }
+  function loadColumnWidths(){
+    try {
+      const saved = JSON.parse(localStorage.getItem(columnWidthStorageKey) || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch(err) {
+      return {};
+    }
+  }
+  function saveColumnWidths(){
+    try {
+      localStorage.setItem(columnWidthStorageKey, JSON.stringify(columnWidths));
+    } catch(err) {}
+  }
+  function loadTimeZone(){
+    try {
+      return localStorage.getItem(timeZoneStorageKey) || 'UTC';
+    } catch(err) {
+      return 'UTC';
+    }
+  }
+  function saveTimeZone(value){
+    selectedTimeZone = value || 'UTC';
+    try {
+      localStorage.setItem(timeZoneStorageKey, selectedTimeZone);
+    } catch(err) {}
+  }
+  function columnWidth(key){
+    return Math.max(24, Number(columnWidths[key] || defaultColumnWidths[key] || 48));
+  }
+  function applyColumnWidth(key){
+    const width = columnWidth(key) + 'px';
+    document.querySelectorAll(`[data-col="${key}"]`).forEach(el => { el.style.width = width; });
+  }
   async function loadEgleStatus(){
     try {
       const studentId = data.logbook ? data.logbook.student_user_id : '';
@@ -366,22 +413,60 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     box.innerHTML = url ? `<img src="${esc(url)}" style="transform:scale(${zoom})">` : '<div class="alogw-image-empty">No uploaded source image yet.<br>Upload scans, run import/extract, then review candidate rows in the logbook table.</div>';
   }
   function renderTable(){
-    document.getElementById('alogTableHead').innerHTML = '<tr>' + cols.map(([,label]) => `<th>${esc(label)}</th>`).join('') + '</tr>';
+    const table = document.querySelector('.alogw-table');
+    const colgroup = '<colgroup>' + cols.map(([key]) => `<col data-col="${esc(key)}" style="width:${columnWidth(key)}px">`).join('') + '</colgroup>';
+    const existingColgroup = table.querySelector('colgroup');
+    if(existingColgroup) {
+      existingColgroup.outerHTML = colgroup;
+    } else {
+      table.insertAdjacentHTML('afterbegin', colgroup);
+    }
+    document.getElementById('alogTableHead').innerHTML = '<tr>' + cols.map(([key,label]) => `<th data-col="${esc(key)}" style="width:${columnWidth(key)}px" title="${esc(label)}"><span>${esc(label)}</span><span class="alogw-col-resizer" data-resize-col="${esc(key)}" aria-hidden="true"></span></th>`).join('') + '</tr>';
     document.getElementById('alogTableBody').innerHTML = entries.map((row,i) => '<tr data-i="'+i+'">' + cols.map(([key]) => cell(row,i,key)).join('') + '</tr>').join('');
   }
   function cell(row,i,key){
     if(key === 'select') return `<td><input type="checkbox" data-select="${i}"></td>`;
     if(key === 'actions') return `<td><div class="alogw-row-actions"><button class="alogw-mini-btn alogw-mini-btn--edit" type="button" data-edit="${i}">Edit</button><button class="alogw-mini-btn alogw-mini-btn--delete" type="button" data-delete="${i}">Delete</button></div></td>`;
+    if(key === 'cross_country_distance_nm') {
+      const value = derivedCrossCountryDistance(row);
+      return `<td class="alogw-num" title="${esc(displayValue(value))}">${esc(displayValue(value))}</td>`;
+    }
+    if(key === 'departure_time' || key === 'arrival_time') {
+      const value = displayLogbookTime(row[key], row.entry_date);
+      return `<td title="${esc(value)}">${esc(value)}</td>`;
+    }
     if(key === 'review_status') {
       const status = String(row[key] || 'ok');
       return `<td><span class="alogw-status-pill alogw-status-pill--${esc(status)}">${esc(status.replace('_',' '))}</span></td>`;
     }
-    return `<td title="${esc(row[key] || '')}">${esc(displayValue(row[key]))}</td>`;
+    const value = displayValue(row[key]);
+    const cls = numeric.has(key) ? ' class="alogw-num"' : '';
+    return `<td${cls} title="${esc(value)}">${esc(value)}</td>`;
   }
   function displayValue(value){
-    if(value === 0 || value === '0' || value === 0.0 || value === '0.00') return '0';
     if(value === null || value === undefined || value === '') return '';
+    if(!Number.isNaN(Number(value)) && Number(value) === 0) return '';
     return String(value);
+  }
+  function derivedCrossCountryDistance(row){
+    if(Number(row.cross_country_time || 0) <= 0) return '';
+    return row.cross_country_distance_nm || '';
+  }
+  function displayLogbookTime(value, dateValue){
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if(!match) return '';
+    const hh = match[1].padStart(2, '0');
+    const mm = match[2];
+    const tz = selectedTimeZone === 'browser' ? Intl.DateTimeFormat().resolvedOptions().timeZone : selectedTimeZone;
+    if(!tz || tz === 'UTC') return `${hh}:${mm}`;
+    try {
+      const date = String(dateValue || '1970-01-01').slice(0, 10);
+      const instant = new Date(`${date}T${hh}:${mm}:00Z`);
+      return new Intl.DateTimeFormat('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false, timeZone:tz}).format(instant);
+    } catch(err) {
+      return `${hh}:${mm}`;
+    }
   }
   function renderRequirements(){
     const reqs = data.requirements || [];
@@ -406,6 +491,26 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   }
   document.addEventListener('change', e => {
     if(e.target.id === 'alogPageSelect') { renderExtractionStatus(); renderImage(); }
+    if(e.target.id === 'alogTimeZoneSelect') { saveTimeZone(e.target.value); renderTable(); }
+  });
+  document.addEventListener('mousedown', e => {
+    const target = e.target;
+    if(!target.classList || !target.classList.contains('alogw-col-resizer')) return;
+    e.preventDefault();
+    const key = target.dataset.resizeCol;
+    const startX = e.clientX;
+    const startWidth = columnWidth(key);
+    const onMove = event => {
+      columnWidths[key] = Math.max(24, startWidth + event.clientX - startX);
+      applyColumnWidth(key);
+    };
+    const onUp = () => {
+      saveColumnWidths();
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   });
   document.addEventListener('click', async e => {
     const editIdx = e.target.dataset ? e.target.dataset.edit : undefined;
@@ -700,6 +805,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       setStatus(`Imported ${count} CSV candidate row${count === 1 ? '' : 's'}`);
     } catch(err){ setStatus(err.message); }
   });
+  document.getElementById('alogTimeZoneSelect').value = selectedTimeZone;
   renderAll();
   loadEgleStatus();
 })();
