@@ -270,6 +270,19 @@ final class AdminLogbookService
     /**
      * @param list<int> $entryIds
      */
+    public function deleteEntries(int $logbookId, array $entryIds, int $actorUserId): void
+    {
+        foreach ($entryIds as $entryId) {
+            $entryId = (int)$entryId;
+            if ($entryId > 0) {
+                $this->deleteEntry($logbookId, $entryId, $actorUserId);
+            }
+        }
+    }
+
+    /**
+     * @param list<int> $entryIds
+     */
     public function flagEntries(int $logbookId, array $entryIds, int $actorUserId): void
     {
         foreach ($entryIds as $entryId) {

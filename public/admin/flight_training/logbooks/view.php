@@ -631,7 +631,22 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogDeleteRows').addEventListener('click', async () => {
-    try { for (const i of selectedIndexes().reverse()) { if(entries[i].id){ await post({action:'delete_entry', logbook_id:logbookId, entry_id:entries[i].id}); } else { entries.splice(i,1); renderTable(); } } setStatus('Deleted'); } catch(err){ setStatus(err.message); }
+    try {
+      const indexes = selectedIndexes();
+      if(indexes.length === 0) {
+        setStatus('Select one or more rows first');
+        return;
+      }
+      const ids = indexes.map(i => Number(entries[i].id || 0)).filter(Boolean);
+      const unsaved = indexes.filter(i => !entries[i].id).sort((a,b) => b-a);
+      unsaved.forEach(i => entries.splice(i, 1));
+      if(ids.length > 0) {
+        await post({action:'delete_entries', logbook_id:logbookId, entry_ids:ids});
+      } else {
+        renderTable();
+      }
+      setStatus(`Deleted ${indexes.length} selected row${indexes.length === 1 ? '' : 's'}`);
+    } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogFlagRows').addEventListener('click', async () => {
     try {

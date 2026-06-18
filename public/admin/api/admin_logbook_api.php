@@ -80,6 +80,12 @@ try {
             $service->deleteEntry($logbookId, (int)($input['entry_id'] ?? 0), $actorUserId);
             alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'delete_entries':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $service->deleteEntries($logbookId, is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(), $actorUserId);
+            alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'flag_entries':
             $input = alog_input();
             $logbookId = (int)($input['logbook_id'] ?? 0);
