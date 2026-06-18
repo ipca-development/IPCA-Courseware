@@ -254,36 +254,40 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .paper-sheet.is-dragging{cursor:grabbing}
 .paper-sheet[data-paper="a4"]{width:297mm;height:210mm;--page-w:297mm;--page-h:210mm;--left-table-x:14mm;--right-table-x:43mm}
 .paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm;--page-w:279.4mm;--page-h:215.9mm;--left-table-x:12mm;--right-table-x:27.4mm}
-.book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px}
-.book-spread.is-active{display:flex}.book-spread.turn-next{animation:pageTurnNext .42s ease}.book-spread.turn-prev{animation:pageTurnPrev .42s ease}
+.book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d}
+.book-spread.is-active{display:flex}
+.book-spread.is-underlay{display:flex;z-index:1;pointer-events:none}.book-spread.is-active{z-index:2}
+.flip-page{position:absolute;top:0;width:var(--page-w);height:var(--page-h);z-index:8;background:#fffdf7;overflow:hidden;backface-visibility:hidden;transform-style:preserve-3d;box-shadow:0 12px 28px rgba(15,23,42,.18)}
+.flip-page.next{left:var(--page-w);transform-origin:left center;animation:flipNext .56s ease-in-out forwards}
+.flip-page.prev{left:0;transform-origin:right center;animation:flipPrev .56s ease-in-out forwards}
 .book-spread::before{content:"";position:absolute;left:50%;top:4mm;bottom:4mm;width:2.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.28),rgba(255,255,255,.75),rgba(15,23,42,.26));z-index:6;border-radius:999px;box-shadow:0 0 7mm rgba(15,23,42,.2)}
 .book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16)}
 .book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),rgba(15,23,42,0) 45%,rgba(15,23,42,.035));z-index:5}
 .book-page-left{border-radius:2mm 0 0 2mm;box-shadow:inset -18mm 0 30mm rgba(15,23,42,.1),inset 0 0 0 .35mm rgba(15,23,42,.08)}
 .book-page-right{border-radius:0 2mm 2mm 0;box-shadow:inset 18mm 0 30mm rgba(15,23,42,.09),inset 0 0 0 .35mm rgba(15,23,42,.08)}
 .book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:1.1mm;background:rgba(15,23,42,.12);z-index:6}.book-page-left::before{left:0}.book-page-right::before{right:0}
-.page-head{position:absolute;left:var(--table-x);top:7mm;width:240mm;height:11mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
+.page-head{position:absolute;left:var(--table-x);top:5mm;width:240mm;height:10mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
 table{border-collapse:collapse;table-layout:fixed;width:240mm}
-.book-page>table{position:absolute;left:var(--table-x);top:20mm}
+.book-page>table{position:absolute;left:var(--table-x);top:16mm}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
 th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0 1mm;font-size:7px;line-height:1.05;font-weight:400;overflow:hidden}
 thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
 .log-body{height:173mm}.log-body td{height:6.92mm}
 .main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
-.totals-box{position:absolute;top:194mm;width:143mm;height:16mm;z-index:7;background:#fff}
+.totals-box{position:absolute;top:189mm;width:143mm;height:16mm;z-index:7;background:#fff}
 .totals-box table{width:143mm;height:16mm;background:#fff}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fff;font-weight:400}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
 .totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
 .totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
-.signature{position:absolute;left:14mm;right:10mm;bottom:8mm;font-size:10px;text-align:center;z-index:7}
+.signature{position:absolute;left:14mm;right:10mm;bottom:2.5mm;font-size:10px;text-align:center;z-index:7}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 .left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
 .right col.c1{width:24.75mm}.right col.c2{width:24.75mm}.right col.c3{width:21.125mm}.right col.c4{width:21.125mm}.right col.c5{width:21.125mm}.right col.c6{width:21.125mm}.right col.c7{width:13.25mm}.right col.c8{width:13.25mm}.right col.c9{width:79.5mm}
-@keyframes pageTurnNext{0%{opacity:.72;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(-9deg) translateX(18mm)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(0) translateX(0)}}
-@keyframes pageTurnPrev{0%{opacity:.72;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(9deg) translateX(-18mm)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(0) translateX(0)}}
-@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:var(--page-w);height:auto;transform:none!important;filter:none;perspective:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page}}
+@keyframes flipNext{0%{transform:rotateY(0deg)}100%{transform:rotateY(-178deg)}}
+@keyframes flipPrev{0%{transform:rotateY(0deg)}100%{transform:rotateY(178deg)}}
+@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:var(--page-w);height:auto;transform:none!important;filter:none;perspective:none}.book-spread::before,.book-page::after,.book-page::before,.flip-page{display:none}.book-page{display:block;background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page}}
 </style>
 </head>
 <body>
@@ -365,6 +369,7 @@ try {
   let zoom = 1;
   let pan = {x:0, y:0};
   let drag = null;
+  let animating = false;
   function spreadSizeMm(){
     return sheet.dataset.paper === 'letter' ? {w:558.8, h:215.9} : {w:594, h:210};
   }
@@ -382,8 +387,11 @@ try {
   function applyTransform(){
     const scale = currentScale();
     sheet.style.setProperty('--spread-scale', String(scale));
-    const active = spreads[current];
-    if(active) active.style.transform = `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+    spreads.forEach(spread => {
+      if(spread.classList.contains('is-active') || spread.classList.contains('is-underlay')) {
+        spread.style.transform = `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+      }
+    });
   }
   function setZoomMode(mode, nextZoom = 1){
     zoomMode = mode;
@@ -392,18 +400,47 @@ try {
     applyTransform();
   }
   function show(index, direction = 0){
-    current = Math.max(0, Math.min(spreads.length - 1, index));
+    const target = Math.max(0, Math.min(spreads.length - 1, index));
+    if(target === current && direction !== 0) return;
+    if(animating) return;
+    if(direction !== 0) {
+      flipTo(target, direction);
+      return;
+    }
+    current = target;
     spreads.forEach((spread, idx) => {
       spread.classList.toggle('is-active', idx === current);
-      spread.classList.remove('turn-next', 'turn-prev');
+      spread.classList.remove('is-underlay');
       spread.style.transform = '';
-      if(idx === current && direction !== 0) {
-        requestAnimationFrame(() => spread.classList.add(direction > 0 ? 'turn-next' : 'turn-prev'));
-      }
     });
     now.textContent = String(current + 1);
     pan = {x:0, y:0};
     applyTransform();
+  }
+  function flipTo(target, direction){
+    const oldSpread = spreads[current];
+    const newSpread = spreads[target];
+    if(!oldSpread || !newSpread) return;
+    animating = true;
+    newSpread.classList.add('is-underlay');
+    newSpread.style.transform = oldSpread.style.transform;
+    const pageSelector = direction > 0 ? '.book-page-right' : '.book-page-left';
+    const flipPage = oldSpread.querySelector(pageSelector).cloneNode(true);
+    flipPage.classList.add('flip-page', direction > 0 ? 'next' : 'prev');
+    oldSpread.appendChild(flipPage);
+    applyTransform();
+    window.setTimeout(() => {
+      flipPage.remove();
+      oldSpread.classList.remove('is-active');
+      oldSpread.style.transform = '';
+      newSpread.classList.remove('is-underlay');
+      newSpread.classList.add('is-active');
+      current = target;
+      now.textContent = String(current + 1);
+      pan = {x:0, y:0};
+      animating = false;
+      applyTransform();
+    }, 590);
   }
   document.getElementById('prevSpread').addEventListener('click', () => show(current - 1, -1));
   document.getElementById('nextSpread').addEventListener('click', () => show(current + 1, 1));
