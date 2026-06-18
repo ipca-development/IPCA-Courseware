@@ -252,7 +252,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     ['select',''],['actions','Actions'],['entry_date','Date'],['departure_airport','Departure'],['arrival_airport','Arrival'],
     ['aircraft_registration','Aircraft Reg'],['aircraft_type','Aircraft Type'],['single_engine_time','SE'],['multi_engine_time','ME'],
     ['pic_time','PIC'],['copilot_time','Co-Pilot'],['dual_received_time','Dual'],['solo_time','Solo'],['cross_country_time','XC'],
-    ['cross_country_distance_nm','XC NM'],['day_time','Day'],['night_time','Night'],['instrument_time','Instrument'],['basic_instrument_flying_time','Basic Instr'],
+    ['cross_country_distance_nm','XC NM'],['day_time','Day Time'],['night_time','Night Time'],['instrument_time','Instrument'],['basic_instrument_flying_time','Basic Instr'],
     ['fnpt_simulator_time','FNPT / Sim'],['day_landings','Day Ldg'],['night_landings','Night Ldg'],['instructor_name','Instructor'],
     ['total_flight_time','Total'],['remarks','Remarks'],['review_status','Status']
   ];
@@ -262,7 +262,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     ['pic_time','PIC','number'],['copilot_time','Co-Pilot','number'],['dual_received_time','Dual','number'],['solo_time','Solo','number'],['cross_country_time','Cross Country','number'],
     ['cross_country_distance_nm','Cross Country NM','number'],['night_time','Night','number'],['instrument_time','Instrument','number'],['actual_instrument_time','Actual Instrument','number'],
     ['simulated_instrument_time','Simulated Instrument','number'],['basic_instrument_flying_time','Basic Instrument Flying','number'],['fnpt_simulator_time','FNPT / Simulator','number'],
-    ['day_landings','Day Landings','number'],['night_landings','Night Landings','number'],['towered_airport_landings','Towered Landings','number'],['instructor_name','Instructor','text'],
+    ['day_time','Day Time','number'],['day_landings','Day Landings','number'],['night_landings','Night Landings','number'],['towered_airport_landings','Towered Landings','number'],['instructor_name','Instructor','text'],
     ['total_flight_time','Total Time','number'],['remarks','Remarks','textarea'],['endorsements','Endorsements','textarea'],['review_status','Status','status']
   ];
   const numeric = new Set(['single_engine_time','multi_engine_time','pic_time','copilot_time','dual_received_time','solo_time','cross_country_time','cross_country_distance_nm','night_time','instrument_time','actual_instrument_time','simulated_instrument_time','basic_instrument_flying_time','fnpt_simulator_time','day_landings','night_landings','towered_airport_landings','total_flight_time']);

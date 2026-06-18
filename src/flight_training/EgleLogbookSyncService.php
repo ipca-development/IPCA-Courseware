@@ -204,7 +204,7 @@ final class EgleLogbookSyncService
         $lbDev = $this->firstExisting($logbookColumns, array('lb_dev', 'device_id', 'aircraft_id'));
         $lbInstr = $this->firstExisting($logbookColumns, array('lb_instr', 'instructor_id'));
         $deviceId = $this->firstExisting($deviceColumns, array('dev_id', 'id', 'device_id'));
-        $userId = $this->firstExisting($userColumns, array('userid', 'user_id', 'id'));
+        $userId = $this->firstExisting($userColumns, array('userid', 'user_id', 'id', 'uid', 'usr_id'));
 
         $select = array();
         foreach ($logbookColumns as $column) {
@@ -425,16 +425,16 @@ final class EgleLogbookSyncService
      */
     private function instructorSelects(array $columns): array
     {
-        $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name', 'displayname', 'user_name', 'username'), 'instructor_name');
+        $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name', 'displayname', 'user_name', 'username', 'user_fullname', 'user_full_name'), 'instructor_name');
         if ($nameSelect === '') {
-            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first', 'first'));
-            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last', 'last'));
+            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first', 'first', 'user_firstname', 'user_first_name', 'usr_firstname'));
+            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last', 'last', 'surname', 'user_lastname', 'user_last_name', 'user_surname', 'usr_lastname'));
             if ($firstCol !== '' || $lastCol !== '') {
                 $nameSelect = "TRIM(CONCAT(COALESCE(" . ($firstCol !== '' ? 'i.' . $this->q($firstCol) : "''") . ", ''), ' ', COALESCE(" . ($lastCol !== '' ? 'i.' . $this->q($lastCol) : "''") . ", ''))) AS instructor_name";
             }
         }
         return array_filter(array(
-            $this->aliasSelect($columns, 'i', array('email', 'user_email', 'u_email'), 'instructor_email'),
+            $this->aliasSelect($columns, 'i', array('email', 'user_email', 'u_email', 'mail', 'user_mail'), 'instructor_email'),
             $nameSelect,
         ));
     }

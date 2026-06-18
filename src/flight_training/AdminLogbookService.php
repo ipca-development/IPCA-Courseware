@@ -719,11 +719,56 @@ final class AdminLogbookService
         $isNight = $this->nightCondition($this->firstSourceValue($source, array('lb_cond', 'lb_condition', 'condition', 'day_night')));
 
         if (trim((string)($row['instructor_name'] ?? '')) === '') {
-            $instructor = $this->firstSourceValue($source, array('instructor_name', 'instructor_full_name', 'instr_name', 'user_name', 'username'));
+            $instructor = $this->firstSourceValue($source, array(
+                'instructor_name',
+                'instructor_full_name',
+                'instr_name',
+                'instr_full_name',
+                'full_name',
+                'fullname',
+                'display_name',
+                'displayname',
+                'user_name',
+                'username',
+                'name',
+            ));
             if (trim((string)$instructor) === '') {
-                $first = $this->firstSourceValue($source, array('instructor_firstname', 'instructor_first_name', 'firstname', 'first_name', 'fname'));
-                $last = $this->firstSourceValue($source, array('instructor_lastname', 'instructor_last_name', 'lastname', 'last_name', 'lname'));
+                $first = $this->firstSourceValue($source, array(
+                    'instructor_firstname',
+                    'instructor_first_name',
+                    'instr_firstname',
+                    'instr_first_name',
+                    'user_firstname',
+                    'user_first_name',
+                    'firstname',
+                    'first_name',
+                    'fname',
+                    'first',
+                ));
+                $last = $this->firstSourceValue($source, array(
+                    'instructor_lastname',
+                    'instructor_last_name',
+                    'instr_lastname',
+                    'instr_last_name',
+                    'user_lastname',
+                    'user_last_name',
+                    'user_surname',
+                    'surname',
+                    'lastname',
+                    'last_name',
+                    'lname',
+                    'last',
+                ));
                 $instructor = trim((string)$first . ' ' . (string)$last);
+            }
+            if (trim((string)$instructor) === '') {
+                $instructor = $this->firstSourceValue($source, array('instructor_email', 'instr_email', 'user_email', 'email'));
+            }
+            if (trim((string)$instructor) === '') {
+                $instructorId = $this->firstSourceValue($source, array('lb_instr', 'instructor_id', 'instr_id'));
+                if (trim((string)$instructorId) !== '') {
+                    $instructor = 'E-GLE Instructor #' . trim((string)$instructorId);
+                }
             }
             if (trim((string)$instructor) !== '') {
                 $row['instructor_name'] = $instructor;
