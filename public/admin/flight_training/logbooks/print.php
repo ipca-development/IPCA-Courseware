@@ -30,7 +30,7 @@ try {
 
 $entries = array_values(array_filter(
     $workspace['entries'] ?? array(),
-    static fn (array $entry): bool => in_array(strtolower((string)($entry['review_status'] ?? '')), array('accepted', 'ok', 'merged', 'split'), true)
+    static fn (mixed $entry): bool => is_array($entry) && strtolower((string)($entry['review_status'] ?? '')) !== 'deleted'
 ));
 $chunks = array_chunk($entries, 25);
 if ($chunks === array()) {
@@ -39,6 +39,7 @@ if ($chunks === array()) {
 
 $logoText = $format === 'faa' ? 'FAA LOGBOOK' : 'POOLEY’S';
 $title = strtoupper($format) . ' Printable Logbook';
+$renderError = '';
 
 function pval(mixed $value, int $decimals = 2): string
 {
@@ -203,6 +204,7 @@ function blankRows(int $count, string $side): string
 body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-serif}
 .screen-tools{position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;padding:10px 14px;background:#102845;color:#fff}
 .screen-tools button{border:0;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+.print-error{max-width:980px;margin:16px auto;padding:14px 16px;border:1px solid #fecdd3;border-radius:12px;background:#fff1f2;color:#991b1b;font-weight:700}
 .book-page{width:240mm;height:210mm;margin:12mm auto;padding:8mm 0 0;background:#fff;page-break-after:always;position:relative}
 .page-head{width:240mm;height:13mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
@@ -225,14 +227,15 @@ thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
 <div class="screen-tools">
   <strong><?= h($title) ?></strong>
   <button onclick="window.print()">Print</button>
-  <span>Use browser print at 100% scale. Each side is fixed at 240mm wide.</span>
+  <span>Use browser print at 100% scale. Each side is fixed at 240mm wide. Rows: <?= count($entries) ?></span>
 </div>
 <?php
-$previousTotals = array();
-foreach ($chunks as $pageIndex => $chunk):
-    $pageTotals = pageTotals($chunk);
-    $runningTotals = addTotals($previousTotals, $pageTotals);
-    $rows = implode('', array_map('leftRow', $chunk)) . blankRows(25 - count($chunk), 'left');
+try {
+    $previousTotals = array();
+    foreach ($chunks as $pageIndex => $chunk):
+        $pageTotals = pageTotals($chunk);
+        $runningTotals = addTotals($previousTotals, $pageTotals);
+        $rows = implode('', array_map('leftRow', $chunk)) . blankRows(max(0, 25 - count($chunk)), 'left');
 ?>
 <section class="book-page">
   <div class="page-head"><div class="logo"><?= h($logoText) ?></div><div class="meta"><span>Medical Expires:</span><span>Class/Type Rating Expires:</span></div></div>
@@ -248,7 +251,7 @@ foreach ($chunks as $pageIndex => $chunk):
   <div class="totals-box"><table><tr><th>Total these pages</th><td><?= h(pval($pageTotals['total'] ?? 0)) ?></td></tr><tr><th>Total from previous pages</th><td><?= h(pval($previousTotals['total'] ?? 0)) ?></td></tr><tr><th>Total Time</th><td><?= h(pval($runningTotals['total'] ?? 0)) ?></td></tr></table></div>
 </section>
 <?php
-    $rightRows = implode('', array_map('rightRow', $chunk)) . blankRows(25 - count($chunk), 'right');
+        $rightRows = implode('', array_map('rightRow', $chunk)) . blankRows(max(0, 25 - count($chunk)), 'right');
 ?>
 <section class="book-page">
   <div class="page-head"><div></div><div class="logo right-logo"><?= h($logoText) ?></div></div>
@@ -265,8 +268,11 @@ foreach ($chunks as $pageIndex => $chunk):
   <div class="signature">I certify that the entries in this log are true: <span class="line"></span> (Pilot's Signature).</div>
 </section>
 <?php
-    $previousTotals = $runningTotals;
-endforeach;
+        $previousTotals = $runningTotals;
+    endforeach;
+} catch (Throwable $e) {
+    echo '<div class="print-error">Printable logbook rendering failed: ' . h($e->getMessage()) . '</div>';
+}
 ?>
 </body>
 </html>
