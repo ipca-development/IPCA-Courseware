@@ -12,6 +12,7 @@ $format = strtolower(trim((string)($_GET['format'] ?? 'easa')));
 if (!in_array($format, array('easa', 'faa'), true)) {
     $format = 'easa';
 }
+$blankMode = in_array(strtolower(trim((string)($_GET['blank'] ?? ''))), array('1', 'true', 'yes'), true);
 
 if (!function_exists('h')) {
     function h(mixed $value): string
@@ -37,6 +38,7 @@ $chunks = array_chunk($entries, $rowsPerSpread);
 if ($chunks === array()) {
     $chunks = array(array());
 }
+$renderChunks = $blankMode ? array(array()) : $chunks;
 
 $logoText = $format === 'faa' ? 'FAA LOGBOOK' : 'POOLEY’S';
 $title = strtoupper($format) . ' Printable Logbook';
@@ -263,18 +265,18 @@ function gridLines(array $columns, int $rows = 25): string
     $height = $header + $body;
     $rowHeight = $body / $rows;
     $x = 0.0;
-    $out = '<rect class="paper-fill" x="0" y="0" width="' . $width . '" height="' . $height . '"/>';
-    $out .= svgLine(0, 0, $width, 0, 'heavy') . svgLine(0, $height, $width, $height, 'heavy') . svgLine(0, 0, 0, $height, 'heavy') . svgLine($width, 0, $width, $height, 'heavy');
-    foreach ($columns as $column) {
+    $out = svgLine(0, 0, $width, 0, 'outer') . svgLine(0, $height, $width, $height, 'outer') . svgLine(0, 0, 0, $height, 'outer') . svgLine($width, 0, $width, $height, 'outer');
+    foreach ($columns as $idx => $column) {
         $x += (float)$column;
-        $out .= svgLine($x, 0, $x, $height);
+        $class = in_array($idx + 1, array(1, 3, 5, 7, 9, 10, 11, 13), true) ? 'main' : 'sub';
+        $out .= svgLine($x, 0, $x, $height, $class);
     }
     foreach (array(5.333, 10.666, 16.0) as $y) {
-        $out .= svgLine(0, $y, $width, $y);
+        $out .= svgLine(0, $y, $width, $y, 'main');
     }
     for ($i = 1; $i < $rows; $i++) {
         $y = $header + $i * $rowHeight;
-        $out .= svgLine(0, $y, $width, $y);
+        $out .= svgLine(0, $y, $width, $y, 'row');
     }
     return $out;
 }
@@ -382,43 +384,45 @@ function rightTemplate(array $entries): string
 *{box-sizing:border-box}
 body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-serif}
 .screen-tools{position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:#102845;color:#fff}
-.screen-tools button,.screen-tools select{border:0;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+.screen-tools button,.screen-tools select,.screen-tools .tool-link{border:0;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;text-decoration:none}
 .screen-tools select{background:#fff;color:#102845}
+.screen-tools .tool-link{background:#e0f2fe;color:#102845}
 .screen-tools .muted{color:#bfdbfe;font-size:12px}
 .print-error{max-width:980px;margin:16px auto;padding:14px 16px;border:1px solid #fecdd3;border-radius:12px;background:#fff1f2;color:#991b1b;font-weight:700}
 .print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:22px;background:radial-gradient(circle at center,#f8fafc 0,#e5e7eb 70%)}
 .paper-sheet{position:relative;background:#f7f8fb;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),0 20px 70px rgba(15,23,42,.22);overflow:hidden;cursor:grab}
 .paper-sheet.is-dragging{cursor:grabbing}
 .paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
-.paper-sheet{--page-w:270mm;--page-h:244mm;--left-table-x:14mm;--right-table-x:16mm}
+.paper-sheet{--page-w:270mm;--page-h:190mm;--grid-w:252mm;--grid-h:158mm;--left-table-x:9mm;--right-table-x:9mm}
 .book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
-.book-spread::before{content:"";position:absolute;left:50%;top:4mm;bottom:4mm;width:2.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.28),rgba(255,255,255,.75),rgba(15,23,42,.26));z-index:6;border-radius:999px;box-shadow:0 0 7mm rgba(15,23,42,.2)}
-.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16);--header-top:7mm;--grid-top:20mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:209mm;--totals-h:16mm;--signature-top:229mm;--signature-h:7mm}
-.book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),rgba(15,23,42,0) 45%,rgba(15,23,42,.035));z-index:5}
-.book-page-left{border-radius:2mm 0 0 2mm;box-shadow:inset -18mm 0 30mm rgba(15,23,42,.1),inset 0 0 0 .35mm rgba(15,23,42,.08)}
-.book-page-right{border-radius:0 2mm 2mm 0;box-shadow:inset 18mm 0 30mm rgba(15,23,42,.09),inset 0 0 0 .35mm rgba(15,23,42,.08)}
-.book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:1.1mm;background:rgba(15,23,42,.12);z-index:6}.book-page-left::before{left:0}.book-page-right::before{right:0}
-.page-head{position:absolute;left:var(--table-x);top:var(--header-top);width:240mm;height:10mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
+.book-spread::before{content:"";position:absolute;left:50%;top:3mm;bottom:3mm;width:.9mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.2),rgba(255,255,255,.35),rgba(15,23,42,.18));z-index:6;border-radius:999px;box-shadow:0 0 4mm rgba(15,23,42,.18)}
+.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:linear-gradient(110deg,#fffdf4 0%,#fbf7eb 48%,#fffdf6 100%);position:relative;flex:0 0 auto;overflow:hidden;border:0.2mm solid rgba(15,23,42,.14);--header-top:5mm;--grid-top:13mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:154mm;--totals-h:16mm;--signature-top:176mm;--signature-h:6mm}
+.book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.26),rgba(15,23,42,0) 46%,rgba(15,23,42,.03));z-index:5}
+.book-page-left{border-radius:1.5mm 0 0 1.5mm;box-shadow:inset -10mm 0 18mm rgba(15,23,42,.08),inset 0 0 0 .25mm rgba(15,23,42,.08)}
+.book-page-right{border-radius:0 1.5mm 1.5mm 0;box-shadow:inset 10mm 0 18mm rgba(15,23,42,.07),inset 0 0 0 .25mm rgba(15,23,42,.08)}
+.book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:.7mm;background:rgba(15,23,42,.1);z-index:6}.book-page-left::before{right:0}.book-page-right::before{left:0}
+.page-head{position:absolute;left:var(--table-x);top:var(--header-top);width:var(--grid-w);height:8mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:10px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
-.log-template{position:absolute;left:var(--table-x);top:var(--grid-top);width:240mm;height:189mm;z-index:4}
-.log-template .paper-fill{fill:#fffdf7}
-.log-template .thin{stroke:#111;stroke-width:.22;vector-effect:non-scaling-stroke}
-.log-template .heavy{stroke:#111;stroke-width:.32;vector-effect:non-scaling-stroke}
+.log-template{position:absolute;left:var(--table-x);top:var(--grid-top);width:var(--grid-w);height:var(--grid-h);z-index:4;shape-rendering:crispEdges}
+.log-template .row{stroke:#111;stroke-width:.13;vector-effect:non-scaling-stroke}
+.log-template .sub{stroke:#111;stroke-width:.2;vector-effect:non-scaling-stroke}
+.log-template .main{stroke:#111;stroke-width:.3;vector-effect:non-scaling-stroke}
+.log-template .outer{stroke:#111;stroke-width:.42;vector-effect:non-scaling-stroke}
 .log-template text{font-family:Arial,Helvetica,sans-serif;fill:#111;dominant-baseline:middle}
-.log-template .tiny{font-size:2.25px;font-weight:700}
-.log-template .head{font-size:2.05px;font-weight:700}
-.log-template .body{font-size:2.0px;font-weight:400}
-.log-template .remarks-text{font-size:1.75px;font-weight:400}
-.totals-box{position:absolute;top:var(--totals-top);width:143mm;height:var(--totals-h);z-index:7;background:#fffdf7}
-.totals-box table{border-collapse:collapse;table-layout:fixed;width:143mm;height:var(--totals-h);background:#fffdf7}.totals-box th,.totals-box td{border:0.22mm solid #111;text-align:center;vertical-align:middle;padding:0 .7mm;height:calc(var(--totals-h) / 3);font-size:6.3px;line-height:1.05;background:#fffdf7;font-weight:400;overflow:hidden}
+.log-template .tiny{font-size:2.55px;font-weight:700}
+.log-template .head{font-size:2.35px;font-weight:700}
+.log-template .body{font-size:1.9px;font-weight:400}
+.log-template .remarks-text{font-size:1.65px;font-weight:400}
+.totals-box{position:absolute;top:var(--totals-top);width:150mm;height:var(--totals-h);z-index:7;background:transparent}
+.totals-box table{border-collapse:collapse;table-layout:fixed;width:150mm;height:var(--totals-h);background:transparent}.totals-box th,.totals-box td{border:0.22mm solid #111;text-align:center;vertical-align:middle;padding:0 .7mm;height:calc(var(--totals-h) / 3);font-size:6px;line-height:1.05;background:transparent;font-weight:400;overflow:hidden}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
-.totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
-.totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
-.signature{position:absolute;left:14mm;right:10mm;top:var(--signature-top);height:var(--signature-h);font-size:9px;text-align:center;z-index:7}
+.totals-box-left{left:calc(var(--table-x) + 99mm)}.totals-box-left col.label{width:73mm}.totals-box-left col.total{width:51.5mm}.totals-box-left col.ldg{width:12.75mm}
+.totals-box-right{left:calc(var(--table-x) + 102mm)}.totals-box-right col.label{width:31mm}.totals-box-right col.night{width:13mm}.totals-box-right col.ifr{width:13mm}.totals-box-right col.pic{width:13mm}.totals-box-right col.copilot{width:13mm}.totals-box-right col.dual{width:13mm}.totals-box-right col.instr{width:13mm}.totals-box-right col.if{width:20.5mm}.totals-box-right col.nav{width:20.5mm}
+.signature{position:absolute;left:20mm;right:10mm;top:var(--signature-top);height:var(--signature-h);font-size:8px;text-align:left;z-index:7}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:calc(var(--page-w) * 2);height:var(--page-h);transform:none!important;filter:none;perspective:none;opacity:1;transition:none;break-after:page}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:inline-block;background:#fff;border:0;box-shadow:none;border-radius:0;vertical-align:top}}
 </style>
@@ -434,18 +438,19 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
   <button type="button" id="fitWidth">Fit Width</button>
   <button type="button" id="fitSpread">Fit Full Spread</button>
   <button type="button" id="resetZoom">100%</button>
+  <a class="tool-link" href="?logbook_id=<?= (int)$logbookId ?>&format=<?= h($format) ?><?= $blankMode ? '' : '&blank=1' ?>"><?= $blankMode ? 'Show Data' : 'Blank Template' ?></a>
   <select id="paperSelect" aria-label="Paper size">
     <option value="a4">A4 landscape</option>
     <option value="letter">US Letter landscape</option>
   </select>
-  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($chunks) ?></span> · Rows: <?= count($entries) ?> · <?= (int)$rowsPerSpread ?> rows/page · fixed 240mm logbook pages</span>
+  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($renderChunks) ?></span> · Rows: <?= $blankMode ? 0 : count($entries) ?> · <?= $blankMode ? 'blank calibration mode' : ((int)$rowsPerSpread . ' rows/page') ?> · calibrated physical template</span>
 </div>
 <main class="print-stage">
 <div class="paper-sheet" id="paperSheet" data-paper="a4">
 <?php
 try {
     $previousTotals = array();
-    foreach ($chunks as $pageIndex => $chunk):
+    foreach ($renderChunks as $pageIndex => $chunk):
         $pageTotals = pageTotals($chunk);
         $runningTotals = addTotals($previousTotals, $pageTotals);
 ?>
@@ -483,7 +488,7 @@ try {
   let pan = {x:0, y:0};
   let drag = null;
   function spreadSizeMm(){
-    return {w:540, h:244};
+    return {w:540, h:190};
   }
   function baseScale(mode){
     const rect = sheet.getBoundingClientRect();
