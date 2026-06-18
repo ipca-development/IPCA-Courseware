@@ -162,8 +162,8 @@ function leftRow(array $entry): string
         . '<td>' . h(pval($entry['multi_engine_time'] ?? 0)) . '</td>'
         . '<td>' . h(pval($entry['total_flight_time'] ?? 0)) . '</td>'
         . '<td>' . h((string)($entry['instructor_name'] ?? '')) . '</td>'
-        . '<td>' . h((int)($entry['day_landings'] ?? 0) ?: '') . '</td>'
-        . '<td>' . h((int)($entry['night_landings'] ?? 0) ?: '') . '</td>'
+        . '<td>' . h((string)((int)($entry['day_landings'] ?? 0) ?: '')) . '</td>'
+        . '<td>' . h((string)((int)($entry['night_landings'] ?? 0) ?: '')) . '</td>'
         . '</tr>';
 }
 
