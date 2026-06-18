@@ -381,7 +381,7 @@ final class AdminLogbookService
             }
             $before = $entry;
             $duration = round((float)($entry['total_flight_time'] ?? 0), 2);
-            foreach (array('single_engine_time', 'multi_engine_time', 'dual_received_time', 'pic_time', 'solo_time', 'cross_country_time', 'instrument_time', 'fnpt_simulator_time') as $field) {
+            foreach (array('single_engine_time', 'multi_engine_time', 'dual_received_time', 'pic_time', 'solo_time', 'cross_country_time', 'instrument_time', 'basic_instrument_flying_time', 'fnpt_simulator_time') as $field) {
                 if (!array_key_exists($field, $flags) || $flags[$field] === '') {
                     continue;
                 }
