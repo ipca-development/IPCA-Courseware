@@ -50,7 +50,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-egle-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px}.alogw-egle-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.alogw-egle-field{display:flex;flex-direction:column;gap:5px}.alogw-egle-field--wide{grid-column:1/-1}.alogw-egle-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b}.alogw-egle-input{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-egle-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.alogw-egle-status{font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}.alogw-egle-candidates{display:flex;flex-direction:column;gap:7px;max-height:210px;overflow:auto}.alogw-egle-candidate{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid rgba(15,23,42,.08);border-radius:13px;padding:8px;background:#f8fafc}.alogw-egle-candidate strong{font-size:12px;color:#102845}.alogw-egle-candidate span{font-size:11px;color:#64748b}
 .alogw-import{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#f8fafc}.alogw-import-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.alogw-input,.alogw-select{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#102845}.alogw-extract-status{margin-left:auto;font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}
 .alogw-grid-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#fff}
-.alogw-table-wrap{overflow-x:hidden;overflow-y:auto;max-height:720px;background:#fff}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;background:#fff}.alogw-table th{position:sticky;top:0;z-index:1;padding:6px 6px 6px 3px;background:#f8fafc;border-right:1px solid #e2e8f0;border-bottom:1px solid #cbd5e1;font-size:8px;line-height:1;white-space:nowrap;text-transform:uppercase;letter-spacing:0;color:#475569;text-align:center;overflow:hidden;text-overflow:ellipsis}.alogw-table th .alogw-col-resizer{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none;touch-action:none}.alogw-table th .alogw-col-resizer:hover{background:rgba(37,99,235,.18)}.alogw-table td{padding:5px 3px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;vertical-align:middle;background:#fff;font-size:9px;line-height:1.1;color:#102845;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-table td.alogw-num{text-align:center;font-variant-numeric:tabular-nums}.alogw-table tr:nth-child(even) td{background:#f8fafc}.alogw-table input[type=checkbox]{width:auto;height:auto}.alogw-row-actions{display:flex;gap:4px;justify-content:center}.alogw-mini-btn{border:0;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;cursor:pointer}.alogw-mini-btn--edit{background:#eef2ff;color:#1e3a8a}.alogw-mini-btn--delete{background:#fff1f2;color:#be123c}.alogw-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e2e8f0;color:#475569}.alogw-status-pill--accepted,.alogw-status-pill--ok{background:#dcfce7;color:#166534}.alogw-status-pill--imported,.alogw-status-pill--needs_review,.alogw-status-pill--flagged{background:#fef3c7;color:#92400e}.alogw-status-pill--rejected{background:#fee2e2;color:#991b1b}
+.alogw-table-wrap{overflow-x:hidden;overflow-y:auto;max-height:720px;background:#fff}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;background:#fff}.alogw-table th{position:sticky;top:0;z-index:3;padding:6px 6px 6px 3px;background:#f8fafc;border-right:1px solid #e2e8f0;border-bottom:1px solid #cbd5e1;font-size:8px;line-height:1;white-space:nowrap;text-transform:uppercase;letter-spacing:0;color:#475569;text-align:center;overflow:hidden;text-overflow:ellipsis}.alogw-table th .alogw-col-resizer{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none;touch-action:none}.alogw-table th .alogw-col-resizer:hover{background:rgba(37,99,235,.18)}.alogw-table td{padding:5px 3px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;vertical-align:middle;background:#fff;font-size:9px;line-height:1.1;color:#102845;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.alogw-table td.alogw-num{font-variant-numeric:tabular-nums}.alogw-table tr:nth-child(even) td{background:#f8fafc}.alogw-table tfoot th,.alogw-table tfoot td{position:sticky;z-index:2;padding:5px 3px;border-right:1px solid #cbd5e1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:8px;line-height:1;background:#eef2ff;color:#1e3a8a}.alogw-table tfoot th{bottom:24px;border-top:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-transform:uppercase;font-weight:900}.alogw-table tfoot td{bottom:0;height:24px;border-bottom:0;font-size:9px;font-weight:900;font-variant-numeric:tabular-nums}.alogw-table input[type=checkbox]{width:auto;height:auto}.alogw-row-actions{display:flex;gap:4px;justify-content:center}.alogw-mini-btn{border:0;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;cursor:pointer}.alogw-mini-btn--edit{background:#eef2ff;color:#1e3a8a}.alogw-mini-btn--delete{background:#fff1f2;color:#be123c}.alogw-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e2e8f0;color:#475569}.alogw-status-pill--accepted,.alogw-status-pill--ok{background:#dcfce7;color:#166534}.alogw-status-pill--imported,.alogw-status-pill--needs_review,.alogw-status-pill--flagged{background:#fef3c7;color:#92400e}.alogw-status-pill--rejected{background:#fee2e2;color:#991b1b}
 .alogw-modal{position:fixed;inset:0;z-index:9999;display:none;background:rgba(15,23,42,.62);padding:18px}.alogw-modal.is-open{display:flex;align-items:center;justify-content:center}.alogw-modal-card{width:min(1100px,96vw);height:min(760px,92vh);border-radius:22px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden}.alogw-modal-head{flex:0 0 auto;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.08)}.alogw-modal-body{flex:1;background:#0f172a;overflow:auto;display:flex;align-items:center;justify-content:center}.alogw-modal-body img{max-width:100%;transform-origin:center;transition:transform .15s ease}.alogw-image-empty{color:#cbd5e1;text-align:center;padding:28px;font-size:13px}
 .alogw-edit-body{flex:1 1 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 14px;overflow:auto;background:#fff}.alogw-edit-field{display:flex;flex-direction:column;gap:3px}.alogw-edit-field--wide{grid-column:1/-1}.alogw-edit-label{font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.alogw-edit-input,.alogw-edit-textarea,.alogw-edit-select{border:1px solid rgba(15,23,42,.13);border-radius:9px;padding:6px 8px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-edit-textarea{min-height:52px;resize:vertical}.alogw-edit-actions{flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid rgba(15,23,42,.08);background:#f8fafc}
 .alogw-modal-card form{min-height:0;display:flex;flex-direction:column;flex:1 1 auto}
@@ -423,6 +423,19 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     }
     document.getElementById('alogTableHead').innerHTML = '<tr>' + cols.map(([key,label]) => `<th data-col="${esc(key)}" style="width:${columnWidth(key)}px" title="${esc(label)}"><span>${esc(label)}</span><span class="alogw-col-resizer" data-resize-col="${esc(key)}" aria-hidden="true"></span></th>`).join('') + '</tr>';
     document.getElementById('alogTableBody').innerHTML = entries.map((row,i) => '<tr data-i="'+i+'">' + cols.map(([key]) => cell(row,i,key)).join('') + '</tr>').join('');
+    const existingFoot = table.querySelector('tfoot');
+    const footHtml = renderTableFooter();
+    if(existingFoot) {
+      existingFoot.outerHTML = footHtml;
+    } else {
+      table.insertAdjacentHTML('beforeend', footHtml);
+    }
+  }
+  function renderTableFooter(){
+    const labelRow = '<tr>' + cols.map(([key,label]) => `<th data-col="${esc(key)}" style="width:${columnWidth(key)}px">${esc(label)}</th>`).join('') + '</tr>';
+    const totals = tableTotals();
+    const totalRow = '<tr>' + cols.map(([key]) => `<td data-col="${esc(key)}" style="width:${columnWidth(key)}px">${esc(totalCellValue(key, totals))}</td>`).join('') + '</tr>';
+    return '<tfoot>' + labelRow + totalRow + '</tfoot>';
   }
   function cell(row,i,key){
     if(key === 'select') return `<td><input type="checkbox" data-select="${i}"></td>`;
@@ -432,7 +445,8 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       return `<td class="alogw-num" title="${esc(displayValue(value))}">${esc(displayValue(value))}</td>`;
     }
     if(key === 'departure_time' || key === 'arrival_time') {
-      const value = displayLogbookTime(row[key], row.entry_date);
+      const rawTime = key === 'arrival_time' ? arrivalTimeValue(row) : row[key];
+      const value = displayLogbookTime(rawTime, row.entry_date);
       return `<td title="${esc(value)}">${esc(value)}</td>`;
     }
     if(key === 'review_status') {
@@ -448,9 +462,45 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     if(!Number.isNaN(Number(value)) && Number(value) === 0) return '';
     return String(value);
   }
+  function totalCellValue(key, totals){
+    if(key === 'entry_date') return 'Totals';
+    if(key === 'select' || key === 'actions' || key === 'review_status') return '';
+    if(!numeric.has(key)) return '';
+    return displayValue((totals[key] || 0).toFixed(countFields().has(key) ? 0 : 2));
+  }
+  function tableTotals(){
+    const totals = {};
+    numeric.forEach(key => { totals[key] = 0; });
+    entries.forEach(row => {
+      numeric.forEach(key => {
+        const raw = key === 'cross_country_distance_nm' ? derivedCrossCountryDistance(row) : row[key];
+        const value = Number(raw || 0);
+        if(!Number.isNaN(value)) totals[key] += value;
+      });
+    });
+    return totals;
+  }
+  function countFields(){
+    return new Set(['day_landings','night_landings','towered_airport_landings']);
+  }
   function derivedCrossCountryDistance(row){
     if(Number(row.cross_country_time || 0) <= 0) return '';
     return row.cross_country_distance_nm || '';
+  }
+  function arrivalTimeValue(row){
+    if(String(row.arrival_time || '').trim() !== '') return row.arrival_time;
+    return deriveArrivalTime(row.departure_time, row.total_flight_time);
+  }
+  function deriveArrivalTime(departureTime, durationHours){
+    const raw = String(departureTime || '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    const duration = Number(durationHours || 0);
+    if(!match || duration <= 0) return '';
+    const start = Number(match[1]) * 60 + Number(match[2]);
+    const total = (start + Math.round(duration * 60)) % (24 * 60);
+    const hh = String(Math.floor(total / 60)).padStart(2, '0');
+    const mm = String(total % 60).padStart(2, '0');
+    return `${hh}:${mm}`;
   }
   function displayLogbookTime(value, dateValue){
     const raw = String(value || '').trim();

@@ -775,6 +775,9 @@ final class AdminLogbookService
     {
         $source = $this->decodeJson((string)($row['source_json'] ?? '{}'));
         if ($source === array()) {
+            if (trim((string)($row['arrival_time'] ?? '')) === '') {
+                $row['arrival_time'] = $this->deriveArrivalTime((string)($row['departure_time'] ?? ''), (float)($row['total_flight_time'] ?? 0));
+            }
             if ((float)($row['cross_country_time'] ?? 0) > 0) {
                 $derivedDistance = $this->straightLineDistanceNm((string)($row['departure_airport'] ?? ''), (string)($row['arrival_airport'] ?? ''));
                 if ($derivedDistance !== null) {
@@ -851,6 +854,9 @@ final class AdminLogbookService
         if ($duration > 0 && (float)($row['total_flight_time'] ?? 0) <= 0) {
             $row['total_flight_time'] = $duration;
         }
+        if (trim((string)($row['arrival_time'] ?? '')) === '') {
+            $row['arrival_time'] = $this->deriveArrivalTime((string)($row['departure_time'] ?? ''), (float)($row['total_flight_time'] ?? 0));
+        }
         if ($isNight && $duration > 0 && (float)($row['night_time'] ?? 0) <= 0) {
             $row['night_time'] = $duration;
         }
@@ -885,6 +891,9 @@ final class AdminLogbookService
     {
         $this->airports->lookupAirport((string)($row['departure_airport'] ?? ''), $allowAiLookup);
         $this->airports->lookupAirport((string)($row['arrival_airport'] ?? ''), $allowAiLookup);
+        if (trim((string)($row['arrival_time'] ?? '')) === '') {
+            $row['arrival_time'] = $this->deriveArrivalTime((string)($row['departure_time'] ?? ''), (float)($row['total_flight_time'] ?? 0));
+        }
         if ((float)($row['cross_country_time'] ?? 0) > 0) {
             $derivedDistance = $this->straightLineDistanceNm((string)($row['departure_airport'] ?? ''), (string)($row['arrival_airport'] ?? ''));
             if ($derivedDistance !== null) {
@@ -894,6 +903,22 @@ final class AdminLogbookService
             $row['cross_country_distance_nm'] = 0;
         }
         return $row;
+    }
+
+    private function deriveArrivalTime(string $departureTime, float $durationHours): ?string
+    {
+        $departureTime = trim($departureTime);
+        if ($departureTime === '' || $durationHours <= 0 || preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $departureTime, $matches) !== 1) {
+            return null;
+        }
+        $hour = max(0, min(23, (int)$matches[1]));
+        $minute = max(0, min(59, (int)$matches[2]));
+        $durationMinutes = (int)round($durationHours * 60);
+        $totalMinutes = ($hour * 60 + $minute + $durationMinutes) % (24 * 60);
+        if ($totalMinutes < 0) {
+            $totalMinutes += 24 * 60;
+        }
+        return sprintf('%02d:%02d:00', intdiv($totalMinutes, 60), $totalMinutes % 60);
     }
 
     /**
