@@ -244,10 +244,19 @@ function rightTotalsRow(string $label, array $totals): string
 @page{size:landscape;margin:0}
 *{box-sizing:border-box}
 body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-serif}
-.screen-tools{position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;padding:10px 14px;background:#102845;color:#fff}
-.screen-tools button{border:0;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+.screen-tools{position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:#102845;color:#fff}
+.screen-tools button,.screen-tools select{border:0;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+.screen-tools select{background:#fff;color:#102845}
+.screen-tools .muted{color:#bfdbfe;font-size:12px}
 .print-error{max-width:980px;margin:16px auto;padding:14px 16px;border:1px solid #fecdd3;border-radius:12px;background:#fff1f2;color:#991b1b;font-weight:700}
-.book-page{width:240mm;height:210mm;margin:12mm auto;padding:8mm 0 0;background:#fff;page-break-after:always;position:relative}
+.print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:18px}
+.paper-sheet{position:relative;background:#fff;box-shadow:0 20px 70px rgba(15,23,42,.22);overflow:hidden}
+.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
+.book-spread{position:absolute;left:50%;top:50%;display:none;width:480mm;height:210mm;transform:translate(-50%,-50%) scale(var(--spread-scale,.58));transform-origin:center;filter:drop-shadow(0 8px 18px rgba(15,23,42,.14))}
+.book-spread.is-active{display:flex}.book-spread.is-turning{animation:pageTurn .26s ease}
+.book-spread::before{content:"";position:absolute;left:50%;top:2mm;bottom:2mm;width:1.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.2),rgba(255,255,255,.65),rgba(15,23,42,.2));z-index:4;border-radius:999px}
+.book-page{width:240mm;height:210mm;margin:0;padding:8mm 0 0;background:#fff;position:relative;flex:0 0 auto}
+.book-page-left{box-shadow:inset -10mm 0 20mm rgba(15,23,42,.07)}.book-page-right{box-shadow:inset 10mm 0 20mm rgba(15,23,42,.07)}
 .page-head{width:240mm;height:13mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
@@ -265,15 +274,24 @@ thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 .left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
 .right col.c1{width:24.75mm}.right col.c2{width:24.75mm}.right col.c3{width:21.125mm}.right col.c4{width:21.125mm}.right col.c5{width:21.125mm}.right col.c6{width:21.125mm}.right col.c7{width:13.25mm}.right col.c8{width:13.25mm}.right col.c9{width:79.5mm}
-@media print{body{background:#fff}.screen-tools{display:none}.book-page{margin:0;padding-top:8mm;break-after:page}}
+@keyframes pageTurn{0%{opacity:.7;transform:translate(-50%,-50%) scale(var(--spread-scale,.58)) rotateY(-3deg)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.58)) rotateY(0)}}
+@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0}.paper-sheet{box-shadow:none;overflow:hidden;break-after:page}.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}.book-spread{display:flex;break-after:page}.book-spread:not(.is-active){display:flex}.book-spread::before{display:block}}
 </style>
 </head>
 <body>
 <div class="screen-tools">
   <strong><?= h($title) ?></strong>
   <button onclick="window.print()">Print</button>
-  <span>Use browser print at 100% scale. Each side is fixed at 240mm wide. Rows: <?= count($entries) ?></span>
+  <button type="button" id="prevSpread">Previous</button>
+  <button type="button" id="nextSpread">Next</button>
+  <select id="paperSelect" aria-label="Paper size">
+    <option value="a4">A4 landscape</option>
+    <option value="letter">US Letter landscape</option>
+  </select>
+  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($chunks) ?></span> · Rows: <?= count($entries) ?> · fixed 240mm logbook pages</span>
 </div>
+<main class="print-stage">
+<div class="paper-sheet" id="paperSheet" data-paper="a4">
 <?php
 try {
     $previousTotals = array();
@@ -282,7 +300,8 @@ try {
         $runningTotals = addTotals($previousTotals, $pageTotals);
         $rows = implode('', array_map('leftRow', $chunk)) . blankRows(max(0, 25 - count($chunk)), 'left');
 ?>
-<section class="book-page">
+<div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
+<section class="book-page book-page-left">
   <div class="page-head"><div class="logo"><?= h($logoText) ?></div><div class="meta"><span>Medical Expires:</span><span>Class/Type Rating Expires:</span></div></div>
   <table class="left">
     <colgroup><?php for ($i = 1; $i <= 13; $i++): ?><col class="c<?= $i ?>"><?php endfor; ?></colgroup>
@@ -298,7 +317,7 @@ try {
 <?php
         $rightRows = implode('', array_map('rightRow', $chunk)) . blankRows(max(0, 25 - count($chunk)), 'right');
 ?>
-<section class="book-page">
+<section class="book-page book-page-right">
   <div class="page-head"><div></div><div class="logo right-logo"><?= h($logoText) ?></div></div>
   <table class="right">
     <colgroup><?php for ($i = 1; $i <= 9; $i++): ?><col class="c<?= $i ?>"><?php endfor; ?></colgroup>
@@ -312,6 +331,7 @@ try {
   <?= rightTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
   <div class="signature">I certify that the entries in this log are true: <span class="line"></span> (Pilot's Signature).</div>
 </section>
+</div>
 <?php
         $previousTotals = $runningTotals;
     endforeach;
@@ -319,5 +339,52 @@ try {
     echo '<div class="print-error">Printable logbook rendering failed: ' . h($e->getMessage()) . '</div>';
 }
 ?>
+</div>
+</main>
+<script>
+(function(){
+  const sheet = document.getElementById('paperSheet');
+  const spreads = Array.from(document.querySelectorAll('.book-spread'));
+  const now = document.getElementById('spreadNow');
+  const select = document.getElementById('paperSelect');
+  let current = 0;
+  function fitSpread(){
+    const rect = sheet.getBoundingClientRect();
+    const pxPerMm = 96 / 25.4;
+    const scale = Math.min((rect.width - 24) / (480 * pxPerMm), (rect.height - 18) / (210 * pxPerMm));
+    sheet.style.setProperty('--spread-scale', String(Math.max(0.1, Math.min(1, scale))));
+  }
+  function show(index){
+    current = Math.max(0, Math.min(spreads.length - 1, index));
+    spreads.forEach((spread, idx) => {
+      spread.classList.toggle('is-active', idx === current);
+      spread.classList.remove('is-turning');
+      if(idx === current) requestAnimationFrame(() => spread.classList.add('is-turning'));
+    });
+    now.textContent = String(current + 1);
+    fitSpread();
+  }
+  document.getElementById('prevSpread').addEventListener('click', () => show(current - 1));
+  document.getElementById('nextSpread').addEventListener('click', () => show(current + 1));
+  select.addEventListener('change', () => {
+    sheet.dataset.paper = select.value;
+    try { localStorage.setItem('ipca.printLogbook.paper', select.value); } catch(err) {}
+    requestAnimationFrame(fitSpread);
+  });
+  try {
+    const saved = localStorage.getItem('ipca.printLogbook.paper');
+    if(saved === 'letter' || saved === 'a4') {
+      select.value = saved;
+      sheet.dataset.paper = saved;
+    }
+  } catch(err) {}
+  window.addEventListener('resize', fitSpread);
+  window.addEventListener('keydown', event => {
+    if(event.key === 'ArrowLeft') show(current - 1);
+    if(event.key === 'ArrowRight') show(current + 1);
+  });
+  show(0);
+})();
+</script>
 </body>
 </html>
