@@ -20,6 +20,40 @@ final class AdminLogbookService
         'ipca_flight_variable_snapshots',
     );
 
+    private const REQUIRED_ENTRY_COLUMNS = array(
+        'external_system',
+        'external_id',
+        'import_profile',
+        'source_json',
+        'source_hash',
+        'normalized_hash',
+        'sync_status',
+        'fnpt_simulator_time',
+        'accepted_at',
+        'accepted_by',
+    );
+
+    private const EGLE_LEGACY_COLUMNS = array(
+        'student_name',
+        'student_email',
+        'instructor_name',
+        'instructor_email',
+        'aircraft_name',
+        'aircraft_type',
+        'aircraft_engine',
+        'aircraft_sort',
+        'lb_dep',
+        'lb_arr',
+        'lb_deptime',
+        'lb_dur',
+        'lb_ld',
+        'lb_cond',
+        'lb_ifr',
+        'lb_fnpt',
+        'lb_dual',
+        'lb_xc',
+    );
+
     private FlightTotalsService $totals;
     private FlightRequirementEngine $requirements;
     private FlightVariableService $variables;
@@ -47,6 +81,13 @@ final class AdminLogbookService
         foreach (self::REQUIRED_TABLES as $table) {
             if (!$this->tableExists($table)) {
                 $missing[] = $table;
+            }
+        }
+        if ($this->tableExists('ipca_admin_logbook_entries')) {
+            foreach (self::REQUIRED_ENTRY_COLUMNS as $column) {
+                if (!$this->columnExists('ipca_admin_logbook_entries', $column)) {
+                    $missing[] = 'ipca_admin_logbook_entries.' . $column;
+                }
             }
         }
         return $missing;
@@ -161,6 +202,23 @@ final class AdminLogbookService
         $before = $entryId > 0 ? $this->getEntry($entryId) : null;
         $row = $this->normalizeEntry($data);
         $row['logbook_id'] = $logbookId;
+        if ($before !== null && $row['external_system'] === null && trim((string)($before['external_system'] ?? '')) !== '') {
+            $row['external_system'] = (string)$before['external_system'];
+        }
+        if ($before !== null && $row['external_id'] === null && trim((string)($before['external_id'] ?? '')) !== '') {
+            $row['external_id'] = (string)$before['external_id'];
+        }
+        if ($before !== null && $row['source_json'] === '[]' && trim((string)($before['source_json'] ?? '')) !== '') {
+            $row['source_json'] = (string)$before['source_json'];
+        }
+        if ($before !== null && $row['import_profile'] === null && trim((string)($before['import_profile'] ?? '')) !== '') {
+            $row['import_profile'] = (string)$before['import_profile'];
+        }
+        foreach (array('source_hash', 'normalized_hash', 'sync_status') as $preservedKey) {
+            if ($before !== null && $row[$preservedKey] === null && trim((string)($before[$preservedKey] ?? '')) !== '') {
+                $row[$preservedKey] = (string)$before[$preservedKey];
+            }
+        }
 
         if ($entryId > 0 && $before !== null) {
             $sets = array();
@@ -227,6 +285,54 @@ final class AdminLogbookService
             ");
             $stmt->execute(array(':id' => $entryId, ':logbook_id' => $logbookId));
             $this->writeAudit($logbookId, $entryId, $actorUserId, 'entry_flagged', $before, array('review_status' => 'flagged'));
+        }
+    }
+
+    /**
+     * @param list<int> $entryIds
+     */
+    public function acceptEntries(int $logbookId, array $entryIds, int $actorUserId): void
+    {
+        foreach ($entryIds as $entryId) {
+            $entryId = (int)$entryId;
+            if ($entryId <= 0) {
+                continue;
+            }
+            $before = $this->getEntry($entryId);
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_admin_logbook_entries
+                SET review_status = 'accepted',
+                    accepted_at = CURRENT_TIMESTAMP,
+                    accepted_by = :actor_user_id
+                WHERE id = :id AND logbook_id = :logbook_id
+            ");
+            $stmt->execute(array(
+                ':actor_user_id' => $actorUserId > 0 ? $actorUserId : null,
+                ':id' => $entryId,
+                ':logbook_id' => $logbookId,
+            ));
+            $this->writeAudit($logbookId, $entryId, $actorUserId, 'entry_accepted', $before, array('review_status' => 'accepted'));
+        }
+    }
+
+    /**
+     * @param list<int> $entryIds
+     */
+    public function rejectEntries(int $logbookId, array $entryIds, int $actorUserId): void
+    {
+        foreach ($entryIds as $entryId) {
+            $entryId = (int)$entryId;
+            if ($entryId <= 0) {
+                continue;
+            }
+            $before = $this->getEntry($entryId);
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_admin_logbook_entries
+                SET review_status = 'rejected'
+                WHERE id = :id AND logbook_id = :logbook_id
+            ");
+            $stmt->execute(array(':id' => $entryId, ':logbook_id' => $logbookId));
+            $this->writeAudit($logbookId, $entryId, $actorUserId, 'entry_rejected', $before, array('review_status' => 'rejected'));
         }
     }
 
@@ -326,6 +432,60 @@ final class AdminLogbookService
         $page = $this->getPage($id);
         $this->writeAudit($logbookId, null, $actorUserId, 'logbook_image_uploaded', null, $page);
         return $page ?? array();
+    }
+
+    /**
+     * @return array{profile:string,total_rows:int,imported_count:int,candidates:list<array<string,mixed>>,warnings:list<string>}
+     */
+    public function importCsvUpload(int $logbookId, array $file, int $actorUserId): array
+    {
+        $this->requireSchema();
+        $this->requireLogbook($logbookId);
+
+        $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('CSV upload failed (code ' . $err . ').');
+        }
+        $tmp = (string)($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new RuntimeException('Invalid CSV upload.');
+        }
+
+        $rows = $this->readCsvRows($tmp);
+        $profile = $this->detectCsvProfile($rows['headers']);
+        $created = array();
+        $warnings = array();
+        foreach ($rows['rows'] as $idx => $sourceRow) {
+            $candidate = $this->mapEgleLegacyCsvRow($sourceRow);
+            $candidate['import_profile'] = $profile;
+            $candidate['source'] = $sourceRow;
+            $candidate['review_status'] = 'imported';
+            $candidate['metadata'] = array(
+                'source' => 'csv_import',
+                'profile' => $profile,
+                'row_number' => $idx + 2,
+                'student_name' => $sourceRow['student_name'] ?? null,
+                'student_email' => $sourceRow['student_email'] ?? null,
+                'instructor_email' => $sourceRow['instructor_email'] ?? null,
+            );
+            $created[] = $this->saveEntry($logbookId, $candidate, $actorUserId);
+        }
+
+        $this->writeAudit($logbookId, null, $actorUserId, 'csv_imported', null, array(
+            'profile' => $profile,
+            'original_filename' => (string)($file['name'] ?? ''),
+            'total_rows' => count($rows['rows']),
+            'imported_count' => count($created),
+            'warnings' => $warnings,
+        ));
+
+        return array(
+            'profile' => $profile,
+            'total_rows' => count($rows['rows']),
+            'imported_count' => count($created),
+            'candidates' => $created,
+            'warnings' => $warnings,
+        );
     }
 
     /**
@@ -613,6 +773,125 @@ final class AdminLogbookService
     }
 
     /**
+     * @return array{headers:list<string>,rows:list<array<string,string>>}
+     */
+    private function readCsvRows(string $path): array
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new RuntimeException('Could not open CSV file.');
+        }
+        $headers = fgetcsv($handle);
+        if (!is_array($headers) || $headers === array()) {
+            fclose($handle);
+            throw new RuntimeException('CSV file is empty.');
+        }
+        $headers = array_map(static fn (mixed $value): string => strtolower(trim((string)$value)), $headers);
+        $rows = array();
+        while (($line = fgetcsv($handle)) !== false) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $row = array();
+            foreach ($headers as $idx => $header) {
+                $value = (string)($line[$idx] ?? '');
+                $row[$header] = trim($value) === 'NULL' ? '' : trim($value);
+            }
+            if (implode('', $row) === '') {
+                continue;
+            }
+            $rows[] = $row;
+        }
+        fclose($handle);
+        return array('headers' => $headers, 'rows' => $rows);
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function detectCsvProfile(array $headers): string
+    {
+        $lookup = array_flip($headers);
+        foreach (self::EGLE_LEGACY_COLUMNS as $required) {
+            if (!array_key_exists($required, $lookup)) {
+                throw new RuntimeException('Unsupported CSV format. Missing column for EGLE_LEGACY_LOGBOOK_V1: ' . $required);
+            }
+        }
+        return 'EGLE_LEGACY_LOGBOOK_V1';
+    }
+
+    /**
+     * @param array<string,string> $source
+     * @return array<string,mixed>
+     */
+    private function mapEgleLegacyCsvRow(array $source): array
+    {
+        $duration = $this->durationDecimal($source['lb_dur'] ?? '');
+        $condition = strtoupper(trim((string)($source['lb_cond'] ?? '')));
+        $engine = strtoupper(trim((string)($source['aircraft_engine'] ?? '')));
+        $aircraftTypeFlag = strtoupper(trim((string)($source['aircraft_type'] ?? '')));
+        $isSimulator = $aircraftTypeFlag === 'SIMULATOR' || $this->truthy($source['lb_fnpt'] ?? '');
+        $isDual = $this->truthy($source['lb_dual'] ?? '');
+        $isNight = $condition === 'NIGHT';
+        $isIfr = $this->truthy($source['lb_ifr'] ?? '');
+        $isCrossCountry = $this->crossCountryFlag($source['lb_xc'] ?? '');
+        $landings = max(0, (int)round((float)($source['lb_ld'] ?? 0)));
+
+        return array(
+            'entry_date' => $this->dateFromLegacyDepartureTime($source['lb_deptime'] ?? ''),
+            'departure_airport' => $source['lb_dep'] ?? null,
+            'departure_time' => $this->timeFromLegacyDepartureTime($source['lb_deptime'] ?? ''),
+            'arrival_airport' => $source['lb_arr'] ?? null,
+            'arrival_time' => null,
+            'aircraft_type' => trim((string)($source['aircraft_sort'] ?? '')) !== '' ? $source['aircraft_sort'] : ($source['aircraft_type'] ?? null),
+            'aircraft_registration' => $source['aircraft_name'] ?? null,
+            'single_engine_time' => (!$isSimulator && $engine === 'SE') ? $duration : 0,
+            'multi_engine_time' => (!$isSimulator && $engine === 'ME') ? $duration : 0,
+            'pic_time' => 0,
+            'copilot_time' => 0,
+            'dual_received_time' => $isDual ? $duration : 0,
+            'instructor_time' => $isDual ? $duration : 0,
+            'solo_time' => 0,
+            'cross_country_time' => $isCrossCountry ? $duration : 0,
+            'cross_country_distance_nm' => 0,
+            'night_time' => $isNight ? $duration : 0,
+            'instrument_time' => $isIfr ? $duration : 0,
+            'actual_instrument_time' => 0,
+            'simulated_instrument_time' => 0,
+            'basic_instrument_flying_time' => 0,
+            'fnpt_simulator_time' => $isSimulator ? $duration : 0,
+            'day_landings' => $isNight ? 0 : $landings,
+            'night_landings' => $isNight ? $landings : 0,
+            'towered_airport_landings' => 0,
+            'total_flight_time' => $duration,
+            'instructor_name' => $source['instructor_name'] ?? null,
+            'remarks' => $this->legacyRemarks($source),
+            'endorsements' => null,
+        );
+    }
+
+    /**
+     * @param array<string,string> $source
+     */
+    private function legacyRemarks(array $source): string
+    {
+        $parts = array();
+        if (trim((string)($source['lb_xc'] ?? '')) !== '') {
+            $parts[] = 'XC: ' . trim((string)$source['lb_xc']);
+        }
+        if (trim((string)($source['lb_cond'] ?? '')) !== '') {
+            $parts[] = 'Condition: ' . trim((string)$source['lb_cond']);
+        }
+        if ($this->truthy($source['lb_fnpt'] ?? '')) {
+            $parts[] = 'FNPT / Simulator';
+        }
+        if (trim((string)($source['lb_brief'] ?? '')) !== '') {
+            $parts[] = 'Brief: ' . trim((string)$source['lb_brief']);
+        }
+        return implode(' · ', $parts);
+    }
+
+    /**
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
@@ -622,10 +901,17 @@ final class AdminLogbookService
             'single_engine_time', 'multi_engine_time', 'pic_time', 'copilot_time', 'dual_received_time',
             'instructor_time', 'solo_time', 'cross_country_time', 'cross_country_distance_nm',
             'night_time', 'instrument_time', 'actual_instrument_time', 'simulated_instrument_time',
-            'basic_instrument_flying_time', 'total_flight_time',
+            'basic_instrument_flying_time', 'fnpt_simulator_time', 'total_flight_time',
         );
         $row = array(
             'source_page_id' => $this->nullableInt($data['source_page_id'] ?? null),
+            'external_system' => $this->textOrNull($data['external_system'] ?? null, 32),
+            'external_id' => $this->textOrNull($data['external_id'] ?? null, 128),
+            'import_profile' => $this->textOrNull($data['import_profile'] ?? null, 64),
+            'source_json' => $this->encodeJson(is_array($data['source'] ?? null) ? $data['source'] : array()),
+            'source_hash' => $this->textOrNull($data['source_hash'] ?? null, 64),
+            'normalized_hash' => $this->textOrNull($data['normalized_hash'] ?? null, 64),
+            'sync_status' => $this->textOrNull($data['sync_status'] ?? null, 32),
             'entry_date' => $this->dateOrNull($data['entry_date'] ?? null),
             'departure_airport' => $this->upperOrNull($data['departure_airport'] ?? null, 16),
             'departure_time' => $this->timeOrNull($data['departure_time'] ?? null),
@@ -639,7 +925,9 @@ final class AdminLogbookService
             'instructor_name' => $this->textOrNull($data['instructor_name'] ?? null, 255),
             'remarks' => $this->textOrNull($data['remarks'] ?? null, 4000),
             'endorsements' => $this->textOrNull($data['endorsements'] ?? null, 4000),
-            'review_status' => in_array((string)($data['review_status'] ?? 'ok'), array('ok', 'flagged', 'merged', 'split'), true) ? (string)$data['review_status'] : 'ok',
+            'review_status' => in_array((string)($data['review_status'] ?? 'ok'), array('imported', 'needs_review', 'accepted', 'rejected', 'ok', 'flagged', 'merged', 'split'), true) ? (string)$data['review_status'] : 'ok',
+            'accepted_at' => $this->dateTimeOrNull($data['accepted_at'] ?? null),
+            'accepted_by' => $this->nullableInt($data['accepted_by'] ?? null),
             'metadata_json' => $this->encodeJson(is_array($data['metadata'] ?? null) ? $data['metadata'] : array()),
         );
         foreach ($timeFields as $field) {
@@ -745,6 +1033,19 @@ final class AdminLogbookService
         return (int)$stmt->fetchColumn() > 0;
     }
 
+    private function columnExists(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table
+              AND COLUMN_NAME = :column
+        ");
+        $stmt->execute(array(':table' => $table, ':column' => $column));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
     private function dateOrNull(mixed $value): ?string
     {
         $value = trim((string)$value);
@@ -757,6 +1058,39 @@ final class AdminLogbookService
     {
         $value = trim((string)$value);
         return preg_match('/^\d{1,2}:\d{2}/', $value) ? substr($value, 0, 5) . ':00' : null;
+    }
+
+    private function dateTimeOrNull(mixed $value): ?string
+    {
+        $value = trim((string)$value);
+        if ($value === '') return null;
+        $ts = strtotime($value);
+        return $ts ? date('Y-m-d H:i:s', $ts) : null;
+    }
+
+    private function dateFromLegacyDepartureTime(mixed $value): ?string
+    {
+        $timestamp = $this->legacyTimestamp($value);
+        return $timestamp > 0 ? date('Y-m-d', $timestamp) : null;
+    }
+
+    private function timeFromLegacyDepartureTime(mixed $value): ?string
+    {
+        $timestamp = $this->legacyTimestamp($value);
+        return $timestamp > 0 ? date('H:i:s', $timestamp) : null;
+    }
+
+    private function legacyTimestamp(mixed $value): int
+    {
+        $value = trim((string)$value);
+        if ($value === '' || $value === '0') {
+            return 0;
+        }
+        if (ctype_digit($value)) {
+            return (int)$value;
+        }
+        $ts = strtotime($value);
+        return $ts ? (int)$ts : 0;
     }
 
     private function textOrNull(mixed $value, int $max): ?string
@@ -781,6 +1115,30 @@ final class AdminLogbookService
     {
         $value = trim((string)$value);
         return $value !== '' ? (int)$value : null;
+    }
+
+    private function durationDecimal(mixed $value): float
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return 0.0;
+        }
+        return round((float)$value, 2);
+    }
+
+    private function truthy(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        return in_array($value, array('1', 'Y', 'YES', 'TRUE', 'T', 'IFR', 'FNPT'), true);
+    }
+
+    private function crossCountryFlag(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        if ($value === '' || $value === 'NO' || $value === 'LOCAL') {
+            return false;
+        }
+        return true;
     }
 
     private function key(string $value): string

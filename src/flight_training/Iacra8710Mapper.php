@@ -22,7 +22,7 @@ final class Iacra8710Mapper
             'multi_engine' => $totals['multi_engine_time'] ?? 0,
             'day_landings' => $totals['day_landings'] ?? 0,
             'night_landings' => $totals['night_landings'] ?? 0,
-            'simulator_atd' => null,
+            'simulator_atd' => $totals['fnpt_simulator_time'] ?? 0,
         );
     }
 }

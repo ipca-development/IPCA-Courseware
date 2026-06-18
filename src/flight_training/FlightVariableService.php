@@ -31,6 +31,7 @@ final class FlightVariableService
             'flight.instructor_time' => $totals['instructor_time'] ?? 0,
             'flight.single_engine_time' => $totals['single_engine_time'] ?? 0,
             'flight.multi_engine_time' => $totals['multi_engine_time'] ?? 0,
+            'flight.fnpt_simulator_time' => $totals['fnpt_simulator_time'] ?? 0,
         );
 
         foreach ($iacra as $key => $value) {

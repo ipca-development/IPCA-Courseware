@@ -14,6 +14,7 @@ final class FlightTotalsService
         'actual_instrument_time',
         'simulated_instrument_time',
         'basic_instrument_flying_time',
+        'fnpt_simulator_time',
         'instructor_time',
         'single_engine_time',
         'multi_engine_time',
@@ -43,7 +44,7 @@ final class FlightTotalsService
         $totals['entry_count'] = 0;
 
         foreach ($entries as $entry) {
-            if ((string)($entry['review_status'] ?? '') === 'deleted') {
+            if (!$this->isTrustedEntry($entry)) {
                 continue;
             }
             $totals['entry_count']++;
@@ -83,8 +84,17 @@ final class FlightTotalsService
             'multi_engine' => $totals['multi_engine_time'] ?? 0,
             'day_landings' => $totals['day_landings'] ?? 0,
             'night_landings' => $totals['night_landings'] ?? 0,
-            'simulator_atd' => null,
+            'simulator_atd' => $totals['fnpt_simulator_time'] ?? 0,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function isTrustedEntry(array $entry): bool
+    {
+        $status = strtolower(trim((string)($entry['review_status'] ?? '')));
+        return in_array($status, array('accepted', 'ok', 'merged', 'split'), true);
     }
 
     private function decimal(mixed $value): float

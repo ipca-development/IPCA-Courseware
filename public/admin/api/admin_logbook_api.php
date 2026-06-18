@@ -86,6 +86,18 @@ try {
             $service->flagEntries($logbookId, is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(), $actorUserId);
             alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'accept_entries':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $service->acceptEntries($logbookId, is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(), $actorUserId);
+            alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
+
+        case 'reject_entries':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $service->rejectEntries($logbookId, is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(), $actorUserId);
+            alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'split_entry':
             $input = alog_input();
             $logbookId = (int)($input['logbook_id'] ?? 0);
@@ -105,6 +117,14 @@ try {
             $logbookId = (int)($_POST['logbook_id'] ?? 0);
             $page = $service->addPageFromUpload($logbookId, $_FILES['image'], $actorUserId);
             alog_json(200, array('ok' => true, 'page' => $page, 'data' => $service->loadWorkspace($logbookId)));
+
+        case 'import_csv':
+            if (empty($_FILES['csv']) || !is_array($_FILES['csv'])) {
+                throw new RuntimeException('csv file required');
+            }
+            $logbookId = (int)($_POST['logbook_id'] ?? 0);
+            $result = $service->importCsvUpload($logbookId, $_FILES['csv'], $actorUserId);
+            alog_json(200, array('ok' => true, 'result' => $result, 'data' => $service->loadWorkspace($logbookId)));
 
         case 'attempt_extract_page':
             $input = alog_input();
