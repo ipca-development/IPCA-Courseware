@@ -243,10 +243,13 @@ final class EgleLogbookSyncService
         $aircraftTypeFlag = strtoupper(trim((string)($source['aircraft_type'] ?? '')));
         $isSimulator = $aircraftTypeFlag === 'SIMULATOR' || $this->truthy($this->firstSourceValue($source, array('lb_fnpt', 'lb_sim', 'fnpt')));
         $isDual = $this->truthy($this->firstSourceValue($source, array('lb_dual', 'dual')));
-        $isNight = $this->nightCondition($this->firstSourceValue($source, array('lb_cond', 'lb_condition', 'condition', 'day_night')));
+        $isDay = $this->dayCondition($this->firstSourceValue($source, array('lb_cond', 'lb_condition', 'condition', 'day_night')));
+        $isNight = !$isDay;
         $isIfr = $this->truthy($this->firstSourceValue($source, array('lb_ifr', 'ifr')));
         $isCrossCountry = $this->crossCountryFlag($this->firstSourceValue($source, array('lb_xc', 'xc')));
         $landings = max(0, (int)round((float)$this->firstSourceValue($source, array('lb_ld', 'lb_landings', 'landings'))));
+        $isAirplane = !$isSimulator && ($aircraftTypeFlag === '' || $aircraftTypeFlag === 'AIRCRAFT' || $aircraftTypeFlag === 'AIRPLANE');
+        $isSoloPic = !$isDual && !$isSimulator;
 
         return array(
             'entry_date' => $this->dateFromLegacyDepartureTime($source['lb_deptime'] ?? ''),
@@ -256,13 +259,13 @@ final class EgleLogbookSyncService
             'arrival_time' => null,
             'aircraft_type' => trim((string)($source['aircraft_sort'] ?? '')) !== '' ? $source['aircraft_sort'] : ($source['aircraft_type'] ?? null),
             'aircraft_registration' => $source['aircraft_name'] ?? null,
-            'single_engine_time' => (!$isSimulator && $engine === 'SE') ? $duration : 0,
+            'single_engine_time' => ($isAirplane && ($engine === '' || $engine === 'SE')) ? $duration : 0,
             'multi_engine_time' => (!$isSimulator && $engine === 'ME') ? $duration : 0,
-            'pic_time' => 0,
+            'pic_time' => $isSoloPic ? $duration : 0,
             'copilot_time' => 0,
             'dual_received_time' => $isDual ? $duration : 0,
             'instructor_time' => $isDual ? $duration : 0,
-            'solo_time' => 0,
+            'solo_time' => $isSoloPic ? $duration : 0,
             'cross_country_time' => $isCrossCountry ? $duration : 0,
             'cross_country_distance_nm' => 0,
             'night_time' => $isNight ? $duration : 0,
@@ -516,6 +519,14 @@ final class EgleLogbookSyncService
         return in_array($value, array('N', 'NIGHT', 'NITE', 'NACHT', 'DARK'), true)
             || str_contains($value, 'NIGHT')
             || str_contains($value, 'NACHT');
+    }
+
+    private function dayCondition(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        return in_array($value, array('D', 'DAY', 'DAG'), true)
+            || str_contains($value, 'DAY')
+            || str_contains($value, 'DAG');
     }
 
     private function dateFromLegacyDepartureTime(mixed $value): ?string

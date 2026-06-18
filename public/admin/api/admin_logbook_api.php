@@ -98,6 +98,17 @@ try {
             $service->rejectEntries($logbookId, is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(), $actorUserId);
             alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'bulk_update_entries':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $service->bulkUpdateEntries(
+                $logbookId,
+                is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(),
+                is_array($input['flags'] ?? null) ? $input['flags'] : array(),
+                $actorUserId
+            );
+            alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'split_entry':
             $input = alog_input();
             $logbookId = (int)($input['logbook_id'] ?? 0);

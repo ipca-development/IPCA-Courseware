@@ -137,6 +137,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSelectAllRows">Select All</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSelectReviewRows">Select Imported / Review</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogClearSelection">Clear Selection</button>
+      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogOpenBulkEdit">Bulk Edit Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogAcceptRows">Accept Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogRejectRows">Reject Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSplitRow">Split Selected</button>
@@ -232,6 +233,37 @@ cw_header('Flight Training · Admin Logbook Workspace');
       </div>
       <div class="alogw-edit-actions">
         <button class="alogw-btn alogw-btn--primary" type="submit">Save & Test Connection</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="alogw-modal" id="alogBulkEditModal" aria-hidden="true">
+  <div class="alogw-modal-card">
+    <div class="alogw-modal-head">
+      <div>
+        <h2 class="alogw-panel-title">Bulk Edit Selected Flights</h2>
+        <p class="alogw-panel-text">Set selected flights quickly. Checked time flags use each row's total time; unchecked flags set that field to zero. Leave blank to keep unchanged.</p>
+      </div>
+      <button class="alogw-btn alogw-btn--danger" type="button" id="alogCancelBulkEdit">Cancel</button>
+    </div>
+    <form id="alogBulkEditForm">
+      <div class="alogw-edit-body">
+        <label class="alogw-edit-field"><span class="alogw-edit-label">SE</span><select class="alogw-edit-select" name="single_engine_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">ME</span><select class="alogw-edit-select" name="multi_engine_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Dual</span><select class="alogw-edit-select" name="dual_received_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">PIC</span><select class="alogw-edit-select" name="pic_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Solo</span><select class="alogw-edit-select" name="solo_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Cross Country</span><select class="alogw-edit-select" name="cross_country_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Night</span><select class="alogw-edit-select" name="night_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Instrument</span><select class="alogw-edit-select" name="instrument_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">FNPT / Sim</span><select class="alogw-edit-select" name="fnpt_simulator_time"><option value="">Keep</option><option value="1">Set total time</option><option value="0">Clear</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Day Landings</span><input class="alogw-edit-input" name="day_landings" type="number" min="0" placeholder="Keep"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Night Landings</span><input class="alogw-edit-input" name="night_landings" type="number" min="0" placeholder="Keep"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Status</span><select class="alogw-edit-select" name="review_status"><option value="">Keep</option><option value="imported">Imported</option><option value="needs_review">Needs review</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="flagged">Flagged</option></select></label>
+      </div>
+      <div class="alogw-edit-actions">
+        <button class="alogw-btn alogw-btn--primary" type="submit">Apply to Selected</button>
       </div>
     </form>
   </div>
@@ -558,6 +590,31 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   document.getElementById('alogClearSelection').addEventListener('click', () => {
     setRowSelection(() => false);
     setStatus('Selection cleared');
+  });
+  function openBulkEditModal(){
+    if(selectedIndexes().length === 0) {
+      setStatus('Select one or more rows first');
+      return;
+    }
+    document.getElementById('alogBulkEditModal').classList.add('is-open');
+    document.getElementById('alogBulkEditModal').setAttribute('aria-hidden','false');
+  }
+  function closeBulkEditModal(){
+    document.getElementById('alogBulkEditModal').classList.remove('is-open');
+    document.getElementById('alogBulkEditModal').setAttribute('aria-hidden','true');
+  }
+  document.getElementById('alogOpenBulkEdit').addEventListener('click', openBulkEditModal);
+  document.getElementById('alogCancelBulkEdit').addEventListener('click', closeBulkEditModal);
+  document.getElementById('alogBulkEditForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const ids = selectedIndexes().map(i => Number(entries[i].id || 0)).filter(Boolean);
+      const formData = new FormData(e.currentTarget);
+      const flags = Object.fromEntries(formData.entries());
+      await post({action:'bulk_update_entries', logbook_id:logbookId, entry_ids:ids, flags});
+      closeBulkEditModal();
+      setStatus('Bulk edit applied');
+    } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogAcceptRows').addEventListener('click', async () => {
     try {

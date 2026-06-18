@@ -336,6 +336,43 @@ final class AdminLogbookService
         }
     }
 
+    /**
+     * @param list<int> $entryIds
+     * @param array<string,mixed> $flags
+     */
+    public function bulkUpdateEntries(int $logbookId, array $entryIds, array $flags, int $actorUserId): void
+    {
+        foreach ($entryIds as $entryId) {
+            $entryId = (int)$entryId;
+            if ($entryId <= 0) {
+                continue;
+            }
+            $entry = $this->getEntry($entryId);
+            if ($entry === null || (int)$entry['logbook_id'] !== $logbookId) {
+                continue;
+            }
+            $before = $entry;
+            $duration = round((float)($entry['total_flight_time'] ?? 0), 2);
+            foreach (array('single_engine_time', 'multi_engine_time', 'dual_received_time', 'pic_time', 'solo_time', 'cross_country_time', 'night_time', 'instrument_time', 'fnpt_simulator_time') as $field) {
+                if (!array_key_exists($field, $flags) || $flags[$field] === '') {
+                    continue;
+                }
+                $entry[$field] = !empty($flags[$field]) ? $duration : 0;
+            }
+            if (array_key_exists('day_landings', $flags) && $flags['day_landings'] !== '') {
+                $entry['day_landings'] = max(0, (int)$flags['day_landings']);
+            }
+            if (array_key_exists('night_landings', $flags) && $flags['night_landings'] !== '') {
+                $entry['night_landings'] = max(0, (int)$flags['night_landings']);
+            }
+            if (array_key_exists('review_status', $flags) && trim((string)$flags['review_status']) !== '') {
+                $entry['review_status'] = trim((string)$flags['review_status']);
+            }
+            $this->saveEntry($logbookId, $entry, $actorUserId);
+            $this->writeAudit($logbookId, $entryId, $actorUserId, 'entry_bulk_updated', $before, $entry);
+        }
+    }
+
     public function splitEntry(int $logbookId, int $entryId, int $actorUserId): array
     {
         $entry = $this->getEntry($entryId);
@@ -928,10 +965,13 @@ final class AdminLogbookService
         $aircraftTypeFlag = strtoupper(trim((string)($source['aircraft_type'] ?? '')));
         $isSimulator = $aircraftTypeFlag === 'SIMULATOR' || $this->truthy($source['lb_fnpt'] ?? '');
         $isDual = $this->truthy($source['lb_dual'] ?? '');
-        $isNight = $this->nightCondition($source['lb_cond'] ?? '');
+        $isDay = $this->dayCondition($source['lb_cond'] ?? '');
+        $isNight = !$isDay;
         $isIfr = $this->truthy($source['lb_ifr'] ?? '');
         $isCrossCountry = $this->crossCountryFlag($source['lb_xc'] ?? '');
         $landings = max(0, (int)round((float)($source['lb_ld'] ?? 0)));
+        $isAirplane = !$isSimulator && ($aircraftTypeFlag === '' || $aircraftTypeFlag === 'AIRCRAFT' || $aircraftTypeFlag === 'AIRPLANE');
+        $isSoloPic = !$isDual && !$isSimulator;
 
         return array(
             'entry_date' => $this->dateFromLegacyDepartureTime($source['lb_deptime'] ?? ''),
@@ -941,13 +981,13 @@ final class AdminLogbookService
             'arrival_time' => null,
             'aircraft_type' => trim((string)($source['aircraft_sort'] ?? '')) !== '' ? $source['aircraft_sort'] : ($source['aircraft_type'] ?? null),
             'aircraft_registration' => $source['aircraft_name'] ?? null,
-            'single_engine_time' => (!$isSimulator && $engine === 'SE') ? $duration : 0,
+            'single_engine_time' => ($isAirplane && ($engine === '' || $engine === 'SE')) ? $duration : 0,
             'multi_engine_time' => (!$isSimulator && $engine === 'ME') ? $duration : 0,
-            'pic_time' => 0,
+            'pic_time' => $isSoloPic ? $duration : 0,
             'copilot_time' => 0,
             'dual_received_time' => $isDual ? $duration : 0,
             'instructor_time' => $isDual ? $duration : 0,
-            'solo_time' => 0,
+            'solo_time' => $isSoloPic ? $duration : 0,
             'cross_country_time' => $isCrossCountry ? $duration : 0,
             'cross_country_distance_nm' => 0,
             'night_time' => $isNight ? $duration : 0,
@@ -1266,6 +1306,14 @@ final class AdminLogbookService
         return in_array($value, array('N', 'NIGHT', 'NITE', 'NACHT', 'DARK'), true)
             || str_contains($value, 'NIGHT')
             || str_contains($value, 'NACHT');
+    }
+
+    private function dayCondition(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        return in_array($value, array('D', 'DAY', 'DAG'), true)
+            || str_contains($value, 'DAY')
+            || str_contains($value, 'DAG');
     }
 
     private function key(string $value): string
