@@ -131,6 +131,8 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogShowRequirements">Requirement Verification</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogShowIacra">IACRA Summary</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogShow8710">FAA 8710 Summary</button>
+      <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print.php?format=easa&amp;logbook_id=<?= (int)$logbookId ?>">Print EASA Logbook</a>
+      <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print.php?format=faa&amp;logbook_id=<?= (int)$logbookId ?>">Print FAA Logbook</a>
       <span class="alogw-extract-status" id="alogExtractionStatus">Extraction status: no page</span>
     </div>
     <div class="alogw-grid-tools">
@@ -540,8 +542,9 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   function render8710Summary(){
     const t = data.totals || {};
     const row = (label, values) => '<tr><th class="alogw-8710-row-head">' + esc(label) + '</th>' + values.map(value => '<td class="alogw-8710-num">' + esc(displayValue(formatTimeValue(value))) + '</td>').join('') + '</tr>';
+    const airplaneTotal = Math.max(0, Number(t.total_flight_time || 0) - Number(t.fnpt_simulator_time || 0));
     const airplaneValues = [
-      t.total_flight_time,
+      airplaneTotal,
       t.dual_received_time,
       t.solo_time,
       t.pic_time,
