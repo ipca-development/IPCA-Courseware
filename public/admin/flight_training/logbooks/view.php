@@ -54,8 +54,8 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-modal{position:fixed;inset:0;z-index:9999;display:none;background:rgba(15,23,42,.62);padding:18px}.alogw-modal.is-open{display:flex;align-items:center;justify-content:center}.alogw-modal-card{width:min(1100px,96vw);height:min(760px,92vh);border-radius:22px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden}.alogw-modal-head{flex:0 0 auto;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.08)}.alogw-modal-body{flex:1;background:#0f172a;overflow:auto;display:flex;align-items:center;justify-content:center}.alogw-modal-body img{max-width:100%;transform-origin:center;transition:transform .15s ease}.alogw-image-empty{color:#cbd5e1;text-align:center;padding:28px;font-size:13px}
 .alogw-edit-body{flex:1 1 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 14px;overflow:auto;background:#fff}.alogw-edit-field{display:flex;flex-direction:column;gap:3px}.alogw-edit-field--wide{grid-column:1/-1}.alogw-edit-label{font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.alogw-edit-input,.alogw-edit-textarea,.alogw-edit-select{border:1px solid rgba(15,23,42,.13);border-radius:9px;padding:6px 8px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-edit-textarea{min-height:52px;resize:vertical}.alogw-edit-actions{flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid rgba(15,23,42,.08);background:#f8fafc}
 .alogw-modal-card form{min-height:0;display:flex;flex-direction:column;flex:1 1 auto}
-.alogw-bottom{display:grid;grid-template-columns:1fr 1fr;gap:16px}.alogw-req-list{max-height:360px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
-.alogw-vars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:12px 16px;max-height:360px;overflow:auto}.alogw-var{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);border-radius:10px;padding:7px;color:#334155}
+.alogw-8710-wrap{overflow:auto;background:#fff}.alogw-8710{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;table-layout:fixed}.alogw-8710 th,.alogw-8710 td{border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;padding:7px 5px;text-align:center;font-size:10px;line-height:1.1;color:#102845;background:#fff}.alogw-8710 th{background:#f8fafc;font-size:9px;font-weight:900;text-transform:uppercase;color:#475569}.alogw-8710 .alogw-8710-row-head{text-align:left;font-weight:900;background:#f8fafc}.alogw-8710 .alogw-8710-num{font-variant-numeric:tabular-nums;font-weight:800}.alogw-8710-note{padding:8px 12px;font-size:11px;color:#64748b;background:#f8fafc;border-top:1px solid rgba(15,23,42,.06)}
+.alogw-bottom{display:grid;grid-template-columns:1fr;gap:16px}.alogw-req-list{max-height:360px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
 @media(max-width:1200px){.alogw-egle-grid,.alogw-bottom{grid-template-columns:1fr}.alogw-egle-form{grid-template-columns:1fr 1fr}.alogw-cards{grid-template-columns:repeat(2,minmax(120px,1fr))}.alogw-extract-status{margin-left:0}}
 </style>
 
@@ -165,6 +165,16 @@ cw_header('Flight Training · Admin Logbook Workspace');
     </div>
   </section>
 
+  <section class="alogw-panel">
+    <div class="alogw-panel-head">
+      <div>
+        <h2 class="alogw-panel-title">FAA 8710 Record of Pilot Time</h2>
+        <p class="alogw-panel-text">Section III-style summary generated from accepted/trusted Admin Logbook entries.</p>
+      </div>
+    </div>
+    <div class="alogw-8710-wrap" id="alog8710Summary"></div>
+  </section>
+
   <section class="alogw-bottom">
     <div class="alogw-panel">
       <div class="alogw-panel-head">
@@ -174,15 +184,6 @@ cw_header('Flight Training · Admin Logbook Workspace');
         </div>
       </div>
       <div class="alogw-req-list" id="alogRequirements"></div>
-    </div>
-    <div class="alogw-panel">
-      <div class="alogw-panel-head">
-        <div>
-          <h2 class="alogw-panel-title">IACRA / FAA 8710 + Variables</h2>
-          <p class="alogw-panel-text">Generated data for future FAA/EASA form auto-fill.</p>
-        </div>
-      </div>
-      <div class="alogw-vars" id="alogVariables"></div>
     </div>
   </section>
 </div>
@@ -337,7 +338,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     data = json.data; entries = (data.entries || []).map(row => ({...row, _dirty:false})); renderAll();
   }
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
-  function renderAll(){ renderCards(); renderPages(); renderTable(); renderRequirements(); renderVariables(); }
+  function renderAll(){ renderCards(); renderPages(); renderTable(); render8710Summary(); renderRequirements(); renderVariables(); }
   function loadColumnWidths(){
     try {
       const saved = JSON.parse(localStorage.getItem(columnWidthStorageKey) || '{}');
@@ -536,6 +537,72 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     const cats = data.requirement_categories || [];
     document.getElementById('alogRequirementSelect').innerHTML = cats.map(c => `<option value="${esc(c.id)}">${esc(c.authority)} ${esc(c.certificate)} - ${esc(c.label)}</option>`).join('');
   }
+  function render8710Summary(){
+    const t = data.totals || {};
+    const row = (label, values) => '<tr><th class="alogw-8710-row-head">' + esc(label) + '</th>' + values.map(value => '<td class="alogw-8710-num">' + esc(displayValue(formatTimeValue(value))) + '</td>').join('') + '</tr>';
+    const airplaneValues = [
+      t.total_flight_time,
+      t.dual_received_time,
+      t.solo_time,
+      t.pic_time,
+      t.dual_cross_country_time,
+      t.solo_cross_country_time,
+      t.pic_cross_country_time,
+      t.instrument_time,
+      t.night_time,
+      t.night_landings,
+      t.night_time,
+      t.single_engine_time,
+      t.multi_engine_time,
+    ];
+    const fstdValues = [
+      t.fnpt_simulator_time,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      t.fnpt_simulator_time,
+      '',
+    ];
+    const headers = [
+      'Category',
+      'Total',
+      'Instruction Received',
+      'Solo',
+      'PIC/SIC',
+      'Cross Country Instruction',
+      'Cross Country Solo',
+      'Cross Country PIC/SIC',
+      'Instrument',
+      'Night',
+      'Night Takeoff/Landing',
+      'Night PIC/SIC',
+      'Class SEL / FSTD SE',
+      'Class MEL',
+    ];
+    document.getElementById('alog8710Summary').innerHTML = `
+      <table class="alogw-8710">
+        <thead><tr>${headers.map(label => `<th>${esc(label)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${row('Airplanes', airplaneValues)}
+          ${row('FFS / FTD / ATD', fstdValues)}
+        </tbody>
+      </table>
+      <div class="alogw-8710-note">Variables remain available to forms and APIs, but are no longer shown permanently on this page.</div>
+    `;
+  }
+  function formatTimeValue(value){
+    if(value === null || value === undefined || value === '') return '';
+    const number = Number(value);
+    if(Number.isNaN(number) || number === 0) return '';
+    return number.toFixed(2);
+  }
   function requirementUnit(req){
     const key = String(req.requirement_key || '').toLowerCase();
     const label = String(req.label || '').toLowerCase();
@@ -552,12 +619,14 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     return String(Math.round(number));
   }
   function renderVariables(){
+    const box = document.getElementById('alogVariables');
+    if(!box) return;
     const vars = data.variables || {};
     const iacra = data.iacra_8710 || {};
     const blocks = [];
     Object.keys(iacra).forEach(k => blocks.push([`iacra.${k}`, iacra[k]]));
     Object.keys(vars).sort().forEach(k => blocks.push([k, vars[k]]));
-    document.getElementById('alogVariables').innerHTML = blocks.map(([k,v]) => `<div class="alogw-var">{{${esc(k)}}}: ${esc(v ?? '')}</div>`).join('');
+    box.innerHTML = blocks.map(([k,v]) => `<div class="alogw-var">{{${esc(k)}}}: ${esc(v ?? '')}</div>`).join('');
   }
   function selectedIndexes(){ return [...document.querySelectorAll('[data-select]:checked')].map(el => Number(el.dataset.select)).filter(i => entries[i]); }
   function setRowSelection(predicate){
