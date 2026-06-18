@@ -10,6 +10,21 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 $kiosk = tv_kiosk_config();
+$gate = array(
+    'label' => (string)($kiosk['gate_label'] ?? tv_adsb_default_gate()['label']),
+    'lat' => (float)($kiosk['gate_lat'] ?? tv_adsb_default_gate()['lat']),
+    'lon' => (float)($kiosk['gate_lon'] ?? tv_adsb_default_gate()['lon']),
+    'radius_nm' => (float)($kiosk['gate_radius_nm'] ?? tv_adsb_default_gate()['radius_nm']),
+    'assume_parked_off_radar' => (int)($kiosk['assume_parked_off_radar'] ?? 1),
+);
+if (isset($_GET['gate_lat'], $_GET['gate_lon'])) {
+    $gate['lat'] = (float)$_GET['gate_lat'];
+    $gate['lon'] = (float)$_GET['gate_lon'];
+}
+if (isset($_GET['gate_radius_nm'])) {
+    $gate['radius_nm'] = max(0.05, min(2.0, (float)$_GET['gate_radius_nm']));
+}
+
 $homeAirport = tv_adsb_normalize_home_airport((string)($_GET['home_airport'] ?? ($kiosk['home_airport'] ?? 'KTRM')));
 $airports = tv_adsb_airports();
 $airport = $airports[$homeAirport] ?? $airports['KTRM'];
@@ -22,11 +37,55 @@ $targets = array();
 $adsbOk = false;
 $adsbError = null;
 $adsbLive = false;
+$trackCount = 0;
 
 try {
-    $targets = tv_adsb_fetch_radar_targets($centerLat, $centerLon, $rangeNm);
+    $tracks = array();
+    $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
+    if ($tableCheck !== false && $tableCheck->fetchColumn() !== false) {
+        $columnCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_hex'");
+        $hasAircraftColumns = $columnCheck !== false && $columnCheck->fetchColumn() !== false;
+        $typeCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_type'");
+        $hasTypeColumn = $typeCheck !== false && $typeCheck->fetchColumn() !== false;
+        $typeSelect = $hasTypeColumn ? 'aircraft_type,' : '';
+        $aircraftSelect = $hasAircraftColumns
+            ? "aircraft_hex, aircraft_label, {$typeSelect} aircraft_home_airport,"
+            : '';
+
+        $stmt = $pdo->prepare("
+            SELECT
+                title,
+                body,
+                {$aircraftSelect}
+                priority,
+                id
+            FROM tv_screen_messages
+            WHERE message_type = 'aircraft'
+              AND status = 'active'
+              AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
+              AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
+            ORDER BY priority DESC, id ASC
+            LIMIT 25
+        ");
+        $stmt->execute();
+        $tracks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    $trackCount = count($tracks);
+    $targets = tv_adsb_fetch_radar_targets($tracks, $centerLat, $centerLon, $rangeNm, array(
+        'gate' => $gate,
+        'home_airport' => $homeAirport,
+    ));
     $adsbOk = true;
-    $adsbLive = count($targets) > 0;
+    foreach ($targets as $target) {
+        if (!empty($target['live'])) {
+            $adsbLive = true;
+            break;
+        }
+    }
+    if (!$adsbLive && count($targets) > 0) {
+        $adsbLive = true;
+    }
 } catch (Throwable $e) {
     $adsbError = $e->getMessage();
 }
@@ -49,6 +108,8 @@ $response = array(
         'live' => $adsbLive,
         'error' => $adsbError,
         'count' => count($targets),
+        'tracks' => $trackCount,
+        'source' => 'fleet_hex',
     ),
     'targets' => $targets,
     'weather' => $weather,
@@ -60,6 +121,7 @@ if (!empty($_GET['debug'])) {
         'provider' => tv_adsb_provider(),
         'weather_source' => (string)($weather['source'] ?? ''),
         'weather_url' => tv_radar_weather_station_url() !== '' ? 'custom' : 'aviationweather.gov/metar',
+        'adsb_method' => 'tv_adsb_build_status per fleet aircraft (same as aircraft board)',
     );
 }
 

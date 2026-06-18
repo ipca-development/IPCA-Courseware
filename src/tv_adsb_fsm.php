@@ -797,6 +797,14 @@ function tv_adsb_fsm_tick(
             'lat' => round($lat, 6),
             'lon' => round($lon, 6),
             'ground_speed_kt' => $gsRounded,
+            'alt_ft' => tv_adsb_altitude_ft($aircraft),
+            'track_deg' => isset($aircraft['track']) && is_numeric($aircraft['track'])
+                ? (float)$aircraft['track']
+                : (isset($aircraft['true_heading']) && is_numeric($aircraft['true_heading'])
+                    ? (float)$aircraft['true_heading']
+                    : (isset($aircraft['mag_heading']) && is_numeric($aircraft['mag_heading'])
+                        ? (float)$aircraft['mag_heading']
+                        : null)),
             'in_spc_parking' => (bool)($obs['in_spc_parking'] ?? false),
             'spc_dist_nm' => round((float)($obs['spc_dist_nm'] ?? 0), 3),
             'on_surface' => (bool)($obs['on_surface'] ?? false),

@@ -13,6 +13,7 @@ if (!in_array($format, array('easa', 'faa'), true)) {
     $format = 'easa';
 }
 $blankMode = in_array(strtolower(trim((string)($_GET['blank'] ?? ''))), array('1', 'true', 'yes'), true);
+$debugMode = in_array(strtolower(trim((string)($_GET['debug'] ?? ''))), array('1', 'true', 'yes'), true);
 
 if (!function_exists('h')) {
     function h(mixed $value): string
@@ -72,6 +73,15 @@ function pdate(mixed $value): string
     return $ts === false ? $raw : date('d/m/y', $ts);
 }
 
+function cleanText(mixed $value, int $maxLength = 0): string
+{
+    $text = trim(preg_replace('/\s+/', ' ', (string)($value ?? '')) ?? '');
+    if ($maxLength > 0 && strlen($text) > $maxLength) {
+        return rtrim(substr($text, 0, $maxLength - 3)) . '...';
+    }
+    return $text;
+}
+
 function sourceValue(array $entry, array $keys): string
 {
     $source = json_decode((string)($entry['source_json'] ?? '{}'), true);
@@ -110,6 +120,57 @@ function instructorEndorsement(array $entry): string
         $expires !== '' ? 'Exp ' . $expires : '',
     ));
     return implode(' · ', $parts);
+}
+
+function picDisplayName(array $entry): string
+{
+    $sourceName = sourceValue($entry, array('pic_name', 'name_pic', 'pilot_in_command', 'pic_user_name', 'student_name'));
+    if ($sourceName !== '') {
+        return $sourceName;
+    }
+    if ((float)($entry['pic_time'] ?? 0) > 0 && trim((string)($entry['student_name'] ?? '')) !== '') {
+        return (string)$entry['student_name'];
+    }
+    return trim((string)($entry['instructor_name'] ?? ''));
+}
+
+function logbookRemarks(array $entry): string
+{
+    return cleanText(trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))), 72);
+}
+
+function leftEntryFields(array $entry): array
+{
+    return array(
+        array('column' => 0, 'field' => 'entry_date', 'value' => pdate($entry['entry_date'] ?? '')),
+        array('column' => 1, 'field' => 'departure_airport', 'value' => cleanText($entry['departure_airport'] ?? '', 12)),
+        array('column' => 2, 'field' => 'departure_time', 'value' => ptime($entry['departure_time'] ?? '')),
+        array('column' => 3, 'field' => 'arrival_airport', 'value' => cleanText($entry['arrival_airport'] ?? '', 12)),
+        array('column' => 4, 'field' => 'arrival_time', 'value' => ptime($entry['arrival_time'] ?? '')),
+        array('column' => 5, 'field' => 'aircraft_type', 'value' => cleanText($entry['aircraft_type'] ?? '', 18)),
+        array('column' => 6, 'field' => 'aircraft_registration', 'value' => cleanText($entry['aircraft_registration'] ?? '', 18)),
+        array('column' => 7, 'field' => 'single_engine_time', 'value' => pval($entry['single_engine_time'] ?? 0)),
+        array('column' => 8, 'field' => 'multi_engine_time', 'value' => pval($entry['multi_engine_time'] ?? 0)),
+        array('column' => 9, 'field' => 'total_flight_time', 'value' => pval($entry['total_flight_time'] ?? 0)),
+        array('column' => 10, 'field' => 'name_pic', 'value' => cleanText(picDisplayName($entry), 26)),
+        array('column' => 11, 'field' => 'day_landings', 'value' => (string)((int)($entry['day_landings'] ?? 0) ?: '')),
+        array('column' => 12, 'field' => 'night_landings', 'value' => (string)((int)($entry['night_landings'] ?? 0) ?: '')),
+    );
+}
+
+function rightEntryFields(array $entry): array
+{
+    return array(
+        array('column' => 0, 'field' => 'night_time', 'value' => pval($entry['night_time'] ?? 0)),
+        array('column' => 1, 'field' => 'instrument_time', 'value' => pval($entry['instrument_time'] ?? 0)),
+        array('column' => 2, 'field' => 'pic_time', 'value' => pval($entry['pic_time'] ?? 0)),
+        array('column' => 3, 'field' => 'copilot_time', 'value' => pval($entry['copilot_time'] ?? 0)),
+        array('column' => 4, 'field' => 'dual_received_time', 'value' => pval($entry['dual_received_time'] ?? 0)),
+        array('column' => 5, 'field' => 'instructor_time', 'value' => pval($entry['instructor_time'] ?? 0)),
+        array('column' => 6, 'field' => 'basic_instrument_flying_time', 'value' => pval($entry['basic_instrument_flying_time'] ?? 0)),
+        array('column' => 7, 'field' => 'cross_country_time', 'value' => pval($entry['cross_country_time'] ?? 0)),
+        array('column' => 8, 'field' => 'remarks_endorsements', 'value' => logbookRemarks($entry)),
+    );
 }
 
 function pageTotals(array $entries): array
@@ -163,6 +224,17 @@ function svgLine(float $x1, float $y1, float $x2, float $y2, string $class = 'th
 function svgText(float $x, float $y, string $text, string $class = 'body', string $anchor = 'middle'): string
 {
     return '<text class="' . h($class) . '" x="' . $x . '" y="' . $y . '" text-anchor="' . h($anchor) . '">' . h($text) . '</text>';
+}
+
+function svgMappedText(float $x, float $y, string $text, string $field, bool $debugMode, int $rowNumber, string $class = 'body', string $anchor = 'middle'): string
+{
+    $title = $field . ($rowNumber > 0 ? ' row ' . $rowNumber : '') . ': ' . $text;
+    $out = '<text class="' . h($class) . '" x="' . $x . '" y="' . $y . '" text-anchor="' . h($anchor) . '"><title>' . h($title) . '</title>' . h($text) . '</text>';
+    if ($debugMode && $rowNumber > 0) {
+        $labelX = $anchor === 'start' ? $x : $x - 0.8;
+        $out .= '<text class="debug-field" x="' . $labelX . '" y="' . ($y - 1.7) . '" text-anchor="' . h($anchor) . '">' . h($rowNumber . ' ' . $field) . '</text>';
+    }
+    return $out;
 }
 
 function svgMultiline(float $x, float $y, array $lines, string $class = 'head'): string
@@ -276,7 +348,7 @@ function bodyCells(array $bounds, float $bodyTop, float $rowH, int $rows, int $c
     return $cells;
 }
 
-function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText): string
+function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode): string
 {
     $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
     $gridX = 9.0;
@@ -319,26 +391,8 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 13)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
-        $values = array(
-            pdate($entry['entry_date'] ?? ''),
-            (string)($entry['departure_airport'] ?? ''),
-            ptime($entry['departure_time'] ?? ''),
-            (string)($entry['arrival_airport'] ?? ''),
-            ptime($entry['arrival_time'] ?? ''),
-            (string)($entry['aircraft_type'] ?? ''),
-            (string)($entry['aircraft_registration'] ?? ''),
-            pval($entry['single_engine_time'] ?? 0),
-            pval($entry['multi_engine_time'] ?? 0),
-            '',
-            pval($entry['total_flight_time'] ?? 0),
-            (string)($entry['instructor_name'] ?? ''),
-            (string)((int)($entry['day_landings'] ?? 0) ?: ''),
-            (string)((int)($entry['night_landings'] ?? 0) ?: ''),
-        );
-        unset($values[9]);
-        $map = array(0,1,2,3,4,5,6,7,8,10,11,12,13);
-        foreach ($map as $colIdx => $valueIdx) {
-            $out .= svgText($centers[$colIdx], $y, (string)$values[$valueIdx], 'body');
+        foreach (leftEntryFields($entry) as $field) {
+            $out .= svgMappedText($centers[$field['column']], $y, (string)$field['value'], 'left.' . $field['field'], $debugMode, $idx + 1, 'body');
         }
     }
     $totalRows = array(
@@ -350,8 +404,9 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     foreach ($totalRows as $idx => $row) {
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
-        $cells[] = gridCell($bounds, 4, 10, $y1, $y2, 'main', $row[0], 'micro');
-        $cells[] = gridCell($bounds, 10, 11, $y1, $y2, 'main', $row[1], 'micro');
+        $cells[] = gridCell($bounds, 4, 9, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 9, 10, $y1, $y2, 'main', $row[1], 'micro');
+        $cells[] = gridCell($bounds, 10, 11, $y1, $y2, 'main', '', 'micro');
         $cells[] = gridCell($bounds, 11, 12, $y1, $y2, 'main', $row[2], 'micro');
         $cells[] = gridCell($bounds, 12, 13, $y1, $y2, 'main', $row[3], 'micro');
     }
@@ -359,7 +414,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     return $out . '</svg>';
 }
 
-function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText): string
+function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode): string
 {
     $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
     $gridX = 9.0;
@@ -392,20 +447,10 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 8)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
-        $values = array(
-            pval($entry['night_time'] ?? 0),
-            pval($entry['instrument_time'] ?? 0),
-            pval($entry['pic_time'] ?? 0),
-            pval($entry['copilot_time'] ?? 0),
-            pval($entry['dual_received_time'] ?? 0),
-            pval($entry['instructor_time'] ?? 0),
-            pval($entry['basic_instrument_flying_time'] ?? 0),
-            pval($entry['cross_country_time'] ?? 0),
-            trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))),
-        );
-        foreach ($values as $colIdx => $value) {
+        foreach (rightEntryFields($entry) as $field) {
+            $colIdx = (int)$field['column'];
             $textX = $colIdx === 8 ? $bounds[8] + 1.5 : $centers[$colIdx];
-            $out .= svgText($textX, $y, (string)$value, $colIdx === 8 ? 'remarks-text' : 'body', $colIdx === 8 ? 'start' : 'middle');
+            $out .= svgMappedText($textX, $y, (string)$field['value'], 'right.' . $field['field'], $debugMode, $idx + 1, $colIdx === 8 ? 'remarks-text' : 'body', $colIdx === 8 ? 'start' : 'middle');
         }
     }
     $rows = array(
@@ -418,8 +463,8 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
         $totals = $row[1];
-        $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['pic'] ?? 0), 'micro');
-        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['instructor'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', pval($totals['if'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', pval($totals['nav'] ?? 0), 'micro');
     }
@@ -474,6 +519,7 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .body{font-size:1.9px;font-weight:400}
 .page-template .remarks-text{font-size:1.65px;font-weight:400}
 .page-template .signature-text{font-size:2.2px;font-weight:400}
+.page-template .debug-field{font-size:1.25px;fill:#b91c1c;font-weight:700}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:calc(var(--page-w) * 2);height:var(--page-h);transform:none!important;filter:none;perspective:none;opacity:1;transition:none;break-after:page}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:inline-block;background:#fff;border:0;box-shadow:none;border-radius:0;vertical-align:top}}
 </style>
 </head>
@@ -489,11 +535,12 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
   <button type="button" id="fitSpread">Fit Full Spread</button>
   <button type="button" id="resetZoom">100%</button>
   <a class="tool-link" href="?logbook_id=<?= (int)$logbookId ?>&format=<?= h($format) ?><?= $blankMode ? '' : '&blank=1' ?>"><?= $blankMode ? 'Show Data' : 'Blank Template' ?></a>
+  <a class="tool-link" href="?logbook_id=<?= (int)$logbookId ?>&format=<?= h($format) ?><?= $blankMode ? '&blank=1' : '' ?><?= $debugMode ? '' : '&debug=1' ?>"><?= $debugMode ? 'Hide Debug' : 'Debug Mapping' ?></a>
   <select id="paperSelect" aria-label="Paper size">
     <option value="a4">A4 landscape</option>
     <option value="letter">US Letter landscape</option>
   </select>
-  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($renderChunks) ?></span> · Rows: <?= $blankMode ? 0 : count($entries) ?> · <?= $blankMode ? 'blank calibration mode' : ((int)$rowsPerSpread . ' rows/page') ?> · calibrated physical template</span>
+  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($renderChunks) ?></span> · Rows: <?= $blankMode ? 0 : count($entries) ?> · <?= $blankMode ? 'blank calibration mode' : ((int)$rowsPerSpread . ' rows/page') ?><?= $debugMode ? ' · mapping debug on' : '' ?> · calibrated physical template</span>
 </div>
 <main class="print-stage">
 <div class="paper-sheet" id="paperSheet" data-paper="a4">
@@ -506,10 +553,10 @@ try {
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
-  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText) ?>
+  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode) ?>
 </section>
 <section class="book-page book-page-right">
-  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText) ?>
+  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode) ?>
 </section>
 </div>
 <?php

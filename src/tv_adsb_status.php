@@ -227,47 +227,43 @@ function tv_adsb_fetch_by_registration(string $registration): ?array
     return tv_adsb_extract_aircraft($payload);
 }
 
-function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
-{
-    $distNm = max(0.5, min(25.0, $distNm));
-    $suffix = tv_adsb_provider() === 'rapidapi' ? '/' : '';
-    $path = '/lat/' . rawurlencode((string)round($lat, 6))
-        . '/lon/' . rawurlencode((string)round($lon, 6))
-        . '/dist/' . rawurlencode((string)round($distNm, 1))
-        . $suffix;
-    $payload = tv_adsb_request($path);
-    if (!isset($payload['ac']) || !is_array($payload['ac'])) {
-        return array();
-    }
-    return $payload['ac'];
-}
-
-function tv_adsb_format_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 5.0): ?array
-{
-    if (!isset($aircraft['lat'], $aircraft['lon']) || !is_numeric($aircraft['lat']) || !is_numeric($aircraft['lon'])) {
+function tv_adsb_build_radar_target_from_track(
+    array $track,
+    float $centerLat,
+    float $centerLon,
+    float $rangeNm,
+    array $gate,
+    string $homeAirport
+): ?array {
+    try {
+        $status = tv_adsb_build_status($track, array(
+            'gate' => $gate,
+            'home_airport' => $homeAirport,
+            'announce_audio_enabled' => false,
+        ));
+    } catch (Throwable $e) {
         return null;
     }
 
-    $lat = (float)$aircraft['lat'];
-    $lon = (float)$aircraft['lon'];
+    $debug = is_array($status['debug'] ?? null) ? $status['debug'] : array();
+    if (!isset($debug['lat'], $debug['lon'])) {
+        return null;
+    }
+
+    $lat = (float)$debug['lat'];
+    $lon = (float)$debug['lon'];
     $dist = tv_adsb_haversine_nm($lat, $lon, $centerLat, $centerLon);
-    if ($dist > $maxNm) {
+    if ($dist > $rangeNm) {
         return null;
     }
 
-    $trackDeg = null;
-    if (isset($aircraft['track']) && is_numeric($aircraft['track'])) {
-        $trackDeg = (float)$aircraft['track'];
-    } elseif (isset($aircraft['true_heading']) && is_numeric($aircraft['true_heading'])) {
-        $trackDeg = (float)$aircraft['true_heading'];
-    } elseif (isset($aircraft['mag_heading']) && is_numeric($aircraft['mag_heading'])) {
-        $trackDeg = (float)$aircraft['mag_heading'];
-    }
-
-    $gs = isset($aircraft['gs']) && is_numeric($aircraft['gs']) ? (float)$aircraft['gs'] : null;
-    $altFt = tv_adsb_altitude_ft($aircraft);
-    $label = tv_adsb_normalize_label((string)($aircraft['r'] ?? ''));
-    $hex = tv_adsb_normalize_hex((string)($aircraft['hex'] ?? ''));
+    $label = tv_adsb_normalize_label((string)($status['label'] ?? $track['label'] ?? ''));
+    $hex = tv_adsb_normalize_hex((string)($track['hex'] ?? ''));
+    $gs = isset($debug['ground_speed_kt']) && is_numeric($debug['ground_speed_kt'])
+        ? (float)$debug['ground_speed_kt']
+        : null;
+    $altFt = isset($debug['alt_ft']) && is_numeric($debug['alt_ft']) ? (float)$debug['alt_ft'] : null;
+    $trackDeg = isset($debug['track_deg']) && is_numeric($debug['track_deg']) ? (float)$debug['track_deg'] : null;
 
     return array(
         'hex' => $hex,
@@ -276,34 +272,54 @@ function tv_adsb_format_radar_target(array $aircraft, float $centerLat, float $c
         'lon' => round($lon, 6),
         'gs' => $gs,
         'alt_ft' => $altFt,
-        'on_ground' => tv_adsb_is_on_ground($aircraft),
+        'on_ground' => (bool)($debug['on_surface'] ?? false),
         'track_deg' => $trackDeg,
         'dist_nm' => round($dist, 1),
-        'icao_type' => strtoupper(trim((string)($aircraft['t'] ?? ''))),
-        'squawk' => trim((string)($aircraft['squawk'] ?? '')),
+        'status_code' => (string)($status['status_code'] ?? ''),
+        'live' => (bool)($status['live'] ?? false),
+        'position_source' => (string)($status['position_source'] ?? ($debug['position_source'] ?? '')),
     );
 }
 
-function tv_adsb_fetch_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 5.0): array
-{
-    $raw = tv_adsb_fetch_near_point($centerLat, $centerLon, $rangeNm);
+function tv_adsb_fetch_radar_targets(
+    array $tracks,
+    float $centerLat,
+    float $centerLon,
+    float $rangeNm = 5.0,
+    array $options = array()
+): array {
+    $gate = array_merge(tv_adsb_default_gate(), (array)($options['gate'] ?? array()));
+    $homeAirport = tv_adsb_normalize_home_airport((string)($options['home_airport'] ?? ''));
     $targets = array();
     $seen = array();
 
-    foreach ($raw as $aircraft) {
-        if (!is_array($aircraft)) {
+    foreach ($tracks as $trackInput) {
+        if (!is_array($trackInput)) {
             continue;
         }
-        $formatted = tv_adsb_format_radar_target($aircraft, $centerLat, $centerLon, $rangeNm);
-        if ($formatted === null) {
+        $track = tv_adsb_resolve_track($trackInput);
+        if ($track['hex'] === '' && $track['label'] === '') {
             continue;
         }
-        $key = $formatted['hex'] !== '' ? $formatted['hex'] : ($formatted['label'] . '|' . $formatted['lat'] . '|' . $formatted['lon']);
+
+        $target = tv_adsb_build_radar_target_from_track(
+            $track,
+            $centerLat,
+            $centerLon,
+            $rangeNm,
+            $gate,
+            $track['home_airport'] !== '' ? $track['home_airport'] : $homeAirport
+        );
+        if ($target === null) {
+            continue;
+        }
+
+        $key = $target['hex'] !== '' ? $target['hex'] : $target['label'];
         if (isset($seen[$key])) {
             continue;
         }
         $seen[$key] = true;
-        $targets[] = $formatted;
+        $targets[] = $target;
     }
 
     usort($targets, static function (array $a, array $b): int {
