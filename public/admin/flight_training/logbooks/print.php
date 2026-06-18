@@ -155,89 +155,6 @@ function addTotals(array $a, array $b): array
     return $a;
 }
 
-function leftRow(array $entry): string
-{
-    return '<tr>'
-        . '<td>' . h(pdate($entry['entry_date'] ?? '')) . '</td>'
-        . '<td>' . h((string)($entry['departure_airport'] ?? '')) . '</td>'
-        . '<td>' . h(ptime($entry['departure_time'] ?? '')) . '</td>'
-        . '<td>' . h((string)($entry['arrival_airport'] ?? '')) . '</td>'
-        . '<td>' . h(ptime($entry['arrival_time'] ?? '')) . '</td>'
-        . '<td>' . h((string)($entry['aircraft_type'] ?? '')) . '</td>'
-        . '<td>' . h((string)($entry['aircraft_registration'] ?? '')) . '</td>'
-        . '<td>' . h(pval($entry['single_engine_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['multi_engine_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['total_flight_time'] ?? 0)) . '</td>'
-        . '<td>' . h((string)($entry['instructor_name'] ?? '')) . '</td>'
-        . '<td>' . h((string)((int)($entry['day_landings'] ?? 0) ?: '')) . '</td>'
-        . '<td>' . h((string)((int)($entry['night_landings'] ?? 0) ?: '')) . '</td>'
-        . '</tr>';
-}
-
-function rightRow(array $entry): string
-{
-    $remarks = trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry)))));
-    return '<tr>'
-        . '<td>' . h(pval($entry['night_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['instrument_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['pic_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['copilot_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['dual_received_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['instructor_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['basic_instrument_flying_time'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($entry['cross_country_time'] ?? 0)) . '</td>'
-        . '<td class="remarks">' . h($remarks) . '</td>'
-        . '</tr>';
-}
-
-function blankRows(int $count, string $side): string
-{
-    $cells = $side === 'left' ? 13 : 9;
-    $html = '';
-    for ($i = 0; $i < $count; $i++) {
-        $html .= '<tr>' . str_repeat('<td></td>', $cells) . '</tr>';
-    }
-    return $html;
-}
-
-function leftTotalsBox(array $pageTotals, array $previousTotals, array $runningTotals): string
-{
-    return '<div class="totals-box totals-box-left"><table>'
-        . '<colgroup><col class="label"><col class="total"><col class="ldg"><col class="ldg"></colgroup>'
-        . totalsRow('Total these pages', pval($pageTotals['total'] ?? 0), pval($pageTotals['day_landings'] ?? 0, 0), pval($pageTotals['night_landings'] ?? 0, 0))
-        . totalsRow('Total from previous pages', pval($previousTotals['total'] ?? 0), pval($previousTotals['day_landings'] ?? 0, 0), pval($previousTotals['night_landings'] ?? 0, 0))
-        . totalsRow('Total Time', pval($runningTotals['total'] ?? 0), pval($runningTotals['day_landings'] ?? 0, 0), pval($runningTotals['night_landings'] ?? 0, 0))
-        . '</table></div>';
-}
-
-function rightTotalsBox(array $pageTotals, array $previousTotals, array $runningTotals): string
-{
-    return '<div class="totals-box totals-box-right"><table>'
-        . '<colgroup><col class="label"><col class="night"><col class="ifr"><col class="pic"><col class="copilot"><col class="dual"><col class="instr"><col class="if"><col class="nav"></colgroup>'
-        . rightTotalsRow('Total these pages', $pageTotals)
-        . rightTotalsRow('Total from previous pages', $previousTotals)
-        . rightTotalsRow('Total Time', $runningTotals)
-        . '</table></div>';
-}
-
-function totalsRow(string $label, string $total, string $dayLandings, string $nightLandings): string
-{
-    return '<tr><th>' . h($label) . '</th><td>' . h($total) . '</td><td>' . h($dayLandings) . '</td><td>' . h($nightLandings) . '</td></tr>';
-}
-
-function rightTotalsRow(string $label, array $totals): string
-{
-    return '<tr><th>' . h($label) . '</th>'
-        . '<td>' . h(pval($totals['night'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['ifr'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['pic'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['copilot'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['dual'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['instructor'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['if'] ?? 0)) . '</td>'
-        . '<td>' . h(pval($totals['nav'] ?? 0)) . '</td></tr>';
-}
-
 function svgLine(float $x1, float $y1, float $x2, float $y2, string $class = 'thin'): string
 {
     return '<line class="' . h($class) . '" x1="' . $x1 . '" y1="' . $y1 . '" x2="' . $x2 . '" y2="' . $y2 . '"/>';
@@ -292,27 +209,84 @@ function centers(array $columns): array
     return $centers;
 }
 
-function leftTemplate(array $entries): string
+function scaledBounds(array $columns, float $x, float $width): array
+{
+    $scale = $width / array_sum($columns);
+    $bounds = array($x);
+    foreach ($columns as $column) {
+        $bounds[] = $bounds[array_key_last($bounds)] + ((float)$column * $scale);
+    }
+    return $bounds;
+}
+
+function masterCell(array $bounds, int $xStart, int $xEnd, float $yStart, float $yEnd, string $text = '', string $class = 'body'): string
+{
+    $x1 = $bounds[$xStart];
+    $x2 = $bounds[$xEnd];
+    $out = svgLine($x1, $yStart, $x2, $yStart, 'main')
+        . svgLine($x2, $yStart, $x2, $yEnd, 'main')
+        . svgLine($x1, $yEnd, $x2, $yEnd, 'main')
+        . svgLine($x1, $yStart, $x1, $yEnd, 'main');
+    if ($text !== '') {
+        $out .= svgText(($x1 + $x2) / 2, ($yStart + $yEnd) / 2, $text, $class);
+    }
+    return $out;
+}
+
+function masterGrid(array $columns, float $gridX, float $gridY, float $gridW, float $gridH, array $mainAfter): array
+{
+    $bounds = scaledBounds($columns, $gridX, $gridW);
+    $headerH = 13.5;
+    $bodyH = $gridH - $headerH;
+    $rowH = $bodyH / 25;
+    $out = svgLine($gridX, $gridY, $gridX + $gridW, $gridY, 'outer')
+        . svgLine($gridX + $gridW, $gridY, $gridX + $gridW, $gridY + $gridH, 'outer')
+        . svgLine($gridX, $gridY + $gridH, $gridX + $gridW, $gridY + $gridH, 'outer')
+        . svgLine($gridX, $gridY, $gridX, $gridY + $gridH, 'outer');
+    foreach ($bounds as $idx => $x) {
+        if ($idx === 0 || $idx === count($bounds) - 1) {
+            continue;
+        }
+        $out .= svgLine($x, $gridY, $x, $gridY + $gridH, in_array($idx, $mainAfter, true) ? 'main' : 'sub');
+    }
+    foreach (array($gridY + 4.5, $gridY + 9.0, $gridY + $headerH) as $y) {
+        $out .= svgLine($gridX, $y, $gridX + $gridW, $y, 'main');
+    }
+    for ($i = 1; $i < 25; $i++) {
+        $y = $gridY + $headerH + ($i * $rowH);
+        $out .= svgLine($gridX, $y, $gridX + $gridW, $y, 'row');
+    }
+    return array($out, $bounds, $headerH, $rowH);
+}
+
+function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText): string
 {
     $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
-    $centers = centers($columns);
-    $out = '<svg class="log-template left-template" viewBox="0 0 240 189" preserveAspectRatio="none">';
-    $out .= gridLines($columns);
-    $out .= svgText(9, 3.4, '1', 'tiny') . svgText(30.25, 3.4, '2', 'tiny') . svgText(54.75, 3.4, '3', 'tiny') . svgText(94.5, 3.4, '4', 'tiny') . svgText(136, 3.4, '5', 'tiny') . svgText(157, 3.4, '6', 'tiny') . svgText(189.75, 3.4, '7', 'tiny') . svgText(226.5, 3.4, '8', 'tiny');
-    $out .= svgMultiline($centers[0], 8.0, array('Date', '(dd/mm/yy)'), 'head');
-    $out .= svgText(($centers[1] + $centers[2]) / 2, 8.0, 'Departure', 'head');
-    $out .= svgText(($centers[3] + $centers[4]) / 2, 8.0, 'Arrival', 'head');
-    $out .= svgText(($centers[5] + $centers[6]) / 2, 8.0, 'Aircraft', 'head');
-    $out .= svgText(($centers[7] + $centers[8]) / 2, 8.0, 'Single Pilot', 'head');
-    $out .= svgMultiline($centers[9], 7.6, array('Total Time', 'of Flight'), 'head');
-    $out .= svgMultiline($centers[10], 7.6, array('Name Pilot', 'in Command'), 'head');
-    $out .= svgText(($centers[11] + $centers[12]) / 2, 8.0, 'Landings', 'head');
+    $gridX = 9.0;
+    $gridY = 13.0;
+    $gridW = 252.0;
+    $gridH = 158.0;
+    [$grid, $bounds, $headerH, $rowHeight] = masterGrid($columns, $gridX, $gridY, $gridW, $gridH, array(1, 3, 5, 7, 9, 10, 11));
+    $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
+    $out = '<svg class="page-template left-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
+    $out .= svgText(14, 6.6, $logoText, 'logo-text', 'start');
+    $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
+    $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
+    $out .= $grid;
+    $out .= svgText(($bounds[0] + $bounds[1]) / 2, $gridY + 2.5, '1', 'tiny') . svgText(($bounds[1] + $bounds[3]) / 2, $gridY + 2.5, '2', 'tiny') . svgText(($bounds[3] + $bounds[5]) / 2, $gridY + 2.5, '3', 'tiny') . svgText(($bounds[5] + $bounds[7]) / 2, $gridY + 2.5, '4', 'tiny') . svgText(($bounds[7] + $bounds[9]) / 2, $gridY + 2.5, '5', 'tiny') . svgText(($bounds[9] + $bounds[10]) / 2, $gridY + 2.5, '6', 'tiny') . svgText(($bounds[10] + $bounds[11]) / 2, $gridY + 2.5, '7', 'tiny') . svgText(($bounds[11] + $bounds[13]) / 2, $gridY + 2.5, '8', 'tiny');
+    $out .= svgMultiline($centers[0], $gridY + 6.2, array('Date', '(dd/mm/yy)'), 'head');
+    $out .= svgText(($bounds[1] + $bounds[3]) / 2, $gridY + 6.2, 'Departure', 'head');
+    $out .= svgText(($bounds[3] + $bounds[5]) / 2, $gridY + 6.2, 'Arrival', 'head');
+    $out .= svgText(($bounds[5] + $bounds[7]) / 2, $gridY + 6.2, 'Aircraft', 'head');
+    $out .= svgText(($bounds[7] + $bounds[9]) / 2, $gridY + 6.2, 'Single Pilot', 'head');
+    $out .= svgMultiline($centers[9], $gridY + 5.8, array('Total Time', 'of Flight'), 'head');
+    $out .= svgMultiline($centers[10], $gridY + 5.8, array('Name Pilot', 'in Command'), 'head');
+    $out .= svgText(($bounds[11] + $bounds[13]) / 2, $gridY + 6.2, 'Landings', 'head');
     foreach (array(1 => 'Place', 2 => 'Time', 3 => 'Place', 4 => 'Time', 5 => 'Type', 6 => 'Registration', 7 => 'SE', 8 => 'ME', 11 => 'Day', 12 => 'Night') as $idx => $label) {
-        $out .= svgText($centers[$idx], 13.6, $label, 'head');
+        $out .= svgText($centers[$idx], $gridY + 11.2, $label, 'head');
     }
-    $rowHeight = 173.0 / 25;
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
-        $y = 16.0 + $idx * $rowHeight + ($rowHeight / 2) + 0.8;
+        $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
             pdate($entry['entry_date'] ?? ''),
             (string)($entry['departure_airport'] ?? ''),
@@ -335,26 +309,45 @@ function leftTemplate(array $entries): string
             $out .= svgText($centers[$colIdx], $y, (string)$values[$valueIdx], 'body');
         }
     }
+    $totalsY = $gridY + $gridH - 16.0;
+    $totalRows = array(
+        array('Total these pages', pval($pageTotals['total'] ?? 0), pval($pageTotals['day_landings'] ?? 0, 0), pval($pageTotals['night_landings'] ?? 0, 0)),
+        array('Total from previous pages', pval($previousTotals['total'] ?? 0), pval($previousTotals['day_landings'] ?? 0, 0), pval($previousTotals['night_landings'] ?? 0, 0)),
+        array('Total Time', pval($runningTotals['total'] ?? 0), pval($runningTotals['day_landings'] ?? 0, 0), pval($runningTotals['night_landings'] ?? 0, 0)),
+    );
+    foreach ($totalRows as $idx => $row) {
+        $y1 = $totalsY + ($idx * (16.0 / 3.0));
+        $y2 = $totalsY + (($idx + 1) * (16.0 / 3.0));
+        $out .= masterCell($bounds, 5, 10, $y1, $y2, $row[0], 'micro');
+        $out .= masterCell($bounds, 10, 11, $y1, $y2, $row[1], 'micro');
+        $out .= masterCell($bounds, 11, 12, $y1, $y2, $row[2], 'micro');
+        $out .= masterCell($bounds, 12, 13, $y1, $y2, $row[3], 'micro');
+    }
     return $out . '</svg>';
 }
 
-function rightTemplate(array $entries): string
+function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText): string
 {
     $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
-    $centers = centers($columns);
-    $out = '<svg class="log-template right-template" viewBox="0 0 240 189" preserveAspectRatio="none">';
-    $out .= gridLines($columns);
-    $out .= svgText(24.75, 3.4, '9', 'tiny') . svgText(91.75, 3.4, '10', 'tiny') . svgText(147.25, 3.4, '11', 'tiny') . svgText(195.25, 3.4, '12', 'tiny');
-    $out .= svgText(24.75, 8.0, 'Operational Condition Time', 'head');
-    $out .= svgText(91.75, 8.0, 'Pilot Function Time', 'head');
-    $out .= svgText(147.25, 8.0, 'Other Flying', 'head');
-    $out .= svgText(195.25, 8.0, 'Remarks and Endorsements', 'head');
+    $gridX = 9.0;
+    $gridY = 13.0;
+    $gridW = 252.0;
+    $gridH = 158.0;
+    [$grid, $bounds, $headerH, $rowHeight] = masterGrid($columns, $gridX, $gridY, $gridW, $gridH, array(2, 6, 8));
+    $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
+    $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
+    $out .= svgText(258, 6.6, $logoText, 'logo-text', 'end');
+    $out .= $grid;
+    $out .= svgText(($bounds[0] + $bounds[2]) / 2, $gridY + 2.5, '9', 'tiny') . svgText(($bounds[2] + $bounds[6]) / 2, $gridY + 2.5, '10', 'tiny') . svgText(($bounds[6] + $bounds[8]) / 2, $gridY + 2.5, '11', 'tiny') . svgText(($bounds[8] + $bounds[9]) / 2, $gridY + 2.5, '12', 'tiny');
+    $out .= svgText(($bounds[0] + $bounds[2]) / 2, $gridY + 6.2, 'Operational Condition Time', 'head');
+    $out .= svgText(($bounds[2] + $bounds[6]) / 2, $gridY + 6.2, 'Pilot Function Time', 'head');
+    $out .= svgText(($bounds[6] + $bounds[8]) / 2, $gridY + 6.2, 'Other Flying', 'head');
+    $out .= svgText(($bounds[8] + $bounds[9]) / 2, $gridY + 6.2, 'Remarks and Endorsements', 'head');
     foreach (array(0 => 'Night', 1 => 'IFR', 2 => 'PIC', 3 => 'Co-Pilot', 4 => 'Dual', 5 => 'Instructor', 6 => 'IF', 7 => 'NAV') as $idx => $label) {
-        $out .= svgText($centers[$idx], 13.6, $label, 'head');
+        $out .= svgText($centers[$idx], $gridY + 11.2, $label, 'head');
     }
-    $rowHeight = 173.0 / 25;
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
-        $y = 16.0 + $idx * $rowHeight + ($rowHeight / 2) + 0.8;
+        $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
             pval($entry['night_time'] ?? 0),
             pval($entry['instrument_time'] ?? 0),
@@ -367,10 +360,30 @@ function rightTemplate(array $entries): string
             trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))),
         );
         foreach ($values as $colIdx => $value) {
-            $textX = $colIdx === 8 ? 152.0 : $centers[$colIdx];
+            $textX = $colIdx === 8 ? $bounds[8] + 1.5 : $centers[$colIdx];
             $out .= svgText($textX, $y, (string)$value, $colIdx === 8 ? 'remarks-text' : 'body', $colIdx === 8 ? 'start' : 'middle');
         }
     }
+    $totalsY = $gridY + $gridH - 16.0;
+    $rows = array(
+        array('Total these pages', $pageTotals),
+        array('Total from previous pages', $previousTotals),
+        array('Total Time', $runningTotals),
+    );
+    foreach ($rows as $idx => $row) {
+        $y1 = $totalsY + ($idx * (16.0 / 3.0));
+        $y2 = $totalsY + (($idx + 1) * (16.0 / 3.0));
+        $totals = $row[1];
+        $out .= masterCell($bounds, 3, 4, $y1, $y2, $row[0], 'micro');
+        $out .= masterCell($bounds, 4, 5, $y1, $y2, pval($totals['pic'] ?? 0), 'micro');
+        $out .= masterCell($bounds, 5, 6, $y1, $y2, pval($totals['dual'] ?? 0), 'micro');
+        $out .= masterCell($bounds, 6, 7, $y1, $y2, pval($totals['if'] ?? 0), 'micro');
+        $out .= masterCell($bounds, 7, 8, $y1, $y2, pval($totals['nav'] ?? 0), 'micro');
+    }
+    $sigY = 181.0;
+    $out .= svgText(17, $sigY, 'I certify that the entries in this log are true', 'signature-text', 'start');
+    $out .= svgLine(85, $sigY, 178, $sigY, 'sub');
+    $out .= svgText(181, $sigY, '(Pilot\'s Signature).', 'signature-text', 'start');
     return $out . '</svg>';
 }
 ?>
@@ -403,27 +416,20 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .book-page-left{border-radius:1.5mm 0 0 1.5mm;box-shadow:inset -10mm 0 18mm rgba(15,23,42,.08),inset 0 0 0 .25mm rgba(15,23,42,.08)}
 .book-page-right{border-radius:0 1.5mm 1.5mm 0;box-shadow:inset 10mm 0 18mm rgba(15,23,42,.07),inset 0 0 0 .25mm rgba(15,23,42,.08)}
 .book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:.7mm;background:rgba(15,23,42,.1);z-index:6}.book-page-left::before{right:0}.book-page-right::before{left:0}
-.page-head{position:absolute;left:var(--table-x);top:var(--header-top);width:var(--grid-w);height:8mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:10px;letter-spacing:.08em}
-.logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
-.meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
-.log-template{position:absolute;left:var(--table-x);top:var(--grid-top);width:var(--grid-w);height:var(--grid-h);z-index:4;shape-rendering:crispEdges}
-.log-template .row{stroke:#111;stroke-width:.13;vector-effect:non-scaling-stroke}
-.log-template .sub{stroke:#111;stroke-width:.2;vector-effect:non-scaling-stroke}
-.log-template .main{stroke:#111;stroke-width:.3;vector-effect:non-scaling-stroke}
-.log-template .outer{stroke:#111;stroke-width:.42;vector-effect:non-scaling-stroke}
-.log-template text{font-family:Arial,Helvetica,sans-serif;fill:#111;dominant-baseline:middle}
-.log-template .tiny{font-size:2.55px;font-weight:700}
-.log-template .head{font-size:2.35px;font-weight:700}
-.log-template .body{font-size:1.9px;font-weight:400}
-.log-template .remarks-text{font-size:1.65px;font-weight:400}
-.totals-box{position:absolute;top:var(--totals-top);width:150mm;height:var(--totals-h);z-index:7;background:transparent}
-.totals-box table{border-collapse:collapse;table-layout:fixed;width:150mm;height:var(--totals-h);background:transparent}.totals-box th,.totals-box td{border:0.22mm solid #111;text-align:center;vertical-align:middle;padding:0 .7mm;height:calc(var(--totals-h) / 3);font-size:6px;line-height:1.05;background:transparent;font-weight:400;overflow:hidden}
-.totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
-.totals-box-left{left:calc(var(--table-x) + 99mm)}.totals-box-left col.label{width:73mm}.totals-box-left col.total{width:51.5mm}.totals-box-left col.ldg{width:12.75mm}
-.totals-box-right{left:calc(var(--table-x) + 102mm)}.totals-box-right col.label{width:31mm}.totals-box-right col.night{width:13mm}.totals-box-right col.ifr{width:13mm}.totals-box-right col.pic{width:13mm}.totals-box-right col.copilot{width:13mm}.totals-box-right col.dual{width:13mm}.totals-box-right col.instr{width:13mm}.totals-box-right col.if{width:20.5mm}.totals-box-right col.nav{width:20.5mm}
-.signature{position:absolute;left:20mm;right:10mm;top:var(--signature-top);height:var(--signature-h);font-size:8px;text-align:left;z-index:7}
-.signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
+.page-template{position:absolute;inset:0;width:100%;height:100%;z-index:4;shape-rendering:crispEdges}
+.page-template .row{stroke:#111;stroke-width:.13;vector-effect:non-scaling-stroke}
+.page-template .sub{stroke:#111;stroke-width:.2;vector-effect:non-scaling-stroke}
+.page-template .main{stroke:#111;stroke-width:.3;vector-effect:non-scaling-stroke}
+.page-template .outer{stroke:#111;stroke-width:.42;vector-effect:non-scaling-stroke}
+.page-template text{font-family:Arial,Helvetica,sans-serif;fill:#111;dominant-baseline:middle}
+.page-template .logo-text{font-size:4.3px;letter-spacing:1.2px;font-weight:500}
+.page-template .micro{font-size:1.85px;font-weight:500}
+.page-template .tiny{font-size:2.55px;font-weight:700}
+.page-template .head{font-size:2.35px;font-weight:700}
+.page-template .body{font-size:1.9px;font-weight:400}
+.page-template .remarks-text{font-size:1.65px;font-weight:400}
+.page-template .signature-text{font-size:2.2px;font-weight:400}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:calc(var(--page-w) * 2);height:var(--page-h);transform:none!important;filter:none;perspective:none;opacity:1;transition:none;break-after:page}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:inline-block;background:#fff;border:0;box-shadow:none;border-radius:0;vertical-align:top}}
 </style>
 </head>
@@ -456,15 +462,10 @@ try {
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
-  <div class="page-head"><div class="logo"><?= h($logoText) ?></div><div class="meta"><span>Medical Expires:</span><span>Class/Type Rating Expires:</span></div></div>
-  <?= leftTemplate($chunk) ?>
-  <?= leftTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
+  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText) ?>
 </section>
 <section class="book-page book-page-right">
-  <div class="page-head"><div></div><div class="logo right-logo"><?= h($logoText) ?></div></div>
-  <?= rightTemplate($chunk) ?>
-  <?= rightTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
-  <div class="signature">I certify that the entries in this log are true: <span class="line"></span> (Pilot's Signature).</div>
+  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText) ?>
 </section>
 </div>
 <?php
