@@ -253,13 +253,13 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:22px;background:radial-gradient(circle at center,#f8fafc 0,#e5e7eb 70%)}
 .paper-sheet{position:relative;background:#f7f8fb;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),0 20px 70px rgba(15,23,42,.22);overflow:hidden;cursor:grab}
 .paper-sheet.is-dragging{cursor:grabbing}
-.paper-sheet[data-paper="a4"]{width:297mm;height:210mm;--page-w:297mm;--page-h:210mm;--left-table-x:14mm;--right-table-x:43mm}
-.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm;--page-w:279.4mm;--page-h:215.9mm;--left-table-x:12mm;--right-table-x:27.4mm}
+.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
+.paper-sheet{--page-w:270mm;--page-h:220mm;--left-table-x:14mm;--right-table-x:16mm}
 .book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
 .book-spread::before{content:"";position:absolute;left:50%;top:4mm;bottom:4mm;width:2.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.28),rgba(255,255,255,.75),rgba(15,23,42,.26));z-index:6;border-radius:999px;box-shadow:0 0 7mm rgba(15,23,42,.2)}
-.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16);--header-top:5mm;--grid-top:21mm;--grid-head-h:16mm;--grid-body-h:145mm;--row-h:5.8mm;--totals-top:184mm;--totals-h:14mm;--signature-top:201mm;--signature-h:6mm}
+.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16);--header-top:7mm;--grid-top:20mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:193mm;--totals-h:16mm;--signature-top:211mm;--signature-h:6mm}
 .book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),rgba(15,23,42,0) 45%,rgba(15,23,42,.035));z-index:5}
 .book-page-left{border-radius:2mm 0 0 2mm;box-shadow:inset -18mm 0 30mm rgba(15,23,42,.1),inset 0 0 0 .35mm rgba(15,23,42,.08)}
 .book-page-right{border-radius:0 2mm 2mm 0;box-shadow:inset 18mm 0 30mm rgba(15,23,42,.09),inset 0 0 0 .35mm rgba(15,23,42,.08)}
@@ -366,7 +366,7 @@ try {
   let pan = {x:0, y:0};
   let drag = null;
   function spreadSizeMm(){
-    return sheet.dataset.paper === 'letter' ? {w:558.8, h:215.9} : {w:594, h:210};
+    return {w:540, h:220};
   }
   function baseScale(mode){
     const rect = sheet.getBoundingClientRect();
