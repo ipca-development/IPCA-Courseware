@@ -1146,7 +1146,9 @@ final class AdminLogbookService
         if ($value === '') {
             return false;
         }
-        return in_array($value, array('N', 'NIGHT', 'NITE'), true) || str_contains($value, 'NIGHT');
+        return in_array($value, array('N', 'NIGHT', 'NITE', 'NACHT', 'DARK'), true)
+            || str_contains($value, 'NIGHT')
+            || str_contains($value, 'NACHT');
     }
 
     private function key(string $value): string

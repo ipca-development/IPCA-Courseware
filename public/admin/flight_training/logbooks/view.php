@@ -346,6 +346,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     return `<td title="${esc(row[key] || '')}">${esc(displayValue(row[key]))}</td>`;
   }
   function displayValue(value){
+    if(value === 0 || value === '0' || value === 0.0 || value === '0.00') return '0';
     if(value === null || value === undefined || value === '') return '';
     return String(value);
   }
