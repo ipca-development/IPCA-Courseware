@@ -387,6 +387,9 @@ final class AdminLogbookService
                 }
                 $entry[$field] = !empty($flags[$field]) ? $duration : 0;
             }
+            if (array_key_exists('fnpt_simulator_time', $flags) && !empty($flags['fnpt_simulator_time'])) {
+                $entry['night_time'] = 0;
+            }
             if (array_key_exists('day_time', $flags) && $flags['day_time'] !== '') {
                 $entry['night_time'] = !empty($flags['day_time']) ? 0 : $duration;
             }
@@ -790,7 +793,7 @@ final class AdminLogbookService
                     $row['cross_country_distance_nm'] = $derivedDistance;
                 }
             }
-            $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
+            $row['day_time'] = $this->deriveDayTime($row);
             return $row;
         }
 
@@ -884,7 +887,7 @@ final class AdminLogbookService
             }
         }
 
-        $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
+        $row['day_time'] = $this->deriveDayTime($row);
         return $row;
     }
 
@@ -929,6 +932,19 @@ final class AdminLogbookService
             $totalMinutes += 24 * 60;
         }
         return sprintf('%02d:%02d:00', intdiv($totalMinutes, 60), $totalMinutes % 60);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function deriveDayTime(array $row): float
+    {
+        return max(0, round(
+            (float)($row['total_flight_time'] ?? 0)
+            - (float)($row['night_time'] ?? 0)
+            - (float)($row['fnpt_simulator_time'] ?? 0),
+            2
+        ));
     }
 
     /**
