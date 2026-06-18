@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/FlightTotalsService.php';
 require_once __DIR__ . '/FlightRequirementEngine.php';
 require_once __DIR__ . '/FlightVariableService.php';
+require_once __DIR__ . '/LogbookImageExtractionService.php';
 
 final class AdminLogbookService
 {
@@ -22,12 +23,14 @@ final class AdminLogbookService
     private FlightTotalsService $totals;
     private FlightRequirementEngine $requirements;
     private FlightVariableService $variables;
+    private LogbookImageExtractionService $extractor;
 
     public function __construct(private PDO $pdo)
     {
         $this->totals = new FlightTotalsService();
         $this->requirements = new FlightRequirementEngine($this->totals);
         $this->variables = new FlightVariableService();
+        $this->extractor = new LogbookImageExtractionService();
     }
 
     public function schemaReady(): bool
@@ -339,7 +342,38 @@ final class AdminLogbookService
             throw new RuntimeException('Logbook page not found.');
         }
 
+        if ($this->existingExtractionCandidateCount($logbookId, $pageId) > 0) {
+            return array(
+                'page' => $page,
+                'candidate_count' => 0,
+                'candidates' => array(),
+                'already_imported' => true,
+            );
+        }
+
         $payload = $this->decodeJson((string)($page['extracted_json'] ?? '{}'));
+        if (!is_array($payload['rows'] ?? null) || $payload['rows'] === array()) {
+            $extracted = $this->extractor->extractRows((string)$page['image_url'], (string)($page['mime_type'] ?? ''));
+            $payload = array(
+                'rows' => $extracted['rows'],
+                'warnings' => $extracted['warnings'],
+                'model' => $extracted['model'],
+                'extracted_at' => date('c'),
+            );
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_admin_logbook_pages
+                SET extraction_status = 'extracted',
+                    extracted_json = :extracted_json
+                WHERE id = :id AND logbook_id = :logbook_id
+            ");
+            $stmt->execute(array(
+                ':extracted_json' => $this->encodeJson($payload),
+                ':id' => $pageId,
+                ':logbook_id' => $logbookId,
+            ));
+            $page = $this->getPage($pageId) ?? $page;
+        }
+
         $candidateRows = is_array($payload['rows'] ?? null) ? $payload['rows'] : array();
         $created = array();
         foreach ($candidateRows as $candidate) {
@@ -351,6 +385,8 @@ final class AdminLogbookService
             $candidate['metadata'] = array(
                 'source' => 'extraction_candidate',
                 'accepted' => false,
+                'confidence' => $candidate['confidence'] ?? null,
+                'warnings' => $candidate['warnings'] ?? array(),
             );
             $created[] = $this->saveEntry($logbookId, $candidate, $actorUserId);
         }
@@ -379,6 +415,7 @@ final class AdminLogbookService
             'page' => $after ?? array(),
             'candidate_count' => count($created),
             'candidates' => $created,
+            'warnings' => is_array($payload['warnings'] ?? null) ? $payload['warnings'] : array(),
         );
     }
 
@@ -551,6 +588,20 @@ final class AdminLogbookService
         $stmt->execute(array(':id' => $pageId));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    private function existingExtractionCandidateCount(int $logbookId, int $pageId): int
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM ipca_admin_logbook_entries
+            WHERE logbook_id = :logbook_id
+              AND source_page_id = :page_id
+              AND review_status <> 'deleted'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = 'extraction_candidate'
+        ");
+        $stmt->execute(array(':logbook_id' => $logbookId, ':page_id' => $pageId));
+        return (int)$stmt->fetchColumn();
     }
 
     private function getRequirementCategory(int $id): ?array

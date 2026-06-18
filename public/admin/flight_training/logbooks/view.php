@@ -263,8 +263,13 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       if(!page) { setStatus('Upload a source page first'); return; }
       setStatus('Running import/extract...');
       const json = await post({action:'attempt_extract_page', logbook_id:logbookId, page_id:page.id});
-      const count = json.result ? Number(json.result.candidate_count || 0) : 0;
-      setStatus(count > 0 ? `Imported ${count} candidate row${count === 1 ? '' : 's'} for review` : 'Extraction attempted: no candidate rows returned yet');
+      const result = json.result || {};
+      const count = Number(result.candidate_count || 0);
+      if (result.already_imported) {
+        setStatus('This page already has imported candidate rows');
+      } else {
+        setStatus(count > 0 ? `Imported ${count} candidate row${count === 1 ? '' : 's'} for review` : 'Extraction completed: no readable rows detected');
+      }
     } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogAddRow').addEventListener('click', () => { entries.push({review_status:'ok', _dirty:true}); renderTable(); setStatus('New row added'); });
