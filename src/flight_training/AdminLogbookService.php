@@ -734,6 +734,7 @@ final class AdminLogbookService
             ));
             if (trim((string)$instructor) === '') {
                 $first = $this->firstSourceValue($source, array(
+                    'voornaam',
                     'instructor_firstname',
                     'instructor_first_name',
                     'instr_firstname',
@@ -746,6 +747,7 @@ final class AdminLogbookService
                     'first',
                 ));
                 $last = $this->firstSourceValue($source, array(
+                    'naam',
                     'instructor_lastname',
                     'instructor_last_name',
                     'instr_lastname',

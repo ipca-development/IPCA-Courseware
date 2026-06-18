@@ -427,8 +427,8 @@ final class EgleLogbookSyncService
     {
         $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name', 'displayname', 'user_name', 'username', 'user_fullname', 'user_full_name'), 'instructor_name');
         if ($nameSelect === '') {
-            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first', 'first', 'user_firstname', 'user_first_name', 'usr_firstname'));
-            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last', 'last', 'surname', 'user_lastname', 'user_last_name', 'user_surname', 'usr_lastname'));
+            $firstCol = $this->firstExisting($columns, array('voornaam', 'firstname', 'first_name', 'fname', 'name_first', 'first', 'user_firstname', 'user_first_name', 'usr_firstname'));
+            $lastCol = $this->firstExisting($columns, array('naam', 'lastname', 'last_name', 'lname', 'name_last', 'last', 'surname', 'user_lastname', 'user_last_name', 'user_surname', 'usr_lastname'));
             if ($firstCol !== '' || $lastCol !== '') {
                 $nameSelect = "TRIM(CONCAT(COALESCE(" . ($firstCol !== '' ? 'i.' . $this->q($firstCol) : "''") . ", ''), ' ', COALESCE(" . ($lastCol !== '' ? 'i.' . $this->q($lastCol) : "''") . ", ''))) AS instructor_name";
             }
