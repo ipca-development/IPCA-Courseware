@@ -315,7 +315,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     foreach (array(1 => 'Place', 2 => 'Time', 3 => 'Place', 4 => 'Time', 5 => 'Type', 6 => 'Registration', 7 => 'SE', 8 => 'ME', 11 => 'Day', 12 => 'Night') as $idx => $label) {
         $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + 9.0, $bodyTop, 'main', $label, 'head');
     }
-    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 5, 'endCol' => 13)));
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 3, 'endCol' => 13)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
@@ -349,7 +349,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     foreach ($totalRows as $idx => $row) {
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
-        $cells[] = gridCell($bounds, 5, 10, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 3, 10, $y1, $y2, 'main', $row[0], 'micro');
         $cells[] = gridCell($bounds, 10, 11, $y1, $y2, 'main', $row[1], 'micro');
         $cells[] = gridCell($bounds, 11, 12, $y1, $y2, 'main', $row[2], 'micro');
         $cells[] = gridCell($bounds, 12, 13, $y1, $y2, 'main', $row[3], 'micro');
@@ -416,7 +416,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
         $totals = $row[1];
-        $cells[] = gridCell($bounds, 3, 4, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 3, 4, $y1, $y2, 'main', '', 'micro');
         $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['pic'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', pval($totals['if'] ?? 0), 'micro');

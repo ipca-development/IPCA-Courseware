@@ -1,0 +1,307 @@
+/* Scoped radar screen — does not alter global flipboard frame */
+.tv-radar-screen{
+  --radar-green:#39ff6a;
+  --radar-green-dim:rgba(57,255,106,.22);
+  --radar-green-fade:rgba(57,255,106,.08);
+  --radar-navy:#08111f;
+  --radar-panel:#101c2e;
+  --radar-panel-border:rgba(57,255,106,.18);
+  --radar-text:#e8f2ff;
+  --radar-muted:rgba(232,242,255,.62);
+  width:100%;
+  height:100%;
+  min-height:0;
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(280px,.95fr);
+  gap:clamp(10px,1.2vw,18px);
+  padding:clamp(6px,.7vw,12px);
+  color:var(--radar-text);
+  font-family:"SF Mono","Roboto Mono","Consolas",monospace;
+  box-sizing:border-box;
+}
+
+.tv-radar-screen *{box-sizing:border-box}
+
+.tv-radar-scope-wrap{
+  position:relative;
+  min-width:0;
+  min-height:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:radial-gradient(circle at 50% 50%, rgba(12,28,48,.95) 0%, var(--radar-navy) 72%);
+  border:1px solid var(--radar-panel-border);
+  border-radius:10px;
+  overflow:hidden;
+}
+
+.tv-radar-scope-canvas,
+.tv-radar-diagram-canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+
+.tv-radar-scope-canvas{
+  aspect-ratio:1;
+  max-height:100%;
+  max-width:100%;
+}
+
+.tv-radar-scope-overlay{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  padding:clamp(8px,1vw,14px);
+}
+
+.tv-radar-scope-status{
+  align-self:flex-start;
+  font-size:clamp(10px,.95vw,13px);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--radar-muted);
+  background:rgba(8,17,31,.72);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:4px;
+  padding:4px 8px;
+}
+
+.tv-radar-scope-status.is-live{color:var(--radar-green)}
+.tv-radar-scope-status.is-error{color:#ff8f8f}
+
+.tv-radar-scope-footer{
+  display:flex;
+  gap:clamp(8px,1vw,14px);
+  align-self:flex-start;
+}
+
+.tv-radar-scope-chip{
+  font-size:clamp(9px,.85vw,12px);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--radar-green);
+  background:rgba(8,17,31,.78);
+  border:1px solid var(--radar-panel-border);
+  border-radius:4px;
+  padding:4px 8px;
+}
+
+.tv-radar-side{
+  min-width:0;
+  min-height:0;
+  display:grid;
+  grid-template-rows:minmax(0,1fr) minmax(0,1.05fr);
+  gap:clamp(8px,1vw,14px);
+}
+
+.tv-radar-panel{
+  background:var(--radar-panel);
+  border:1px solid var(--radar-panel-border);
+  border-radius:10px;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+.tv-radar-panel-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:clamp(8px,.9vw,12px) clamp(10px,1vw,14px);
+  border-bottom:1px solid rgba(255,255,255,.08);
+  font-size:clamp(10px,.9vw,12px);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--radar-green);
+}
+
+.tv-radar-panel-updated{
+  color:var(--radar-muted);
+  font-size:clamp(9px,.8vw,11px);
+  letter-spacing:.08em;
+  text-transform:none;
+  white-space:nowrap;
+}
+
+.tv-radar-diagram-body{
+  position:relative;
+  flex:1;
+  min-height:0;
+  padding:clamp(6px,.7vw,10px);
+}
+
+.tv-radar-diagram-canvas{
+  width:100%;
+  height:100%;
+  min-height:120px;
+}
+
+.tv-radar-weather-body{
+  flex:1;
+  min-height:0;
+  padding:clamp(10px,1vw,14px);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);
+  gap:clamp(10px,1vw,16px);
+}
+
+.tv-radar-wind-block{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-width:0;
+}
+
+.tv-radar-wind-compass{
+  position:relative;
+  width:clamp(88px,9vw,128px);
+  height:clamp(88px,9vw,128px);
+  border:1px solid rgba(57,255,106,.25);
+  border-radius:50%;
+  background:rgba(8,17,31,.55);
+}
+
+.tv-radar-wind-compass::before,
+.tv-radar-wind-compass::after{
+  content:"";
+  position:absolute;
+  background:rgba(57,255,106,.22);
+}
+.tv-radar-wind-compass::before{
+  left:50%;top:8%;bottom:8%;
+  width:1px;transform:translateX(-50%);
+}
+.tv-radar-wind-compass::after{
+  top:50%;left:8%;right:8%;
+  height:1px;transform:translateY(-50%);
+}
+
+.tv-radar-wind-n{
+  position:absolute;
+  top:4px;left:50%;
+  transform:translateX(-50%);
+  font-size:10px;
+  color:var(--radar-green);
+  letter-spacing:.1em;
+}
+
+.tv-radar-wind-arrow{
+  position:absolute;
+  left:50%;top:50%;
+  width:4px;
+  height:42%;
+  margin-left:-2px;
+  transform-origin:50% 88%;
+  background:linear-gradient(180deg, var(--radar-green) 0%, rgba(57,255,106,.2) 100%);
+  border-radius:2px;
+  box-shadow:0 0 10px rgba(57,255,106,.45);
+}
+
+.tv-radar-wind-arrow::after{
+  content:"";
+  position:absolute;
+  top:-8px;left:50%;
+  transform:translateX(-50%);
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-bottom:10px solid var(--radar-green);
+}
+
+.tv-radar-wind-value{
+  font-size:clamp(18px,2vw,28px);
+  font-weight:700;
+  letter-spacing:.04em;
+  line-height:1.1;
+  text-align:center;
+}
+
+.tv-radar-wind-sub{
+  font-size:clamp(10px,.9vw,12px);
+  color:var(--radar-muted);
+  text-align:center;
+}
+
+.tv-radar-asos-list{
+  display:flex;
+  flex-direction:column;
+  gap:clamp(5px,.55vw,8px);
+  min-width:0;
+}
+
+.tv-radar-asos-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:clamp(10px,.95vw,13px);
+  line-height:1.35;
+  border-bottom:1px solid rgba(255,255,255,.05);
+  padding-bottom:4px;
+}
+
+.tv-radar-asos-row:last-child{border-bottom:0;padding-bottom:0}
+
+.tv-radar-asos-label{
+  color:var(--radar-muted);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  flex:0 0 auto;
+}
+
+.tv-radar-asos-value{
+  text-align:right;
+  color:var(--radar-text);
+  word-break:break-word;
+}
+
+.tv-radar-unavailable{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:16px;
+  color:#ff9f9f;
+  font-size:clamp(11px,1vw,14px);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+
+.tv-radar-runway-favor{
+  margin-top:8px;
+  padding-top:8px;
+  border-top:1px solid rgba(255,255,255,.08);
+  font-size:clamp(9px,.85vw,11px);
+  color:var(--radar-muted);
+  letter-spacing:.06em;
+}
+
+.fb-message-board.is-radar-mode{
+  display:flex;
+  align-items:stretch;
+  justify-content:stretch;
+  padding:0;
+  min-height:clamp(280px,42vh,560px);
+}
+
+.fb-message-board.is-radar-mode .fb-main-lines,
+.fb-message-board.is-radar-mode .fb-ops-board{
+  display:none !important;
+}
+
+@media (max-width:960px){
+  .tv-radar-screen{
+    grid-template-columns:1fr;
+    grid-template-rows:minmax(240px,1fr) auto;
+  }
+  .tv-radar-side{
+    grid-template-rows:auto auto;
+  }
+}

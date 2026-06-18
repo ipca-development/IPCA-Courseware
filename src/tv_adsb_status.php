@@ -227,6 +227,92 @@ function tv_adsb_fetch_by_registration(string $registration): ?array
     return tv_adsb_extract_aircraft($payload);
 }
 
+function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
+{
+    $distNm = max(0.5, min(25.0, $distNm));
+    $suffix = tv_adsb_provider() === 'rapidapi' ? '/' : '';
+    $path = '/lat/' . rawurlencode((string)round($lat, 6))
+        . '/lon/' . rawurlencode((string)round($lon, 6))
+        . '/dist/' . rawurlencode((string)round($distNm, 1))
+        . $suffix;
+    $payload = tv_adsb_request($path);
+    if (!isset($payload['ac']) || !is_array($payload['ac'])) {
+        return array();
+    }
+    return $payload['ac'];
+}
+
+function tv_adsb_format_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 5.0): ?array
+{
+    if (!isset($aircraft['lat'], $aircraft['lon']) || !is_numeric($aircraft['lat']) || !is_numeric($aircraft['lon'])) {
+        return null;
+    }
+
+    $lat = (float)$aircraft['lat'];
+    $lon = (float)$aircraft['lon'];
+    $dist = tv_adsb_haversine_nm($lat, $lon, $centerLat, $centerLon);
+    if ($dist > $maxNm) {
+        return null;
+    }
+
+    $trackDeg = null;
+    if (isset($aircraft['track']) && is_numeric($aircraft['track'])) {
+        $trackDeg = (float)$aircraft['track'];
+    } elseif (isset($aircraft['true_heading']) && is_numeric($aircraft['true_heading'])) {
+        $trackDeg = (float)$aircraft['true_heading'];
+    } elseif (isset($aircraft['mag_heading']) && is_numeric($aircraft['mag_heading'])) {
+        $trackDeg = (float)$aircraft['mag_heading'];
+    }
+
+    $gs = isset($aircraft['gs']) && is_numeric($aircraft['gs']) ? (float)$aircraft['gs'] : null;
+    $altFt = tv_adsb_altitude_ft($aircraft);
+    $label = tv_adsb_normalize_label((string)($aircraft['r'] ?? ''));
+    $hex = tv_adsb_normalize_hex((string)($aircraft['hex'] ?? ''));
+
+    return array(
+        'hex' => $hex,
+        'label' => $label !== '' ? $label : ($hex !== '' ? strtoupper($hex) : 'UNKNOWN'),
+        'lat' => round($lat, 6),
+        'lon' => round($lon, 6),
+        'gs' => $gs,
+        'alt_ft' => $altFt,
+        'on_ground' => tv_adsb_is_on_ground($aircraft),
+        'track_deg' => $trackDeg,
+        'dist_nm' => round($dist, 1),
+        'icao_type' => strtoupper(trim((string)($aircraft['t'] ?? ''))),
+        'squawk' => trim((string)($aircraft['squawk'] ?? '')),
+    );
+}
+
+function tv_adsb_fetch_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 5.0): array
+{
+    $raw = tv_adsb_fetch_near_point($centerLat, $centerLon, $rangeNm);
+    $targets = array();
+    $seen = array();
+
+    foreach ($raw as $aircraft) {
+        if (!is_array($aircraft)) {
+            continue;
+        }
+        $formatted = tv_adsb_format_radar_target($aircraft, $centerLat, $centerLon, $rangeNm);
+        if ($formatted === null) {
+            continue;
+        }
+        $key = $formatted['hex'] !== '' ? $formatted['hex'] : ($formatted['label'] . '|' . $formatted['lat'] . '|' . $formatted['lon']);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $targets[] = $formatted;
+    }
+
+    usort($targets, static function (array $a, array $b): int {
+        return ($a['dist_nm'] <=> $b['dist_nm']);
+    });
+
+    return $targets;
+}
+
 function tv_adsb_haversine_nm(float $lat1, float $lon1, float $lat2, float $lon2): float
 {
     $earthRadiusNm = 3440.065;
