@@ -229,7 +229,75 @@ final class EgleLogbookSyncService
             WHERE l." . $this->q($lbStudent) . " = :egle_userid
             ORDER BY l." . $this->q($order !== '' ? $order : $lbId) . " ASC
         ";
-        return $this->connection->selectRows($eglePdo, $sql, array(':egle_userid' => $egleUserid));
+        $rows = $this->connection->selectRows($eglePdo, $sql, array(':egle_userid' => $egleUserid));
+        return $this->enrichMissionCodes($eglePdo, $rows);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function enrichMissionCodes(PDO $eglePdo, array $rows): array
+    {
+        $cache = array();
+        foreach ($rows as $idx => $row) {
+            $trackingTable = trim((string)($row['lb_db'] ?? ''));
+            $trackingId = trim((string)($row['lb_sctr'] ?? ''));
+            if ($trackingTable === '' || $trackingId === '') {
+                continue;
+            }
+            $cacheKey = $trackingTable . ':' . $trackingId;
+            if (!array_key_exists($cacheKey, $cache)) {
+                $cache[$cacheKey] = $this->lookupMissionCode($eglePdo, $trackingTable, $trackingId);
+            }
+            if ($cache[$cacheKey] !== null) {
+                $rows[$idx]['mission_code'] = $cache[$cacheKey]['mission_code'];
+                $rows[$idx]['mission_tracking_table'] = $trackingTable;
+                $rows[$idx]['mission_tracking_id'] = $trackingId;
+                $rows[$idx]['mission_scenario_id'] = $cache[$cacheKey]['scenario_id'];
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * @return array{mission_code:string,scenario_id:string}|null
+     */
+    private function lookupMissionCode(PDO $eglePdo, string $trackingTable, string $trackingId): ?array
+    {
+        if (!preg_match('/^scenario_tracking_[A-Za-z0-9_]+$/', $trackingTable) || !preg_match('/^\d+$/', $trackingId)) {
+            return null;
+        }
+        $trackingColumns = $this->connection->tableColumns($eglePdo, $trackingTable);
+        $scenarioColumns = $this->connection->tableColumns($eglePdo, 'scenarios');
+        $trackingIdColumn = $this->firstExisting($trackingColumns, array('sctr_id', 'id'));
+        $trackingScenarioColumn = $this->firstExisting($trackingColumns, array('sctr_scenario_id', 'scenario_id'));
+        $scenarioIdColumn = $this->firstExisting($scenarioColumns, array('sc_id', 'id'));
+        $scenarioCodeColumn = $this->firstExisting($scenarioColumns, array('sc_code', 'code'));
+        if ($trackingIdColumn === '' || $trackingScenarioColumn === '' || $scenarioIdColumn === '' || $scenarioCodeColumn === '') {
+            return null;
+        }
+        $rows = $this->connection->selectRows($eglePdo, "
+            SELECT st." . $this->q($trackingScenarioColumn) . " AS scenario_id,
+                   s." . $this->q($scenarioCodeColumn) . " AS mission_code
+            FROM " . $this->q($trackingTable) . " st
+            LEFT JOIN scenarios s ON s." . $this->q($scenarioIdColumn) . " = st." . $this->q($trackingScenarioColumn) . "
+            WHERE st." . $this->q($trackingIdColumn) . " = :tracking_id
+            LIMIT 1
+        ", array(':tracking_id' => $trackingId));
+        $row = $rows[0] ?? null;
+        if (!is_array($row)) {
+            return null;
+        }
+        $missionCode = trim((string)($row['mission_code'] ?? ''));
+        $scenarioId = trim((string)($row['scenario_id'] ?? ''));
+        if ($missionCode === '' && $scenarioId === '') {
+            return null;
+        }
+        return array(
+            'mission_code' => $missionCode !== '' ? $missionCode : $scenarioId,
+            'scenario_id' => $scenarioId,
+        );
     }
 
     /**
@@ -560,6 +628,9 @@ final class EgleLogbookSyncService
     private function legacyRemarks(array $source): string
     {
         $parts = array();
+        if (trim((string)($source['mission_code'] ?? '')) !== '') {
+            $parts[] = 'Mission: ' . trim((string)$source['mission_code']);
+        }
         if (trim((string)($source['lb_xc'] ?? '')) !== '') {
             $parts[] = 'XC: ' . trim((string)$source['lb_xc']);
         }

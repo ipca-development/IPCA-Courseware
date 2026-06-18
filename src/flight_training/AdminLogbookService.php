@@ -797,6 +797,10 @@ final class AdminLogbookService
         $duration = $this->durationDecimal($this->firstSourceValue($source, array('lb_dur', 'duration', 'flight_duration')));
         $landings = max(0, (int)round((float)$this->firstSourceValue($source, array('lb_ld', 'lb_landings', 'landings', 'ldg'))));
         $isNight = $this->nightCondition($this->firstSourceValue($source, array('lb_cond', 'lb_condition', 'condition', 'day_night')));
+        $missionCode = trim((string)$this->firstSourceValue($source, array('mission_code', 'sc_code', 'scenario_code')));
+        if ($missionCode !== '' && !str_contains((string)($row['remarks'] ?? ''), $missionCode)) {
+            $row['remarks'] = trim('Mission: ' . $missionCode . (((string)($row['remarks'] ?? '') !== '') ? ' · ' . (string)$row['remarks'] : ''));
+        }
 
         if (trim((string)($row['instructor_name'] ?? '')) === '') {
             $instructor = $this->firstSourceValue($source, array(
@@ -1107,6 +1111,9 @@ final class AdminLogbookService
     private function legacyRemarks(array $source): string
     {
         $parts = array();
+        if (trim((string)($source['mission_code'] ?? '')) !== '') {
+            $parts[] = 'Mission: ' . trim((string)$source['mission_code']);
+        }
         if (trim((string)($source['lb_xc'] ?? '')) !== '') {
             $parts[] = 'XC: ' . trim((string)$source['lb_xc']);
         }
