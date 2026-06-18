@@ -47,7 +47,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(15,23,42,.07)}
 .alogw-panel-title{margin:0;font-size:15px;color:#102845}.alogw-panel-text{margin:3px 0 0;color:#64748b;font-size:12px}
 .alogw-cards{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px}.alogw-card{padding:13px 14px;border-radius:17px;background:#fff;border:1px solid rgba(15,23,42,.08);box-shadow:0 8px 20px rgba(15,23,42,.05)}.alogw-card-label{font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b}.alogw-card-value{margin-top:4px;font-size:20px;font-weight:900;color:#102845}
-.alogw-egle-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;padding:14px 16px}.alogw-egle-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.alogw-egle-field{display:flex;flex-direction:column;gap:5px}.alogw-egle-field--wide{grid-column:1/-1}.alogw-egle-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b}.alogw-egle-input{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-egle-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.alogw-egle-status{font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}.alogw-egle-candidates{display:flex;flex-direction:column;gap:7px;max-height:210px;overflow:auto}.alogw-egle-candidate{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid rgba(15,23,42,.08);border-radius:13px;padding:8px;background:#f8fafc}.alogw-egle-candidate strong{font-size:12px;color:#102845}.alogw-egle-candidate span{font-size:11px;color:#64748b}
+.alogw-egle-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px}.alogw-egle-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.alogw-egle-field{display:flex;flex-direction:column;gap:5px}.alogw-egle-field--wide{grid-column:1/-1}.alogw-egle-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b}.alogw-egle-input{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-egle-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.alogw-egle-status{font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}.alogw-egle-candidates{display:flex;flex-direction:column;gap:7px;max-height:210px;overflow:auto}.alogw-egle-candidate{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid rgba(15,23,42,.08);border-radius:13px;padding:8px;background:#f8fafc}.alogw-egle-candidate strong{font-size:12px;color:#102845}.alogw-egle-candidate span{font-size:11px;color:#64748b}
 .alogw-import{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#f8fafc}.alogw-import-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.alogw-input,.alogw-select{border:1px solid rgba(15,23,42,.13);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#102845}.alogw-extract-status{margin-left:auto;font-size:12px;font-weight:900;color:#475569;background:#e2e8f0;border-radius:999px;padding:7px 10px}
 .alogw-grid-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid rgba(15,23,42,.07);background:#fff}
 .alogw-table-wrap{overflow-x:hidden;overflow-y:auto;max-height:720px;background:#fff}.alogw-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;background:#fff}.alogw-table th{position:sticky;top:0;z-index:1;padding:6px 3px;background:#f8fafc;border-right:1px solid #e2e8f0;border-bottom:1px solid #cbd5e1;font-size:8px;line-height:1;white-space:nowrap;text-transform:uppercase;letter-spacing:0;color:#475569;text-align:center}.alogw-table td{padding:5px 3px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;vertical-align:middle;background:#fff;font-size:9px;line-height:1.1;color:#102845;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-table tr:nth-child(even) td{background:#f8fafc}.alogw-table input[type=checkbox]{width:auto;height:auto}.alogw-row-actions{display:flex;gap:4px;justify-content:center}.alogw-mini-btn{border:0;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;cursor:pointer}.alogw-mini-btn--edit{background:#eef2ff;color:#1e3a8a}.alogw-mini-btn--delete{background:#fff1f2;color:#be123c}.alogw-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 6px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e2e8f0;color:#475569}.alogw-status-pill--accepted,.alogw-status-pill--ok{background:#dcfce7;color:#166534}.alogw-status-pill--imported,.alogw-status-pill--needs_review,.alogw-status-pill--flagged{background:#fef3c7;color:#92400e}.alogw-status-pill--rejected{background:#fee2e2;color:#991b1b}
@@ -83,17 +83,9 @@ cw_header('Flight Training · Admin Logbook Workspace');
     </div>
     <div class="alogw-egle-grid">
       <div>
-        <form id="alogEgleConnectionForm" class="alogw-egle-form">
-          <label class="alogw-egle-field"><span class="alogw-egle-label">Host</span><input class="alogw-egle-input" name="host" autocomplete="off"></label>
-          <label class="alogw-egle-field"><span class="alogw-egle-label">Port</span><input class="alogw-egle-input" name="port" type="number" value="3306"></label>
-          <label class="alogw-egle-field"><span class="alogw-egle-label">Database</span><input class="alogw-egle-input" name="database" autocomplete="off"></label>
-          <label class="alogw-egle-field"><span class="alogw-egle-label">Username</span><input class="alogw-egle-input" name="username" autocomplete="off"></label>
-          <label class="alogw-egle-field"><span class="alogw-egle-label">Password</span><input class="alogw-egle-input" name="password" type="password" autocomplete="new-password"></label>
-          <label class="alogw-egle-field"><span class="alogw-egle-label">SSL</span><select class="alogw-egle-input" name="ssl"><option value="0">No</option><option value="1">Yes</option></select></label>
-          <label class="alogw-egle-field alogw-egle-field--wide"><span class="alogw-egle-label">Connection Notes</span><input class="alogw-egle-input" name="notes" autocomplete="off"></label>
-        </form>
+        <p class="alogw-panel-text">Configure host, database, username, password, SSL, and notes in the settings modal.</p>
         <div class="alogw-egle-actions">
-          <button class="alogw-btn alogw-btn--primary" type="button" id="alogTestEgle">Test Connection</button>
+          <button class="alogw-btn alogw-btn--primary" type="button" id="alogOpenEgleSettings">E-GLE Settings</button>
           <button class="alogw-btn alogw-btn--ghost" type="button" id="alogDisconnectEgle">Disconnect E-GLE</button>
           <button class="alogw-btn alogw-btn--secondary" type="button" id="alogSyncStudent">Sync Student</button>
           <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSyncAll">Sync All Students</button>
@@ -211,6 +203,32 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <div class="alogw-edit-body" id="alogEditFields"></div>
       <div class="alogw-edit-actions">
         <button class="alogw-btn alogw-btn--primary" type="submit">Save Row</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="alogw-modal" id="alogEgleSettingsModal" aria-hidden="true">
+  <div class="alogw-modal-card">
+    <div class="alogw-modal-head">
+      <div>
+        <h2 class="alogw-panel-title">E-GLE Connection Settings</h2>
+        <p class="alogw-panel-text">Temporary read-only credentials. Password is masked and never displayed back to the browser.</p>
+      </div>
+      <button class="alogw-btn alogw-btn--danger" type="button" id="alogCloseEgleSettings">Cancel</button>
+    </div>
+    <form id="alogEgleConnectionForm">
+      <div class="alogw-edit-body">
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Host</span><input class="alogw-edit-input" name="host" autocomplete="off" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Port</span><input class="alogw-edit-input" name="port" type="number" value="3306" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Database Name</span><input class="alogw-edit-input" name="database" autocomplete="off" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Username</span><input class="alogw-edit-input" name="username" autocomplete="off" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Password</span><input class="alogw-edit-input" name="password" type="password" autocomplete="new-password"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">SSL</span><select class="alogw-edit-select" name="ssl"><option value="0">No</option><option value="1">Yes</option></select></label>
+        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Connection Notes</span><input class="alogw-edit-input" name="notes" autocomplete="off"></label>
+      </div>
+      <div class="alogw-edit-actions">
+        <button class="alogw-btn alogw-btn--primary" type="submit">Save & Test Connection</button>
       </div>
     </form>
   </div>
@@ -394,16 +412,28 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       setStatus('Row saved');
     } catch(err){ setStatus(err.message); }
   });
-  document.getElementById('alogTestEgle').addEventListener('click', async () => {
+  function openEgleSettings(){
+    document.getElementById('alogEgleSettingsModal').classList.add('is-open');
+    document.getElementById('alogEgleSettingsModal').setAttribute('aria-hidden','false');
+  }
+  function closeEgleSettings(){
+    document.getElementById('alogEgleSettingsModal').classList.remove('is-open');
+    document.getElementById('alogEgleSettingsModal').setAttribute('aria-hidden','true');
+  }
+  document.getElementById('alogOpenEgleSettings').addEventListener('click', openEgleSettings);
+  document.getElementById('alogCloseEgleSettings').addEventListener('click', closeEgleSettings);
+  document.getElementById('alogEgleConnectionForm').addEventListener('submit', async e => {
+    e.preventDefault();
     try {
       setStatus('Testing E-GLE connection...');
-      const form = new FormData(document.getElementById('alogEgleConnectionForm'));
+      const form = new FormData(e.currentTarget);
       const payload = Object.fromEntries(form.entries());
       payload.action = 'test_connection';
       payload.ssl = payload.ssl === '1';
       const json = await eglePost(payload);
       await loadEgleStatus();
       const tables = json.result && json.result.tables ? json.result.tables.join(', ') : 'no expected tables found';
+      closeEgleSettings();
       setStatus('E-GLE connected. Tables: ' + tables);
     } catch(err){ setStatus(err.message); }
   });
