@@ -235,6 +235,142 @@ function rightTotalsRow(string $label, array $totals): string
         . '<td>' . h(pval($totals['if'] ?? 0)) . '</td>'
         . '<td>' . h(pval($totals['nav'] ?? 0)) . '</td></tr>';
 }
+
+function svgLine(float $x1, float $y1, float $x2, float $y2, string $class = 'thin'): string
+{
+    return '<line class="' . h($class) . '" x1="' . $x1 . '" y1="' . $y1 . '" x2="' . $x2 . '" y2="' . $y2 . '"/>';
+}
+
+function svgText(float $x, float $y, string $text, string $class = 'body', string $anchor = 'middle'): string
+{
+    return '<text class="' . h($class) . '" x="' . $x . '" y="' . $y . '" text-anchor="' . h($anchor) . '">' . h($text) . '</text>';
+}
+
+function svgMultiline(float $x, float $y, array $lines, string $class = 'head'): string
+{
+    $out = '<text class="' . h($class) . '" x="' . $x . '" y="' . $y . '" text-anchor="middle">';
+    foreach (array_values($lines) as $idx => $line) {
+        $out .= '<tspan x="' . $x . '" dy="' . ($idx === 0 ? 0 : 2.8) . '">' . h((string)$line) . '</tspan>';
+    }
+    return $out . '</text>';
+}
+
+function gridLines(array $columns, int $rows = 25): string
+{
+    $width = array_sum($columns);
+    $header = 16.0;
+    $body = 173.0;
+    $height = $header + $body;
+    $rowHeight = $body / $rows;
+    $x = 0.0;
+    $out = '<rect class="paper-fill" x="0" y="0" width="' . $width . '" height="' . $height . '"/>';
+    $out .= svgLine(0, 0, $width, 0, 'heavy') . svgLine(0, $height, $width, $height, 'heavy') . svgLine(0, 0, 0, $height, 'heavy') . svgLine($width, 0, $width, $height, 'heavy');
+    foreach ($columns as $column) {
+        $x += (float)$column;
+        $out .= svgLine($x, 0, $x, $height);
+    }
+    foreach (array(5.333, 10.666, 16.0) as $y) {
+        $out .= svgLine(0, $y, $width, $y);
+    }
+    for ($i = 1; $i < $rows; $i++) {
+        $y = $header + $i * $rowHeight;
+        $out .= svgLine(0, $y, $width, $y);
+    }
+    return $out;
+}
+
+function centers(array $columns): array
+{
+    $centers = array();
+    $x = 0.0;
+    foreach ($columns as $width) {
+        $centers[] = $x + ((float)$width / 2);
+        $x += (float)$width;
+    }
+    return $centers;
+}
+
+function leftTemplate(array $entries): string
+{
+    $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
+    $centers = centers($columns);
+    $out = '<svg class="log-template left-template" viewBox="0 0 240 189" preserveAspectRatio="none">';
+    $out .= gridLines($columns);
+    $out .= svgText(9, 3.4, '1', 'tiny') . svgText(30.25, 3.4, '2', 'tiny') . svgText(54.75, 3.4, '3', 'tiny') . svgText(94.5, 3.4, '4', 'tiny') . svgText(136, 3.4, '5', 'tiny') . svgText(157, 3.4, '6', 'tiny') . svgText(189.75, 3.4, '7', 'tiny') . svgText(226.5, 3.4, '8', 'tiny');
+    $out .= svgMultiline($centers[0], 8.0, array('Date', '(dd/mm/yy)'), 'head');
+    $out .= svgText(($centers[1] + $centers[2]) / 2, 8.0, 'Departure', 'head');
+    $out .= svgText(($centers[3] + $centers[4]) / 2, 8.0, 'Arrival', 'head');
+    $out .= svgText(($centers[5] + $centers[6]) / 2, 8.0, 'Aircraft', 'head');
+    $out .= svgText(($centers[7] + $centers[8]) / 2, 8.0, 'Single Pilot', 'head');
+    $out .= svgMultiline($centers[9], 7.6, array('Total Time', 'of Flight'), 'head');
+    $out .= svgMultiline($centers[10], 7.6, array('Name Pilot', 'in Command'), 'head');
+    $out .= svgText(($centers[11] + $centers[12]) / 2, 8.0, 'Landings', 'head');
+    foreach (array(1 => 'Place', 2 => 'Time', 3 => 'Place', 4 => 'Time', 5 => 'Type', 6 => 'Registration', 7 => 'SE', 8 => 'ME', 11 => 'Day', 12 => 'Night') as $idx => $label) {
+        $out .= svgText($centers[$idx], 13.6, $label, 'head');
+    }
+    $rowHeight = 173.0 / 25;
+    foreach (array_slice($entries, 0, 25) as $idx => $entry) {
+        $y = 16.0 + $idx * $rowHeight + ($rowHeight / 2) + 0.8;
+        $values = array(
+            pdate($entry['entry_date'] ?? ''),
+            (string)($entry['departure_airport'] ?? ''),
+            ptime($entry['departure_time'] ?? ''),
+            (string)($entry['arrival_airport'] ?? ''),
+            ptime($entry['arrival_time'] ?? ''),
+            (string)($entry['aircraft_type'] ?? ''),
+            (string)($entry['aircraft_registration'] ?? ''),
+            pval($entry['single_engine_time'] ?? 0),
+            pval($entry['multi_engine_time'] ?? 0),
+            '',
+            pval($entry['total_flight_time'] ?? 0),
+            (string)($entry['instructor_name'] ?? ''),
+            (string)((int)($entry['day_landings'] ?? 0) ?: ''),
+            (string)((int)($entry['night_landings'] ?? 0) ?: ''),
+        );
+        unset($values[9]);
+        $map = array(0,1,2,3,4,5,6,7,8,10,11,12,13);
+        foreach ($map as $colIdx => $valueIdx) {
+            $out .= svgText($centers[$colIdx], $y, (string)$values[$valueIdx], 'body');
+        }
+    }
+    return $out . '</svg>';
+}
+
+function rightTemplate(array $entries): string
+{
+    $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
+    $centers = centers($columns);
+    $out = '<svg class="log-template right-template" viewBox="0 0 240 189" preserveAspectRatio="none">';
+    $out .= gridLines($columns);
+    $out .= svgText(24.75, 3.4, '9', 'tiny') . svgText(91.75, 3.4, '10', 'tiny') . svgText(147.25, 3.4, '11', 'tiny') . svgText(195.25, 3.4, '12', 'tiny');
+    $out .= svgText(24.75, 8.0, 'Operational Condition Time', 'head');
+    $out .= svgText(91.75, 8.0, 'Pilot Function Time', 'head');
+    $out .= svgText(147.25, 8.0, 'Other Flying', 'head');
+    $out .= svgText(195.25, 8.0, 'Remarks and Endorsements', 'head');
+    foreach (array(0 => 'Night', 1 => 'IFR', 2 => 'PIC', 3 => 'Co-Pilot', 4 => 'Dual', 5 => 'Instructor', 6 => 'IF', 7 => 'NAV') as $idx => $label) {
+        $out .= svgText($centers[$idx], 13.6, $label, 'head');
+    }
+    $rowHeight = 173.0 / 25;
+    foreach (array_slice($entries, 0, 25) as $idx => $entry) {
+        $y = 16.0 + $idx * $rowHeight + ($rowHeight / 2) + 0.8;
+        $values = array(
+            pval($entry['night_time'] ?? 0),
+            pval($entry['instrument_time'] ?? 0),
+            pval($entry['pic_time'] ?? 0),
+            pval($entry['copilot_time'] ?? 0),
+            pval($entry['dual_received_time'] ?? 0),
+            pval($entry['instructor_time'] ?? 0),
+            pval($entry['basic_instrument_flying_time'] ?? 0),
+            pval($entry['cross_country_time'] ?? 0),
+            trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))),
+        );
+        foreach ($values as $colIdx => $value) {
+            $textX = $colIdx === 8 ? 152.0 : $centers[$colIdx];
+            $out .= svgText($textX, $y, (string)$value, $colIdx === 8 ? 'remarks-text' : 'body', $colIdx === 8 ? 'start' : 'middle');
+        }
+    }
+    return $out . '</svg>';
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -254,12 +390,12 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .paper-sheet{position:relative;background:#f7f8fb;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),0 20px 70px rgba(15,23,42,.22);overflow:hidden;cursor:grab}
 .paper-sheet.is-dragging{cursor:grabbing}
 .paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
-.paper-sheet{--page-w:270mm;--page-h:220mm;--left-table-x:14mm;--right-table-x:16mm}
+.paper-sheet{--page-w:270mm;--page-h:244mm;--left-table-x:14mm;--right-table-x:16mm}
 .book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
 .book-spread::before{content:"";position:absolute;left:50%;top:4mm;bottom:4mm;width:2.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.28),rgba(255,255,255,.75),rgba(15,23,42,.26));z-index:6;border-radius:999px;box-shadow:0 0 7mm rgba(15,23,42,.2)}
-.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16);--header-top:7mm;--grid-top:20mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:193mm;--totals-h:16mm;--signature-top:211mm;--signature-h:6mm}
+.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16);--header-top:7mm;--grid-top:20mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:209mm;--totals-h:16mm;--signature-top:229mm;--signature-h:7mm}
 .book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),rgba(15,23,42,0) 45%,rgba(15,23,42,.035));z-index:5}
 .book-page-left{border-radius:2mm 0 0 2mm;box-shadow:inset -18mm 0 30mm rgba(15,23,42,.1),inset 0 0 0 .35mm rgba(15,23,42,.08)}
 .book-page-right{border-radius:0 2mm 2mm 0;box-shadow:inset 18mm 0 30mm rgba(15,23,42,.09),inset 0 0 0 .35mm rgba(15,23,42,.08)}
@@ -267,23 +403,24 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-head{position:absolute;left:var(--table-x);top:var(--header-top);width:240mm;height:10mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
-table{border-collapse:collapse;table-layout:fixed;width:240mm}
-.book-page>table{position:absolute;left:var(--table-x);top:var(--grid-top)}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
-th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0 1mm;font-size:7px;line-height:1.05;font-weight:400;overflow:hidden}
-thead{height:var(--grid-head-h)}thead tr{height:5.333mm}tbody tr{height:var(--row-h)}
-.log-body{height:var(--grid-body-h)}.log-body td{height:var(--row-h)}
-.main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
+.log-template{position:absolute;left:var(--table-x);top:var(--grid-top);width:240mm;height:189mm;z-index:4}
+.log-template .paper-fill{fill:#fffdf7}
+.log-template .thin{stroke:#111;stroke-width:.22;vector-effect:non-scaling-stroke}
+.log-template .heavy{stroke:#111;stroke-width:.32;vector-effect:non-scaling-stroke}
+.log-template text{font-family:Arial,Helvetica,sans-serif;fill:#111;dominant-baseline:middle}
+.log-template .tiny{font-size:2.25px;font-weight:700}
+.log-template .head{font-size:2.05px;font-weight:700}
+.log-template .body{font-size:2.0px;font-weight:400}
+.log-template .remarks-text{font-size:1.75px;font-weight:400}
 .totals-box{position:absolute;top:var(--totals-top);width:143mm;height:var(--totals-h);z-index:7;background:#fffdf7}
-.totals-box table{width:143mm;height:var(--totals-h);background:#fffdf7}.totals-box th,.totals-box td{height:calc(var(--totals-h) / 3);font-size:6.6px;background:#fffdf7;font-weight:400}
+.totals-box table{border-collapse:collapse;table-layout:fixed;width:143mm;height:var(--totals-h);background:#fffdf7}.totals-box th,.totals-box td{border:0.22mm solid #111;text-align:center;vertical-align:middle;padding:0 .7mm;height:calc(var(--totals-h) / 3);font-size:6.3px;line-height:1.05;background:#fffdf7;font-weight:400;overflow:hidden}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
 .totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
 .totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
-.signature{position:absolute;left:14mm;right:10mm;top:var(--signature-top);height:var(--signature-h);font-size:10px;text-align:center;z-index:7}
+.signature{position:absolute;left:14mm;right:10mm;top:var(--signature-top);height:var(--signature-h);font-size:9px;text-align:center;z-index:7}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
-.left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
-.right col.c1{width:24.75mm}.right col.c2{width:24.75mm}.right col.c3{width:21.125mm}.right col.c4{width:21.125mm}.right col.c5{width:21.125mm}.right col.c6{width:21.125mm}.right col.c7{width:13.25mm}.right col.c8{width:13.25mm}.right col.c9{width:79.5mm}
-@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:var(--page-w);height:auto;transform:none!important;filter:none;perspective:none;opacity:1;transition:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page}}
+@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:calc(var(--page-w) * 2);height:var(--page-h);transform:none!important;filter:none;perspective:none;opacity:1;transition:none;break-after:page}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:inline-block;background:#fff;border:0;box-shadow:none;border-radius:0;vertical-align:top}}
 </style>
 </head>
 <body>
@@ -311,36 +448,16 @@ try {
     foreach ($chunks as $pageIndex => $chunk):
         $pageTotals = pageTotals($chunk);
         $runningTotals = addTotals($previousTotals, $pageTotals);
-        $rows = implode('', array_map('leftRow', $chunk)) . blankRows(max(0, $rowsPerSpread - count($chunk)), 'left');
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
   <div class="page-head"><div class="logo"><?= h($logoText) ?></div><div class="meta"><span>Medical Expires:</span><span>Class/Type Rating Expires:</span></div></div>
-  <table class="left">
-    <colgroup><?php for ($i = 1; $i <= 13; $i++): ?><col class="c<?= $i ?>"><?php endfor; ?></colgroup>
-    <thead>
-      <tr><th colspan="1">1</th><th colspan="2">2</th><th colspan="2">3</th><th colspan="2">4</th><th colspan="2">5</th><th>6</th><th>7</th><th colspan="2">8</th></tr>
-      <tr><th rowspan="2">Date<br><span class="sub">(dd/mm/yy)</span></th><th colspan="2">Departure</th><th colspan="2">Arrival</th><th colspan="2">Aircraft</th><th colspan="2">Single Pilot</th><th rowspan="2">Multi<br>Pilot</th><th rowspan="2">Total Time<br>of Flight</th><th colspan="2">Landings</th></tr>
-      <tr><th>Place</th><th>Time</th><th>Place</th><th>Time</th><th>Type</th><th>Registration</th><th>SE</th><th>ME</th><th>Day</th><th>Night</th></tr>
-    </thead>
-    <tbody class="log-body"><?= $rows ?></tbody>
-  </table>
+  <?= leftTemplate($chunk) ?>
   <?= leftTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
 </section>
-<?php
-        $rightRows = implode('', array_map('rightRow', $chunk)) . blankRows(max(0, $rowsPerSpread - count($chunk)), 'right');
-?>
 <section class="book-page book-page-right">
   <div class="page-head"><div></div><div class="logo right-logo"><?= h($logoText) ?></div></div>
-  <table class="right">
-    <colgroup><?php for ($i = 1; $i <= 9; $i++): ?><col class="c<?= $i ?>"><?php endfor; ?></colgroup>
-    <thead>
-      <tr><th colspan="2">9</th><th colspan="4">10</th><th colspan="2">11</th><th>12</th></tr>
-      <tr><th colspan="2">Operational Condition Time</th><th colspan="4">Pilot Function Time</th><th colspan="2">Other Flying</th><th rowspan="2">Remarks and Endorsements</th></tr>
-      <tr><th>Night</th><th>IFR</th><th>PIC</th><th>Co-Pilot</th><th>Dual</th><th>Instructor</th><th>IF</th><th>NAV</th></tr>
-    </thead>
-    <tbody class="log-body"><?= $rightRows ?></tbody>
-  </table>
+  <?= rightTemplate($chunk) ?>
   <?= rightTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
   <div class="signature">I certify that the entries in this log are true: <span class="line"></span> (Pilot's Signature).</div>
 </section>
@@ -366,7 +483,7 @@ try {
   let pan = {x:0, y:0};
   let drag = null;
   function spreadSizeMm(){
-    return {w:540, h:220};
+    return {w:540, h:244};
   }
   function baseScale(mode){
     const rect = sheet.getBoundingClientRect();
