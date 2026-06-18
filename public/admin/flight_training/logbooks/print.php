@@ -123,6 +123,8 @@ function pageTotals(array $entries): array
         'instructor' => 0.0,
         'if' => 0.0,
         'nav' => 0.0,
+        'day_landings' => 0.0,
+        'night_landings' => 0.0,
     );
     foreach ($entries as $entry) {
         $totals['total'] += (float)($entry['total_flight_time'] ?? 0) - (float)($entry['fnpt_simulator_time'] ?? 0);
@@ -136,6 +138,8 @@ function pageTotals(array $entries): array
         $totals['instructor'] += (float)($entry['instructor_time'] ?? 0);
         $totals['if'] += (float)($entry['basic_instrument_flying_time'] ?? 0);
         $totals['nav'] += (float)($entry['cross_country_time'] ?? 0);
+        $totals['day_landings'] += (float)((int)($entry['day_landings'] ?? 0));
+        $totals['night_landings'] += (float)((int)($entry['night_landings'] ?? 0));
     }
     return $totals;
 }
@@ -192,6 +196,44 @@ function blankRows(int $count, string $side): string
     }
     return $html;
 }
+
+function leftTotalsBox(array $pageTotals, array $previousTotals, array $runningTotals): string
+{
+    return '<div class="totals-box totals-box-left"><table>'
+        . '<colgroup><col class="label"><col class="total"><col class="ldg"><col class="ldg"></colgroup>'
+        . totalsRow('Total these pages', pval($pageTotals['total'] ?? 0), pval($pageTotals['day_landings'] ?? 0, 0), pval($pageTotals['night_landings'] ?? 0, 0))
+        . totalsRow('Total from previous pages', pval($previousTotals['total'] ?? 0), pval($previousTotals['day_landings'] ?? 0, 0), pval($previousTotals['night_landings'] ?? 0, 0))
+        . totalsRow('Total Time', pval($runningTotals['total'] ?? 0), pval($runningTotals['day_landings'] ?? 0, 0), pval($runningTotals['night_landings'] ?? 0, 0))
+        . '</table></div>';
+}
+
+function rightTotalsBox(array $pageTotals, array $previousTotals, array $runningTotals): string
+{
+    return '<div class="totals-box totals-box-right"><table>'
+        . '<colgroup><col class="label"><col class="night"><col class="ifr"><col class="pic"><col class="copilot"><col class="dual"><col class="instr"><col class="if"><col class="nav"></colgroup>'
+        . rightTotalsRow('Total these pages', $pageTotals)
+        . rightTotalsRow('Total from previous pages', $previousTotals)
+        . rightTotalsRow('Total Time', $runningTotals)
+        . '</table></div>';
+}
+
+function totalsRow(string $label, string $total, string $dayLandings, string $nightLandings): string
+{
+    return '<tr><th>' . h($label) . '</th><td>' . h($total) . '</td><td>' . h($dayLandings) . '</td><td>' . h($nightLandings) . '</td></tr>';
+}
+
+function rightTotalsRow(string $label, array $totals): string
+{
+    return '<tr><th>' . h($label) . '</th>'
+        . '<td>' . h(pval($totals['night'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['ifr'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['pic'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['copilot'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['dual'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['instructor'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['if'] ?? 0)) . '</td>'
+        . '<td>' . h(pval($totals['nav'] ?? 0)) . '</td></tr>';
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -214,8 +256,11 @@ th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0
 thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
 .log-body{height:173mm}.log-body td{height:6.92mm}
 .main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
-.totals-box{position:absolute;left:94.5mm;top:197mm;width:143mm;height:16mm}
-.totals-box table{width:143mm;height:16mm}.totals-box th,.totals-box td{height:5.333mm;font-size:7px}
+.totals-box{position:absolute;top:194mm;width:143mm;height:16mm;z-index:3;background:#fff}
+.totals-box table{width:143mm;height:16mm;background:#fff}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fff;font-weight:400}
+.totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
+.totals-box-left{left:94.5mm}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
+.totals-box-right{left:97mm}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
 .signature{position:absolute;left:14mm;right:10mm;bottom:8mm;font-size:10px;text-align:center}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 .left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
@@ -248,7 +293,7 @@ try {
     </thead>
     <tbody class="log-body"><?= $rows ?></tbody>
   </table>
-  <div class="totals-box"><table><tr><th>Total these pages</th><td><?= h(pval($pageTotals['total'] ?? 0)) ?></td></tr><tr><th>Total from previous pages</th><td><?= h(pval($previousTotals['total'] ?? 0)) ?></td></tr><tr><th>Total Time</th><td><?= h(pval($runningTotals['total'] ?? 0)) ?></td></tr></table></div>
+  <?= leftTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
 </section>
 <?php
         $rightRows = implode('', array_map('rightRow', $chunk)) . blankRows(max(0, 25 - count($chunk)), 'right');
@@ -264,7 +309,7 @@ try {
     </thead>
     <tbody class="log-body"><?= $rightRows ?></tbody>
   </table>
-  <div class="totals-box"><table><tr><th>Total these pages</th><td><?= h(pval($pageTotals['total'] ?? 0)) ?></td></tr><tr><th>Total from previous pages</th><td><?= h(pval($previousTotals['total'] ?? 0)) ?></td></tr><tr><th>Total Time</th><td><?= h(pval($runningTotals['total'] ?? 0)) ?></td></tr></table></div>
+  <?= rightTotalsBox($pageTotals, $previousTotals, $runningTotals) ?>
   <div class="signature">I certify that the entries in this log are true: <span class="line"></span> (Pilot's Signature).</div>
 </section>
 <?php
