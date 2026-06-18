@@ -18,8 +18,13 @@ if (!in_array($mode, ['standard', 'schedule', 'night'], true)) {
 
 $cssPath = __DIR__ . '/assets/flipboard.css';
 $jsPath = __DIR__ . '/assets/flipboard.js';
+$radarCssPath = __DIR__ . '/assets/radar.css';
+$radarJsPath = __DIR__ . '/assets/radar.js';
 $cssVersion = is_file($cssPath) ? (string)filemtime($cssPath) : '1';
 $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
+$radarCssVersion = is_file($radarCssPath) ? (string)filemtime($radarCssPath) : '1';
+$radarJsVersion = is_file($radarJsPath) ? (string)filemtime($radarJsPath) : '1';
+$isRadarScreen = $screenKey === 'radar';
 ?>
 <!doctype html>
 <html lang="en">
@@ -29,6 +34,9 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
   <meta name="theme-color" content="#0d1d34">
   <title>IPCA Flip Board</title>
   <link rel="stylesheet" href="/tv/assets/flipboard.css?v=<?= h($cssVersion) ?>">
+  <?php if ($isRadarScreen): ?>
+  <link rel="stylesheet" href="/tv/assets/radar.css?v=<?= h($radarCssVersion) ?>">
+  <?php endif; ?>
 </head>
 <body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?>">
   <div
@@ -48,6 +56,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-home-airport="<?= h((string)($kioskConfig['home_airport'] ?? 'KTRM')) ?>"
     data-auto-audio="<?= ((int)($kioskConfig['audio_enabled'] ?? 1) === 1) ? '1' : '0' ?>"
     data-aircraft-ops="<?= $screenKey === 'aircraft' ? '1' : '0' ?>"
+    data-radar-mode="<?= $isRadarScreen ? '1' : '0' ?>"
+    data-radar-api-url="/tv/api/radar.php"
   >
     <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
@@ -92,6 +102,9 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     </main>
   </div>
 
+  <?php if ($isRadarScreen): ?>
+  <script src="/tv/assets/radar.js?v=<?= h($radarJsVersion) ?>" defer></script>
+  <?php endif; ?>
   <script src="/tv/assets/flipboard.js?v=<?= h($jsVersion) ?>" defer></script>
 </body>
 </html>

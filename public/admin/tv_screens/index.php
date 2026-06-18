@@ -126,6 +126,15 @@ function tv_type_badge(string $type): string
     };
 }
 
+function tv_screen_presets(): array
+{
+    return array(
+        'main' => array('label' => 'Main (flip messages)', 'route' => '/tv/flipboard.php?screen=main'),
+        'aircraft' => array('label' => 'Aircraft (ADS-B ops board)', 'route' => '/tv/flipboard.php?screen=aircraft'),
+        'radar' => array('label' => 'Radar (KTRM scope + weather)', 'route' => '/tv/flipboard.php?screen=radar'),
+    );
+}
+
 $defaults = array(
     'id' => 0,
     'screen_key' => 'main',
@@ -527,7 +536,7 @@ cw_header('TV Flip Board');
     <div class="tv-alert err">Apply <code>scripts/sql/2026_05_30_tv_screen_pa_voice.sql</code> to enable OpenAI PA voice selection.</div>
   <?php endif; ?>
   <?php if ($tableReady): ?>
-    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code>, <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>, and <code>scripts/sql/2026_06_08_tv_screen_aircraft_type_col.sql</code>.</div>
+    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Radar uses the same ADS-B source plus METAR weather (<code>CW_TV_WEATHER_URL</code> optional for onsite station). Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code>, <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>, and <code>scripts/sql/2026_06_08_tv_screen_aircraft_type_col.sql</code>.</div>
   <?php endif; ?>
 
   <section class="card tv-list-head-card">
@@ -633,7 +642,15 @@ cw_header('TV Flip Board');
         <div class="tv-form-grid">
           <div class="tv-field">
             <label class="tv-field-label" for="set_screen_key">Default screen key</label>
-            <input class="app-input" id="set_screen_key" name="screen_key" value="<?= h((string)$settings['screen_key']) ?>" maxlength="64" required>
+            <select class="app-select" id="set_screen_key" name="screen_key" required>
+              <?php foreach (tv_screen_presets() as $presetKey => $preset): ?>
+                <option value="<?= h($presetKey) ?>" <?= (string)$settings['screen_key'] === $presetKey ? 'selected' : '' ?>><?= h($preset['label']) ?></option>
+              <?php endforeach; ?>
+              <?php if (!array_key_exists((string)$settings['screen_key'], tv_screen_presets())): ?>
+                <option value="<?= h((string)$settings['screen_key']) ?>" selected><?= h((string)$settings['screen_key']) ?> (custom)</option>
+              <?php endif; ?>
+            </select>
+            <p class="tv-field-hint">Radar kiosk: <code>/tv/flipboard.php?screen=radar</code></p>
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="set_default_mode">Default mode</label>
@@ -722,7 +739,12 @@ cw_header('TV Flip Board');
         <div class="tv-form-grid">
           <div class="tv-field">
             <label class="tv-field-label" for="msg_screen_key">Screen</label>
-            <input class="app-input" id="msg_screen_key" name="screen_key" value="<?= h((string)$form['screen_key']) ?>" maxlength="64" required>
+            <input class="app-input" id="msg_screen_key" name="screen_key" value="<?= h((string)$form['screen_key']) ?>" maxlength="64" list="tv_screen_key_presets" required>
+            <datalist id="tv_screen_key_presets">
+              <?php foreach (tv_screen_presets() as $presetKey => $preset): ?>
+                <option value="<?= h($presetKey) ?>"><?= h($preset['label']) ?></option>
+              <?php endforeach; ?>
+            </datalist>
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="msg_message_type">Mode</label>

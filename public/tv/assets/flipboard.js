@@ -862,6 +862,7 @@
     this.apiUrl = root.getAttribute('data-api-url') || '/tv/api/messages.php';
     this.aircraftApiUrl = root.getAttribute('data-aircraft-api-url') || '/tv/api/aircraft_status.php';
     this.aircraftBoardApiUrl = root.getAttribute('data-aircraft-board-api-url') || '/tv/api/aircraft_board.php';
+    this.radarApiUrl = root.getAttribute('data-radar-api-url') || '/tv/api/radar.php';
     this.pollMs = clamp(parseInt(root.getAttribute('data-poll-ms') || '7000', 10), 5000, 10000);
     this.aircraftPollMs = clamp(parseInt(root.getAttribute('data-aircraft-poll-ms') || '15000', 10), 10000, 60000);
     this.gateLabel = root.getAttribute('data-gate-label') || 'SPC Gate';
@@ -894,7 +895,14 @@
     this.rotateTimer = null;
     this.aircraftPollTimer = null;
     this.aircraftPageTimer = null;
+    this.radarScreen = null;
+    this.radarStarted = false;
   }
+
+  FlipBoard.prototype.isRadarScreen = function () {
+    return this.screenKey === 'radar'
+      || this.root.getAttribute('data-radar-mode') === '1';
+  };
 
   FlipBoard.prototype.isAircraftOpsScreen = function () {
     return this.screenKey === 'aircraft'
@@ -905,11 +913,39 @@
     this.bindAudio();
     this.tickClock();
     this.buildMessageBoard();
-    this.renderCurrent(true);
+    if (this.isRadarScreen()) {
+      if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
+      this.ensureRadarScreen();
+      this.rendering = false;
+    } else {
+      this.renderCurrent(true);
+    }
     this.poll();
     window.setInterval(this.poll.bind(this), this.pollMs);
     window.setInterval(this.tickClock.bind(this), 1000);
     this.ensureAircraftPoll();
+  };
+
+  FlipBoard.prototype.showRadarBoard = function () {
+    this.showMessageBoard();
+    if (this.mainLinesEl) this.mainLinesEl.hidden = true;
+    if (this.opsBoardEl) this.opsBoardEl.hidden = true;
+    if (this.scheduleBoard) this.scheduleBoard.hidden = true;
+    if (this.messageBoard) this.messageBoard.classList.remove('is-aircraft-mode');
+    if (this.messageBoard) this.messageBoard.classList.add('is-radar-mode');
+  };
+
+  FlipBoard.prototype.ensureRadarScreen = function () {
+    if (!this.isRadarScreen() || !this.messageBoard) return;
+    this.showRadarBoard();
+    if (this.radarStarted || typeof window.TvRadarScreen !== 'function') return;
+    this.radarScreen = new window.TvRadarScreen({
+      apiUrl: this.radarApiUrl,
+      pollMs: this.aircraftPollMs
+    });
+    this.radarScreen.mount(this.messageBoard);
+    this.radarScreen.start();
+    this.radarStarted = true;
   };
 
   FlipBoard.prototype.showMessageBoard = function () {
@@ -1173,10 +1209,14 @@
       this.aircraftPollTimer = null;
     }
 
-    if (!hasAircraft && !this.isAircraftOpsScreen()) return;
+    if (!hasAircraft && !this.isAircraftOpsScreen() && !this.isRadarScreen()) return;
 
     this.aircraftPollTimer = window.setInterval(function () {
       if (self.rendering || self.audio.announcing) return;
+      if (self.isRadarScreen()) {
+        self.ensureRadarScreen();
+        return;
+      }
       if (self.isAircraftBoardMode()) {
         self.fetchAndRenderAircraftBoard(false);
         return;
@@ -1390,6 +1430,7 @@
         return res.json();
       })
       .then(function (payload) {
+        if (self.isRadarScreen()) return;
         var incoming = Array.isArray(payload.messages) ? payload.messages : [];
         if (!incoming.length && !self.isAircraftOpsScreen()) {
           incoming = DEFAULT_MESSAGES.slice();
@@ -1408,6 +1449,7 @@
         self.renderCurrent(false);
       })
       .catch(function () {
+        if (self.isRadarScreen()) return;
         if (self.isAircraftOpsScreen()) {
           if (!self.messageHash) {
             self.messages = [];
@@ -1424,6 +1466,11 @@
 
   FlipBoard.prototype.renderCurrent = function (force) {
     var self = this;
+    if (this.isRadarScreen()) {
+      this.ensureRadarScreen();
+      if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
+      return;
+    }
     if (this.rendering) {
       this.pendingRender = true;
       return;

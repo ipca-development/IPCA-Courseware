@@ -284,7 +284,8 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $gridW = 252.0;
     $gridH = 158.0;
     $bounds = scaledBounds($columns, $gridX, $gridW);
-    $headerH = 13.5;
+    $headerH = 15.2;
+    $headerRowH = $headerH / 3.0;
     $bodyTop = $gridY + $headerH;
     $rowHeight = ($gridH - $headerH) / 25;
     $footerStartRow = 22;
@@ -295,27 +296,27 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
     $cells = array(
-        gridCell($bounds, 0, 1, $gridY, $gridY + 4.5, 'main', '1', 'tiny'),
-        gridCell($bounds, 1, 3, $gridY, $gridY + 4.5, 'main', '2', 'tiny'),
-        gridCell($bounds, 3, 5, $gridY, $gridY + 4.5, 'main', '3', 'tiny'),
-        gridCell($bounds, 5, 7, $gridY, $gridY + 4.5, 'main', '4', 'tiny'),
-        gridCell($bounds, 7, 9, $gridY, $gridY + 4.5, 'main', '5', 'tiny'),
-        gridCell($bounds, 9, 10, $gridY, $gridY + 4.5, 'main', '6', 'tiny'),
-        gridCell($bounds, 10, 11, $gridY, $gridY + 4.5, 'main', '7', 'tiny'),
-        gridCell($bounds, 11, 13, $gridY, $gridY + 4.5, 'main', '8', 'tiny'),
-        gridCell($bounds, 0, 1, $gridY + 4.5, $bodyTop, 'main', 'Date', 'head'),
-        gridCell($bounds, 1, 3, $gridY + 4.5, $gridY + 9.0, 'main', 'Departure', 'head'),
-        gridCell($bounds, 3, 5, $gridY + 4.5, $gridY + 9.0, 'main', 'Arrival', 'head'),
-        gridCell($bounds, 5, 7, $gridY + 4.5, $gridY + 9.0, 'main', 'Aircraft', 'head'),
-        gridCell($bounds, 7, 9, $gridY + 4.5, $gridY + 9.0, 'main', 'Single Pilot', 'head'),
-        gridCell($bounds, 9, 10, $gridY + 4.5, $bodyTop, 'main', 'Total Time', 'head'),
-        gridCell($bounds, 10, 11, $gridY + 4.5, $bodyTop, 'main', 'Name PIC', 'head'),
-        gridCell($bounds, 11, 13, $gridY + 4.5, $gridY + 9.0, 'main', 'Landings', 'head'),
+        gridCell($bounds, 0, 1, $gridY, $gridY + $headerRowH, 'main', '1', 'tiny'),
+        gridCell($bounds, 1, 3, $gridY, $gridY + $headerRowH, 'main', '2', 'tiny'),
+        gridCell($bounds, 3, 5, $gridY, $gridY + $headerRowH, 'main', '3', 'tiny'),
+        gridCell($bounds, 5, 7, $gridY, $gridY + $headerRowH, 'main', '4', 'tiny'),
+        gridCell($bounds, 7, 9, $gridY, $gridY + $headerRowH, 'main', '5', 'tiny'),
+        gridCell($bounds, 9, 10, $gridY, $gridY + $headerRowH, 'main', '6', 'tiny'),
+        gridCell($bounds, 10, 11, $gridY, $gridY + $headerRowH, 'main', '7', 'tiny'),
+        gridCell($bounds, 11, 13, $gridY, $gridY + $headerRowH, 'main', '8', 'tiny'),
+        gridCell($bounds, 0, 1, $gridY + $headerRowH, $bodyTop, 'main', 'Date', 'head'),
+        gridCell($bounds, 1, 3, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Departure', 'head'),
+        gridCell($bounds, 3, 5, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Arrival', 'head'),
+        gridCell($bounds, 5, 7, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Aircraft', 'head'),
+        gridCell($bounds, 7, 9, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Single Pilot', 'head'),
+        gridCell($bounds, 9, 10, $gridY + $headerRowH, $bodyTop, 'main', 'Total Time', 'head'),
+        gridCell($bounds, 10, 11, $gridY + $headerRowH, $bodyTop, 'main', 'Name PIC', 'head'),
+        gridCell($bounds, 11, 13, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Landings', 'head'),
     );
     foreach (array(1 => 'Place', 2 => 'Time', 3 => 'Place', 4 => 'Time', 5 => 'Type', 6 => 'Registration', 7 => 'SE', 8 => 'ME', 11 => 'Day', 12 => 'Night') as $idx => $label) {
-        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + 9.0, $bodyTop, 'main', $label, 'head');
+        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + ($headerRowH * 2), $bodyTop, 'main', $label, 'head');
     }
-    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 3, 'endCol' => 13)));
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 13)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
@@ -349,7 +350,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     foreach ($totalRows as $idx => $row) {
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
-        $cells[] = gridCell($bounds, 3, 10, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 4, 10, $y1, $y2, 'main', $row[0], 'micro');
         $cells[] = gridCell($bounds, 10, 11, $y1, $y2, 'main', $row[1], 'micro');
         $cells[] = gridCell($bounds, 11, 12, $y1, $y2, 'main', $row[2], 'micro');
         $cells[] = gridCell($bounds, 12, 13, $y1, $y2, 'main', $row[3], 'micro');
@@ -366,7 +367,8 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $gridW = 252.0;
     $gridH = 158.0;
     $bounds = scaledBounds($columns, $gridX, $gridW);
-    $headerH = 13.5;
+    $headerH = 15.2;
+    $headerRowH = $headerH / 3.0;
     $bodyTop = $gridY + $headerH;
     $rowHeight = ($gridH - $headerH) / 25;
     $footerStartRow = 22;
@@ -375,19 +377,19 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
     $out .= svgText(258, 6.6, $logoText, 'logo-text', 'end');
     $cells = array(
-        gridCell($bounds, 0, 2, $gridY, $gridY + 4.5, 'main', '9', 'tiny'),
-        gridCell($bounds, 2, 6, $gridY, $gridY + 4.5, 'main', '10', 'tiny'),
-        gridCell($bounds, 6, 8, $gridY, $gridY + 4.5, 'main', '11', 'tiny'),
-        gridCell($bounds, 8, 9, $gridY, $gridY + 4.5, 'main', '12', 'tiny'),
-        gridCell($bounds, 0, 2, $gridY + 4.5, $gridY + 9.0, 'main', 'Operational Condition Time', 'head'),
-        gridCell($bounds, 2, 6, $gridY + 4.5, $gridY + 9.0, 'main', 'Pilot Function Time', 'head'),
-        gridCell($bounds, 6, 8, $gridY + 4.5, $gridY + 9.0, 'main', 'Other Flying', 'head'),
-        gridCell($bounds, 8, 9, $gridY + 4.5, $bodyTop, 'main', 'Remarks and Endorsements', 'head'),
+        gridCell($bounds, 0, 2, $gridY, $gridY + $headerRowH, 'main', '9', 'tiny'),
+        gridCell($bounds, 2, 6, $gridY, $gridY + $headerRowH, 'main', '10', 'tiny'),
+        gridCell($bounds, 6, 8, $gridY, $gridY + $headerRowH, 'main', '11', 'tiny'),
+        gridCell($bounds, 8, 9, $gridY, $gridY + $headerRowH, 'main', '12', 'tiny'),
+        gridCell($bounds, 0, 2, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Operational Condition Time', 'head'),
+        gridCell($bounds, 2, 6, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Pilot Function Time', 'head'),
+        gridCell($bounds, 6, 8, $gridY + $headerRowH, $gridY + ($headerRowH * 2), 'main', 'Other Flying', 'head'),
+        gridCell($bounds, 8, 9, $gridY + $headerRowH, $bodyTop, 'main', 'Remarks and Endorsements', 'head'),
     );
     foreach (array(0 => 'Night', 1 => 'IFR', 2 => 'PIC', 3 => 'Co-Pilot', 4 => 'Dual', 5 => 'Instructor', 6 => 'IF', 7 => 'NAV') as $idx => $label) {
-        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + 9.0, $bodyTop, 'main', $label, 'head');
+        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + ($headerRowH * 2), $bodyTop, 'main', $label, 'head');
     }
-    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 3, 'endCol' => 8)));
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 8)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
@@ -416,17 +418,16 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
         $totals = $row[1];
-        $cells[] = gridCell($bounds, 3, 4, $y1, $y2, 'main', '', 'micro');
         $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['pic'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', pval($totals['if'] ?? 0), 'micro');
         $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', pval($totals['nav'] ?? 0), 'micro');
     }
     $out .= renderCellBorders($cells);
-    $sigY = 181.0;
-    $out .= svgText(17, $sigY, 'I certify that the entries in this log are true', 'signature-text', 'start');
-    $out .= svgLine(85, $sigY, 178, $sigY, 'sub');
-    $out .= svgText(181, $sigY, '(Pilot\'s Signature).', 'signature-text', 'start');
+    $sigY = 178.6;
+    $out .= svgText(13, $sigY, 'I certify that the entries in this log are true', 'signature-text', 'start');
+    $out .= svgLine(80, $sigY, 173, $sigY, 'sub');
+    $out .= svgText(176, $sigY, '(Pilot\'s Signature).', 'signature-text', 'start');
     return $out . '</svg>';
 }
 ?>
@@ -453,12 +454,12 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
-.book-spread::before{content:"";position:absolute;left:50%;top:3mm;bottom:3mm;width:.9mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.2),rgba(255,255,255,.35),rgba(15,23,42,.18));z-index:6;border-radius:999px;box-shadow:0 0 4mm rgba(15,23,42,.18)}
+.book-spread::before{content:"";position:absolute;left:50%;top:3mm;bottom:3mm;width:.35mm;transform:translateX(-50%);background:rgba(15,23,42,.08);z-index:6;border-radius:999px;box-shadow:-2.5mm 0 7mm rgba(15,23,42,.08),2.5mm 0 7mm rgba(15,23,42,.07)}
 .book-page{width:var(--page-w);height:var(--page-h);margin:0;background:linear-gradient(110deg,#fffdf4 0%,#fbf7eb 48%,#fffdf6 100%);position:relative;flex:0 0 auto;overflow:hidden;border:0.2mm solid rgba(15,23,42,.14);--header-top:5mm;--grid-top:13mm;--grid-head-h:16mm;--grid-body-h:173mm;--row-h:6.92mm;--totals-top:154mm;--totals-h:16mm;--signature-top:176mm;--signature-h:6mm}
 .book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.26),rgba(15,23,42,0) 46%,rgba(15,23,42,.03));z-index:5}
-.book-page-left{border-radius:1.5mm 0 0 1.5mm;box-shadow:inset -10mm 0 18mm rgba(15,23,42,.08),inset 0 0 0 .25mm rgba(15,23,42,.08)}
-.book-page-right{border-radius:0 1.5mm 1.5mm 0;box-shadow:inset 10mm 0 18mm rgba(15,23,42,.07),inset 0 0 0 .25mm rgba(15,23,42,.08)}
-.book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:.7mm;background:rgba(15,23,42,.1);z-index:6}.book-page-left::before{right:0}.book-page-right::before{left:0}
+.book-page-left{border-radius:1.5mm 0 0 1.5mm;box-shadow:inset -7mm 0 16mm rgba(15,23,42,.055),inset 0 0 0 .25mm rgba(15,23,42,.08)}
+.book-page-right{border-radius:0 1.5mm 1.5mm 0;box-shadow:inset 7mm 0 16mm rgba(15,23,42,.05),inset 0 0 0 .25mm rgba(15,23,42,.08)}
+.book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:2.2mm;z-index:6;pointer-events:none}.book-page-left::before{right:0;background:linear-gradient(90deg,rgba(15,23,42,0),rgba(15,23,42,.045))}.book-page-right::before{left:0;background:linear-gradient(90deg,rgba(15,23,42,.04),rgba(15,23,42,0))}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
 .page-template{position:absolute;inset:0;width:100%;height:100%;z-index:4;shape-rendering:crispEdges}
 .page-template .row{stroke:#111;stroke-width:.13;vector-effect:non-scaling-stroke}
