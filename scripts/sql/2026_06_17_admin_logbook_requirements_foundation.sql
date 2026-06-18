@@ -224,6 +224,9 @@ VALUES
   ('FAA_PART_61', 'PPL', 'first_solo', 'First Solo', 'First solo flight verification.', NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT()),
   ('FAA_PART_61', 'PPL', 'long_solo_cross_country', 'Long Solo Cross Country', 'Long solo cross-country flight.', NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT()),
   ('FAA_PART_61', 'PPL', 'solo_cross_country_150_nm', 'Solo Cross Country 150 NM', 'Solo cross-country requirement with 150 NM total distance.', NULL, 150.0, 1, JSON_OBJECT('type', 'selected_entries_distance'), JSON_OBJECT()),
+  ('FAA_PART_61', 'PPL', 'dual_cross_country_time', 'Dual Cross Country Time', 'Dual received cross-country flight time.', 3.0, NULL, NULL, JSON_OBJECT('metric', 'dual_cross_country_time'), JSON_OBJECT()),
+  ('FAA_PART_61', 'PPL', 'solo_cross_country_time', 'Solo Cross Country Time', 'Solo cross-country flight time.', 5.0, NULL, NULL, JSON_OBJECT('metric', 'solo_cross_country_time'), JSON_OBJECT()),
+  ('FAA_PART_61', 'PPL', 'pic_cross_country_time', 'PIC Cross Country Time', 'PIC cross-country flight time.', NULL, NULL, NULL, JSON_OBJECT('metric', 'pic_cross_country_time'), JSON_OBJECT()),
   ('FAA_PART_61', 'PPL', 'towered_airport_landings', 'Towered Airport Full Stop Landings', 'Towered airport full-stop landings.', NULL, NULL, 3, JSON_OBJECT('metric', 'towered_airport_landings'), JSON_OBJECT()),
   ('FAA_PART_61', 'PPL', 'night_dual', 'Night Dual', 'Night dual instruction.', 3.0, NULL, NULL, JSON_OBJECT('metric', 'night_time'), JSON_OBJECT()),
   ('FAA_PART_61', 'PPL', 'basic_instrument_flying', 'Basic Instrument Flying', 'Basic instrument flying training time.', 3.0, NULL, NULL, JSON_OBJECT('metric', 'basic_instrument_flying_time'), JSON_OBJECT()),
@@ -233,6 +236,9 @@ VALUES
   ('FAA_PART_141', 'PPL', 'end_of_course_eligible', 'End Of Course Eligible', 'End of course readiness marker.', NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT()),
   ('EASA', 'PPL', 'dual_instruction', 'Dual Instruction', 'EASA PPL dual instruction.', NULL, NULL, NULL, JSON_OBJECT('metric', 'dual_received_time'), JSON_OBJECT()),
   ('EASA', 'PPL', 'solo_flight', 'Solo Flight', 'EASA PPL solo flight.', NULL, NULL, NULL, JSON_OBJECT('metric', 'solo_time'), JSON_OBJECT()),
+  ('EASA', 'PPL', 'dual_cross_country_time', 'Dual Cross Country Time', 'Dual cross-country/navigation instruction time.', NULL, NULL, NULL, JSON_OBJECT('metric', 'dual_cross_country_time'), JSON_OBJECT()),
+  ('EASA', 'PPL', 'solo_cross_country_time', 'Solo Cross Country Time', 'Solo cross-country flight time.', 5.0, NULL, NULL, JSON_OBJECT('metric', 'solo_cross_country_time'), JSON_OBJECT()),
+  ('EASA', 'PPL', 'pic_cross_country_time', 'PIC Cross Country Time', 'PIC cross-country flight time.', NULL, NULL, NULL, JSON_OBJECT('metric', 'pic_cross_country_time'), JSON_OBJECT()),
   ('EASA', 'PPL', 'navigation_flight', 'Navigation Flight', 'EASA PPL navigation flight.', NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT()),
   ('EASA', 'PPL', 'basic_instrument_flying', 'Basic Instrument Flying', 'EASA basic instrument flying.', NULL, NULL, NULL, JSON_OBJECT('metric', 'basic_instrument_flying_time'), JSON_OBJECT())
 ON DUPLICATE KEY UPDATE

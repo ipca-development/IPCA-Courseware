@@ -19,6 +19,9 @@ final class FlightTotalsService
         'single_engine_time',
         'multi_engine_time',
         'copilot_time',
+        'dual_cross_country_time',
+        'solo_cross_country_time',
+        'pic_cross_country_time',
     );
 
     private const COUNT_FIELDS = array(
@@ -55,6 +58,10 @@ final class FlightTotalsService
                 $totals[$field] += (int)($entry[$field] ?? 0);
             }
             $totals['cross_country_distance_nm'] += $this->decimal($entry['cross_country_distance_nm'] ?? 0);
+            $crossCountry = $this->decimal($entry['cross_country_time'] ?? 0);
+            $totals['dual_cross_country_time'] += min($this->decimal($entry['dual_received_time'] ?? 0), $crossCountry);
+            $totals['solo_cross_country_time'] += min($this->decimal($entry['solo_time'] ?? 0), $crossCountry);
+            $totals['pic_cross_country_time'] += min($this->decimal($entry['pic_time'] ?? 0), $crossCountry);
         }
 
         foreach (self::TIME_FIELDS as $field) {
