@@ -270,18 +270,18 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
 table{border-collapse:collapse;table-layout:fixed;width:240mm}
-.book-page>table{position:absolute;left:var(--table-x);top:16mm}
+.book-page>table{position:absolute;left:var(--table-x);top:15mm}
 .book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
 th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0 1mm;font-size:7px;line-height:1.05;font-weight:400;overflow:hidden}
-thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
-.log-body{height:173mm}.log-body td{height:6.92mm}
+thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.4mm}
+.log-body{height:160mm}.log-body td{height:6.4mm}
 .main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
-.totals-box{position:absolute;top:189mm;width:143mm;height:16mm;z-index:7;background:#fff}
+.totals-box{position:absolute;top:176mm;width:143mm;height:16mm;z-index:7;background:#fff}
 .totals-box table{width:143mm;height:16mm;background:#fff}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fff;font-weight:400}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
 .totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
 .totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
-.signature{position:absolute;left:14mm;right:10mm;bottom:2.5mm;font-size:10px;text-align:center;z-index:7}
+.signature{position:absolute;left:14mm;right:10mm;bottom:5mm;font-size:10px;text-align:center;z-index:7}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 .left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
 .right col.c1{width:24.75mm}.right col.c2{width:24.75mm}.right col.c3{width:21.125mm}.right col.c4{width:21.125mm}.right col.c5{width:21.125mm}.right col.c6{width:21.125mm}.right col.c7{width:13.25mm}.right col.c8{width:13.25mm}.right col.c9{width:79.5mm}
