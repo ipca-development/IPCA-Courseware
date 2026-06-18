@@ -695,7 +695,57 @@ final class AdminLogbookService
             ORDER BY entry_date IS NULL, entry_date, id
         ");
         $stmt->execute(array(':id' => $logbookId));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return array_map(fn (array $row): array => $this->hydrateEntryFromSource($row), $rows);
+    }
+
+    /**
+     * Existing imported rows may predate newer mapping rules. Hydrate missing
+     * display/calculation fields from source_json without writing to the DB.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function hydrateEntryFromSource(array $row): array
+    {
+        $source = $this->decodeJson((string)($row['source_json'] ?? '{}'));
+        if ($source === array()) {
+            $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
+            return $row;
+        }
+
+        $duration = $this->durationDecimal($this->firstSourceValue($source, array('lb_dur', 'duration', 'flight_duration')));
+        $landings = max(0, (int)round((float)$this->firstSourceValue($source, array('lb_ld', 'lb_landings', 'landings', 'ldg'))));
+        $isNight = $this->nightCondition($this->firstSourceValue($source, array('lb_cond', 'lb_condition', 'condition', 'day_night')));
+
+        if (trim((string)($row['instructor_name'] ?? '')) === '') {
+            $instructor = $this->firstSourceValue($source, array('instructor_name', 'instructor_full_name', 'instr_name', 'user_name', 'username'));
+            if (trim((string)$instructor) === '') {
+                $first = $this->firstSourceValue($source, array('instructor_firstname', 'instructor_first_name', 'firstname', 'first_name', 'fname'));
+                $last = $this->firstSourceValue($source, array('instructor_lastname', 'instructor_last_name', 'lastname', 'last_name', 'lname'));
+                $instructor = trim((string)$first . ' ' . (string)$last);
+            }
+            if (trim((string)$instructor) !== '') {
+                $row['instructor_name'] = $instructor;
+            }
+        }
+
+        if ($duration > 0 && (float)($row['total_flight_time'] ?? 0) <= 0) {
+            $row['total_flight_time'] = $duration;
+        }
+        if ($isNight && $duration > 0 && (float)($row['night_time'] ?? 0) <= 0) {
+            $row['night_time'] = $duration;
+        }
+        if ($landings > 0 && (int)($row['day_landings'] ?? 0) <= 0 && (int)($row['night_landings'] ?? 0) <= 0) {
+            if ($isNight) {
+                $row['night_landings'] = $landings;
+            } else {
+                $row['day_landings'] = $landings;
+            }
+        }
+
+        $row['day_time'] = max(0, round((float)($row['total_flight_time'] ?? 0) - (float)($row['night_time'] ?? 0), 2));
+        return $row;
     }
 
     /**
@@ -1123,6 +1173,26 @@ final class AdminLogbookService
             return 0.0;
         }
         return round((float)$value, 2);
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @param list<string> $keys
+     */
+    private function firstSourceValue(array $source, array $keys): mixed
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $source) && trim((string)$source[$key]) !== '') {
+                return $source[$key];
+            }
+        }
+        foreach ($keys as $key) {
+            $alias = $key . '_alias';
+            if (array_key_exists($alias, $source) && trim((string)$source[$alias]) !== '') {
+                return $source[$alias];
+            }
+        }
+        return '';
     }
 
     private function truthy(mixed $value): bool

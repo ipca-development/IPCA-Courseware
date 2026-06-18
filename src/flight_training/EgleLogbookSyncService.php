@@ -425,10 +425,10 @@ final class EgleLogbookSyncService
      */
     private function instructorSelects(array $columns): array
     {
-        $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name'), 'instructor_name');
+        $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name', 'displayname', 'user_name', 'username'), 'instructor_name');
         if ($nameSelect === '') {
-            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first'));
-            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last'));
+            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first', 'first'));
+            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last', 'last'));
             if ($firstCol !== '' || $lastCol !== '') {
                 $nameSelect = "TRIM(CONCAT(COALESCE(" . ($firstCol !== '' ? 'i.' . $this->q($firstCol) : "''") . ", ''), ' ', COALESCE(" . ($lastCol !== '' ? 'i.' . $this->q($lastCol) : "''") . ", ''))) AS instructor_name";
             }

@@ -252,7 +252,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     ['select',''],['actions','Actions'],['entry_date','Date'],['departure_airport','Departure'],['arrival_airport','Arrival'],
     ['aircraft_registration','Aircraft Reg'],['aircraft_type','Aircraft Type'],['single_engine_time','SE'],['multi_engine_time','ME'],
     ['pic_time','PIC'],['copilot_time','Co-Pilot'],['dual_received_time','Dual'],['solo_time','Solo'],['cross_country_time','XC'],
-    ['cross_country_distance_nm','XC NM'],['night_time','Night'],['instrument_time','Instrument'],['basic_instrument_flying_time','Basic Instr'],
+    ['cross_country_distance_nm','XC NM'],['day_time','Day'],['night_time','Night'],['instrument_time','Instrument'],['basic_instrument_flying_time','Basic Instr'],
     ['fnpt_simulator_time','FNPT / Sim'],['day_landings','Day Ldg'],['night_landings','Night Ldg'],['instructor_name','Instructor'],
     ['total_flight_time','Total'],['remarks','Remarks'],['review_status','Status']
   ];
