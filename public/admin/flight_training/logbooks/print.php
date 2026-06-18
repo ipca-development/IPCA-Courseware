@@ -34,7 +34,7 @@ $entries = array_values(array_filter(
     $workspace['entries'] ?? array(),
     static fn (mixed $entry): bool => is_array($entry) && strtolower((string)($entry['review_status'] ?? '')) !== 'deleted'
 ));
-$rowsPerSpread = 25;
+$rowsPerSpread = 22;
 $chunks = array_chunk($entries, $rowsPerSpread);
 if ($chunks === array()) {
     $chunks = array(array());
@@ -139,6 +139,25 @@ function logbookRemarks(array $entry): string
     return cleanText(trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))), 72);
 }
 
+function isSimulatorEntry(array $entry): bool
+{
+    if ((float)($entry['fnpt_simulator_time'] ?? 0) > 0) {
+        return true;
+    }
+    $type = strtolower((string)($entry['aircraft_type'] ?? '') . ' ' . (string)($entry['aircraft_registration'] ?? ''));
+    return str_contains($type, 'sim') || str_contains($type, 'fnpt') || str_contains($type, 'fstd');
+}
+
+function singlePilotSeMarker(array $entry): string
+{
+    return !isSimulatorEntry($entry) && (float)($entry['single_engine_time'] ?? 0) > 0 ? 'X' : '';
+}
+
+function singlePilotMeMarker(array $entry): string
+{
+    return !isSimulatorEntry($entry) && (float)($entry['multi_engine_time'] ?? 0) > 0 ? 'X' : '';
+}
+
 function leftEntryFields(array $entry): array
 {
     return array(
@@ -149,8 +168,8 @@ function leftEntryFields(array $entry): array
         array('column' => 4, 'field' => 'arrival_time', 'value' => ptime($entry['arrival_time'] ?? '')),
         array('column' => 5, 'field' => 'aircraft_type', 'value' => cleanText($entry['aircraft_type'] ?? '', 18)),
         array('column' => 6, 'field' => 'aircraft_registration', 'value' => cleanText($entry['aircraft_registration'] ?? '', 18)),
-        array('column' => 7, 'field' => 'single_engine_time', 'value' => pval($entry['single_engine_time'] ?? 0)),
-        array('column' => 8, 'field' => 'multi_engine_time', 'value' => pval($entry['multi_engine_time'] ?? 0)),
+        array('column' => 7, 'field' => 'single_pilot_se_marker', 'value' => singlePilotSeMarker($entry)),
+        array('column' => 8, 'field' => 'single_pilot_me_marker', 'value' => singlePilotMeMarker($entry)),
         array('column' => 9, 'field' => 'total_flight_time', 'value' => pval($entry['total_flight_time'] ?? 0)),
         array('column' => 10, 'field' => 'name_pic', 'value' => cleanText(picDisplayName($entry), 26)),
         array('column' => 11, 'field' => 'day_landings', 'value' => (string)((int)($entry['day_landings'] ?? 0) ?: '')),
@@ -389,7 +408,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
         $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + ($headerRowH * 2), $bodyTop, 'main', $label, 'head');
     }
     $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 13)));
-    foreach (array_slice($entries, 0, 25) as $idx => $entry) {
+    foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         foreach (leftEntryFields($entry) as $field) {
             $out .= svgMappedText($centers[$field['column']], $y, (string)$field['value'], 'left.' . $field['field'], $debugMode, $idx + 1, 'body');
@@ -445,7 +464,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + ($headerRowH * 2), $bodyTop, 'main', $label, 'head');
     }
     $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 8)));
-    foreach (array_slice($entries, 0, 25) as $idx => $entry) {
+    foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         foreach (rightEntryFields($entry) as $field) {
             $colIdx = (int)$field['column'];
