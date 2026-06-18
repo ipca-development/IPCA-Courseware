@@ -195,68 +195,85 @@ function scaledBounds(array $columns, float $x, float $width): array
     return $bounds;
 }
 
-function footerGrid(array $bounds, array $columns, float $yTop, float $height, array $rows): string
+function renderCellBorders(array $cells): string
 {
-    $rowH = $height / count($rows);
+    $lines = array();
     $out = '';
-    foreach ($columns as $column) {
-        $x = $bounds[$column];
-        $out .= svgLine($x, $yTop, $x, $yTop + $height, 'main');
-    }
-    for ($i = 0; $i <= count($rows); $i++) {
-        $y = $yTop + ($i * $rowH);
-        $out .= svgLine($bounds[$columns[0]], $y, $bounds[$columns[array_key_last($columns)]], $y, 'main');
-    }
-    foreach ($rows as $rowIdx => $row) {
-        $y = $yTop + ($rowIdx * $rowH) + ($rowH / 2);
-        foreach ($row as $cell) {
-            [$start, $end, $text] = $cell;
-            $out .= svgText(($bounds[$start] + $bounds[$end]) / 2, $y, (string)$text, 'micro');
+    foreach ($cells as $cell) {
+        $x1 = (float)$cell['x1'];
+        $x2 = (float)$cell['x2'];
+        $y1 = (float)$cell['y1'];
+        $y2 = (float)$cell['y2'];
+        $class = (string)($cell['class'] ?? 'sub');
+        $borders = $cell['borders'] ?? array('top', 'right', 'bottom', 'left');
+        foreach ($borders as $border) {
+            $line = match ($border) {
+                'top' => array($x1, $y1, $x2, $y1),
+                'right' => array($x2, $y1, $x2, $y2),
+                'bottom' => array($x1, $y2, $x2, $y2),
+                'left' => array($x1, $y1, $x1, $y2),
+                default => null,
+            };
+            if ($line === null) {
+                continue;
+            }
+            $key = implode(':', array_map(static fn (float $value): string => number_format($value, 3, '.', ''), $line)) . ':' . $class;
+            $lines[$key] = array($line, $class);
         }
+        $text = (string)($cell['text'] ?? '');
+        if ($text !== '') {
+            $anchor = (string)($cell['anchor'] ?? 'middle');
+            $textX = isset($cell['textX']) ? (float)$cell['textX'] : ($x1 + $x2) / 2;
+            $textY = isset($cell['textY']) ? (float)$cell['textY'] : ($y1 + $y2) / 2;
+            $out .= svgText($textX, $textY, $text, (string)($cell['textClass'] ?? 'body'), $anchor);
+        }
+    }
+    foreach ($lines as [$line, $class]) {
+        $out .= svgLine($line[0], $line[1], $line[2], $line[3], $class);
     }
     return $out;
 }
 
-function masterGrid(array $columns, float $gridX, float $gridY, float $gridW, float $gridH, array $mainAfter, ?int $footerStartCol = null, ?int $footerEndCol = null, float $footerH = 16.0): array
+function gridCell(array $bounds, int $colStart, int $colEnd, float $y1, float $y2, string $class = 'sub', string $text = '', string $textClass = 'body', ?float $textX = null, string $anchor = 'middle', ?array $borders = null): array
 {
-    $bounds = scaledBounds($columns, $gridX, $gridW);
-    $headerH = 13.5;
-    $bodyH = $gridH - $headerH;
-    $rowH = $bodyH / 25;
-    $footerTop = $footerStartCol === null || $footerEndCol === null ? $gridY + $gridH : $gridY + $gridH - $footerH;
-    $leftEdgeEnd = $footerStartCol === 0 ? $footerTop : $gridY + $gridH;
-    $rightEdgeEnd = $footerEndCol === count($columns) ? $footerTop : $gridY + $gridH;
-    $out = svgLine($gridX, $gridY, $gridX + $gridW, $gridY, 'outer')
-        . svgLine($gridX + $gridW, $gridY, $gridX + $gridW, $rightEdgeEnd, 'outer')
-        . svgLine($gridX, $gridY, $gridX, $leftEdgeEnd, 'outer');
-    if ($footerStartCol !== null && $footerEndCol !== null) {
-        $out .= svgLine($gridX, $gridY + $gridH, $bounds[$footerStartCol], $gridY + $gridH, 'outer')
-            . svgLine($bounds[$footerEndCol], $gridY + $gridH, $gridX + $gridW, $gridY + $gridH, 'outer');
-    } else {
-        $out .= svgLine($gridX, $gridY + $gridH, $gridX + $gridW, $gridY + $gridH, 'outer');
-    }
-    foreach ($bounds as $idx => $x) {
-        if ($idx === 0 || $idx === count($bounds) - 1) {
-            continue;
+    return array(
+        'x1' => $bounds[$colStart],
+        'x2' => $bounds[$colEnd],
+        'y1' => $y1,
+        'y2' => $y2,
+        'class' => $class,
+        'text' => $text,
+        'textClass' => $textClass,
+        'textX' => $textX,
+        'anchor' => $anchor,
+        'borders' => $borders ?? array('top', 'right', 'bottom', 'left'),
+    );
+}
+
+function bodyCells(array $bounds, float $bodyTop, float $rowH, int $rows, int $columns, ?array $footer = null): array
+{
+    $cells = array();
+    $footerStartRow = $footer['startRow'] ?? $rows;
+    $footerStartCol = $footer['startCol'] ?? $columns;
+    $footerEndCol = $footer['endCol'] ?? $footerStartCol;
+    for ($row = 0; $row < $rows; $row++) {
+        $y1 = $bodyTop + ($row * $rowH);
+        $y2 = $bodyTop + (($row + 1) * $rowH);
+        for ($col = 0; $col < $columns; $col++) {
+            if ($row >= $footerStartRow && $col >= $footerStartCol && $col < $footerEndCol) {
+                continue;
+            }
+            $borders = array('right', 'bottom', 'left');
+            if ($row === $footerStartRow - 1 && $col >= $footerStartCol && $col < $footerEndCol) {
+                $borders = array_values(array_diff($borders, array('bottom')));
+            }
+            if ($row !== 0) {
+                $borders[] = 'top';
+            }
+            $cells[] = gridCell($bounds, $col, $col + 1, $y1, $y2, 'row', '', 'body', null, 'middle', $borders);
         }
-        $lineEnd = $footerStartCol !== null && $footerEndCol !== null && $idx >= $footerStartCol && $idx <= $footerEndCol
-            ? $footerTop
-            : $gridY + $gridH;
-        $out .= svgLine($x, $gridY, $x, $lineEnd, in_array($idx, $mainAfter, true) ? 'main' : 'sub');
     }
-    foreach (array($gridY + 4.5, $gridY + 9.0, $gridY + $headerH) as $y) {
-        $out .= svgLine($gridX, $y, $gridX + $gridW, $y, 'main');
-    }
-    for ($i = 1; $i < 25; $i++) {
-        $y = $gridY + $headerH + ($i * $rowH);
-        if ($footerStartCol !== null && $footerEndCol !== null && $y >= $footerTop) {
-            $out .= svgLine($gridX, $y, $bounds[$footerStartCol], $y, 'row')
-                . svgLine($bounds[$footerEndCol], $y, $gridX + $gridW, $y, 'row');
-            continue;
-        }
-        $out .= svgLine($gridX, $y, $gridX + $gridW, $y, 'row');
-    }
-    return array($out, $bounds, $headerH, $rowH, $footerTop);
+    return $cells;
 }
 
 function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText): string
@@ -266,25 +283,39 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $gridY = 13.0;
     $gridW = 252.0;
     $gridH = 158.0;
-    [$grid, $bounds, $headerH, $rowHeight, $totalsY] = masterGrid($columns, $gridX, $gridY, $gridW, $gridH, array(1, 3, 5, 7, 9, 10, 11), 5, 13);
+    $bounds = scaledBounds($columns, $gridX, $gridW);
+    $headerH = 13.5;
+    $bodyTop = $gridY + $headerH;
+    $rowHeight = ($gridH - $headerH) / 25;
+    $footerStartRow = 22;
+    $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template left-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
     $out .= svgText(14, 6.6, $logoText, 'logo-text', 'start');
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
-    $out .= $grid;
-    $out .= svgText(($bounds[0] + $bounds[1]) / 2, $gridY + 2.5, '1', 'tiny') . svgText(($bounds[1] + $bounds[3]) / 2, $gridY + 2.5, '2', 'tiny') . svgText(($bounds[3] + $bounds[5]) / 2, $gridY + 2.5, '3', 'tiny') . svgText(($bounds[5] + $bounds[7]) / 2, $gridY + 2.5, '4', 'tiny') . svgText(($bounds[7] + $bounds[9]) / 2, $gridY + 2.5, '5', 'tiny') . svgText(($bounds[9] + $bounds[10]) / 2, $gridY + 2.5, '6', 'tiny') . svgText(($bounds[10] + $bounds[11]) / 2, $gridY + 2.5, '7', 'tiny') . svgText(($bounds[11] + $bounds[13]) / 2, $gridY + 2.5, '8', 'tiny');
-    $out .= svgMultiline($centers[0], $gridY + 6.2, array('Date', '(dd/mm/yy)'), 'head');
-    $out .= svgText(($bounds[1] + $bounds[3]) / 2, $gridY + 6.2, 'Departure', 'head');
-    $out .= svgText(($bounds[3] + $bounds[5]) / 2, $gridY + 6.2, 'Arrival', 'head');
-    $out .= svgText(($bounds[5] + $bounds[7]) / 2, $gridY + 6.2, 'Aircraft', 'head');
-    $out .= svgText(($bounds[7] + $bounds[9]) / 2, $gridY + 6.2, 'Single Pilot', 'head');
-    $out .= svgMultiline($centers[9], $gridY + 5.8, array('Total Time', 'of Flight'), 'head');
-    $out .= svgMultiline($centers[10], $gridY + 5.8, array('Name Pilot', 'in Command'), 'head');
-    $out .= svgText(($bounds[11] + $bounds[13]) / 2, $gridY + 6.2, 'Landings', 'head');
+    $cells = array(
+        gridCell($bounds, 0, 1, $gridY, $gridY + 4.5, 'main', '1', 'tiny'),
+        gridCell($bounds, 1, 3, $gridY, $gridY + 4.5, 'main', '2', 'tiny'),
+        gridCell($bounds, 3, 5, $gridY, $gridY + 4.5, 'main', '3', 'tiny'),
+        gridCell($bounds, 5, 7, $gridY, $gridY + 4.5, 'main', '4', 'tiny'),
+        gridCell($bounds, 7, 9, $gridY, $gridY + 4.5, 'main', '5', 'tiny'),
+        gridCell($bounds, 9, 10, $gridY, $gridY + 4.5, 'main', '6', 'tiny'),
+        gridCell($bounds, 10, 11, $gridY, $gridY + 4.5, 'main', '7', 'tiny'),
+        gridCell($bounds, 11, 13, $gridY, $gridY + 4.5, 'main', '8', 'tiny'),
+        gridCell($bounds, 0, 1, $gridY + 4.5, $bodyTop, 'main', 'Date', 'head'),
+        gridCell($bounds, 1, 3, $gridY + 4.5, $gridY + 9.0, 'main', 'Departure', 'head'),
+        gridCell($bounds, 3, 5, $gridY + 4.5, $gridY + 9.0, 'main', 'Arrival', 'head'),
+        gridCell($bounds, 5, 7, $gridY + 4.5, $gridY + 9.0, 'main', 'Aircraft', 'head'),
+        gridCell($bounds, 7, 9, $gridY + 4.5, $gridY + 9.0, 'main', 'Single Pilot', 'head'),
+        gridCell($bounds, 9, 10, $gridY + 4.5, $bodyTop, 'main', 'Total Time', 'head'),
+        gridCell($bounds, 10, 11, $gridY + 4.5, $bodyTop, 'main', 'Name PIC', 'head'),
+        gridCell($bounds, 11, 13, $gridY + 4.5, $gridY + 9.0, 'main', 'Landings', 'head'),
+    );
     foreach (array(1 => 'Place', 2 => 'Time', 3 => 'Place', 4 => 'Time', 5 => 'Type', 6 => 'Registration', 7 => 'SE', 8 => 'ME', 11 => 'Day', 12 => 'Night') as $idx => $label) {
-        $out .= svgText($centers[$idx], $gridY + 11.2, $label, 'head');
+        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + 9.0, $bodyTop, 'main', $label, 'head');
     }
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 5, 'endCol' => 13)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
@@ -314,10 +345,16 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
         array('Total from previous pages', pval($previousTotals['total'] ?? 0), pval($previousTotals['day_landings'] ?? 0, 0), pval($previousTotals['night_landings'] ?? 0, 0)),
         array('Total Time', pval($runningTotals['total'] ?? 0), pval($runningTotals['day_landings'] ?? 0, 0), pval($runningTotals['night_landings'] ?? 0, 0)),
     );
-    $out .= footerGrid($bounds, array(5, 10, 11, 12, 13), $totalsY, 16.0, array_map(
-        static fn (array $row): array => array(array(5, 10, $row[0]), array(10, 11, $row[1]), array(11, 12, $row[2]), array(12, 13, $row[3])),
-        $totalRows
-    ));
+    $footerRowH = ($gridY + $gridH - $totalsY) / 3.0;
+    foreach ($totalRows as $idx => $row) {
+        $y1 = $totalsY + ($idx * $footerRowH);
+        $y2 = $totalsY + (($idx + 1) * $footerRowH);
+        $cells[] = gridCell($bounds, 5, 10, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 10, 11, $y1, $y2, 'main', $row[1], 'micro');
+        $cells[] = gridCell($bounds, 11, 12, $y1, $y2, 'main', $row[2], 'micro');
+        $cells[] = gridCell($bounds, 12, 13, $y1, $y2, 'main', $row[3], 'micro');
+    }
+    $out .= renderCellBorders($cells);
     return $out . '</svg>';
 }
 
@@ -328,19 +365,29 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $gridY = 13.0;
     $gridW = 252.0;
     $gridH = 158.0;
-    [$grid, $bounds, $headerH, $rowHeight, $totalsY] = masterGrid($columns, $gridX, $gridY, $gridW, $gridH, array(2, 6, 8), 3, 8);
+    $bounds = scaledBounds($columns, $gridX, $gridW);
+    $headerH = 13.5;
+    $bodyTop = $gridY + $headerH;
+    $rowHeight = ($gridH - $headerH) / 25;
+    $footerStartRow = 22;
+    $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
     $out .= svgText(258, 6.6, $logoText, 'logo-text', 'end');
-    $out .= $grid;
-    $out .= svgText(($bounds[0] + $bounds[2]) / 2, $gridY + 2.5, '9', 'tiny') . svgText(($bounds[2] + $bounds[6]) / 2, $gridY + 2.5, '10', 'tiny') . svgText(($bounds[6] + $bounds[8]) / 2, $gridY + 2.5, '11', 'tiny') . svgText(($bounds[8] + $bounds[9]) / 2, $gridY + 2.5, '12', 'tiny');
-    $out .= svgText(($bounds[0] + $bounds[2]) / 2, $gridY + 6.2, 'Operational Condition Time', 'head');
-    $out .= svgText(($bounds[2] + $bounds[6]) / 2, $gridY + 6.2, 'Pilot Function Time', 'head');
-    $out .= svgText(($bounds[6] + $bounds[8]) / 2, $gridY + 6.2, 'Other Flying', 'head');
-    $out .= svgText(($bounds[8] + $bounds[9]) / 2, $gridY + 6.2, 'Remarks and Endorsements', 'head');
+    $cells = array(
+        gridCell($bounds, 0, 2, $gridY, $gridY + 4.5, 'main', '9', 'tiny'),
+        gridCell($bounds, 2, 6, $gridY, $gridY + 4.5, 'main', '10', 'tiny'),
+        gridCell($bounds, 6, 8, $gridY, $gridY + 4.5, 'main', '11', 'tiny'),
+        gridCell($bounds, 8, 9, $gridY, $gridY + 4.5, 'main', '12', 'tiny'),
+        gridCell($bounds, 0, 2, $gridY + 4.5, $gridY + 9.0, 'main', 'Operational Condition Time', 'head'),
+        gridCell($bounds, 2, 6, $gridY + 4.5, $gridY + 9.0, 'main', 'Pilot Function Time', 'head'),
+        gridCell($bounds, 6, 8, $gridY + 4.5, $gridY + 9.0, 'main', 'Other Flying', 'head'),
+        gridCell($bounds, 8, 9, $gridY + 4.5, $bodyTop, 'main', 'Remarks and Endorsements', 'head'),
+    );
     foreach (array(0 => 'Night', 1 => 'IFR', 2 => 'PIC', 3 => 'Co-Pilot', 4 => 'Dual', 5 => 'Instructor', 6 => 'IF', 7 => 'NAV') as $idx => $label) {
-        $out .= svgText($centers[$idx], $gridY + 11.2, $label, 'head');
+        $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + 9.0, $bodyTop, 'main', $label, 'head');
     }
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 3, 'endCol' => 8)));
     foreach (array_slice($entries, 0, 25) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         $values = array(
@@ -364,16 +411,18 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         array('Total from previous pages', $previousTotals),
         array('Total Time', $runningTotals),
     );
-    $out .= footerGrid($bounds, array(3, 4, 5, 6, 7, 8), $totalsY, 16.0, array_map(
-        static fn (array $row): array => array(
-            array(3, 4, $row[0]),
-            array(4, 5, pval($row[1]['pic'] ?? 0)),
-            array(5, 6, pval($row[1]['dual'] ?? 0)),
-            array(6, 7, pval($row[1]['if'] ?? 0)),
-            array(7, 8, pval($row[1]['nav'] ?? 0)),
-        ),
-        $rows
-    ));
+    $footerRowH = ($gridY + $gridH - $totalsY) / 3.0;
+    foreach ($rows as $idx => $row) {
+        $y1 = $totalsY + ($idx * $footerRowH);
+        $y2 = $totalsY + (($idx + 1) * $footerRowH);
+        $totals = $row[1];
+        $cells[] = gridCell($bounds, 3, 4, $y1, $y2, 'main', $row[0], 'micro');
+        $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['pic'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', pval($totals['if'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', pval($totals['nav'] ?? 0), 'micro');
+    }
+    $out .= renderCellBorders($cells);
     $sigY = 181.0;
     $out .= svgText(17, $sigY, 'I certify that the entries in this log are true', 'signature-text', 'start');
     $out .= svgLine(85, $sigY, 178, $sigY, 'sub');
