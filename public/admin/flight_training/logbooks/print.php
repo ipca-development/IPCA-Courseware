@@ -249,33 +249,41 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .screen-tools select{background:#fff;color:#102845}
 .screen-tools .muted{color:#bfdbfe;font-size:12px}
 .print-error{max-width:980px;margin:16px auto;padding:14px 16px;border:1px solid #fecdd3;border-radius:12px;background:#fff1f2;color:#991b1b;font-weight:700}
-.print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:18px}
-.paper-sheet{position:relative;background:#fff;box-shadow:0 20px 70px rgba(15,23,42,.22);overflow:hidden}
-.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
-.book-spread{position:absolute;left:50%;top:50%;display:none;width:480mm;height:210mm;transform:translate(-50%,-50%) scale(var(--spread-scale,.58));transform-origin:center;filter:drop-shadow(0 8px 18px rgba(15,23,42,.14))}
-.book-spread.is-active{display:flex}.book-spread.is-turning{animation:pageTurn .26s ease}
-.book-spread::before{content:"";position:absolute;left:50%;top:2mm;bottom:2mm;width:1.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.2),rgba(255,255,255,.65),rgba(15,23,42,.2));z-index:4;border-radius:999px}
-.book-page{width:240mm;height:210mm;margin:0;padding:8mm 0 0;background:#fff;position:relative;flex:0 0 auto}
-.book-page-left{box-shadow:inset -10mm 0 20mm rgba(15,23,42,.07)}.book-page-right{box-shadow:inset 10mm 0 20mm rgba(15,23,42,.07)}
-.page-head{width:240mm;height:13mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
+.print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:22px;background:radial-gradient(circle at center,#f8fafc 0,#e5e7eb 70%)}
+.paper-sheet{position:relative;background:#f7f8fb;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),0 20px 70px rgba(15,23,42,.22);overflow:hidden;cursor:grab}
+.paper-sheet.is-dragging{cursor:grabbing}
+.paper-sheet[data-paper="a4"]{width:297mm;height:210mm;--page-w:297mm;--page-h:210mm;--left-table-x:14mm;--right-table-x:43mm}
+.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm;--page-w:279.4mm;--page-h:215.9mm;--left-table-x:12mm;--right-table-x:27.4mm}
+.book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px}
+.book-spread.is-active{display:flex}.book-spread.turn-next{animation:pageTurnNext .42s ease}.book-spread.turn-prev{animation:pageTurnPrev .42s ease}
+.book-spread::before{content:"";position:absolute;left:50%;top:4mm;bottom:4mm;width:2.2mm;transform:translateX(-50%);background:linear-gradient(90deg,rgba(15,23,42,.28),rgba(255,255,255,.75),rgba(15,23,42,.26));z-index:6;border-radius:999px;box-shadow:0 0 7mm rgba(15,23,42,.2)}
+.book-page{width:var(--page-w);height:var(--page-h);margin:0;background:#fffdf7;position:relative;flex:0 0 auto;overflow:hidden;border:0.25mm solid rgba(15,23,42,.16)}
+.book-page::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),rgba(15,23,42,0) 45%,rgba(15,23,42,.035));z-index:5}
+.book-page-left{border-radius:2mm 0 0 2mm;box-shadow:inset -18mm 0 30mm rgba(15,23,42,.1),inset 0 0 0 .35mm rgba(15,23,42,.08)}
+.book-page-right{border-radius:0 2mm 2mm 0;box-shadow:inset 18mm 0 30mm rgba(15,23,42,.09),inset 0 0 0 .35mm rgba(15,23,42,.08)}
+.book-page-left::before,.book-page-right::before{content:"";position:absolute;top:0;bottom:0;width:1.1mm;background:rgba(15,23,42,.12);z-index:6}.book-page-left::before{left:0}.book-page-right::before{right:0}
+.page-head{position:absolute;left:var(--table-x);top:7mm;width:240mm;height:11mm;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;letter-spacing:.08em}
 .logo{font-size:16px;letter-spacing:.35em;font-weight:500}.right-logo{text-align:right}
 .meta{display:flex;gap:36mm;font-size:9px;letter-spacing:0}
 table{border-collapse:collapse;table-layout:fixed;width:240mm}
+.book-page>table{position:absolute;left:var(--table-x);top:20mm}
+.book-page-left{--table-x:var(--left-table-x)}.book-page-right{--table-x:var(--right-table-x)}
 th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0 1mm;font-size:7px;line-height:1.05;font-weight:400;overflow:hidden}
 thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
 .log-body{height:173mm}.log-body td{height:6.92mm}
 .main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
-.totals-box{position:absolute;top:194mm;width:143mm;height:16mm;z-index:3;background:#fff}
+.totals-box{position:absolute;top:194mm;width:143mm;height:16mm;z-index:7;background:#fff}
 .totals-box table{width:143mm;height:16mm;background:#fff}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fff;font-weight:400}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
-.totals-box-left{left:94.5mm}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
-.totals-box-right{left:97mm}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
-.signature{position:absolute;left:14mm;right:10mm;bottom:8mm;font-size:10px;text-align:center}
+.totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
+.totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
+.signature{position:absolute;left:14mm;right:10mm;bottom:8mm;font-size:10px;text-align:center;z-index:7}
 .signature .line{display:inline-block;width:82mm;border-bottom:0.25mm dotted #111}
 .left col.c1{width:18mm}.left col.c2{width:12.25mm}.left col.c3{width:12.25mm}.left col.c4{width:12.25mm}.left col.c5{width:12.25mm}.left col.c6{width:27.5mm}.left col.c7{width:27.5mm}.left col.c8{width:12.75mm}.left col.c9{width:12.75mm}.left col.c10{width:16.5mm}.left col.c11{width:49mm}.left col.c12{width:13.5mm}.left col.c13{width:13.5mm}
 .right col.c1{width:24.75mm}.right col.c2{width:24.75mm}.right col.c3{width:21.125mm}.right col.c4{width:21.125mm}.right col.c5{width:21.125mm}.right col.c6{width:21.125mm}.right col.c7{width:13.25mm}.right col.c8{width:13.25mm}.right col.c9{width:79.5mm}
-@keyframes pageTurn{0%{opacity:.7;transform:translate(-50%,-50%) scale(var(--spread-scale,.58)) rotateY(-3deg)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.58)) rotateY(0)}}
-@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0}.paper-sheet{box-shadow:none;overflow:hidden;break-after:page}.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}.book-spread{display:flex;break-after:page}.book-spread:not(.is-active){display:flex}.book-spread::before{display:block}}
+@keyframes pageTurnNext{0%{opacity:.72;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(-9deg) translateX(18mm)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(0) translateX(0)}}
+@keyframes pageTurnPrev{0%{opacity:.72;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(9deg) translateX(-18mm)}100%{opacity:1;transform:translate(-50%,-50%) scale(var(--spread-scale,.5)) rotateY(0) translateX(0)}}
+@media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:var(--page-w);height:auto;transform:none!important;filter:none;perspective:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page}}
 </style>
 </head>
 <body>
@@ -284,6 +292,11 @@ thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.92mm}
   <button onclick="window.print()">Print</button>
   <button type="button" id="prevSpread">Previous</button>
   <button type="button" id="nextSpread">Next</button>
+  <button type="button" id="zoomOut">Zoom -</button>
+  <button type="button" id="zoomIn">Zoom +</button>
+  <button type="button" id="fitWidth">Fit Width</button>
+  <button type="button" id="fitSpread">Fit Full Spread</button>
+  <button type="button" id="resetZoom">100%</button>
   <select id="paperSelect" aria-label="Paper size">
     <option value="a4">A4 landscape</option>
     <option value="letter">US Letter landscape</option>
@@ -348,29 +361,84 @@ try {
   const now = document.getElementById('spreadNow');
   const select = document.getElementById('paperSelect');
   let current = 0;
-  function fitSpread(){
+  let zoomMode = 'fit-spread';
+  let zoom = 1;
+  let pan = {x:0, y:0};
+  let drag = null;
+  function spreadSizeMm(){
+    return sheet.dataset.paper === 'letter' ? {w:558.8, h:215.9} : {w:594, h:210};
+  }
+  function baseScale(mode){
     const rect = sheet.getBoundingClientRect();
     const pxPerMm = 96 / 25.4;
-    const scale = Math.min((rect.width - 24) / (480 * pxPerMm), (rect.height - 18) / (210 * pxPerMm));
-    sheet.style.setProperty('--spread-scale', String(Math.max(0.1, Math.min(1, scale))));
+    const size = spreadSizeMm();
+    if(mode === 'fit-width') return (rect.width - 24) / (size.w * pxPerMm);
+    if(mode === 'actual') return 1;
+    return Math.min((rect.width - 24) / (size.w * pxPerMm), (rect.height - 18) / (size.h * pxPerMm));
   }
-  function show(index){
+  function currentScale(){
+    return Math.max(0.08, Math.min(2.2, baseScale(zoomMode) * zoom));
+  }
+  function applyTransform(){
+    const scale = currentScale();
+    sheet.style.setProperty('--spread-scale', String(scale));
+    const active = spreads[current];
+    if(active) active.style.transform = `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+  }
+  function setZoomMode(mode, nextZoom = 1){
+    zoomMode = mode;
+    zoom = nextZoom;
+    pan = {x:0, y:0};
+    applyTransform();
+  }
+  function show(index, direction = 0){
     current = Math.max(0, Math.min(spreads.length - 1, index));
     spreads.forEach((spread, idx) => {
       spread.classList.toggle('is-active', idx === current);
-      spread.classList.remove('is-turning');
-      if(idx === current) requestAnimationFrame(() => spread.classList.add('is-turning'));
+      spread.classList.remove('turn-next', 'turn-prev');
+      spread.style.transform = '';
+      if(idx === current && direction !== 0) {
+        requestAnimationFrame(() => spread.classList.add(direction > 0 ? 'turn-next' : 'turn-prev'));
+      }
     });
     now.textContent = String(current + 1);
-    fitSpread();
+    pan = {x:0, y:0};
+    applyTransform();
   }
-  document.getElementById('prevSpread').addEventListener('click', () => show(current - 1));
-  document.getElementById('nextSpread').addEventListener('click', () => show(current + 1));
+  document.getElementById('prevSpread').addEventListener('click', () => show(current - 1, -1));
+  document.getElementById('nextSpread').addEventListener('click', () => show(current + 1, 1));
+  document.getElementById('zoomIn').addEventListener('click', () => { zoomMode = zoomMode === 'actual' ? 'fit-spread' : zoomMode; zoom = Math.min(3, zoom * 1.18); applyTransform(); });
+  document.getElementById('zoomOut').addEventListener('click', () => { zoomMode = zoomMode === 'actual' ? 'fit-spread' : zoomMode; zoom = Math.max(.35, zoom / 1.18); applyTransform(); });
+  document.getElementById('fitWidth').addEventListener('click', () => setZoomMode('fit-width'));
+  document.getElementById('fitSpread').addEventListener('click', () => setZoomMode('fit-spread'));
+  document.getElementById('resetZoom').addEventListener('click', () => setZoomMode('actual'));
   select.addEventListener('change', () => {
     sheet.dataset.paper = select.value;
     try { localStorage.setItem('ipca.printLogbook.paper', select.value); } catch(err) {}
-    requestAnimationFrame(fitSpread);
+    requestAnimationFrame(applyTransform);
   });
+  sheet.addEventListener('mousedown', event => {
+    if(event.button !== 0) return;
+    drag = {x:event.clientX, y:event.clientY, startX:pan.x, startY:pan.y};
+    sheet.classList.add('is-dragging');
+  });
+  window.addEventListener('mousemove', event => {
+    if(!drag) return;
+    pan.x = drag.startX + event.clientX - drag.x;
+    pan.y = drag.startY + event.clientY - drag.y;
+    applyTransform();
+  });
+  window.addEventListener('mouseup', () => {
+    drag = null;
+    sheet.classList.remove('is-dragging');
+  });
+  sheet.addEventListener('wheel', event => {
+    if(!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    zoomMode = zoomMode === 'actual' ? 'fit-spread' : zoomMode;
+    zoom = Math.max(.35, Math.min(3, zoom * (event.deltaY < 0 ? 1.08 : .92)));
+    applyTransform();
+  }, {passive:false});
   try {
     const saved = localStorage.getItem('ipca.printLogbook.paper');
     if(saved === 'letter' || saved === 'a4') {
@@ -378,10 +446,10 @@ try {
       sheet.dataset.paper = saved;
     }
   } catch(err) {}
-  window.addEventListener('resize', fitSpread);
+  window.addEventListener('resize', applyTransform);
   window.addEventListener('keydown', event => {
-    if(event.key === 'ArrowLeft') show(current - 1);
-    if(event.key === 'ArrowRight') show(current + 1);
+    if(event.key === 'ArrowLeft') show(current - 1, -1);
+    if(event.key === 'ArrowRight') show(current + 1, 1);
   });
   show(0);
 })();
