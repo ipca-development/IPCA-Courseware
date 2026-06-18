@@ -276,8 +276,8 @@ th,td{border:0.25mm solid #111;text-align:center;vertical-align:middle;padding:0
 thead{height:16mm}thead tr{height:5.333mm}tbody tr{height:6.4mm}
 .log-body{height:160mm}.log-body td{height:6.4mm}
 .main-title{font-size:8px;font-weight:700}.sub{font-size:6.5px}.remarks{text-align:left;font-size:6.4px}
-.totals-box{position:absolute;top:176mm;width:143mm;height:16mm;z-index:7;background:#fff}
-.totals-box table{width:143mm;height:16mm;background:#fff}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fff;font-weight:400}
+.totals-box{position:absolute;top:191mm;width:143mm;height:16mm;z-index:7;background:#fffdf7}
+.totals-box table{width:143mm;height:16mm;background:#fffdf7}.totals-box th,.totals-box td{height:5.333mm;font-size:6.6px;background:#fffdf7;font-weight:400}
 .totals-box th{text-align:center}.totals-box td{font-variant-numeric:tabular-nums}
 .totals-box-left{left:calc(var(--table-x) + 94.5mm)}.totals-box-left col.label{width:69.5mm}.totals-box-left col.total{width:49mm}.totals-box-left col.ldg{width:12.25mm}
 .totals-box-right{left:calc(var(--table-x) + 97mm)}.totals-box-right col.label{width:30mm}.totals-box-right col.night{width:12.4mm}.totals-box-right col.ifr{width:12.4mm}.totals-box-right col.pic{width:12.5mm}.totals-box-right col.copilot{width:12.5mm}.totals-box-right col.dual{width:12.5mm}.totals-box-right col.instr{width:12.5mm}.totals-box-right col.if{width:19.85mm}.totals-box-right col.nav{width:18.85mm}
