@@ -827,12 +827,11 @@ final class AdminLogbookService
     private function mapEgleLegacyCsvRow(array $source): array
     {
         $duration = $this->durationDecimal($source['lb_dur'] ?? '');
-        $condition = strtoupper(trim((string)($source['lb_cond'] ?? '')));
         $engine = strtoupper(trim((string)($source['aircraft_engine'] ?? '')));
         $aircraftTypeFlag = strtoupper(trim((string)($source['aircraft_type'] ?? '')));
         $isSimulator = $aircraftTypeFlag === 'SIMULATOR' || $this->truthy($source['lb_fnpt'] ?? '');
         $isDual = $this->truthy($source['lb_dual'] ?? '');
-        $isNight = $condition === 'NIGHT';
+        $isNight = $this->nightCondition($source['lb_cond'] ?? '');
         $isIfr = $this->truthy($source['lb_ifr'] ?? '');
         $isCrossCountry = $this->crossCountryFlag($source['lb_xc'] ?? '');
         $landings = max(0, (int)round((float)($source['lb_ld'] ?? 0)));
@@ -1139,6 +1138,15 @@ final class AdminLogbookService
             return false;
         }
         return true;
+    }
+
+    private function nightCondition(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        if ($value === '') {
+            return false;
+        }
+        return in_array($value, array('N', 'NIGHT', 'NITE'), true) || str_contains($value, 'NIGHT');
     }
 
     private function key(string $value): string

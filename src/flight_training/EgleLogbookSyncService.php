@@ -238,12 +238,11 @@ final class EgleLogbookSyncService
     private function mapEgleLegacyRow(array $source): array
     {
         $duration = $this->durationDecimal($source['lb_dur'] ?? '');
-        $condition = strtoupper(trim((string)($source['lb_cond'] ?? '')));
         $engine = strtoupper(trim((string)($source['aircraft_engine'] ?? '')));
         $aircraftTypeFlag = strtoupper(trim((string)($source['aircraft_type'] ?? '')));
         $isSimulator = $aircraftTypeFlag === 'SIMULATOR' || $this->truthy($source['lb_fnpt'] ?? '');
         $isDual = $this->truthy($source['lb_dual'] ?? '');
-        $isNight = $condition === 'NIGHT';
+        $isNight = $this->nightCondition($source['lb_cond'] ?? '');
         $isIfr = $this->truthy($source['lb_ifr'] ?? '');
         $isCrossCountry = $this->crossCountryFlag($source['lb_xc'] ?? '');
         $landings = max(0, (int)round((float)($source['lb_ld'] ?? 0)));
@@ -413,9 +412,17 @@ final class EgleLogbookSyncService
      */
     private function instructorSelects(array $columns): array
     {
+        $nameSelect = $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name', 'display_name'), 'instructor_name');
+        if ($nameSelect === '') {
+            $firstCol = $this->firstExisting($columns, array('firstname', 'first_name', 'fname', 'name_first'));
+            $lastCol = $this->firstExisting($columns, array('lastname', 'last_name', 'lname', 'name_last'));
+            if ($firstCol !== '' || $lastCol !== '') {
+                $nameSelect = "TRIM(CONCAT(COALESCE(" . ($firstCol !== '' ? 'i.' . $this->q($firstCol) : "''") . ", ''), ' ', COALESCE(" . ($lastCol !== '' ? 'i.' . $this->q($lastCol) : "''") . ", ''))) AS instructor_name";
+            }
+        }
         return array_filter(array(
             $this->aliasSelect($columns, 'i', array('email', 'user_email', 'u_email'), 'instructor_email'),
-            $this->aliasSelect($columns, 'i', array('name', 'fullname', 'full_name'), 'instructor_name'),
+            $nameSelect,
         ));
     }
 
@@ -465,6 +472,15 @@ final class EgleLogbookSyncService
     {
         $value = strtoupper(trim((string)$value));
         return $value !== '' && $value !== 'NO' && $value !== 'LOCAL';
+    }
+
+    private function nightCondition(mixed $value): bool
+    {
+        $value = strtoupper(trim((string)$value));
+        if ($value === '') {
+            return false;
+        }
+        return in_array($value, array('N', 'NIGHT', 'NITE'), true) || str_contains($value, 'NIGHT');
     }
 
     private function dateFromLegacyDepartureTime(mixed $value): ?string

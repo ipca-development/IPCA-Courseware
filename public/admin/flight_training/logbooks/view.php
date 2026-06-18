@@ -134,6 +134,9 @@ cw_header('Flight Training · Admin Logbook Workspace');
     </div>
     <div class="alogw-grid-tools">
       <button class="alogw-btn alogw-btn--primary" type="button" id="alogAddRow">Add Row</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSelectAllRows">Select All</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSelectReviewRows">Select Imported / Review</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogClearSelection">Clear Selection</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogAcceptRows">Accept Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogRejectRows">Reject Selected</button>
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogSplitRow">Split Selected</button>
@@ -361,6 +364,12 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     document.getElementById('alogVariables').innerHTML = blocks.map(([k,v]) => `<div class="alogw-var">{{${esc(k)}}}: ${esc(v ?? '')}</div>`).join('');
   }
   function selectedIndexes(){ return [...document.querySelectorAll('[data-select]:checked')].map(el => Number(el.dataset.select)).filter(i => entries[i]); }
+  function setRowSelection(predicate){
+    document.querySelectorAll('[data-select]').forEach(el => {
+      const index = Number(el.dataset.select);
+      el.checked = predicate(entries[index], index);
+    });
+  }
   document.addEventListener('change', e => {
     if(e.target.id === 'alogPageSelect') { renderExtractionStatus(); renderImage(); }
   });
@@ -536,6 +545,19 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogAddRow').addEventListener('click', () => openEditModal(-1));
+  document.getElementById('alogSelectAllRows').addEventListener('click', () => {
+    setRowSelection(() => true);
+    setStatus('All visible rows selected');
+  });
+  document.getElementById('alogSelectReviewRows').addEventListener('click', () => {
+    const reviewStatuses = new Set(['imported','needs_review','flagged']);
+    setRowSelection(row => row && reviewStatuses.has(String(row.review_status || '')));
+    setStatus('Imported/review rows selected');
+  });
+  document.getElementById('alogClearSelection').addEventListener('click', () => {
+    setRowSelection(() => false);
+    setStatus('Selection cleared');
+  });
   document.getElementById('alogAcceptRows').addEventListener('click', async () => {
     try {
       const ids = selectedIndexes().map(i => Number(entries[i].id || 0)).filter(Boolean);
