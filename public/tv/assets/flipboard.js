@@ -10,7 +10,7 @@
   var OPS_DATA_ROWS = 9;
   var OPS_MAX_DATA_ROWS = 10;
   var AIRCRAFT_PAGE_SECONDS = 12;
-  var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()⇄↗↘✈O';
+  var TILE_CHARS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-/:+&()!?,\'⇄↗↘✈O';
 
   var DEFAULT_MESSAGES = [
     {
@@ -641,6 +641,23 @@
     this.setChar(this.char);
   }
 
+  FlipTile.prototype.measuredHeight = function () {
+    var h = this.el.offsetHeight;
+    if (h > 4) return h;
+    this.el.style.removeProperty('--tile-h');
+    h = this.el.offsetHeight;
+    if (h > 4) return h;
+    var parsed = parseFloat(window.getComputedStyle(this.el).height);
+    return (parsed > 4) ? Math.floor(parsed) : 44;
+  };
+
+  FlipTile.prototype.applyTileHeight = function () {
+    var h = this.measuredHeight();
+    if (h > 4) {
+      this.el.style.setProperty('--tile-h', h + 'px');
+    }
+  };
+
   FlipTile.prototype.setChar = function (char) {
     this.char = char || ' ';
     this.displayTop.textContent = this.char;
@@ -652,6 +669,7 @@
     this.el.classList.toggle('is-space', this.char === ' ');
     this.el.classList.remove('is-flipping', 'is-settling');
     this.resetFlapMotion();
+    this.el.style.removeProperty('--tile-h');
   };
 
   FlipTile.prototype.resetFlapMotion = function () {
@@ -678,7 +696,7 @@
       self.upperBack.textContent = nextChar;
       self.lowerBack.textContent = nextChar;
       self.el.style.setProperty('--flip-duration', duration + 'ms');
-      self.el.style.setProperty('--tile-h', self.el.offsetHeight + 'px');
+      self.applyTileHeight();
       self.resetFlapMotion();
 
       var done = false;
@@ -756,6 +774,29 @@
       this.el.appendChild(tile.el);
     }
   }
+
+  FlipLine.prototype.ensureTileMetrics = function () {
+    var sample = this.tiles[0];
+    if (!sample) return;
+    var h = sample.measuredHeight();
+    if (h <= 4) return;
+    this.tiles.forEach(function (tile) {
+      tile.el.style.setProperty('--tile-h', h + 'px');
+    });
+  };
+
+  FlipLine.prototype.reconcileTiles = function (text) {
+    var fitted = fitText(text, this.length);
+    this.tiles.forEach(function (tile, idx) {
+      var char = fitted.charAt(idx);
+      var broken = tile.el.offsetHeight < 4
+        || tile.displayTop.textContent !== char
+        || tile.displayBottom.textContent !== char;
+      if (tile.char !== char || broken) {
+        tile.setChar(char);
+      }
+    });
+  };
 
   FlipLine.prototype.setText = function (text, options, audio, rowDelayBase) {
     var fitted = fitText(text, this.length);
@@ -1699,6 +1740,12 @@
       });
   };
 
+  function waitForLayout(cb) {
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(cb);
+    });
+  }
+
   FlipBoard.prototype.renderMessage = function (message, urgent) {
     this.showMainLinesBoard();
 
@@ -1708,11 +1755,22 @@
     var self = this;
 
     return new Promise(function (resolve) {
-      window.requestAnimationFrame(function () {
+      waitForLayout(function () {
+        self.lines.forEach(function (line) {
+          line.ensureTileMetrics();
+        });
+
         Promise.all(self.lines.map(function (line, idx) {
           var rowDelay = idx * randomBetween(80, 140);
           return line.setText(rows[idx] || '', options, self.audio, rowDelay);
-        })).then(resolve);
+        })).then(function () {
+          waitForLayout(function () {
+            self.lines.forEach(function (line, idx) {
+              line.reconcileTiles(rows[idx] || '');
+            });
+            resolve();
+          });
+        });
       });
     });
   };
