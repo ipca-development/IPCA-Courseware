@@ -577,7 +577,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     return $out . '</svg>';
 }
 
-function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
+function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, int $pageNumber, int $totalPages): string
 {
     $columns = array(12, 19, 19, 16, 16, 80, 11, 10);
     $gridX = 10.0;
@@ -591,6 +591,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
     $bounds = scaledBounds($columns, $gridX, $gridW);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template faa-left-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
+    $out .= svgImage(9.4, 2.3, 31, 12.6, $logoHref);
     $cells = array(
         gridCell($bounds, 0, 1, $gridY, $gridY + $headerH, 'main'),
         gridCell($bounds, 1, 2, $gridY, $gridY + $headerH, 'main'),
@@ -660,7 +661,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
     return $out . '</svg>';
 }
 
-function faaRightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
+function faaRightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, int $pageNumber, int $totalPages): string
 {
     $columns = array(8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 14,5);
     $gridX = 10.0;
@@ -674,6 +675,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     $bounds = scaledBounds($columns, $gridX, $gridW);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template faa-right-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
+    $out .= svgImage(165.2, 2.3, 31, 12.6, $logoHref);
     $cells = array(
         gridCell($bounds, 0, 8, $gridY, $gridY + 5.5, 'main'),
         gridCell($bounds, 8, 14, $gridY, $gridY + 5.5, 'main'),
@@ -826,12 +828,12 @@ try {
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
   <?= $format === 'faa'
-      ? faaLeftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $leftPageNumber, $totalPrintedPages)
+      ? faaLeftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $leftPageNumber, $totalPrintedPages)
       : leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
 </section>
 <section class="book-page book-page-right">
   <?= $format === 'faa'
-      ? faaRightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $rightPageNumber, $totalPrintedPages)
+      ? faaRightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $rightPageNumber, $totalPrintedPages)
       : rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
 </section>
 </div>
