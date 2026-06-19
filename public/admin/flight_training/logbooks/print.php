@@ -541,7 +541,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
 
 function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
 {
-    $columns = array(12, 19, 19, 16, 16, 80, 11, 10, 2);
+    $columns = array(12, 19, 19, 16, 16, 80, 11, 10);
     $gridX = 10.0;
     $gridY = 10.0;
     $gridW = 185.0;
@@ -603,7 +603,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
     $out .= renderCellBorders($cells);
     $out .= svgText(12, 79.5, 'I certify that the statements made by me on this form are true.', 'faa-cert', 'start');
     $out .= svgText(12, 94.5, 'PILOT\'S SIGNATURE:', 'faa-cert', 'start');
-    $out .= svgLine(41, 94.5, 143, 94.5, 'main');
+    $out .= svgLine(41, 94.5, 138, 94.5, 'main');
     for ($row = 0; $row < 9; $row++) {
         $y1 = $bodyTop + ($row * $rowH);
         $y2 = $y1 + $rowH;
