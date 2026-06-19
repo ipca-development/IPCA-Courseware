@@ -411,7 +411,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template left-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
-    $out .= svgImage(13, 3.9, 30, 5.8, $logoHref);
+    $out .= svgImage(8.3, 3.0, 39, 7.54, $logoHref);
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
     $out .= svgText(12, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'start');
@@ -478,7 +478,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
-    $out .= svgImage(227, 3.9, 30, 5.8, $logoHref);
+    $out .= svgImage(223.6, 3.0, 39, 7.54, $logoHref);
     $out .= svgText(258, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
     $cells = array(
         gridCell($bounds, 0, 2, $gridY, $gridY + $headerRowH, 'main', '9', 'tiny'),

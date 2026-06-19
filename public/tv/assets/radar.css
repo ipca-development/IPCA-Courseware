@@ -64,19 +64,45 @@
 
 .tv-radar-scope-status{
   align-self:flex-start;
-  font-size:clamp(10px,.95vw,13px);
-  letter-spacing:.12em;
-  text-transform:uppercase;
-  color:var(--radar-muted);
-  background:rgba(8,17,31,.72);
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+  max-width:38%;
+  font-family:inherit;
+  background:rgba(8,17,31,.82);
   border:1px solid rgba(255,255,255,.08);
   border-radius:4px;
-  padding:4px 8px;
+  padding:5px 8px 4px;
+  line-height:1.15;
 }
 
-.tv-radar-scope-status.is-live{color:var(--radar-green)}
-.tv-radar-scope-status.is-error{color:#ff8f8f}
-.tv-radar-scope-status.is-warn{color:#ffd27a}
+.tv-radar-scope-status-title{
+  font-size:clamp(10px,.95vw,13px);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  font-weight:700;
+  color:var(--radar-muted);
+  white-space:nowrap;
+}
+
+.tv-radar-scope-status-sub{
+  font-size:clamp(8px,.72vw,10px);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:rgba(232,242,255,.58);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:100%;
+}
+
+.tv-radar-scope-status.is-live .tv-radar-scope-status-title{color:var(--radar-green)}
+.tv-radar-scope-status.is-live .tv-radar-scope-status-sub{color:rgba(57,255,106,.72)}
+.tv-radar-scope-status.is-error .tv-radar-scope-status-title{color:#ff8f8f}
+.tv-radar-scope-status.is-error .tv-radar-scope-status-sub{color:rgba(255,143,143,.75)}
+.tv-radar-scope-status.is-warn .tv-radar-scope-status-title{color:#ffd27a}
+.tv-radar-scope-status.is-warn .tv-radar-scope-status-sub{color:rgba(255,210,122,.78)}
 
 .tv-radar-scope-footer{
   display:flex;

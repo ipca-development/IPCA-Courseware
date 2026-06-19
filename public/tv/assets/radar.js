@@ -247,7 +247,10 @@
       '<div class="tv-radar-scope-wrap">',
       '  <canvas class="tv-radar-scope-canvas" aria-label="Radar scope"></canvas>',
       '  <div class="tv-radar-scope-overlay">',
-      '    <div class="tv-radar-scope-status" data-radar-adsb-status>INITIALIZING ADS-B</div>',
+      '    <div class="tv-radar-scope-status" data-radar-adsb-status>',
+      '      <div class="tv-radar-scope-status-title" data-radar-adsb-title>LIVE RADAR</div>',
+      '      <div class="tv-radar-scope-status-sub" data-radar-adsb-sub>INITIALIZING</div>',
+      '    </div>',
       '    <div class="tv-radar-scope-footer">',
       '      <div class="tv-radar-scope-chip">RANGE: ' + this.geo.rangeNm + ' NM</div>',
       '      <div class="tv-radar-scope-chip">TILT: 0.5°</div>',
@@ -287,6 +290,8 @@
     this.diagramCanvas = this.root.querySelector('.tv-radar-diagram-canvas');
     this.diagramCtx = this.diagramCanvas.getContext('2d');
     this.statusEl = this.root.querySelector('[data-radar-adsb-status]');
+    this.statusTitleEl = this.root.querySelector('[data-radar-adsb-title]');
+    this.statusSubEl = this.root.querySelector('[data-radar-adsb-sub]');
     this.weatherEls = {
       updated: this.root.querySelector('[data-radar-weather-updated]'),
       body: this.root.querySelector('[data-radar-weather-body]'),
@@ -366,7 +371,33 @@
     var dHeight = Math.max(90, Math.floor(dRect.height));
     this.diagramCanvas.width = dWidth;
     this.diagramCanvas.height = dHeight;
+    this.updateStatusLayout();
     this.drawDiagram();
+  };
+
+  RadarScreen.prototype.updateStatusLayout = function () {
+    if (!this.statusEl || !this.scopeCanvas) return;
+    var scopeWrap = this.scopeCanvas.parentElement;
+    if (!scopeWrap) return;
+    var wrapW = scopeWrap.getBoundingClientRect().width;
+    var size = this.scopeSize;
+    var sidePad = Math.max(10, (wrapW - size) * 0.5);
+    var maxW = Math.max(108, Math.floor(sidePad - 14));
+    this.statusEl.style.maxWidth = maxW + 'px';
+  };
+
+  RadarScreen.prototype.setScopeStatus = function (title, sub, stateClass) {
+    if (!this.statusEl) return;
+    this.statusEl.classList.remove('is-live', 'is-error', 'is-warn');
+    if (stateClass) this.statusEl.classList.add(stateClass);
+    if (this.statusTitleEl) this.statusTitleEl.textContent = title;
+    if (this.statusSubEl) this.statusSubEl.textContent = sub || '';
+  };
+
+  RadarScreen.prototype.formatTargetSubline = function (count, fleet, area, extra) {
+    var line = count + ' TARGET' + (count === 1 ? '' : 'S') + ' (FLEET ' + fleet + ' / AREA ' + area + ')';
+    if (extra) line += ' ' + extra;
+    return line;
   };
 
   RadarScreen.prototype.start = function () {
@@ -434,41 +465,35 @@
   RadarScreen.prototype.updateStatus = function () {
     if (!this.statusEl) return;
     var meta = this.adsbMeta || {};
-    this.statusEl.classList.remove('is-live', 'is-error', 'is-warn');
-    if (!this.adsbOk) {
-      this.statusEl.textContent = 'ADS-B UNAVAILABLE';
-      this.statusEl.classList.add('is-error');
-      return;
-    }
-
     var fleet = meta.fleet_count != null ? meta.fleet_count : 0;
     var area = meta.area_count != null ? meta.area_count : 0;
     var areaConnected = !!meta.area_connected;
     var areaRaw = meta.area_raw_count != null ? meta.area_raw_count : 0;
 
+    if (!this.adsbOk) {
+      this.setScopeStatus('LIVE RADAR', 'ADS-B UNAVAILABLE', 'is-error');
+      return;
+    }
+
     if (!this.targets.length) {
       if (areaConnected) {
-        this.statusEl.textContent = 'ADS-B CONNECTED — NO TRAFFIC IN ' + this.geo.rangeNm + ' NM (AREA ' + areaRaw + ' RAW)';
-        this.statusEl.classList.add('is-live');
+        this.setScopeStatus(
+          'LIVE RADAR',
+          '0 TARGETS (FLEET ' + fleet + ' / AREA ' + area + ')',
+          'is-live'
+        );
       } else {
-        var err = meta.area_error ? ' — ' + meta.area_error : '';
-        this.statusEl.textContent = 'ADS-B PARTIAL — AREA FEED OFFLINE' + err;
-        this.statusEl.classList.add('is-warn');
+        this.setScopeStatus('LIVE RADAR', 'AREA FEED OFFLINE', 'is-warn');
       }
       return;
     }
 
-    var parts = 'ADS-B LIVE — ' + this.targets.length + ' TARGET' + (this.targets.length === 1 ? '' : 'S');
-    if (fleet > 0 || area > 0) {
-      parts += ' (FLEET ' + fleet + ' / AREA ' + area + ')';
-    }
-    if (!areaConnected) {
-      parts += ' — AREA OFFLINE';
-      this.statusEl.classList.add('is-warn');
-    } else {
-      this.statusEl.classList.add('is-live');
-    }
-    this.statusEl.textContent = parts;
+    var extra = !areaConnected ? '— AREA OFFLINE' : '';
+    this.setScopeStatus(
+      'LIVE RADAR',
+      this.formatTargetSubline(this.targets.length, fleet, area, extra),
+      areaConnected ? 'is-live' : 'is-warn'
+    );
   };
 
   RadarScreen.prototype.updateWeather = function () {
@@ -556,10 +581,12 @@
   RadarScreen.prototype.updateWindAnimation = function (ts, dtSec) {
     if (this.windTargetDir == null || !this.weatherEls.windLive) return;
     if (this.displayWindDir == null) this.displayWindDir = this.windTargetDir;
-    var wave = Math.sin(ts / 2800) * 2.4 + Math.sin(ts / 5300) * 1.2;
+    var wave = Math.sin(ts / 1500) * 5.5 + Math.sin(ts / 3100) * 3.2 + Math.sin(ts / 680) * 1.6;
     var desired = this.windTargetDir + wave;
-    this.displayWindDir = lerpAngle(this.displayWindDir, desired, Math.min(1, dtSec * 2.6));
+    this.displayWindDir = lerpAngle(this.displayWindDir, desired, Math.min(1, dtSec * 4.5));
+    var breathe = 0.82 + 0.18 * (0.5 + 0.5 * Math.sin(ts / 2100));
     this.weatherEls.windLive.setAttribute('transform', 'rotate(' + this.displayWindDir.toFixed(1) + ' 50 50)');
+    this.weatherEls.windLive.style.opacity = String(breathe);
   };
 
   RadarScreen.prototype.syncTrackStates = function (targets, ts) {
@@ -609,29 +636,45 @@
       state.lastFixTs = ts;
 
       if (target.gs != null && target.gs > 2) {
-        state.vxNm = measVx * 0.25 + gsVel.vxNm * 0.75;
-        state.vyNm = measVy * 0.25 + gsVel.vyNm * 0.75;
+        state.vxNm = gsVel.vxNm * 0.55 + measVx * 0.45;
+        state.vyNm = gsVel.vyNm * 0.55 + measVy * 0.45;
       } else if (target.gs != null && target.gs > 0.5) {
-        state.vxNm = measVx * 0.4 + gsVel.vxNm * 0.6;
-        state.vyNm = measVy * 0.4 + gsVel.vyNm * 0.6;
+        state.vxNm = gsVel.vxNm * 0.45 + measVx * 0.55;
+        state.vyNm = gsVel.vyNm * 0.45 + measVy * 0.55;
       } else {
-        state.vxNm = measVx * 0.5;
-        state.vyNm = measVy * 0.5;
+        state.vxNm = measVx * 0.35;
+        state.vyNm = measVy * 0.35;
       }
 
       var gs = target.gs != null ? target.gs : 0;
+      if (gs > 1) {
+        var errX = xy.xNm - state.displayXNm;
+        var errY = xy.yNm - state.displayYNm;
+        var steerSec = gs > 25 ? 2 : (gs > 12 ? 3 : (gs > 5 ? 4.5 : 7));
+        var baseVx = gsVel.vxNm;
+        var baseVy = gsVel.vyNm;
+        if (Math.hypot(baseVx, baseVy) < 0.00001 && Math.hypot(measVx, measVy) > 0.00001) {
+          baseVx = measVx;
+          baseVy = measVy;
+        }
+        state.vxNm = baseVx + errX / steerSec;
+        state.vyNm = baseVy + errY / steerSec;
+        var targetSpd = gsToNmPerSec(gs);
+        var curSpd = Math.hypot(state.vxNm, state.vyNm);
+        if (targetSpd > 0.00001 && curSpd > 0.00001) {
+          var spdBlend = 0.35;
+          var scale = (curSpd * (1 - spdBlend) + targetSpd * spdBlend) / curSpd;
+          state.vxNm *= scale;
+          state.vyNm *= scale;
+        }
+      }
+
       if (gs > 1 && target.track_deg != null) {
-        state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, 0.35);
+        state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, 0.2);
       } else if (Math.hypot(state.vxNm, state.vyNm) > 0.00005) {
         var velHeading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
         if (velHeading < 0) velHeading += 360;
-        state.displayHeading = lerpAngle(state.displayHeading, velHeading, 0.25);
-      }
-
-      var err = Math.hypot(xy.xNm - state.displayXNm, xy.yNm - state.displayYNm);
-      if (err > 0.5 && gs < 4) {
-        state.displayXNm = xy.xNm;
-        state.displayYNm = xy.yNm;
+        state.displayHeading = lerpAngle(state.displayHeading, velHeading, 0.15);
       }
     });
 
@@ -645,13 +688,25 @@
       var state = this.trackStates[key];
       var target = state.target || {};
       var gs = target.gs != null ? target.gs : 0;
-      state.displayXNm += state.vxNm * dtSec;
-      state.displayYNm += state.vyNm * dtSec;
 
-      var pullRate = gs > 8 ? 0.45 : (gs > 3 ? 0.9 : (gs > 0.5 ? 1.4 : 2.2));
-      var pull = Math.min(1, dtSec * pullRate);
+      if (gs > 0.8) {
+        state.displayXNm += state.vxNm * dtSec;
+        state.displayYNm += state.vyNm * dtSec;
+        if (target.track_deg != null) {
+          state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, Math.min(1, dtSec * 1.2));
+        } else if (Math.hypot(state.vxNm, state.vyNm) > 0.00005) {
+          var velHeading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
+          if (velHeading < 0) velHeading += 360;
+          state.displayHeading = lerpAngle(state.displayHeading, velHeading, Math.min(1, dtSec * 1.2));
+        }
+        return;
+      }
+
+      var pull = Math.min(1, dtSec * 2.5);
       state.displayXNm += (state.fixXNm - state.displayXNm) * pull;
       state.displayYNm += (state.fixYNm - state.displayYNm) * pull;
+      state.vxNm *= Math.max(0, 1 - dtSec * 2);
+      state.vyNm *= Math.max(0, 1 - dtSec * 2);
     }, this);
   };
 
@@ -808,13 +863,15 @@
       }
     };
 
-    (geo.aprons || []).forEach(function (apron) {
-      drawPolygon(apron.points, 'rgba(140,155,170,' + (alpha * 0.55) + ')', 'rgba(140,155,170,' + (alpha * 0.8) + ')');
-    });
+    if (scopeMode) {
+      (geo.aprons || []).forEach(function (apron) {
+        drawPolygon(apron.points, 'rgba(140,155,170,' + (alpha * 0.55) + ')', 'rgba(140,155,170,' + (alpha * 0.8) + ')');
+      });
 
-    (geo.taxiways || []).forEach(function (taxi) {
-      drawPolyline(taxi.points, 'rgba(140,155,170,' + (alpha * 0.95) + ')', scopeMode ? 1.2 : 1.6);
-    });
+      (geo.taxiways || []).forEach(function (taxi) {
+        drawPolyline(taxi.points, 'rgba(140,155,170,' + (alpha * 0.95) + ')', 1.2);
+      });
+    }
 
     (geo.runways || []).forEach(function (runway) {
       if (!runway.ends || runway.ends.length < 2) return;
@@ -954,12 +1011,6 @@
       if (!target) return;
       var xy = self.displayXYForState(state);
       var heading = state.displayHeading != null ? state.displayHeading : (target.track_deg != null ? target.track_deg : 0);
-      if (target.gs != null && target.gs > 3 && Math.hypot(state.vxNm, state.vyNm) > 0.00008) {
-        heading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
-        if (heading < 0) heading += 360;
-        state.displayHeading = lerpAngle(state.displayHeading, heading, 0.18);
-        heading = state.displayHeading;
-      }
       self.drawAircraftSymbol(ctx, xy.x, xy.y, heading);
       self.drawSSRLabel(ctx, xy.x, xy.y, target, idx);
     });
