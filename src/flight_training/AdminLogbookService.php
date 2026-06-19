@@ -718,6 +718,21 @@ final class AdminLogbookService
         return $this->getRequirementCategory($id) ?? array();
     }
 
+    public function deleteRequirementCategory(int $categoryId): void
+    {
+        $this->requireSchema();
+        if ($categoryId <= 0) {
+            throw new RuntimeException('Missing requirement category.');
+        }
+        $category = $this->getRequirementCategory($categoryId);
+        if ($category === null) {
+            throw new RuntimeException('Requirement category not found.');
+        }
+
+        $stmt = $this->pdo->prepare('DELETE FROM ipca_flight_requirement_categories WHERE id = :id');
+        $stmt->execute(array(':id' => $categoryId));
+    }
+
     public function assignRequirement(int $logbookId, int $studentUserId, int $categoryId, array $entryIds, int $actorUserId): void
     {
         $this->requireSchema();

@@ -55,7 +55,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-edit-body{flex:1 1 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 14px;overflow:auto;background:#fff}.alogw-edit-field{display:flex;flex-direction:column;gap:3px}.alogw-edit-field--wide{grid-column:1/-1}.alogw-edit-label{font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.alogw-edit-input,.alogw-edit-textarea,.alogw-edit-select{border:1px solid rgba(15,23,42,.13);border-radius:9px;padding:6px 8px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-edit-textarea{min-height:52px;resize:vertical}.alogw-edit-actions{flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid rgba(15,23,42,.08);background:#f8fafc}
 .alogw-modal-card form{min-height:0;display:flex;flex-direction:column;flex:1 1 auto}
 .alogw-8710-wrap{overflow:auto;background:#fff}.alogw-8710{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;table-layout:fixed}.alogw-8710 th,.alogw-8710 td{border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;padding:7px 5px;text-align:center;font-size:10px;line-height:1.1;color:#102845;background:#fff}.alogw-8710 th{background:#f8fafc;font-size:9px;font-weight:900;text-transform:uppercase;color:#475569}.alogw-8710 .alogw-8710-row-head{text-align:left;font-weight:900;background:#f8fafc}.alogw-8710 .alogw-8710-num{font-variant-numeric:tabular-nums;font-weight:800}.alogw-8710-note{padding:8px 12px;font-size:11px;color:#64748b;background:#f8fafc;border-top:1px solid rgba(15,23,42,.06)}
-.alogw-bottom{display:grid;grid-template-columns:1fr;gap:16px}.alogw-req-list{max-height:460px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-req-evidence{grid-column:1/-1;margin-top:8px;padding:9px 10px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);font-size:11px;color:#334155}.alogw-req-evidence-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:900;color:#102845}.alogw-req-evidence-list{margin:7px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}.alogw-req-evidence-list li{display:flex;gap:7px;align-items:flex-start;flex-wrap:wrap}.alogw-req-evidence-empty{color:#92400e;background:#fffbeb;border-color:#fde68a}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
+.alogw-bottom{display:grid;grid-template-columns:1fr;gap:16px}.alogw-req-list{max-height:460px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px 102px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-req-actions{display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap}.alogw-req-evidence{grid-column:1/-1;margin-top:8px;padding:9px 10px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);font-size:11px;color:#334155}.alogw-req-evidence-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:900;color:#102845}.alogw-req-evidence-list{margin:7px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}.alogw-req-evidence-list li{display:flex;gap:7px;align-items:flex-start;flex-wrap:wrap}.alogw-req-evidence-empty{color:#92400e;background:#fffbeb;border-color:#fde68a}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
 @media(max-width:1200px){.alogw-egle-grid,.alogw-bottom{grid-template-columns:1fr}.alogw-egle-form{grid-template-columns:1fr 1fr}.alogw-cards{grid-template-columns:repeat(2,minmax(120px,1fr))}.alogw-extract-status{margin-left:0}}
 </style>
 
@@ -184,6 +184,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
           <h2 class="alogw-panel-title">Requirement Verification</h2>
           <p class="alogw-panel-text">PASS/FAIL preview based on totals and explicit assignments.</p>
         </div>
+      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAddRequirementCategory">Add Requirement Category</button>
       </div>
       <div class="alogw-req-list" id="alogRequirements"></div>
     </div>
@@ -284,6 +285,39 @@ cw_header('Flight Training · Admin Logbook Workspace');
   </div>
 </div>
 
+<div class="alogw-modal" id="alogRequirementCategoryModal" aria-hidden="true">
+  <div class="alogw-modal-card">
+    <div class="alogw-modal-head">
+      <div>
+        <h2 class="alogw-panel-title" id="alogRequirementCategoryTitle">Requirement Category</h2>
+        <p class="alogw-panel-text">Edit the rule that appears in requirement verification and the “Tag Selected as Required Event” dropdown.</p>
+      </div>
+      <button class="alogw-btn alogw-btn--danger" type="button" id="alogCancelRequirementCategory">Cancel</button>
+    </div>
+    <form id="alogRequirementCategoryForm">
+      <input type="hidden" name="id">
+      <div class="alogw-edit-body">
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Authority</span><input class="alogw-edit-input" name="authority" value="FAA_PART_61" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Certificate</span><input class="alogw-edit-input" name="certificate" value="PPL" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Requirement Key</span><input class="alogw-edit-input" name="requirement_key" placeholder="faa61.ppl.first_solo" required></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Status</span><select class="alogw-edit-select" name="status"><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label>
+        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Label</span><input class="alogw-edit-input" name="label" required></label>
+        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Description</span><textarea class="alogw-edit-textarea" name="description"></textarea></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Time</span><input class="alogw-edit-input" type="number" step="0.01" name="minimum_time"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Distance NM</span><input class="alogw-edit-input" type="number" step="0.1" name="minimum_distance_nm"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Count</span><input class="alogw-edit-input" type="number" step="1" min="0" name="minimum_count"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">One Flight Multiple Requirements</span><select class="alogw-edit-select" name="allow_one_flight_multiple_requirements"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Multiple Flights One Requirement</span><select class="alogw-edit-select" name="allow_multiple_flights_one_requirement"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
+        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Automatic Rules JSON</span><textarea class="alogw-edit-textarea" name="automatic_rules_json" rows="4">{}</textarea></label>
+        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Manual Rules JSON</span><textarea class="alogw-edit-textarea" name="manual_rules_json" rows="4">{}</textarea></label>
+      </div>
+      <div class="alogw-edit-actions">
+        <button class="alogw-btn alogw-btn--primary" type="submit">Save Category</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
 (function(){
@@ -340,6 +374,10 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     data = json.data; entries = (data.entries || []).map(row => ({...row, _dirty:false})); renderAll();
   }
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+  function categoryById(id){
+    const categoryId = Number(id || 0);
+    return (data.requirement_categories || []).find(c => Number(c.id || 0) === categoryId) || null;
+  }
   function renderAll(){ renderCards(); renderPages(); renderTable(); render8710Summary(); renderRequirements(); renderVariables(); }
   function loadColumnWidths(){
     try {
@@ -525,8 +563,9 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   }
   function renderRequirements(){
     const reqs = data.requirements || [];
-    const header = '<div class="alogw-req-row alogw-req-head"><span>Authority</span><span>Requirement</span><span>Required</span><span>Actual</span><span>Result</span></div>';
+    const header = '<div class="alogw-req-row alogw-req-head"><span>Authority</span><span>Requirement</span><span>Required</span><span>Actual</span><span>Result</span><span>Actions</span></div>';
     const rows = reqs.map(r => {
+      const categoryId = Number(r.requirement_category_id || 0);
       const unit = requirementUnit(r);
       const required = r.minimum === null || r.minimum === undefined ? null : Number(r.minimum);
       const actual = Number(r.value || 0);
@@ -542,7 +581,8 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
             return `<li><strong>${esc(detail)}</strong>${entry.remarks ? `<span>${esc(entry.remarks)}</span>` : ''}</li>`;
           }).join('')}</ul></div>`
         : `<div class="alogw-req-evidence alogw-req-evidence-empty"><strong>No tagged logbook record yet.</strong> Select row(s), choose this event, then click “Tag Selected as Required Event”.</div>`;
-      return `<div class="alogw-req-row"><span class="alogw-req-cell" title="${esc(r.authority)}">${esc(r.authority)}</span><strong class="alogw-req-cell" title="${esc(r.label)}">${esc(r.label)}</strong><span class="alogw-req-value">${esc(formatRequirementValue(required, unit))}</span><span class="alogw-req-value">${esc(formatRequirementValue(actual, unit))}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}" title="${esc(result)}">${esc(result)}</span>${evidenceHtml}</div>`;
+      const actions = `<span class="alogw-req-actions"><button class="alogw-mini-btn alogw-mini-btn--edit" type="button" data-edit-category="${esc(categoryId)}">Edit</button><button class="alogw-mini-btn alogw-mini-btn--delete" type="button" data-delete-category="${esc(categoryId)}">Delete</button></span>`;
+      return `<div class="alogw-req-row"><span class="alogw-req-cell" title="${esc(r.authority)}">${esc(r.authority)}</span><strong class="alogw-req-cell" title="${esc(r.label)}">${esc(r.label)}</strong><span class="alogw-req-value">${esc(formatRequirementValue(required, unit))}</span><span class="alogw-req-value">${esc(formatRequirementValue(actual, unit))}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}" title="${esc(result)}">${esc(result)}</span>${actions}${evidenceHtml}</div>`;
     }).join('');
     document.getElementById('alogRequirements').innerHTML = reqs.length ? header + rows : '<div class="alogw-image-empty">No requirement categories.</div>';
     const cats = data.requirement_categories || [];
@@ -673,6 +713,26 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   document.addEventListener('click', async e => {
     const editIdx = e.target.dataset ? e.target.dataset.edit : undefined;
     const deleteIdx = e.target.dataset ? e.target.dataset.delete : undefined;
+    const editCategoryId = e.target.dataset ? e.target.dataset.editCategory : undefined;
+    const deleteCategoryId = e.target.dataset ? e.target.dataset.deleteCategory : undefined;
+    if(editCategoryId !== undefined) {
+      openRequirementCategoryModal(categoryById(editCategoryId));
+      return;
+    }
+    if(deleteCategoryId !== undefined) {
+      const category = categoryById(deleteCategoryId);
+      if(!category) {
+        setStatus('Requirement category not found');
+        return;
+      }
+      const ok = window.confirm(`Delete requirement category "${category.label}"? Existing tagged records/evaluations for this category will also be removed.`);
+      if(!ok) return;
+      try {
+        await post({action:'delete_requirement_category', logbook_id:logbookId, requirement_category_id:category.id});
+        setStatus('Requirement category deleted');
+      } catch(err){ setStatus(err.message); }
+      return;
+    }
     if(editIdx !== undefined) {
       openEditModal(Number(editIdx));
     }
@@ -716,6 +776,66 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       await post({action:'save_entry', logbook_id:logbookId, entry:base});
       closeEditModal();
       setStatus('Row saved');
+    } catch(err){ setStatus(err.message); }
+  });
+  function defaultRequirementCategory(){
+    return {
+      id:'',
+      authority:'FAA_PART_61',
+      certificate:'PPL',
+      requirement_key:'',
+      status:'active',
+      label:'',
+      description:'',
+      minimum_time:'',
+      minimum_distance_nm:'',
+      minimum_count:'',
+      allow_one_flight_multiple_requirements:1,
+      allow_multiple_flights_one_requirement:1,
+      automatic_rules_json:'{}',
+      manual_rules_json:'{}'
+    };
+  }
+  function openRequirementCategoryModal(category){
+    const row = {...defaultRequirementCategory(), ...(category || {})};
+    const form = document.getElementById('alogRequirementCategoryForm');
+    document.getElementById('alogRequirementCategoryTitle').textContent = row.id ? 'Edit Requirement Category' : 'Add Requirement Category';
+    Object.keys(defaultRequirementCategory()).forEach(key => {
+      if(!form.elements[key]) return;
+      let value = row[key] ?? '';
+      if((key === 'automatic_rules_json' || key === 'manual_rules_json') && value && typeof value !== 'string') {
+        value = JSON.stringify(value, null, 2);
+      }
+      if((key === 'automatic_rules_json' || key === 'manual_rules_json') && String(value).trim() === '') {
+        value = '{}';
+      }
+      form.elements[key].value = String(value);
+    });
+    document.getElementById('alogRequirementCategoryModal').classList.add('is-open');
+    document.getElementById('alogRequirementCategoryModal').setAttribute('aria-hidden','false');
+  }
+  function closeRequirementCategoryModal(){
+    document.getElementById('alogRequirementCategoryModal').classList.remove('is-open');
+    document.getElementById('alogRequirementCategoryModal').setAttribute('aria-hidden','true');
+  }
+  document.getElementById('alogAddRequirementCategory').addEventListener('click', () => openRequirementCategoryModal(null));
+  document.getElementById('alogCancelRequirementCategory').addEventListener('click', closeRequirementCategoryModal);
+  document.getElementById('alogRequirementCategoryForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const formData = new FormData(e.currentTarget);
+      const payload = Object.fromEntries(formData.entries());
+      payload.action = 'save_requirement_category';
+      payload.id = Number(payload.id || 0);
+      payload.minimum_time = payload.minimum_time === '' ? null : Number(payload.minimum_time);
+      payload.minimum_distance_nm = payload.minimum_distance_nm === '' ? null : Number(payload.minimum_distance_nm);
+      payload.minimum_count = payload.minimum_count === '' ? null : Number(payload.minimum_count);
+      payload.allow_one_flight_multiple_requirements = String(payload.allow_one_flight_multiple_requirements || '0') === '1';
+      payload.allow_multiple_flights_one_requirement = String(payload.allow_multiple_flights_one_requirement || '0') === '1';
+      await post(payload);
+      await refreshWorkspace();
+      closeRequirementCategoryModal();
+      setStatus('Requirement category saved');
     } catch(err){ setStatus(err.message); }
   });
   function openEgleSettings(){

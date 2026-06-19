@@ -356,6 +356,7 @@ $mockOralEnabled = $permRow ? ((int)$permRow['mock_oral_enabled'] === 1) : false
   let drawing = false;
   let hasInk = false;
   let last = null;
+  let lastMid = null;
   const ratio = Math.max(1, window.devicePixelRatio || 1);
   function resize(){
     const rect = canvas.getBoundingClientRect();
@@ -376,6 +377,7 @@ $mockOralEnabled = $permRow ? ((int)$permRow['mock_oral_enabled'] === 1) : false
   function start(e){
     drawing = true;
     last = point(e);
+    lastMid = last;
     e.preventDefault();
   }
   function move(e){
@@ -388,16 +390,18 @@ $mockOralEnabled = $permRow ? ((int)$permRow['mock_oral_enabled'] === 1) : false
     const mid = {x:(last.x+p.x)/2, y:(last.y+p.y)/2};
     ctx.lineWidth = width;
     ctx.beginPath();
-    ctx.moveTo(last.x, last.y);
+    ctx.moveTo(lastMid.x, lastMid.y);
     ctx.quadraticCurveTo(last.x, last.y, mid.x, mid.y);
     ctx.stroke();
     last = p;
+    lastMid = mid;
     hasInk = true;
     e.preventDefault();
   }
   function end(){
     drawing = false;
     last = null;
+    lastMid = null;
   }
   function clear(){
     ctx.clearRect(0, 0, canvas.width, canvas.height);

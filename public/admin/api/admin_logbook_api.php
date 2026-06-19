@@ -175,6 +175,16 @@ try {
             $category = $service->saveRequirementCategory($input);
             alog_json(200, array('ok' => true, 'category' => $category));
 
+        case 'delete_requirement_category':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $service->deleteRequirementCategory((int)($input['requirement_category_id'] ?? 0));
+            $response = array('ok' => true);
+            if ($logbookId > 0) {
+                $response['data'] = $service->loadWorkspace($logbookId);
+            }
+            alog_json(200, $response);
+
         default:
             alog_json(400, array('ok' => false, 'error' => 'Unknown action.'));
     }
