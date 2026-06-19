@@ -184,6 +184,27 @@
   gap:clamp(10px,1vw,16px);
 }
 
+.tv-radar-weather-error{
+  grid-column:1 / -1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:16px;
+  color:#ff9f9f;
+  font-size:clamp(11px,1vw,14px);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+
+.tv-radar-weather-error[hidden]{
+  display:none !important;
+}
+
+.tv-radar-weather-live[hidden]{
+  display:none !important;
+}
+
 .tv-radar-wind-block{
   display:flex;
   flex-direction:column;

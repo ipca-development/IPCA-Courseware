@@ -84,9 +84,10 @@
   var DEG_TO_RAD = Math.PI / 180;
   var RAD_TO_DEG = 180 / Math.PI;
   var SWEEP_PERIOD_MS = 4200;
-  var BLIP_TRAIL_TURNS = 8;
+  var BLIP_TRAIL_TURNS = 14;
   var BLIP_LIFE_MS = SWEEP_PERIOD_MS * BLIP_TRAIL_TURNS;
-  var BLIP_SPAWN_MIN_PX = 2.5;
+  var BLIP_SPAWN_MIN_PX = 11;
+  var BLIP_MAX_COUNT = 20;
   var WIND_HISTORY_MS = 10 * 60 * 1000;
   var RADAR_DELAY_MS = 25000;
   var TRACK_HISTORY_MS = 90000;
@@ -105,11 +106,47 @@
     var spread = 3.4;
     var op = opacity != null ? opacity : 1;
     return [
-      '<line x1="' + cx + '" y1="' + tailY + '" x2="' + cx + '" y2="' + tipY + '"',
+      '<line class="tv-radar-wind-shaft" x1="' + cx + '" y1="' + tailY + '" x2="' + cx + '" y2="' + tipY + '"',
       ' stroke="' + stroke + '" stroke-width="' + strokeWidth + '" stroke-linecap="round" opacity="' + op + '"/>',
-      '<polygon points="' + cx + ',' + headTipY + ' ' + (cx - spread) + ',' + headBaseY + ' ' + (cx + spread) + ',' + headBaseY + '"',
+      '<polygon class="tv-radar-wind-head" points="' + cx + ',' + headTipY + ' ' + (cx - spread) + ',' + headBaseY + ' ' + (cx + spread) + ',' + headBaseY + '"',
       ' fill="' + fill + '" opacity="' + op + '"/>'
     ].join('');
+  }
+
+  function positionWindFromArrow(groupEl, dirDeg) {
+    if (!groupEl || dirDeg == null || !isFinite(dirDeg)) return;
+    var line = groupEl.querySelector('.tv-radar-wind-shaft');
+    var head = groupEl.querySelector('.tv-radar-wind-head');
+    if (!line || !head) return;
+
+    var rad = dirDeg * DEG_TO_RAD;
+    var sin = Math.sin(rad);
+    var cos = Math.cos(rad);
+    var cx = 50;
+    var cy = 50;
+    var tailX = cx + sin * WIND_ARROW_R_OUTER;
+    var tailY = cy - cos * WIND_ARROW_R_OUTER;
+    var tipX = cx + sin * WIND_ARROW_R_INNER;
+    var tipY = cy - cos * WIND_ARROW_R_INNER;
+    var spread = 3.4;
+    var headTipX = tipX - sin * 3.6;
+    var headTipY = tipY + cos * 3.6;
+    var baseX = tipX + sin * 1.2;
+    var baseY = tipY - cos * 1.2;
+    var wing1X = baseX + cos * spread;
+    var wing1Y = baseY + sin * spread;
+    var wing2X = baseX - cos * spread;
+    var wing2Y = baseY - sin * spread;
+
+    line.setAttribute('x1', tailX.toFixed(2));
+    line.setAttribute('y1', tailY.toFixed(2));
+    line.setAttribute('x2', tipX.toFixed(2));
+    line.setAttribute('y2', tipY.toFixed(2));
+    head.setAttribute('points',
+      headTipX.toFixed(2) + ',' + headTipY.toFixed(2) + ' ' +
+      wing2X.toFixed(2) + ',' + wing2Y.toFixed(2) + ' ' +
+      wing1X.toFixed(2) + ',' + wing1Y.toFixed(2)
+    );
   }
 
   function clamp(n, min, max) {
@@ -349,7 +386,9 @@
       '  <section class="tv-radar-panel">',
       '    <div class="tv-radar-panel-head"><span>WEATHER / ASOS</span><span class="tv-radar-panel-updated" data-radar-weather-updated>Updated —</span></div>',
       '    <div class="tv-radar-weather-body" data-radar-weather-body>',
-      '      <div class="tv-radar-wind-block">',
+      '      <div class="tv-radar-weather-error" data-radar-weather-error hidden>WEATHER STATION UNAVAILABLE</div>',
+      '      <div class="tv-radar-weather-live" data-radar-weather-live>',
+      '        <div class="tv-radar-wind-block">',
       '        <div class="tv-radar-wind-compass" data-radar-wind-compass>',
       '          <svg class="tv-radar-wind-svg" viewBox="0 0 100 100" aria-hidden="true">',
       '            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(57,255,106,.22)" stroke-width="1"/>',
@@ -361,6 +400,7 @@
       '        </div>',
       '        <div class="tv-radar-wind-value" data-radar-wind-value>--- / -- KT</div>',
       '        <div class="tv-radar-wind-sub" data-radar-runway-favor></div>',
+      '        </div>',
       '      </div>',
       '      <div class="tv-radar-asos-list" data-radar-asos-list></div>',
       '    </div>',
@@ -379,6 +419,8 @@
     this.weatherEls = {
       updated: this.root.querySelector('[data-radar-weather-updated]'),
       body: this.root.querySelector('[data-radar-weather-body]'),
+      error: this.root.querySelector('[data-radar-weather-error]'),
+      live: this.root.querySelector('[data-radar-weather-live]'),
       windValue: this.root.querySelector('[data-radar-wind-value]'),
       windVariation: this.root.querySelector('[data-radar-wind-variation]'),
       windLive: this.root.querySelector('[data-radar-wind-live]'),
@@ -586,20 +628,22 @@
 
     if (!w || !w.ok) {
       els.updated.textContent = 'Updated —';
-      els.body.innerHTML = '<div class="tv-radar-unavailable">WEATHER STATION UNAVAILABLE</div>';
+      if (els.error) els.error.hidden = false;
+      if (els.live) els.live.hidden = true;
       return;
     }
+
+    if (els.error) els.error.hidden = true;
+    if (els.live) els.live.hidden = false;
 
     els.updated.textContent = formatUpdatedAt(w);
     els.windValue.textContent = formatWind(w);
 
-    var windDir = w.wind_dir_deg != null ? w.wind_dir_deg : windDirToTens(w.wind_dir_raw_deg);
-    if (windDir != null) {
+    var windDir = w.wind_dir_deg != null ? Number(w.wind_dir_deg) : windDirToTens(w.wind_dir_raw_deg);
+    if (windDir != null && isFinite(windDir)) {
       this.windTargetDir = windDir;
       if (this.displayWindDir == null) this.displayWindDir = windDir;
-      if (els.windLive) {
-        els.windLive.setAttribute('transform', 'rotate(' + windDir + ' 50 50)');
-      }
+      positionWindFromArrow(els.windLive, windDir);
       var now = Date.now();
       var last = this.windHistory.length ? this.windHistory[this.windHistory.length - 1] : null;
       if (!last || Math.abs(((windDir - last.dir + 540) % 360) - 180) > 2 || now - last.ts > 45000) {
@@ -614,10 +658,9 @@
     if (els.windFcst) {
       var fcstDir = windDirToTens(w.forecast_wind_dir_deg);
       if (fcstDir != null) {
-        els.windFcst.setAttribute('transform', 'rotate(' + fcstDir + ' 50 50)');
+        positionWindFromArrow(els.windFcst, fcstDir);
         els.windFcst.style.opacity = '0.9';
       } else {
-        els.windFcst.removeAttribute('transform');
         els.windFcst.style.opacity = '0';
       }
     }
@@ -672,9 +715,12 @@
     var wave = Math.sin(ts / 1500) * 5.5 + Math.sin(ts / 3100) * 3.2 + Math.sin(ts / 680) * 1.6;
     var desired = this.windTargetDir + wave;
     this.displayWindDir = lerpAngle(this.displayWindDir, desired, Math.min(1, dtSec * 4.5));
+    positionWindFromArrow(this.weatherEls.windLive, this.displayWindDir);
     var breathe = 0.82 + 0.18 * (0.5 + 0.5 * Math.sin(ts / 2100));
-    this.weatherEls.windLive.setAttribute('transform', 'rotate(' + this.displayWindDir.toFixed(1) + ' 50 50)');
-    this.weatherEls.windLive.style.opacity = String(breathe);
+    var shaft = this.weatherEls.windLive.querySelector('.tv-radar-wind-shaft');
+    var head = this.weatherEls.windLive.querySelector('.tv-radar-wind-head');
+    if (shaft) shaft.style.opacity = String(breathe);
+    if (head) head.style.opacity = String(breathe);
   };
 
   RadarScreen.prototype.parseObservedAtMs = function (target, recvMs) {
@@ -820,10 +866,12 @@
 
       var moved = state.lastBlipX == null ? 999 : Math.hypot(xy.x - state.lastBlipX, xy.y - state.lastBlipY);
       var gs = state.segmentGs != null ? state.segmentGs : (target.gs != null ? target.gs : 0);
-      var spawnMs = gs > 12 ? 180 : (gs > 6 ? 260 : (gs > 2 ? 420 : (gs > 0.5 ? 700 : 2000)));
+      var spawnMs = gs > 20 ? 1100 : (gs > 10 ? 1400 : (gs > 4 ? 2000 : (gs > 1 ? 3200 : 5500)));
       var elapsed = ts - (state.lastBlipSpawnTs || 0);
+      var movedEnough = moved >= BLIP_SPAWN_MIN_PX;
+      var timeReady = elapsed >= spawnMs;
 
-      if (moved >= BLIP_SPAWN_MIN_PX || elapsed >= spawnMs) {
+      if (timeReady && (gs <= 1 ? true : movedEnough)) {
         state.blips.push({ x: xy.x, y: xy.y, born: ts });
         state.lastBlipX = xy.x;
         state.lastBlipY = xy.y;
@@ -833,8 +881,8 @@
       state.blips = state.blips.filter(function (blip) {
         return ts - blip.born < BLIP_LIFE_MS;
       });
-      if (state.blips.length > 48) {
-        state.blips = state.blips.slice(state.blips.length - 48);
+      if (state.blips.length > BLIP_MAX_COUNT) {
+        state.blips = state.blips.slice(state.blips.length - BLIP_MAX_COUNT);
       }
     });
   };
@@ -1039,36 +1087,36 @@
         var age = ts - blip.born;
         if (age < 0 || age >= BLIP_LIFE_MS) return;
         var lifeT = age / BLIP_LIFE_MS;
-        var alpha = 0.96 * Math.pow(1 - lifeT, 1.35);
-        if (alpha < 0.02) return;
+        var alpha = 0.92 * Math.pow(1 - lifeT, 0.48);
+        if (alpha < 0.015) return;
 
-        var scatterAmt = lifeT * 5.5;
-        var scatter = scatterOffset(state.scatterSeed + idx * 2.7 + lifeT * 4, scatterAmt);
+        var scatterAmt = lifeT * lifeT * 4.5;
+        var scatter = scatterOffset(state.scatterSeed + idx * 2.7 + lifeT * 3, scatterAmt);
         var bx = blip.x + scatter.x;
         var by = blip.y + scatter.y;
-        var coreR = 5.2 - lifeT * 2.2;
-        var glowR = 7 + lifeT * 10;
+        var coreR = 4.8 - lifeT * 1.6;
+        var glowR = 6 + lifeT * 14;
 
         ctx.save();
-        if (lifeT > 0.08) {
-          ctx.filter = 'blur(' + (0.5 + lifeT * 2.2) + 'px)';
+        if (lifeT > 0.2) {
+          ctx.filter = 'blur(' + (0.4 + lifeT * 1.8) + 'px)';
         }
 
         var grad = ctx.createRadialGradient(bx, by, 0, bx, by, glowR);
-        grad.addColorStop(0, 'rgba(210,255,220,' + (alpha * 0.98) + ')');
-        grad.addColorStop(0.18, 'rgba(80,255,110,' + (alpha * 0.72) + ')');
-        grad.addColorStop(0.45, 'rgba(40,220,80,' + (alpha * 0.32) + ')');
+        grad.addColorStop(0, 'rgba(210,255,220,' + (alpha * 0.95) + ')');
+        grad.addColorStop(0.22, 'rgba(80,255,110,' + (alpha * 0.62) + ')');
+        grad.addColorStop(0.5, 'rgba(40,220,80,' + (alpha * 0.28) + ')');
         grad.addColorStop(1, 'rgba(20,120,50,0)');
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(bx, by, glowR, 0, Math.PI * 2);
         ctx.fill();
 
-        if (lifeT < 0.45) {
+        if (lifeT < 0.62) {
           ctx.filter = 'none';
-          ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.9) + ')';
+          ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.88) + ')';
           ctx.beginPath();
-          ctx.arc(bx, by, Math.max(1.5, coreR), 0, Math.PI * 2);
+          ctx.arc(bx, by, Math.max(1.4, coreR), 0, Math.PI * 2);
           ctx.fill();
         }
 
