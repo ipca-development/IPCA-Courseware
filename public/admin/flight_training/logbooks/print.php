@@ -82,7 +82,7 @@ function totalHourParts(mixed $value): array
 {
     $number = round((float)$value, 1);
     if (abs($number) < 0.05) {
-        return array('0', '');
+        return array('0.', '0');
     }
     return hourParts($number);
 }
@@ -205,6 +205,15 @@ function easaActingInstructorTime(array $entry): float
     return 0.0;
 }
 
+function faaActualInstrumentTime(array $entry): float
+{
+    $actual = (float)($entry['actual_instrument_time'] ?? 0);
+    if ($actual > 0) {
+        return $actual;
+    }
+    return (float)($entry['instrument_time'] ?? 0);
+}
+
 function leftEntryFields(array $entry): array
 {
     return array(
@@ -247,6 +256,8 @@ function pageTotals(array $entries): array
         'me' => 0.0,
         'night' => 0.0,
         'ifr' => 0.0,
+        'actual_instrument' => 0.0,
+        'simulated_instrument' => 0.0,
         'pic' => 0.0,
         'copilot' => 0.0,
         'dual' => 0.0,
@@ -263,6 +274,8 @@ function pageTotals(array $entries): array
         $totals['me'] += (float)($entry['multi_engine_time'] ?? 0);
         $totals['night'] += (float)($entry['night_time'] ?? 0);
         $totals['ifr'] += (float)($entry['instrument_time'] ?? 0);
+        $totals['actual_instrument'] += faaActualInstrumentTime($entry);
+        $totals['simulated_instrument'] += (float)($entry['simulated_instrument_time'] ?? 0);
         $totals['pic'] += (float)($entry['pic_time'] ?? 0);
         $totals['copilot'] += (float)($entry['copilot_time'] ?? 0);
         $totals['dual'] += (float)($entry['dual_received_time'] ?? 0);
@@ -704,7 +717,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
             0 => $entry['single_engine_time'] ?? 0,
             2 => $entry['multi_engine_time'] ?? 0,
             8 => $entry['night_time'] ?? 0,
-            10 => $entry['actual_instrument_time'] ?? 0,
+            10 => faaActualInstrumentTime($entry),
             12 => $entry['simulated_instrument_time'] ?? 0,
             14 => $entry['fnpt_simulator_time'] ?? 0,
             16 => $entry['dual_received_time'] ?? 0,
@@ -719,7 +732,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     }
     foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
         $y = $bodyTop + (($footerStartRow + $idx) * $rowH) + ($rowH / 2);
-        foreach (array(0 => 'se', 2 => 'me', 8 => 'night', 10 => 'ifr', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
+        foreach (array(0 => 'se', 2 => 'me', 8 => 'night', 10 => 'actual_instrument', 12 => 'simulated_instrument', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
             [$whole, $tenths] = totalHourParts($totals[$key] ?? 0);
             $out .= svgText($centers[$colIdx], $y, $whole, 'faa-body');
             $out .= svgText($centers[$colIdx + 1], $y, $tenths, 'faa-body');
