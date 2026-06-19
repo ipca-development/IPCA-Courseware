@@ -1230,6 +1230,7 @@ if (!function_exists('aue_load_exams_endorsements_context')) {
     {
         require_once __DIR__ . '/mock_oral/mock_oral_bootstrap.php';
         require_once __DIR__ . '/mock_oral/FaaKnowledgeTestParserService.php';
+        require_once __DIR__ . '/flight_training/UserFlightCredentialService.php';
         mo_ensure_tables($pdo);
 
         $cohorts = [];
@@ -1262,6 +1263,8 @@ if (!function_exists('aue_load_exams_endorsements_context')) {
 
         $parser = new FaaKnowledgeTestParserService($pdo);
         $reports = $parser->listReportsForUser($userId);
+        $flightCredentialService = new UserFlightCredentialService($pdo);
+        $flightCredentials = $flightCredentialService->loadForUser($userId);
 
         $selectedCohortId = (int)($_GET['cohort_id'] ?? ($cohorts[0]['cohort_id'] ?? 0));
         $deficiencies = [];
@@ -1303,6 +1306,8 @@ if (!function_exists('aue_load_exams_endorsements_context')) {
             'areas' => $areas,
             'permissions' => $permissions,
             'reports' => $reports,
+            'flight_credentials' => $flightCredentials,
+            'flight_credentials_schema_ready' => $flightCredentialService->schemaReady(),
             'selected_cohort_id' => $selectedCohortId,
             'deficiencies' => $deficiencies,
             'sessions' => $sessions,
@@ -1317,6 +1322,7 @@ if (!function_exists('aue_update_exams_endorsements_tab')) {
         require_once __DIR__ . '/courseware_progression_v2.php';
         require_once __DIR__ . '/mock_oral/FaaKnowledgeTestParserService.php';
         require_once __DIR__ . '/mock_oral/mock_oral_bootstrap.php';
+        require_once __DIR__ . '/flight_training/UserFlightCredentialService.php';
         mo_ensure_tables($pdo);
 
         $action = strtolower(trim((string)($_POST['exams_action'] ?? '')));
@@ -1331,6 +1337,11 @@ if (!function_exists('aue_update_exams_endorsements_tab')) {
                 throw new RuntimeException('Select a cohort.');
             }
             $engine->setMockOralPermission($userId, $cohortId, $enabled, $actorId, $notes !== '' ? $notes : null, $catalogId ?: null);
+            return;
+        }
+
+        if ($action === 'save_flight_credentials') {
+            (new UserFlightCredentialService($pdo))->saveForUser($userId, $_POST, $actorId);
             return;
         }
 

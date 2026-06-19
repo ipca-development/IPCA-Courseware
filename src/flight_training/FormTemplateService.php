@@ -692,7 +692,7 @@ final class FormTemplateService
                     array('iacra_ftn', 'IACRA FTN', 'iacra.ftn', 'student', true),
                     array('iacra_username', 'IACRA username', 'iacra.username', 'student', false),
                     array('knowledge_test_score', 'Knowledge test score', 'knowledge_test.score', 'instructor', false),
-                    array('knowledge_test_deficient_codes', 'Knowledge test deficient codes', 'knowledge_test.deficient_codes', 'instructor', false),
+                    array('knowledge_test_deficient_codes', 'Paste written test report deficient codes', 'knowledge_test.deficient_codes', 'instructor', false),
                 )),
                 array($this->headingBlock(17, 4, 'FAA 8710 / Logbook Totals', 2)),
                 $this->fieldBlocks(18, 4, array(
@@ -707,15 +707,19 @@ final class FormTemplateService
                 array($this->headingBlock(25, 5, 'Private Pilot SEL Readiness Checks', 2)),
                 $this->fieldBlocks(26, 5, array(
                     array('ground_training_complete', 'Ground training / theory completion', 'theory.completion', 'instructor', false),
-                    array('first_solo_status', 'First solo status', 'faa61.ppl.first_solo.status', 'instructor', false),
-                    array('long_solo_xc_status', 'Long solo cross-country status', 'faa61.ppl.long_solo_cross_country.status', 'instructor', false),
-                    array('solo_xc_150nm_status', 'Solo cross-country 150 NM status', 'faa61.ppl.solo_cross_country_150_nm.status', 'instructor', false),
-                    array('towered_airport_landings', 'Towered airport landings', 'faa61.ppl.towered_airport_landings.value', 'instructor', false),
-                    array('basic_instrument_status', 'Basic instrument flying status', 'faa61.ppl.basic_instrument_flying.status', 'instructor', false),
+                    array('first_solo_event', 'Tagged first solo flight', 'faa61.ppl.first_solo.events', 'instructor', false),
+                    array('dual_xc_training_events', 'Tagged dual cross-country training flight(s)', 'faa61.ppl.dual_cross_country_training.events', 'instructor', false),
+                    array('dual_night_training_events', 'Tagged dual night training flight(s)', 'faa61.ppl.dual_night_training.events', 'instructor', false),
+                    array('dual_night_xc_event', 'Tagged dual night cross-country flight incl. distance', 'faa61.ppl.dual_night_cross_country.events', 'instructor', false),
+                    array('dual_night_takeoffs_landings_events', 'Tagged dual night takeoffs and landings', 'faa61.ppl.dual_night_takeoffs_landings.events', 'instructor', false),
+                    array('dual_instrument_training_events', 'Tagged dual instrument flight training', 'faa61.ppl.dual_instrument_flight_training.events', 'instructor', false),
+                    array('solo_xc_event', 'Tagged solo cross-country flight', 'faa61.ppl.solo_cross_country_flight.events', 'instructor', false),
+                    array('long_150nm_solo_xc_event', 'Tagged long 150 NM solo cross-country flight', 'faa61.ppl.long_150nm_solo_cross_country_flight.events', 'instructor', false),
+                    array('towered_airport_takeoffs_landings_events', 'Tagged towered airport takeoffs and landings', 'faa61.ppl.towered_airport_takeoffs_landings.events', 'instructor', false),
                 )),
                 array(
-                    $this->signatureBlock(32, 5, 'cfi_signature', 'CFI signature', 'instructor'),
-                    $this->signatureBlock(33, 5, 'applicant_signature', 'Applicant signature', 'student'),
+                    $this->signatureBlock(40, 5, 'cfi_signature', 'CFI signature', 'instructor'),
+                    $this->signatureBlock(41, 5, 'applicant_signature', 'Applicant signature', 'student'),
                 )
             ),
         ));

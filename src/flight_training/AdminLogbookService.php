@@ -180,7 +180,8 @@ final class AdminLogbookService
         $assignments = $this->listAssignments($logbookId);
         $totals = $this->totals->calculate($entries);
         $evaluations = $this->requirements->evaluateAll($entries, $categories, $assignments);
-        $variables = $this->variables->buildVariables($totals, $evaluations);
+        $evaluations = $this->attachRequirementEvidence($evaluations, $assignments);
+        $variables = $this->variables->buildVariables($totals, $evaluations, $assignments);
         $this->saveVariableSnapshot($logbook, $variables);
 
         return array(
@@ -720,6 +721,13 @@ final class AdminLogbookService
     public function assignRequirement(int $logbookId, int $studentUserId, int $categoryId, array $entryIds, int $actorUserId): void
     {
         $this->requireSchema();
+        $entryIds = array_values(array_unique(array_filter(array_map(static fn(mixed $entryId): int => (int)$entryId, $entryIds), static fn(int $entryId): bool => $entryId > 0)));
+        if ($entryIds === array()) {
+            throw new RuntimeException('Select one or more logbook entries to tag as the required event.');
+        }
+        if ($categoryId <= 0) {
+            throw new RuntimeException('Choose a requirement event category.');
+        }
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_flight_requirement_assignments
               (student_user_id, logbook_id, requirement_category_id, assigned_by, status, metadata_json)
@@ -738,10 +746,7 @@ final class AdminLogbookService
             VALUES (:assignment_id, :entry_id)
         ");
         foreach ($entryIds as $entryId) {
-            $entryId = (int)$entryId;
-            if ($entryId > 0) {
-                $ins->execute(array(':assignment_id' => $assignmentId, ':entry_id' => $entryId));
-            }
+            $ins->execute(array(':assignment_id' => $assignmentId, ':entry_id' => $entryId));
         }
         $this->writeAudit($logbookId, null, $actorUserId, 'requirement_assigned', null, array('assignment_id' => $assignmentId, 'entry_ids' => array_values($entryIds)));
     }
@@ -960,7 +965,146 @@ final class AdminLogbookService
             ORDER BY a.created_at DESC
         ");
         $stmt->execute(array(':id' => $logbookId));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $assignments = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($assignments === array()) {
+            return array();
+        }
+
+        $entriesStmt = $this->pdo->prepare("
+            SELECT e.*
+            FROM ipca_flight_requirement_assignment_entries ae
+            INNER JOIN ipca_admin_logbook_entries e ON e.id = ae.entry_id
+            WHERE ae.assignment_id = :assignment_id
+              AND e.review_status <> 'deleted'
+            ORDER BY e.entry_date IS NULL, e.entry_date, e.id
+        ");
+        foreach ($assignments as &$assignment) {
+            $entriesStmt->execute(array(':assignment_id' => (int)$assignment['id']));
+            $entries = array_map(
+                fn (array $row): array => $this->hydrateEntryFromSource($row),
+                $entriesStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()
+            );
+            $assignment['entries'] = $entries;
+            $assignment['entry_count'] = count($entries);
+            $assignment['total_time'] = round(array_sum(array_map(static fn(array $entry): float => (float)($entry['total_flight_time'] ?? 0), $entries)), 2);
+            $assignment['total_distance_nm'] = round(array_sum(array_map(static fn(array $entry): float => (float)($entry['cross_country_distance_nm'] ?? 0), $entries)), 1);
+            $assignment['entry_summary'] = $this->requirementEntrySummary($entries);
+        }
+        unset($assignment);
+
+        return $assignments;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $evaluations
+     * @param list<array<string,mixed>> $assignments
+     * @return list<array<string,mixed>>
+     */
+    private function attachRequirementEvidence(array $evaluations, array $assignments): array
+    {
+        $byKey = array();
+        foreach ($assignments as $assignment) {
+            $key = strtolower(trim((string)($assignment['requirement_key'] ?? '')));
+            if ($key === '') {
+                continue;
+            }
+            $byKey[$key][] = array(
+                'assignment_id' => (int)($assignment['id'] ?? 0),
+                'label' => (string)($assignment['label'] ?? ''),
+                'entry_count' => (int)($assignment['entry_count'] ?? 0),
+                'total_time' => round((float)($assignment['total_time'] ?? 0), 1),
+                'total_distance_nm' => round((float)($assignment['total_distance_nm'] ?? 0), 1),
+                'summary' => (string)($assignment['entry_summary'] ?? ''),
+                'entries' => $this->requirementEvidenceEntries(is_array($assignment['entries'] ?? null) ? $assignment['entries'] : array()),
+            );
+        }
+
+        foreach ($evaluations as &$evaluation) {
+            $key = strtolower(trim((string)($evaluation['requirement_key'] ?? '')));
+            $evidence = $key !== '' ? ($byKey[$key] ?? array()) : array();
+            $evaluation['evidence'] = $evidence;
+            $evaluation['evidence_count'] = array_sum(array_map(static fn(array $row): int => (int)($row['entry_count'] ?? 0), $evidence));
+            $evaluation['evidence_summary'] = implode('; ', array_values(array_filter(array_map(static fn(array $row): string => trim((string)($row['summary'] ?? '')), $evidence))));
+        }
+        unset($evaluation);
+
+        return $evaluations;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     * @return list<array<string,mixed>>
+     */
+    private function requirementEvidenceEntries(array $entries): array
+    {
+        $out = array();
+        foreach ($entries as $entry) {
+            $out[] = array(
+                'id' => (int)($entry['id'] ?? 0),
+                'entry_date' => (string)($entry['entry_date'] ?? ''),
+                'route' => $this->entryRoute($entry),
+                'departure_airport' => (string)($entry['departure_airport'] ?? ''),
+                'arrival_airport' => (string)($entry['arrival_airport'] ?? ''),
+                'total_flight_time' => round((float)($entry['total_flight_time'] ?? 0), 1),
+                'dual_received_time' => round((float)($entry['dual_received_time'] ?? 0), 1),
+                'solo_time' => round((float)($entry['solo_time'] ?? 0), 1),
+                'cross_country_time' => round((float)($entry['cross_country_time'] ?? 0), 1),
+                'cross_country_distance_nm' => round((float)($entry['cross_country_distance_nm'] ?? 0), 1),
+                'night_time' => round((float)($entry['night_time'] ?? 0), 1),
+                'instrument_time' => round((float)($entry['instrument_time'] ?? 0), 1),
+                'towered_airport_landings' => (int)($entry['towered_airport_landings'] ?? 0),
+                'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
+                'remarks' => (string)($entry['remarks'] ?? ''),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function requirementEntrySummary(array $entries): string
+    {
+        $parts = array();
+        foreach ($entries as $entry) {
+            $date = trim((string)($entry['entry_date'] ?? ''));
+            $dep = trim((string)($entry['departure_airport'] ?? ''));
+            $arr = trim((string)($entry['arrival_airport'] ?? ''));
+            $route = trim($dep . ($dep !== '' || $arr !== '' ? '-' : '') . $arr, '-');
+            $time = round((float)($entry['total_flight_time'] ?? 0), 1);
+            $distance = round((float)($entry['cross_country_distance_nm'] ?? 0), 1);
+            $bits = array();
+            if ($date !== '') {
+                $bits[] = $date;
+            }
+            if ($route !== '') {
+                $bits[] = $route;
+            }
+            if ($time > 0) {
+                $bits[] = number_format($time, 1, '.', '') . 'h';
+            }
+            if ($distance > 0) {
+                $bits[] = number_format($distance, 1, '.', '') . ' NM';
+            }
+            $aircraft = trim((string)($entry['aircraft_registration'] ?? ''));
+            if ($aircraft !== '') {
+                $bits[] = $aircraft;
+            }
+            if ($bits !== array()) {
+                $parts[] = implode(' · ', $bits);
+            }
+        }
+        return implode('; ', $parts);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function entryRoute(array $entry): string
+    {
+        $dep = trim((string)($entry['departure_airport'] ?? ''));
+        $arr = trim((string)($entry['arrival_airport'] ?? ''));
+        return trim($dep . ($dep !== '' || $arr !== '' ? '-' : '') . $arr, '-');
     }
 
     /**

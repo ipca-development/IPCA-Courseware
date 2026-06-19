@@ -55,7 +55,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
 .alogw-edit-body{flex:1 1 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 14px;overflow:auto;background:#fff}.alogw-edit-field{display:flex;flex-direction:column;gap:3px}.alogw-edit-field--wide{grid-column:1/-1}.alogw-edit-label{font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.alogw-edit-input,.alogw-edit-textarea,.alogw-edit-select{border:1px solid rgba(15,23,42,.13);border-radius:9px;padding:6px 8px;font:inherit;font-size:12px;color:#102845;background:#fff}.alogw-edit-textarea{min-height:52px;resize:vertical}.alogw-edit-actions{flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid rgba(15,23,42,.08);background:#f8fafc}
 .alogw-modal-card form{min-height:0;display:flex;flex-direction:column;flex:1 1 auto}
 .alogw-8710-wrap{overflow:auto;background:#fff}.alogw-8710{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;table-layout:fixed}.alogw-8710 th,.alogw-8710 td{border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;padding:7px 5px;text-align:center;font-size:10px;line-height:1.1;color:#102845;background:#fff}.alogw-8710 th{background:#f8fafc;font-size:9px;font-weight:900;text-transform:uppercase;color:#475569}.alogw-8710 .alogw-8710-row-head{text-align:left;font-weight:900;background:#f8fafc}.alogw-8710 .alogw-8710-num{font-variant-numeric:tabular-nums;font-weight:800}.alogw-8710-note{padding:8px 12px;font-size:11px;color:#64748b;background:#f8fafc;border-top:1px solid rgba(15,23,42,.06)}
-.alogw-bottom{display:grid;grid-template-columns:1fr;gap:16px}.alogw-req-list{max-height:360px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
+.alogw-bottom{display:grid;grid-template-columns:1fr;gap:16px}.alogw-req-list{max-height:460px;overflow:auto}.alogw-req-row{display:grid;grid-template-columns:74px minmax(170px,1fr) 76px 76px 118px;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(15,23,42,.06);align-items:center}.alogw-req-head{position:sticky;top:0;z-index:1;background:#f8fafc;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b}.alogw-req-cell{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alogw-req-value{text-align:center;font-variant-numeric:tabular-nums}.alogw-req-evidence{grid-column:1/-1;margin-top:8px;padding:9px 10px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);font-size:11px;color:#334155}.alogw-req-evidence-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:900;color:#102845}.alogw-req-evidence-list{margin:7px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}.alogw-req-evidence-list li{display:flex;gap:7px;align-items:flex-start;flex-wrap:wrap}.alogw-req-evidence-empty{color:#92400e;background:#fffbeb;border-color:#fde68a}.alogw-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase;white-space:nowrap}.alogw-badge--pass{background:#dcfce7;color:#166534}.alogw-badge--fail{background:#fee2e2;color:#991b1b}
 @media(max-width:1200px){.alogw-egle-grid,.alogw-bottom{grid-template-columns:1fr}.alogw-egle-form{grid-template-columns:1fr 1fr}.alogw-cards{grid-template-columns:repeat(2,minmax(120px,1fr))}.alogw-extract-status{margin-left:0}}
 </style>
 
@@ -156,8 +156,8 @@ cw_header('Flight Training · Admin Logbook Workspace');
         <option value="Europe/London">United Kingdom Local</option>
         <option value="browser">Browser Local</option>
       </select>
-      <select class="alogw-select" id="alogRequirementSelect"></select>
-      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Assign Requirement</button>
+      <select class="alogw-select" id="alogRequirementSelect" title="Choose the required event that the selected logbook row(s) prove"></select>
+      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Tag Selected as Required Event</button>
     </div>
     <div class="alogw-table-wrap">
       <table class="alogw-table">
@@ -533,7 +533,16 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       const short = required === null ? 0 : Math.max(0, required - actual);
       const status = String(r.status || 'fail').toUpperCase();
       const result = status === 'PASS' ? `PASS` : `${formatRequirementValue(short, unit)} short · FAIL`;
-      return `<div class="alogw-req-row"><span class="alogw-req-cell" title="${esc(r.authority)}">${esc(r.authority)}</span><strong class="alogw-req-cell" title="${esc(r.label)}">${esc(r.label)}</strong><span class="alogw-req-value">${esc(formatRequirementValue(required, unit))}</span><span class="alogw-req-value">${esc(formatRequirementValue(actual, unit))}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}" title="${esc(result)}">${esc(result)}</span></div>`;
+      const evidence = Array.isArray(r.evidence) ? r.evidence : [];
+      const evidenceEntries = evidence.flatMap(ev => Array.isArray(ev.entries) ? ev.entries : []);
+      const evidenceHtml = evidenceEntries.length
+        ? `<div class="alogw-req-evidence"><div class="alogw-req-evidence-title"><span>Tagged logbook record(s)</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}">${esc(status === 'PASS' ? 'Satisfies requirement' : 'Does not satisfy yet')}</span></div><ul class="alogw-req-evidence-list">${evidenceEntries.map(entry => {
+            const bits = [entry.entry_date, entry.route, entry.total_flight_time ? `${entry.total_flight_time}h` : '', entry.cross_country_distance_nm ? `${entry.cross_country_distance_nm} NM` : '', entry.aircraft_registration].filter(Boolean);
+            const detail = bits.length ? bits.join(' · ') : `Entry #${entry.id || ''}`;
+            return `<li><strong>${esc(detail)}</strong>${entry.remarks ? `<span>${esc(entry.remarks)}</span>` : ''}</li>`;
+          }).join('')}</ul></div>`
+        : `<div class="alogw-req-evidence alogw-req-evidence-empty"><strong>No tagged logbook record yet.</strong> Select row(s), choose this event, then click “Tag Selected as Required Event”.</div>`;
+      return `<div class="alogw-req-row"><span class="alogw-req-cell" title="${esc(r.authority)}">${esc(r.authority)}</span><strong class="alogw-req-cell" title="${esc(r.label)}">${esc(r.label)}</strong><span class="alogw-req-value">${esc(formatRequirementValue(required, unit))}</span><span class="alogw-req-value">${esc(formatRequirementValue(actual, unit))}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}" title="${esc(result)}">${esc(result)}</span>${evidenceHtml}</div>`;
     }).join('');
     document.getElementById('alogRequirements').innerHTML = reqs.length ? header + rows : '<div class="alogw-image-empty">No requirement categories.</div>';
     const cats = data.requirement_categories || [];
@@ -928,8 +937,11 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   document.getElementById('alogAssignRequirement').addEventListener('click', async () => {
     try {
       const ids = selectedIndexes().map(i => Number(entries[i].id || 0)).filter(Boolean);
+      if (!ids.length) {
+        throw new Error('Select one or more logbook rows to tag as the required event.');
+      }
       await post({action:'assign_requirement', logbook_id:logbookId, student_user_id:data.logbook.student_user_id, requirement_category_id:document.getElementById('alogRequirementSelect').value, entry_ids:ids});
-      setStatus('Requirement assigned');
+      setStatus('Selected logbook row(s) tagged as required event');
     } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogUploadForm').addEventListener('submit', async e => {

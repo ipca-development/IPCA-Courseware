@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/FormTemplateService.php';
 require_once __DIR__ . '/FlightTotalsService.php';
 require_once __DIR__ . '/Iacra8710Mapper.php';
+require_once __DIR__ . '/KnowledgeTestCodeResolver.php';
+require_once __DIR__ . '/UserFlightCredentialService.php';
 
 final class FormInstanceService
 {
@@ -264,6 +266,7 @@ final class FormInstanceService
                 i.status AS instance_status,
                 i.template_id,
                 i.template_version_id,
+                i.student_user_id,
                 t.title AS template_title,
                 tv.version_label
             FROM ipca_form_instance_recipients r
@@ -293,8 +296,237 @@ final class FormInstanceService
         ");
         $fieldsStmt->execute(array(':instance_id' => (int)$recipient['form_instance_id']));
         $fields = $fieldsStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $fields = $this->attachFieldRequirementEvidence($fields, (int)($recipient['student_user_id'] ?? 0));
+        $fields = $this->attachKnowledgeTestCodeRows($fields);
 
         return array('recipient' => $recipient, 'fields' => $fields);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $fields
+     * @return list<array<string,mixed>>
+     */
+    private function attachKnowledgeTestCodeRows(array $fields): array
+    {
+        $resolver = new KnowledgeTestCodeResolver($this->pdo);
+        foreach ($fields as &$field) {
+            if (!$this->isKnowledgeTestCodeField($field)) {
+                continue;
+            }
+            if (strtolower(trim((string)($field['label'] ?? ''))) === 'knowledge test deficient codes') {
+                $field['label'] = 'Paste written test report deficient codes';
+            }
+            $valueJson = $this->decodeJsonObject($field['value_json'] ?? null);
+            $rows = is_array($valueJson['resolved_codes'] ?? null) ? $valueJson['resolved_codes'] : array();
+            if ($rows === array()) {
+                $rows = $resolver->resolvePastedReport((string)($field['value_text'] ?? ''));
+            }
+            $field['knowledge_test_codes'] = $rows;
+        }
+        unset($field);
+        return $fields;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $fields
+     * @return list<array<string,mixed>>
+     */
+    private function attachFieldRequirementEvidence(array $fields, int $studentUserId): array
+    {
+        if ($fields === array() || $studentUserId <= 0) {
+            return $fields;
+        }
+        $evidence = $this->studentRequirementEvidenceByPrefix($studentUserId);
+        if ($evidence === array()) {
+            return $fields;
+        }
+
+        foreach ($fields as &$field) {
+            $prefix = $this->fieldRequirementPrefix((string)($field['variable_key'] ?? ''));
+            if ($prefix !== '' && isset($evidence[$prefix])) {
+                $field['requirement_evidence'] = $evidence[$prefix];
+            }
+        }
+        unset($field);
+
+        return $fields;
+    }
+
+    private function fieldRequirementPrefix(string $variableKey): string
+    {
+        $variableKey = strtolower(trim($variableKey));
+        if ($variableKey === '') {
+            return '';
+        }
+        foreach (array('.events', '.status', '.value', '.entry_count', '.hours', '.distance_nm', '.route', '.date') as $suffix) {
+            if (str_ends_with($variableKey, $suffix)) {
+                return substr($variableKey, 0, -strlen($suffix));
+            }
+        }
+        return '';
+    }
+
+    /**
+     * @return array<string,array<string,mixed>>
+     */
+    private function studentRequirementEvidenceByPrefix(int $studentUserId): array
+    {
+        if (
+            !$this->tableExists('ipca_admin_logbooks')
+            || !$this->tableExists('ipca_flight_requirement_assignments')
+            || !$this->tableExists('ipca_flight_requirement_assignment_entries')
+            || !$this->tableExists('ipca_flight_requirement_categories')
+        ) {
+            return array();
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_admin_logbooks
+            WHERE student_user_id = :student_user_id
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array(':student_user_id' => $studentUserId));
+        $logbookId = (int)$stmt->fetchColumn();
+        if ($logbookId <= 0) {
+            return array();
+        }
+
+        $assignmentStmt = $this->pdo->prepare("
+            SELECT
+                a.id,
+                c.authority,
+                c.certificate,
+                c.requirement_key,
+                c.label,
+                c.minimum_time,
+                c.minimum_distance_nm,
+                c.minimum_count,
+                c.automatic_rules_json
+            FROM ipca_flight_requirement_assignments a
+            INNER JOIN ipca_flight_requirement_categories c ON c.id = a.requirement_category_id
+            WHERE a.logbook_id = :logbook_id
+              AND a.status <> 'rejected'
+            ORDER BY a.created_at DESC, a.id DESC
+        ");
+        $assignmentStmt->execute(array(':logbook_id' => $logbookId));
+        $assignments = $assignmentStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($assignments === array()) {
+            return array();
+        }
+
+        $entryStmt = $this->pdo->prepare("
+            SELECT e.*
+            FROM ipca_flight_requirement_assignment_entries ae
+            INNER JOIN ipca_admin_logbook_entries e ON e.id = ae.entry_id
+            WHERE ae.assignment_id = :assignment_id
+              AND e.review_status <> 'deleted'
+            ORDER BY e.entry_date IS NULL, e.entry_date, e.id
+        ");
+
+        $evidence = array();
+        foreach ($assignments as $assignment) {
+            $prefix = $this->requirementVariablePrefix($assignment);
+            if ($prefix === '') {
+                continue;
+            }
+            $entryStmt->execute(array(':assignment_id' => (int)$assignment['id']));
+            $entries = $entryStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            $summary = $this->requirementEntrySummary($entries);
+            $hours = $this->sumEntryField($entries, 'total_flight_time');
+            $distance = $this->sumEntryField($entries, 'cross_country_distance_nm');
+            $entryCount = count($entries);
+            $satisfied = $this->requirementEvidenceSatisfied($assignment, $entryCount, $hours, $distance);
+
+            $evidence[$prefix] = array(
+                'label' => (string)($assignment['label'] ?? ''),
+                'status' => $satisfied ? 'pass' : 'fail',
+                'summary' => $summary,
+                'entry_count' => $entryCount,
+                'hours' => $this->formatNumber($hours),
+                'distance_nm' => $this->formatNumber($distance),
+                'route' => $this->requirementRouteSummary($entries),
+                'date' => $this->firstEntryField($entries, 'entry_date'),
+                'entries' => $this->compactEvidenceEntries($entries),
+            );
+        }
+        $this->addRequirementEvidenceAliases($evidence);
+
+        return $evidence;
+    }
+
+    /**
+     * @param array<string,mixed> $category
+     */
+    private function requirementEvidenceSatisfied(array $category, int $entryCount, float $hours, float $distance): bool
+    {
+        $rules = $this->decodeJsonObject($category['automatic_rules_json'] ?? null);
+        $type = (string)($rules['type'] ?? '');
+        if ($type === 'selected_entries_distance') {
+            $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : 0.0;
+            return $entryCount > 0 && $distance >= $minimum;
+        }
+        if ($category['minimum_time'] !== null) {
+            return $hours >= (float)$category['minimum_time'];
+        }
+        $minimumCount = $category['minimum_count'] !== null ? (int)$category['minimum_count'] : 1;
+        return $entryCount >= max(1, $minimumCount);
+    }
+
+    /**
+     * @param mixed $json
+     * @return array<string,mixed>
+     */
+    private function decodeJsonObject(mixed $json): array
+    {
+        if (is_array($json)) {
+            return $json;
+        }
+        if (!is_string($json) || trim($json) === '') {
+            return array();
+        }
+        $decoded = json_decode($json, true);
+        return is_array($decoded) ? $decoded : array();
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     * @return list<array<string,mixed>>
+     */
+    private function compactEvidenceEntries(array $entries): array
+    {
+        $out = array();
+        foreach ($entries as $entry) {
+            $out[] = array(
+                'id' => (int)($entry['id'] ?? 0),
+                'entry_date' => (string)($entry['entry_date'] ?? ''),
+                'route' => $this->entryRoute($entry),
+                'total_flight_time' => $this->formatNumber($entry['total_flight_time'] ?? 0),
+                'cross_country_distance_nm' => $this->formatNumber($entry['cross_country_distance_nm'] ?? 0),
+                'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
+                'remarks' => (string)($entry['remarks'] ?? ''),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $evidence
+     */
+    private function addRequirementEvidenceAliases(array &$evidence): void
+    {
+        $aliases = array(
+            'faa61.ppl.long_solo_cross_country' => 'faa61.ppl.long_150nm_solo_cross_country_flight',
+            'faa61.ppl.solo_cross_country_150_nm' => 'faa61.ppl.long_150nm_solo_cross_country_flight',
+            'faa61.ppl.basic_instrument_flying' => 'faa61.ppl.dual_instrument_flight_training',
+            'faa61.ppl.towered_airport_landings' => 'faa61.ppl.towered_airport_takeoffs_landings',
+        );
+        foreach ($aliases as $oldPrefix => $newPrefix) {
+            if (isset($evidence[$newPrefix])) {
+                $evidence[$oldPrefix] = $evidence[$newPrefix];
+            }
+        }
     }
 
     /**
@@ -324,6 +556,10 @@ final class FormInstanceService
 
                 $fieldType = strtolower(trim((string)($field['field_type'] ?? 'text')));
                 $value = $this->normalizeSubmittedValue($values[$fieldKey], $fieldType);
+                $valueJson = array('value' => $value);
+                if ($this->isKnowledgeTestCodeField($field)) {
+                    $valueJson['resolved_codes'] = (new KnowledgeTestCodeResolver($this->pdo))->resolvePastedReport($value);
+                }
                 $signatureJson = null;
                 $signedAtSql = 'signed_at';
                 if (in_array($fieldType, array('signature', 'initial'), true) && trim($value) !== '') {
@@ -348,7 +584,7 @@ final class FormInstanceService
                 ");
                 $stmt->execute(array(
                     ':value_text' => $value !== '' ? $value : null,
-                    ':value_json' => $this->encodeJson(array('value' => $value)),
+                    ':value_json' => $this->encodeJson($valueJson),
                     ':filled_by_user_id' => $userId,
                     ':signature_json' => $signatureJson,
                     ':field_value_id' => (int)$field['id'],
@@ -452,6 +688,13 @@ final class FormInstanceService
         foreach ($this->studentFlightVariables((int)($student['id'] ?? 0)) as $key => $value) {
             $snapshot[$key] = $value;
         }
+        $credentialService = new UserFlightCredentialService($this->pdo);
+        foreach ($credentialService->variablesForUser((int)($student['id'] ?? 0), 'student') as $key => $value) {
+            $snapshot[$key] = $value;
+        }
+        foreach ($credentialService->variablesForUser((int)($instructor['id'] ?? 0), 'instructor') as $key => $value) {
+            $snapshot[$key] = $value;
+        }
 
         return $snapshot;
     }
@@ -489,7 +732,7 @@ final class FormInstanceService
         $totals = (new FlightTotalsService())->calculate($rows);
         $iacra = (new Iacra8710Mapper())->map($totals);
 
-        return array(
+        $variables = array(
             'flight.total_time' => $this->formatNumber($totals['total_flight_time'] ?? 0),
             'flight.pic_time' => $this->formatNumber($totals['pic_time'] ?? 0),
             'flight.dual_time' => $this->formatNumber($totals['dual_received_time'] ?? 0),
@@ -510,6 +753,208 @@ final class FormInstanceService
             'iacra.basic_instrument_flying' => $this->formatNumber($iacra['basic_instrument_flying'] ?? 0),
             'iacra.dual_received' => $this->formatNumber($iacra['dual_received'] ?? 0),
         );
+
+        foreach ($this->studentRequirementEventVariables($logbookId) as $key => $value) {
+            $variables[$key] = $value;
+        }
+
+        return $variables;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function studentRequirementEventVariables(int $logbookId): array
+    {
+        if (
+            $logbookId <= 0
+            || !$this->tableExists('ipca_flight_requirement_assignments')
+            || !$this->tableExists('ipca_flight_requirement_assignment_entries')
+            || !$this->tableExists('ipca_flight_requirement_categories')
+        ) {
+            return array();
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                a.id,
+                c.authority,
+                c.certificate,
+                c.requirement_key,
+                c.label
+            FROM ipca_flight_requirement_assignments a
+            INNER JOIN ipca_flight_requirement_categories c ON c.id = a.requirement_category_id
+            WHERE a.logbook_id = :logbook_id
+              AND a.status <> 'rejected'
+            ORDER BY a.created_at DESC, a.id DESC
+        ");
+        $stmt->execute(array(':logbook_id' => $logbookId));
+        $assignments = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($assignments === array()) {
+            return array();
+        }
+
+        $entryStmt = $this->pdo->prepare("
+            SELECT e.*
+            FROM ipca_flight_requirement_assignment_entries ae
+            INNER JOIN ipca_admin_logbook_entries e ON e.id = ae.entry_id
+            WHERE ae.assignment_id = :assignment_id
+              AND e.review_status <> 'deleted'
+            ORDER BY e.entry_date IS NULL, e.entry_date, e.id
+        ");
+
+        $vars = array();
+        foreach ($assignments as $assignment) {
+            $prefix = $this->requirementVariablePrefix($assignment);
+            if ($prefix === '') {
+                continue;
+            }
+            $entryStmt->execute(array(':assignment_id' => (int)$assignment['id']));
+            $entries = $entryStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            $summary = $this->requirementEntrySummary($entries);
+            $hours = $this->sumEntryField($entries, 'total_flight_time');
+            $distance = $this->sumEntryField($entries, 'cross_country_distance_nm');
+            $route = $this->requirementRouteSummary($entries);
+            $date = $this->firstEntryField($entries, 'entry_date');
+
+            $vars[$prefix . '.events'] = $summary;
+            $vars[$prefix . '.entry_count'] = (string)count($entries);
+            $vars[$prefix . '.hours'] = $this->formatNumber($hours);
+            $vars[$prefix . '.distance_nm'] = $this->formatNumber($distance);
+            $vars[$prefix . '.route'] = $route;
+            $vars[$prefix . '.date'] = $date;
+            if ($summary !== '') {
+                $vars[$prefix . '.status'] = 'Tagged: ' . $summary;
+            }
+        }
+
+        $this->addRequirementAliases($vars);
+        return $vars;
+    }
+
+    /**
+     * @param array<string,mixed> $assignment
+     */
+    private function requirementVariablePrefix(array $assignment): string
+    {
+        $authority = strtolower(str_replace('FAA_PART_', 'faa', (string)($assignment['authority'] ?? '')));
+        $certificate = strtolower((string)($assignment['certificate'] ?? ''));
+        $requirementKey = strtolower((string)($assignment['requirement_key'] ?? ''));
+        if ($authority === '' || $certificate === '' || $requirementKey === '') {
+            return '';
+        }
+        return $authority . '.' . $certificate . '.' . $requirementKey;
+    }
+
+    /**
+     * @param array<string,string> $vars
+     */
+    private function addRequirementAliases(array &$vars): void
+    {
+        $aliases = array(
+            'faa61.ppl.long_solo_cross_country' => 'faa61.ppl.long_150nm_solo_cross_country_flight',
+            'faa61.ppl.solo_cross_country_150_nm' => 'faa61.ppl.long_150nm_solo_cross_country_flight',
+            'faa61.ppl.basic_instrument_flying' => 'faa61.ppl.dual_instrument_flight_training',
+            'faa61.ppl.towered_airport_landings' => 'faa61.ppl.towered_airport_takeoffs_landings',
+        );
+        foreach ($aliases as $oldPrefix => $newPrefix) {
+            foreach (array('events', 'entry_count', 'hours', 'distance_nm', 'route', 'date', 'status', 'value') as $suffix) {
+                $newKey = $newPrefix . '.' . $suffix;
+                if (array_key_exists($newKey, $vars)) {
+                    $vars[$oldPrefix . '.' . $suffix] = $vars[$newKey];
+                }
+            }
+            $eventsKey = $newPrefix . '.events';
+            if (array_key_exists($eventsKey, $vars)) {
+                $vars[$oldPrefix . '.value'] = $vars[$eventsKey];
+            }
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function requirementEntrySummary(array $entries): string
+    {
+        $parts = array();
+        foreach ($entries as $entry) {
+            $bits = array();
+            $date = trim((string)($entry['entry_date'] ?? ''));
+            if ($date !== '') {
+                $bits[] = $date;
+            }
+            $route = $this->entryRoute($entry);
+            if ($route !== '') {
+                $bits[] = $route;
+            }
+            $hours = round((float)($entry['total_flight_time'] ?? 0), 1);
+            if ($hours > 0) {
+                $bits[] = number_format($hours, 1, '.', '') . 'h';
+            }
+            $distance = round((float)($entry['cross_country_distance_nm'] ?? 0), 1);
+            if ($distance > 0) {
+                $bits[] = number_format($distance, 1, '.', '') . ' NM';
+            }
+            $aircraft = trim((string)($entry['aircraft_registration'] ?? ''));
+            if ($aircraft !== '') {
+                $bits[] = $aircraft;
+            }
+            if ($bits !== array()) {
+                $parts[] = implode(' · ', $bits);
+            }
+        }
+        return implode('; ', $parts);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function requirementRouteSummary(array $entries): string
+    {
+        $routes = array();
+        foreach ($entries as $entry) {
+            $route = $this->entryRoute($entry);
+            if ($route !== '') {
+                $routes[] = $route;
+            }
+        }
+        return implode('; ', array_values(array_unique($routes)));
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function entryRoute(array $entry): string
+    {
+        $dep = trim((string)($entry['departure_airport'] ?? ''));
+        $arr = trim((string)($entry['arrival_airport'] ?? ''));
+        return trim($dep . ($dep !== '' || $arr !== '' ? '-' : '') . $arr, '-');
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function sumEntryField(array $entries, string $field): float
+    {
+        $sum = 0.0;
+        foreach ($entries as $entry) {
+            $sum += (float)($entry[$field] ?? 0);
+        }
+        return round($sum, 1);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function firstEntryField(array $entries, string $field): string
+    {
+        foreach ($entries as $entry) {
+            $value = trim((string)($entry[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return '';
     }
 
     /**
@@ -679,6 +1124,20 @@ final class FormInstanceService
             return !empty($raw) ? '1' : '';
         }
         return trim((string)$raw);
+    }
+
+    /**
+     * @param array<string,mixed> $field
+     */
+    private function isKnowledgeTestCodeField(array $field): bool
+    {
+        $variableKey = strtolower(trim((string)($field['variable_key'] ?? '')));
+        $fieldKey = strtolower(trim((string)($field['field_key'] ?? '')));
+        $label = strtolower(trim((string)($field['label'] ?? '')));
+        return $variableKey === 'knowledge_test.deficient_codes'
+            || str_contains($fieldKey, 'deficient_code')
+            || str_contains($label, 'deficient code')
+            || str_contains($label, 'written test report');
     }
 
     private function userName(array $user): string

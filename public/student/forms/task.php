@@ -63,6 +63,9 @@ function sft_render_control(array $field, bool $editable): string
     if ($type === 'checkbox') {
         return '<label class="sft-check"><input type="checkbox" name="' . $name . '" value="1"' . ($value !== '' ? ' checked' : '') . '> Yes</label>';
     }
+    if (sft_is_knowledge_code_field($field)) {
+        return '<textarea class="sft-textarea" name="' . $name . '" placeholder="Paste the written test report learning statement / deficient knowledge codes here.">' . h($value) . '</textarea>';
+    }
     if ($type === 'signature' || $type === 'initial') {
         return '<input class="sft-input" name="' . $name . '" value="' . h($value) . '" placeholder="Type your name to sign">';
     }
@@ -70,6 +73,106 @@ function sft_render_control(array $field, bool $editable): string
         return '<textarea class="sft-textarea" name="' . $name . '">' . h($value) . '</textarea>';
     }
     return '<input class="sft-input" name="' . $name . '" value="' . h($value) . '">';
+}
+
+function sft_is_knowledge_code_field(array $field): bool
+{
+    $variable = strtolower(trim((string)($field['variable_key'] ?? '')));
+    $fieldKey = strtolower(trim((string)($field['field_key'] ?? '')));
+    $label = strtolower(trim((string)($field['label'] ?? '')));
+    return $variable === 'knowledge_test.deficient_codes'
+        || str_contains($fieldKey, 'deficient_code')
+        || str_contains($label, 'deficient code')
+        || str_contains($label, 'written test report');
+}
+
+function sft_field_hint(array $field): string
+{
+    $variable = strtolower(trim((string)($field['variable_key'] ?? '')));
+    $label = strtolower(trim((string)($field['label'] ?? '')));
+    $map = array(
+        'first_solo' => 'Expected evidence: tagged first solo flight with date/route/hours.',
+        'dual_cross_country_training' => 'Expected evidence: tagged dual cross-country training flight(s).',
+        'dual_night_training' => 'Expected evidence: tagged dual night training flight(s).',
+        'dual_night_cross_country' => 'Expected evidence: tagged dual night cross-country flight including distance covered.',
+        'dual_night_takeoffs_landings' => 'Expected evidence: tagged night takeoff/landing training entry or entries.',
+        'dual_instrument_flight_training' => 'Expected evidence: tagged dual/basic instrument training flight entry or entries.',
+        'basic_instrument_flying' => 'Expected evidence: tagged dual/basic instrument training flight entry or entries.',
+        'solo_cross_country_flight' => 'Expected evidence: tagged solo cross-country flight entry or entries.',
+        'long_150nm_solo_cross_country_flight' => 'Expected evidence: tagged long solo cross-country flight with at least 150 NM total distance.',
+        'long_solo_cross_country' => 'Expected evidence: tagged long solo cross-country flight with date, route, hours, and distance.',
+        'solo_cross_country_150_nm' => 'Expected evidence: tagged solo cross-country 150 NM flight with route and distance.',
+        'towered_airport_takeoffs_landings' => 'Expected evidence: tagged takeoff/landing entry or entries at a towered airport.',
+        'towered_airport_landings' => 'Expected evidence: tagged takeoff/landing entry or entries at a towered airport.',
+    );
+    foreach ($map as $needle => $hint) {
+        if (str_contains($variable, $needle) || str_contains($label, str_replace('_', ' ', $needle))) {
+            return $hint;
+        }
+    }
+    if (str_contains($variable, '.events')) {
+        return 'This should contain tagged logbook entry evidence: date, route, hours, distance when applicable, and aircraft.';
+    }
+    if (sft_is_knowledge_code_field($field)) {
+        return 'Written test report codes are resolved into title and relevant section automatically.';
+    }
+    return '';
+}
+
+function sft_knowledge_codes_html(array $field): string
+{
+    $rows = is_array($field['knowledge_test_codes'] ?? null) ? $field['knowledge_test_codes'] : array();
+    if ($rows === array()) {
+        return sft_is_knowledge_code_field($field)
+            ? '<div class="sft-code-help">Written test codes will appear here as code + title + relevant section after they are entered.</div>'
+            : '';
+    }
+    $out = '<div class="sft-code-table-wrap"><table class="sft-code-table"><thead><tr><th>Code</th><th>Title</th><th>Relevant Section</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $out .= '<tr><td><strong>' . h((string)($row['code'] ?? '')) . '</strong></td><td>' . h((string)($row['title'] ?? '')) . '</td><td>' . h((string)($row['relevant_section'] ?? '')) . '</td></tr>';
+    }
+    return $out . '</tbody></table></div>';
+}
+
+function sft_requirement_evidence_html(array $field): string
+{
+    $evidence = is_array($field['requirement_evidence'] ?? null) ? $field['requirement_evidence'] : array();
+    if ($evidence === array()) {
+        return '';
+    }
+    $status = strtolower(trim((string)($evidence['status'] ?? 'fail')));
+    $entries = is_array($evidence['entries'] ?? null) ? $evidence['entries'] : array();
+    $label = trim((string)($evidence['label'] ?? 'Requirement evidence'));
+    $out = '<div class="sft-evidence">'
+        . '<div class="sft-evidence-head">'
+        . '<strong>' . h($label) . '</strong>'
+        . '<span class="sft-evidence-badge sft-evidence-badge--' . h($status === 'pass' ? 'pass' : 'fail') . '">'
+        . h($status === 'pass' ? 'Satisfies requirement' : 'Does not satisfy yet')
+        . '</span>'
+        . '</div>';
+    if ($entries === array()) {
+        return $out . '<p class="sft-evidence-empty">No tagged logbook record yet.</p></div>';
+    }
+    $out .= '<ul class="sft-evidence-list">';
+    foreach ($entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $bits = array_filter(array(
+            trim((string)($entry['entry_date'] ?? '')),
+            trim((string)($entry['route'] ?? '')),
+            trim((string)($entry['total_flight_time'] ?? '')) !== '0.0' ? trim((string)($entry['total_flight_time'] ?? '')) . 'h' : '',
+            trim((string)($entry['cross_country_distance_nm'] ?? '')) !== '0.0' ? trim((string)($entry['cross_country_distance_nm'] ?? '')) . ' NM' : '',
+            trim((string)($entry['aircraft_registration'] ?? '')),
+        ));
+        $detail = $bits !== array() ? implode(' · ', $bits) : ('Entry #' . (int)($entry['id'] ?? 0));
+        $remarks = trim((string)($entry['remarks'] ?? ''));
+        $out .= '<li><strong>' . h($detail) . '</strong>' . ($remarks !== '' ? '<span>' . h($remarks) . '</span>' : '') . '</li>';
+    }
+    return $out . '</ul></div>';
 }
 
 cw_header('Form Task');
@@ -94,6 +197,8 @@ cw_header('Form Task');
 .sft-textarea{min-height:88px;resize:vertical}
 .sft-readonly{min-height:20px;padding:10px 12px;border-radius:14px;background:#f8fafc;color:#334155;border:1px solid rgba(15,23,42,.08)}
 .sft-check{display:inline-flex;align-items:center;gap:8px;font-weight:800;color:#102845}
+.sft-evidence{margin-top:9px;padding:10px 12px;border-radius:14px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);color:#334155;font-size:12px}.sft-evidence-head{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;color:#102845}.sft-evidence-badge{display:inline-flex;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900;text-transform:uppercase}.sft-evidence-badge--pass{background:#dcfce7;color:#166534}.sft-evidence-badge--fail{background:#fee2e2;color:#991b1b}.sft-evidence-list{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}.sft-evidence-list li{display:flex;gap:7px;align-items:flex-start;flex-wrap:wrap}.sft-evidence-empty{margin:8px 0 0;color:#92400e}
+.sft-code-help{margin-top:9px;padding:10px 12px;border-radius:14px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px;font-weight:800}.sft-code-table-wrap{margin-top:9px;overflow:auto;border:1px solid rgba(15,23,42,.08);border-radius:14px}.sft-code-table{width:100%;border-collapse:separate;border-spacing:0;background:#fff}.sft-code-table th{padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;background:#f8fafc;border-bottom:1px solid rgba(15,23,42,.07)}.sft-code-table td{padding:9px 10px;border-bottom:1px solid rgba(15,23,42,.06);font-size:12px;color:#102845}.sft-code-table tr:last-child td{border-bottom:0}
 .sft-actions{display:flex;justify-content:flex-end;gap:8px;padding:16px 18px;border-top:1px solid rgba(15,23,42,.07);background:#f8fafc}
 .sft-notice,.sft-error{padding:13px 16px;border-radius:16px;font-size:13px;font-weight:800}
 .sft-notice{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}
@@ -131,9 +236,17 @@ cw_header('Form Task');
               <?php if (trim((string)($field['variable_key'] ?? '')) !== ''): ?>
                 · <?= h((string)$field['variable_key']) ?>
               <?php endif; ?>
+              <?php $hint = sft_field_hint($field); ?>
+              <?php if ($hint !== ''): ?>
+                <div class="sft-meta"><?= h($hint) ?></div>
+              <?php endif; ?>
             </div>
           </div>
-          <div><?= sft_render_control($field, $editable) ?></div>
+          <div>
+            <?= sft_render_control($field, $editable) ?>
+            <?= sft_knowledge_codes_html($field) ?>
+            <?= sft_requirement_evidence_html($field) ?>
+          </div>
         </div>
       <?php endforeach; ?>
       <?php if (!$isCompleted): ?>

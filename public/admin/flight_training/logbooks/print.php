@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../../src/flight_training/AdminLogbookService.php';
+require_once __DIR__ . '/../../../../src/flight_training/UserFlightCredentialService.php';
 
 cw_require_admin();
 
@@ -38,6 +39,37 @@ $entries = array_values(array_filter(
     $workspace['entries'] ?? array(),
     static fn (mixed $entry): bool => is_array($entry) && strtolower((string)($entry['review_status'] ?? '')) !== 'deleted'
 ));
+$studentCredentials = array();
+try {
+    $studentUserId = (int)($workspace['logbook']['student_user_id'] ?? 0);
+    if ($studentUserId > 0) {
+        $studentCredentials = (new UserFlightCredentialService($pdo))->loadForUser($studentUserId);
+    }
+} catch (Throwable $e) {
+    $studentCredentials = array();
+}
+$instructorCredentialIndex = array();
+try {
+    $stmt = $pdo->query("
+        SELECT
+            u.name,
+            c.instructor_certificate_number,
+            c.instructor_certificate_expiration_date,
+            c.signature_image_path
+        FROM ipca_user_flight_credentials c
+        INNER JOIN users u ON u.id = c.user_id
+        WHERE c.instructor_certificate_number IS NOT NULL
+           OR c.signature_image_path IS NOT NULL
+    ");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+        $key = strtolower(preg_replace('/\s+/', ' ', trim((string)($row['name'] ?? ''))) ?? '');
+        if ($key !== '') {
+            $instructorCredentialIndex[$key] = $row;
+        }
+    }
+} catch (Throwable $e) {
+    $instructorCredentialIndex = array();
+}
 $rowsPerSpread = $format === 'faa' ? 6 : 22;
 $chunks = array_chunk($entries, $rowsPerSpread);
 if ($chunks === array()) {
@@ -148,9 +180,18 @@ function missionCode(array $entry): string
 
 function instructorEndorsement(array $entry): string
 {
+    global $instructorCredentialIndex;
     $name = trim((string)($entry['instructor_name'] ?? ''));
     $license = sourceValue($entry, array('instructor_license', 'instructor_licence', 'cfi_number', 'license_nr', 'licence_nr'));
     $expires = sourceValue($entry, array('instructor_license_expires', 'instructor_licence_expires', 'cfi_expiration', 'license_expiration'));
+    if (($license === '' || $expires === '') && $name !== '') {
+        $key = strtolower(preg_replace('/\s+/', ' ', $name) ?? '');
+        $credential = is_array($instructorCredentialIndex[$key] ?? null) ? $instructorCredentialIndex[$key] : array();
+        if ($credential !== array()) {
+            $license = $license !== '' ? $license : trim((string)($credential['instructor_certificate_number'] ?? ''));
+            $expires = $expires !== '' ? $expires : trim((string)($credential['instructor_certificate_expiration_date'] ?? ''));
+        }
+    }
     $parts = array_filter(array(
         $name,
         $license !== '' ? 'Lic ' . $license : '',
@@ -312,6 +353,35 @@ function svgImage(float $x, float $y, float $width, float $height, string $href)
     return '<image class="page-logo" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '" href="' . h($href) . '" preserveAspectRatio="xMinYMid meet"/>';
 }
 
+function svgSignatureImage(float $x, float $y, float $width, float $height, string $href): string
+{
+    if (trim($href) === '') {
+        return '';
+    }
+    return '<image class="signature-image" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '" href="' . h($href) . '" preserveAspectRatio="xMidYMid meet"/>';
+}
+
+function credentialValue(array $credentials, string $key): string
+{
+    return trim((string)($credentials[$key] ?? ''));
+}
+
+function credentialDate(array $credentials, string $key): string
+{
+    $raw = credentialValue($credentials, $key);
+    if ($raw === '') {
+        return '';
+    }
+    $ts = strtotime($raw);
+    return $ts ? date('d/m/y', $ts) : $raw;
+}
+
+function credentialSignatureHref(array $credentials): string
+{
+    $path = credentialValue($credentials, 'signature_image_path');
+    return $path !== '' ? '/' . ltrim($path, '/') : '';
+}
+
 function svgRect(float $x, float $y, float $width, float $height, string $class): string
 {
     return '<rect class="' . h($class) . '" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '"/>';
@@ -447,7 +517,7 @@ function bodyCells(array $bounds, float $bodyTop, float $rowH, int $rows, int $c
     return $cells;
 }
 
-function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages): string
+function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages, array $studentCredentials = array()): string
 {
     $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
     $gridX = 9.0;
@@ -465,7 +535,9 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $out = '<svg class="page-template left-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
     $out .= svgImage(8.3, 3.0, 39, 7.54, $logoHref);
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
+    $out .= svgText(195, 6.6, credentialDate($studentCredentials, 'medical_certificate_expiration_date'), 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
+    $out .= svgText(256, 6.6, credentialDate($studentCredentials, 'pilot_certificate_expiration_date'), 'micro', 'end');
     $out .= svgText(12, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'start');
     $cells = array(
         gridCell($bounds, 0, 1, $gridY, $gridY + $headerRowH, 'main', '1', 'tiny'),
@@ -514,7 +586,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     return $out . '</svg>';
 }
 
-function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages): string
+function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages, array $studentCredentials = array()): string
 {
     $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
     $gridX = 9.0;
@@ -577,11 +649,12 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $sigY = 178.6;
     $out .= svgText(13, $sigY, 'I certify that the entries in this log are true', 'signature-text', 'start');
     $out .= svgLine(80, $sigY, 173, $sigY, 'sub');
+    $out .= svgSignatureImage(92, $sigY - 8.0, 65, 8.5, credentialSignatureHref($studentCredentials));
     $out .= svgText(176, $sigY, '(Pilot\'s Signature).', 'signature-text', 'start');
     return $out . '</svg>';
 }
 
-function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, int $pageNumber, int $totalPages): string
+function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, int $pageNumber, int $totalPages, array $studentCredentials = array()): string
 {
     $columns = array(12, 19, 19, 16, 16, 80, 11, 10);
     $gridX = 10.0;
@@ -655,6 +728,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
     $out .= renderCellBorders($cells);
     $out .= svgText(12, 79.5, 'I certify that the statements made by me on this form are true.', 'faa-cert', 'start');
     $out .= svgText(12, 94.5, 'PILOT\'S SIGNATURE:', 'faa-cert', 'start');
+    $out .= svgSignatureImage(54, 87.6, 72, 9.2, credentialSignatureHref($studentCredentials));
     for ($row = 0; $row < 9; $row++) {
         $y1 = $bodyTop + ($row * $rowH);
         $y2 = $y1 + $rowH;
@@ -834,13 +908,13 @@ try {
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
   <?= $format === 'faa'
-      ? faaLeftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $leftPageNumber, $totalPrintedPages)
-      : leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
+      ? faaLeftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $leftPageNumber, $totalPrintedPages, $studentCredentials)
+      : leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages, $studentCredentials) ?>
 </section>
 <section class="book-page book-page-right">
   <?= $format === 'faa'
       ? faaRightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $rightPageNumber, $totalPrintedPages)
-      : rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
+      : rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages, $studentCredentials) ?>
 </section>
 </div>
 <?php
