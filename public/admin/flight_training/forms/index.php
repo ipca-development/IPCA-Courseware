@@ -158,7 +158,10 @@ cw_header('Flight Training · Form Manager');
         Phase 1 creates the template registry and lifecycle foundation only.
       </p>
     </div>
-    <a class="ftfm-btn ftfm-btn--secondary" href="/admin/api/form_template_manager_api.php?action=list">API: list</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+      <a class="ftfm-btn ftfm-btn--secondary" href="/admin/flight_training/forms/send.php">Send Packet</a>
+      <a class="ftfm-btn ftfm-btn--secondary" href="/admin/api/form_template_manager_api.php?action=list">API: list</a>
+    </div>
   </header>
 
   <?php if ($notice !== ''): ?>

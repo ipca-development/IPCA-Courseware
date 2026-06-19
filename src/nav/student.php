@@ -86,10 +86,28 @@ return [
         'key' => 'documents',
         'label' => 'Documents',
         'icon' => 'documents',
-        'href' => '/student/manuals.php',
-        'match_paths' => [
-            '/student/manuals.php',
-            '/student/manual_reader.php',
+        'href' => null,
+        'children' => [
+            [
+                'key' => 'internal_inbox',
+                'label' => 'Internal Inbox',
+                'icon' => 'documents',
+                'href' => '/student/forms/inbox.php',
+                'match_paths' => [
+                    '/student/forms/inbox.php',
+                    '/student/forms/task.php',
+                ],
+            ],
+            [
+                'key' => 'manuals',
+                'label' => 'Manuals',
+                'icon' => 'documents',
+                'href' => '/student/manuals.php',
+                'match_paths' => [
+                    '/student/manuals.php',
+                    '/student/manual_reader.php',
+                ],
+            ],
         ],
     ],
 

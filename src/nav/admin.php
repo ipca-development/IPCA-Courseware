@@ -89,6 +89,16 @@ return [
                 'href' => '/admin/flight_training/forms/index.php',
                 'match_paths' => [
                     '/admin/flight_training/forms/index.php',
+                    '/admin/flight_training/forms/editor.php',
+                ],
+            ],
+            [
+                'key' => 'flight_training_form_packets',
+                'label' => 'Send Form Packets',
+                'icon' => 'documents',
+                'href' => '/admin/flight_training/forms/send.php',
+                'match_paths' => [
+                    '/admin/flight_training/forms/send.php',
                 ],
             ],
             [
