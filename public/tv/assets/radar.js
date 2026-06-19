@@ -9,6 +9,7 @@
     center: { lat: 33.62670135498, lon: -116.16000366211 },
     elevFt: 115,
     rangeNm: 2.5,
+    diagramRangeNm: 0.88,
     weatherStation: { lat: 33.636485, lon: -116.160931, label: 'ASOS' },
     runways: [
       {
@@ -84,10 +85,9 @@
   var RAD_TO_DEG = 180 / Math.PI;
   var SWEEP_PERIOD_MS = 4200;
   var BLIP_TRAIL_TURNS = 8;
-  var BLIP_ALPHAS = [0.96, 0.74, 0.54, 0.38, 0.27, 0.18, 0.11, 0.06];
-  var BLIP_SCATTER_PX = [0, 1.2, 2.0, 2.8, 3.6, 4.4, 5.2, 6.0];
-  var SWEEP_HIT_WIDTH_DEG = 6;
-  var SWEEP_RELEASE_DEG = 28;
+  var BLIP_LIFE_MS = SWEEP_PERIOD_MS * BLIP_TRAIL_TURNS;
+  var BLIP_SPAWN_MIN_PX = 2.5;
+  var WIND_HISTORY_MS = 10 * 60 * 1000;
   var NOISE_BLOB_COUNT = 28;
 
   function clamp(n, min, max) {
@@ -124,9 +124,16 @@
     return d > 180 ? 360 - d : d;
   }
 
+  function lerpAngle(current, target, t) {
+    var delta = ((target - current + 540) % 360) - 180;
+    return (current + delta * t + 360) % 360;
+  }
+
   function formatWind(wind) {
-    if (!wind || wind.wind_dir_deg == null || wind.wind_kt == null) return '--- / -- KT';
-    var dir = String(Math.round(wind.wind_dir_deg)).padStart(3, '0');
+    if (!wind || wind.wind_kt == null) return '--- / -- KT';
+    var dirVal = wind.wind_dir_raw_deg != null ? wind.wind_dir_raw_deg : wind.wind_dir_deg;
+    if (dirVal == null) return '--- / -- KT';
+    var dir = String(Math.round(dirVal)).padStart(3, '0');
     var spd = Math.round(wind.wind_kt);
     var gust = wind.gust_kt != null && wind.gust_kt > 0 ? ' G' + Math.round(wind.gust_kt) : '';
     return dir + '° / ' + spd + ' KT' + gust;
@@ -206,6 +213,10 @@
     this.pollTimer = null;
     this.resizeObserver = null;
     this.scopeSize = 480;
+    this.adsbMeta = {};
+    this.windTargetDir = null;
+    this.displayWindDir = null;
+    this.windHistory = [];
     this.fetching = false;
   }
 
@@ -233,7 +244,21 @@
       '    <div class="tv-radar-panel-head"><span>WEATHER / ASOS</span><span class="tv-radar-panel-updated" data-radar-weather-updated>Updated —</span></div>',
       '    <div class="tv-radar-weather-body" data-radar-weather-body>',
       '      <div class="tv-radar-wind-block">',
-      '        <div class="tv-radar-wind-compass"><span class="tv-radar-wind-n">N</span><div class="tv-radar-wind-arrow" data-radar-wind-arrow></div></div>',
+      '        <div class="tv-radar-wind-compass" data-radar-wind-compass>',
+      '          <svg class="tv-radar-wind-svg" viewBox="0 0 100 100" aria-hidden="true">',
+      '            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(57,255,106,.22)" stroke-width="1"/>',
+      '            <g data-radar-wind-variation></g>',
+      '            <g data-radar-wind-fcst opacity="0.85">',
+      '              <line x1="50" y1="50" x2="50" y2="16" stroke="rgba(120,210,255,.8)" stroke-width="2.5" stroke-linecap="round"/>',
+      '              <polygon points="50,10 46.5,18 53.5,18" fill="rgba(120,210,255,.9)"/>',
+      '            </g>',
+      '            <g data-radar-wind-live>',
+      '              <line x1="50" y1="50" x2="50" y2="12" stroke="#39ff6a" stroke-width="3" stroke-linecap="round"/>',
+      '              <polygon points="50,6 45,14 55,14" fill="#39ff6a"/>',
+      '            </g>',
+      '          </svg>',
+      '          <span class="tv-radar-wind-n">N</span>',
+      '        </div>',
       '        <div class="tv-radar-wind-value" data-radar-wind-value>--- / -- KT</div>',
       '        <div class="tv-radar-wind-sub" data-radar-runway-favor></div>',
       '      </div>',
@@ -253,7 +278,9 @@
       updated: this.root.querySelector('[data-radar-weather-updated]'),
       body: this.root.querySelector('[data-radar-weather-body]'),
       windValue: this.root.querySelector('[data-radar-wind-value]'),
-      windArrow: this.root.querySelector('[data-radar-wind-arrow]'),
+      windVariation: this.root.querySelector('[data-radar-wind-variation]'),
+      windLive: this.root.querySelector('[data-radar-wind-live]'),
+      windFcst: this.root.querySelector('[data-radar-wind-fcst]'),
       asosList: this.root.querySelector('[data-radar-asos-list]'),
       runwayFavor: this.root.querySelector('[data-radar-runway-favor]')
     };
@@ -310,7 +337,7 @@
 
     if (size !== this.scopeSize) {
       Object.keys(this.trackStates).forEach(function (key) {
-        self.trackStates[key].blipTrail = [];
+        self.trackStates[key].blips = [];
       });
     }
 
@@ -385,6 +412,7 @@
       this.geo.center.lon = payload.center.lon;
     }
     if (payload.range_nm) this.geo.rangeNm = payload.range_nm;
+    this.adsbMeta = payload.adsb || {};
     this.updateStatus();
     this.updateWeather();
     this.drawDiagram();
@@ -392,19 +420,42 @@
 
   RadarScreen.prototype.updateStatus = function () {
     if (!this.statusEl) return;
-    this.statusEl.classList.remove('is-live', 'is-error');
+    var meta = this.adsbMeta || {};
+    this.statusEl.classList.remove('is-live', 'is-error', 'is-warn');
     if (!this.adsbOk) {
       this.statusEl.textContent = 'ADS-B UNAVAILABLE';
       this.statusEl.classList.add('is-error');
       return;
     }
+
+    var fleet = meta.fleet_count != null ? meta.fleet_count : 0;
+    var area = meta.area_count != null ? meta.area_count : 0;
+    var areaConnected = !!meta.area_connected;
+    var areaRaw = meta.area_raw_count != null ? meta.area_raw_count : 0;
+
     if (!this.targets.length) {
-      this.statusEl.textContent = 'ADS-B LIVE — NO TARGETS IN RANGE';
-      this.statusEl.classList.add('is-live');
+      if (areaConnected) {
+        this.statusEl.textContent = 'ADS-B CONNECTED — NO TRAFFIC IN ' + this.geo.rangeNm + ' NM (AREA ' + areaRaw + ' RAW)';
+        this.statusEl.classList.add('is-live');
+      } else {
+        var err = meta.area_error ? ' — ' + meta.area_error : '';
+        this.statusEl.textContent = 'ADS-B PARTIAL — AREA FEED OFFLINE' + err;
+        this.statusEl.classList.add('is-warn');
+      }
       return;
     }
-    this.statusEl.textContent = 'ADS-B LIVE — ' + this.targets.length + ' TARGET' + (this.targets.length === 1 ? '' : 'S');
-    this.statusEl.classList.add('is-live');
+
+    var parts = 'ADS-B LIVE — ' + this.targets.length + ' TARGET' + (this.targets.length === 1 ? '' : 'S');
+    if (fleet > 0 || area > 0) {
+      parts += ' (FLEET ' + fleet + ' / AREA ' + area + ')';
+    }
+    if (!areaConnected) {
+      parts += ' — AREA OFFLINE';
+      this.statusEl.classList.add('is-warn');
+    } else {
+      this.statusEl.classList.add('is-live');
+    }
+    this.statusEl.textContent = parts;
   };
 
   RadarScreen.prototype.updateWeather = function () {
@@ -420,8 +471,29 @@
 
     els.updated.textContent = formatUpdatedAt(w);
     els.windValue.textContent = formatWind(w);
-    if (els.windArrow && w.wind_dir_deg != null) {
-      els.windArrow.style.transform = 'rotate(' + Math.round(w.wind_dir_deg) + 'deg)';
+
+    var windDir = w.wind_dir_raw_deg != null ? w.wind_dir_raw_deg : w.wind_dir_deg;
+    if (windDir != null) {
+      this.windTargetDir = windDir;
+      if (this.displayWindDir == null) this.displayWindDir = windDir;
+      var now = Date.now();
+      var last = this.windHistory.length ? this.windHistory[this.windHistory.length - 1] : null;
+      if (!last || Math.abs(((windDir - last.dir + 540) % 360) - 180) > 1.5 || now - last.ts > 45000) {
+        this.windHistory.push({ dir: windDir, ts: now });
+      }
+      this.windHistory = this.windHistory.filter(function (entry) {
+        return now - entry.ts <= WIND_HISTORY_MS;
+      });
+      this.renderWindVariation();
+    }
+
+    if (els.windFcst) {
+      if (w.forecast_wind_dir_deg != null) {
+        els.windFcst.setAttribute('transform', 'rotate(' + Math.round(w.forecast_wind_dir_deg) + ' 50 50)');
+        els.windFcst.style.opacity = '0.9';
+      } else {
+        els.windFcst.style.opacity = '0';
+      }
     }
 
     var rows = [
@@ -447,6 +519,36 @@
     }
   };
 
+  RadarScreen.prototype.renderWindVariation = function () {
+    var g = this.weatherEls.windVariation;
+    if (!g) return;
+    var now = Date.now();
+    var ticks = this.windHistory.map(function (entry) {
+      var age = (now - entry.ts) / WIND_HISTORY_MS;
+      var alpha = 0.25 + (1 - Math.min(1, age)) * 0.65;
+      var rad = entry.dir * DEG_TO_RAD;
+      var cx = 50;
+      var cy = 50;
+      var rOuter = 46;
+      var rInner = 39;
+      var x1 = cx + Math.sin(rad) * rOuter;
+      var y1 = cy - Math.cos(rad) * rOuter;
+      var x2 = cx + Math.sin(rad) * rInner;
+      var y2 = cy - Math.cos(rad) * rInner;
+      return '<line x1="' + x1.toFixed(2) + '" y1="' + y1.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y2.toFixed(2) + '" stroke="rgba(57,255,106,' + alpha.toFixed(2) + ')" stroke-width="2" stroke-linecap="round"/>';
+    });
+    g.innerHTML = ticks.join('');
+  };
+
+  RadarScreen.prototype.updateWindAnimation = function (ts, dtSec) {
+    if (this.windTargetDir == null || !this.weatherEls.windLive) return;
+    if (this.displayWindDir == null) this.displayWindDir = this.windTargetDir;
+    var wave = Math.sin(ts / 2800) * 2.4 + Math.sin(ts / 5300) * 1.2;
+    var desired = this.windTargetDir + wave;
+    this.displayWindDir = lerpAngle(this.displayWindDir, desired, Math.min(1, dtSec * 2.6));
+    this.weatherEls.windLive.setAttribute('transform', 'rotate(' + this.displayWindDir.toFixed(1) + ' 50 50)');
+  };
+
   RadarScreen.prototype.syncTrackStates = function (targets, ts) {
     var self = this;
     var seen = {};
@@ -462,6 +564,7 @@
       var gsVel = velocityFromTrack(target.gs, target.track_deg);
 
       if (!state) {
+        var initHeading = target.track_deg != null ? target.track_deg : 0;
         state = {
           key: key,
           target: target,
@@ -471,9 +574,12 @@
           displayYNm: xy.yNm,
           vxNm: gsVel.vxNm,
           vyNm: gsVel.vyNm,
+          displayHeading: initHeading,
           lastFixTs: ts,
-          sweepHit: false,
-          blipTrail: [],
+          blips: [],
+          lastBlipX: null,
+          lastBlipY: null,
+          lastBlipSpawnTs: 0,
           scatterSeed: Math.random() * 1000
         };
         self.trackStates[key] = state;
@@ -490,15 +596,27 @@
       state.lastFixTs = ts;
 
       if (target.gs != null && target.gs > 2) {
-        state.vxNm = measVx * 0.35 + gsVel.vxNm * 0.65;
-        state.vyNm = measVy * 0.35 + gsVel.vyNm * 0.65;
+        state.vxNm = measVx * 0.25 + gsVel.vxNm * 0.75;
+        state.vyNm = measVy * 0.25 + gsVel.vyNm * 0.75;
+      } else if (target.gs != null && target.gs > 0.5) {
+        state.vxNm = measVx * 0.4 + gsVel.vxNm * 0.6;
+        state.vyNm = measVy * 0.4 + gsVel.vyNm * 0.6;
       } else {
-        state.vxNm = measVx * 0.55;
-        state.vyNm = measVy * 0.55;
+        state.vxNm = measVx * 0.5;
+        state.vyNm = measVy * 0.5;
+      }
+
+      var gs = target.gs != null ? target.gs : 0;
+      if (gs > 1 && target.track_deg != null) {
+        state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, 0.35);
+      } else if (Math.hypot(state.vxNm, state.vyNm) > 0.00005) {
+        var velHeading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
+        if (velHeading < 0) velHeading += 360;
+        state.displayHeading = lerpAngle(state.displayHeading, velHeading, 0.25);
       }
 
       var err = Math.hypot(xy.xNm - state.displayXNm, xy.yNm - state.displayYNm);
-      if (err > 0.35) {
+      if (err > 0.5 && gs < 4) {
         state.displayXNm = xy.xNm;
         state.displayYNm = xy.yNm;
       }
@@ -510,16 +628,18 @@
   };
 
   RadarScreen.prototype.advanceTrackStates = function (dtSec) {
-    var self = this;
     Object.keys(this.trackStates).forEach(function (key) {
-      var state = self.trackStates[key];
+      var state = this.trackStates[key];
+      var target = state.target || {};
+      var gs = target.gs != null ? target.gs : 0;
       state.displayXNm += state.vxNm * dtSec;
       state.displayYNm += state.vyNm * dtSec;
 
-      var pull = Math.min(1, dtSec * 1.8);
+      var pullRate = gs > 8 ? 0.45 : (gs > 3 ? 0.9 : (gs > 0.5 ? 1.4 : 2.2));
+      var pull = Math.min(1, dtSec * pullRate);
       state.displayXNm += (state.fixXNm - state.displayXNm) * pull;
       state.displayYNm += (state.fixYNm - state.displayYNm) * pull;
-    });
+    }, this);
   };
 
   RadarScreen.prototype.displayXYForState = function (state) {
@@ -540,34 +660,36 @@
     this.sweepAngle = (this.sweepAngle + (dt / SWEEP_PERIOD_MS) * 360) % 360;
     this.sweepRev = Math.floor(ts / SWEEP_PERIOD_MS);
     this.advanceTrackStates(dtSec);
-    this.updateSweepBlips(ts);
+    this.updateContinuousBlips(ts);
+    this.updateWindAnimation(ts, dtSec);
     this.drawScope(ts);
   };
 
-  RadarScreen.prototype.updateSweepBlips = function (ts) {
+  RadarScreen.prototype.updateContinuousBlips = function (ts) {
     var self = this;
-    var sweep = this.sweepAngle;
-    var rev = this.sweepRev;
-
     Object.keys(this.trackStates).forEach(function (key) {
       var state = self.trackStates[key];
+      var target = state.target || {};
       var xy = self.displayXYForState(state);
-      var bearing = bearingFromCenter(xy.xNm, xy.yNm);
-      var delta = angleDiff(bearing, sweep);
+      if (!state.blips) state.blips = [];
 
-      if (delta < SWEEP_HIT_WIDTH_DEG && !state.sweepHit) {
-        state.sweepHit = true;
-        state.blipTrail.push({
-          x: xy.x,
-          y: xy.y,
-          rev: rev,
-          ts: ts
-        });
-        state.blipTrail = state.blipTrail.filter(function (blip) {
-          return rev - blip.rev < BLIP_TRAIL_TURNS;
-        });
-      } else if (delta > SWEEP_RELEASE_DEG) {
-        state.sweepHit = false;
+      var moved = state.lastBlipX == null ? 999 : Math.hypot(xy.x - state.lastBlipX, xy.y - state.lastBlipY);
+      var gs = target.gs != null ? target.gs : 0;
+      var spawnMs = gs > 12 ? 180 : (gs > 6 ? 260 : (gs > 2 ? 420 : (gs > 0.5 ? 700 : 1600)));
+      var elapsed = ts - (state.lastBlipSpawnTs || 0);
+
+      if (moved >= BLIP_SPAWN_MIN_PX || elapsed >= spawnMs) {
+        state.blips.push({ x: xy.x, y: xy.y, born: ts });
+        state.lastBlipX = xy.x;
+        state.lastBlipY = xy.y;
+        state.lastBlipSpawnTs = ts;
+      }
+
+      state.blips = state.blips.filter(function (blip) {
+        return ts - blip.born < BLIP_LIFE_MS;
+      });
+      if (state.blips.length > 48) {
+        state.blips = state.blips.slice(state.blips.length - 48);
       }
     });
   };
@@ -630,14 +752,22 @@
     });
   };
 
-  RadarScreen.prototype.drawAirportLayer = function (ctx, size, alpha, scopeMode) {
+  RadarScreen.prototype.drawAirportLayer = function (ctx, size, alpha, scopeMode, layerOpts) {
     var self = this;
     var geo = this.geo;
+    layerOpts = layerOpts || {};
+    var rangeNm = layerOpts.rangeNm != null ? layerOpts.rangeNm : geo.rangeNm;
+    var favoredRunway = layerOpts.favoredRunway || null;
+
+    var toXY = function (lat, lon) {
+      return latLonToRadarXY(lat, lon, geo.center, rangeNm, size);
+    };
+
     var drawPolyline = function (points, color, width) {
       if (!points || points.length < 2) return;
       ctx.beginPath();
       points.forEach(function (pt, idx) {
-        var xy = latLonToRadarXY(pt.lat, pt.lon, geo.center, geo.rangeNm, size);
+        var xy = toXY(pt.lat, pt.lon);
         if (idx === 0) ctx.moveTo(xy.x, xy.y);
         else ctx.lineTo(xy.x, xy.y);
       });
@@ -649,7 +779,7 @@
       if (!points || points.length < 3) return;
       ctx.beginPath();
       points.forEach(function (pt, idx) {
-        var xy = latLonToRadarXY(pt.lat, pt.lon, geo.center, geo.rangeNm, size);
+        var xy = toXY(pt.lat, pt.lon);
         if (idx === 0) ctx.moveTo(xy.x, xy.y);
         else ctx.lineTo(xy.x, xy.y);
       });
@@ -675,12 +805,20 @@
 
     (geo.runways || []).forEach(function (runway) {
       if (!runway.ends || runway.ends.length < 2) return;
-      drawPolyline(runway.ends, 'rgba(210,220,230,' + Math.min(1, alpha + 0.25) + ')', scopeMode ? 2.4 : 3.2);
+      var favored = favoredRunway && runway.ends.some(function (end) {
+        return String(end.id) === String(favoredRunway);
+      });
+      var runwayColor = favored
+        ? 'rgba(57,255,106,' + Math.min(1, alpha + 0.55) + ')'
+        : 'rgba(210,220,230,' + Math.min(1, alpha + 0.25) + ')';
+      var runwayWidth = favored ? (scopeMode ? 3.4 : 5.2) : (scopeMode ? 2.4 : 3.2);
+      drawPolyline(runway.ends, runwayColor, runwayWidth);
       runway.ends.forEach(function (end) {
-        var xy = latLonToRadarXY(end.lat, end.lon, geo.center, geo.rangeNm, size);
+        var xy = toXY(end.lat, end.lon);
         if (!scopeMode) {
-          ctx.fillStyle = 'rgba(232,242,255,.85)';
-          ctx.font = 'bold 11px monospace';
+          var isEndFavored = favoredRunway && String(end.id) === String(favoredRunway);
+          ctx.fillStyle = isEndFavored ? '#39ff6a' : 'rgba(232,242,255,.85)';
+          ctx.font = 'bold ' + (isEndFavored ? '13px' : '11px') + ' monospace';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(end.id, xy.x, xy.y);
@@ -689,7 +827,7 @@
     });
 
     if (geo.weatherStation) {
-      var ws = latLonToRadarXY(geo.weatherStation.lat, geo.weatherStation.lon, geo.center, geo.rangeNm, size);
+      var ws = toXY(geo.weatherStation.lat, geo.weatherStation.lon);
       ctx.beginPath();
       ctx.arc(ws.x, ws.y, scopeMode ? 3 : 4, 0, Math.PI * 2);
       ctx.fillStyle = scopeMode ? 'rgba(80,180,255,.75)' : '#4cb8ff';
@@ -744,30 +882,29 @@
 
   RadarScreen.prototype.drawPrimaryBlips = function (ctx, ts) {
     var self = this;
-    var rev = this.sweepRev;
 
     Object.keys(this.trackStates).forEach(function (key) {
       var state = self.trackStates[key];
-      var trail = state.blipTrail || [];
-      if (!trail.length) return;
+      var blips = state.blips || [];
+      if (!blips.length) return;
 
-      trail.forEach(function (blip, idx) {
-        var turnAge = rev - blip.rev;
-        if (turnAge < 0) turnAge = 0;
-        if (turnAge >= BLIP_TRAIL_TURNS) return;
+      blips.forEach(function (blip, idx) {
+        var age = ts - blip.born;
+        if (age < 0 || age >= BLIP_LIFE_MS) return;
+        var lifeT = age / BLIP_LIFE_MS;
+        var alpha = 0.96 * Math.pow(1 - lifeT, 1.35);
+        if (alpha < 0.02) return;
 
-        var alpha = BLIP_ALPHAS[turnAge] || 0.04;
-        var scatterAmt = BLIP_SCATTER_PX[turnAge] || 6;
-        var scatter = scatterOffset(state.scatterSeed + idx * 3.1 + turnAge, scatterAmt);
+        var scatterAmt = lifeT * 5.5;
+        var scatter = scatterOffset(state.scatterSeed + idx * 2.7 + lifeT * 4, scatterAmt);
         var bx = blip.x + scatter.x;
         var by = blip.y + scatter.y;
-
-        var coreR = turnAge === 0 ? 5.5 : 4.5 - turnAge * 0.25;
-        var glowR = 8 + turnAge * 3.2;
+        var coreR = 5.2 - lifeT * 2.2;
+        var glowR = 7 + lifeT * 10;
 
         ctx.save();
-        if (turnAge > 0) {
-          ctx.filter = 'blur(' + (0.6 + turnAge * 0.85) + 'px)';
+        if (lifeT > 0.08) {
+          ctx.filter = 'blur(' + (0.5 + lifeT * 2.2) + 'px)';
         }
 
         var grad = ctx.createRadialGradient(bx, by, 0, bx, by, glowR);
@@ -780,11 +917,11 @@
         ctx.arc(bx, by, glowR, 0, Math.PI * 2);
         ctx.fill();
 
-        if (turnAge <= 2) {
+        if (lifeT < 0.45) {
           ctx.filter = 'none';
           ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.9) + ')';
           ctx.beginPath();
-          ctx.arc(bx, by, coreR, 0, Math.PI * 2);
+          ctx.arc(bx, by, Math.max(1.5, coreR), 0, Math.PI * 2);
           ctx.fill();
         }
 
@@ -803,10 +940,12 @@
       var target = state.target;
       if (!target) return;
       var xy = self.displayXYForState(state);
-      var heading = target.track_deg != null ? target.track_deg : 0;
-      if (target.gs != null && target.gs > 3) {
+      var heading = state.displayHeading != null ? state.displayHeading : (target.track_deg != null ? target.track_deg : 0);
+      if (target.gs != null && target.gs > 3 && Math.hypot(state.vxNm, state.vyNm) > 0.00008) {
         heading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
         if (heading < 0) heading += 360;
+        state.displayHeading = lerpAngle(state.displayHeading, heading, 0.18);
+        heading = state.displayHeading;
       }
       self.drawAircraftSymbol(ctx, xy.x, xy.y, heading);
       self.drawSSRLabel(ctx, xy.x, xy.y, target, idx);
@@ -866,17 +1005,20 @@
     if (!ctx || !canvas) return;
     var w = canvas.width;
     var h = canvas.height;
-    var size = Math.min(w, h);
+    var diagramRange = this.geo.diagramRangeNm || 0.88;
+    var favored = this.weather && this.weather.favored_runway ? this.weather.favored_runway : null;
+    var drawSize = Math.min(w, h);
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#0a1524';
     ctx.fillRect(0, 0, w, h);
 
     ctx.save();
-    var offsetX = (w - size) / 2;
-    var offsetY = (h - size) / 2;
-    ctx.translate(offsetX, offsetY);
-    this.drawAirportLayer(ctx, size, 0.85, false);
+    ctx.translate((w - drawSize) / 2, (h - drawSize) / 2);
+    this.drawAirportLayer(ctx, drawSize, 0.95, false, {
+      rangeNm: diagramRange,
+      favoredRunway: favored
+    });
     ctx.restore();
   };
 

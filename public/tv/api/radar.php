@@ -41,6 +41,15 @@ $trackCount = 0;
 $fleetTargets = array();
 $areaTargets = array();
 
+$areaMeta = array(
+    'connected' => false,
+    'raw_count' => 0,
+    'in_range_count' => 0,
+    'error' => null,
+    'path' => null,
+    'targets' => array(),
+);
+
 try {
     $tracks = array();
     $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
@@ -78,7 +87,8 @@ try {
         'gate' => $gate,
         'home_airport' => $homeAirport,
     ));
-    $areaTargets = tv_adsb_fetch_area_radar_targets($centerLat, $centerLon, $rangeNm);
+    $areaMeta = tv_adsb_fetch_area_radar_targets_meta($centerLat, $centerLon, $rangeNm);
+    $areaTargets = $areaMeta['targets'];
     $targets = tv_adsb_merge_radar_targets($fleetTargets, $areaTargets);
     $adsbOk = true;
     foreach ($targets as $target) {
@@ -115,6 +125,11 @@ $response = array(
         'tracks' => $trackCount,
         'fleet_count' => isset($fleetTargets) ? count($fleetTargets) : 0,
         'area_count' => isset($areaTargets) ? count($areaTargets) : 0,
+        'area_connected' => (bool)($areaMeta['connected'] ?? false),
+        'area_raw_count' => (int)($areaMeta['raw_count'] ?? 0),
+        'area_in_range_count' => (int)($areaMeta['in_range_count'] ?? 0),
+        'area_error' => $areaMeta['error'] ?? null,
+        'area_path' => $areaMeta['path'] ?? null,
         'source' => 'fleet_and_area',
     ),
     'targets' => $targets,
@@ -127,9 +142,15 @@ if (!empty($_GET['debug'])) {
         'provider' => tv_adsb_provider(),
         'weather_source' => (string)($weather['source'] ?? ''),
         'weather_station' => (string)($weather['station'] ?? ''),
+        'visibility_source' => (string)($weather['visibility_source'] ?? ''),
+        'forecast_wind_dir_deg' => $weather['forecast_wind_dir_deg'] ?? null,
         'adsb_method' => 'fleet tv_adsb_build_status + live area /lat/lon/dist/',
         'fleet_count' => isset($fleetTargets) ? count($fleetTargets) : 0,
         'area_count' => isset($areaTargets) ? count($areaTargets) : 0,
+        'area_connected' => (bool)($areaMeta['connected'] ?? false),
+        'area_raw_count' => (int)($areaMeta['raw_count'] ?? 0),
+        'area_error' => $areaMeta['error'] ?? null,
+        'area_path' => $areaMeta['path'] ?? null,
     );
 }
 

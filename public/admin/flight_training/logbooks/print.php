@@ -390,7 +390,7 @@ function bodyCells(array $bounds, float $bodyTop, float $rowH, int $rows, int $c
     return $cells;
 }
 
-function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode): string
+function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode, int $pageNumber, int $totalPages): string
 {
     $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
     $gridX = 9.0;
@@ -409,6 +409,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $out .= svgText(14, 6.6, $logoText, 'logo-text', 'start');
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
+    $out .= svgText(12, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'start');
     $cells = array(
         gridCell($bounds, 0, 1, $gridY, $gridY + $headerRowH, 'main', '1', 'tiny'),
         gridCell($bounds, 1, 3, $gridY, $gridY + $headerRowH, 'main', '2', 'tiny'),
@@ -438,9 +439,9 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
         }
     }
     $totalRows = array(
-        array('Total these pages', pval($pageTotals['total'] ?? 0), pval($pageTotals['day_landings'] ?? 0, 0), pval($pageTotals['night_landings'] ?? 0, 0)),
-        array('Total from previous pages', pval($previousTotals['total'] ?? 0), pval($previousTotals['day_landings'] ?? 0, 0), pval($previousTotals['night_landings'] ?? 0, 0)),
-        array('Total Time', pval($runningTotals['total'] ?? 0), pval($runningTotals['day_landings'] ?? 0, 0), pval($runningTotals['night_landings'] ?? 0, 0)),
+        array('Total these pages', ptotal($pageTotals['total'] ?? 0), ptotal($pageTotals['day_landings'] ?? 0, 0), ptotal($pageTotals['night_landings'] ?? 0, 0)),
+        array('Total from previous pages', ptotal($previousTotals['total'] ?? 0), ptotal($previousTotals['day_landings'] ?? 0, 0), ptotal($previousTotals['night_landings'] ?? 0, 0)),
+        array('Total Time', ptotal($runningTotals['total'] ?? 0), ptotal($runningTotals['day_landings'] ?? 0, 0), ptotal($runningTotals['night_landings'] ?? 0, 0)),
     );
     $footerRowH = ($gridY + $gridH - $totalsY) / 3.0;
     foreach ($totalRows as $idx => $row) {
@@ -456,7 +457,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     return $out . '</svg>';
 }
 
-function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode): string
+function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode, int $pageNumber, int $totalPages): string
 {
     $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
     $gridX = 9.0;
@@ -473,6 +474,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
     $out .= svgText(258, 6.6, $logoText, 'logo-text', 'end');
+    $out .= svgText(258, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
     $cells = array(
         gridCell($bounds, 0, 2, $gridY, $gridY + $headerRowH, 'main', '9', 'tiny'),
         gridCell($bounds, 2, 6, $gridY, $gridY + $headerRowH, 'main', '10', 'tiny'),
@@ -566,6 +568,7 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .remarks-text{font-size:1.65px;font-weight:400}
 .page-template .signature-text{font-size:2.2px;font-weight:400}
 .page-template .debug-field{font-size:1.25px;fill:#b91c1c;font-weight:700}
+.page-template .page-number{font-size:2.6px;font-weight:500}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:relative;left:auto;top:auto;display:block!important;width:calc(var(--page-w) * 2);height:var(--page-h);transform:none!important;filter:none;perspective:none;opacity:1;transition:none;break-after:page}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:inline-block;background:#fff;border:0;box-shadow:none;border-radius:0;vertical-align:top}}
 </style>
 </head>
@@ -593,16 +596,19 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 <?php
 try {
     $previousTotals = array();
+    $totalPrintedPages = count($renderChunks) * 2;
     foreach ($renderChunks as $pageIndex => $chunk):
         $pageTotals = pageTotals($chunk);
         $runningTotals = addTotals($previousTotals, $pageTotals);
+        $leftPageNumber = ($pageIndex * 2) + 1;
+        $rightPageNumber = $leftPageNumber + 1;
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
-  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode) ?>
+  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
 </section>
 <section class="book-page book-page-right">
-  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode) ?>
+  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
 </section>
 </div>
 <?php

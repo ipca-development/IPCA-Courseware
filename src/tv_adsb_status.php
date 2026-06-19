@@ -246,10 +246,16 @@ function tv_adsb_extract_aircraft_list(array $payload): array
 
 function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
 {
+    return tv_adsb_fetch_near_point_result($lat, $lon, $distNm)['aircraft'];
+}
+
+function tv_adsb_fetch_near_point_result(float $lat, float $lon, float $distNm): array
+{
     $distNm = max(0.5, min(25.0, $distNm));
+    $apiDist = max(1, (int)ceil($distNm));
     $latStr = rawurlencode((string)round($lat, 6));
     $lonStr = rawurlencode((string)round($lon, 6));
-    $distStr = rawurlencode((string)round($distNm, 1));
+    $distStr = rawurlencode((string)$apiDist);
 
     $paths = tv_adsb_provider() === 'rapidapi'
         ? array(
@@ -261,21 +267,75 @@ function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
             '/lat/' . $latStr . '/lon/' . $lonStr . '/dist/' . $distStr . '/',
         );
 
+    $result = array(
+        'aircraft' => array(),
+        'connected' => false,
+        'raw_count' => 0,
+        'error' => null,
+        'path' => null,
+        'api_dist_nm' => $apiDist,
+    );
+
     foreach ($paths as $path) {
         try {
             $payload = tv_adsb_request($path);
             $list = tv_adsb_extract_aircraft_list($payload);
-            if (count($list) > 0) {
-                return $list;
-            }
+            $result['connected'] = true;
+            $result['raw_count'] = count($list);
+            $result['path'] = $path;
+            $result['aircraft'] = $list;
+            $result['error'] = null;
+            return $result;
         } catch (Throwable $e) {
-            continue;
+            $result['error'] = $e->getMessage();
         }
     }
 
-    return array();
+    return $result;
 }
 
+function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 2.5): array
+{
+    $meta = tv_adsb_fetch_area_radar_targets_meta($centerLat, $centerLon, $rangeNm);
+    return $meta['targets'];
+}
+
+function tv_adsb_fetch_area_radar_targets_meta(float $centerLat, float $centerLon, float $rangeNm = 2.5): array
+{
+    $fetch = tv_adsb_fetch_near_point_result($centerLat, $centerLon, $rangeNm);
+    $targets = array();
+    $seen = array();
+
+    foreach ($fetch['aircraft'] as $aircraft) {
+        if (!is_array($aircraft)) {
+            continue;
+        }
+        $formatted = tv_adsb_format_area_radar_target($aircraft, $centerLat, $centerLon, $rangeNm);
+        if ($formatted === null) {
+            continue;
+        }
+        $key = $formatted['hex'] !== '' ? $formatted['hex'] : ($formatted['label'] . '|' . $formatted['lat'] . '|' . $formatted['lon']);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $targets[] = $formatted;
+    }
+
+    usort($targets, static function (array $a, array $b): int {
+        return ($a['dist_nm'] <=> $b['dist_nm']);
+    });
+
+    return array(
+        'targets' => $targets,
+        'connected' => (bool)$fetch['connected'],
+        'raw_count' => (int)$fetch['raw_count'],
+        'in_range_count' => count($targets),
+        'error' => $fetch['error'],
+        'path' => $fetch['path'],
+        'api_dist_nm' => $fetch['api_dist_nm'],
+    );
+}
 function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 2.5): ?array
 {
     if (!isset($aircraft['lat'], $aircraft['lon']) || !is_numeric($aircraft['lat']) || !is_numeric($aircraft['lon'])) {
@@ -318,35 +378,6 @@ function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, flo
         'position_source' => 'live',
         'target_source' => 'area',
     );
-}
-
-function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 2.5): array
-{
-    $raw = tv_adsb_fetch_near_point($centerLat, $centerLon, $rangeNm);
-    $targets = array();
-    $seen = array();
-
-    foreach ($raw as $aircraft) {
-        if (!is_array($aircraft)) {
-            continue;
-        }
-        $formatted = tv_adsb_format_area_radar_target($aircraft, $centerLat, $centerLon, $rangeNm);
-        if ($formatted === null) {
-            continue;
-        }
-        $key = $formatted['hex'] !== '' ? $formatted['hex'] : ($formatted['label'] . '|' . $formatted['lat'] . '|' . $formatted['lon']);
-        if (isset($seen[$key])) {
-            continue;
-        }
-        $seen[$key] = true;
-        $targets[] = $formatted;
-    }
-
-    usort($targets, static function (array $a, array $b): int {
-        return ($a['dist_nm'] <=> $b['dist_nm']);
-    });
-
-    return $targets;
 }
 
 function tv_adsb_merge_radar_targets(array $fleetTargets, array $areaTargets): array

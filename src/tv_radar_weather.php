@@ -123,6 +123,180 @@ function tv_radar_weather_ktrm_runways(): array
     );
 }
 
+function tv_radar_weather_nbm_grid_url(): string
+{
+    return trim((string)(getenv('CW_NBM_GRID_URL') ?: 'https://api.weather.gov/gridpoints/SGX/100,48'));
+}
+
+function tv_radar_weather_iso_duration_seconds(string $dur): int
+{
+    $days = 0;
+    $hours = 0;
+    $mins = 0;
+    $secs = 0;
+    $parts = explode('T', $dur);
+    $datePart = $parts[0];
+    $timePart = count($parts) > 1 ? $parts[1] : '';
+
+    if (preg_match('/P(\d+)D/', $datePart, $m)) {
+        $days = (int)$m[1];
+    }
+    if ($timePart !== '') {
+        if (preg_match('/(\d+)H/', $timePart, $m)) {
+            $hours = (int)$m[1];
+        }
+        if (preg_match('/(\d+)M/', $timePart, $m)) {
+            $mins = (int)$m[1];
+        }
+        if (preg_match('/(\d+)S/', $timePart, $m)) {
+            $secs = (int)$m[1];
+        }
+    }
+
+    return ($days * 86400) + ($hours * 3600) + ($mins * 60) + $secs;
+}
+
+function tv_radar_weather_grid_value_at_time($values, int $targetUnix)
+{
+    if (!is_array($values)) {
+        return null;
+    }
+
+    $bestPast = null;
+    $bestPastStart = null;
+
+    foreach ($values as $item) {
+        if (!is_array($item) || !isset($item['validTime'])) {
+            continue;
+        }
+        $parts = explode('/', (string)$item['validTime']);
+        if (count($parts) < 2) {
+            continue;
+        }
+        $start = strtotime($parts[0]);
+        if ($start === false) {
+            continue;
+        }
+        $end = $start + tv_radar_weather_iso_duration_seconds($parts[1]);
+        if ($targetUnix >= $start && $targetUnix < $end) {
+            return $item['value'] ?? null;
+        }
+        if ($start <= $targetUnix && ($bestPastStart === null || $start > $bestPastStart)) {
+            $bestPastStart = $start;
+            $bestPast = $item['value'] ?? null;
+        }
+    }
+
+    return $bestPast;
+}
+
+function tv_radar_weather_unit_to_knots($value, string $unitCode): ?float
+{
+    if ($value === null || !is_numeric($value)) {
+        return null;
+    }
+    $v = (float)$value;
+    if (strpos($unitCode, 'km_h-1') !== false) {
+        return $v * 0.5399568;
+    }
+    if (strpos($unitCode, 'm_s-1') !== false) {
+        return $v * 1.943844;
+    }
+    return $v;
+}
+
+function tv_radar_weather_fetch_json(string $url, int $timeout = 10): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, array(
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_ENCODING => 'gzip',
+        CURLOPT_HTTPHEADER => array(
+            'Accept: application/geo+json, application/json',
+            'User-Agent: IPCA-TV-Radar/1.0',
+        ),
+    ));
+    $body = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($body === false) {
+        throw new RuntimeException('Weather request failed: ' . $err);
+    }
+    if ($code < 200 || $code >= 300) {
+        throw new RuntimeException('Weather request returned HTTP ' . $code);
+    }
+
+    $decoded = json_decode((string)$body, true);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('Weather request returned invalid JSON.');
+    }
+
+    return $decoded;
+}
+
+function tv_radar_weather_nbm_forecast_2h(): array
+{
+    $grid = tv_radar_weather_fetch_json(tv_radar_weather_nbm_grid_url(), 10);
+    if (!isset($grid['properties']) || !is_array($grid['properties'])) {
+        return array('ok' => false);
+    }
+
+    $props = $grid['properties'];
+    $wdVals = $props['windDirection']['values'] ?? null;
+    $wsVals = $props['windSpeed']['values'] ?? null;
+    $wsUom = (string)($props['windSpeed']['uom'] ?? '');
+    $target = time() + 7200;
+
+    $wd = tv_radar_weather_grid_value_at_time($wdVals, $target);
+    $ws = tv_radar_weather_grid_value_at_time($wsVals, $target);
+
+    return array(
+        'ok' => true,
+        'forecast_wind_dir_deg' => $wd !== null ? (int)round((float)$wd, 0) : null,
+        'forecast_wind_kt' => $ws !== null ? (int)round(tv_radar_weather_unit_to_knots($ws, $wsUom) ?? 0, 0) : null,
+    );
+}
+
+function tv_radar_weather_fetch_metar_visibility(string $station): ?string
+{
+    $station = strtoupper(trim($station)) ?: 'KTRM';
+    $url = 'https://aviationweather.gov/api/data/metar?ids=' . rawurlencode($station) . '&format=json';
+    $decoded = tv_radar_weather_fetch_json($url, 8);
+    if (!count($decoded) || !is_array($decoded[0])) {
+        return null;
+    }
+    $vis = isset($decoded[0]['visib']) ? trim((string)$decoded[0]['visib']) : '';
+    return $vis !== '' ? $vis : null;
+}
+
+function tv_radar_weather_enrich_payload(array $payload, string $station = 'KTRM'): array
+{
+    try {
+        $visibility = tv_radar_weather_fetch_metar_visibility($station);
+        if ($visibility !== null) {
+            $payload['visibility_sm'] = $visibility;
+            $payload['visibility_source'] = 'metar_' . strtolower($station);
+        }
+    } catch (Throwable $e) {
+        $payload['visibility_error'] = $e->getMessage();
+    }
+
+    try {
+        $forecast = tv_radar_weather_nbm_forecast_2h();
+        if (!empty($forecast['ok'])) {
+            $payload['forecast_wind_dir_deg'] = $forecast['forecast_wind_dir_deg'];
+            $payload['forecast_wind_kt'] = $forecast['forecast_wind_kt'];
+        }
+    } catch (Throwable $e) {
+        $payload['forecast_error'] = $e->getMessage();
+    }
+
+    return $payload;
+}
+
 function tv_radar_weather_from_custom_url(string $url): array
 {
     $ch = curl_init($url);
@@ -235,6 +409,7 @@ function tv_radar_weather_fetch_tempest(float $fieldElevFt = 115.0): array
         'station' => 'KTRM',
         'station_id' => $config['station_id'],
         'wind_dir_deg' => $windDir,
+        'wind_dir_raw_deg' => $windDirRaw !== null ? round($windDirRaw, 0) : null,
         'wind_kt' => $windKt,
         'gust_kt' => $gustKt,
         'temp_c' => $tempC,
@@ -360,16 +535,19 @@ function tv_radar_weather_build(string $station = 'KTRM', float $fieldElevFt = 1
             $payload['ok'] = true;
             $payload['source'] = (string)($payload['source'] ?? 'station');
             $payload['station'] = (string)($payload['station'] ?? $station);
+            $payload = tv_radar_weather_enrich_payload($payload, $station);
             tv_radar_weather_save_cache($station, $payload);
             return $payload;
         }
 
         $payload = tv_radar_weather_fetch_tempest($fieldElevFt);
+        $payload = tv_radar_weather_enrich_payload($payload, $station);
         tv_radar_weather_save_cache($station, $payload);
         return $payload;
     } catch (Throwable $tempestError) {
         try {
             $payload = tv_radar_weather_fetch_metar($station, $fieldElevFt);
+            $payload = tv_radar_weather_enrich_payload($payload, $station);
             $payload['tempest_error'] = $tempestError->getMessage();
             tv_radar_weather_save_cache($station, $payload);
             return $payload;
