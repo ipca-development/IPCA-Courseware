@@ -332,7 +332,7 @@ final class EgleLogbookSyncService
             'pic_time' => $isSoloPic ? $duration : 0,
             'copilot_time' => 0,
             'dual_received_time' => $isDual ? $duration : 0,
-            'instructor_time' => $isDual ? $duration : 0,
+            'instructor_time' => 0,
             'solo_time' => $isSoloPic ? $duration : 0,
             'cross_country_time' => $isCrossCountry ? $duration : 0,
             'cross_country_distance_nm' => 0,

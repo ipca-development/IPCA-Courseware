@@ -120,19 +120,25 @@
     return d > 180 ? 360 - d : d;
   }
 
-  function formatUpdatedAt(value) {
-    if (!value) return 'Updated —';
-    var dt = new Date(value);
-    if (isNaN(dt.getTime())) return 'Updated —';
-    return 'Updated ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-  }
-
   function formatWind(wind) {
     if (!wind || wind.wind_dir_deg == null || wind.wind_kt == null) return '--- / -- KT';
     var dir = String(Math.round(wind.wind_dir_deg)).padStart(3, '0');
     var spd = Math.round(wind.wind_kt);
-    var gust = wind.gust_kt != null ? ' G' + Math.round(wind.gust_kt) : '';
+    var gust = wind.gust_kt != null && wind.gust_kt > 0 ? ' G' + Math.round(wind.gust_kt) : '';
     return dir + '° / ' + spd + ' KT' + gust;
+  }
+
+  function formatUpdatedAt(weather) {
+    if (!weather) return 'Updated —';
+    if (weather.recorded_at_local) return 'Updated ' + weather.recorded_at_local;
+    return formatUpdatedAtLegacy(weather.updated_at);
+  }
+
+  function formatUpdatedAtLegacy(value) {
+    if (!value) return 'Updated —';
+    var dt = new Date(value);
+    if (isNaN(dt.getTime())) return 'Updated —';
+    return 'Updated ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
   function RadarScreen(options) {
@@ -234,28 +240,44 @@
 
   RadarScreen.prototype.bindResize = function () {
     var self = this;
-    var onResize = function () { self.resize(); };
+    var onResize = function () {
+      window.requestAnimationFrame(function () {
+        self.resize();
+      });
+    };
     window.addEventListener('resize', onResize);
     if (typeof ResizeObserver !== 'undefined' && this.root) {
       this.resizeObserver = new ResizeObserver(onResize);
-      this.resizeObserver.observe(this.root);
+      var scopeWrap = this.root.querySelector('.tv-radar-scope-wrap');
+      if (scopeWrap) {
+        this.resizeObserver.observe(scopeWrap);
+      }
     }
   };
 
   RadarScreen.prototype.resize = function () {
-    if (!this.scopeCanvas || !this.diagramCanvas) return;
-    var wrap = this.scopeCanvas.parentElement;
-    var wrapRect = wrap.getBoundingClientRect();
+    if (!this.scopeCanvas || !this.diagramCanvas || !this.root) return;
+    var rootRect = this.root.getBoundingClientRect();
+    if (rootRect.width < 10 || rootRect.height < 10) return;
+
+    var scopeWrap = this.scopeCanvas.parentElement;
+    var wrapRect = scopeWrap.getBoundingClientRect();
     var size = Math.floor(Math.min(wrapRect.width, wrapRect.height));
-    size = Math.max(220, size);
+    size = Math.max(180, Math.min(size, Math.floor(rootRect.height - 8)));
+    if (size === this.scopeSize && this.diagramCanvas.width > 0) return;
+
     this.scopeSize = size;
     this.scopeCanvas.width = size;
     this.scopeCanvas.height = size;
+    this.scopeCanvas.style.width = size + 'px';
+    this.scopeCanvas.style.height = size + 'px';
 
     var diagramBody = this.diagramCanvas.parentElement;
     var dRect = diagramBody.getBoundingClientRect();
-    this.diagramCanvas.width = Math.max(180, Math.floor(dRect.width - 12));
-    this.diagramCanvas.height = Math.max(120, Math.floor(dRect.height - 12));
+    var dWidth = Math.max(120, Math.floor(dRect.width));
+    var dHeight = Math.max(90, Math.floor(dRect.height));
+    this.diagramCanvas.width = dWidth;
+    this.diagramCanvas.height = dHeight;
     this.drawDiagram();
   };
 
@@ -346,7 +368,7 @@
       return;
     }
 
-    els.updated.textContent = formatUpdatedAt(w.updated_at);
+    els.updated.textContent = formatUpdatedAt(w);
     els.windValue.textContent = formatWind(w);
     if (els.windArrow && w.wind_dir_deg != null) {
       els.windArrow.style.transform = 'rotate(' + Math.round(w.wind_dir_deg) + 'deg)';

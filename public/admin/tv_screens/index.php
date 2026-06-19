@@ -536,7 +536,7 @@ cw_header('TV Flip Board');
     <div class="tv-alert err">Apply <code>scripts/sql/2026_05_30_tv_screen_pa_voice.sql</code> to enable OpenAI PA voice selection.</div>
   <?php endif; ?>
   <?php if ($tableReady): ?>
-    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Radar uses the same ADS-B source plus METAR weather (<code>CW_TV_WEATHER_URL</code> optional for onsite station). Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code>, <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>, and <code>scripts/sql/2026_06_08_tv_screen_aircraft_type_col.sql</code>.</div>
+    <div class="tv-alert ok">ADS-B aircraft boards use RapidAPI (<code>CW_ADSBEXCHANGE_API_KEY</code> in PHP-FPM). Radar merges fleet ADS-B with live area traffic. Weather uses Tempest station (<code>CW_TEMPEST_ACCESS_TOKEN</code>, <code>CW_TEMPEST_STATION_ID</code>) from tempo_asos. Apply <code>scripts/sql/2026_05_31_tv_screen_aircraft_type.sql</code>, <code>scripts/sql/2026_06_07_tv_screen_aircraft_fields.sql</code>, and <code>scripts/sql/2026_06_08_tv_screen_aircraft_type_col.sql</code>.</div>
   <?php endif; ?>
 
   <section class="card tv-list-head-card">

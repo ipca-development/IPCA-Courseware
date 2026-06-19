@@ -38,6 +38,8 @@ $adsbOk = false;
 $adsbError = null;
 $adsbLive = false;
 $trackCount = 0;
+$fleetTargets = array();
+$areaTargets = array();
 
 try {
     $tracks = array();
@@ -72,10 +74,12 @@ try {
     }
 
     $trackCount = count($tracks);
-    $targets = tv_adsb_fetch_radar_targets($tracks, $centerLat, $centerLon, $rangeNm, array(
+    $fleetTargets = tv_adsb_fetch_radar_targets($tracks, $centerLat, $centerLon, $rangeNm, array(
         'gate' => $gate,
         'home_airport' => $homeAirport,
     ));
+    $areaTargets = tv_adsb_fetch_area_radar_targets($centerLat, $centerLon, $rangeNm);
+    $targets = tv_adsb_merge_radar_targets($fleetTargets, $areaTargets);
     $adsbOk = true;
     foreach ($targets as $target) {
         if (!empty($target['live'])) {
@@ -109,7 +113,9 @@ $response = array(
         'error' => $adsbError,
         'count' => count($targets),
         'tracks' => $trackCount,
-        'source' => 'fleet_hex',
+        'fleet_count' => isset($fleetTargets) ? count($fleetTargets) : 0,
+        'area_count' => isset($areaTargets) ? count($areaTargets) : 0,
+        'source' => 'fleet_and_area',
     ),
     'targets' => $targets,
     'weather' => $weather,
@@ -120,8 +126,10 @@ if (!empty($_GET['debug'])) {
     $response['debug'] = array(
         'provider' => tv_adsb_provider(),
         'weather_source' => (string)($weather['source'] ?? ''),
-        'weather_url' => tv_radar_weather_station_url() !== '' ? 'custom' : 'aviationweather.gov/metar',
-        'adsb_method' => 'tv_adsb_build_status per fleet aircraft (same as aircraft board)',
+        'weather_station' => (string)($weather['station'] ?? ''),
+        'adsb_method' => 'fleet tv_adsb_build_status + live area /lat/lon/dist/',
+        'fleet_count' => isset($fleetTargets) ? count($fleetTargets) : 0,
+        'area_count' => isset($areaTargets) ? count($areaTargets) : 0,
     );
 }
 

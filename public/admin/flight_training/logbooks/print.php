@@ -54,6 +54,15 @@ function pval(mixed $value, int $decimals = 2): string
     return number_format($number, $decimals, '.', '');
 }
 
+function ptotal(mixed $value, int $decimals = 2): string
+{
+    $number = (float)$value;
+    if (abs($number) < 0.005) {
+        return '0';
+    }
+    return number_format($number, $decimals, '.', '');
+}
+
 function ptime(mixed $value): string
 {
     $raw = trim((string)($value ?? ''));
@@ -158,6 +167,20 @@ function singlePilotMeMarker(array $entry): string
     return !isSimulatorEntry($entry) && (float)($entry['multi_engine_time'] ?? 0) > 0 ? 'X' : '';
 }
 
+function easaActingInstructorTime(array $entry): float
+{
+    $source = json_decode((string)($entry['source_json'] ?? '{}'), true);
+    if (!is_array($source)) {
+        return 0.0;
+    }
+    foreach (array('acting_instructor_time', 'flight_instructor_time', 'instructor_given_time', 'fi_time') as $key) {
+        if (isset($source[$key]) && (float)$source[$key] > 0) {
+            return (float)$source[$key];
+        }
+    }
+    return 0.0;
+}
+
 function leftEntryFields(array $entry): array
 {
     return array(
@@ -185,7 +208,7 @@ function rightEntryFields(array $entry): array
         array('column' => 2, 'field' => 'pic_time', 'value' => pval($entry['pic_time'] ?? 0)),
         array('column' => 3, 'field' => 'copilot_time', 'value' => pval($entry['copilot_time'] ?? 0)),
         array('column' => 4, 'field' => 'dual_received_time', 'value' => pval($entry['dual_received_time'] ?? 0)),
-        array('column' => 5, 'field' => 'instructor_time', 'value' => pval($entry['instructor_time'] ?? 0)),
+        array('column' => 5, 'field' => 'acting_instructor_time', 'value' => pval(easaActingInstructorTime($entry))),
         array('column' => 6, 'field' => 'basic_instrument_flying_time', 'value' => pval($entry['basic_instrument_flying_time'] ?? 0)),
         array('column' => 7, 'field' => 'cross_country_time', 'value' => pval($entry['cross_country_time'] ?? 0)),
         array('column' => 8, 'field' => 'remarks_endorsements', 'value' => logbookRemarks($entry)),
@@ -218,7 +241,7 @@ function pageTotals(array $entries): array
         $totals['pic'] += (float)($entry['pic_time'] ?? 0);
         $totals['copilot'] += (float)($entry['copilot_time'] ?? 0);
         $totals['dual'] += (float)($entry['dual_received_time'] ?? 0);
-        $totals['instructor'] += (float)($entry['instructor_time'] ?? 0);
+        $totals['instructor'] += easaActingInstructorTime($entry);
         $totals['if'] += (float)($entry['basic_instrument_flying_time'] ?? 0);
         $totals['nav'] += (float)($entry['cross_country_time'] ?? 0);
         $totals['day_landings'] += (float)((int)($entry['day_landings'] ?? 0));
@@ -463,7 +486,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     foreach (array(0 => 'Night', 1 => 'IFR', 2 => 'PIC', 3 => 'Co-Pilot', 4 => 'Dual', 5 => 'Instructor', 6 => 'IF', 7 => 'NAV') as $idx => $label) {
         $cells[] = gridCell($bounds, $idx, $idx + 1, $gridY + ($headerRowH * 2), $bodyTop, 'main', $label, 'head');
     }
-    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 4, 'endCol' => 8)));
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowHeight, 25, count($columns), array('startRow' => $footerStartRow, 'startCol' => 0, 'endCol' => 8)));
     foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $gridY + $headerH + $idx * $rowHeight + ($rowHeight / 2) + 0.55;
         foreach (rightEntryFields($entry) as $field) {
@@ -482,10 +505,14 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         $y1 = $totalsY + ($idx * $footerRowH);
         $y2 = $totalsY + (($idx + 1) * $footerRowH);
         $totals = $row[1];
-        $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', pval($totals['dual'] ?? 0), 'micro');
-        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', pval($totals['instructor'] ?? 0), 'micro');
-        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', pval($totals['if'] ?? 0), 'micro');
-        $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', pval($totals['nav'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 0, 1, $y1, $y2, 'main', ptotal($totals['night'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 1, 2, $y1, $y2, 'main', ptotal($totals['ifr'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 2, 3, $y1, $y2, 'main', ptotal($totals['pic'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 3, 4, $y1, $y2, 'main', ptotal($totals['copilot'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 4, 5, $y1, $y2, 'main', ptotal($totals['dual'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', ptotal($totals['instructor'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', ptotal($totals['if'] ?? 0), 'micro');
+        $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', ptotal($totals['nav'] ?? 0), 'micro');
     }
     $out .= renderCellBorders($cells);
     $sigY = 178.6;

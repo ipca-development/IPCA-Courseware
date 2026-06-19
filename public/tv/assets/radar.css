@@ -10,7 +10,9 @@
   --radar-muted:rgba(232,242,255,.62);
   width:100%;
   height:100%;
+  max-height:100%;
   min-height:0;
+  overflow:hidden;
   display:grid;
   grid-template-columns:minmax(0,1.45fr) minmax(280px,.95fr);
   gap:clamp(10px,1.2vw,18px);
@@ -18,6 +20,7 @@
   color:var(--radar-text);
   font-family:"SF Mono","Roboto Mono","Consolas",monospace;
   box-sizing:border-box;
+  align-items:stretch;
 }
 
 .tv-radar-screen *{box-sizing:border-box}
@@ -26,6 +29,8 @@
   position:relative;
   min-width:0;
   min-height:0;
+  height:100%;
+  max-height:100%;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -38,14 +43,13 @@
 .tv-radar-scope-canvas,
 .tv-radar-diagram-canvas{
   display:block;
-  width:100%;
-  height:100%;
 }
 
 .tv-radar-scope-canvas{
-  aspect-ratio:1;
-  max-height:100%;
+  width:auto;
+  height:auto;
   max-width:100%;
+  max-height:100%;
 }
 
 .tv-radar-scope-overlay{
@@ -93,8 +97,11 @@
 .tv-radar-side{
   min-width:0;
   min-height:0;
+  height:100%;
+  max-height:100%;
+  overflow:hidden;
   display:grid;
-  grid-template-rows:minmax(0,1fr) minmax(0,1.05fr);
+  grid-template-rows:minmax(0,.9fr) minmax(0,1.1fr);
   gap:clamp(8px,1vw,14px);
 }
 
@@ -133,13 +140,15 @@
   position:relative;
   flex:1;
   min-height:0;
+  overflow:hidden;
   padding:clamp(6px,.7vw,10px);
 }
 
 .tv-radar-diagram-canvas{
-  width:100%;
-  height:100%;
-  min-height:120px;
+  position:absolute;
+  inset:clamp(6px,.7vw,10px);
+  width:calc(100% - clamp(12px,1.4vw,20px));
+  height:calc(100% - clamp(12px,1.4vw,20px));
 }
 
 .tv-radar-weather-body{
@@ -288,7 +297,10 @@
   align-items:stretch;
   justify-content:stretch;
   padding:0;
-  min-height:clamp(280px,42vh,560px);
+  height:calc(min(62vh, 720px) - 32px);
+  max-height:calc(min(62vh, 720px) - 32px);
+  min-height:0;
+  overflow:hidden;
 }
 
 .fb-message-board.is-radar-mode .fb-main-lines,

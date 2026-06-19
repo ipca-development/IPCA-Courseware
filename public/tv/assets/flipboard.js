@@ -915,6 +915,7 @@
     this.buildMessageBoard();
     if (this.isRadarScreen()) {
       if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
+      this.showRadarBoard();
       this.ensureRadarScreen();
       this.rendering = false;
     } else {
@@ -1116,6 +1117,11 @@
       var line = new FlipLine(ROW_COLS);
       self.lines.push(line);
       self.mainLinesEl.appendChild(line.el);
+    }
+
+    if (this.isRadarScreen()) {
+      this.messageBoard.classList.add('is-radar-mode');
+      this.mainLinesEl.hidden = true;
     }
   };
 

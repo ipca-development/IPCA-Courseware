@@ -227,6 +227,174 @@ function tv_adsb_fetch_by_registration(string $registration): ?array
     return tv_adsb_extract_aircraft($payload);
 }
 
+function tv_adsb_extract_aircraft_list(array $payload): array
+{
+    if (isset($payload['ac']) && is_array($payload['ac'])) {
+        return $payload['ac'];
+    }
+    if (isset($payload['aircraft']) && is_array($payload['aircraft'])) {
+        return $payload['aircraft'];
+    }
+    if ($payload !== array() && array_keys($payload) === range(0, count($payload) - 1)) {
+        $first = $payload[0] ?? null;
+        if (is_array($first) && (isset($first['hex']) || isset($first['lat']))) {
+            return $payload;
+        }
+    }
+    return array();
+}
+
+function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
+{
+    $distNm = max(0.5, min(25.0, $distNm));
+    $latStr = rawurlencode((string)round($lat, 6));
+    $lonStr = rawurlencode((string)round($lon, 6));
+    $distStr = rawurlencode((string)round($distNm, 1));
+
+    $paths = tv_adsb_provider() === 'rapidapi'
+        ? array(
+            '/lat/' . $latStr . '/lon/' . $lonStr . '/dist/' . $distStr . '/',
+            '/lat/' . $latStr . '/lon/' . $lonStr . '/dist/' . $distStr,
+        )
+        : array(
+            '/lat/' . $latStr . '/lon/' . $lonStr . '/dist/' . $distStr,
+            '/lat/' . $latStr . '/lon/' . $lonStr . '/dist/' . $distStr . '/',
+        );
+
+    foreach ($paths as $path) {
+        try {
+            $payload = tv_adsb_request($path);
+            $list = tv_adsb_extract_aircraft_list($payload);
+            if (count($list) > 0) {
+                return $list;
+            }
+        } catch (Throwable $e) {
+            continue;
+        }
+    }
+
+    return array();
+}
+
+function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 5.0): ?array
+{
+    if (!isset($aircraft['lat'], $aircraft['lon']) || !is_numeric($aircraft['lat']) || !is_numeric($aircraft['lon'])) {
+        return null;
+    }
+
+    $lat = (float)$aircraft['lat'];
+    $lon = (float)$aircraft['lon'];
+    $dist = tv_adsb_haversine_nm($lat, $lon, $centerLat, $centerLon);
+    if ($dist > $maxNm) {
+        return null;
+    }
+
+    $trackDeg = null;
+    if (isset($aircraft['track']) && is_numeric($aircraft['track'])) {
+        $trackDeg = (float)$aircraft['track'];
+    } elseif (isset($aircraft['true_heading']) && is_numeric($aircraft['true_heading'])) {
+        $trackDeg = (float)$aircraft['true_heading'];
+    } elseif (isset($aircraft['mag_heading']) && is_numeric($aircraft['mag_heading'])) {
+        $trackDeg = (float)$aircraft['mag_heading'];
+    }
+
+    $gs = isset($aircraft['gs']) && is_numeric($aircraft['gs']) ? (float)$aircraft['gs'] : null;
+    $label = tv_adsb_normalize_label((string)($aircraft['r'] ?? ($aircraft['flight'] ?? '')));
+    $hex = tv_adsb_normalize_hex((string)($aircraft['hex'] ?? ''));
+
+    return array(
+        'hex' => $hex,
+        'label' => $label !== '' ? $label : ($hex !== '' ? strtoupper($hex) : 'UNKNOWN'),
+        'lat' => round($lat, 6),
+        'lon' => round($lon, 6),
+        'gs' => $gs,
+        'alt_ft' => tv_adsb_altitude_ft($aircraft),
+        'on_ground' => tv_adsb_is_on_ground($aircraft),
+        'track_deg' => $trackDeg,
+        'dist_nm' => round($dist, 1),
+        'icao_type' => strtoupper(trim((string)($aircraft['t'] ?? ''))),
+        'status_code' => tv_adsb_is_on_ground($aircraft) ? 'on_surface' : 'in_flight',
+        'live' => true,
+        'position_source' => 'live',
+        'target_source' => 'area',
+    );
+}
+
+function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 5.0): array
+{
+    $raw = tv_adsb_fetch_near_point($centerLat, $centerLon, $rangeNm);
+    $targets = array();
+    $seen = array();
+
+    foreach ($raw as $aircraft) {
+        if (!is_array($aircraft)) {
+            continue;
+        }
+        $formatted = tv_adsb_format_area_radar_target($aircraft, $centerLat, $centerLon, $rangeNm);
+        if ($formatted === null) {
+            continue;
+        }
+        $key = $formatted['hex'] !== '' ? $formatted['hex'] : ($formatted['label'] . '|' . $formatted['lat'] . '|' . $formatted['lon']);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $targets[] = $formatted;
+    }
+
+    usort($targets, static function (array $a, array $b): int {
+        return ($a['dist_nm'] <=> $b['dist_nm']);
+    });
+
+    return $targets;
+}
+
+function tv_adsb_merge_radar_targets(array $fleetTargets, array $areaTargets): array
+{
+    $merged = array();
+    $index = array();
+
+    foreach ($fleetTargets as $target) {
+        if (!is_array($target)) {
+            continue;
+        }
+        $target['target_source'] = (string)($target['target_source'] ?? 'fleet');
+        $key = !empty($target['hex']) ? $target['hex'] : ($target['label'] ?? '');
+        if ($key === '') {
+            $merged[] = $target;
+            continue;
+        }
+        $index[$key] = count($merged);
+        $merged[] = $target;
+    }
+
+    foreach ($areaTargets as $target) {
+        if (!is_array($target)) {
+            continue;
+        }
+        $key = !empty($target['hex']) ? $target['hex'] : '';
+        if ($key !== '' && isset($index[$key])) {
+            continue;
+        }
+        $labelKey = (string)($target['label'] ?? '');
+        if ($key === '' && $labelKey !== '') {
+            foreach ($merged as $existing) {
+                if (strcasecmp((string)($existing['label'] ?? ''), $labelKey) === 0) {
+                    continue 2;
+                }
+            }
+        }
+        $target['target_source'] = 'area';
+        $merged[] = $target;
+    }
+
+    usort($merged, static function (array $a, array $b): int {
+        return ($a['dist_nm'] <=> $b['dist_nm']);
+    });
+
+    return $merged;
+}
+
 function tv_adsb_build_radar_target_from_track(
     array $track,
     float $centerLat,
@@ -278,6 +446,7 @@ function tv_adsb_build_radar_target_from_track(
         'status_code' => (string)($status['status_code'] ?? ''),
         'live' => (bool)($status['live'] ?? false),
         'position_source' => (string)($status['position_source'] ?? ($debug['position_source'] ?? '')),
+        'target_source' => 'fleet',
     );
 }
 
