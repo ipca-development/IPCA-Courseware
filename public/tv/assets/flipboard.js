@@ -686,6 +686,9 @@
     var self = this;
     return new Promise(function (resolve) {
       if (nextChar === self.char) {
+        if (!self.isDisplayCorrect(nextChar)) {
+          self.setChar(nextChar);
+        }
         resolve();
         return;
       }
@@ -732,11 +735,18 @@
     });
   };
 
+  FlipTile.prototype.isDisplayCorrect = function (char) {
+    return this.char === char
+      && this.displayTop.textContent === char
+      && this.displayBottom.textContent === char
+      && this.el.offsetHeight > 4;
+  };
+
   FlipTile.prototype.flipTo = function (target, options, audio) {
     var self = this;
     options = options || {};
     target = target || ' ';
-    if (target === this.char && !options.force) return Promise.resolve();
+    if (this.isDisplayCorrect(target) && !options.force) return Promise.resolve();
 
     var duration = Math.floor(randomBetween(480, 980) * (options.urgent ? 0.72 : 1));
     var extraFlaps = options.urgent
@@ -803,7 +813,7 @@
     var jobs = [];
     this.tiles.forEach(function (tile, idx) {
       var char = fitted.charAt(idx);
-      if (char === tile.char && !options.force) return;
+      if (tile.isDisplayCorrect(char) && !options.force) return;
       var delay = rowDelayBase + ((options && options.urgent)
         ? randomBetween(0, 150)
         : idx * randomBetween(7, 22) + randomBetween(0, 260));
@@ -822,7 +832,7 @@
     var jobs = [];
     this.tiles.forEach(function (tile, idx) {
       var char = fitted.charAt(idx);
-      if (char === tile.char && !options.force) return;
+      if (tile.isDisplayCorrect(char) && !options.force) return;
       var delay = rowDelayBase + ((options && options.urgent)
         ? randomBetween(0, 150)
         : idx * randomBetween(7, 22) + randomBetween(0, 260));
