@@ -648,6 +648,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
         gridCell($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 18, 20, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 20, 22, $gridY + 5.5, $gridY + $headerH, 'main'),
+        gridCell($bounds, 22, 26, $gridY + 5.5, $gridY + $headerH, 'main'),
     );
     $out .= svgCellMultiline($bounds, 0, 8, $gridY, $gridY + 5.5, array('AIRCRAFT CATEGORY AND CLASS'), 'faa-head');
     $out .= svgCellMultiline($bounds, 8, 14, $gridY, $gridY + 5.5, array('CONDITIONS OF FLIGHT'), 'faa-head');
