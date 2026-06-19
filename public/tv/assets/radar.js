@@ -88,6 +88,9 @@
   var BLIP_LIFE_MS = SWEEP_PERIOD_MS * BLIP_TRAIL_TURNS;
   var BLIP_SPAWN_MIN_PX = 2.5;
   var WIND_HISTORY_MS = 10 * 60 * 1000;
+  var RADAR_DELAY_MS = 25000;
+  var TRACK_HISTORY_MS = 90000;
+  var TRACK_MIN_SAMPLE_MS = 4000;
   var WIND_ARROW_R_OUTER = 46;
   var WIND_ARROW_R_INNER = 23;
   var NOISE_BLOB_COUNT = 28;
@@ -148,9 +151,17 @@
     return (current + delta * t + 360) % 360;
   }
 
+  function windDirToTens(deg) {
+    if (deg == null || !isFinite(deg)) return null;
+    var dir = Math.round(deg / 10) * 10;
+    if (dir <= 0) dir = 360;
+    if (dir > 360) dir = 360;
+    return dir;
+  }
+
   function formatWind(wind) {
     if (!wind || wind.wind_kt == null) return '--- / -- KT';
-    var dirVal = wind.wind_dir_raw_deg != null ? wind.wind_dir_raw_deg : wind.wind_dir_deg;
+    var dirVal = wind.wind_dir_deg != null ? wind.wind_dir_deg : windDirToTens(wind.wind_dir_raw_deg);
     if (dirVal == null) return '--- / -- KT';
     var dir = String(Math.round(dirVal)).padStart(3, '0');
     var spd = Math.round(wind.wind_kt);
@@ -195,6 +206,78 @@
     };
   }
 
+  function headingFromDelta(xNm, yNm) {
+    if (Math.hypot(xNm, yNm) < 0.000001) return null;
+    var deg = Math.atan2(xNm, yNm) * RAD_TO_DEG;
+    return (deg + 360) % 360;
+  }
+
+  function interpolateTrackHistory(history, renderTimeMs) {
+    if (!history || history.length < 2) return null;
+
+    var first = history[0];
+    var last = history[history.length - 1];
+    if (renderTimeMs < first.t) return null;
+
+    if (renderTimeMs >= last.t) {
+      var prev = history[history.length - 2];
+      var segMs = last.t - prev.t;
+      if (segMs < 200) {
+        return {
+          xNm: last.xNm,
+          yNm: last.yNm,
+          heading: last.heading != null ? last.heading : 0,
+          gs: last.gs != null ? last.gs : 0
+        };
+      }
+      var segSec = segMs / 1000;
+      var vx = (last.xNm - prev.xNm) / segSec;
+      var vy = (last.yNm - prev.yNm) / segSec;
+      var extrapSec = Math.min(6, (renderTimeMs - last.t) / 1000);
+      var heading = headingFromDelta(vx, vy);
+      return {
+        xNm: last.xNm + vx * extrapSec,
+        yNm: last.yNm + vy * extrapSec,
+        heading: heading != null ? heading : (last.heading != null ? last.heading : 0),
+        gs: last.gs != null ? last.gs : 0
+      };
+    }
+
+    for (var i = 0; i < history.length - 1; i += 1) {
+      var a = history[i];
+      var b = history[i + 1];
+      if (renderTimeMs < a.t || renderTimeMs > b.t) continue;
+      var span = b.t - a.t;
+      if (span < 1) {
+        return {
+          xNm: b.xNm,
+          yNm: b.yNm,
+          heading: b.heading != null ? b.heading : 0,
+          gs: b.gs != null ? b.gs : 0
+        };
+      }
+      var f = (renderTimeMs - a.t) / span;
+      var xNm = a.xNm + (b.xNm - a.xNm) * f;
+      var yNm = a.yNm + (b.yNm - a.yNm) * f;
+      var vx = (b.xNm - a.xNm) / (span / 1000);
+      var vy = (b.yNm - a.yNm) / (span / 1000);
+      var h = headingFromDelta(vx, vy);
+      var gs = b.gs != null ? b.gs : a.gs;
+      if (gs == null) {
+        var spdNmSec = Math.hypot(vx, vy);
+        gs = spdNmSec * 3600;
+      }
+      return {
+        xNm: xNm,
+        yNm: yNm,
+        heading: h != null ? h : (b.heading != null ? b.heading : 0),
+        gs: gs != null ? gs : 0
+      };
+    }
+
+    return null;
+  }
+
   function scatterOffset(seed, amount) {
     if (!amount) return { x: 0, y: 0 };
     var a = Math.sin(seed * 12.9898) * 43758.5453;
@@ -209,7 +292,8 @@
 
   function RadarScreen(options) {
     this.apiUrl = options.apiUrl || '/tv/api/radar.php';
-    this.pollMs = options.pollMs || 15000;
+    this.pollMs = options.pollMs || 10000;
+    this.radarDelayMs = options.radarDelayMs || RADAR_DELAY_MS;
     this.geo = options.geo || KTRM_AIRPORT_GEO;
     this.container = null;
     this.root = null;
@@ -253,7 +337,7 @@
       '    </div>',
       '    <div class="tv-radar-scope-footer">',
       '      <div class="tv-radar-scope-chip">RANGE: ' + this.geo.rangeNm + ' NM</div>',
-      '      <div class="tv-radar-scope-chip">TILT: 0.5°</div>',
+      '      <div class="tv-radar-scope-chip">DELAY: ' + (this.radarDelayMs / 1000) + 'S</div>',
       '    </div>',
       '  </div>',
       '</div>',
@@ -381,8 +465,8 @@
     if (!scopeWrap) return;
     var wrapW = scopeWrap.getBoundingClientRect().width;
     var size = this.scopeSize;
-    var sidePad = Math.max(10, (wrapW - size) * 0.5);
-    var maxW = Math.max(108, Math.floor(sidePad - 14));
+    var margin = Math.max(0, (wrapW - size) * 0.5);
+    var maxW = Math.max(248, Math.min(300, Math.floor(margin + size * 0.34)));
     this.statusEl.style.maxWidth = maxW + 'px';
   };
 
@@ -445,8 +529,7 @@
   };
 
   RadarScreen.prototype.applyPayload = function (payload) {
-    var now = performance.now();
-    this.syncTrackStates(Array.isArray(payload.targets) ? payload.targets : [], now);
+    this.syncTrackStates(Array.isArray(payload.targets) ? payload.targets : [], Date.now());
     this.targets = Array.isArray(payload.targets) ? payload.targets : [];
     this.weather = payload.weather || null;
     this.adsbOk = !!(payload.adsb && payload.adsb.ok);
@@ -510,13 +593,16 @@
     els.updated.textContent = formatUpdatedAt(w);
     els.windValue.textContent = formatWind(w);
 
-    var windDir = w.wind_dir_raw_deg != null ? w.wind_dir_raw_deg : w.wind_dir_deg;
+    var windDir = w.wind_dir_deg != null ? w.wind_dir_deg : windDirToTens(w.wind_dir_raw_deg);
     if (windDir != null) {
       this.windTargetDir = windDir;
       if (this.displayWindDir == null) this.displayWindDir = windDir;
+      if (els.windLive) {
+        els.windLive.setAttribute('transform', 'rotate(' + windDir + ' 50 50)');
+      }
       var now = Date.now();
       var last = this.windHistory.length ? this.windHistory[this.windHistory.length - 1] : null;
-      if (!last || Math.abs(((windDir - last.dir + 540) % 360) - 180) > 1.5 || now - last.ts > 45000) {
+      if (!last || Math.abs(((windDir - last.dir + 540) % 360) - 180) > 2 || now - last.ts > 45000) {
         this.windHistory.push({ dir: windDir, ts: now });
       }
       this.windHistory = this.windHistory.filter(function (entry) {
@@ -526,10 +612,12 @@
     }
 
     if (els.windFcst) {
-      if (w.forecast_wind_dir_deg != null) {
-        els.windFcst.setAttribute('transform', 'rotate(' + Math.round(w.forecast_wind_dir_deg) + ' 50 50)');
+      var fcstDir = windDirToTens(w.forecast_wind_dir_deg);
+      if (fcstDir != null) {
+        els.windFcst.setAttribute('transform', 'rotate(' + fcstDir + ' 50 50)');
         els.windFcst.style.opacity = '0.9';
       } else {
+        els.windFcst.removeAttribute('transform');
         els.windFcst.style.opacity = '0';
       }
     }
@@ -589,7 +677,48 @@
     this.weatherEls.windLive.style.opacity = String(breathe);
   };
 
-  RadarScreen.prototype.syncTrackStates = function (targets, ts) {
+  RadarScreen.prototype.parseObservedAtMs = function (target, recvMs) {
+    if (target && target.observed_at) {
+      var parsed = Date.parse(target.observed_at);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return recvMs;
+  };
+
+  RadarScreen.prototype.appendHistorySample = function (state, sample) {
+    var hist = state.history || [];
+    var last = hist[hist.length - 1];
+
+    if (last) {
+      if (sample.t <= last.t) {
+        sample.t = last.t + Math.max(TRACK_MIN_SAMPLE_MS, this.pollMs * 0.75);
+      }
+      var dist = Math.hypot(sample.xNm - last.xNm, sample.yNm - last.yNm);
+      if (dist < 0.00003 && sample.t - last.t < TRACK_MIN_SAMPLE_MS) {
+        return;
+      }
+    }
+
+    var heading = sample.track_deg != null ? sample.track_deg : headingFromDelta(
+      last ? sample.xNm - last.xNm : 0,
+      last ? sample.yNm - last.yNm : 0
+    );
+
+    hist.push({
+      t: sample.t,
+      xNm: sample.xNm,
+      yNm: sample.yNm,
+      gs: sample.gs,
+      heading: heading
+    });
+
+    var cutoff = Date.now() - TRACK_HISTORY_MS;
+    state.history = hist.filter(function (entry) {
+      return entry.t >= cutoff;
+    });
+  };
+
+  RadarScreen.prototype.syncTrackStates = function (targets, recvMs) {
     var self = this;
     var seen = {};
 
@@ -600,22 +729,19 @@
       seen[key] = true;
 
       var xy = latLonToRadarXY(target.lat, target.lon, self.geo.center, self.geo.rangeNm, self.scopeSize);
+      var obsMs = self.parseObservedAtMs(target, recvMs);
       var state = self.trackStates[key];
-      var gsVel = velocityFromTrack(target.gs, target.track_deg);
 
       if (!state) {
-        var initHeading = target.track_deg != null ? target.track_deg : 0;
         state = {
           key: key,
           target: target,
-          fixXNm: xy.xNm,
-          fixYNm: xy.yNm,
+          history: [],
           displayXNm: xy.xNm,
           displayYNm: xy.yNm,
-          vxNm: gsVel.vxNm,
-          vyNm: gsVel.vyNm,
-          displayHeading: initHeading,
-          lastFixTs: ts,
+          displayHeading: target.track_deg != null ? target.track_deg : 0,
+          displayDistNm: xy.distNm,
+          renderReady: false,
           blips: [],
           lastBlipX: null,
           lastBlipY: null,
@@ -623,59 +749,16 @@
           scatterSeed: Math.random() * 1000
         };
         self.trackStates[key] = state;
-        return;
       }
-
-      var dtSec = Math.max(0.05, (ts - state.lastFixTs) / 1000);
-      var measVx = (xy.xNm - state.fixXNm) / dtSec;
-      var measVy = (xy.yNm - state.fixYNm) / dtSec;
 
       state.target = target;
-      state.fixXNm = xy.xNm;
-      state.fixYNm = xy.yNm;
-      state.lastFixTs = ts;
-
-      if (target.gs != null && target.gs > 2) {
-        state.vxNm = gsVel.vxNm * 0.55 + measVx * 0.45;
-        state.vyNm = gsVel.vyNm * 0.55 + measVy * 0.45;
-      } else if (target.gs != null && target.gs > 0.5) {
-        state.vxNm = gsVel.vxNm * 0.45 + measVx * 0.55;
-        state.vyNm = gsVel.vyNm * 0.45 + measVy * 0.55;
-      } else {
-        state.vxNm = measVx * 0.35;
-        state.vyNm = measVy * 0.35;
-      }
-
-      var gs = target.gs != null ? target.gs : 0;
-      if (gs > 1) {
-        var errX = xy.xNm - state.displayXNm;
-        var errY = xy.yNm - state.displayYNm;
-        var steerSec = gs > 25 ? 2 : (gs > 12 ? 3 : (gs > 5 ? 4.5 : 7));
-        var baseVx = gsVel.vxNm;
-        var baseVy = gsVel.vyNm;
-        if (Math.hypot(baseVx, baseVy) < 0.00001 && Math.hypot(measVx, measVy) > 0.00001) {
-          baseVx = measVx;
-          baseVy = measVy;
-        }
-        state.vxNm = baseVx + errX / steerSec;
-        state.vyNm = baseVy + errY / steerSec;
-        var targetSpd = gsToNmPerSec(gs);
-        var curSpd = Math.hypot(state.vxNm, state.vyNm);
-        if (targetSpd > 0.00001 && curSpd > 0.00001) {
-          var spdBlend = 0.35;
-          var scale = (curSpd * (1 - spdBlend) + targetSpd * spdBlend) / curSpd;
-          state.vxNm *= scale;
-          state.vyNm *= scale;
-        }
-      }
-
-      if (gs > 1 && target.track_deg != null) {
-        state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, 0.2);
-      } else if (Math.hypot(state.vxNm, state.vyNm) > 0.00005) {
-        var velHeading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
-        if (velHeading < 0) velHeading += 360;
-        state.displayHeading = lerpAngle(state.displayHeading, velHeading, 0.15);
-      }
+      self.appendHistorySample(state, {
+        t: obsMs,
+        xNm: xy.xNm,
+        yNm: xy.yNm,
+        gs: target.gs,
+        track_deg: target.track_deg
+      });
     });
 
     Object.keys(this.trackStates).forEach(function (key) {
@@ -683,30 +766,23 @@
     });
   };
 
-  RadarScreen.prototype.advanceTrackStates = function (dtSec) {
+  RadarScreen.prototype.advanceTrackStates = function () {
+    var renderMs = Date.now() - this.radarDelayMs;
+
     Object.keys(this.trackStates).forEach(function (key) {
       var state = this.trackStates[key];
-      var target = state.target || {};
-      var gs = target.gs != null ? target.gs : 0;
-
-      if (gs > 0.8) {
-        state.displayXNm += state.vxNm * dtSec;
-        state.displayYNm += state.vyNm * dtSec;
-        if (target.track_deg != null) {
-          state.displayHeading = lerpAngle(state.displayHeading, target.track_deg, Math.min(1, dtSec * 1.2));
-        } else if (Math.hypot(state.vxNm, state.vyNm) > 0.00005) {
-          var velHeading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
-          if (velHeading < 0) velHeading += 360;
-          state.displayHeading = lerpAngle(state.displayHeading, velHeading, Math.min(1, dtSec * 1.2));
-        }
+      var pose = interpolateTrackHistory(state.history, renderMs);
+      if (!pose) {
+        state.renderReady = false;
         return;
       }
 
-      var pull = Math.min(1, dtSec * 2.5);
-      state.displayXNm += (state.fixXNm - state.displayXNm) * pull;
-      state.displayYNm += (state.fixYNm - state.displayYNm) * pull;
-      state.vxNm *= Math.max(0, 1 - dtSec * 2);
-      state.vyNm *= Math.max(0, 1 - dtSec * 2);
+      state.renderReady = true;
+      state.displayXNm = pose.xNm;
+      state.displayYNm = pose.yNm;
+      state.displayHeading = pose.heading;
+      state.displayDistNm = Math.sqrt(pose.xNm * pose.xNm + pose.yNm * pose.yNm);
+      state.segmentGs = pose.gs;
     }, this);
   };
 
@@ -727,7 +803,7 @@
     var dtSec = dt / 1000;
     this.sweepAngle = (this.sweepAngle + (dt / SWEEP_PERIOD_MS) * 360) % 360;
     this.sweepRev = Math.floor(ts / SWEEP_PERIOD_MS);
-    this.advanceTrackStates(dtSec);
+    this.advanceTrackStates();
     this.updateContinuousBlips(ts);
     this.updateWindAnimation(ts, dtSec);
     this.drawScope(ts);
@@ -737,13 +813,14 @@
     var self = this;
     Object.keys(this.trackStates).forEach(function (key) {
       var state = self.trackStates[key];
+      if (!state.renderReady) return;
       var target = state.target || {};
       var xy = self.displayXYForState(state);
       if (!state.blips) state.blips = [];
 
       var moved = state.lastBlipX == null ? 999 : Math.hypot(xy.x - state.lastBlipX, xy.y - state.lastBlipY);
-      var gs = target.gs != null ? target.gs : 0;
-      var spawnMs = gs > 12 ? 180 : (gs > 6 ? 260 : (gs > 2 ? 420 : (gs > 0.5 ? 700 : 1600)));
+      var gs = state.segmentGs != null ? state.segmentGs : (target.gs != null ? target.gs : 0);
+      var spawnMs = gs > 12 ? 180 : (gs > 6 ? 260 : (gs > 2 ? 420 : (gs > 0.5 ? 700 : 2000)));
       var elapsed = ts - (state.lastBlipSpawnTs || 0);
 
       if (moved >= BLIP_SPAWN_MIN_PX || elapsed >= spawnMs) {
@@ -956,7 +1033,7 @@
     Object.keys(this.trackStates).forEach(function (key) {
       var state = self.trackStates[key];
       var blips = state.blips || [];
-      if (!blips.length) return;
+      if (!state.renderReady || !blips.length) return;
 
       blips.forEach(function (blip, idx) {
         var age = ts - blip.born;
@@ -1008,11 +1085,11 @@
 
     states.forEach(function (state, idx) {
       var target = state.target;
-      if (!target) return;
+      if (!target || !state.renderReady) return;
       var xy = self.displayXYForState(state);
       var heading = state.displayHeading != null ? state.displayHeading : (target.track_deg != null ? target.track_deg : 0);
       self.drawAircraftSymbol(ctx, xy.x, xy.y, heading);
-      self.drawSSRLabel(ctx, xy.x, xy.y, target, idx);
+      self.drawSSRLabel(ctx, xy.x, xy.y, target, idx, state.displayDistNm);
     });
   };
 
@@ -1034,7 +1111,7 @@
     ctx.restore();
   };
 
-  RadarScreen.prototype.drawSSRLabel = function (ctx, x, y, target, idx) {
+  RadarScreen.prototype.drawSSRLabel = function (ctx, x, y, target, idx, displayDistNm) {
     var side = idx % 2 === 0 ? 1 : -1;
     var labelX = x + 16 * side;
     var labelY = y - 18;
@@ -1045,10 +1122,11 @@
     ctx.lineTo(labelX - 6 * side, labelY + 18);
     ctx.stroke();
 
+    var distNm = displayDistNm != null ? displayDistNm : target.dist_nm;
     var lines = [
       target.label || target.hex || 'UNKNOWN',
       (target.gs != null ? Math.round(target.gs) + 'KT' : '--KT'),
-      (target.dist_nm != null ? target.dist_nm.toFixed(1) + 'NM' : '--NM')
+      (distNm != null ? distNm.toFixed(1) + 'NM' : '--NM')
     ];
     if (target.alt_ft != null && !target.on_ground) {
       lines.push(Math.round(target.alt_ft) + 'FT');

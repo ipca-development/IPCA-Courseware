@@ -478,7 +478,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
-    $out .= svgImage(223.6, 3.0, 39, 7.54, $logoHref);
+    $out .= svgImage(243.2, 3.0, 39, 7.54, $logoHref);
     $out .= svgText(258, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
     $cells = array(
         gridCell($bounds, 0, 2, $gridY, $gridY + $headerRowH, 'main', '9', 'tiny'),
@@ -544,12 +544,12 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .screen-tools .tool-link{background:#e0f2fe;color:#102845}
 .screen-tools .muted{color:#bfdbfe;font-size:12px}
 .print-error{max-width:980px;margin:16px auto;padding:14px 16px;border:1px solid #fecdd3;border-radius:12px;background:#fff1f2;color:#991b1b;font-weight:700}
-.print-stage{min-height:calc(100vh - 58px);display:flex;align-items:flex-start;justify-content:center;padding:22px;background:radial-gradient(circle at center,#f8fafc 0,#e5e7eb 70%)}
-.paper-sheet{position:relative;background:#f7f8fb;border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.08),0 20px 70px rgba(15,23,42,.22);overflow:hidden;cursor:grab}
+.print-stage{min-height:calc(100vh - 58px);display:flex;align-items:center;justify-content:center;padding:16px;background:radial-gradient(circle at center,#f8fafc 0,#e5e7eb 70%)}
+.paper-sheet{position:relative;width:calc(100vw - 32px)!important;height:calc(100vh - 92px)!important;background:linear-gradient(135deg,rgba(248,250,252,.96),rgba(241,245,249,.86));border-radius:18px;box-shadow:inset 0 0 0 1px rgba(15,23,42,.06),0 20px 70px rgba(15,23,42,.18);overflow:visible;cursor:grab;contain:layout paint}
 .paper-sheet.is-dragging{cursor:grabbing}
-.paper-sheet[data-paper="a4"]{width:297mm;height:210mm}.paper-sheet[data-paper="letter"]{width:279.4mm;height:215.9mm}
+.paper-sheet[data-paper="a4"]{max-width:none}.paper-sheet[data-paper="letter"]{max-width:none}
 .paper-sheet{--page-w:270mm;--page-h:190mm;--grid-w:252mm;--grid-h:158mm;--left-table-x:9mm;--right-table-x:9mm}
-.book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate(-50%,-50%) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;opacity:0;transition:opacity .25s ease}
+.book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate3d(-50%,-50%,0) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;backface-visibility:hidden;will-change:transform,opacity;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
 .book-spread::before{content:"";position:absolute;left:50%;top:3mm;bottom:3mm;width:.35mm;transform:translateX(-50%);background:rgba(15,23,42,.08);z-index:6;border-radius:999px;box-shadow:-2.5mm 0 7mm rgba(15,23,42,.08),2.5mm 0 7mm rgba(15,23,42,.07)}
@@ -655,7 +655,7 @@ try {
     sheet.style.setProperty('--spread-scale', String(scale));
     spreads.forEach(spread => {
       if(spread.classList.contains('is-active') || spread.classList.contains('is-fading')) {
-        spread.style.transform = `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+        spread.style.transform = `translate3d(-50%, -50%, 0) translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})`;
       }
     });
   }

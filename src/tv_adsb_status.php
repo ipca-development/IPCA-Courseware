@@ -294,6 +294,18 @@ function tv_adsb_fetch_near_point_result(float $lat, float $lon, float $distNm):
     return $result;
 }
 
+function tv_adsb_radar_observed_at(array $aircraft = array()): string
+{
+    $now = time();
+    if (isset($aircraft['seen_pos']) && is_numeric($aircraft['seen_pos'])) {
+        return gmdate('c', $now - max(0, (int)round((float)$aircraft['seen_pos'])));
+    }
+    if (isset($aircraft['seen']) && is_numeric($aircraft['seen'])) {
+        return gmdate('c', $now - max(0, (int)round((float)$aircraft['seen'])));
+    }
+    return gmdate('c');
+}
+
 function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 2.5): array
 {
     $meta = tv_adsb_fetch_area_radar_targets_meta($centerLat, $centerLon, $rangeNm);
@@ -377,6 +389,7 @@ function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, flo
         'live' => true,
         'position_source' => 'live',
         'target_source' => 'area',
+        'observed_at' => tv_adsb_radar_observed_at($aircraft),
     );
 }
 
@@ -478,6 +491,7 @@ function tv_adsb_build_radar_target_from_track(
         'live' => (bool)($status['live'] ?? false),
         'position_source' => (string)($status['position_source'] ?? ($debug['position_source'] ?? '')),
         'target_source' => 'fleet',
+        'observed_at' => gmdate('c'),
     );
 }
 
