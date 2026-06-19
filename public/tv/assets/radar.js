@@ -8,7 +8,7 @@
   var KTRM_AIRPORT_GEO = {
     center: { lat: 33.62670135498, lon: -116.16000366211 },
     elevFt: 115,
-    rangeNm: 5,
+    rangeNm: 2.5,
     weatherStation: { lat: 33.636485, lon: -116.160931, label: 'ASOS' },
     runways: [
       {
@@ -83,7 +83,11 @@
   var DEG_TO_RAD = Math.PI / 180;
   var RAD_TO_DEG = 180 / Math.PI;
   var SWEEP_PERIOD_MS = 4200;
-  var BLIP_FADE_MS = 2800;
+  var BLIP_TRAIL_TURNS = 8;
+  var BLIP_ALPHAS = [0.96, 0.74, 0.54, 0.38, 0.27, 0.18, 0.11, 0.06];
+  var BLIP_SCATTER_PX = [0, 1.2, 2.0, 2.8, 3.6, 4.4, 5.2, 6.0];
+  var SWEEP_HIT_WIDTH_DEG = 6;
+  var SWEEP_RELEASE_DEG = 28;
   var NOISE_BLOB_COUNT = 28;
 
   function clamp(n, min, max) {
@@ -141,6 +145,42 @@
     return 'Updated ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
+  function targetKey(target) {
+    if (!target) return '';
+    if (target.hex) return String(target.hex).toLowerCase();
+    if (target.label) return String(target.label).toUpperCase();
+    return String(target.lat) + ',' + String(target.lon);
+  }
+
+  function gsToNmPerSec(gsKt) {
+    if (gsKt == null || !isFinite(gsKt)) return 0;
+    return Math.max(0, gsKt) / 3600;
+  }
+
+  function velocityFromTrack(gsKt, trackDeg) {
+    var spd = gsToNmPerSec(gsKt);
+    if (spd <= 0 || trackDeg == null || !isFinite(trackDeg)) {
+      return { vxNm: 0, vyNm: 0 };
+    }
+    var rad = trackDeg * DEG_TO_RAD;
+    return {
+      vxNm: spd * Math.sin(rad),
+      vyNm: spd * Math.cos(rad)
+    };
+  }
+
+  function scatterOffset(seed, amount) {
+    if (!amount) return { x: 0, y: 0 };
+    var a = Math.sin(seed * 12.9898) * 43758.5453;
+    var b = Math.sin((seed + 1.7) * 78.233) * 12345.6789;
+    var u = a - Math.floor(a);
+    var v = b - Math.floor(b);
+    return {
+      x: (u - 0.5) * amount * 2,
+      y: (v - 0.5) * amount * 2
+    };
+  }
+
   function RadarScreen(options) {
     this.apiUrl = options.apiUrl || '/tv/api/radar.php';
     this.pollMs = options.pollMs || 15000;
@@ -157,9 +197,10 @@
     this.weather = null;
     this.adsbOk = false;
     this.adsbError = null;
-    this.blips = {};
+    this.trackStates = {};
     this.noiseBlobs = [];
     this.sweepAngle = 0;
+    this.sweepRev = 0;
     this.lastFrame = 0;
     this.animId = null;
     this.pollTimer = null;
@@ -264,7 +305,14 @@
     var wrapRect = scopeWrap.getBoundingClientRect();
     var size = Math.floor(Math.min(wrapRect.width, wrapRect.height));
     size = Math.max(180, Math.min(size, Math.floor(rootRect.height - 8)));
+    var self = this;
     if (size === this.scopeSize && this.diagramCanvas.width > 0) return;
+
+    if (size !== this.scopeSize) {
+      Object.keys(this.trackStates).forEach(function (key) {
+        self.trackStates[key].blipTrail = [];
+      });
+    }
 
     this.scopeSize = size;
     this.scopeCanvas.width = size;
@@ -326,6 +374,8 @@
   };
 
   RadarScreen.prototype.applyPayload = function (payload) {
+    var now = performance.now();
+    this.syncTrackStates(Array.isArray(payload.targets) ? payload.targets : [], now);
     this.targets = Array.isArray(payload.targets) ? payload.targets : [];
     this.weather = payload.weather || null;
     this.adsbOk = !!(payload.adsb && payload.adsb.ok);
@@ -397,29 +447,128 @@
     }
   };
 
-  RadarScreen.prototype.animate = function (ts) {
-    var dt = ts - this.lastFrame;
-    this.lastFrame = ts;
-    this.sweepAngle = (this.sweepAngle + (dt / SWEEP_PERIOD_MS) * 360) % 360;
-    this.updateBlips(ts);
-    this.drawScope(ts);
-  };
-
-  RadarScreen.prototype.updateBlips = function (ts) {
+  RadarScreen.prototype.syncTrackStates = function (targets, ts) {
     var self = this;
-    var sweep = this.sweepAngle;
-    (this.targets || []).forEach(function (target) {
+    var seen = {};
+
+    (targets || []).forEach(function (target) {
       if (target.lat == null || target.lon == null) return;
+      var key = targetKey(target);
+      if (!key) return;
+      seen[key] = true;
+
       var xy = latLonToRadarXY(target.lat, target.lon, self.geo.center, self.geo.rangeNm, self.scopeSize);
-      var bearing = bearingFromCenter(xy.xNm, xy.yNm);
-      if (angleDiff(bearing, sweep) < 7) {
-        var key = target.hex || target.label || (target.lat + ',' + target.lon);
-        self.blips[key] = { ts: ts, x: xy.x, y: xy.y, strong: true };
+      var state = self.trackStates[key];
+      var gsVel = velocityFromTrack(target.gs, target.track_deg);
+
+      if (!state) {
+        state = {
+          key: key,
+          target: target,
+          fixXNm: xy.xNm,
+          fixYNm: xy.yNm,
+          displayXNm: xy.xNm,
+          displayYNm: xy.yNm,
+          vxNm: gsVel.vxNm,
+          vyNm: gsVel.vyNm,
+          lastFixTs: ts,
+          sweepHit: false,
+          blipTrail: [],
+          scatterSeed: Math.random() * 1000
+        };
+        self.trackStates[key] = state;
+        return;
+      }
+
+      var dtSec = Math.max(0.05, (ts - state.lastFixTs) / 1000);
+      var measVx = (xy.xNm - state.fixXNm) / dtSec;
+      var measVy = (xy.yNm - state.fixYNm) / dtSec;
+
+      state.target = target;
+      state.fixXNm = xy.xNm;
+      state.fixYNm = xy.yNm;
+      state.lastFixTs = ts;
+
+      if (target.gs != null && target.gs > 2) {
+        state.vxNm = measVx * 0.35 + gsVel.vxNm * 0.65;
+        state.vyNm = measVy * 0.35 + gsVel.vyNm * 0.65;
+      } else {
+        state.vxNm = measVx * 0.55;
+        state.vyNm = measVy * 0.55;
+      }
+
+      var err = Math.hypot(xy.xNm - state.displayXNm, xy.yNm - state.displayYNm);
+      if (err > 0.35) {
+        state.displayXNm = xy.xNm;
+        state.displayYNm = xy.yNm;
       }
     });
 
-    Object.keys(this.blips).forEach(function (key) {
-      if (ts - self.blips[key].ts > BLIP_FADE_MS) delete self.blips[key];
+    Object.keys(this.trackStates).forEach(function (key) {
+      if (!seen[key]) delete self.trackStates[key];
+    });
+  };
+
+  RadarScreen.prototype.advanceTrackStates = function (dtSec) {
+    var self = this;
+    Object.keys(this.trackStates).forEach(function (key) {
+      var state = self.trackStates[key];
+      state.displayXNm += state.vxNm * dtSec;
+      state.displayYNm += state.vyNm * dtSec;
+
+      var pull = Math.min(1, dtSec * 1.8);
+      state.displayXNm += (state.fixXNm - state.displayXNm) * pull;
+      state.displayYNm += (state.fixYNm - state.displayYNm) * pull;
+    });
+  };
+
+  RadarScreen.prototype.displayXYForState = function (state) {
+    var half = this.scopeSize / 2;
+    var scale = half / this.geo.rangeNm;
+    return {
+      x: half + state.displayXNm * scale,
+      y: half - state.displayYNm * scale,
+      xNm: state.displayXNm,
+      yNm: state.displayYNm
+    };
+  };
+
+  RadarScreen.prototype.animate = function (ts) {
+    var dt = Math.min(80, Math.max(0, ts - this.lastFrame));
+    this.lastFrame = ts;
+    var dtSec = dt / 1000;
+    this.sweepAngle = (this.sweepAngle + (dt / SWEEP_PERIOD_MS) * 360) % 360;
+    this.sweepRev = Math.floor(ts / SWEEP_PERIOD_MS);
+    this.advanceTrackStates(dtSec);
+    this.updateSweepBlips(ts);
+    this.drawScope(ts);
+  };
+
+  RadarScreen.prototype.updateSweepBlips = function (ts) {
+    var self = this;
+    var sweep = this.sweepAngle;
+    var rev = this.sweepRev;
+
+    Object.keys(this.trackStates).forEach(function (key) {
+      var state = self.trackStates[key];
+      var xy = self.displayXYForState(state);
+      var bearing = bearingFromCenter(xy.xNm, xy.yNm);
+      var delta = angleDiff(bearing, sweep);
+
+      if (delta < SWEEP_HIT_WIDTH_DEG && !state.sweepHit) {
+        state.sweepHit = true;
+        state.blipTrail.push({
+          x: xy.x,
+          y: xy.y,
+          rev: rev,
+          ts: ts
+        });
+        state.blipTrail = state.blipTrail.filter(function (blip) {
+          return rev - blip.rev < BLIP_TRAIL_TURNS;
+        });
+      } else if (delta > SWEEP_RELEASE_DEG) {
+        state.sweepHit = false;
+      }
     });
   };
 
@@ -445,19 +594,21 @@
     var center = size / 2;
     var half = center;
     var range = this.geo.rangeNm;
+    var step = range <= 3 ? 0.5 : 1;
     ctx.save();
     ctx.translate(center, center);
-    for (var nm = 1; nm <= range; nm += 1) {
+    for (var nm = step; nm <= range + 0.001; nm += step) {
       var r = (nm / range) * half;
+      var isOuter = Math.abs(nm - range) < 0.001;
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.strokeStyle = nm === range ? 'rgba(57,255,106,.42)' : 'rgba(57,255,106,.18)';
-      ctx.lineWidth = nm === range ? 1.4 : 1;
+      ctx.strokeStyle = isOuter ? 'rgba(57,255,106,.42)' : 'rgba(57,255,106,.18)';
+      ctx.lineWidth = isOuter ? 1.4 : 1;
       ctx.stroke();
       ctx.fillStyle = 'rgba(57,255,106,.55)';
       ctx.font = '10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(String(nm), 0, -r + 12);
+      ctx.fillText(nm % 1 === 0 ? String(nm) : nm.toFixed(1), 0, -r + 12);
     }
     this.drawCompassRose(ctx, half);
     ctx.restore();
@@ -593,29 +744,70 @@
 
   RadarScreen.prototype.drawPrimaryBlips = function (ctx, ts) {
     var self = this;
-    Object.keys(this.blips).forEach(function (key) {
-      var blip = self.blips[key];
-      var age = ts - blip.ts;
-      var life = 1 - age / BLIP_FADE_MS;
-      if (life <= 0) return;
-      var alpha = blip.strong ? life : life * 0.6;
-      var grad = ctx.createRadialGradient(blip.x, blip.y, 0, blip.x, blip.y, 10 + 16 * alpha);
-      grad.addColorStop(0, 'rgba(90,255,120,' + (0.95 * alpha) + ')');
-      grad.addColorStop(0.35, 'rgba(57,255,106,' + (0.45 * alpha) + ')');
-      grad.addColorStop(1, 'rgba(57,255,106,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(blip.x, blip.y, 10 + 16 * alpha, 0, Math.PI * 2);
-      ctx.fill();
+    var rev = this.sweepRev;
+
+    Object.keys(this.trackStates).forEach(function (key) {
+      var state = self.trackStates[key];
+      var trail = state.blipTrail || [];
+      if (!trail.length) return;
+
+      trail.forEach(function (blip, idx) {
+        var turnAge = rev - blip.rev;
+        if (turnAge < 0) turnAge = 0;
+        if (turnAge >= BLIP_TRAIL_TURNS) return;
+
+        var alpha = BLIP_ALPHAS[turnAge] || 0.04;
+        var scatterAmt = BLIP_SCATTER_PX[turnAge] || 6;
+        var scatter = scatterOffset(state.scatterSeed + idx * 3.1 + turnAge, scatterAmt);
+        var bx = blip.x + scatter.x;
+        var by = blip.y + scatter.y;
+
+        var coreR = turnAge === 0 ? 5.5 : 4.5 - turnAge * 0.25;
+        var glowR = 8 + turnAge * 3.2;
+
+        ctx.save();
+        if (turnAge > 0) {
+          ctx.filter = 'blur(' + (0.6 + turnAge * 0.85) + 'px)';
+        }
+
+        var grad = ctx.createRadialGradient(bx, by, 0, bx, by, glowR);
+        grad.addColorStop(0, 'rgba(210,255,220,' + (alpha * 0.98) + ')');
+        grad.addColorStop(0.18, 'rgba(80,255,110,' + (alpha * 0.72) + ')');
+        grad.addColorStop(0.45, 'rgba(40,220,80,' + (alpha * 0.32) + ')');
+        grad.addColorStop(1, 'rgba(20,120,50,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(bx, by, glowR, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (turnAge <= 2) {
+          ctx.filter = 'none';
+          ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.9) + ')';
+          ctx.beginPath();
+          ctx.arc(bx, by, coreR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
+      });
     });
   };
 
   RadarScreen.prototype.drawSSRTargets = function (ctx) {
     var self = this;
-    (this.targets || []).forEach(function (target, idx) {
-      if (target.lat == null || target.lon == null) return;
-      var xy = latLonToRadarXY(target.lat, target.lon, self.geo.center, self.geo.rangeNm, self.scopeSize);
+    var states = Object.keys(this.trackStates).map(function (key) {
+      return self.trackStates[key];
+    });
+
+    states.forEach(function (state, idx) {
+      var target = state.target;
+      if (!target) return;
+      var xy = self.displayXYForState(state);
       var heading = target.track_deg != null ? target.track_deg : 0;
+      if (target.gs != null && target.gs > 3) {
+        heading = Math.atan2(state.vxNm, state.vyNm) * RAD_TO_DEG;
+        if (heading < 0) heading += 360;
+      }
       self.drawAircraftSymbol(ctx, xy.x, xy.y, heading);
       self.drawSSRLabel(ctx, xy.x, xy.y, target, idx);
     });

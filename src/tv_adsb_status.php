@@ -276,7 +276,7 @@ function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
     return array();
 }
 
-function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 5.0): ?array
+function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, float $centerLon, float $maxNm = 2.5): ?array
 {
     if (!isset($aircraft['lat'], $aircraft['lon']) || !is_numeric($aircraft['lat']) || !is_numeric($aircraft['lon'])) {
         return null;
@@ -320,7 +320,7 @@ function tv_adsb_format_area_radar_target(array $aircraft, float $centerLat, flo
     );
 }
 
-function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 5.0): array
+function tv_adsb_fetch_area_radar_targets(float $centerLat, float $centerLon, float $rangeNm = 2.5): array
 {
     $raw = tv_adsb_fetch_near_point($centerLat, $centerLon, $rangeNm);
     $targets = array();
@@ -454,7 +454,7 @@ function tv_adsb_fetch_radar_targets(
     array $tracks,
     float $centerLat,
     float $centerLon,
-    float $rangeNm = 5.0,
+    float $rangeNm = 2.5,
     array $options = array()
 ): array {
     $gate = array_merge(tv_adsb_default_gate(), (array)($options['gate'] ?? array()));

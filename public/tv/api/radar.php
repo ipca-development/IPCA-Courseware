@@ -30,7 +30,7 @@ $airports = tv_adsb_airports();
 $airport = $airports[$homeAirport] ?? $airports['KTRM'];
 $centerLat = (float)$airport['lat'];
 $centerLon = (float)$airport['lon'];
-$rangeNm = max(1.0, min(10.0, (float)($_GET['range_nm'] ?? 5.0)));
+$rangeNm = max(0.5, min(10.0, (float)($_GET['range_nm'] ?? 2.5)));
 $fieldElevFt = (float)($airport['elev_ft'] ?? 115.0);
 
 $targets = array();
