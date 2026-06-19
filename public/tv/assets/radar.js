@@ -88,7 +88,26 @@
   var BLIP_LIFE_MS = SWEEP_PERIOD_MS * BLIP_TRAIL_TURNS;
   var BLIP_SPAWN_MIN_PX = 2.5;
   var WIND_HISTORY_MS = 10 * 60 * 1000;
+  var WIND_ARROW_R_OUTER = 46;
+  var WIND_ARROW_R_INNER = 23;
   var NOISE_BLOB_COUNT = 28;
+
+  function windFromArrowSvg(stroke, strokeWidth, fill, opacity) {
+    var cx = 50;
+    var cy = 50;
+    var tailY = cy - WIND_ARROW_R_OUTER;
+    var tipY = cy - WIND_ARROW_R_INNER;
+    var headTipY = tipY + 3.6;
+    var headBaseY = tipY - 1.2;
+    var spread = 3.4;
+    var op = opacity != null ? opacity : 1;
+    return [
+      '<line x1="' + cx + '" y1="' + tailY + '" x2="' + cx + '" y2="' + tipY + '"',
+      ' stroke="' + stroke + '" stroke-width="' + strokeWidth + '" stroke-linecap="round" opacity="' + op + '"/>',
+      '<polygon points="' + cx + ',' + headTipY + ' ' + (cx - spread) + ',' + headBaseY + ' ' + (cx + spread) + ',' + headBaseY + '"',
+      ' fill="' + fill + '" opacity="' + op + '"/>'
+    ].join('');
+  }
 
   function clamp(n, min, max) {
     return Math.max(min, Math.min(max, n));
@@ -248,14 +267,8 @@
       '          <svg class="tv-radar-wind-svg" viewBox="0 0 100 100" aria-hidden="true">',
       '            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(57,255,106,.22)" stroke-width="1"/>',
       '            <g data-radar-wind-variation></g>',
-      '            <g data-radar-wind-fcst opacity="0.85">',
-      '              <line x1="50" y1="50" x2="50" y2="16" stroke="rgba(120,210,255,.8)" stroke-width="2.5" stroke-linecap="round"/>',
-      '              <polygon points="50,10 46.5,18 53.5,18" fill="rgba(120,210,255,.9)"/>',
-      '            </g>',
-      '            <g data-radar-wind-live>',
-      '              <line x1="50" y1="50" x2="50" y2="12" stroke="#39ff6a" stroke-width="3" stroke-linecap="round"/>',
-      '              <polygon points="50,6 45,14 55,14" fill="#39ff6a"/>',
-      '            </g>',
+      '            <g data-radar-wind-fcst opacity="0.85">' + windFromArrowSvg('rgba(120,210,255,.85)', 2.5, 'rgba(120,210,255,.9)', 0.9) + '</g>',
+      '            <g data-radar-wind-live">' + windFromArrowSvg('#39ff6a', 3, '#39ff6a', 1) + '</g>',
       '          </svg>',
       '          <span class="tv-radar-wind-n">N</span>',
       '        </div>',

@@ -41,7 +41,7 @@ if ($chunks === array()) {
 }
 $renderChunks = $blankMode ? array(array()) : $chunks;
 
-$logoText = $format === 'faa' ? 'FAA LOGBOOK' : 'POOLEY’S';
+$logoHref = '/assets/ipca_logo_logbook.png';
 $title = strtoupper($format) . ' Printable Logbook';
 $renderError = '';
 
@@ -268,6 +268,11 @@ function svgText(float $x, float $y, string $text, string $class = 'body', strin
     return '<text class="' . h($class) . '" x="' . $x . '" y="' . $y . '" text-anchor="' . h($anchor) . '">' . h($text) . '</text>';
 }
 
+function svgImage(float $x, float $y, float $width, float $height, string $href): string
+{
+    return '<image class="page-logo" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '" href="' . h($href) . '" preserveAspectRatio="xMinYMid meet"/>';
+}
+
 function svgMappedText(float $x, float $y, string $text, string $field, bool $debugMode, int $rowNumber, string $class = 'body', string $anchor = 'middle'): string
 {
     $title = $field . ($rowNumber > 0 ? ' row ' . $rowNumber : '') . ': ' . $text;
@@ -390,7 +395,7 @@ function bodyCells(array $bounds, float $bodyTop, float $rowH, int $rows, int $c
     return $cells;
 }
 
-function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode, int $pageNumber, int $totalPages): string
+function leftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages): string
 {
     $columns = array(18, 12.25, 12.25, 12.25, 12.25, 27.5, 27.5, 12.75, 12.75, 16.5, 49, 13.5, 13.5);
     $gridX = 9.0;
@@ -406,7 +411,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template left-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
-    $out .= svgText(14, 6.6, $logoText, 'logo-text', 'start');
+    $out .= svgImage(13, 3.9, 30, 5.8, $logoHref);
     $out .= svgText(169, 6.6, 'Medical Expires:', 'micro');
     $out .= svgText(223, 6.6, 'Class/Type Rating Expires:', 'micro');
     $out .= svgText(12, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'start');
@@ -457,7 +462,7 @@ function leftTemplate(array $entries, array $pageTotals, array $previousTotals, 
     return $out . '</svg>';
 }
 
-function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoText, bool $debugMode, int $pageNumber, int $totalPages): string
+function rightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, string $logoHref, bool $debugMode, int $pageNumber, int $totalPages): string
 {
     $columns = array(24.75, 24.75, 21.125, 21.125, 21.125, 21.125, 13.25, 13.25, 89.5);
     $gridX = 9.0;
@@ -473,7 +478,7 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $totalsY = $bodyTop + ($footerStartRow * $rowHeight);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template right-template" viewBox="0 0 270 190" preserveAspectRatio="none">';
-    $out .= svgText(258, 6.6, $logoText, 'logo-text', 'end');
+    $out .= svgImage(227, 3.9, 30, 5.8, $logoHref);
     $out .= svgText(258, 184.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
     $cells = array(
         gridCell($bounds, 0, 2, $gridY, $gridY + $headerRowH, 'main', '9', 'tiny'),
@@ -605,10 +610,10 @@ try {
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
-  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
+  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
 </section>
 <section class="book-page book-page-right">
-  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoText, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
+  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
 </section>
 </div>
 <?php
