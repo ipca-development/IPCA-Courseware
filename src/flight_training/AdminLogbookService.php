@@ -1122,7 +1122,7 @@ final class AdminLogbookService
                 'instrument_time' => round((float)($entry['instrument_time'] ?? 0), 1),
                 'day_landings' => (int)($entry['day_landings'] ?? 0),
                 'night_landings' => (int)($entry['night_landings'] ?? 0),
-                'towered_airport_landings' => (int)($entry['towered_airport_landings'] ?? 0),
+                'towered_airport_landings' => (int)$this->entryMetricValue($entry, 'towered_airport_landings'),
                 'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
                 'remarks' => (string)($entry['remarks'] ?? ''),
             );
@@ -1175,6 +1175,18 @@ final class AdminLogbookService
         $dep = trim((string)($entry['departure_airport'] ?? ''));
         $arr = trim((string)($entry['arrival_airport'] ?? ''));
         return trim($dep . ($dep !== '' || $arr !== '' ? '-' : '') . $arr, '-');
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function entryMetricValue(array $entry, string $field): float
+    {
+        $value = (float)($entry[$field] ?? 0);
+        if ($field === 'towered_airport_landings' && $value <= 0) {
+            return (float)($entry['day_landings'] ?? 0) + (float)($entry['night_landings'] ?? 0);
+        }
+        return $value;
     }
 
     /**

@@ -530,7 +530,7 @@ final class FormInstanceService
                 'cross_country_distance_nm' => $this->formatNumber($entry['cross_country_distance_nm'] ?? 0),
                 'day_landings' => (int)($entry['day_landings'] ?? 0),
                 'night_landings' => (int)($entry['night_landings'] ?? 0),
-                'towered_airport_landings' => (int)($entry['towered_airport_landings'] ?? 0),
+                'towered_airport_landings' => (int)$this->entryMetricValue($entry, 'towered_airport_landings'),
                 'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
                 'remarks' => (string)($entry['remarks'] ?? ''),
             );
@@ -986,9 +986,21 @@ final class FormInstanceService
     {
         $sum = 0.0;
         foreach ($entries as $entry) {
-            $sum += (float)($entry[$field] ?? 0);
+            $sum += $this->entryMetricValue($entry, $field);
         }
         return round($sum, 1);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function entryMetricValue(array $entry, string $field): float
+    {
+        $value = (float)($entry[$field] ?? 0);
+        if ($field === 'towered_airport_landings' && $value <= 0) {
+            return (float)($entry['day_landings'] ?? 0) + (float)($entry['night_landings'] ?? 0);
+        }
+        return $value;
     }
 
     /**

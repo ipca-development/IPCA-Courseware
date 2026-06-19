@@ -196,11 +196,23 @@ final class FlightRequirementEngine
                     $seen[$dedupeKey] = true;
                 }
                 foreach ($fields as $field) {
-                    $sums[$key][$field] = ($sums[$key][$field] ?? 0.0) + (float)($entry[$field] ?? 0);
+                    $sums[$key][$field] = ($sums[$key][$field] ?? 0.0) + $this->entryMetricValue($entry, $field);
                 }
             }
         }
         return $sums;
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function entryMetricValue(array $entry, string $field): float
+    {
+        $value = (float)($entry[$field] ?? 0);
+        if ($field === 'towered_airport_landings' && $value <= 0) {
+            return (float)($entry['day_landings'] ?? 0) + (float)($entry['night_landings'] ?? 0);
+        }
+        return $value;
     }
 
     /**
