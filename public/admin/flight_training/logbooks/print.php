@@ -275,6 +275,11 @@ function svgImage(float $x, float $y, float $width, float $height, string $href)
     return '<image class="page-logo" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '" href="' . h($href) . '" preserveAspectRatio="xMinYMid meet"/>';
 }
 
+function svgRect(float $x, float $y, float $width, float $height, string $class): string
+{
+    return '<rect class="' . h($class) . '" x="' . $x . '" y="' . $y . '" width="' . $width . '" height="' . $height . '"/>';
+}
+
 function svgMappedText(float $x, float $y, string $text, string $field, bool $debugMode, int $rowNumber, string $class = 'body', string $anchor = 'middle'): string
 {
     $title = $field . ($rowNumber > 0 ? ' row ' . $rowNumber : '') . ': ' . $text;
@@ -649,13 +654,14 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     $out .= svgCellMultiline($bounds, 22, 24, $gridY, $gridY + $headerH, array('TOTAL', 'DURATION', 'OF FLIGHT'), 'faa-head');
     $out .= svgCellMultiline($bounds, 0, 2, $gridY + 5.5, $gridY + $headerH, array('AIRPLANE', 'SEL'), 'faa-head');
     $out .= svgCellMultiline($bounds, 2, 4, $gridY + 5.5, $gridY + $headerH, array('AIRPLANE', 'MEL'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 4, 6, $gridY + 5.5, $gridY + $headerH, array('NIGHT'), 'faa-head');
+    $out .= svgRect($bounds[4], $gridY + 5.5, $bounds[6] - $bounds[4], $headerH - 5.5, 'night-fill');
+    $out .= svgCellMultiline($bounds, 4, 6, $gridY + 5.5, $gridY + $headerH, array('NIGHT'), 'faa-head-inverse');
     $out .= svgCellMultiline($bounds, 6, 8, $gridY + 5.5, $gridY + $headerH, array('ACTUAL', 'INSTRUMENT'), 'faa-head');
     $out .= svgCellMultiline($bounds, 8, 10, $gridY + 5.5, $gridY + $headerH, array('SIMULATED', 'INSTRUMENT'), 'faa-head');
     $out .= svgCellMultiline($bounds, 12, 14, $gridY + 5.5, $gridY + $headerH, array('FLIGHT', 'TRAINING'), 'faa-head');
     $out .= svgCellMultiline($bounds, 14, 16, $gridY + 5.5, $gridY + $headerH, array('SOLO', 'OR PIC'), 'faa-head');
     $out .= svgCellMultiline($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, array('CROSS-', 'COUNTRY'), 'faa-head');
-    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowH, 9, count($columns), array('startRow' => $footerStartRow, 'startCol' => 0, 'endCol' => 24)));
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowH, 9, count($columns)));
     foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $bodyTop + ($idx * $rowH) + ($rowH / 2);
         foreach (array(
@@ -674,10 +680,9 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
         }
     }
     foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
-        $y1 = $bodyTop + (($footerStartRow + $idx) * $rowH);
-        $y2 = $y1 + $rowH;
+        $y = $bodyTop + (($footerStartRow + $idx) * $rowH) + ($rowH / 2);
         foreach (array(4 => 'night', 6 => 'ifr', 10 => 'sim', 12 => 'dual', 14 => 'pic', 16 => 'nav', 22 => 'total') as $colIdx => $key) {
-            $cells[] = gridCell($bounds, $colIdx, $colIdx + 2, $y1, $y2, 'main', ptotal($totals[$key] ?? 0), 'faa-body');
+            $out .= svgText(($bounds[$colIdx] + $bounds[$colIdx + 2]) / 2, $y, ptotal($totals[$key] ?? 0), 'faa-body');
         }
     }
     $out .= renderCellBorders($cells);
@@ -732,9 +737,11 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .debug-field{font-size:1.25px;fill:#b91c1c;font-weight:700}
 .page-template .page-number{font-size:2.6px;font-weight:500}
 .page-template .faa-head{font-size:1.75px;font-weight:800}
+.page-template .faa-head-inverse{font-size:1.75px;font-weight:800;fill:#fff}
 .page-template .faa-body{font-size:1.9px;font-weight:400}
 .page-template .faa-body-left{font-size:1.75px;font-weight:400}
 .page-template .faa-cert{font-size:2.45px;font-style:italic;font-weight:400}
+.page-template .night-fill{fill:#111;stroke:none}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:static;display:contents!important;width:auto;height:auto;transform:none!important;filter:none;perspective:none;opacity:1;transition:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;width:var(--page-w);height:var(--page-h);background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page;page-break-after:always}.book-spread:last-of-type .book-page-right{break-after:auto;page-break-after:auto}}
 </style>
 </head>
