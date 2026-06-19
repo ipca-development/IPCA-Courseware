@@ -75,7 +75,7 @@ function hourParts(mixed $value): array
         $whole++;
         $tenths = 0;
     }
-    return array((string)$whole, (string)$tenths);
+    return array((string)$whole . '.', (string)$tenths);
 }
 
 function totalHourParts(mixed $value): array
@@ -701,12 +701,8 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $bodyTop + ($idx * $rowH) + ($rowH / 2);
         foreach (array(
-            array(0, singlePilotSeMarker($entry)),
-            array(2, singlePilotMeMarker($entry)),
-        ) as [$colIdx, $value]) {
-            $out .= svgMappedText($centers[$colIdx], $y, (string)$value, 'faa.right.' . $colIdx, false, $idx + 1, 'faa-body');
-        }
-        foreach (array(
+            0 => $entry['single_engine_time'] ?? 0,
+            2 => $entry['multi_engine_time'] ?? 0,
             8 => $entry['night_time'] ?? 0,
             10 => $entry['actual_instrument_time'] ?? 0,
             12 => $entry['simulated_instrument_time'] ?? 0,
@@ -723,7 +719,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     }
     foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
         $y = $bodyTop + (($footerStartRow + $idx) * $rowH) + ($rowH / 2);
-        foreach (array(8 => 'night', 10 => 'ifr', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
+        foreach (array(0 => 'se', 2 => 'me', 8 => 'night', 10 => 'ifr', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
             [$whole, $tenths] = totalHourParts($totals[$key] ?? 0);
             $out .= svgText($centers[$colIdx], $y, $whole, 'faa-body');
             $out .= svgText($centers[$colIdx + 1], $y, $tenths, 'faa-body');
