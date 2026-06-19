@@ -1627,7 +1627,6 @@
     }
 
     this.rendering = true;
-    this.lastRenderedKey = key;
     window.clearTimeout(this.rotateTimer);
     if (!boardMode && !aircraft && !radarSlot) {
       window.clearTimeout(this.aircraftPageTimer);
@@ -1653,8 +1652,12 @@
       this.statusLabel.textContent = urgent ? 'URGENT OVERRIDE' : (schedule ? 'SCHEDULE MODE' : 'STANDARD OPS');
     }
 
+    var shouldAnnounce = !aircraft && !boardMode && !radarSlot
+      && message.announce_audio_enabled
+      && (message.audio_url || message.voice_text || urgent);
+
     var announcePromise = Promise.resolve();
-    if (!aircraft && !boardMode && !radarSlot && message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
+    if (shouldAnnounce) {
       announcePromise = new Promise(function (resolve) {
         window.setTimeout(resolve, urgent ? 200 : 500);
       }).then(function () {
@@ -1662,15 +1665,22 @@
       });
     }
 
-    announcePromise
+    var visualPromise;
+    if (radarSlot) {
+      visualPromise = self.renderRadarSlot(message);
+    } else if (boardMode) {
+      visualPromise = self.fetchAndRenderAircraftBoard(force);
+    } else if (aircraft) {
+      visualPromise = self.fetchAndRenderAircraft(message, false);
+    } else if (schedule) {
+      visualPromise = self.renderSchedule(message, urgent);
+    } else {
+      visualPromise = self.renderMessage(message, urgent);
+    }
+
+    Promise.all([visualPromise, announcePromise])
       .then(function () {
-        if (radarSlot) return self.renderRadarSlot(message);
-        if (boardMode) return self.fetchAndRenderAircraftBoard(force);
-        if (aircraft) return self.fetchAndRenderAircraft(message, false);
-        if (schedule) return self.renderSchedule(message, urgent);
-        return self.renderMessage(message, urgent);
-      })
-      .then(function () {
+        self.lastRenderedKey = key;
         self.audio.scheduleSettle();
         self.rendering = false;
         if (self.pendingRender) {
@@ -1679,6 +1689,13 @@
           return;
         }
         self.schedulePlaylistRotation(message);
+      })
+      .catch(function () {
+        self.rendering = false;
+        if (self.pendingRender) {
+          self.pendingRender = false;
+          self.renderCurrent(true);
+        }
       });
   };
 
@@ -1690,10 +1707,14 @@
     var options = { urgent: urgent, force: urgent };
     var self = this;
 
-    return Promise.all(this.lines.map(function (line, idx) {
-      var rowDelay = idx * randomBetween(80, 140);
-      return line.setText(rows[idx] || '', options, self.audio, rowDelay);
-    }));
+    return new Promise(function (resolve) {
+      window.requestAnimationFrame(function () {
+        Promise.all(self.lines.map(function (line, idx) {
+          var rowDelay = idx * randomBetween(80, 140);
+          return line.setText(rows[idx] || '', options, self.audio, rowDelay);
+        })).then(resolve);
+      });
+    });
   };
 
   FlipBoard.prototype.renderSchedule = function (message, urgent) {
