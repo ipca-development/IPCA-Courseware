@@ -433,11 +433,12 @@ final class FormInstanceService
             }
             $entryStmt->execute(array(':assignment_id' => (int)$assignment['id']));
             $entries = $entryStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            $entries = $this->dedupeEntries($entries);
             $summary = $this->requirementEntrySummary($entries);
             $hours = $this->sumEntryField($entries, 'total_flight_time');
             $distance = $this->sumEntryField($entries, 'cross_country_distance_nm');
             $entryCount = count($entries);
-            $satisfied = $this->requirementEvidenceSatisfied($assignment, $entryCount, $hours, $distance);
+            $satisfied = $this->requirementEvidenceSatisfied($assignment, $entries, $entryCount, $hours, $distance);
 
             $evidence[$prefix] = array(
                 'label' => (string)($assignment['label'] ?? ''),
@@ -459,13 +460,24 @@ final class FormInstanceService
     /**
      * @param array<string,mixed> $category
      */
-    private function requirementEvidenceSatisfied(array $category, int $entryCount, float $hours, float $distance): bool
+    private function requirementEvidenceSatisfied(array $category, array $entries, int $entryCount, float $hours, float $distance): bool
     {
         $rules = $this->decodeJsonObject($category['automatic_rules_json'] ?? null);
         $type = (string)($rules['type'] ?? '');
         if ($type === 'selected_entries_distance') {
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : 0.0;
             return $entryCount > 0 && $distance >= $minimum;
+        }
+        if ($type === 'selected_entries_sum' || $this->inferredSelectedEntryMetric((string)($category['requirement_key'] ?? '')) !== '') {
+            $metric = (string)($rules['metric'] ?? ($rules['field'] ?? ''));
+            if ($metric === '') {
+                $metric = $this->inferredSelectedEntryMetric((string)($category['requirement_key'] ?? ''));
+            }
+            if ($metric === '') {
+                return false;
+            }
+            $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : 1.0;
+            return $this->sumEntryField($entries, $metric) >= $minimum;
         }
         if ($category['minimum_time'] !== null) {
             return $hours >= (float)$category['minimum_time'];
@@ -490,6 +502,18 @@ final class FormInstanceService
         return is_array($decoded) ? $decoded : array();
     }
 
+    private function inferredSelectedEntryMetric(string $requirementKey): string
+    {
+        $key = strtolower($requirementKey);
+        if (str_contains($key, 'night_takeoffs_landings')) {
+            return 'night_landings';
+        }
+        if (str_contains($key, 'towered_airport_takeoffs_landings') || str_contains($key, 'towered_airport_landings')) {
+            return 'towered_airport_landings';
+        }
+        return '';
+    }
+
     /**
      * @param list<array<string,mixed>> $entries
      * @return list<array<string,mixed>>
@@ -497,16 +521,40 @@ final class FormInstanceService
     private function compactEvidenceEntries(array $entries): array
     {
         $out = array();
-        foreach ($entries as $entry) {
+        foreach ($this->dedupeEntries($entries) as $entry) {
             $out[] = array(
                 'id' => (int)($entry['id'] ?? 0),
                 'entry_date' => (string)($entry['entry_date'] ?? ''),
                 'route' => $this->entryRoute($entry),
                 'total_flight_time' => $this->formatNumber($entry['total_flight_time'] ?? 0),
                 'cross_country_distance_nm' => $this->formatNumber($entry['cross_country_distance_nm'] ?? 0),
+                'day_landings' => (int)($entry['day_landings'] ?? 0),
+                'night_landings' => (int)($entry['night_landings'] ?? 0),
+                'towered_airport_landings' => (int)($entry['towered_airport_landings'] ?? 0),
                 'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
                 'remarks' => (string)($entry['remarks'] ?? ''),
             );
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     * @return list<array<string,mixed>>
+     */
+    private function dedupeEntries(array $entries): array
+    {
+        $out = array();
+        $seen = array();
+        foreach ($entries as $entry) {
+            $entryId = (int)($entry['id'] ?? 0);
+            if ($entryId > 0 && isset($seen[$entryId])) {
+                continue;
+            }
+            if ($entryId > 0) {
+                $seen[$entryId] = true;
+            }
+            $out[] = $entry;
         }
         return $out;
     }

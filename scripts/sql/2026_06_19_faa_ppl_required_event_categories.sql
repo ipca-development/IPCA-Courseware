@@ -23,8 +23,8 @@ VALUES
 
   ('FAA_PART_61', 'PPL', 'dual_night_takeoffs_landings',
    'Dual Night Takeoffs and Landings',
-   'Tagged night takeoff/landing training entry or entries.',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
+   '10 dual takeoffs and landings at night with traffic patterns - §61.109(a)(2)(ii).',
+   NULL, NULL, 10, JSON_OBJECT('type', 'selected_entries_sum', 'metric', 'night_landings'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
 
   ('FAA_PART_61', 'PPL', 'dual_instrument_flight_training',
    'Dual Instrument Flight Training',

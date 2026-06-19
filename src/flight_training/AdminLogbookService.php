@@ -743,19 +743,48 @@ final class AdminLogbookService
         if ($categoryId <= 0) {
             throw new RuntimeException('Choose a requirement event category.');
         }
-        $stmt = $this->pdo->prepare("
-            INSERT INTO ipca_flight_requirement_assignments
-              (student_user_id, logbook_id, requirement_category_id, assigned_by, status, metadata_json)
-            VALUES
-              (:student_user_id, :logbook_id, :requirement_category_id, :assigned_by, 'assigned', JSON_OBJECT())
+        $existingStmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_flight_requirement_assignments
+            WHERE logbook_id = :logbook_id
+              AND requirement_category_id = :requirement_category_id
+            ORDER BY id ASC
+            LIMIT 1
         ");
-        $stmt->execute(array(
-            ':student_user_id' => $studentUserId > 0 ? $studentUserId : null,
+        $existingStmt->execute(array(
             ':logbook_id' => $logbookId,
             ':requirement_category_id' => $categoryId,
-            ':assigned_by' => $actorUserId > 0 ? $actorUserId : null,
         ));
-        $assignmentId = (int)$this->pdo->lastInsertId();
+        $assignmentId = (int)($existingStmt->fetchColumn() ?: 0);
+        if ($assignmentId > 0) {
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_flight_requirement_assignments
+                SET student_user_id = :student_user_id,
+                    assigned_by = :assigned_by,
+                    status = 'assigned',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            ");
+            $stmt->execute(array(
+                ':student_user_id' => $studentUserId > 0 ? $studentUserId : null,
+                ':assigned_by' => $actorUserId > 0 ? $actorUserId : null,
+                ':id' => $assignmentId,
+            ));
+        } else {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO ipca_flight_requirement_assignments
+                  (student_user_id, logbook_id, requirement_category_id, assigned_by, status, metadata_json)
+                VALUES
+                  (:student_user_id, :logbook_id, :requirement_category_id, :assigned_by, 'assigned', JSON_OBJECT())
+            ");
+            $stmt->execute(array(
+                ':student_user_id' => $studentUserId > 0 ? $studentUserId : null,
+                ':logbook_id' => $logbookId,
+                ':requirement_category_id' => $categoryId,
+                ':assigned_by' => $actorUserId > 0 ? $actorUserId : null,
+            ));
+            $assignmentId = (int)$this->pdo->lastInsertId();
+        }
         $ins = $this->pdo->prepare("
             INSERT IGNORE INTO ipca_flight_requirement_assignment_entries (assignment_id, entry_id)
             VALUES (:assignment_id, :entry_id)
@@ -1018,19 +1047,35 @@ final class AdminLogbookService
     private function attachRequirementEvidence(array $evaluations, array $assignments): array
     {
         $byKey = array();
+        $seenEntriesByKey = array();
         foreach ($assignments as $assignment) {
             $key = strtolower(trim((string)($assignment['requirement_key'] ?? '')));
             if ($key === '') {
                 continue;
             }
+            $entries = $this->requirementEvidenceEntries(is_array($assignment['entries'] ?? null) ? $assignment['entries'] : array());
+            $entries = array_values(array_filter($entries, static function (array $entry) use (&$seenEntriesByKey, $key): bool {
+                $entryId = (int)($entry['id'] ?? 0);
+                if ($entryId <= 0) {
+                    return true;
+                }
+                if (isset($seenEntriesByKey[$key][$entryId])) {
+                    return false;
+                }
+                $seenEntriesByKey[$key][$entryId] = true;
+                return true;
+            }));
+            if ($entries === array()) {
+                continue;
+            }
             $byKey[$key][] = array(
                 'assignment_id' => (int)($assignment['id'] ?? 0),
                 'label' => (string)($assignment['label'] ?? ''),
-                'entry_count' => (int)($assignment['entry_count'] ?? 0),
+                'entry_count' => count($entries),
                 'total_time' => round((float)($assignment['total_time'] ?? 0), 1),
                 'total_distance_nm' => round((float)($assignment['total_distance_nm'] ?? 0), 1),
                 'summary' => (string)($assignment['entry_summary'] ?? ''),
-                'entries' => $this->requirementEvidenceEntries(is_array($assignment['entries'] ?? null) ? $assignment['entries'] : array()),
+                'entries' => $entries,
             );
         }
 
@@ -1053,9 +1098,17 @@ final class AdminLogbookService
     private function requirementEvidenceEntries(array $entries): array
     {
         $out = array();
+        $seen = array();
         foreach ($entries as $entry) {
+            $entryId = (int)($entry['id'] ?? 0);
+            if ($entryId > 0 && isset($seen[$entryId])) {
+                continue;
+            }
+            if ($entryId > 0) {
+                $seen[$entryId] = true;
+            }
             $out[] = array(
-                'id' => (int)($entry['id'] ?? 0),
+                'id' => $entryId,
                 'entry_date' => (string)($entry['entry_date'] ?? ''),
                 'route' => $this->entryRoute($entry),
                 'departure_airport' => (string)($entry['departure_airport'] ?? ''),
@@ -1067,6 +1120,8 @@ final class AdminLogbookService
                 'cross_country_distance_nm' => round((float)($entry['cross_country_distance_nm'] ?? 0), 1),
                 'night_time' => round((float)($entry['night_time'] ?? 0), 1),
                 'instrument_time' => round((float)($entry['instrument_time'] ?? 0), 1),
+                'day_landings' => (int)($entry['day_landings'] ?? 0),
+                'night_landings' => (int)($entry['night_landings'] ?? 0),
                 'towered_airport_landings' => (int)($entry['towered_airport_landings'] ?? 0),
                 'aircraft_registration' => (string)($entry['aircraft_registration'] ?? ''),
                 'remarks' => (string)($entry['remarks'] ?? ''),

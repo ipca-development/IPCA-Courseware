@@ -20,9 +20,10 @@ final class FlightRequirementEngine
         $totals = $this->totalsService->calculate($entries);
         $assignmentCounts = $this->assignmentCounts($assignments);
         $assignmentDistances = $this->assignmentDistances($assignments);
+        $assignmentSums = $this->assignmentSums($assignments);
         $results = array();
         foreach ($categories as $category) {
-            $results[] = $this->evaluate($category, $totals, $assignmentCounts, $assignmentDistances);
+            $results[] = $this->evaluate($category, $totals, $assignmentCounts, $assignmentDistances, $assignmentSums);
         }
         return $results;
     }
@@ -32,9 +33,10 @@ final class FlightRequirementEngine
      * @param array<string,mixed> $totals
      * @param array<string,int> $assignmentCounts
      * @param array<string,float> $assignmentDistances
+     * @param array<string,array<string,float>> $assignmentSums
      * @return array<string,mixed>
      */
-    public function evaluate(array $category, array $totals, array $assignmentCounts = array(), array $assignmentDistances = array()): array
+    public function evaluate(array $category, array $totals, array $assignmentCounts = array(), array $assignmentDistances = array(), array $assignmentSums = array()): array
     {
         $rules = $this->decodeRules($category['automatic_rules_json'] ?? null);
         $requirementKey = (string)($category['requirement_key'] ?? '');
@@ -56,6 +58,22 @@ final class FlightRequirementEngine
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
             if ($value <= 0) {
                 $warnings[] = 'Selected logbook entry distance required.';
+            }
+        } elseif ($type === 'selected_entries_sum' || $this->inferredSelectedEntryMetric($requirementKey) !== '') {
+            $field = $metric !== '' ? $metric : (string)($rules['field'] ?? '');
+            if ($field === '') {
+                $field = $this->inferredSelectedEntryMetric($requirementKey);
+            }
+            $value = $field !== '' ? (float)($assignmentSums[$requirementKey][$field] ?? 0) : 0.0;
+            $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
+            if ($minimum === null && $category['minimum_time'] !== null) {
+                $minimum = (float)$category['minimum_time'];
+            }
+            if ($minimum === null) {
+                $minimum = 1.0;
+            }
+            if ($field === '') {
+                $warnings[] = 'Selected logbook entry metric required.';
             }
         } else {
             $value = (float)($assignmentCounts[$requirementKey] ?? 0);
@@ -110,22 +128,79 @@ final class FlightRequirementEngine
     private function assignmentDistances(array $assignments): array
     {
         $distances = array();
+        $seen = array();
         foreach ($assignments as $assignment) {
             $key = (string)($assignment['requirement_key'] ?? '');
             if ($key === '') {
                 continue;
             }
             $distance = (float)($assignment['total_distance_nm'] ?? 0);
-            if ($distance <= 0 && is_array($assignment['entries'] ?? null)) {
+            if (is_array($assignment['entries'] ?? null)) {
+                $distance = 0.0;
                 foreach ($assignment['entries'] as $entry) {
-                    if (is_array($entry)) {
-                        $distance += (float)($entry['cross_country_distance_nm'] ?? 0);
+                    if (!is_array($entry)) {
+                        continue;
                     }
+                    $entryId = (int)($entry['id'] ?? 0);
+                    $dedupeKey = $key . ':' . $entryId;
+                    if ($entryId > 0 && isset($seen[$dedupeKey])) {
+                        continue;
+                    }
+                    if ($entryId > 0) {
+                        $seen[$dedupeKey] = true;
+                    }
+                    $distance += (float)($entry['cross_country_distance_nm'] ?? 0);
                 }
             }
             $distances[$key] = ($distances[$key] ?? 0.0) + round($distance, 1);
         }
         return $distances;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $assignments
+     * @return array<string,array<string,float>>
+     */
+    private function assignmentSums(array $assignments): array
+    {
+        $sums = array();
+        $seen = array();
+        $fields = array(
+            'day_landings',
+            'night_landings',
+            'towered_airport_landings',
+            'total_flight_time',
+            'dual_received_time',
+            'solo_time',
+            'cross_country_time',
+            'cross_country_distance_nm',
+            'night_time',
+            'instrument_time',
+            'basic_instrument_flying_time',
+        );
+        foreach ($assignments as $assignment) {
+            $key = (string)($assignment['requirement_key'] ?? '');
+            if ($key === '' || !is_array($assignment['entries'] ?? null)) {
+                continue;
+            }
+            foreach ($assignment['entries'] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $entryId = (int)($entry['id'] ?? 0);
+                $dedupeKey = $key . ':' . $entryId;
+                if ($entryId > 0 && isset($seen[$dedupeKey])) {
+                    continue;
+                }
+                if ($entryId > 0) {
+                    $seen[$dedupeKey] = true;
+                }
+                foreach ($fields as $field) {
+                    $sums[$key][$field] = ($sums[$key][$field] ?? 0.0) + (float)($entry[$field] ?? 0);
+                }
+            }
+        }
+        return $sums;
     }
 
     /**
@@ -141,5 +216,17 @@ final class FlightRequirementEngine
         }
         $decoded = json_decode($json, true);
         return is_array($decoded) ? $decoded : array();
+    }
+
+    private function inferredSelectedEntryMetric(string $requirementKey): string
+    {
+        $key = strtolower($requirementKey);
+        if (str_contains($key, 'night_takeoffs_landings')) {
+            return 'night_landings';
+        }
+        if (str_contains($key, 'towered_airport_takeoffs_landings') || str_contains($key, 'towered_airport_landings')) {
+            return 'towered_airport_landings';
+        }
+        return '';
     }
 }

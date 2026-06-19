@@ -305,11 +305,14 @@ cw_header('Flight Training · Admin Logbook Workspace');
         <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Description</span><textarea class="alogw-edit-textarea" name="description"></textarea></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Time</span><input class="alogw-edit-input" type="number" step="0.01" name="minimum_time"></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Distance NM</span><input class="alogw-edit-input" type="number" step="0.1" name="minimum_distance_nm"></label>
-        <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Count</span><input class="alogw-edit-input" type="number" step="1" min="0" name="minimum_count"></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Count / Landings</span><input class="alogw-edit-input" type="number" step="1" min="0" name="minimum_count"></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">One Flight Multiple Requirements</span><select class="alogw-edit-select" name="allow_one_flight_multiple_requirements"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Multiple Flights One Requirement</span><select class="alogw-edit-select" name="allow_multiple_flights_one_requirement"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
-        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Automatic Rules JSON</span><textarea class="alogw-edit-textarea" name="automatic_rules_json" rows="4">{}</textarea></label>
-        <label class="alogw-edit-field alogw-edit-field--wide"><span class="alogw-edit-label">Manual Rules JSON</span><textarea class="alogw-edit-textarea" name="manual_rules_json" rows="4">{}</textarea></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Evaluation Method</span><select class="alogw-edit-select" name="evaluation_method" id="alogRequirementEvaluationMethod"><option value="manual_assignment">Tagged entry count</option><option value="selected_entries_sum">Sum field from tagged entries</option><option value="selected_entries_distance">Sum tagged cross-country distance</option><option value="total_metric">Total logbook metric</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Tagged Entry Field</span><select class="alogw-edit-select" name="selected_entry_metric" id="alogRequirementSelectedMetric"><option value="">Not applicable</option><option value="night_landings">Night landings</option><option value="day_landings">Day landings</option><option value="towered_airport_landings">Towered airport landings</option><option value="total_flight_time">Total flight time</option><option value="dual_received_time">Dual received time</option><option value="night_time">Night time</option><option value="instrument_time">Instrument time</option><option value="basic_instrument_flying_time">Basic instrument flying</option><option value="cross_country_time">Cross-country time</option><option value="cross_country_distance_nm">Cross-country distance NM</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Total Logbook Metric</span><select class="alogw-edit-select" name="total_metric" id="alogRequirementTotalMetric"><option value="">Not applicable</option><option value="total_flight_time">Total flight time</option><option value="dual_received_time">Dual received time</option><option value="night_time">Night time</option><option value="instrument_time">Instrument time</option><option value="cross_country_time">Cross-country time</option><option value="solo_time">Solo time</option><option value="pic_time">PIC time</option><option value="night_landings">Night landings</option><option value="day_landings">Day landings</option></select></label>
+        <input type="hidden" name="automatic_rules_json" value="{}">
+        <input type="hidden" name="manual_rules_json" value='{"evidence":"selected_logbook_entries"}'>
       </div>
       <div class="alogw-edit-actions">
         <button class="alogw-btn alogw-btn--primary" type="submit">Save Category</button>
@@ -374,9 +377,24 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     data = json.data; entries = (data.entries || []).map(row => ({...row, _dirty:false})); renderAll();
   }
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+  function decodeJsonObject(value){
+    if(value && typeof value === 'object') return value;
+    try {
+      const parsed = JSON.parse(String(value || '{}'));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch(err) {
+      return {};
+    }
+  }
   function categoryById(id){
     const categoryId = Number(id || 0);
     return (data.requirement_categories || []).find(c => Number(c.id || 0) === categoryId) || null;
+  }
+  function inferredSelectedEntryMetric(requirementKey){
+    const key = String(requirementKey || '').toLowerCase();
+    if(key.includes('night_takeoffs_landings')) return 'night_landings';
+    if(key.includes('towered_airport_takeoffs_landings') || key.includes('towered_airport_landings')) return 'towered_airport_landings';
+    return '';
   }
   function renderAll(){ renderCards(); renderPages(); renderTable(); render8710Summary(); renderRequirements(); renderVariables(); }
   function loadColumnWidths(){
@@ -576,7 +594,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       const evidenceEntries = evidence.flatMap(ev => Array.isArray(ev.entries) ? ev.entries : []);
       const evidenceHtml = evidenceEntries.length
         ? `<div class="alogw-req-evidence"><div class="alogw-req-evidence-title"><span>Tagged logbook record(s)</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}">${esc(status === 'PASS' ? 'Satisfies requirement' : 'Does not satisfy yet')}</span></div><ul class="alogw-req-evidence-list">${evidenceEntries.map(entry => {
-            const bits = [entry.entry_date, entry.route, entry.total_flight_time ? `${entry.total_flight_time}h` : '', entry.cross_country_distance_nm ? `${entry.cross_country_distance_nm} NM` : '', entry.aircraft_registration].filter(Boolean);
+            const bits = [entry.entry_date, entry.route, entry.total_flight_time ? `${entry.total_flight_time}h` : '', entry.night_landings ? `${entry.night_landings} night LDG` : '', entry.day_landings ? `${entry.day_landings} day LDG` : '', entry.towered_airport_landings ? `${entry.towered_airport_landings} towered LDG` : '', entry.cross_country_distance_nm ? `${entry.cross_country_distance_nm} NM` : '', entry.aircraft_registration].filter(Boolean);
             const detail = bits.length ? bits.join(' · ') : `Entry #${entry.id || ''}`;
             return `<li><strong>${esc(detail)}</strong>${entry.remarks ? `<span>${esc(entry.remarks)}</span>` : ''}</li>`;
           }).join('')}</ul></div>`
@@ -792,12 +810,31 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       minimum_count:'',
       allow_one_flight_multiple_requirements:1,
       allow_multiple_flights_one_requirement:1,
+      evaluation_method:'manual_assignment',
+      selected_entry_metric:'',
+      total_metric:'',
       automatic_rules_json:'{}',
       manual_rules_json:'{}'
     };
   }
   function openRequirementCategoryModal(category){
     const row = {...defaultRequirementCategory(), ...(category || {})};
+    const rules = decodeJsonObject(row.automatic_rules_json);
+    if(rules.type === 'selected_entries_sum') {
+      row.evaluation_method = 'selected_entries_sum';
+      row.selected_entry_metric = rules.metric || rules.field || '';
+    } else if(rules.type === 'selected_entries_distance') {
+      row.evaluation_method = 'selected_entries_distance';
+      row.selected_entry_metric = 'cross_country_distance_nm';
+    } else if(rules.metric) {
+      row.evaluation_method = 'total_metric';
+      row.total_metric = rules.metric || '';
+    } else if(inferredSelectedEntryMetric(row.requirement_key)) {
+      row.evaluation_method = 'selected_entries_sum';
+      row.selected_entry_metric = inferredSelectedEntryMetric(row.requirement_key);
+    } else {
+      row.evaluation_method = 'manual_assignment';
+    }
     const form = document.getElementById('alogRequirementCategoryForm');
     document.getElementById('alogRequirementCategoryTitle').textContent = row.id ? 'Edit Requirement Category' : 'Add Requirement Category';
     Object.keys(defaultRequirementCategory()).forEach(key => {
@@ -811,6 +848,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       }
       form.elements[key].value = String(value);
     });
+    updateRequirementRuleControls();
     document.getElementById('alogRequirementCategoryModal').classList.add('is-open');
     document.getElementById('alogRequirementCategoryModal').setAttribute('aria-hidden','false');
   }
@@ -820,6 +858,17 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
   }
   document.getElementById('alogAddRequirementCategory').addEventListener('click', () => openRequirementCategoryModal(null));
   document.getElementById('alogCancelRequirementCategory').addEventListener('click', closeRequirementCategoryModal);
+  function updateRequirementRuleControls(){
+    const form = document.getElementById('alogRequirementCategoryForm');
+    const method = form.elements.evaluation_method ? String(form.elements.evaluation_method.value || '') : '';
+    if(form.elements.selected_entry_metric) {
+      form.elements.selected_entry_metric.disabled = method !== 'selected_entries_sum';
+    }
+    if(form.elements.total_metric) {
+      form.elements.total_metric.disabled = method !== 'total_metric';
+    }
+  }
+  document.getElementById('alogRequirementEvaluationMethod').addEventListener('change', updateRequirementRuleControls);
   document.getElementById('alogRequirementCategoryForm').addEventListener('submit', async e => {
     e.preventDefault();
     try {
@@ -832,6 +881,20 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       payload.minimum_count = payload.minimum_count === '' ? null : Number(payload.minimum_count);
       payload.allow_one_flight_multiple_requirements = String(payload.allow_one_flight_multiple_requirements || '0') === '1';
       payload.allow_multiple_flights_one_requirement = String(payload.allow_multiple_flights_one_requirement || '0') === '1';
+      const method = String(payload.evaluation_method || 'manual_assignment');
+      if(method === 'selected_entries_sum') {
+        if(!payload.selected_entry_metric) throw new Error('Choose which tagged entry field to sum.');
+        payload.automatic_rules_json = JSON.stringify({type:'selected_entries_sum', metric:payload.selected_entry_metric});
+      } else if(method === 'selected_entries_distance') {
+        payload.automatic_rules_json = JSON.stringify({type:'selected_entries_distance'});
+        payload.manual_rules_json = JSON.stringify({evidence:'selected_logbook_entries', requires_distance_nm:true});
+      } else if(method === 'total_metric') {
+        if(!payload.total_metric) throw new Error('Choose the total logbook metric.');
+        payload.automatic_rules_json = JSON.stringify({metric:payload.total_metric});
+      } else {
+        payload.automatic_rules_json = JSON.stringify({type:'manual_assignment'});
+      }
+      payload.manual_rules_json = payload.manual_rules_json || JSON.stringify({evidence:'selected_logbook_entries'});
       await post(payload);
       await refreshWorkspace();
       closeRequirementCategoryModal();

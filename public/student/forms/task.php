@@ -165,6 +165,9 @@ function sft_requirement_evidence_html(array $field): string
             trim((string)($entry['entry_date'] ?? '')),
             trim((string)($entry['route'] ?? '')),
             trim((string)($entry['total_flight_time'] ?? '')) !== '0.0' ? trim((string)($entry['total_flight_time'] ?? '')) . 'h' : '',
+            (int)($entry['night_landings'] ?? 0) > 0 ? (int)$entry['night_landings'] . ' night LDG' : '',
+            (int)($entry['day_landings'] ?? 0) > 0 ? (int)$entry['day_landings'] . ' day LDG' : '',
+            (int)($entry['towered_airport_landings'] ?? 0) > 0 ? (int)$entry['towered_airport_landings'] . ' towered LDG' : '',
             trim((string)($entry['cross_country_distance_nm'] ?? '')) !== '0.0' ? trim((string)($entry['cross_country_distance_nm'] ?? '')) . ' NM' : '',
             trim((string)($entry['aircraft_registration'] ?? '')),
         ));
