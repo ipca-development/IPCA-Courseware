@@ -63,6 +63,30 @@ function ptotal(mixed $value, int $decimals = 2): string
     return number_format($number, $decimals, '.', '');
 }
 
+function hourParts(mixed $value): array
+{
+    $number = round((float)$value, 1);
+    if (abs($number) < 0.05) {
+        return array('', '');
+    }
+    $whole = (int)floor($number);
+    $tenths = (int)round(($number - $whole) * 10);
+    if ($tenths === 10) {
+        $whole++;
+        $tenths = 0;
+    }
+    return array((string)$whole, (string)$tenths);
+}
+
+function totalHourParts(mixed $value): array
+{
+    $number = round((float)$value, 1);
+    if (abs($number) < 0.05) {
+        return array('0', '');
+    }
+    return hourParts($number);
+}
+
 function ptime(mixed $value): string
 {
     $raw = trim((string)($value ?? ''));
@@ -585,12 +609,19 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
             cleanText($entry['departure_airport'] ?? '', 8),
             cleanText($entry['arrival_airport'] ?? '', 8),
             logbookRemarks($entry),
-            (string)(((int)($entry['day_landings'] ?? 0) + (int)($entry['night_landings'] ?? 0)) ?: ''),
             '',
         );
         foreach ($values as $colIdx => $value) {
             $textX = $colIdx === 5 ? $bounds[5] + 1.2 : $centers[$colIdx];
             $out .= svgMappedText($textX, $y, (string)$value, 'faa.left.' . $colIdx, false, $idx + 1, $colIdx === 5 ? 'faa-body-left' : 'faa-body', $colIdx === 5 ? 'start' : 'middle');
+        }
+        $dayLandings = (int)($entry['day_landings'] ?? 0);
+        $nightLandings = (int)($entry['night_landings'] ?? 0);
+        if ($dayLandings > 0) {
+            $out .= svgText($bounds[6] + 2.3, $bodyTop + ($idx * $rowH) + 2.8, (string)$dayLandings, 'faa-body', 'middle');
+        }
+        if ($nightLandings > 0) {
+            $out .= svgText($bounds[7] - 2.3, $bodyTop + (($idx + 1) * $rowH) - 2.1, (string)$nightLandings, 'faa-body', 'middle');
         }
     }
     foreach (array(
@@ -601,8 +632,10 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
         $y1 = $bodyTop + (($footerStartRow + $idx) * $rowH);
         $y2 = $y1 + $rowH;
         $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', $row[0], 'faa-head');
-        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', $row[2], 'faa-body');
+        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', '', 'faa-body');
         $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', '', 'faa-body');
+        $out .= svgText($bounds[6] + 2.3, $y1 + 2.8, ptotal($idx === 0 ? ($pageTotals['day_landings'] ?? 0) : ($idx === 1 ? ($previousTotals['day_landings'] ?? 0) : ($runningTotals['day_landings'] ?? 0)), 0), 'faa-body', 'middle');
+        $out .= svgText($bounds[7] - 2.3, $y2 - 2.1, ptotal($idx === 0 ? ($pageTotals['night_landings'] ?? 0) : ($idx === 1 ? ($previousTotals['night_landings'] ?? 0) : ($runningTotals['night_landings'] ?? 0)), 0), 'faa-body', 'middle');
     }
     $cells[] = gridCell($bounds, 0, 5, $bodyTop + ($footerStartRow * $rowH), $bodyTop + (9 * $rowH), 'main');
     $out .= renderCellBorders($cells);
@@ -670,22 +703,30 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
         foreach (array(
             array(0, singlePilotSeMarker($entry)),
             array(2, singlePilotMeMarker($entry)),
-            array(8, pval($entry['night_time'] ?? 0)),
-            array(10, pval($entry['actual_instrument_time'] ?? 0)),
-            array(12, pval($entry['simulated_instrument_time'] ?? 0)),
-            array(14, pval($entry['fnpt_simulator_time'] ?? 0)),
-            array(16, pval($entry['dual_received_time'] ?? 0)),
-            array(18, pval($entry['pic_time'] ?? 0)),
-            array(20, pval($entry['cross_country_time'] ?? 0)),
-            array(26, pval($entry['total_flight_time'] ?? 0)),
         ) as [$colIdx, $value]) {
             $out .= svgMappedText($centers[$colIdx], $y, (string)$value, 'faa.right.' . $colIdx, false, $idx + 1, 'faa-body');
+        }
+        foreach (array(
+            8 => $entry['night_time'] ?? 0,
+            10 => $entry['actual_instrument_time'] ?? 0,
+            12 => $entry['simulated_instrument_time'] ?? 0,
+            14 => $entry['fnpt_simulator_time'] ?? 0,
+            16 => $entry['dual_received_time'] ?? 0,
+            18 => $entry['pic_time'] ?? 0,
+            20 => $entry['cross_country_time'] ?? 0,
+            26 => $entry['total_flight_time'] ?? 0,
+        ) as $colIdx => $value) {
+            [$whole, $tenths] = hourParts($value);
+            $out .= svgText($centers[$colIdx], $y, $whole, 'faa-body');
+            $out .= svgText($centers[$colIdx + 1], $y, $tenths, 'faa-body');
         }
     }
     foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
         $y = $bodyTop + (($footerStartRow + $idx) * $rowH) + ($rowH / 2);
         foreach (array(8 => 'night', 10 => 'ifr', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
-            $out .= svgText(($bounds[$colIdx] + $bounds[$colIdx + 2]) / 2, $y, ptotal($totals[$key] ?? 0), 'faa-body');
+            [$whole, $tenths] = totalHourParts($totals[$key] ?? 0);
+            $out .= svgText($centers[$colIdx], $y, $whole, 'faa-body');
+            $out .= svgText($centers[$colIdx + 1], $y, $tenths, 'faa-body');
         }
     }
     $out .= renderCellBorders($cells);
@@ -742,7 +783,7 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .page-number{font-size:2.6px;font-weight:500}
 .page-template .faa-head{font-size:1.75px;font-weight:800}
 .page-template .faa-head-inverse{font-size:1.75px;font-weight:800;fill:#fff}
-.page-template .faa-body{font-size:1.9px;font-weight:400}
+.page-template .faa-body{font-size:2.35px;font-weight:400}
 .page-template .faa-body-left{font-size:1.75px;font-weight:400}
 .page-template .faa-cert{font-size:2.45px;font-style:italic;font-weight:400}
 .page-template .night-fill{fill:#111;stroke:none}

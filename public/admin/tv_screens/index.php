@@ -46,6 +46,21 @@ function tv_clean_enum(string $value, array $allowed, string $fallback): string
     return in_array($value, $allowed, true) ? $value : $fallback;
 }
 
+function tv_message_types(): array
+{
+    return array('standard', 'urgent', 'schedule', 'night', 'aircraft', 'aircraft_board', 'radar');
+}
+
+function tv_message_type_label(string $type): string
+{
+    return match (strtolower(trim($type))) {
+        'aircraft' => 'Aircraft (ADS-B track)',
+        'aircraft_board' => 'Aircraft board (fleet)',
+        'radar' => 'Radar (KTRM scope)',
+        default => ucfirst($type),
+    };
+}
+
 function tv_messages_table_ready(PDO $pdo): bool
 {
     try {
@@ -122,6 +137,8 @@ function tv_type_badge(string $type): string
         'schedule' => 'app-badge app-badge-warn',
         'night' => 'app-badge app-badge-sky',
         'aircraft' => 'app-badge app-badge-success',
+        'aircraft_board' => 'app-badge app-badge-success',
+        'radar' => 'app-badge app-badge-sky',
         default => 'app-badge app-badge-accent',
     };
 }
@@ -129,9 +146,9 @@ function tv_type_badge(string $type): string
 function tv_screen_presets(): array
 {
     return array(
-        'main' => array('label' => 'Main (flip messages)', 'route' => '/tv/flipboard.php?screen=main'),
-        'aircraft' => array('label' => 'Aircraft (ADS-B ops board)', 'route' => '/tv/flipboard.php?screen=aircraft'),
-        'radar' => array('label' => 'Radar (KTRM scope + weather)', 'route' => '/tv/flipboard.php?screen=radar'),
+        'main' => array('label' => 'Main (flip messages / playlist)', 'route' => '/tv/flipboard.php?screen=main'),
+        'aircraft' => array('label' => 'Aircraft (fleet board or playlist)', 'route' => '/tv/flipboard.php?screen=aircraft'),
+        'radar' => array('label' => 'Radar (scope only or playlist)', 'route' => '/tv/flipboard.php?screen=radar'),
     );
 }
 
@@ -220,12 +237,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'save') {
             $id = (int)($_POST['id'] ?? 0);
             $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', trim((string)($_POST['screen_key'] ?? 'main'))) ?: 'main';
-            $type = tv_clean_enum((string)($_POST['message_type'] ?? ''), ['standard', 'urgent', 'schedule', 'night', 'aircraft'], 'standard');
+            $type = tv_clean_enum((string)($_POST['message_type'] ?? ''), tv_message_types(), 'standard');
             $status = tv_clean_enum((string)($_POST['status'] ?? ''), ['draft', 'active', 'inactive', 'archived'], 'draft');
             $title = trim((string)($_POST['title'] ?? ''));
             $body = trim((string)($_POST['body'] ?? ''));
             $priority = max(0, min(100, (int)($_POST['priority'] ?? 10)));
-            $duration = max(5, min(120, (int)($_POST['display_duration_seconds'] ?? 12)));
+            $duration = max(5, min(300, (int)($_POST['display_duration_seconds'] ?? 12)));
             $startsAt = tv_dt_or_null((string)($_POST['starts_at'] ?? ''));
             $endsAt = tv_dt_or_null((string)($_POST['ends_at'] ?? ''));
             $announce = isset($_POST['announce_audio_enabled']) ? 1 : 0;
@@ -246,6 +263,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $title = $aircraftLabel;
                 $body = $aircraftHex;
+            } elseif (in_array($type, array('radar', 'aircraft_board'), true)) {
+                if ($title === '') {
+                    $title = $type === 'radar' ? 'LIVE RADAR' : 'AIRCRAFT OPS';
+                }
+                if ($body === '') {
+                    $body = '—';
+                }
             } elseif ($title === '' || $body === '') {
                 throw new RuntimeException('Title and board body are required.');
             }
@@ -650,7 +674,7 @@ cw_header('TV Flip Board');
                 <option value="<?= h((string)$settings['screen_key']) ?>" selected><?= h((string)$settings['screen_key']) ?> (custom)</option>
               <?php endif; ?>
             </select>
-            <p class="tv-field-hint">Radar kiosk: <code>/tv/flipboard.php?screen=radar</code></p>
+            <p class="tv-field-hint">Radar kiosk: <code>/tv/flipboard.php?screen=radar</code>. Playlist: set the same screen key on multiple active messages.</p>
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="set_default_mode">Default mode</label>
@@ -749,10 +773,11 @@ cw_header('TV Flip Board');
           <div class="tv-field">
             <label class="tv-field-label" for="msg_message_type">Mode</label>
             <select class="app-select" id="msg_message_type" name="message_type">
-              <?php foreach (['standard', 'urgent', 'schedule', 'night', 'aircraft'] as $type): ?>
-                <option value="<?= h($type) ?>" <?= $form['message_type'] === $type ? 'selected' : '' ?>><?= h($type === 'aircraft' ? 'Aircraft (ADS-B)' : ucfirst($type)) ?></option>
+              <?php foreach (tv_message_types() as $type): ?>
+                <option value="<?= h($type) ?>" <?= $form['message_type'] === $type ? 'selected' : '' ?>><?= h(tv_message_type_label($type)) ?></option>
               <?php endforeach; ?>
             </select>
+            <p class="tv-field-hint" id="msg_playlist_hint">Playlist: add multiple active messages on the same screen key (standard → radar → aircraft board). Each slot uses its display seconds.</p>
           </div>
           <div class="tv-field span-2" id="msg_title_field">
             <label class="tv-field-label" for="msg_title" id="msg_title_label">Title</label>
@@ -790,7 +815,8 @@ cw_header('TV Flip Board');
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="msg_display_duration_seconds">Display seconds</label>
-            <input class="app-input" type="number" id="msg_display_duration_seconds" name="display_duration_seconds" min="5" max="120" value="<?= h((string)$form['display_duration_seconds']) ?>">
+            <input class="app-input" type="number" id="msg_display_duration_seconds" name="display_duration_seconds" min="5" max="300" value="<?= h((string)$form['display_duration_seconds']) ?>">
+            <p class="tv-field-hint" id="msg_duration_hint">Seconds this playlist slot stays on screen (5–300).</p>
           </div>
           <div class="tv-field">
             <label class="tv-field-label" for="msg_starts_at">Starts at (UTC)</label>
@@ -872,7 +898,9 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   function syncAircraftFormHints() {
     var typeEl = document.getElementById('msg_message_type');
-    var isAircraft = typeEl && typeEl.value === 'aircraft';
+    var type = typeEl ? typeEl.value : 'standard';
+    var isAircraft = type === 'aircraft';
+    var isPlaylistSlot = type === 'radar' || type === 'aircraft_board';
     var titleField = document.getElementById('msg_title_field');
     var bodyField = document.getElementById('msg_body_field');
     var hexField = document.getElementById('msg_aircraft_hex_field');
@@ -883,18 +911,33 @@ document.addEventListener('DOMContentLoaded', function () {
     var bodyInput = document.getElementById('msg_body');
     var hexInput = document.getElementById('msg_aircraft_hex');
     var labelInput = document.getElementById('msg_aircraft_label');
+    var titleLabel = document.getElementById('msg_title_label');
+    var bodyLabel = document.getElementById('msg_body_label');
+    var durationHint = document.getElementById('msg_duration_hint');
 
     if (titleField) titleField.style.display = isAircraft ? 'none' : '';
-    if (bodyField) bodyField.style.display = isAircraft ? 'none' : '';
+    if (bodyField) bodyField.style.display = (isAircraft || isPlaylistSlot) ? 'none' : '';
     if (hexField) hexField.style.display = isAircraft ? '' : 'none';
     if (labelField) labelField.style.display = isAircraft ? '' : 'none';
     if (typeField) typeField.style.display = isAircraft ? '' : 'none';
     if (homeField) homeField.style.display = isAircraft ? '' : 'none';
 
     if (titleInput) titleInput.required = !isAircraft;
-    if (bodyInput) bodyInput.required = !isAircraft;
+    if (bodyInput) bodyInput.required = !isAircraft && !isPlaylistSlot;
     if (hexInput) hexInput.required = !!isAircraft;
     if (labelInput) labelInput.required = !!isAircraft;
+
+    if (titleLabel) {
+      titleLabel.textContent = type === 'radar'
+        ? 'Slot label (status bar)'
+        : (type === 'aircraft_board' ? 'Slot label (status bar)' : 'Title');
+    }
+    if (bodyLabel) bodyLabel.textContent = 'Board body';
+    if (durationHint) {
+      durationHint.textContent = isPlaylistSlot
+        ? 'Seconds this view stays on screen before the next playlist slot.'
+        : 'Seconds this message stays on screen (5–300).';
+    }
 
     var announceInput = document.getElementById('msg_announce_audio_enabled');
     if (announceInput && isAircraft && document.getElementById('msg_id').value === '0') {

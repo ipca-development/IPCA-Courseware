@@ -14,6 +14,7 @@ Apply the migration:
 
 ```bash
 mysql "$CW_DB_NAME" < scripts/sql/2026_05_20_tv_screen_messages.sql
+mysql "$CW_DB_NAME" < scripts/sql/2026_06_20_tv_screen_playlist_types.sql
 ```
 
 Use the same MySQL connection settings as the application environment. The API reads active messages where `starts_at` and `ends_at` include the current UTC time. Urgent messages are any `message_type = 'urgent'` or `priority >= 90`; when present, they override normal rotation.
@@ -25,6 +26,20 @@ Use the same MySQL connection settings as the application environment. The API r
 - `schedule`: departure-board style rows. Put one row per line in the body, using `TITLE | STATUS`.
 - `night`: normal board content with dimmed kiosk lighting when opened with `mode=night`.
 - `aircraft`: live ADS-B status board for a tail number (for example `N397EA – At the SPC Gate`).
+- `aircraft_board`: fleet ADS-B ops grid (same view as `/tv/flipboard.php?screen=aircraft`).
+- `radar`: KTRM live radar scope + weather (preloaded in background for instant display).
+
+## Playlist rotation
+
+Create **multiple active messages** with the **same screen key** (for example `aircraft`). Each message is one playlist slot. Set **Display seconds** per slot (5–300). The kiosk cycles through slots in API order (priority, then schedule).
+
+Example on `screen=aircraft`:
+
+1. `standard` — announcement — 30 seconds
+2. `radar` — LIVE RADAR — 60 seconds
+3. `aircraft_board` — AIRCRAFT OPS — 60 seconds
+
+Point the TV at `/tv/flipboard.php?screen=aircraft`. With no active messages, `screen=aircraft` and `screen=radar` still show their dedicated full-time views.
 
 ## Live Aircraft Status (ADS-B Exchange)
 
