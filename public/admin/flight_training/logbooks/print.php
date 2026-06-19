@@ -586,15 +586,12 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
   <button type="button" id="zoomOut">Zoom -</button>
   <button type="button" id="zoomIn">Zoom +</button>
   <button type="button" id="fitWidth">Fit Width</button>
-  <button type="button" id="fitSpread">Fit Full Spread</button>
   <button type="button" id="resetZoom">100%</button>
-  <a class="tool-link" href="?logbook_id=<?= (int)$logbookId ?>&format=<?= h($format) ?><?= $blankMode ? '' : '&blank=1' ?>"><?= $blankMode ? 'Show Data' : 'Blank Template' ?></a>
-  <a class="tool-link" href="?logbook_id=<?= (int)$logbookId ?>&format=<?= h($format) ?><?= $blankMode ? '&blank=1' : '' ?><?= $debugMode ? '' : '&debug=1' ?>"><?= $debugMode ? 'Hide Debug' : 'Debug Mapping' ?></a>
   <select id="paperSelect" aria-label="Paper size">
     <option value="a4">A4 landscape</option>
     <option value="letter">US Letter landscape</option>
   </select>
-  <span class="muted">Spread <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($renderChunks) ?></span> · Rows: <?= $blankMode ? 0 : count($entries) ?> · <?= $blankMode ? 'blank calibration mode' : ((int)$rowsPerSpread . ' rows/page') ?><?= $debugMode ? ' · mapping debug on' : '' ?> · calibrated physical template</span>
+  <span class="muted">Page <span id="spreadNow">1</span>/<span id="spreadTotal"><?= count($renderChunks) ?></span></span>
 </div>
 <main class="print-stage">
 <div class="paper-sheet" id="paperSheet" data-paper="a4">
@@ -703,7 +700,6 @@ try {
   document.getElementById('zoomIn').addEventListener('click', () => { zoomMode = zoomMode === 'actual' ? 'fit-spread' : zoomMode; zoom = Math.min(3, zoom * 1.18); applyTransform(); });
   document.getElementById('zoomOut').addEventListener('click', () => { zoomMode = zoomMode === 'actual' ? 'fit-spread' : zoomMode; zoom = Math.max(.35, zoom / 1.18); applyTransform(); });
   document.getElementById('fitWidth').addEventListener('click', () => setZoomMode('fit-width'));
-  document.getElementById('fitSpread').addEventListener('click', () => setZoomMode('fit-spread'));
   document.getElementById('resetZoom').addEventListener('click', () => setZoomMode('actual'));
   select.addEventListener('change', () => {
     sheet.dataset.paper = select.value;

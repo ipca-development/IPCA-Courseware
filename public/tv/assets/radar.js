@@ -394,7 +394,7 @@
       '            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(57,255,106,.22)" stroke-width="1"/>',
       '            <g data-radar-wind-variation></g>',
       '            <g data-radar-wind-fcst opacity="0.85">' + windFromArrowSvg('rgba(120,210,255,.85)', 2.5, 'rgba(120,210,255,.9)', 0.9) + '</g>',
-      '            <g data-radar-wind-live">' + windFromArrowSvg('#39ff6a', 3, '#39ff6a', 1) + '</g>',
+      '            <g data-radar-wind-live>' + windFromArrowSvg('#39ff6a', 3, '#39ff6a', 1) + '</g>',
       '          </svg>',
       '          <span class="tv-radar-wind-n">N</span>',
       '        </div>',
