@@ -207,11 +207,7 @@ function easaActingInstructorTime(array $entry): float
 
 function faaActualInstrumentTime(array $entry): float
 {
-    $actual = (float)($entry['actual_instrument_time'] ?? 0);
-    if ($actual > 0) {
-        return $actual;
-    }
-    return (float)($entry['instrument_time'] ?? 0);
+    return (float)($entry['actual_instrument_time'] ?? 0);
 }
 
 function leftEntryFields(array $entry): array
