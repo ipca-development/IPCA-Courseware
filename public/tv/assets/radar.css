@@ -329,6 +329,10 @@
   letter-spacing:.06em;
 }
 
+.tv-radar-screen[hidden]{
+  display:none !important;
+}
+
 .fb-message-board.is-radar-mode{
   display:flex;
   align-items:stretch;

@@ -913,9 +913,9 @@
     this.bindAudio();
     this.tickClock();
     this.buildMessageBoard();
+    this.preloadRadar();
     if (this.isRadarScreen()) {
       if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
-      this.showRadarBoard();
       this.ensureRadarScreen();
       this.rendering = false;
     } else {
@@ -927,6 +927,23 @@
     this.ensureAircraftPoll();
   };
 
+  FlipBoard.prototype.preloadRadar = function () {
+    if (!this.messageBoard || typeof window.TvRadarScreen !== 'function') return;
+    if (this.radarScreen) return;
+
+    this.radarScreen = new window.TvRadarScreen({
+      apiUrl: this.radarApiUrl,
+      pollMs: this.aircraftPollMs
+    });
+    this.radarScreen.mount(this.messageBoard);
+    this.radarScreen.start({ visible: this.isRadarScreen() });
+    this.radarStarted = true;
+
+    if (!this.isRadarScreen()) {
+      this.hideRadarBoard();
+    }
+  };
+
   FlipBoard.prototype.showRadarBoard = function () {
     this.showMessageBoard();
     if (this.mainLinesEl) this.mainLinesEl.hidden = true;
@@ -934,19 +951,18 @@
     if (this.scheduleBoard) this.scheduleBoard.hidden = true;
     if (this.messageBoard) this.messageBoard.classList.remove('is-aircraft-mode');
     if (this.messageBoard) this.messageBoard.classList.add('is-radar-mode');
+    if (this.radarScreen) this.radarScreen.setVisible(true);
+  };
+
+  FlipBoard.prototype.hideRadarBoard = function () {
+    if (this.messageBoard) this.messageBoard.classList.remove('is-radar-mode');
+    if (this.radarScreen) this.radarScreen.setVisible(false);
   };
 
   FlipBoard.prototype.ensureRadarScreen = function () {
-    if (!this.isRadarScreen() || !this.messageBoard) return;
+    if (!this.messageBoard) return;
+    this.preloadRadar();
     this.showRadarBoard();
-    if (this.radarStarted || typeof window.TvRadarScreen !== 'function') return;
-    this.radarScreen = new window.TvRadarScreen({
-      apiUrl: this.radarApiUrl,
-      pollMs: this.aircraftPollMs
-    });
-    this.radarScreen.mount(this.messageBoard);
-    this.radarScreen.start();
-    this.radarStarted = true;
   };
 
   FlipBoard.prototype.showMessageBoard = function () {
@@ -955,6 +971,7 @@
   };
 
   FlipBoard.prototype.showMainLinesBoard = function () {
+    this.hideRadarBoard();
     this.showMessageBoard();
     if (this.mainLinesEl) this.mainLinesEl.hidden = false;
     if (this.opsBoardEl) this.opsBoardEl.hidden = true;
@@ -962,6 +979,7 @@
   };
 
   FlipBoard.prototype.showAircraftOpsBoard = function () {
+    this.hideRadarBoard();
     this.showMessageBoard();
     if (this.mainLinesEl) this.mainLinesEl.hidden = true;
     if (this.opsBoardEl) this.opsBoardEl.hidden = false;
@@ -1206,6 +1224,7 @@
 
   FlipBoard.prototype.ensureAircraftPoll = function () {
     var self = this;
+    this.preloadRadar();
     var hasAircraft = (this.messages || []).some(function (message) {
       return self.isAircraftMessage(message);
     });
@@ -1215,7 +1234,7 @@
       this.aircraftPollTimer = null;
     }
 
-    if (!hasAircraft && !this.isAircraftOpsScreen() && !this.isRadarScreen()) return;
+    if (!hasAircraft && !this.isAircraftOpsScreen() && !this.isRadarScreen() && !this.radarScreen) return;
 
     this.aircraftPollTimer = window.setInterval(function () {
       if (self.rendering || self.audio.announcing) return;
@@ -1571,6 +1590,7 @@
   };
 
   FlipBoard.prototype.renderSchedule = function (message, urgent) {
+    this.hideRadarBoard();
     this.ensureScheduleBoard();
     if (this.messageBoard) this.messageBoard.hidden = true;
     if (this.mainLinesEl) this.mainLinesEl.hidden = true;

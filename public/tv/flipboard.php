@@ -34,9 +34,7 @@ $isRadarScreen = $screenKey === 'radar';
   <meta name="theme-color" content="#0d1d34">
   <title>IPCA Flip Board</title>
   <link rel="stylesheet" href="/tv/assets/flipboard.css?v=<?= h($cssVersion) ?>">
-  <?php if ($isRadarScreen): ?>
   <link rel="stylesheet" href="/tv/assets/radar.css?v=<?= h($radarCssVersion) ?>">
-  <?php endif; ?>
 </head>
 <body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?>">
   <div
@@ -102,9 +100,7 @@ $isRadarScreen = $screenKey === 'radar';
     </main>
   </div>
 
-  <?php if ($isRadarScreen): ?>
   <script src="/tv/assets/radar.js?v=<?= h($radarJsVersion) ?>" defer></script>
-  <?php endif; ?>
   <script src="/tv/assets/flipboard.js?v=<?= h($jsVersion) ?>" defer></script>
 </body>
 </html>

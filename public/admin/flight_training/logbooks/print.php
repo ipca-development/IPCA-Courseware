@@ -620,7 +620,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
 
 function faaRightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
 {
-    $columns = array(8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 14,5, 10);
+    $columns = array(8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 14,5);
     $gridX = 10.0;
     $gridY = 10.0;
     $gridW = 185.0;
@@ -633,59 +633,62 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template faa-right-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
     $cells = array(
-        gridCell($bounds, 0, 4, $gridY, $gridY + 5.5, 'main'),
-        gridCell($bounds, 4, 10, $gridY, $gridY + 5.5, 'main'),
-        gridCell($bounds, 10, 12, $gridY, $gridY + $headerH, 'main'),
-        gridCell($bounds, 12, 22, $gridY, $gridY + 5.5, 'main'),
-        gridCell($bounds, 22, 24, $gridY, $gridY + $headerH, 'main'),
+        gridCell($bounds, 0, 8, $gridY, $gridY + 5.5, 'main'),
+        gridCell($bounds, 8, 14, $gridY, $gridY + 5.5, 'main'),
+        gridCell($bounds, 14, 16, $gridY, $gridY + $headerH, 'main'),
+        gridCell($bounds, 16, 26, $gridY, $gridY + 5.5, 'main'),
+        gridCell($bounds, 26, 28, $gridY, $gridY + $headerH, 'main'),
         gridCell($bounds, 0, 2, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 2, 4, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 4, 6, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 6, 8, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 8, 10, $gridY + 5.5, $gridY + $headerH, 'main'),
+        gridCell($bounds, 10, 12, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 12, 14, $gridY + 5.5, $gridY + $headerH, 'main'),
-        gridCell($bounds, 14, 16, $gridY + 5.5, $gridY + $headerH, 'main'),
         gridCell($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, 'main'),
+        gridCell($bounds, 18, 20, $gridY + 5.5, $gridY + $headerH, 'main'),
+        gridCell($bounds, 20, 22, $gridY + 5.5, $gridY + $headerH, 'main'),
     );
-    $out .= svgCellMultiline($bounds, 0, 4, $gridY, $gridY + 5.5, array('AIRCRAFT CATEGORY AND CLASS'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 4, 10, $gridY, $gridY + 5.5, array('CONDITIONS OF FLIGHT'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 10, 12, $gridY, $gridY + $headerH, array('FLIGHT', 'TRAINING', 'DEVICE'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 12, 22, $gridY, $gridY + 5.5, array('TYPE OF PILOTING TIME'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 22, 24, $gridY, $gridY + $headerH, array('TOTAL', 'DURATION', 'OF FLIGHT'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 0, 8, $gridY, $gridY + 5.5, array('AIRCRAFT CATEGORY AND CLASS'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 8, 14, $gridY, $gridY + 5.5, array('CONDITIONS OF FLIGHT'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 14, 16, $gridY, $gridY + $headerH, array('FLIGHT', 'TRAINING', 'DEVICE'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 16, 26, $gridY, $gridY + 5.5, array('TYPE OF PILOTING TIME'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 26, 28, $gridY, $gridY + $headerH, array('TOTAL', 'DURATION', 'OF FLIGHT'), 'faa-head');
     $out .= svgCellMultiline($bounds, 0, 2, $gridY + 5.5, $gridY + $headerH, array('AIRPLANE', 'SEL'), 'faa-head');
     $out .= svgCellMultiline($bounds, 2, 4, $gridY + 5.5, $gridY + $headerH, array('AIRPLANE', 'MEL'), 'faa-head');
-    $out .= svgRect($bounds[4], $gridY + 5.5, $bounds[6] - $bounds[4], $headerH - 5.5, 'night-fill');
-    $out .= svgCellMultiline($bounds, 4, 6, $gridY + 5.5, $gridY + $headerH, array('NIGHT'), 'faa-head-inverse');
-    $out .= svgCellMultiline($bounds, 6, 8, $gridY + 5.5, $gridY + $headerH, array('ACTUAL', 'INSTRUMENT'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 8, 10, $gridY + 5.5, $gridY + $headerH, array('SIMULATED', 'INSTRUMENT'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 12, 14, $gridY + 5.5, $gridY + $headerH, array('FLIGHT', 'TRAINING'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 14, 16, $gridY + 5.5, $gridY + $headerH, array('SOLO', 'OR PIC'), 'faa-head');
-    $out .= svgCellMultiline($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, array('CROSS-', 'COUNTRY'), 'faa-head');
+    $out .= svgRect($bounds[8], $gridY + 5.5, $bounds[10] - $bounds[8], $headerH - 5.5, 'night-fill');
+    $out .= svgCellMultiline($bounds, 8, 10, $gridY + 5.5, $gridY + $headerH, array('NIGHT'), 'faa-head-inverse');
+    $out .= svgCellMultiline($bounds, 10, 12, $gridY + 5.5, $gridY + $headerH, array('ACTUAL', 'INSTRUMENT'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 12, 14, $gridY + 5.5, $gridY + $headerH, array('SIMULATED', 'INSTRUMENT'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, array('FLIGHT', 'TRAINING'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 18, 20, $gridY + 5.5, $gridY + $headerH, array('SOLO', 'OR PIC'), 'faa-head');
+    $out .= svgCellMultiline($bounds, 20, 22, $gridY + 5.5, $gridY + $headerH, array('CROSS-', 'COUNTRY'), 'faa-head');
     $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowH, 9, count($columns)));
     foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
         $y = $bodyTop + ($idx * $rowH) + ($rowH / 2);
         foreach (array(
             array(0, singlePilotSeMarker($entry)),
             array(2, singlePilotMeMarker($entry)),
-            array(4, pval($entry['night_time'] ?? 0)),
-            array(6, pval($entry['actual_instrument_time'] ?? 0)),
-            array(8, pval($entry['simulated_instrument_time'] ?? 0)),
-            array(10, pval($entry['fnpt_simulator_time'] ?? 0)),
-            array(12, pval($entry['dual_received_time'] ?? 0)),
-            array(14, pval($entry['pic_time'] ?? 0)),
-            array(16, pval($entry['cross_country_time'] ?? 0)),
-            array(22, pval($entry['total_flight_time'] ?? 0)),
+            array(8, pval($entry['night_time'] ?? 0)),
+            array(10, pval($entry['actual_instrument_time'] ?? 0)),
+            array(12, pval($entry['simulated_instrument_time'] ?? 0)),
+            array(14, pval($entry['fnpt_simulator_time'] ?? 0)),
+            array(16, pval($entry['dual_received_time'] ?? 0)),
+            array(18, pval($entry['pic_time'] ?? 0)),
+            array(20, pval($entry['cross_country_time'] ?? 0)),
+            array(26, pval($entry['total_flight_time'] ?? 0)),
         ) as [$colIdx, $value]) {
             $out .= svgMappedText($centers[$colIdx], $y, (string)$value, 'faa.right.' . $colIdx, false, $idx + 1, 'faa-body');
         }
     }
     foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
         $y = $bodyTop + (($footerStartRow + $idx) * $rowH) + ($rowH / 2);
-        foreach (array(4 => 'night', 6 => 'ifr', 10 => 'sim', 12 => 'dual', 14 => 'pic', 16 => 'nav', 22 => 'total') as $colIdx => $key) {
+        foreach (array(8 => 'night', 10 => 'ifr', 14 => 'sim', 16 => 'dual', 18 => 'pic', 20 => 'nav', 26 => 'total') as $colIdx => $key) {
             $out .= svgText(($bounds[$colIdx] + $bounds[$colIdx + 2]) / 2, $y, ptotal($totals[$key] ?? 0), 'faa-body');
         }
     }
     $out .= renderCellBorders($cells);
+    $out .= svgLine($bounds[0], $bodyTop + ($footerStartRow * $rowH), $bounds[count($bounds) - 1], $bodyTop + ($footerStartRow * $rowH), 'outer');
     $out .= svgText(195, 110.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
     return $out . '</svg>';
 }

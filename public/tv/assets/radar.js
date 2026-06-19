@@ -346,6 +346,7 @@
     this.displayWindDir = null;
     this.windHistory = [];
     this.fetching = false;
+    this.visible = true;
   }
 
   RadarScreen.prototype.mount = function (container) {
@@ -514,8 +515,15 @@
     return line;
   };
 
-  RadarScreen.prototype.start = function () {
+  RadarScreen.prototype.start = function (opts) {
     var self = this;
+    opts = opts || {};
+    if (opts.visible === false) {
+      this.visible = false;
+    }
+    if (this.root) {
+      this.root.hidden = !this.visible;
+    }
     this.poll();
     this.pollTimer = window.setInterval(function () {
       self.poll();
@@ -526,6 +534,25 @@
       self.animId = requestAnimationFrame(frame);
     };
     this.animId = requestAnimationFrame(frame);
+  };
+
+  RadarScreen.prototype.setVisible = function (visible) {
+    var next = !!visible;
+    if (this.visible === next) {
+      if (this.root) this.root.hidden = !next;
+      return;
+    }
+    this.visible = next;
+    if (this.root) {
+      this.root.hidden = !next;
+    }
+    if (next) {
+      var self = this;
+      window.requestAnimationFrame(function () {
+        self.resize();
+        self.drawDiagram();
+      });
+    }
   };
 
   RadarScreen.prototype.stop = function () {
@@ -572,7 +599,9 @@
     this.adsbMeta = payload.adsb || {};
     this.updateStatus();
     this.updateWeather();
-    this.drawDiagram();
+    if (this.visible) {
+      this.drawDiagram();
+    }
   };
 
   RadarScreen.prototype.updateStatus = function () {
@@ -839,7 +868,9 @@
     this.advanceTrackStates();
     this.updateContinuousBlips(ts);
     this.updateWindAnimation(ts, dtSec);
-    this.drawScope(ts);
+    if (this.visible) {
+      this.drawScope(ts);
+    }
   };
 
   RadarScreen.prototype.updateContinuousBlips = function (ts) {
