@@ -591,7 +591,7 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
     $bounds = scaledBounds($columns, $gridX, $gridW);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template faa-left-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
-    $out .= svgImage(9.4, 2.3, 31, 12.6, $logoHref);
+    $out .= svgImage(9.6, 1.6, 20, 8.1, $logoHref);
     $cells = array(
         gridCell($bounds, 0, 1, $gridY, $gridY + $headerH, 'main'),
         gridCell($bounds, 1, 2, $gridY, $gridY + $headerH, 'main'),
@@ -675,7 +675,7 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
     $bounds = scaledBounds($columns, $gridX, $gridW);
     $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
     $out = '<svg class="page-template faa-right-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
-    $out .= svgImage(165.2, 2.3, 31, 12.6, $logoHref);
+    $out .= svgImage(176.2, 1.6, 20, 8.1, $logoHref);
     $cells = array(
         gridCell($bounds, 0, 8, $gridY, $gridY + 5.5, 'main'),
         gridCell($bounds, 8, 14, $gridY, $gridY + 5.5, 'main'),
