@@ -37,6 +37,8 @@ $error = '';
 
 if (isset($_GET['created'])) {
     $notice = 'Template created.';
+} elseif (isset($_GET['imported'])) {
+    $notice = 'PDF imported as a draft form template.';
 } elseif (isset($_GET['archived'])) {
     $notice = 'Template archived.';
 } elseif (isset($_GET['activated'])) {
@@ -59,6 +61,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'version_label' => (string)($_POST['version_label'] ?? '1.0'),
             ), $actorUserId);
             redirect('/admin/flight_training/forms/index.php?created=1');
+        }
+
+        if ($action === 'import_pdf') {
+            $templateId = $service->importPdfTemplate(array(
+                'title' => (string)($_POST['title'] ?? ''),
+                'template_key' => (string)($_POST['template_key'] ?? ''),
+                'category' => (string)($_POST['category'] ?? 'Checkride'),
+                'description' => (string)($_POST['description'] ?? ''),
+                'version_label' => (string)($_POST['version_label'] ?? '1.0'),
+                'import_profile' => (string)($_POST['import_profile'] ?? 'private_sel_practical_test'),
+            ), is_array($_FILES['source_pdf'] ?? null) ? $_FILES['source_pdf'] : array(), $actorUserId);
+            redirect('/admin/flight_training/forms/editor.php?template_id=' . $templateId . '&imported=1');
         }
 
         if ($action === 'archive') {
@@ -100,10 +114,12 @@ cw_header('Flight Training · Form Manager');
 .ftfm-card-title{margin:0;font-size:17px;color:#102845}
 .ftfm-card-text{margin:4px 0 0;color:#64748b;font-size:13px}
 .ftfm-form-grid{display:grid;grid-template-columns:1.4fr .9fr .9fr .55fr;gap:12px;padding:18px 20px}
+.ftfm-form-grid--import{grid-template-columns:1.3fr .8fr .8fr .55fr}
 .ftfm-field{display:flex;flex-direction:column;gap:6px}
 .ftfm-field--wide{grid-column:1 / -1}
 .ftfm-label{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
-.ftfm-input,.ftfm-textarea{width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.13);border-radius:14px;padding:11px 12px;font:inherit;font-size:14px;color:#102845;background:#fff}
+.ftfm-input,.ftfm-textarea,.ftfm-select{width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.13);border-radius:14px;padding:11px 12px;font:inherit;font-size:14px;color:#102845;background:#fff}
+.ftfm-input[type="file"]{padding:9px 12px}
 .ftfm-textarea{min-height:72px;resize:vertical}
 .ftfm-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:0 20px 18px}
 .ftfm-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:900;text-decoration:none;cursor:pointer;white-space:nowrap}
@@ -191,6 +207,48 @@ cw_header('Flight Training · Form Manager');
       </div>
       <div class="ftfm-actions">
         <button class="ftfm-btn ftfm-btn--primary" type="submit"<?= $schemaReady ? '' : ' disabled' ?>>Create Template</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="ftfm-card">
+    <div class="ftfm-card-head">
+      <div>
+        <h2 class="ftfm-card-title">Import PDF Form</h2>
+        <p class="ftfm-card-text">Imports a source PDF and seeds a structured form template with auto-fill field bindings.</p>
+      </div>
+    </div>
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="action" value="import_pdf">
+      <input type="hidden" name="import_profile" value="private_sel_practical_test">
+      <div class="ftfm-form-grid ftfm-form-grid--import">
+        <label class="ftfm-field ftfm-field--wide">
+          <span class="ftfm-label">PDF Source</span>
+          <input class="ftfm-input" type="file" name="source_pdf" accept="application/pdf,.pdf" required>
+        </label>
+        <label class="ftfm-field">
+          <span class="ftfm-label">Title</span>
+          <input class="ftfm-input" name="title" value="Practical Test Guide - Private Pilot SEL" placeholder="Practical Test Guide - Private Pilot SEL">
+        </label>
+        <label class="ftfm-field">
+          <span class="ftfm-label">Template Key</span>
+          <input class="ftfm-input" name="template_key" value="PRACTICAL_TEST_GUIDE_PRIVATE_SEL" placeholder="PRACTICAL_TEST_GUIDE_PRIVATE_SEL">
+        </label>
+        <label class="ftfm-field">
+          <span class="ftfm-label">Category</span>
+          <input class="ftfm-input" name="category" value="Checkride" placeholder="Checkride">
+        </label>
+        <label class="ftfm-field">
+          <span class="ftfm-label">Version</span>
+          <input class="ftfm-input" name="version_label" value="1.0">
+        </label>
+        <label class="ftfm-field ftfm-field--wide">
+          <span class="ftfm-label">Description</span>
+          <textarea class="ftfm-textarea" name="description">Imported Practical Test Guide for Private Pilot Single-Engine Land checkride preparation and auto-fill.</textarea>
+        </label>
+      </div>
+      <div class="ftfm-actions">
+        <button class="ftfm-btn ftfm-btn--primary" type="submit"<?= $schemaReady ? '' : ' disabled' ?>>Import PDF</button>
       </div>
     </form>
   </section>

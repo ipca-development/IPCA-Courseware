@@ -495,6 +495,125 @@ function tv_adsb_build_radar_target_from_track(
     );
 }
 
+function tv_adsb_fleet_track_messages_ready(PDO $pdo): bool
+{
+    try {
+        $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
+        if ($tableCheck === false || $tableCheck->fetchColumn() === false) {
+            return false;
+        }
+        $columnCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_hex'");
+        return $columnCheck !== false && $columnCheck->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function tv_adsb_fetch_active_fleet_tracks(PDO $pdo, string $screenKey = '', int $limit = 25): array
+{
+    $limit = max(1, min(50, $limit));
+    $configTracks = tv_kiosk_fleet_track_rows();
+
+    if (!tv_adsb_fleet_track_messages_ready($pdo)) {
+        return array_slice($configTracks, 0, $limit);
+    }
+
+    $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', $screenKey) ?: '';
+
+    $typeCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_type'");
+    $hasTypeColumn = $typeCheck !== false && $typeCheck->fetchColumn() !== false;
+    $typeSelect = $hasTypeColumn ? 'aircraft_type,' : '';
+    $aircraftSelect = "aircraft_hex, aircraft_label, {$typeSelect} aircraft_home_airport,";
+    $voiceSelect = '';
+    try {
+        $voiceCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'voice'");
+        if ($voiceCheck !== false && $voiceCheck->fetchColumn() !== false) {
+            $voiceSelect = 'voice, announce_audio_enabled,';
+        } else {
+            $voiceSelect = 'announce_audio_enabled,';
+        }
+    } catch (Throwable $e) {
+        $voiceSelect = 'announce_audio_enabled,';
+    }
+
+    $fetch = static function (PDO $pdo, ?string $forScreenKey, int $limit, string $aircraftSelect, string $voiceSelect): array {
+        if ($forScreenKey !== null && $forScreenKey !== '') {
+            $stmt = $pdo->prepare("
+                SELECT
+                    id,
+                    title,
+                    body,
+                    {$aircraftSelect}
+                    {$voiceSelect}
+                    priority
+                FROM tv_screen_messages
+                WHERE screen_key = ?
+                  AND message_type = 'aircraft'
+                  AND status = 'active'
+                  AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
+                  AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
+                ORDER BY priority DESC, id ASC
+                LIMIT {$limit}
+            ");
+            $stmt->execute([$forScreenKey]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        }
+
+        $stmt = $pdo->query("
+            SELECT
+                id,
+                title,
+                body,
+                {$aircraftSelect}
+                {$voiceSelect}
+                priority
+            FROM tv_screen_messages
+            WHERE message_type = 'aircraft'
+              AND status = 'active'
+              AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
+              AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
+            ORDER BY priority DESC, id ASC
+            LIMIT {$limit}
+        ");
+        return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
+    };
+
+    $rows = $screenKey !== '' ? $fetch($pdo, $screenKey, $limit, $aircraftSelect, $voiceSelect) : array();
+    if ($rows === array()) {
+        $rows = $fetch($pdo, null, $limit, $aircraftSelect, $voiceSelect);
+    }
+
+    if ($configTracks !== array()) {
+        return array_slice(tv_adsb_merge_fleet_track_rows($configTracks, $rows), 0, $limit);
+    }
+
+    return array_slice($rows, 0, $limit);
+}
+
+function tv_adsb_merge_fleet_track_rows(array $primary, array $secondary): array
+{
+    $merged = array();
+    $seen = array();
+
+    foreach (array($primary, $secondary) as $group) {
+        foreach ($group as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $hex = tv_adsb_normalize_hex((string)($row['aircraft_hex'] ?? $row['body'] ?? ''));
+            $label = tv_adsb_normalize_label((string)($row['aircraft_label'] ?? $row['title'] ?? ''));
+            $key = $hex !== '' ? $hex : strtolower($label);
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $merged[] = $row;
+        }
+    }
+
+    return $merged;
+}
+
 function tv_adsb_fetch_radar_targets(
     array $tracks,
     float $centerLat,

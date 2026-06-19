@@ -66,11 +66,6 @@ try {
 
     $aircraftColumnsReady = tv_board_aircraft_columns_ready($pdo);
     $typeColumnReady = tv_board_aircraft_type_ready($pdo);
-    $typeSelect = $typeColumnReady ? 'aircraft_type,' : '';
-    $aircraftSelect = $aircraftColumnsReady
-        ? "aircraft_hex, aircraft_label, {$typeSelect} aircraft_home_airport,"
-        : '';
-
     $voiceColumnReady = false;
     try {
         $voiceStmt = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'voice'");
@@ -79,27 +74,7 @@ try {
         $voiceColumnReady = false;
     }
 
-    $voiceSelect = $voiceColumnReady ? 'voice,' : '';
-    $stmt = $pdo->prepare("
-        SELECT
-            id,
-            title,
-            body,
-            {$aircraftSelect}
-            {$voiceSelect}
-            announce_audio_enabled,
-            priority
-        FROM tv_screen_messages
-        WHERE screen_key = ?
-          AND message_type = 'aircraft'
-          AND status = 'active'
-          AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
-          AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
-        ORDER BY priority DESC, id ASC
-        LIMIT 10
-    ");
-    $stmt->execute([$screenKey]);
-    $tracks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $tracks = tv_adsb_fetch_active_fleet_tracks($pdo, $screenKey, 10);
 
     $rows = array();
     $announcements = array();

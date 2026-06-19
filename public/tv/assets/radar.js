@@ -318,6 +318,7 @@
   function RadarScreen(options) {
     this.apiUrl = options.apiUrl || '/tv/api/radar.php';
     this.pollMs = options.pollMs || 10000;
+    this.screenKey = options.screenKey || 'aircraft';
     this.radarDelayMs = options.radarDelayMs || RADAR_DELAY_MS;
     this.geo = options.geo || KTRM_AIRPORT_GEO;
     this.container = null;
@@ -565,7 +566,10 @@
     var self = this;
     if (this.fetching) return;
     this.fetching = true;
-    fetch(this.apiUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    var url = this.apiUrl;
+    var join = url.indexOf('?') >= 0 ? '&' : '?';
+    url += join + 'screen_key=' + encodeURIComponent(this.screenKey || 'aircraft');
+    fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then(function (res) {
         if (!res.ok) throw new Error('Radar API unavailable');
         return res.json();
@@ -608,6 +612,7 @@
     if (!this.statusEl) return;
     var meta = this.adsbMeta || {};
     var fleet = meta.fleet_count != null ? meta.fleet_count : 0;
+    var fleetConfigured = meta.fleet_configured != null ? meta.fleet_configured : fleet;
     var area = meta.area_count != null ? meta.area_count : 0;
     var areaConnected = !!meta.area_connected;
     var areaRaw = meta.area_raw_count != null ? meta.area_raw_count : 0;
@@ -618,22 +623,30 @@
     }
 
     if (!this.targets.length) {
+      var fleetLabel = fleetConfigured > fleet
+        ? ('FLEET ' + fleet + '/' + fleetConfigured)
+        : ('FLEET ' + fleet);
       if (areaConnected) {
         this.setScopeStatus(
           'LIVE RADAR',
-          '0 TARGETS (FLEET ' + fleet + ' / AREA ' + area + ')',
+          '0 TARGETS (' + fleetLabel + ' / AREA ' + area + ')',
           'is-live'
         );
       } else {
-        this.setScopeStatus('LIVE RADAR', 'AREA FEED OFFLINE', 'is-warn');
+        this.setScopeStatus(
+          'LIVE RADAR',
+          '0 TARGETS (' + fleetLabel + ' / AREA ' + area + ') — AREA OFFLINE',
+          fleetConfigured > 0 ? 'is-warn' : 'is-warn'
+        );
       }
       return;
     }
 
     var extra = !areaConnected ? '— AREA OFFLINE' : '';
+    var fleetExtra = fleetConfigured > fleet ? (' — FLEET ' + fleet + '/' + fleetConfigured) : '';
     this.setScopeStatus(
       'LIVE RADAR',
-      this.formatTargetSubline(this.targets.length, fleet, area, extra),
+      this.formatTargetSubline(this.targets.length, fleet, area, extra + fleetExtra),
       areaConnected ? 'is-live' : 'is-warn'
     );
   };

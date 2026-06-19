@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../document/StructuredDocumentPayload.php';
+
 /**
  * Phase 1 service for Flight Training form template lifecycle management.
  */
@@ -185,6 +187,157 @@ final class FormTemplateService
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $upload
+     */
+    public function importPdfTemplate(array $data, array $upload, int $actorUserId): int
+    {
+        $this->requireSchema();
+        $this->validatePdfUpload($upload);
+
+        $originalName = trim((string)($upload['name'] ?? 'Imported form.pdf'));
+        $title = trim((string)($data['title'] ?? ''));
+        if ($title === '') {
+            $title = $this->titleFromFilename($originalName);
+        }
+        if ($title === '') {
+            throw new RuntimeException('Template title is required.');
+        }
+
+        $templateKey = $this->normalizeTemplateKey((string)($data['template_key'] ?? ''));
+        if ($templateKey === '') {
+            $templateKey = $this->normalizeTemplateKey($title);
+        }
+        $templateKey = $this->ensureUniqueTemplateKey($templateKey);
+
+        $category = trim((string)($data['category'] ?? 'Checkride'));
+        $description = trim((string)($data['description'] ?? ''));
+        $versionLabel = trim((string)($data['version_label'] ?? '1.0'));
+        if ($versionLabel === '') {
+            $versionLabel = '1.0';
+        }
+        $profile = trim((string)($data['import_profile'] ?? 'private_sel_practical_test'));
+
+        $tmpName = (string)($upload['tmp_name'] ?? '');
+        $sourceHash = hash_file('sha256', $tmpName);
+        if (!is_string($sourceHash) || $sourceHash === '') {
+            throw new RuntimeException('Unable to hash uploaded PDF.');
+        }
+        $sourceMimeType = $this->detectPdfMimeType($tmpName);
+
+        $storedFilePath = null;
+        $this->pdo->beginTransaction();
+        try {
+            $insTemplate = $this->pdo->prepare("
+                INSERT INTO ipca_form_templates
+                    (template_key, title, description, category, status, metadata_json, created_by)
+                VALUES
+                    (:template_key, :title, :description, :category, 'draft', :metadata_json, :created_by)
+            ");
+            $insTemplate->execute(array(
+                ':template_key' => $templateKey,
+                ':title' => $title,
+                ':description' => $description !== '' ? $description : null,
+                ':category' => $category !== '' ? $category : null,
+                ':metadata_json' => $this->encodeJson(array('phase' => 'pdf_import_pending')),
+                ':created_by' => $actorUserId > 0 ? $actorUserId : null,
+            ));
+            $templateId = (int)$this->pdo->lastInsertId();
+
+            $sourcePdf = $this->storeImportedPdf($upload, $templateId, $templateKey, $sourceHash);
+            $storedFilePath = $sourcePdf['path'];
+
+            $metadata = array(
+                'phase' => 'pdf_import',
+                'source_document_type' => 'pdf',
+                'import_profile' => $profile,
+                'source_pdf' => array(
+                    'original_filename' => $originalName,
+                    'stored_filename' => basename($sourcePdf['path']),
+                    'public_url' => $sourcePdf['url'],
+                    'sha256' => $sourceHash,
+                    'size_bytes' => (int)($upload['size'] ?? 0),
+                    'mime_type' => $sourceMimeType,
+                ),
+                'autofill_status' => 'field_bindings_seeded',
+            );
+            $updTemplate = $this->pdo->prepare('UPDATE ipca_form_templates SET metadata_json = :metadata_json WHERE id = :id');
+            $updTemplate->execute(array(
+                ':metadata_json' => $this->encodeJson($metadata),
+                ':id' => $templateId,
+            ));
+
+            $document = $this->importedPdfDocument($title, $profile, $sourcePdf['url'], $originalName);
+            $contentJson = $this->encodeJson($document);
+            $fields = StructuredDocumentPayload::collectFields($document['blocks'] ?? array());
+            $fieldSchemaJson = $this->encodeJson($fields);
+            $variableMapJson = $this->encodeJson($this->variablesUsed($fields));
+            $contentHash = hash('sha256', $contentJson . $fieldSchemaJson);
+
+            $insVersion = $this->pdo->prepare("
+                INSERT INTO ipca_form_template_versions
+                    (template_id, version_label, lifecycle_status, title, content_json,
+                     variable_map_json, field_schema_json, content_hash, created_by)
+                VALUES
+                    (:template_id, :version_label, 'draft', :title, :content_json,
+                     :variable_map_json, :field_schema_json, :content_hash, :created_by)
+            ");
+            $insVersion->execute(array(
+                ':template_id' => $templateId,
+                ':version_label' => $versionLabel,
+                ':title' => $title . ' v' . $versionLabel,
+                ':content_json' => $contentJson,
+                ':variable_map_json' => $variableMapJson,
+                ':field_schema_json' => $fieldSchemaJson,
+                ':content_hash' => $contentHash,
+                ':created_by' => $actorUserId > 0 ? $actorUserId : null,
+            ));
+            $versionId = (int)$this->pdo->lastInsertId();
+
+            $upd = $this->pdo->prepare('UPDATE ipca_form_templates SET current_version_id = :version_id WHERE id = :template_id');
+            $upd->execute(array(
+                ':version_id' => $versionId,
+                ':template_id' => $templateId,
+            ));
+
+            $this->insertFieldSchemas($versionId, $fields);
+
+            $this->writeAuditEvent(
+                'template_pdf_imported',
+                $actorUserId,
+                array(
+                    'template_key' => $templateKey,
+                    'title' => $title,
+                    'version_label' => $versionLabel,
+                    'source_pdf_sha256' => $sourceHash,
+                    'import_profile' => $profile,
+                    'field_count' => count($fields),
+                ),
+                $templateId,
+                $versionId
+            );
+            $this->writeAuditEvent(
+                'template_fields_seeded',
+                $actorUserId,
+                array('field_count' => count($fields), 'source' => 'pdf_import_profile'),
+                $templateId,
+                $versionId
+            );
+
+            $this->pdo->commit();
+            return $templateId;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            if (is_string($storedFilePath) && $storedFilePath !== '' && is_file($storedFilePath)) {
+                @unlink($storedFilePath);
             }
             throw $e;
         }
@@ -379,6 +532,343 @@ final class FormTemplateService
                 'Flight Training Forms tables are not installed. Apply scripts/sql/2026_06_16_flight_training_forms_foundation.sql.'
             );
         }
+    }
+
+    /**
+     * @param array<string,mixed> $upload
+     */
+    private function validatePdfUpload(array $upload): void
+    {
+        $error = (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new RuntimeException($this->uploadErrorMessage($error));
+        }
+
+        $tmpName = (string)($upload['tmp_name'] ?? '');
+        if ($tmpName === '' || !is_uploaded_file($tmpName)) {
+            throw new RuntimeException('Uploaded PDF was not received correctly.');
+        }
+
+        $size = (int)($upload['size'] ?? 0);
+        if ($size <= 0) {
+            throw new RuntimeException('Uploaded PDF is empty.');
+        }
+        if ($size > 30 * 1024 * 1024) {
+            throw new RuntimeException('Uploaded PDF is too large. Maximum size is 30 MB.');
+        }
+
+        $name = strtolower((string)($upload['name'] ?? ''));
+        $mime = strtolower($this->detectPdfMimeType($tmpName));
+        if (!str_ends_with($name, '.pdf') && !in_array($mime, array('application/pdf', 'application/x-pdf'), true)) {
+            throw new RuntimeException('Only PDF files can be imported.');
+        }
+    }
+
+    private function uploadErrorMessage(int $error): string
+    {
+        return match ($error) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Uploaded PDF is too large.',
+            UPLOAD_ERR_PARTIAL => 'Uploaded PDF was only partially received.',
+            UPLOAD_ERR_NO_FILE => 'Choose a PDF to import.',
+            default => 'Unable to import the uploaded PDF.',
+        };
+    }
+
+    private function detectPdfMimeType(string $path): string
+    {
+        if ($path !== '' && is_file($path) && function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $mime = finfo_file($finfo, $path);
+                finfo_close($finfo);
+                if (is_string($mime) && $mime !== '') {
+                    return $mime;
+                }
+            }
+        }
+        return 'application/pdf';
+    }
+
+    /**
+     * @param array<string,mixed> $upload
+     * @return array{path:string,url:string}
+     */
+    private function storeImportedPdf(array $upload, int $templateId, string $templateKey, string $sourceHash): array
+    {
+        $root = dirname(__DIR__, 2);
+        $relativeDir = '/uploads/flight_training/form_templates/' . $templateId . '_' . strtolower($templateKey);
+        $targetDir = $root . '/public' . $relativeDir;
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+            throw new RuntimeException('Unable to create form import storage directory.');
+        }
+
+        $filename = 'source_' . substr($sourceHash, 0, 16) . '.pdf';
+        $targetPath = $targetDir . '/' . $filename;
+        $tmpName = (string)($upload['tmp_name'] ?? '');
+        if (!move_uploaded_file($tmpName, $targetPath)) {
+            throw new RuntimeException('Unable to store uploaded PDF.');
+        }
+        @chmod($targetPath, 0664);
+
+        return array(
+            'path' => $targetPath,
+            'url' => $relativeDir . '/' . $filename,
+        );
+    }
+
+    private function titleFromFilename(string $filename): string
+    {
+        $base = pathinfo($filename, PATHINFO_FILENAME);
+        $base = preg_replace('/[_-]+/', ' ', (string)$base) ?? '';
+        return trim($base);
+    }
+
+    private function ensureUniqueTemplateKey(string $baseKey): string
+    {
+        $baseKey = $baseKey !== '' ? $baseKey : 'IMPORTED_FORM';
+        $key = $baseKey;
+        $suffix = 2;
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM ipca_form_templates WHERE template_key = :template_key');
+        while (true) {
+            $stmt->execute(array(':template_key' => $key));
+            if ((int)$stmt->fetchColumn() === 0) {
+                return $key;
+            }
+            $key = $baseKey . '_' . $suffix;
+            $suffix++;
+        }
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function importedPdfDocument(string $title, string $profile, string $sourcePdfUrl, string $originalName): array
+    {
+        if ($profile !== 'private_sel_practical_test') {
+            $profile = 'private_sel_practical_test';
+        }
+
+        $escapedUrl = htmlspecialchars($sourcePdfUrl, ENT_QUOTES, 'UTF-8');
+        $escapedName = htmlspecialchars($originalName, ENT_QUOTES, 'UTF-8');
+
+        return StructuredDocumentPayload::normalizeDocument(array(
+            'document_type' => 'flight_training_form',
+            'schema_version' => 1,
+            'title' => $title,
+            'layout' => array('page' => 'letter', 'orientation' => 'portrait'),
+            'page_header' => array('enabled' => false),
+            'page_footer' => array('enabled' => false),
+            'sections' => array(
+                array('id' => 1, 'section_key' => 'source_pdf', 'title' => 'Source PDF', 'sort_order' => 10),
+                array('id' => 2, 'section_key' => 'applicant_cfi', 'title' => 'Applicant and CFI Information', 'sort_order' => 20),
+                array('id' => 3, 'section_key' => 'iacra_faa', 'title' => 'IACRA / FAA Application', 'sort_order' => 30),
+                array('id' => 4, 'section_key' => 'flight_experience', 'title' => 'Flight Experience Auto-Fill', 'sort_order' => 40),
+                array('id' => 5, 'section_key' => 'checkride_readiness', 'title' => 'Checkride Readiness', 'sort_order' => 50),
+            ),
+            'blocks' => array_merge(
+                array(
+                    $this->headingBlock(1, 1, 'Private Pilot: Single-Engine Land Practical Test Guide', 1),
+                    $this->paragraphBlock(
+                        2,
+                        1,
+                        'Imported from <a href="' . $escapedUrl . '" target="_blank" rel="noopener">' . $escapedName . '</a>. This imported draft preserves the PDF as the source document and seeds the fields IPCA can auto-fill from student, instructor, logbook, requirements, and IACRA data.'
+                    ),
+                    $this->calloutBlock(3, 1, 'info', 'Import v1.0', 'This first import creates the structured field map. Exact PDF overlay coordinates can be calibrated next without changing the source file.'),
+                    $this->headingBlock(4, 2, 'Applicant Information', 2),
+                ),
+                $this->fieldBlocks(5, 2, array(
+                    array('applicant_name', 'Applicant name', 'student.full_name', 'student', true),
+                    array('applicant_phone', 'Applicant phone', 'student.phone', 'student', true),
+                    array('applicant_email', 'Applicant email', 'student.email', 'student', true),
+                )),
+                array($this->headingBlock(8, 2, 'CFI Information', 2)),
+                $this->fieldBlocks(9, 2, array(
+                    array('cfi_name', 'CFI name', 'instructor.full_name', 'instructor', true),
+                    array('cfi_phone', 'CFI phone', 'instructor.phone', 'instructor', true),
+                    array('cfi_email', 'CFI email', 'instructor.email', 'instructor', true),
+                )),
+                array($this->headingBlock(12, 3, 'IACRA Application Details', 2)),
+                $this->fieldBlocks(13, 3, array(
+                    array('iacra_ftn', 'IACRA FTN', 'iacra.ftn', 'student', true),
+                    array('iacra_username', 'IACRA username', 'iacra.username', 'student', false),
+                    array('knowledge_test_score', 'Knowledge test score', 'knowledge_test.score', 'instructor', false),
+                    array('knowledge_test_deficient_codes', 'Knowledge test deficient codes', 'knowledge_test.deficient_codes', 'instructor', false),
+                )),
+                array($this->headingBlock(17, 4, 'FAA 8710 / Logbook Totals', 2)),
+                $this->fieldBlocks(18, 4, array(
+                    array('faa_total_time', 'Total time', 'iacra.total_time', 'instructor', true),
+                    array('faa_pic_time', 'PIC time', 'iacra.pic_time', 'instructor', true),
+                    array('faa_solo_time', 'Solo time', 'iacra.solo_time', 'instructor', true),
+                    array('faa_cross_country_time', 'Cross-country time', 'iacra.cross_country_time', 'instructor', true),
+                    array('faa_night_time', 'Night time', 'iacra.night_time', 'instructor', true),
+                    array('faa_instrument_time', 'Instrument time', 'iacra.instrument_time', 'instructor', true),
+                    array('faa_dual_received', 'Dual received', 'iacra.dual_received', 'instructor', true),
+                )),
+                array($this->headingBlock(25, 5, 'Private Pilot SEL Readiness Checks', 2)),
+                $this->fieldBlocks(26, 5, array(
+                    array('ground_training_complete', 'Ground training / theory completion', 'theory.completion', 'instructor', false),
+                    array('first_solo_status', 'First solo status', 'faa61.ppl.first_solo.status', 'instructor', false),
+                    array('long_solo_xc_status', 'Long solo cross-country status', 'faa61.ppl.long_solo_cross_country.status', 'instructor', false),
+                    array('solo_xc_150nm_status', 'Solo cross-country 150 NM status', 'faa61.ppl.solo_cross_country_150_nm.status', 'instructor', false),
+                    array('towered_airport_landings', 'Towered airport landings', 'faa61.ppl.towered_airport_landings.value', 'instructor', false),
+                    array('basic_instrument_status', 'Basic instrument flying status', 'faa61.ppl.basic_instrument_flying.status', 'instructor', false),
+                )),
+                array(
+                    $this->signatureBlock(32, 5, 'cfi_signature', 'CFI signature', 'instructor'),
+                    $this->signatureBlock(33, 5, 'applicant_signature', 'Applicant signature', 'student'),
+                )
+            ),
+        ));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function headingBlock(int $id, int $sectionId, string $text, int $level): array
+    {
+        return array(
+            'id' => $id,
+            'section_id' => $sectionId,
+            'block_key' => 'heading_' . $id,
+            'stable_anchor' => 'form-block-' . $id,
+            'block_type' => 'heading',
+            'payload' => array('text' => $text, 'level' => $level, 'paragraph_style' => $level === 1 ? 'title' : 'subtitle_2'),
+            'sort_order' => $id * 10,
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function paragraphBlock(int $id, int $sectionId, string $html): array
+    {
+        return array(
+            'id' => $id,
+            'section_id' => $sectionId,
+            'block_key' => 'paragraph_' . $id,
+            'stable_anchor' => 'form-block-' . $id,
+            'block_type' => 'paragraph',
+            'payload' => array('html' => $html, 'paragraph_style' => 'body'),
+            'sort_order' => $id * 10,
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function calloutBlock(int $id, int $sectionId, string $type, string $title, string $text): array
+    {
+        return array(
+            'id' => $id,
+            'section_id' => $sectionId,
+            'block_key' => 'callout_' . $id,
+            'stable_anchor' => 'form-block-' . $id,
+            'block_type' => 'callout',
+            'payload' => array('callout_type' => $type, 'title' => $title, 'text' => $text),
+            'sort_order' => $id * 10,
+        );
+    }
+
+    /**
+     * @param list<array{0:string,1:string,2:string,3:string,4:bool}> $definitions
+     * @return list<array<string,mixed>>
+     */
+    private function fieldBlocks(int $firstId, int $sectionId, array $definitions): array
+    {
+        $blocks = array();
+        foreach ($definitions as $idx => $definition) {
+            $id = $firstId + $idx;
+            $blocks[] = array(
+                'id' => $id,
+                'section_id' => $sectionId,
+                'block_key' => 'field_' . $definition[0],
+                'stable_anchor' => 'form-block-' . $id,
+                'block_type' => 'field',
+                'payload' => array(
+                    'field_key' => $definition[0],
+                    'field_type' => 'text',
+                    'label' => $definition[1],
+                    'variable_key' => $definition[2],
+                    'assigned_role' => $definition[3],
+                    'required' => $definition[4],
+                    'placeholder' => '{{' . $definition[2] . '}}',
+                ),
+                'sort_order' => $id * 10,
+            );
+        }
+        return $blocks;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function signatureBlock(int $id, int $sectionId, string $fieldKey, string $label, string $role): array
+    {
+        return array(
+            'id' => $id,
+            'section_id' => $sectionId,
+            'block_key' => 'signature_' . $fieldKey,
+            'stable_anchor' => 'form-block-' . $id,
+            'block_type' => 'signature',
+            'payload' => array(
+                'field_key' => $fieldKey,
+                'field_type' => 'signature',
+                'label' => $label,
+                'assigned_role' => $role,
+                'required' => true,
+                'variable_key' => '',
+                'placeholder' => '',
+            ),
+            'sort_order' => $id * 10,
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $fields
+     */
+    private function insertFieldSchemas(int $templateVersionId, array $fields): void
+    {
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_form_fields
+                (template_version_id, field_key, field_type, label, required, assigned_role,
+                 variable_key, validation_json, position_json, metadata_json, sort_order)
+            VALUES
+                (:template_version_id, :field_key, :field_type, :label, :required, :assigned_role,
+                 :variable_key, :validation_json, :position_json, :metadata_json, :sort_order)
+        ");
+        $sort = 10;
+        foreach ($fields as $field) {
+            $stmt->execute(array(
+                ':template_version_id' => $templateVersionId,
+                ':field_key' => (string)($field['field_key'] ?? ''),
+                ':field_type' => (string)($field['field_type'] ?? 'text'),
+                ':label' => trim((string)($field['label'] ?? '')) !== '' ? (string)$field['label'] : null,
+                ':required' => !empty($field['required']) ? 1 : 0,
+                ':assigned_role' => (string)($field['assigned_role'] ?? 'instructor'),
+                ':variable_key' => trim((string)($field['variable_key'] ?? '')) !== '' ? (string)$field['variable_key'] : null,
+                ':validation_json' => $this->encodeJson(is_array($field['validation'] ?? null) ? $field['validation'] : array()),
+                ':position_json' => $this->encodeJson(is_array($field['position'] ?? null) ? $field['position'] : array()),
+                ':metadata_json' => $this->encodeJson(is_array($field['metadata'] ?? null) ? $field['metadata'] : array()),
+                ':sort_order' => $sort,
+            ));
+            $sort += 10;
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $fields
+     * @return array<string,mixed>
+     */
+    private function variablesUsed(array $fields): array
+    {
+        $vars = array();
+        foreach ($fields as $field) {
+            $key = trim((string)($field['variable_key'] ?? ''));
+            if ($key !== '') {
+                $vars[$key] = array('field_key' => (string)$field['field_key']);
+            }
+        }
+        return $vars;
     }
 
     private function tableExists(string $table): bool

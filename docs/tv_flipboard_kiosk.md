@@ -29,15 +29,30 @@ Use the same MySQL connection settings as the application environment. The API r
 - `aircraft_board`: fleet ADS-B ops grid (same view as `/tv/flipboard.php?screen=aircraft`).
 - `radar`: KTRM live radar scope + weather (preloaded in background for instant display).
 
+## Fleet aircraft (settings)
+
+In **Admin → TV Screens → Screen settings**, add your fleet in **Fleet aircraft** — one line per aircraft:
+
+```
+N153PC,a4b605,ALPHA
+N397EA,abc123,C172
+```
+
+Format: `TAIL,HEX` or `TAIL,HEX,TYPE`. This list powers the fleet board, radar fleet blips, and gate PA announcements.
+
+Legacy per-aircraft TV messages (`message_type = aircraft`) still work as a fallback if the settings list is empty.
+
 ## Playlist rotation
 
 Create **multiple active messages** with the **same screen key** (for example `aircraft`). Each message is one playlist slot. Set **Display seconds** per slot (5–300). The kiosk cycles through slots in API order (priority, then schedule).
 
 Example on `screen=aircraft`:
 
-1. `standard` — announcement — 30 seconds
-2. `radar` — LIVE RADAR — 60 seconds
-3. `aircraft_board` — AIRCRAFT OPS — 60 seconds
+1. Add fleet aircraft in **Screen settings** (see above).
+2. Add playlist slots:
+   - `standard` — announcement — 30 seconds
+   - `radar` — LIVE RADAR — 60 seconds
+   - `aircraft_board` — AIRCRAFT OPS — 60 seconds
 
 Point the TV at `/tv/flipboard.php?screen=aircraft`. With no active messages, `screen=aircraft` and `screen=radar` still show their dedicated full-time views.
 

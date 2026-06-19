@@ -6,12 +6,16 @@ require_once __DIR__ . '/../../../../src/flight_training/AdminLogbookService.php
 
 cw_require_admin();
 
+const IPCA_EASA_LOGBOOK_TEMPLATE_VERSION = '1.0';
+const IPCA_FAA_LOGBOOK_TEMPLATE_VERSION = '1.0';
+
 $service = new AdminLogbookService($pdo);
 $logbookId = (int)($_GET['logbook_id'] ?? 0);
 $format = strtolower(trim((string)($_GET['format'] ?? 'easa')));
 if (!in_array($format, array('easa', 'faa'), true)) {
     $format = 'easa';
 }
+$templateVersion = $format === 'faa' ? IPCA_FAA_LOGBOOK_TEMPLATE_VERSION : IPCA_EASA_LOGBOOK_TEMPLATE_VERSION;
 $blankMode = in_array(strtolower(trim((string)($_GET['blank'] ?? ''))), array('1', 'true', 'yes'), true);
 $debugMode = in_array(strtolower(trim((string)($_GET['debug'] ?? ''))), array('1', 'true', 'yes'), true);
 
@@ -746,6 +750,8 @@ function faaRightTemplate(array $entries, array $pageTotals, array $previousTota
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="ipca-logbook-template-version" content="<?= h($templateVersion) ?>">
+<meta name="ipca-logbook-template-format" content="<?= h($format) ?>">
 <title><?= h($title) ?></title>
 <style>
 @page{size:landscape;margin:0}
@@ -797,7 +803,7 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:static;display:contents!important;width:auto;height:auto;transform:none!important;filter:none;perspective:none;opacity:1;transition:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;width:var(--page-w);height:var(--page-h);background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page;page-break-after:always}.book-spread:last-of-type .book-page-right{break-after:auto;page-break-after:auto}}
 </style>
 </head>
-<body class="print-format-<?= h($format) ?>">
+<body class="print-format-<?= h($format) ?>" data-logbook-template-version="<?= h($templateVersion) ?>" data-logbook-template-format="<?= h($format) ?>">
 <div class="screen-tools">
   <strong><?= h($title) ?></strong>
   <button onclick="window.print()">Print</button>

@@ -178,6 +178,15 @@ cw_header('Flight Training · Form Template Editor');
                   <option value="theory.completion">Theory completion</option>
                   <option value="knowledge_test.score">Knowledge test score</option>
                   <option value="knowledge_test.deficient_codes">Knowledge test deficient codes</option>
+                  <option value="iacra.ftn">IACRA FTN</option>
+                  <option value="iacra.username">IACRA username</option>
+                  <option value="iacra.total_time">IACRA total time</option>
+                  <option value="iacra.pic_time">IACRA PIC time</option>
+                  <option value="iacra.solo_time">IACRA solo time</option>
+                  <option value="iacra.cross_country_time">IACRA cross-country time</option>
+                  <option value="iacra.night_time">IACRA night time</option>
+                  <option value="iacra.instrument_time">IACRA instrument time</option>
+                  <option value="iacra.dual_received">IACRA dual received</option>
                 </select>
                 <button type="button" class="cpb-tool-btn" id="cpbFormFieldSettings" title="Field settings">Field Settings</button>
               </div>

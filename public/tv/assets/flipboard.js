@@ -898,6 +898,7 @@
     this.radarScreen = null;
     this.radarStarted = false;
     this.playlistActive = false;
+    this.lastPlaylistViewType = '';
   }
 
   FlipBoard.prototype.messageViewType = function (message) {
@@ -962,7 +963,8 @@
 
     this.radarScreen = new window.TvRadarScreen({
       apiUrl: this.radarApiUrl,
-      pollMs: this.aircraftPollMs
+      pollMs: this.aircraftPollMs,
+      screenKey: this.screenKey
     });
     this.radarScreen.mount(this.messageBoard);
     this.radarScreen.start({ visible: this.isDedicatedRadarMode() });
@@ -971,6 +973,24 @@
     if (!this.isDedicatedRadarMode()) {
       this.hideRadarBoard();
     }
+  };
+
+  FlipBoard.prototype.applyPlaylistViewShell = function (viewType) {
+    if (viewType === 'radar') {
+      this.showRadarBoard();
+      return;
+    }
+    this.hideRadarBoard();
+    if (viewType === 'aircraft_board' || viewType === 'aircraft') {
+      if (this.scheduleBoard) this.scheduleBoard.hidden = true;
+      if (this.messageBoard) this.messageBoard.hidden = false;
+      this.showAircraftOpsBoard();
+      return;
+    }
+    if (viewType === 'schedule') {
+      return;
+    }
+    this.showMainLinesBoard();
   };
 
   FlipBoard.prototype.showRadarBoard = function () {
@@ -1393,6 +1413,7 @@
       })
     ]);
     if (!force && boardKey === this.lastAircraftBoardKey) {
+      this.showAircraftOpsBoard();
       return Promise.resolve();
     }
     this.lastAircraftBoardKey = boardKey;
@@ -1431,6 +1452,7 @@
 
   FlipBoard.prototype.fetchAndRenderAircraftBoard = function (force) {
     var self = this;
+    this.showAircraftOpsBoard();
     if (this.statusLabel) this.statusLabel.textContent = 'AIRCRAFT OPS';
     this.root.classList.toggle('is-urgent', false);
     this.statusLight.classList.toggle('is-urgent', false);
@@ -1525,6 +1547,9 @@
       .then(function (payload) {
         var incoming = Array.isArray(payload.messages) ? payload.messages : [];
         self.playlistActive = incoming.length > 0;
+        if (self.messageBoard) {
+          self.messageBoard.classList.toggle('is-playlist-mode', self.playlistActive);
+        }
 
         if (!incoming.length) {
           if (self.isRadarScreen() || self.isAircraftOpsScreen()) {
@@ -1583,13 +1608,23 @@
     var radarSlot = viewType === 'radar';
     var aircraft = viewType === 'aircraft';
     var key = radarSlot
-      ? ['radar-slot', message.id, this.screenKey].join('|')
+      ? ['radar-slot', message.id, this.screenKey, this.activeIndex].join('|')
       : boardMode
         ? ['aircraft-board', this.screenKey, this.lastAircraftBoardKey, this.messages.length, this.activeIndex].join('|')
         : aircraft
           ? [message.id, 'aircraft', this.lastAircraftDisplay, message.aircraft_hex, message.aircraft_label, message.aircraft_home_airport].join('|')
           : [message.id, message.message_type, message.title, message.body, message.priority].join('|');
-    if (!force && key === this.lastRenderedKey) return;
+
+    if (this.isPlaylistMode()) {
+      this.applyPlaylistViewShell(viewType);
+    }
+
+    if (!force && key === this.lastRenderedKey) {
+      if (this.isPlaylistMode()) {
+        this.schedulePlaylistRotation(message);
+      }
+      return;
+    }
 
     this.rendering = true;
     this.lastRenderedKey = key;

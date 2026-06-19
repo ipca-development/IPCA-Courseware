@@ -26,6 +26,7 @@ if (isset($_GET['gate_radius_nm'])) {
 }
 
 $homeAirport = tv_adsb_normalize_home_airport((string)($_GET['home_airport'] ?? ($kiosk['home_airport'] ?? 'KTRM')));
+$screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['screen_key'] ?? 'aircraft')) ?: 'aircraft';
 $airports = tv_adsb_airports();
 $airport = $airports[$homeAirport] ?? $airports['KTRM'];
 $centerLat = (float)$airport['lat'];
@@ -51,36 +52,7 @@ $areaMeta = array(
 );
 
 try {
-    $tracks = array();
-    $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
-    if ($tableCheck !== false && $tableCheck->fetchColumn() !== false) {
-        $columnCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_hex'");
-        $hasAircraftColumns = $columnCheck !== false && $columnCheck->fetchColumn() !== false;
-        $typeCheck = $pdo->query("SHOW COLUMNS FROM tv_screen_messages LIKE 'aircraft_type'");
-        $hasTypeColumn = $typeCheck !== false && $typeCheck->fetchColumn() !== false;
-        $typeSelect = $hasTypeColumn ? 'aircraft_type,' : '';
-        $aircraftSelect = $hasAircraftColumns
-            ? "aircraft_hex, aircraft_label, {$typeSelect} aircraft_home_airport,"
-            : '';
-
-        $stmt = $pdo->prepare("
-            SELECT
-                title,
-                body,
-                {$aircraftSelect}
-                priority,
-                id
-            FROM tv_screen_messages
-            WHERE message_type = 'aircraft'
-              AND status = 'active'
-              AND (starts_at IS NULL OR starts_at <= UTC_TIMESTAMP())
-              AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())
-            ORDER BY priority DESC, id ASC
-            LIMIT 25
-        ");
-        $stmt->execute();
-        $tracks = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
+    $tracks = tv_adsb_fetch_active_fleet_tracks($pdo, $screenKey, 25);
 
     $trackCount = count($tracks);
     $fleetTargets = tv_adsb_fetch_radar_targets($tracks, $centerLat, $centerLon, $rangeNm, array(
@@ -108,7 +80,7 @@ $weather = tv_radar_weather_build($homeAirport, $fieldElevFt);
 
 $response = array(
     'ok' => true,
-    'screen_key' => 'radar',
+    'screen_key' => $screenKey,
     'center' => array(
         'icao' => $homeAirport,
         'name' => (string)($airport['name'] ?? $homeAirport),
@@ -123,6 +95,7 @@ $response = array(
         'error' => $adsbError,
         'count' => count($targets),
         'tracks' => $trackCount,
+        'fleet_configured' => $trackCount,
         'fleet_count' => isset($fleetTargets) ? count($fleetTargets) : 0,
         'area_count' => isset($areaTargets) ? count($areaTargets) : 0,
         'area_connected' => (bool)($areaMeta['connected'] ?? false),

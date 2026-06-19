@@ -301,6 +301,18 @@ body.fb-kiosk{
   gap:clamp(4px,.45vw,8px);
 }
 
+.fb-message-board.is-playlist-mode.is-aircraft-mode{
+  height:auto;
+  max-height:none;
+  min-height:calc(min(62vh, 720px) - 32px);
+  width:100%;
+}
+
+.fb-message-board.is-playlist-mode .fb-ops-board{
+  width:100%;
+  max-width:100%;
+}
+
 .fb-ops-board{
   gap:clamp(4px,.45vw,7px);
 }

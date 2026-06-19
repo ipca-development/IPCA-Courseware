@@ -174,6 +174,8 @@ $defaults = array(
 );
 
 $settings = tv_kiosk_config();
+$fleetAircraftText = tv_kiosk_fleet_aircraft_to_text(is_array($settings['fleet_aircraft'] ?? null) ? $settings['fleet_aircraft'] : array());
+$fleetAircraftCount = count(tv_kiosk_normalize_fleet_aircraft(is_array($settings['fleet_aircraft'] ?? null) ? $settings['fleet_aircraft'] : array(), (string)($settings['home_airport'] ?? 'KTRM')));
 
 $notice = '';
 $error = '';
@@ -190,6 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         if ($action === 'save_settings') {
+            $homeAirport = strtoupper(trim((string)($_POST['home_airport'] ?? tv_adsb_default_home_airport()))) ?: tv_adsb_default_home_airport();
             tv_kiosk_config_save(array(
                 'screen_key' => preg_replace('/[^a-zA-Z0-9_-]/', '', trim((string)($_POST['screen_key'] ?? 'main'))) ?: 'main',
                 'default_mode' => tv_clean_enum((string)($_POST['default_mode'] ?? ''), ['standard', 'schedule', 'night'], 'standard'),
@@ -203,7 +206,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'gate_lon' => (float)($_POST['gate_lon'] ?? tv_adsb_default_gate()['lon']),
                 'gate_radius_nm' => max(0.05, min(2.0, (float)($_POST['gate_radius_nm'] ?? tv_adsb_default_gate()['radius_nm']))),
                 'assume_parked_off_radar' => isset($_POST['assume_parked_off_radar']) ? 1 : 0,
-                'home_airport' => strtoupper(trim((string)($_POST['home_airport'] ?? tv_adsb_default_home_airport()))) ?: tv_adsb_default_home_airport(),
+                'home_airport' => $homeAirport,
+                'fleet_aircraft' => tv_kiosk_parse_fleet_aircraft_text((string)($_POST['fleet_aircraft_text'] ?? ''), $homeAirport),
                 'kiosk_notes' => trim((string)($_POST['kiosk_notes'] ?? '')),
             ));
             redirect('/admin/tv_screens/index.php?settings=1');
@@ -548,6 +552,7 @@ cw_header('TV Flip Board');
       <div class="tv-stat-chip"><div class="tv-stat-label">Total Messages</div><div class="tv-stat-value"><?= count($messages) ?></div></div>
       <div class="tv-stat-chip"><div class="tv-stat-label">Active</div><div class="tv-stat-value"><?= $activeCount ?></div></div>
       <div class="tv-stat-chip"><div class="tv-stat-label">Screen Key</div><div class="tv-stat-value" style="font-size:22px;letter-spacing:.04em"><?= h(strtoupper((string)$settings['screen_key'])) ?></div></div>
+      <div class="tv-stat-chip"><div class="tv-stat-label">Fleet Aircraft</div><div class="tv-stat-value"><?= $fleetAircraftCount ?></div></div>
       <div class="tv-stat-chip"><div class="tv-stat-label">Poll Interval</div><div class="tv-stat-value" style="font-size:22px"><?= (int)$settings['poll_ms'] / 1000 ?>s</div></div>
     </div>
   </section>
@@ -733,6 +738,11 @@ cw_header('TV Flip Board');
             <label class="tv-field-label" for="set_night_mode">Open preview in night mode</label>
           </div>
           <div class="tv-field span-2">
+            <label class="tv-field-label" for="set_fleet_aircraft_text">Fleet aircraft</label>
+            <textarea class="app-textarea" id="set_fleet_aircraft_text" name="fleet_aircraft_text" rows="8" placeholder="N153PC,a4b605,ALPHA&#10;N397EA,abc123,C172"><?= h($fleetAircraftText) ?></textarea>
+            <p class="tv-field-hint">One aircraft per line: <code>TAIL,HEX</code> or <code>TAIL,HEX,TYPE</code>. Used by the fleet board, radar, and PA announcements. Lines starting with <code>#</code> are ignored.</p>
+          </div>
+          <div class="tv-field span-2">
             <label class="tv-field-label" for="set_kiosk_notes">Kiosk notes</label>
             <textarea class="app-textarea" id="set_kiosk_notes" name="kiosk_notes" rows="3"><?= h((string)$settings['kiosk_notes']) ?></textarea>
           </div>
@@ -777,7 +787,7 @@ cw_header('TV Flip Board');
                 <option value="<?= h($type) ?>" <?= $form['message_type'] === $type ? 'selected' : '' ?>><?= h(tv_message_type_label($type)) ?></option>
               <?php endforeach; ?>
             </select>
-            <p class="tv-field-hint" id="msg_playlist_hint">Playlist: add multiple active messages on the same screen key (standard → radar → aircraft board). Each slot uses its display seconds.</p>
+            <p class="tv-field-hint" id="msg_playlist_hint">Playlist: add multiple active messages on the same screen key (standard, radar, aircraft board, etc.). Fleet aircraft are configured in <strong>Screen settings</strong>, not here.</p>
           </div>
           <div class="tv-field span-2" id="msg_title_field">
             <label class="tv-field-label" for="msg_title" id="msg_title_label">Title</label>

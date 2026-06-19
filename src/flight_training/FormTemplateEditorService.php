@@ -183,6 +183,8 @@ final class FormTemplateEditorService
                 array('key' => 'easa.ppl.basic_instrument_flying.status', 'token' => '{{easa.ppl.basic_instrument_flying.status}}', 'label' => 'Basic instrument flying status'),
             )),
             array('group' => 'IACRA / FAA 8710', 'variables' => array(
+                array('key' => 'iacra.ftn', 'token' => '{{iacra.ftn}}', 'label' => 'IACRA FTN'),
+                array('key' => 'iacra.username', 'token' => '{{iacra.username}}', 'label' => 'IACRA username'),
                 array('key' => 'iacra.total_time', 'token' => '{{iacra.total_time}}', 'label' => 'IACRA total time'),
                 array('key' => 'iacra.pic_time', 'token' => '{{iacra.pic_time}}', 'label' => 'IACRA PIC time'),
                 array('key' => 'iacra.solo_time', 'token' => '{{iacra.solo_time}}', 'label' => 'IACRA solo time'),

@@ -55,6 +55,25 @@ try {
                 'template_id' => $templateId,
             ));
 
+        case 'import_pdf':
+            $input = $_POST;
+            $templateId = $service->importPdfTemplate(
+                array(
+                    'title' => (string)($input['title'] ?? ''),
+                    'template_key' => (string)($input['template_key'] ?? ''),
+                    'category' => (string)($input['category'] ?? 'Checkride'),
+                    'description' => (string)($input['description'] ?? ''),
+                    'version_label' => (string)($input['version_label'] ?? '1.0'),
+                    'import_profile' => (string)($input['import_profile'] ?? 'private_sel_practical_test'),
+                ),
+                is_array($_FILES['source_pdf'] ?? null) ? $_FILES['source_pdf'] : array(),
+                $actorUserId
+            );
+            ft_form_template_json(200, array(
+                'ok' => true,
+                'template_id' => $templateId,
+            ));
+
         case 'archive':
             $input = ft_form_template_input();
             $service->archiveTemplate((int)($input['template_id'] ?? 0), $actorUserId);
