@@ -34,7 +34,7 @@ $entries = array_values(array_filter(
     $workspace['entries'] ?? array(),
     static fn (mixed $entry): bool => is_array($entry) && strtolower((string)($entry['review_status'] ?? '')) !== 'deleted'
 ));
-$rowsPerSpread = 22;
+$rowsPerSpread = $format === 'faa' ? 6 : 22;
 $chunks = array_chunk($entries, $rowsPerSpread);
 if ($chunks === array()) {
     $chunks = array(array());
@@ -229,6 +229,7 @@ function pageTotals(array $entries): array
         'instructor' => 0.0,
         'if' => 0.0,
         'nav' => 0.0,
+        'sim' => 0.0,
         'day_landings' => 0.0,
         'night_landings' => 0.0,
     );
@@ -244,6 +245,7 @@ function pageTotals(array $entries): array
         $totals['instructor'] += easaActingInstructorTime($entry);
         $totals['if'] += (float)($entry['basic_instrument_flying_time'] ?? 0);
         $totals['nav'] += (float)($entry['cross_country_time'] ?? 0);
+        $totals['sim'] += (float)($entry['fnpt_simulator_time'] ?? 0);
         $totals['day_landings'] += (float)((int)($entry['day_landings'] ?? 0));
         $totals['night_landings'] += (float)((int)($entry['night_landings'] ?? 0));
     }
@@ -528,6 +530,127 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
     $out .= svgText(176, $sigY, '(Pilot\'s Signature).', 'signature-text', 'start');
     return $out . '</svg>';
 }
+
+function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
+{
+    $columns = array(12, 19, 19, 16, 16, 80, 11, 10, 2);
+    $gridX = 10.0;
+    $gridY = 10.0;
+    $gridW = 185.0;
+    $gridH = 92.0;
+    $headerH = 11.0;
+    $rowH = 9.0;
+    $footerStartRow = 6;
+    $bodyTop = $gridY + $headerH;
+    $bounds = scaledBounds($columns, $gridX, $gridW);
+    $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
+    $out = '<svg class="page-template faa-left-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
+    $cells = array(
+        gridCell($bounds, 0, 1, $gridY, $gridY + $headerH, 'main', 'DATE', 'faa-head'),
+        gridCell($bounds, 1, 2, $gridY, $gridY + $headerH, 'main', 'AIRCRAFT MAKE & MODEL', 'faa-head'),
+        gridCell($bounds, 2, 3, $gridY, $gridY + $headerH, 'main', 'AIRCRAFT IDENT.', 'faa-head'),
+        gridCell($bounds, 3, 5, $gridY, $gridY + 5.5, 'main', 'ROUTE OF FLIGHT', 'faa-head'),
+        gridCell($bounds, 5, 6, $gridY, $gridY + $headerH, 'main', 'REMARKS, PROCEDURES, MANEUVERS', 'faa-head'),
+        gridCell($bounds, 6, 7, $gridY, $gridY + $headerH, 'main', 'NO. LAND.', 'faa-head'),
+        gridCell($bounds, 7, 8, $gridY, $gridY + $headerH, 'main', 'NO. INSTR. APP.', 'faa-head'),
+        gridCell($bounds, 3, 4, $gridY + 5.5, $gridY + $headerH, 'main', 'FROM', 'faa-head'),
+        gridCell($bounds, 4, 5, $gridY + 5.5, $gridY + $headerH, 'main', 'TO', 'faa-head'),
+    );
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowH, 9, count($columns), array('startRow' => $footerStartRow, 'startCol' => 5, 'endCol' => 8)));
+    foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
+        $y = $bodyTop + ($idx * $rowH) + ($rowH / 2);
+        $values = array(
+            pdate($entry['entry_date'] ?? ''),
+            cleanText($entry['aircraft_type'] ?? '', 18),
+            cleanText($entry['aircraft_registration'] ?? '', 14),
+            cleanText($entry['departure_airport'] ?? '', 8),
+            cleanText($entry['arrival_airport'] ?? '', 8),
+            logbookRemarks($entry),
+            (string)(((int)($entry['day_landings'] ?? 0) + (int)($entry['night_landings'] ?? 0)) ?: ''),
+            '',
+        );
+        foreach ($values as $colIdx => $value) {
+            $textX = $colIdx === 5 ? $bounds[5] + 1.2 : $centers[$colIdx];
+            $out .= svgMappedText($textX, $y, (string)$value, 'faa.left.' . $colIdx, false, $idx + 1, $colIdx === 5 ? 'faa-body-left' : 'faa-body', $colIdx === 5 ? 'start' : 'middle');
+        }
+    }
+    foreach (array(
+        array('PAGE TOTAL', ptotal($pageTotals['total'] ?? 0), ptotal(($pageTotals['day_landings'] ?? 0) + ($pageTotals['night_landings'] ?? 0), 0)),
+        array('AMT. FORWARD', ptotal($previousTotals['total'] ?? 0), ptotal(($previousTotals['day_landings'] ?? 0) + ($previousTotals['night_landings'] ?? 0), 0)),
+        array('TOTAL TO DATE', ptotal($runningTotals['total'] ?? 0), ptotal(($runningTotals['day_landings'] ?? 0) + ($runningTotals['night_landings'] ?? 0), 0)),
+    ) as $idx => $row) {
+        $y1 = $bodyTop + (($footerStartRow + $idx) * $rowH);
+        $y2 = $y1 + $rowH;
+        $cells[] = gridCell($bounds, 5, 6, $y1, $y2, 'main', $row[0], 'faa-head');
+        $cells[] = gridCell($bounds, 6, 7, $y1, $y2, 'main', $row[2], 'faa-body');
+        $cells[] = gridCell($bounds, 7, 8, $y1, $y2, 'main', '', 'faa-body');
+    }
+    $out .= renderCellBorders($cells);
+    $out .= svgText(12, 87.0, 'I certify that the statements made by me on this form are true.', 'faa-cert', 'start');
+    $out .= svgText(12, 102.0, 'PILOT\'S SIGNATURE:', 'faa-cert', 'start');
+    $out .= svgLine(42, 102.0, 150, 102.0, 'main');
+    $out .= svgText(10, 110.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'start');
+    return $out . '</svg>';
+}
+
+function faaRightTemplate(array $entries, array $pageTotals, array $previousTotals, array $runningTotals, int $pageNumber, int $totalPages): string
+{
+    $columns = array(8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 8,5, 14,5, 10);
+    $gridX = 10.0;
+    $gridY = 10.0;
+    $gridW = 185.0;
+    $gridH = 92.0;
+    $headerH = 11.0;
+    $rowH = 9.0;
+    $footerStartRow = 6;
+    $bodyTop = $gridY + $headerH;
+    $bounds = scaledBounds($columns, $gridX, $gridW);
+    $centers = array_map(static fn (int $idx): float => ($bounds[$idx] + $bounds[$idx + 1]) / 2, array_keys($columns));
+    $out = '<svg class="page-template faa-right-template" viewBox="0 0 205 115" preserveAspectRatio="none">';
+    $cells = array(
+        gridCell($bounds, 0, 4, $gridY, $gridY + 5.5, 'main', 'AIRCRAFT CATEGORY AND CLASS', 'faa-head'),
+        gridCell($bounds, 4, 10, $gridY, $gridY + 5.5, 'main', 'CONDITIONS OF FLIGHT', 'faa-head'),
+        gridCell($bounds, 10, 12, $gridY, $gridY + $headerH, 'main', 'FLIGHT TRAINING DEVICE', 'faa-head'),
+        gridCell($bounds, 12, 22, $gridY, $gridY + 5.5, 'main', 'TYPE OF PILOTING TIME', 'faa-head'),
+        gridCell($bounds, 22, 24, $gridY, $gridY + $headerH, 'main', 'TOTAL DURATION OF FLIGHT', 'faa-head'),
+        gridCell($bounds, 0, 2, $gridY + 5.5, $gridY + $headerH, 'main', 'AIRPLANE SEL', 'faa-head'),
+        gridCell($bounds, 2, 4, $gridY + 5.5, $gridY + $headerH, 'main', 'AIRPLANE MEL', 'faa-head'),
+        gridCell($bounds, 4, 6, $gridY + 5.5, $gridY + $headerH, 'main', 'NIGHT', 'faa-head'),
+        gridCell($bounds, 6, 8, $gridY + 5.5, $gridY + $headerH, 'main', 'ACTUAL INSTRUMENT', 'faa-head'),
+        gridCell($bounds, 8, 10, $gridY + 5.5, $gridY + $headerH, 'main', 'SIMULATED INSTRUMENT', 'faa-head'),
+        gridCell($bounds, 12, 14, $gridY + 5.5, $gridY + $headerH, 'main', 'FLIGHT TRAINING', 'faa-head'),
+        gridCell($bounds, 14, 16, $gridY + 5.5, $gridY + $headerH, 'main', 'SOLO OR PIC', 'faa-head'),
+        gridCell($bounds, 16, 18, $gridY + 5.5, $gridY + $headerH, 'main', 'CROSS-COUNTRY', 'faa-head'),
+    );
+    $cells = array_merge($cells, bodyCells($bounds, $bodyTop, $rowH, 9, count($columns), array('startRow' => $footerStartRow, 'startCol' => 0, 'endCol' => 24)));
+    foreach (array_slice($entries, 0, $footerStartRow) as $idx => $entry) {
+        $y = $bodyTop + ($idx * $rowH) + ($rowH / 2);
+        foreach (array(
+            array(0, singlePilotSeMarker($entry)),
+            array(2, singlePilotMeMarker($entry)),
+            array(4, pval($entry['night_time'] ?? 0)),
+            array(6, pval($entry['actual_instrument_time'] ?? 0)),
+            array(8, pval($entry['simulated_instrument_time'] ?? 0)),
+            array(10, pval($entry['fnpt_simulator_time'] ?? 0)),
+            array(12, pval($entry['dual_received_time'] ?? 0)),
+            array(14, pval($entry['pic_time'] ?? 0)),
+            array(16, pval($entry['cross_country_time'] ?? 0)),
+            array(22, pval($entry['total_flight_time'] ?? 0)),
+        ) as [$colIdx, $value]) {
+            $out .= svgMappedText($centers[$colIdx], $y, (string)$value, 'faa.right.' . $colIdx, false, $idx + 1, 'faa-body');
+        }
+    }
+    foreach (array($pageTotals, $previousTotals, $runningTotals) as $idx => $totals) {
+        $y1 = $bodyTop + (($footerStartRow + $idx) * $rowH);
+        $y2 = $y1 + $rowH;
+        foreach (array(4 => 'night', 6 => 'ifr', 10 => 'sim', 12 => 'dual', 14 => 'pic', 16 => 'nav', 22 => 'total') as $colIdx => $key) {
+            $cells[] = gridCell($bounds, $colIdx, $colIdx + 2, $y1, $y2, 'main', ptotal($totals[$key] ?? 0), 'faa-body');
+        }
+    }
+    $out .= renderCellBorders($cells);
+    $out .= svgText(195, 110.0, 'Page ' . $pageNumber . ' of ' . $totalPages, 'page-number', 'end');
+    return $out . '</svg>';
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -549,6 +672,7 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .paper-sheet.is-dragging{cursor:grabbing}
 .paper-sheet[data-paper="a4"]{max-width:none}.paper-sheet[data-paper="letter"]{max-width:none}
 .paper-sheet{--page-w:270mm;--page-h:190mm;--grid-w:252mm;--grid-h:158mm;--left-table-x:9mm;--right-table-x:9mm}
+.print-format-faa .paper-sheet{--page-w:205mm;--page-h:115mm}
 .book-spread{position:absolute;left:50%;top:50%;display:none;width:calc(var(--page-w) * 2);height:var(--page-h);transform:translate3d(-50%,-50%,0) scale(var(--spread-scale,.5));transform-origin:center;filter:drop-shadow(0 12px 26px rgba(15,23,42,.2));perspective:1600px;transform-style:preserve-3d;backface-visibility:hidden;will-change:transform,opacity;opacity:0;transition:opacity .25s ease}
 .book-spread.is-active{display:flex;opacity:1;z-index:2}
 .book-spread.is-fading{display:flex;opacity:0;z-index:2;pointer-events:none}
@@ -574,10 +698,14 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .signature-text{font-size:2.2px;font-weight:400}
 .page-template .debug-field{font-size:1.25px;fill:#b91c1c;font-weight:700}
 .page-template .page-number{font-size:2.6px;font-weight:500}
+.page-template .faa-head{font-size:2.35px;font-weight:800}
+.page-template .faa-body{font-size:2.15px;font-weight:400}
+.page-template .faa-body-left{font-size:1.85px;font-weight:400}
+.page-template .faa-cert{font-size:2.45px;font-style:italic;font-weight:400}
 @media print{body{background:#fff}.screen-tools{display:none}.print-stage{display:block;padding:0;background:#fff}.paper-sheet{width:auto!important;height:auto!important;box-shadow:none;border-radius:0;background:#fff;overflow:visible;cursor:auto}.book-spread{position:static;display:contents!important;width:auto;height:auto;transform:none!important;filter:none;perspective:none;opacity:1;transition:none}.book-spread::before,.book-page::after,.book-page::before{display:none}.book-page{display:block;width:var(--page-w);height:var(--page-h);background:#fff;border:0;box-shadow:none;border-radius:0;break-after:page;page-break-after:always}.book-spread:last-of-type .book-page-right{break-after:auto;page-break-after:auto}}
 </style>
 </head>
-<body>
+<body class="print-format-<?= h($format) ?>">
 <div class="screen-tools">
   <strong><?= h($title) ?></strong>
   <button onclick="window.print()">Print</button>
@@ -607,10 +735,14 @@ try {
 ?>
 <div class="book-spread<?= $pageIndex === 0 ? ' is-active' : '' ?>" data-spread="<?= (int)$pageIndex ?>">
 <section class="book-page book-page-left">
-  <?= leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
+  <?= $format === 'faa'
+      ? faaLeftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $leftPageNumber, $totalPrintedPages)
+      : leftTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $leftPageNumber, $totalPrintedPages) ?>
 </section>
 <section class="book-page book-page-right">
-  <?= rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
+  <?= $format === 'faa'
+      ? faaRightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $rightPageNumber, $totalPrintedPages)
+      : rightTemplate($chunk, $pageTotals, $previousTotals, $runningTotals, $logoHref, $debugMode, $rightPageNumber, $totalPrintedPages) ?>
 </section>
 </div>
 <?php
@@ -634,7 +766,7 @@ try {
   let pan = {x:0, y:0};
   let drag = null;
   function spreadSizeMm(){
-    return {w:540, h:190};
+    return <?= $format === 'faa' ? '{w:410, h:115}' : '{w:540, h:190}' ?>;
   }
   function baseScale(mode){
     const rect = sheet.getBoundingClientRect();

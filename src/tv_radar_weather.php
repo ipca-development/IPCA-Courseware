@@ -96,7 +96,7 @@ function tv_radar_weather_runway_components(?float $windDirDeg, ?float $windKt, 
             continue;
         }
         $angle = deg2rad($windDirDeg - $heading);
-        $headwind = -$windKt * cos($angle);
+        $headwind = $windKt * cos($angle);
         $crosswind = abs($windKt * sin($angle));
         $results[] = array(
             'id' => $id,
@@ -107,7 +107,12 @@ function tv_radar_weather_runway_components(?float $windDirDeg, ?float $windKt, 
     }
 
     usort($results, static function (array $a, array $b): int {
-        return ($a['crosswind_kt'] <=> $b['crosswind_kt']);
+        $crossCmp = $a['crosswind_kt'] <=> $b['crosswind_kt'];
+        if ($crossCmp !== 0) {
+            return $crossCmp;
+        }
+
+        return $b['headwind_kt'] <=> $a['headwind_kt'];
     });
 
     return $results;

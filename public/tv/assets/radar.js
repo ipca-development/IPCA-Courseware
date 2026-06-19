@@ -84,7 +84,7 @@
   var DEG_TO_RAD = Math.PI / 180;
   var RAD_TO_DEG = 180 / Math.PI;
   var SWEEP_PERIOD_MS = 4200;
-  var BLIP_TRAIL_TURNS = 14;
+  var BLIP_TRAIL_TURNS = 7;
   var BLIP_LIFE_MS = SWEEP_PERIOD_MS * BLIP_TRAIL_TURNS;
   var BLIP_SPAWN_MIN_PX = 11;
   var BLIP_MAX_COUNT = 20;
@@ -313,18 +313,6 @@
     }
 
     return null;
-  }
-
-  function scatterOffset(seed, amount) {
-    if (!amount) return { x: 0, y: 0 };
-    var a = Math.sin(seed * 12.9898) * 43758.5453;
-    var b = Math.sin((seed + 1.7) * 78.233) * 12345.6789;
-    var u = a - Math.floor(a);
-    var v = b - Math.floor(b);
-    return {
-      x: (u - 0.5) * amount * 2,
-      y: (v - 0.5) * amount * 2
-    };
   }
 
   function RadarScreen(options) {
@@ -791,8 +779,7 @@
           blips: [],
           lastBlipX: null,
           lastBlipY: null,
-          lastBlipSpawnTs: 0,
-          scatterSeed: Math.random() * 1000
+          lastBlipSpawnTs: 0
         };
         self.trackStates[key] = state;
       }
@@ -1083,24 +1070,19 @@
       var blips = state.blips || [];
       if (!state.renderReady || !blips.length) return;
 
-      blips.forEach(function (blip, idx) {
+      blips.forEach(function (blip) {
         var age = ts - blip.born;
         if (age < 0 || age >= BLIP_LIFE_MS) return;
         var lifeT = age / BLIP_LIFE_MS;
         var alpha = 0.92 * Math.pow(1 - lifeT, 0.48);
         if (alpha < 0.015) return;
 
-        var scatterAmt = lifeT * lifeT * 4.5;
-        var scatter = scatterOffset(state.scatterSeed + idx * 2.7 + lifeT * 3, scatterAmt);
-        var bx = blip.x + scatter.x;
-        var by = blip.y + scatter.y;
-        var coreR = 4.8 - lifeT * 1.6;
-        var glowR = 6 + lifeT * 14;
+        var bx = blip.x;
+        var by = blip.y;
+        var glowR = 10 - lifeT * 3;
+        var coreR = 4.5 - lifeT * 2;
 
         ctx.save();
-        if (lifeT > 0.2) {
-          ctx.filter = 'blur(' + (0.4 + lifeT * 1.8) + 'px)';
-        }
 
         var grad = ctx.createRadialGradient(bx, by, 0, bx, by, glowR);
         grad.addColorStop(0, 'rgba(210,255,220,' + (alpha * 0.95) + ')');
@@ -1112,13 +1094,10 @@
         ctx.arc(bx, by, glowR, 0, Math.PI * 2);
         ctx.fill();
 
-        if (lifeT < 0.62) {
-          ctx.filter = 'none';
-          ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.88) + ')';
-          ctx.beginPath();
-          ctx.arc(bx, by, Math.max(1.4, coreR), 0, Math.PI * 2);
-          ctx.fill();
-        }
+        ctx.fillStyle = 'rgba(235,255,240,' + (alpha * 0.88) + ')';
+        ctx.beginPath();
+        ctx.arc(bx, by, Math.max(1.2, coreR), 0, Math.PI * 2);
+        ctx.fill();
 
         ctx.restore();
       });
