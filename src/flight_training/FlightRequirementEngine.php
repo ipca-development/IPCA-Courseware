@@ -23,20 +23,21 @@ final class FlightRequirementEngine
         $assignmentSums = $this->assignmentSums($assignments);
         $results = array();
         foreach ($categories as $category) {
-            $results[] = $this->evaluate($category, $totals, $assignmentCounts, $assignmentDistances, $assignmentSums);
+            $results[] = $this->evaluate($category, $entries, $totals, $assignmentCounts, $assignmentDistances, $assignmentSums);
         }
         return $results;
     }
 
     /**
      * @param array<string,mixed> $category
+     * @param list<array<string,mixed>> $entries
      * @param array<string,mixed> $totals
      * @param array<string,int> $assignmentCounts
      * @param array<string,float> $assignmentDistances
      * @param array<string,array<string,float>> $assignmentSums
      * @return array<string,mixed>
      */
-    public function evaluate(array $category, array $totals, array $assignmentCounts = array(), array $assignmentDistances = array(), array $assignmentSums = array()): array
+    public function evaluate(array $category, array $entries, array $totals, array $assignmentCounts = array(), array $assignmentDistances = array(), array $assignmentSums = array()): array
     {
         $rules = $this->decodeRules($category['automatic_rules_json'] ?? null);
         $requirementKey = (string)($category['requirement_key'] ?? '');
@@ -46,10 +47,15 @@ final class FlightRequirementEngine
         $minimum = null;
         $warnings = array();
         $missing = array();
+        $evidenceSource = 'manual';
+        $requiresTagging = true;
+        $evidenceLabel = 'Manual tag required';
 
         if ($type === 'selected_entries_distance') {
             $value = (float)($assignmentDistances[$requirementKey] ?? 0);
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
+            $evidenceSource = 'tagged';
+            $evidenceLabel = 'Tagged logbook records';
             if ($value <= 0) {
                 $warnings[] = 'Selected logbook entry distance required.';
             }
@@ -69,12 +75,24 @@ final class FlightRequirementEngine
             if ($field === '') {
                 $warnings[] = 'Selected logbook entry metric required.';
             }
+            $evidenceSource = 'tagged';
+            $evidenceLabel = 'Tagged logbook records';
+        } elseif ($type === 'filtered_sum') {
+            $filters = is_array($rules['filters'] ?? null) ? $rules['filters'] : array();
+            $value = $metric !== '' ? $this->filteredSum($entries, $metric, $filters) : 0.0;
+            $minimum = $this->minimumForMetric($category, $metric);
+            $evidenceSource = 'auto_calculated';
+            $requiresTagging = false;
+            $evidenceLabel = 'Calculated from accepted logbook rows';
+            if ($metric === '') {
+                $warnings[] = 'Filtered requirement metric required.';
+            }
         } elseif ($metric !== '') {
             $value = (float)($totals[$metric] ?? 0);
-            $minimum = $category['minimum_time'] !== null ? (float)$category['minimum_time'] : null;
-            if ($minimum === null && $category['minimum_count'] !== null) {
-                $minimum = (float)$category['minimum_count'];
-            }
+            $minimum = $this->minimumForMetric($category, $metric);
+            $evidenceSource = 'auto_calculated';
+            $requiresTagging = false;
+            $evidenceLabel = 'Calculated from accepted logbook rows';
         } else {
             $value = (float)($assignmentCounts[$requirementKey] ?? 0);
             $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : 1.0;
@@ -101,7 +119,81 @@ final class FlightRequirementEngine
             'minimum' => $minimum,
             'warnings' => $warnings,
             'missing_items' => $missing,
+            'evidence_source' => $evidenceSource,
+            'evidence_label' => $evidenceLabel,
+            'requires_tagging' => $requiresTagging,
+            'rule_type' => $type !== '' ? $type : ($metric !== '' ? 'total_metric' : 'manual_assignment'),
+            'metric' => $metric,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $category
+     */
+    private function minimumForMetric(array $category, string $metric): ?float
+    {
+        if (in_array($metric, array('day_landings', 'night_landings', 'towered_airport_landings'), true)) {
+            return $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
+        }
+        if ($metric === 'cross_country_distance_nm') {
+            return $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
+        }
+        if ($category['minimum_time'] !== null) {
+            return (float)$category['minimum_time'];
+        }
+        return $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     * @param list<array<string,mixed>> $filters
+     */
+    private function filteredSum(array $entries, string $metric, array $filters): float
+    {
+        $sum = 0.0;
+        foreach ($entries as $entry) {
+            if (!is_array($entry) || !$this->isTrustedEntry($entry) || !$this->matchesFilters($entry, $filters)) {
+                continue;
+            }
+            $sum += $this->entryMetricValue($entry, $metric);
+        }
+        return round($sum, in_array($metric, array('day_landings', 'night_landings', 'towered_airport_landings'), true) ? 0 : 2);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     * @param list<array<string,mixed>> $filters
+     */
+    private function matchesFilters(array $entry, array $filters): bool
+    {
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) {
+                continue;
+            }
+            $field = (string)($filter['field'] ?? '');
+            $operator = (string)($filter['operator'] ?? 'gt');
+            $expected = (float)($filter['value'] ?? 0);
+            $actual = $this->entryMetricValue($entry, $field);
+            if ($operator === 'gte' && $actual < $expected) {
+                return false;
+            }
+            if ($operator === 'gt' && $actual <= $expected) {
+                return false;
+            }
+            if ($operator === 'eq' && abs($actual - $expected) > 0.0001) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function isTrustedEntry(array $entry): bool
+    {
+        $status = strtolower(trim((string)($entry['review_status'] ?? '')));
+        return in_array($status, array('accepted', 'ok', 'merged', 'split'), true);
     }
 
     /**

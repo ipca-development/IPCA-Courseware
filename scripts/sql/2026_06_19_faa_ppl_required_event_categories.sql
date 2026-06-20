@@ -8,13 +8,13 @@ INSERT INTO ipca_flight_requirement_categories
 VALUES
   ('FAA_PART_61', 'PPL', 'dual_cross_country_training',
    'Dual Cross-Country Training',
-   'Tagged dual cross-country training flight(s) used as evidence for FAA PPL eligibility.',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
+   '3 hours of dual cross-country flight training - §61.109(a)(1).',
+   3.0, NULL, NULL, JSON_OBJECT('type', 'filtered_sum', 'metric', 'cross_country_time', 'filters', JSON_ARRAY(JSON_OBJECT('field', 'dual_received_time', 'operator', 'gt', 'value', 0), JSON_OBJECT('field', 'cross_country_time', 'operator', 'gt', 'value', 0))), JSON_OBJECT('evidence', 'accepted_logbook_rows'), 1, 1, 'active'),
 
   ('FAA_PART_61', 'PPL', 'dual_night_training',
    'Dual Night Training',
-   'Tagged dual night training flight(s).',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
+   '3 hours of dual night flight training - §61.109(a)(2).',
+   3.0, NULL, NULL, JSON_OBJECT('type', 'filtered_sum', 'metric', 'night_time', 'filters', JSON_ARRAY(JSON_OBJECT('field', 'dual_received_time', 'operator', 'gt', 'value', 0), JSON_OBJECT('field', 'night_time', 'operator', 'gt', 'value', 0))), JSON_OBJECT('evidence', 'accepted_logbook_rows'), 1, 1, 'active'),
 
   ('FAA_PART_61', 'PPL', 'dual_night_cross_country',
    'Dual Night Cross-Country Flight',
@@ -28,13 +28,13 @@ VALUES
 
   ('FAA_PART_61', 'PPL', 'dual_instrument_flight_training',
    'Dual Instrument Flight Training',
-   'Tagged dual/basic instrument flight training entry or entries.',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
+   '3 hours of flight training by reference to instruments - §61.109(a)(3).',
+   3.0, NULL, NULL, JSON_OBJECT('type', 'filtered_sum', 'metric', 'basic_instrument_flying_time', 'filters', JSON_ARRAY(JSON_OBJECT('field', 'dual_received_time', 'operator', 'gt', 'value', 0), JSON_OBJECT('field', 'basic_instrument_flying_time', 'operator', 'gt', 'value', 0))), JSON_OBJECT('evidence', 'accepted_logbook_rows'), 1, 1, 'active'),
 
   ('FAA_PART_61', 'PPL', 'solo_cross_country_flight',
    'Solo Cross-Country Flight',
-   'Tagged solo cross-country flight entry or entries.',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active'),
+   '5 hours of solo cross-country time - §61.109(a)(5)(i).',
+   5.0, NULL, NULL, JSON_OBJECT('type', 'filtered_sum', 'metric', 'cross_country_time', 'filters', JSON_ARRAY(JSON_OBJECT('field', 'solo_time', 'operator', 'gt', 'value', 0), JSON_OBJECT('field', 'cross_country_time', 'operator', 'gt', 'value', 0))), JSON_OBJECT('evidence', 'accepted_logbook_rows'), 1, 1, 'active'),
 
   ('FAA_PART_61', 'PPL', 'long_150nm_solo_cross_country_flight',
    'Long 150 NM Solo Cross-Country Flight',
@@ -43,8 +43,8 @@ VALUES
 
   ('FAA_PART_61', 'PPL', 'towered_airport_takeoffs_landings',
    'Towered Airport Takeoffs and Landings',
-   'Tagged takeoff/landing entry or entries at a towered airport.',
-   NULL, NULL, 1, JSON_OBJECT('type', 'manual_assignment'), JSON_OBJECT('evidence', 'selected_logbook_entries'), 1, 1, 'active')
+   '3 solo takeoffs and landings to a full stop at an airport with an operating control tower - §61.109(a)(5)(iii).',
+   NULL, NULL, 3, JSON_OBJECT('type', 'filtered_sum', 'metric', 'towered_airport_landings', 'filters', JSON_ARRAY(JSON_OBJECT('field', 'solo_time', 'operator', 'gt', 'value', 0), JSON_OBJECT('field', 'towered_airport_landings', 'operator', 'gt', 'value', 0))), JSON_OBJECT('evidence', 'accepted_logbook_rows'), 1, 1, 'active')
 ON DUPLICATE KEY UPDATE
   label = VALUES(label),
   description = VALUES(description),

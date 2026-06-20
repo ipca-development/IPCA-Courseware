@@ -479,6 +479,16 @@ final class FormInstanceService
             $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : 1.0;
             return $this->sumEntryField($entries, $metric) >= $minimum;
         }
+        if ($type === 'filtered_sum') {
+            $metric = (string)($rules['metric'] ?? '');
+            if ($metric === '') {
+                return false;
+            }
+            $minimum = in_array($metric, array('day_landings', 'night_landings', 'towered_airport_landings'), true)
+                ? (float)($category['minimum_count'] ?? 1)
+                : (float)($category['minimum_time'] ?? ($category['minimum_count'] ?? 1));
+            return $this->sumEntryField($entries, $metric) >= $minimum;
+        }
         if ($category['minimum_time'] !== null) {
             return $hours >= (float)$category['minimum_time'];
         }
