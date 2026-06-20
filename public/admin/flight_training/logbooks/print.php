@@ -53,6 +53,8 @@ try {
     $stmt = $pdo->query("
         SELECT
             u.name,
+            u.first_name,
+            u.last_name,
             c.instructor_certificate_number,
             c.instructor_certificate_expiration_date,
             c.signature_image_path
@@ -62,9 +64,15 @@ try {
            OR c.signature_image_path IS NOT NULL
     ");
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-        $key = strtolower(preg_replace('/\s+/', ' ', trim((string)($row['name'] ?? ''))) ?? '');
-        if ($key !== '') {
-            $instructorCredentialIndex[$key] = $row;
+        $names = array(
+            trim((string)($row['name'] ?? '')),
+            trim((string)($row['first_name'] ?? '') . ' ' . (string)($row['last_name'] ?? '')),
+        );
+        foreach ($names as $name) {
+            $key = strtolower(preg_replace('/\s+/', ' ', trim($name)) ?? '');
+            if ($key !== '') {
+                $instructorCredentialIndex[$key] = $row;
+            }
         }
     }
 } catch (Throwable $e) {
@@ -180,24 +188,58 @@ function missionCode(array $entry): string
 
 function instructorEndorsement(array $entry): string
 {
+    $details = instructorEndorsementDetails($entry);
+    $parts = array_filter(array(
+        $details['name'],
+        $details['certificate_line'],
+    ));
+    return implode(' · ', $parts);
+}
+
+/**
+ * @return array{name:string,certificate:string,expires:string,certificate_line:string,signature_href:string}
+ */
+function instructorEndorsementDetails(array $entry): array
+{
     global $instructorCredentialIndex;
     $name = trim((string)($entry['instructor_name'] ?? ''));
     $license = sourceValue($entry, array('instructor_license', 'instructor_licence', 'cfi_number', 'license_nr', 'licence_nr'));
     $expires = sourceValue($entry, array('instructor_license_expires', 'instructor_licence_expires', 'cfi_expiration', 'license_expiration'));
-    if (($license === '' || $expires === '') && $name !== '') {
+    $signatureHref = '';
+    if ($name !== '') {
         $key = strtolower(preg_replace('/\s+/', ' ', $name) ?? '');
         $credential = is_array($instructorCredentialIndex[$key] ?? null) ? $instructorCredentialIndex[$key] : array();
         if ($credential !== array()) {
             $license = $license !== '' ? $license : trim((string)($credential['instructor_certificate_number'] ?? ''));
             $expires = $expires !== '' ? $expires : trim((string)($credential['instructor_certificate_expiration_date'] ?? ''));
+            $signaturePath = trim((string)($credential['signature_image_path'] ?? ''));
+            $signatureHref = $signaturePath !== '' ? '/' . ltrim($signaturePath, '/') : '';
         }
     }
-    $parts = array_filter(array(
-        $name,
-        $license !== '' ? 'Lic ' . $license : '',
-        $expires !== '' ? 'Exp ' . $expires : '',
-    ));
-    return implode(' · ', $parts);
+    $certificateLine = '';
+    if ($license !== '') {
+        $certificateLine = $license . '.CFI';
+        if ($expires !== '') {
+            $certificateLine .= ' Exp. ' . certExpiryShort($expires);
+        }
+    }
+    return array(
+        'name' => $name,
+        'certificate' => $license,
+        'expires' => $expires,
+        'certificate_line' => $certificateLine,
+        'signature_href' => $signatureHref,
+    );
+}
+
+function certExpiryShort(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    $ts = strtotime($value);
+    return $ts === false ? $value : date('m/y', $ts);
 }
 
 function picDisplayName(array $entry): string
@@ -215,6 +257,16 @@ function picDisplayName(array $entry): string
 function logbookRemarks(array $entry): string
 {
     return cleanText(trim(implode(' · ', array_filter(array(missionCode($entry), instructorEndorsement($entry))))), 72);
+}
+
+function instructorEndorsementText(array $entry): string
+{
+    $details = instructorEndorsementDetails($entry);
+    return cleanText(trim(implode(' ', array_filter(array(
+        missionCode($entry),
+        $details['name'],
+        $details['certificate_line'],
+    )))), 76);
 }
 
 function isSimulatorEntry(array $entry): bool
@@ -395,6 +447,28 @@ function svgMappedText(float $x, float $y, string $text, string $field, bool $de
         $labelX = $anchor === 'start' ? $x : $x - 0.8;
         $out .= '<text class="debug-field" x="' . $labelX . '" y="' . ($y - 1.7) . '" text-anchor="' . h($anchor) . '">' . h($rowNumber . ' ' . $field) . '</text>';
     }
+    return $out;
+}
+
+function svgInstructorEndorsement(float $x, float $y, float $width, float $rowHeight, array $entry, string $prefix, bool $debugMode, int $rowNumber): string
+{
+    $mission = missionCode($entry);
+    $details = instructorEndorsementDetails($entry);
+    if ($mission === '' && $details['name'] === '' && $details['certificate_line'] === '') {
+        return '';
+    }
+    $out = '';
+    $topY = $y - ($rowHeight / 2) + 2.25;
+    $line2Y = $topY + 2.65;
+    $missionWidth = min(16.0, max(10.0, $width * 0.22));
+    $signatureX = $x + min($width * 0.58, 58.0);
+    $signatureW = max(14.0, min($width - ($signatureX - $x) - 1.5, 24.0));
+    $out .= svgMappedText($x, $topY, cleanText($mission, 12), $prefix . '.mission', $debugMode, $rowNumber, 'endorsement-mission', 'start');
+    $out .= svgMappedText($x + $missionWidth, $topY, cleanText($details['name'], 28), $prefix . '.instructor_name', $debugMode, $rowNumber, 'endorsement-name', 'start');
+    if ($details['signature_href'] !== '') {
+        $out .= svgSignatureImage($signatureX, $topY - 3.1, $signatureW, 4.6, $details['signature_href']);
+    }
+    $out .= svgMappedText($x + $missionWidth, $line2Y, cleanText($details['certificate_line'], 36), $prefix . '.instructor_certificate', $debugMode, $rowNumber, 'endorsement-cert', 'start');
     return $out;
 }
 
@@ -623,7 +697,11 @@ function rightTemplate(array $entries, array $pageTotals, array $previousTotals,
         foreach (rightEntryFields($entry) as $field) {
             $colIdx = (int)$field['column'];
             $textX = $colIdx === 8 ? $bounds[8] + 1.5 : $centers[$colIdx];
-            $out .= svgMappedText($textX, $y, (string)$field['value'], 'right.' . $field['field'], $debugMode, $idx + 1, $colIdx === 8 ? 'remarks-text' : 'body', $colIdx === 8 ? 'start' : 'middle');
+            if ($colIdx === 8) {
+                $out .= svgInstructorEndorsement($bounds[8] + 1.2, $y, $bounds[9] - $bounds[8] - 2.4, $rowHeight, $entry, 'right.' . $field['field'], $debugMode, $idx + 1);
+            } else {
+                $out .= svgMappedText($textX, $y, (string)$field['value'], 'right.' . $field['field'], $debugMode, $idx + 1, 'body', 'middle');
+            }
         }
     }
     $rows = array(
@@ -695,12 +773,16 @@ function faaLeftTemplate(array $entries, array $pageTotals, array $previousTotal
             cleanText($entry['aircraft_registration'] ?? '', 14),
             cleanText($entry['departure_airport'] ?? '', 8),
             cleanText($entry['arrival_airport'] ?? '', 8),
-            logbookRemarks($entry),
+            '',
             '',
         );
         foreach ($values as $colIdx => $value) {
             $textX = $colIdx === 5 ? $bounds[5] + 1.2 : $centers[$colIdx];
-            $out .= svgMappedText($textX, $y, (string)$value, 'faa.left.' . $colIdx, false, $idx + 1, $colIdx === 5 ? 'faa-body-left' : 'faa-body', $colIdx === 5 ? 'start' : 'middle');
+            if ($colIdx === 5) {
+                $out .= svgInstructorEndorsement($bounds[5] + 1.0, $y, $bounds[6] - $bounds[5] - 2.0, $rowH, $entry, 'faa.left.remarks', false, $idx + 1);
+            } else {
+                $out .= svgMappedText($textX, $y, (string)$value, 'faa.left.' . $colIdx, false, $idx + 1, 'faa-body', 'middle');
+            }
         }
         $dayLandings = (int)($entry['day_landings'] ?? 0);
         $nightLandings = (int)($entry['night_landings'] ?? 0);
@@ -865,6 +947,9 @@ body{margin:0;background:#e5e7eb;color:#111827;font-family:Arial,Helvetica,sans-
 .page-template .head{font-size:2.35px;font-weight:700}
 .page-template .body{font-size:1.9px;font-weight:400}
 .page-template .remarks-text{font-size:1.65px;font-weight:400}
+.page-template .endorsement-mission{font-size:1.6px;font-weight:700}
+.page-template .endorsement-name{font-size:1.55px;font-weight:500}
+.page-template .endorsement-cert{font-size:1.45px;font-weight:500}
 .page-template .signature-text{font-size:2.2px;font-weight:400}
 .page-template .debug-field{font-size:1.25px;fill:#b91c1c;font-weight:700}
 .page-template .page-number{font-size:2.6px;font-weight:500}
