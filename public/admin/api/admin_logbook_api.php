@@ -178,6 +178,12 @@ try {
             );
             alog_json(200, array('ok' => true, 'deleted_count' => $deleted, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'clear_requirement_tags':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $result = $service->clearRequirementTags($logbookId, $actorUserId);
+            alog_json(200, array('ok' => true, 'result' => $result, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'requirement_categories':
             alog_json(200, array('ok' => true, 'categories' => $service->listRequirementCategories()));
 

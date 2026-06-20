@@ -860,6 +860,50 @@ final class AdminLogbookService
     }
 
     /**
+     * Remove all manually tagged requirement evidence for one logbook.
+     *
+     * @return array<string,int>
+     */
+    public function clearRequirementTags(int $logbookId, int $actorUserId): array
+    {
+        $this->requireSchema();
+        $this->requireLogbook($logbookId);
+
+        $countStmt = $this->pdo->prepare("
+            SELECT
+                COUNT(DISTINCT a.id) AS assignment_count,
+                COUNT(ae.id) AS entry_link_count
+            FROM ipca_flight_requirement_assignments a
+            LEFT JOIN ipca_flight_requirement_assignment_entries ae
+              ON ae.assignment_id = a.id
+            WHERE a.logbook_id = :logbook_id
+        ");
+        $countStmt->execute(array(':logbook_id' => $logbookId));
+        $counts = $countStmt->fetch(PDO::FETCH_ASSOC) ?: array();
+        $assignmentCount = (int)($counts['assignment_count'] ?? 0);
+        $entryLinkCount = (int)($counts['entry_link_count'] ?? 0);
+
+        $deleteAssignments = $this->pdo->prepare('DELETE FROM ipca_flight_requirement_assignments WHERE logbook_id = :logbook_id');
+        $deleteAssignments->execute(array(':logbook_id' => $logbookId));
+
+        $deleteEvaluations = $this->pdo->prepare('DELETE FROM ipca_flight_requirement_evaluations WHERE logbook_id = :logbook_id');
+        $deleteEvaluations->execute(array(':logbook_id' => $logbookId));
+        $evaluationCount = $deleteEvaluations->rowCount();
+
+        $this->writeAudit($logbookId, null, $actorUserId, 'requirement_tags_cleared', null, array(
+            'assignment_count' => $assignmentCount,
+            'entry_link_count' => $entryLinkCount,
+            'evaluation_count' => $evaluationCount,
+        ));
+
+        return array(
+            'assignment_count' => $assignmentCount,
+            'entry_link_count' => $entryLinkCount,
+            'evaluation_count' => $evaluationCount,
+        );
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     private function listPages(int $logbookId): array
