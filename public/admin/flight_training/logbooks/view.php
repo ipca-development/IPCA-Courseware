@@ -158,6 +158,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
       </select>
       <select class="alogw-select" id="alogRequirementSelect" title="Choose the required event that the selected logbook row(s) prove"></select>
       <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAssignRequirement">Tag Selected as Required Event</button>
+      <button class="alogw-btn alogw-btn--ghost" type="button" id="alogUnassignRequirement">Untag Selected from Event</button>
     </div>
     <div class="alogw-table-wrap">
       <table class="alogw-table">
@@ -1161,6 +1162,22 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       }
       await post({action:'assign_requirement', logbook_id:logbookId, student_user_id:data.logbook.student_user_id, requirement_category_id:document.getElementById('alogRequirementSelect').value, entry_ids:ids});
       setStatus('Selected logbook row(s) tagged as required event');
+    } catch(err){ setStatus(err.message); }
+  });
+  document.getElementById('alogUnassignRequirement').addEventListener('click', async () => {
+    try {
+      const ids = selectedIndexes().map(i => Number(entries[i].id || 0)).filter(Boolean);
+      if (!ids.length) {
+        throw new Error('Select one or more logbook rows to untag.');
+      }
+      const select = document.getElementById('alogRequirementSelect');
+      const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : 'this event';
+      if (!window.confirm(`Remove selected row(s) from ${label}?`)) {
+        return;
+      }
+      const json = await post({action:'unassign_requirement', logbook_id:logbookId, requirement_category_id:select.value, entry_ids:ids});
+      const count = Number(json.deleted_count || 0);
+      setStatus(count > 0 ? `Removed ${count} tagged row${count === 1 ? '' : 's'} from requirement event` : 'No matching tags found for selected row(s)');
     } catch(err){ setStatus(err.message); }
   });
   document.getElementById('alogUploadForm').addEventListener('submit', async e => {

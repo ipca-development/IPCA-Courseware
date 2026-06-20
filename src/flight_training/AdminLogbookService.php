@@ -795,6 +795,70 @@ final class AdminLogbookService
         $this->writeAudit($logbookId, null, $actorUserId, 'requirement_assigned', null, array('assignment_id' => $assignmentId, 'entry_ids' => array_values($entryIds)));
     }
 
+    public function unassignRequirementEntries(int $logbookId, int $categoryId, array $entryIds, int $actorUserId): int
+    {
+        $this->requireSchema();
+        $entryIds = array_values(array_unique(array_filter(array_map(static fn(mixed $entryId): int => (int)$entryId, $entryIds), static fn(int $entryId): bool => $entryId > 0)));
+        if ($entryIds === array()) {
+            throw new RuntimeException('Select one or more logbook entries to untag.');
+        }
+        if ($categoryId <= 0) {
+            throw new RuntimeException('Choose a requirement event category.');
+        }
+
+        $assignmentStmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_flight_requirement_assignments
+            WHERE logbook_id = :logbook_id
+              AND requirement_category_id = :requirement_category_id
+        ");
+        $assignmentStmt->execute(array(
+            ':logbook_id' => $logbookId,
+            ':requirement_category_id' => $categoryId,
+        ));
+        $assignmentIds = array_values(array_filter(array_map('intval', $assignmentStmt->fetchAll(PDO::FETCH_COLUMN) ?: array())));
+        if ($assignmentIds === array()) {
+            return 0;
+        }
+
+        $deleted = 0;
+        $deleteStmt = $this->pdo->prepare('
+            DELETE FROM ipca_flight_requirement_assignment_entries
+            WHERE assignment_id = :assignment_id
+              AND entry_id = :entry_id
+        ');
+        foreach ($assignmentIds as $assignmentId) {
+            foreach ($entryIds as $entryId) {
+                $deleteStmt->execute(array(
+                    ':assignment_id' => $assignmentId,
+                    ':entry_id' => $entryId,
+                ));
+                $deleted += $deleteStmt->rowCount();
+            }
+        }
+
+        $cleanupStmt = $this->pdo->prepare("
+            DELETE a
+            FROM ipca_flight_requirement_assignments a
+            LEFT JOIN ipca_flight_requirement_assignment_entries ae
+              ON ae.assignment_id = a.id
+            WHERE a.id = :assignment_id
+              AND ae.id IS NULL
+        ");
+        foreach ($assignmentIds as $assignmentId) {
+            $cleanupStmt->execute(array(':assignment_id' => $assignmentId));
+        }
+
+        $this->writeAudit($logbookId, null, $actorUserId, 'requirement_unassigned', null, array(
+            'requirement_category_id' => $categoryId,
+            'assignment_ids' => $assignmentIds,
+            'entry_ids' => array_values($entryIds),
+            'deleted_count' => $deleted,
+        ));
+
+        return $deleted;
+    }
+
     /**
      * @return list<array<string,mixed>>
      */

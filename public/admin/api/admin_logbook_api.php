@@ -167,6 +167,17 @@ try {
             );
             alog_json(200, array('ok' => true, 'data' => $service->loadWorkspace($logbookId)));
 
+        case 'unassign_requirement':
+            $input = alog_input();
+            $logbookId = (int)($input['logbook_id'] ?? 0);
+            $deleted = $service->unassignRequirementEntries(
+                $logbookId,
+                (int)($input['requirement_category_id'] ?? 0),
+                is_array($input['entry_ids'] ?? null) ? $input['entry_ids'] : array(),
+                $actorUserId
+            );
+            alog_json(200, array('ok' => true, 'deleted_count' => $deleted, 'data' => $service->loadWorkspace($logbookId)));
+
         case 'requirement_categories':
             alog_json(200, array('ok' => true, 'categories' => $service->listRequirementCategories()));
 
