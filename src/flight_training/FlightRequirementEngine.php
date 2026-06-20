@@ -47,13 +47,7 @@ final class FlightRequirementEngine
         $warnings = array();
         $missing = array();
 
-        if ($metric !== '') {
-            $value = (float)($totals[$metric] ?? 0);
-            $minimum = $category['minimum_time'] !== null ? (float)$category['minimum_time'] : null;
-            if ($minimum === null && $category['minimum_count'] !== null) {
-                $minimum = (float)$category['minimum_count'];
-            }
-        } elseif ($type === 'selected_entries_distance') {
+        if ($type === 'selected_entries_distance') {
             $value = (float)($assignmentDistances[$requirementKey] ?? 0);
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
             if ($value <= 0) {
@@ -74,6 +68,12 @@ final class FlightRequirementEngine
             }
             if ($field === '') {
                 $warnings[] = 'Selected logbook entry metric required.';
+            }
+        } elseif ($metric !== '') {
+            $value = (float)($totals[$metric] ?? 0);
+            $minimum = $category['minimum_time'] !== null ? (float)$category['minimum_time'] : null;
+            if ($minimum === null && $category['minimum_count'] !== null) {
+                $minimum = (float)$category['minimum_count'];
             }
         } else {
             $value = (float)($assignmentCounts[$requirementKey] ?? 0);
