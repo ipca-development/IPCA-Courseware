@@ -464,7 +464,7 @@ final class FormInstanceService
     {
         $rules = $this->decodeJsonObject($category['automatic_rules_json'] ?? null);
         $type = (string)($rules['type'] ?? '');
-        if ($type === 'selected_entries_distance') {
+        if ($type === 'selected_entries_distance' || $category['minimum_distance_nm'] !== null) {
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : 0.0;
             return $entryCount > 0 && $distance >= $minimum;
         }
@@ -476,7 +476,7 @@ final class FormInstanceService
             if ($metric === '') {
                 return false;
             }
-            $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : 1.0;
+            $minimum = $this->requirementMinimumForMetric($category, $metric) ?? 1.0;
             return $this->sumEntryField($entries, $metric) >= $minimum;
         }
         if ($type === 'filtered_sum') {
@@ -522,6 +522,23 @@ final class FormInstanceService
             return 'towered_airport_landings';
         }
         return '';
+    }
+
+    /**
+     * @param array<string,mixed> $category
+     */
+    private function requirementMinimumForMetric(array $category, string $metric): ?float
+    {
+        if ($metric === 'cross_country_distance_nm') {
+            return $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
+        }
+        if (in_array($metric, array('day_landings', 'night_landings', 'towered_airport_landings'), true)) {
+            return $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
+        }
+        if ($category['minimum_time'] !== null) {
+            return (float)$category['minimum_time'];
+        }
+        return $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
     }
 
     /**

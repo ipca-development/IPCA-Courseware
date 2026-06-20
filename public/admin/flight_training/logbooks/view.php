@@ -310,10 +310,11 @@ cw_header('Flight Training · Admin Logbook Workspace');
         <label class="alogw-edit-field"><span class="alogw-edit-label">Minimum Count / Landings</span><input class="alogw-edit-input" type="number" step="1" min="0" name="minimum_count"></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">One Flight Multiple Requirements</span><select class="alogw-edit-select" name="allow_one_flight_multiple_requirements"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Multiple Flights One Requirement</span><select class="alogw-edit-select" name="allow_multiple_flights_one_requirement"><option value="1">Allowed</option><option value="0">Not allowed</option></select></label>
-        <label class="alogw-edit-field"><span class="alogw-edit-label">Evaluation Method</span><select class="alogw-edit-select" name="evaluation_method" id="alogRequirementEvaluationMethod"><option value="manual_assignment">Tagged entry count</option><option value="selected_entries_sum">Sum field from tagged entries</option><option value="selected_entries_distance">Sum tagged cross-country distance</option><option value="total_metric">Total logbook metric</option><option value="filtered_sum">Filtered logbook sum</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Evaluation Method</span><select class="alogw-edit-select" name="evaluation_method" id="alogRequirementEvaluationMethod"><option value="manual_assignment">Tagged entry count</option><option value="selected_entries_sum">Sum field from tagged entries</option><option value="selected_entries_distance">Sum tagged cross-country distance</option><option value="total_metric">Total logbook metric</option><option value="filtered_sum">Filtered logbook sum</option><option value="credited_total_time">Credited total time with simulator cap</option></select></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Metric / Tagged Entry Field</span><select class="alogw-edit-select" name="selected_entry_metric" id="alogRequirementSelectedMetric"><option value="">Not applicable</option><option value="total_flight_time">Total flight time</option><option value="dual_received_time">Dual received time</option><option value="solo_time">Solo time</option><option value="pic_time">PIC time</option><option value="cross_country_time">Cross-country time</option><option value="solo_cross_country_time">Solo cross-country time</option><option value="dual_cross_country_time">Dual cross-country time</option><option value="night_time">Night time</option><option value="instrument_time">Instrument time</option><option value="basic_instrument_flying_time">Basic instrument flying</option><option value="night_landings">Night landings</option><option value="day_landings">Day landings</option><option value="towered_airport_landings">Towered airport landings</option><option value="cross_country_distance_nm">Cross-country distance NM</option></select></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Total Logbook Metric</span><select class="alogw-edit-select" name="total_metric" id="alogRequirementTotalMetric"><option value="">Not applicable</option><option value="total_flight_time">Total flight time</option><option value="dual_received_time">Dual received time</option><option value="solo_time">Solo time</option><option value="pic_time">PIC time</option><option value="cross_country_time">Cross-country time</option><option value="dual_cross_country_time">Dual cross-country time</option><option value="solo_cross_country_time">Solo cross-country time</option><option value="pic_cross_country_time">PIC cross-country time</option><option value="night_time">Night time</option><option value="instrument_time">Instrument time</option><option value="basic_instrument_flying_time">Basic instrument flying</option><option value="night_landings">Night landings</option><option value="day_landings">Day landings</option><option value="towered_airport_landings">Towered airport landings</option></select></label>
         <label class="alogw-edit-field"><span class="alogw-edit-label">Filter Preset</span><select class="alogw-edit-select" name="filter_preset" id="alogRequirementFilterPreset"><option value="">No filter</option><option value="dual">Dual flights only</option><option value="solo">Solo flights only</option><option value="cross_country">Cross-country flights only</option><option value="night">Night flights only</option><option value="dual_cross_country">Dual cross-country flights</option><option value="solo_cross_country">Solo cross-country flights</option><option value="dual_night">Dual night flights</option><option value="solo_towered">Solo towered takeoff/landing flights</option></select></label>
+        <label class="alogw-edit-field"><span class="alogw-edit-label">Simulator Credit Cap</span><input class="alogw-edit-input" type="number" step="0.1" min="0" name="sim_credit_cap" value="2.5"></label>
         <input type="hidden" name="automatic_rules_json" value="{}">
         <input type="hidden" name="manual_rules_json" value='{"evidence":"selected_logbook_entries"}'>
       </div>
@@ -596,15 +597,16 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       const evidence = Array.isArray(r.evidence) ? r.evidence : [];
       const evidenceEntries = evidence.flatMap(ev => Array.isArray(ev.entries) ? ev.entries : []);
       const requiresTagging = r.requires_tagging !== false;
+      const breakdownHtml = requirementBreakdownHtml(r);
       const evidenceHtml = evidenceEntries.length
         ? `<div class="alogw-req-evidence"><div class="alogw-req-evidence-title"><span>${esc(r.evidence_label || 'Tagged logbook record(s)')}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}">${esc(status === 'PASS' ? 'Satisfies requirement' : 'Does not satisfy yet')}</span></div><ul class="alogw-req-evidence-list">${evidenceEntries.map(entry => {
             const bits = [entry.entry_date, entry.route, entry.total_flight_time ? `${entry.total_flight_time}h` : '', entry.night_landings ? `${entry.night_landings} night LDG` : '', entry.day_landings ? `${entry.day_landings} day LDG` : '', entry.towered_airport_landings ? `${entry.towered_airport_landings} towered LDG` : '', entry.cross_country_distance_nm ? `${entry.cross_country_distance_nm} NM` : '', entry.aircraft_registration].filter(Boolean);
             const detail = bits.length ? bits.join(' · ') : `Entry #${entry.id || ''}`;
             return `<li><strong>${esc(detail)}</strong>${entry.remarks ? `<span>${esc(entry.remarks)}</span>` : ''}</li>`;
-          }).join('')}</ul></div>`
+          }).join('')}</ul>${breakdownHtml}</div>`
         : (requiresTagging
           ? `<div class="alogw-req-evidence alogw-req-evidence-empty"><strong>No tagged logbook record yet.</strong> Select row(s), choose this event, then click “Tag Selected as Required Event”.</div>`
-          : `<div class="alogw-req-evidence"><div class="alogw-req-evidence-title"><span>${esc(r.evidence_label || 'Calculated from accepted logbook rows')}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}">${esc(status === 'PASS' ? 'Satisfies requirement' : 'Does not satisfy yet')}</span></div></div>`);
+          : `<div class="alogw-req-evidence"><div class="alogw-req-evidence-title"><span>${esc(r.evidence_label || 'Calculated from accepted logbook rows')}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}">${esc(status === 'PASS' ? 'Satisfies requirement' : 'Does not satisfy yet')}</span></div>${breakdownHtml}</div>`);
       const actions = `<span class="alogw-req-actions"><button class="alogw-mini-btn alogw-mini-btn--edit" type="button" data-edit-category="${esc(categoryId)}">Edit</button><button class="alogw-mini-btn alogw-mini-btn--delete" type="button" data-delete-category="${esc(categoryId)}">Delete</button></span>`;
       return `<div class="alogw-req-row"><span class="alogw-req-cell" title="${esc(r.authority)}">${esc(r.authority)}</span><strong class="alogw-req-cell" title="${esc(r.label)}">${esc(r.label)}</strong><span class="alogw-req-value">${esc(formatRequirementValue(required, unit))}</span><span class="alogw-req-value">${esc(formatRequirementValue(actual, unit))}</span><span class="alogw-badge alogw-badge--${status === 'PASS' ? 'pass':'fail'}" title="${esc(result)}">${esc(result)}</span>${actions}${evidenceHtml}</div>`;
     }).join('');
@@ -673,6 +675,19 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       <div class="alogw-8710-note">Variables remain available to forms and APIs, but are no longer shown permanently on this page.</div>
     `;
   }
+  function requirementBreakdownHtml(req){
+    const b = req && req.breakdown && typeof req.breakdown === 'object' ? req.breakdown : null;
+    if(!b || req.rule_type !== 'credited_total_time') return '';
+    const rows = [
+      ['Airplane time', b.airplane_time],
+      ['AATD/BATD logged', b.sim_logged_time],
+      ['AATD/BATD credited', b.sim_credited_time],
+      ['AATD/BATD cap', b.sim_credit_cap],
+      ['Simulator time not credited', b.sim_excess_time],
+      ['Credited total', b.credited_total_time],
+    ];
+    return `<ul class="alogw-req-evidence-list">${rows.map(([label,value]) => `<li><strong>${esc(label)}:</strong><span>${esc(formatRequirementValue(value, 'h'))}</span></li>`).join('')}</ul>`;
+  }
   function formatTimeValue(value){
     if(value === null || value === undefined || value === '') return '';
     const number = Number(value);
@@ -684,7 +699,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     const key = String(req.requirement_key || '').toLowerCase();
     const label = String(req.label || '').toLowerCase();
     const warnings = Array.isArray(req.warnings) ? req.warnings.join(' ').toLowerCase() : '';
-    if(metric.includes('distance') || key.includes('distance') || label.includes('distance') || label.includes(' nm')) return 'nm';
+    if(metric.includes('distance') || key.includes('distance') || label.includes('distance') || label.includes('nm')) return 'nm';
     if(metric.includes('landing') || key.includes('landing') || label.includes('landing') || warnings.includes('manual assignment')) return 'count';
     return 'h';
   }
@@ -821,6 +836,7 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       selected_entry_metric:'',
       total_metric:'',
       filter_preset:'',
+      sim_credit_cap:'2.5',
       automatic_rules_json:'{}',
       manual_rules_json:'{}'
     };
@@ -831,6 +847,9 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     if(rules.type === 'selected_entries_sum') {
       row.evaluation_method = 'selected_entries_sum';
       row.selected_entry_metric = rules.metric || rules.field || '';
+    } else if(rules.type === 'credited_total_time') {
+      row.evaluation_method = 'credited_total_time';
+      row.sim_credit_cap = rules.sim_credit_cap || '2.5';
     } else if(rules.type === 'filtered_sum') {
       row.evaluation_method = 'filtered_sum';
       row.selected_entry_metric = rules.metric || '';
@@ -882,6 +901,9 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
     if(form.elements.filter_preset) {
       form.elements.filter_preset.disabled = method !== 'filtered_sum';
     }
+    if(form.elements.sim_credit_cap) {
+      form.elements.sim_credit_cap.disabled = method !== 'credited_total_time';
+    }
   }
   document.getElementById('alogRequirementEvaluationMethod').addEventListener('change', updateRequirementRuleControls);
   function filterRulesForPreset(preset){
@@ -923,6 +945,9 @@ window.IPCA_ADMIN_LOGBOOK = <?= $workspaceJson ?: '{}' ?>;
       } else if(method === 'filtered_sum') {
         if(!payload.selected_entry_metric) throw new Error('Choose which logbook metric to sum.');
         payload.automatic_rules_json = JSON.stringify({type:'filtered_sum', metric:payload.selected_entry_metric, filters:filterRulesForPreset(payload.filter_preset || '')});
+      } else if(method === 'credited_total_time') {
+        payload.minimum_time = payload.minimum_time === null ? 40 : payload.minimum_time;
+        payload.automatic_rules_json = JSON.stringify({type:'credited_total_time', sim_metric:'fnpt_simulator_time', sim_credit_cap:Number(payload.sim_credit_cap || 2.5)});
       } else if(method === 'selected_entries_distance') {
         payload.automatic_rules_json = JSON.stringify({type:'selected_entries_distance'});
         payload.manual_rules_json = JSON.stringify({evidence:'selected_logbook_entries', requires_distance_nm:true});

@@ -51,7 +51,7 @@ final class FlightRequirementEngine
         $requiresTagging = true;
         $evidenceLabel = 'Manual tag required';
 
-        if ($type === 'selected_entries_distance') {
+        if ($type === 'selected_entries_distance' || ($category['minimum_distance_nm'] !== null && $metric === '')) {
             $value = (float)($assignmentDistances[$requirementKey] ?? 0);
             $minimum = $category['minimum_distance_nm'] !== null ? (float)$category['minimum_distance_nm'] : null;
             $evidenceSource = 'tagged';
@@ -65,10 +65,7 @@ final class FlightRequirementEngine
                 $field = $this->inferredSelectedEntryMetric($requirementKey);
             }
             $value = $field !== '' ? (float)($assignmentSums[$requirementKey][$field] ?? 0) : 0.0;
-            $minimum = $category['minimum_count'] !== null ? (float)$category['minimum_count'] : null;
-            if ($minimum === null && $category['minimum_time'] !== null) {
-                $minimum = (float)$category['minimum_time'];
-            }
+            $minimum = $this->minimumForMetric($category, $field);
             if ($minimum === null) {
                 $minimum = 1.0;
             }
@@ -87,6 +84,13 @@ final class FlightRequirementEngine
             if ($metric === '') {
                 $warnings[] = 'Filtered requirement metric required.';
             }
+        } elseif ($type === 'credited_total_time') {
+            $credit = $this->creditedTotalTime($totals, $rules);
+            $value = (float)$credit['credited_total_time'];
+            $minimum = $this->minimumForMetric($category, 'total_flight_time');
+            $evidenceSource = 'auto_calculated';
+            $requiresTagging = false;
+            $evidenceLabel = 'Calculated with capped AATD/BATD credit';
         } elseif ($metric !== '') {
             $value = (float)($totals[$metric] ?? 0);
             $minimum = $this->minimumForMetric($category, $metric);
@@ -124,6 +128,32 @@ final class FlightRequirementEngine
             'requires_tagging' => $requiresTagging,
             'rule_type' => $type !== '' ? $type : ($metric !== '' ? 'total_metric' : 'manual_assignment'),
             'metric' => $metric,
+            'breakdown' => isset($credit) && is_array($credit) ? $credit : array(),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $totals
+     * @param array<string,mixed> $rules
+     * @return array<string,mixed>
+     */
+    private function creditedTotalTime(array $totals, array $rules): array
+    {
+        $simMetric = (string)($rules['sim_metric'] ?? 'fnpt_simulator_time');
+        $cap = (float)($rules['sim_credit_cap'] ?? 2.5);
+        $totalLogged = (float)($totals['total_flight_time'] ?? 0);
+        $simLogged = max(0.0, (float)($totals[$simMetric] ?? 0));
+        $airplaneTime = max(0.0, $totalLogged - $simLogged);
+        $simCredited = min($simLogged, $cap);
+        $creditedTotal = $airplaneTime + $simCredited;
+
+        return array(
+            'airplane_time' => round($airplaneTime, 2),
+            'sim_logged_time' => round($simLogged, 2),
+            'sim_credit_cap' => round($cap, 2),
+            'sim_credited_time' => round($simCredited, 2),
+            'sim_excess_time' => round(max(0.0, $simLogged - $simCredited), 2),
+            'credited_total_time' => round($creditedTotal, 2),
         );
     }
 

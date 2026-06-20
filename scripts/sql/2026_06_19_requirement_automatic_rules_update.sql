@@ -6,7 +6,11 @@ SET
   minimum_time = 40.0,
   minimum_distance_nm = NULL,
   minimum_count = NULL,
-  automatic_rules_json = JSON_OBJECT('metric', 'total_flight_time'),
+  automatic_rules_json = JSON_OBJECT(
+    'type', 'credited_total_time',
+    'sim_metric', 'fnpt_simulator_time',
+    'sim_credit_cap', 2.5
+  ),
   manual_rules_json = JSON_OBJECT('evidence', 'accepted_logbook_rows'),
   updated_at = CURRENT_TIMESTAMP
 WHERE authority = 'FAA_PART_61'
@@ -112,6 +116,18 @@ SET
 WHERE authority = 'FAA_PART_61'
   AND certificate = 'PPL'
   AND requirement_key IN ('solo_cross_country_flight', 'solo_cross_country_time', 'faa61_ppl_solo_xc');
+
+UPDATE ipca_flight_requirement_categories
+SET
+  minimum_time = NULL,
+  minimum_distance_nm = 150.0,
+  minimum_count = NULL,
+  automatic_rules_json = JSON_OBJECT('type', 'selected_entries_distance'),
+  manual_rules_json = JSON_OBJECT('evidence', 'selected_logbook_entries', 'requires_distance_nm', true),
+  updated_at = CURRENT_TIMESTAMP
+WHERE authority = 'FAA_PART_61'
+  AND certificate = 'PPL'
+  AND requirement_key IN ('long_solo_cross_country', 'long_150nm_solo_cross_country_flight', 'solo_cross_country_150_nm');
 
 UPDATE ipca_flight_requirement_categories
 SET
