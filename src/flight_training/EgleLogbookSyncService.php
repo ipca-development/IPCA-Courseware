@@ -627,19 +627,9 @@ final class EgleLogbookSyncService
      */
     private function legacyRemarks(array $source): string
     {
-        $parts = array();
         if (trim((string)($source['mission_code'] ?? '')) !== '') {
-            $parts[] = 'Mission: ' . trim((string)$source['mission_code']);
+            return 'Mission: ' . trim((string)$source['mission_code']);
         }
-        if (trim((string)($source['lb_xc'] ?? '')) !== '') {
-            $parts[] = 'XC: ' . trim((string)$source['lb_xc']);
-        }
-        if (trim((string)($source['lb_cond'] ?? '')) !== '') {
-            $parts[] = 'Condition: ' . trim((string)$source['lb_cond']);
-        }
-        if ($this->truthy($source['lb_fnpt'] ?? '')) {
-            $parts[] = 'FNPT / Simulator';
-        }
-        return implode(' · ', $parts);
+        return '';
     }
 }

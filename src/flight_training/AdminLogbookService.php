@@ -961,6 +961,7 @@ final class AdminLogbookService
         if ($missionCode !== '' && !str_contains((string)($row['remarks'] ?? ''), $missionCode)) {
             $row['remarks'] = trim('Mission: ' . $missionCode . (((string)($row['remarks'] ?? '') !== '') ? ' · ' . (string)$row['remarks'] : ''));
         }
+        $row['remarks'] = $this->sanitizeMissionRemarks((string)($row['remarks'] ?? ''));
 
         if (trim((string)($row['instructor_name'] ?? '')) === '') {
             $instructor = $this->firstSourceValue($source, array(
@@ -1460,23 +1461,22 @@ final class AdminLogbookService
      */
     private function legacyRemarks(array $source): string
     {
-        $parts = array();
         if (trim((string)($source['mission_code'] ?? '')) !== '') {
-            $parts[] = 'Mission: ' . trim((string)$source['mission_code']);
+            return 'Mission: ' . trim((string)$source['mission_code']);
         }
-        if (trim((string)($source['lb_xc'] ?? '')) !== '') {
-            $parts[] = 'XC: ' . trim((string)$source['lb_xc']);
+        return '';
+    }
+
+    private function sanitizeMissionRemarks(string $remarks): string
+    {
+        $remarks = trim($remarks);
+        if ($remarks === '') {
+            return '';
         }
-        if (trim((string)($source['lb_cond'] ?? '')) !== '') {
-            $parts[] = 'Condition: ' . trim((string)$source['lb_cond']);
+        if (preg_match('/\\bMission\\s*:?[\\s]*([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)/i', $remarks, $match) === 1) {
+            return 'Mission: ' . trim((string)$match[1]);
         }
-        if ($this->truthy($source['lb_fnpt'] ?? '')) {
-            $parts[] = 'FNPT / Simulator';
-        }
-        if (trim((string)($source['lb_brief'] ?? '')) !== '') {
-            $parts[] = 'Brief: ' . trim((string)$source['lb_brief']);
-        }
-        return implode(' · ', $parts);
+        return $remarks;
     }
 
     /**
@@ -1511,7 +1511,7 @@ final class AdminLogbookService
             'night_landings' => (int)($data['night_landings'] ?? 0),
             'towered_airport_landings' => (int)($data['towered_airport_landings'] ?? 0),
             'instructor_name' => $this->textOrNull($data['instructor_name'] ?? null, 255),
-            'remarks' => $this->textOrNull($data['remarks'] ?? null, 4000),
+            'remarks' => $this->textOrNull($this->sanitizeMissionRemarks((string)($data['remarks'] ?? '')), 4000),
             'endorsements' => $this->textOrNull($data['endorsements'] ?? null, 4000),
             'review_status' => in_array((string)($data['review_status'] ?? 'ok'), array('imported', 'needs_review', 'accepted', 'rejected', 'ok', 'flagged', 'merged', 'split'), true) ? (string)$data['review_status'] : 'ok',
             'accepted_at' => $this->dateTimeOrNull($data['accepted_at'] ?? null),
