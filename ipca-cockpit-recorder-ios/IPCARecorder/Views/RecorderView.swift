@@ -5,12 +5,14 @@ struct RecorderView: View {
     @EnvironmentObject private var store: RecordingStore
     @EnvironmentObject private var audio: AudioRecorderManager
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var ahrsBLE: AHRSBLEManager
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     recordingCard
+                    ahrsCard
                     inputCard
                     lastRecordingCard
                 }
@@ -117,7 +119,12 @@ struct RecorderView: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                 Button("Record") {
-                    Task { _ = await audio.startRecording(language: settings.language) }
+                    Task {
+                        let started = await audio.startRecording(language: settings.language)
+                        if started, let recordingID = audio.activeRecordingID {
+                            ahrsBLE.startCapture(recordingID: recordingID)
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(audio.isRecording)
@@ -156,6 +163,7 @@ struct RecorderView: View {
             if let recording = store.recordings.first {
                 LabeledContent("Recording", value: recording.id)
                 LabeledContent("Input used", value: recording.inputDeviceName)
+                LabeledContent("AHRS samples", value: recording.ahrsSamplesPath == nil ? "None saved" : "Saved")
                 LabeledContent("Upload", value: "\(recording.uploadStatus.label) \(Int(recording.uploadProgress * 100))%")
                 LabeledContent("Transcript", value: "\(recording.transcriptStatus.label) \(recording.transcriptProgress)%")
                 if !recording.lastError.isEmpty {
@@ -173,6 +181,49 @@ struct RecorderView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
+    private var ahrsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("BLE AHRS").font(.headline)
+            LabeledContent("State", value: ahrsBLE.connectionState.rawValue)
+            if let sample = ahrsBLE.latestSample {
+                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                    GridRow {
+                        Text("Roll")
+                        Text(String(format: "%.1f", sample.roll)).foregroundStyle(.green)
+                    }
+                    GridRow {
+                        Text("Pitch")
+                        Text(String(format: "%.1f", sample.pitch)).foregroundStyle(.green)
+                    }
+                    GridRow {
+                        Text("Yaw")
+                        Text(String(format: "%.1f", sample.yaw)).foregroundStyle(.green)
+                    }
+                    GridRow {
+                        Text("Acceleration")
+                        Text(String(format: "%.2f", sample.acceleration)).foregroundStyle(.green)
+                    }
+                    GridRow {
+                        Text("Mag heading")
+                        Text(String(format: "%.0f", sample.magneticHeading)).foregroundStyle(.green)
+                    }
+                }
+                Text(sample.rawLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text("Waiting for IPCA-CVR BLE AHRS data.")
+                    .foregroundStyle(.secondary)
+            }
+            if !ahrsBLE.lastError.isEmpty {
+                Text(ahrsBLE.lastError).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
     private var statusText: String {
         if audio.isRecording && audio.isPaused { return "Paused" }
         if audio.isRecording { return "Recording" }
@@ -180,7 +231,8 @@ struct RecorderView: View {
     }
 
     private func stopAndUpload() {
-        guard let recording = audio.stopRecording(language: settings.language) else { return }
+        guard var recording = audio.stopRecording(language: settings.language) else { return }
+        recording.ahrsSamplesPath = ahrsBLE.stopCaptureAndSave(recordingID: recording.id)
         store.add(recording)
         uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
     }

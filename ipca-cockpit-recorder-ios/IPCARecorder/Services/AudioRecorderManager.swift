@@ -19,6 +19,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var peakLevel: Float = 0
     @Published private(set) var averagePowerDB: Float = -160
     @Published private(set) var peakPowerDB: Float = -160
+    @Published private(set) var activeRecordingID: String?
     @Published var lastError: String = ""
 
     var sourceSummary: String {
@@ -103,6 +104,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             recorder = audioRecorder
             recordingURL = url
             recordingID = id
+            activeRecordingID = id
             startedAt = Date()
             elapsed = 0
             fileSize = 0
@@ -140,6 +142,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         self.recorder = nil
         self.recordingURL = nil
         self.recordingID = nil
+        self.activeRecordingID = nil
         self.startedAt = nil
         isRecording = false
         isPaused = false
@@ -162,7 +165,8 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             transcriptProgress: 0,
             language: language,
             transcript: "",
-            lastError: ""
+            lastError: "",
+            ahrsSamplesPath: nil
         )
     }
 

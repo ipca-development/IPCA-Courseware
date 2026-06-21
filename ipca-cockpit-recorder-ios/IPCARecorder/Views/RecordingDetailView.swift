@@ -45,6 +45,7 @@ struct RecordingDetailView: View {
             LabeledContent("Duration", value: Formatters.duration(recording.duration))
             LabeledContent("File size", value: Formatters.bytes(recording.fileSize))
             LabeledContent("Input device", value: recording.inputDeviceName)
+            LabeledContent("AHRS samples", value: recording.ahrsSamplesPath == nil ? "None saved" : "Saved")
             LabeledContent("Language", value: recording.language)
             LabeledContent("Upload", value: "\(recording.uploadStatus.label) \(Int(recording.uploadProgress * 100))%")
             LabeledContent("Transcript", value: "\(recording.transcriptStatus.label) \(recording.transcriptProgress)%")

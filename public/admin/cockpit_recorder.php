@@ -87,6 +87,7 @@ cw_header('Cockpit Recorder POC');
             <th>Language</th>
             <th>Upload</th>
             <th>Transcription</th>
+            <th>AHRS</th>
             <th>Audio</th>
             <th>Transcript / Error</th>
           </tr>
@@ -94,7 +95,7 @@ cw_header('Cockpit Recorder POC');
         <tbody>
         <?php if (!$recordings): ?>
           <tr>
-            <td colspan="9" class="cockpit-muted">No cockpit recorder uploads yet.</td>
+            <td colspan="10" class="cockpit-muted">No cockpit recorder uploads yet.</td>
           </tr>
         <?php endif; ?>
         <?php foreach ($recordings as $row): ?>
@@ -103,6 +104,7 @@ cw_header('Cockpit Recorder POC');
             $upload = (string)($row['upload_status'] ?? '');
             $transcription = (string)($row['transcription_status'] ?? '');
             $audioUrl = '/admin/cockpit_recorder_audio.php?id=' . $id;
+            $ahrsUrl = '/admin/cockpit_recorder_ahrs.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
             $rowError = trim((string)($row['error_message'] ?? ''));
           ?>
@@ -122,6 +124,16 @@ cw_header('Cockpit Recorder POC');
             <td>
               <span class="cockpit-badge cockpit-badge-<?= h($transcription) ?>"><?= h($transcription) ?></span>
               <div class="cockpit-muted"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div>
+            </td>
+            <td>
+              <?php if (!empty($row['ahrs_storage_path'])): ?>
+                <span class="cockpit-badge cockpit-badge-ready">Saved</span>
+                <div class="cockpit-muted"><?= (int)($row['ahrs_sample_count'] ?? 0) ?> samples</div>
+                <div class="cockpit-muted"><?= h(cockpit_admin_fmt_bytes((int)($row['ahrs_file_size_bytes'] ?? 0))) ?></div>
+                <div><a href="<?= h($ahrsUrl) ?>">Download AHRS JSON</a></div>
+              <?php else: ?>
+                <span class="cockpit-muted">No AHRS</span>
+              <?php endif; ?>
             </td>
             <td>
               <?php if ($id > 0 && !empty($row['storage_path'])): ?>

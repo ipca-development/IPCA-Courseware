@@ -107,20 +107,53 @@ struct APIClient {
             try write("\(field.1)\r\n")
         }
 
-        try write("--\(boundary)\r\n")
-        try write("Content-Disposition: form-data; name=\"audio\"; filename=\"\(audioURL.lastPathComponent)\"\r\n")
-        try write("Content-Type: audio/mp4\r\n\r\n")
+        try appendFile(
+            fieldName: "audio",
+            fileURL: audioURL,
+            contentType: "audio/mp4",
+            boundary: boundary,
+            handle: handle,
+            write: write
+        )
 
-        let audioHandle = try FileHandle(forReadingFrom: audioURL)
-        defer { try? audioHandle.close() }
+        if let ahrsPath = recording.ahrsSamplesPath {
+            let ahrsURL = URL(fileURLWithPath: ahrsPath)
+            if FileManager.default.fileExists(atPath: ahrsURL.path) {
+                try appendFile(
+                    fieldName: "ahrs",
+                    fileURL: ahrsURL,
+                    contentType: "application/json",
+                    boundary: boundary,
+                    handle: handle,
+                    write: write
+                )
+            }
+        }
+
+        try write("--\(boundary)--\r\n")
+        return bodyURL
+    }
+
+    private func appendFile(
+        fieldName: String,
+        fileURL: URL,
+        contentType: String,
+        boundary: String,
+        handle: FileHandle,
+        write: (String) throws -> Void
+    ) throws {
+        try write("--\(boundary)\r\n")
+        try write("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileURL.lastPathComponent)\"\r\n")
+        try write("Content-Type: \(contentType)\r\n\r\n")
+
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? fileHandle.close() }
         while true {
-            let data = try audioHandle.read(upToCount: 1024 * 1024) ?? Data()
+            let data = try fileHandle.read(upToCount: 1024 * 1024) ?? Data()
             if data.isEmpty { break }
             try handle.write(contentsOf: data)
         }
-
-        try write("\r\n--\(boundary)--\r\n")
-        return bodyURL
+        try write("\r\n")
     }
 
     func status(recordingID: String) async throws -> StatusResponse {

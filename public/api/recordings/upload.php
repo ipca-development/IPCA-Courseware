@@ -37,7 +37,8 @@ try {
     );
 
     $service = new CockpitRecorderService($pdo);
-    cockpit_upload_json(200, $service->storeUploadedRecording($_FILES['audio'], $metadata));
+    $ahrsFile = isset($_FILES['ahrs']) && is_array($_FILES['ahrs']) ? $_FILES['ahrs'] : null;
+    cockpit_upload_json(200, $service->storeUploadedRecording($_FILES['audio'], $metadata, $ahrsFile));
 } catch (Throwable $e) {
     cockpit_upload_json(400, array('ok' => false, 'error' => $e->getMessage()));
 }

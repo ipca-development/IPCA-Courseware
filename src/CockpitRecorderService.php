@@ -24,6 +24,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/audio';
     }
 
+    public static function ahrsRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/ahrs';
+    }
+
     public static function tablesPresent(PDO $pdo): bool
     {
         $stmt = $pdo->query("SHOW TABLES LIKE 'ipca_cockpit_recordings'");
@@ -40,9 +45,10 @@ final class CockpitRecorderService
     /**
      * @param array<string,mixed> $file
      * @param array<string,mixed> $metadata
+     * @param array<string,mixed>|null $ahrsFile
      * @return array<string,mixed>
      */
-    public function storeUploadedRecording(array $file, array $metadata): array
+    public function storeUploadedRecording(array $file, array $metadata, ?array $ahrsFile = null): array
     {
         $this->requireTables();
 
@@ -158,6 +164,11 @@ final class CockpitRecorderService
         $recording = $this->recordingByUid($recordingUid);
         if (!$recording) {
             throw new RuntimeException('Stored recording could not be loaded.');
+        }
+
+        if ($ahrsFile !== null && $this->isPresentUpload($ahrsFile)) {
+            $this->storeUploadedAHRS((int)$recording['id'], $recordingUid, $ahrsFile);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
         $workerSpawned = $this->spawnTranscriptionWorker((int)$recording['id']);
@@ -276,6 +287,33 @@ final class CockpitRecorderService
         $stmt->execute(array($uid));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array{path:string,mime:string,filename:string}|null
+     */
+    public function ahrsFileForRecording(string $id): ?array
+    {
+        $recording = $this->recordingByAnyId($id);
+        if (!$recording) {
+            return null;
+        }
+        $relativePath = (string)($recording['ahrs_storage_path'] ?? '');
+        if ($relativePath === '') {
+            return null;
+        }
+        $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
+        $realPath = realpath($path);
+        $root = realpath(self::ahrsRoot());
+        if ($root === false || $realPath === false || !str_starts_with($realPath, $root) || !is_file($realPath)) {
+            return null;
+        }
+        $filename = (string)($recording['recording_uid'] ?? 'recording') . '.ahrs.json';
+        return array(
+            'path' => $realPath,
+            'mime' => 'application/json',
+            'filename' => $filename,
+        );
     }
 
     /**
@@ -408,12 +446,106 @@ final class CockpitRecorderService
             'transcription_status' => (string)($recording['transcription_status'] ?? 'pending'),
             'progress' => (int)($recording['transcription_progress'] ?? 0),
             'file_size' => (int)($recording['file_size_bytes'] ?? 0),
+            'ahrs_available' => trim((string)($recording['ahrs_storage_path'] ?? '')) !== '',
+            'ahrs_file_size' => (int)($recording['ahrs_file_size_bytes'] ?? 0),
+            'ahrs_sample_count' => (int)($recording['ahrs_sample_count'] ?? 0),
             'original_filename' => (string)($recording['original_filename'] ?? ''),
             'uploaded_at' => $recording['uploaded_at'] ?? null,
             'created_at' => $recording['created_at'] ?? null,
             'updated_at' => $recording['updated_at'] ?? null,
             'error' => (string)($recording['error_message'] ?? ''),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $file
+     */
+    private function storeUploadedAHRS(int $recordingId, string $recordingUid, array $file): void
+    {
+        if (!$this->hasColumn('ahrs_storage_path')) {
+            return;
+        }
+
+        $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err === UPLOAD_ERR_NO_FILE) {
+            return;
+        }
+        if ($err !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('AHRS upload failed: ' . self::uploadErrorText($err));
+        }
+
+        $tmp = (string)($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new RuntimeException('Invalid AHRS upload.');
+        }
+
+        $size = (int)($file['size'] ?? 0);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 25 * 1024 * 1024) {
+            throw new RuntimeException('AHRS JSON is too large (max 25 MB).');
+        }
+
+        $raw = file_get_contents($tmp);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Could not read AHRS JSON.');
+        }
+
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new RuntimeException('Invalid AHRS JSON: ' . $e->getMessage());
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException('AHRS JSON must be an array of samples.');
+        }
+
+        $sampleCount = count($decoded);
+        $relativePath = self::relativeAHRSPath($recordingUid);
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+
+        if (!move_uploaded_file($tmp, $absolutePath)) {
+            throw new RuntimeException('Could not store AHRS JSON.');
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET ahrs_storage_path = ?,
+                ahrs_file_size_bytes = ?,
+                ahrs_sample_count = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
+        $stmt->execute(array($relativePath, $size, $sampleCount, $recordingId));
+    }
+
+    /**
+     * @param array<string,mixed> $file
+     */
+    private function isPresentUpload(array $file): bool
+    {
+        return (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+    }
+
+    private function hasColumn(string $columnName): bool
+    {
+        static $cache = array();
+        if (array_key_exists($columnName, $cache)) {
+            return (bool)$cache[$columnName];
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ");
+        $stmt->execute(array(self::TABLE, $columnName));
+        $cache[$columnName] = (int)$stmt->fetchColumn() > 0;
+        return (bool)$cache[$columnName];
     }
 
     /**
@@ -559,6 +691,12 @@ final class CockpitRecorderService
     {
         $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
         return 'storage/cockpit_recorder/audio/' . gmdate('Y/m/d') . '/' . $safeUid . '.' . $ext;
+    }
+
+    private static function relativeAHRSPath(string $recordingUid): string
+    {
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
+        return 'storage/cockpit_recorder/ahrs/' . gmdate('Y/m/d') . '/' . $safeUid . '.ahrs.json';
     }
 
     private static function ensureDirectory(string $dir): void

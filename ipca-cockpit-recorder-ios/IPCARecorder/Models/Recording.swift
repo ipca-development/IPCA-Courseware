@@ -47,6 +47,7 @@ struct Recording: Identifiable, Codable, Equatable {
     var language: String
     var transcript: String
     var lastError: String
+    var ahrsSamplesPath: String?
 
     var fileURL: URL {
         URL(fileURLWithPath: filePath)
@@ -72,4 +73,21 @@ struct AudioInputInfo: Identifiable, Equatable {
     var portType: String
     var isUSB: Bool
     var isBuiltInMic: Bool
+}
+
+enum AHRSConnectionState: String {
+    case disconnected
+    case scanning
+    case connecting
+    case connected
+}
+
+struct AHRSSample: Codable, Equatable {
+    var timestamp: Date
+    var roll: Double
+    var pitch: Double
+    var yaw: Double
+    var acceleration: Double
+    var magneticHeading: Double
+    var rawLine: String
 }
