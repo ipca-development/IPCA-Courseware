@@ -9,12 +9,12 @@ struct LevelMeterView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(.gray.opacity(0.18))
+                        .fill(IPCATheme.lightBlue.opacity(0.45))
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(level > 0.75 ? .orange : .green)
+                        .fill(level > 0.75 ? IPCATheme.warning : IPCATheme.success)
                         .frame(width: max(2, proxy.size.width * CGFloat(level)))
                     Rectangle()
-                        .fill(.primary)
+                        .fill(IPCATheme.navy)
                         .frame(width: 3)
                         .offset(x: max(0, min(proxy.size.width - 3, proxy.size.width * CGFloat(peakLevel))))
                 }

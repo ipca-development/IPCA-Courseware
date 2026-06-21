@@ -7,7 +7,14 @@ struct RecordingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    IPCAHeader(
+                        title: "Recordings",
+                        subtitle: "Saved cockpit audio and flight data packages",
+                        systemImage: "archivebox"
+                    )
+
                 if store.recordings.isEmpty {
                     ContentUnavailableView("No Recordings", systemImage: "waveform", description: Text("Record cockpit audio from the Recorder tab."))
                 }
@@ -16,23 +23,7 @@ struct RecordingsView: View {
                     NavigationLink {
                         RecordingDetailView(recordingID: recording.id)
                     } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(recording.startedAt, style: .date)
-                                .font(.headline)
-                            Text(recording.startedAt, style: .time)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                Text(Formatters.duration(recording.duration))
-                                Text(Formatters.bytes(recording.fileSize))
-                                Text(recording.statusLabel)
-                            }
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                            if recording.uploadStatus == .uploading {
-                                ProgressView(value: recording.uploadProgress)
-                            }
-                        }
+                        recordingRow(recording)
                     }
                     .swipeActions {
                         Button("Retry Upload") {
@@ -41,8 +32,43 @@ struct RecordingsView: View {
                         .disabled(uploadManager.activeUploads.contains(recording.id))
                     }
                 }
+                }
+                .padding()
             }
+            .background(IPCATheme.pageBackground.ignoresSafeArea())
             .navigationTitle("Recordings")
+            .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private func recordingRow(_ recording: Recording) -> some View {
+        IPCACard(title: recording.startedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "waveform") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(recording.aircraftLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(IPCATheme.navy)
+
+                HStack(spacing: 8) {
+                    IPCAStatusPill(text: Formatters.duration(recording.duration), color: IPCATheme.blue)
+                    IPCAStatusPill(text: Formatters.bytes(recording.fileSize), color: IPCATheme.blue)
+                    IPCAStatusPill(text: recording.statusLabel, color: statusColor(for: recording))
+                }
+
+                if recording.uploadStatus == .uploading {
+                    ProgressView(value: recording.uploadProgress)
+                        .tint(IPCATheme.brightBlue)
+                }
+            }
+        }
+    }
+
+    private func statusColor(for recording: Recording) -> Color {
+        if recording.uploadStatus == .failed || recording.transcriptStatus == .failed {
+            return IPCATheme.danger
+        }
+        if recording.transcriptStatus == .ready {
+            return IPCATheme.success
+        }
+        return IPCATheme.brightBlue
     }
 }

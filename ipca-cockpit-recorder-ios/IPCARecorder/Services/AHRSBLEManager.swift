@@ -12,11 +12,14 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     private let deviceName = "IPCA-CVR"
     private let serviceUUID = CBUUID(string: "7b7f1000-9a7b-4f6a-9f0c-6c9c1f8b0001")
     private let characteristicUUID = CBUUID(string: "7b7f1001-9a7b-4f6a-9f0c-6c9c1f8b0001")
+    private let statusCharacteristicUUID = CBUUID(string: "7b7f1002-9a7b-4f6a-9f0c-6c9c1f8b0001")
 
     private var centralManager: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var characteristic: CBCharacteristic?
+    private var statusCharacteristic: CBCharacteristic?
     private var captureRecordingID: String?
+    private var captureStartedAt: Date?
     private var capturedSamples: [AHRSSample] = []
 
     func start() {
@@ -27,8 +30,9 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         startScanningIfPossible()
     }
 
-    func startCapture(recordingID: String) {
+    func startCapture(recordingID: String, startedAt: Date) {
         captureRecordingID = recordingID
+        captureStartedAt = startedAt
         capturedSamples = []
     }
 
@@ -37,6 +41,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             return nil
         }
         captureRecordingID = nil
+        captureStartedAt = nil
         guard !capturedSamples.isEmpty else {
             capturedSamples = []
             return nil
@@ -47,7 +52,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             let url = directory.appendingPathComponent("\(recordingID).ahrs.json")
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
+            encoder.dateEncodingStrategy = .custom(Self.encodeFractionalUTCDate)
             let data = try encoder.encode(capturedSamples)
             try data.write(to: url, options: [.atomic])
             capturedSamples = []
@@ -57,6 +62,19 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             capturedSamples = []
             return nil
         }
+    }
+
+    func sendStatusCommand(_ command: String) {
+        guard connectionState == .connected,
+              let peripheral,
+              let statusCharacteristic,
+              let data = command.data(using: .utf8)
+        else {
+            return
+        }
+
+        let writeType: CBCharacteristicWriteType = statusCharacteristic.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+        peripheral.writeValue(data, for: statusCharacteristic, type: writeType)
     }
 
     private func startScanningIfPossible() {
@@ -71,7 +89,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     }
 
     private func handle(line: String) {
-        guard let sample = Self.parseAHRSLine(line) else {
+        guard let sample = Self.parseAHRSLine(line, recordingStartedAt: captureStartedAt) else {
             return
         }
         latestSample = sample
@@ -81,7 +99,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         }
     }
 
-    private static func parseAHRSLine(_ rawLine: String) -> AHRSSample? {
+    private static func parseAHRSLine(_ rawLine: String, recordingStartedAt: Date?) -> AHRSSample? {
         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard line.hasPrefix("AHRS,") else {
             return nil
@@ -103,8 +121,10 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             return nil
         }
 
+        let timestamp = Date()
         return AHRSSample(
-            timestamp: Date(),
+            timestamp: timestamp,
+            secondsSinceRecordingStart: recordingStartedAt.map { timestamp.timeIntervalSince($0) } ?? 0,
             roll: roll,
             pitch: pitch,
             yaw: yaw,
@@ -113,6 +133,18 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             rawLine: line
         )
     }
+
+    private static func encodeFractionalUTCDate(_ date: Date, encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(fractionalUTCFormatter.string(from: date))
+    }
+
+    private static let fractionalUTCFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 }
 
 extension AHRSBLEManager: CBCentralManagerDelegate {
@@ -172,6 +204,7 @@ extension AHRSBLEManager: CBCentralManagerDelegate {
         Task { @MainActor in
             self.connectionState = .disconnected
             self.characteristic = nil
+            self.statusCharacteristic = nil
             if let error {
                 self.lastError = error.localizedDescription
             }
@@ -189,7 +222,7 @@ extension AHRSBLEManager: CBPeripheralDelegate {
             }
             peripheral.services?
                 .filter { $0.uuid == self.serviceUUID }
-                .forEach { peripheral.discoverCharacteristics([self.characteristicUUID], for: $0) }
+                .forEach { peripheral.discoverCharacteristics([self.characteristicUUID, self.statusCharacteristicUUID], for: $0) }
         }
     }
 
@@ -199,6 +232,11 @@ extension AHRSBLEManager: CBPeripheralDelegate {
                 self.lastError = error.localizedDescription
                 return
             }
+            if let statusCharacteristic = service.characteristics?.first(where: { $0.uuid == self.statusCharacteristicUUID }) {
+                self.statusCharacteristic = statusCharacteristic
+                self.sendStatusCommand("IPAD=1")
+            }
+
             guard let characteristic = service.characteristics?.first(where: { $0.uuid == self.characteristicUUID }) else {
                 self.lastError = "AHRS characteristic not found."
                 return

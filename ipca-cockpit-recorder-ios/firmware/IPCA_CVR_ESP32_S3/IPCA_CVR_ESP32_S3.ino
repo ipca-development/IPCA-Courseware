@@ -37,6 +37,7 @@
 #define BLE_DEVICE_NAME "IPCA-CVR"
 #define BLE_SERVICE_UUID "7b7f1000-9a7b-4f6a-9f0c-6c9c1f8b0001"
 #define BLE_AHRS_CHARACTERISTIC_UUID "7b7f1001-9a7b-4f6a-9f0c-6c9c1f8b0001"
+#define BLE_STATUS_CHARACTERISTIC_UUID "7b7f1002-9a7b-4f6a-9f0c-6c9c1f8b0001"
 
 Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
 Adafruit_BNO08x bno08x(-1);
@@ -51,9 +52,14 @@ sh2_SensorValue_t sensorValue;
 
 bool ipadReady = false;
 bool audioReady = false;
+bool gpsReady = false;
 bool ahrsReady = false;
 bool recording = false;
+bool recordingPaused = false;
 bool bleCentralConnected = false;
+int audioLevelPct = 0;
+int uploadState = 0;       // 0 wait, 1 busy, 2 ok, 3 fail
+int transcriptionState = 0; // 0 wait, 1 busy, 2 ok, 3 fail
 
 String inputLine = "";
 
@@ -79,6 +85,7 @@ float magHeadingDeg = 0;
 
 BLEServer *bleServer = nullptr;
 BLECharacteristic *ahrsCharacteristic = nullptr;
+BLECharacteristic *statusCharacteristic = nullptr;
 
 #define LOGO_W 210
 #define LOGO_H 210
@@ -447,6 +454,8 @@ const unsigned char ipca_logo_bitmap[] PROGMEM = {
 // =======================================================
 
 
+void handleCommand(String cmd);
+
 class IPCABLEServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *server) override {
     bleCentralConnected = true;
@@ -459,6 +468,15 @@ class IPCABLEServerCallbacks : public BLEServerCallbacks {
     ipadReady = false;
     screenDirty = true;
     server->getAdvertising()->start();
+  }
+};
+
+class IPCAStatusCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *characteristic) override {
+    String cmd = characteristic->getValue().c_str();
+    if (cmd.length() > 0) {
+      handleCommand(cmd);
+    }
   }
 };
 
@@ -496,6 +514,13 @@ void setupBLE() {
   );
   ahrsCharacteristic->addDescriptor(new BLE2902());
   ahrsCharacteristic->setValue(buildAHRSLine().c_str());
+
+  statusCharacteristic = service->createCharacteristic(
+    BLE_STATUS_CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  statusCharacteristic->setCallbacks(new IPCAStatusCallbacks());
+  statusCharacteristic->setValue("READY");
 
   service->start();
 
@@ -623,6 +648,75 @@ void drawSplashScreen() {
   tft.println("1.0");
 }
 
+void drawStatusLine(int x, int y, const char *label, bool ok, const char *value) {
+  tft.fillCircle(x, y + 6, 5, ok ? GREEN : YELLOW);
+  tft.setTextSize(1);
+  tft.setTextColor(WHITE);
+  tft.setCursor(x + 12, y);
+  tft.print(label);
+  tft.setCursor(x + 58, y);
+  tft.setTextColor(ok ? GREEN : YELLOW);
+  tft.print(value);
+}
+
+void drawStateLine(int x, int y, const char *label, int state) {
+  uint16_t color = YELLOW;
+  const char *value = "WAIT";
+  if (state == 1) {
+    color = YELLOW;
+    value = "BUSY";
+  } else if (state == 2) {
+    color = GREEN;
+    value = "OK";
+  } else if (state == 3) {
+    color = RED;
+    value = "FAIL";
+  }
+
+  tft.fillCircle(x, y + 6, 5, color);
+  tft.setTextSize(1);
+  tft.setTextColor(WHITE);
+  tft.setCursor(x + 12, y);
+  tft.print(label);
+  tft.setTextColor(color);
+  tft.setCursor(x + 34, y);
+  tft.print(value);
+}
+
+void drawAudioStatus(int x, int y) {
+  int barW = 78;
+  int fillW = map(audioLevelPct, 0, 100, 0, barW);
+  tft.fillCircle(x, y + 6, 5, audioReady ? GREEN : YELLOW);
+  tft.setTextSize(1);
+  tft.setTextColor(WHITE);
+  tft.setCursor(x + 12, y);
+  tft.print("Audio");
+  tft.drawRect(x + 58, y, barW, 10, WHITE);
+  tft.fillRect(x + 59, y + 1, max(0, fillW - 2), 8, audioReady ? GREEN : YELLOW);
+  tft.setCursor(x + 142, y);
+  tft.setTextColor(audioReady ? GREEN : YELLOW);
+  tft.print(audioLevelPct);
+  tft.print("%");
+}
+
+void drawRecordingFooter() {
+  tft.fillRect(54, 210, 134, 13, BLACK);
+  tft.setTextSize(1);
+  if (recordingPaused) {
+    tft.setTextColor(YELLOW);
+    tft.setCursor(92, 215);
+    tft.print("PAUSED");
+  } else if (recording) {
+    tft.setTextColor(RED);
+    tft.setCursor(104, 215);
+    tft.print("REC");
+  } else {
+    tft.setTextColor(YELLOW);
+    tft.setCursor(88, 215);
+    tft.print("STANDBY");
+  }
+}
+
 void drawStatusScreen() {
   tft.fillScreen(BLACK);
 
@@ -634,26 +728,26 @@ void drawStatusScreen() {
   tft.setCursor(55, 24);
   tft.println("IPCA");
 
-  tft.setTextSize(4);
-  tft.setCursor(68, 58);
-  tft.println("CVR");
-
   tft.setTextSize(2);
+  tft.setCursor(74, 54);
+  tft.println("STATUS");
 
-  tft.fillCircle(40, 118, 7, ipadReady ? GREEN : YELLOW);
-  tft.setTextColor(WHITE);
-  tft.setCursor(58, 111);
-  tft.println(ipadReady ? "iPad READY" : "iPad WAIT");
+  drawStatusLine(28, 86, "iPad", ipadReady, ipadReady ? "BLE OK" : "WAIT");
+  drawStatusLine(28, 106, "AHRS", ahrsReady, ahrsReady ? "READY" : "WAIT");
+  drawStatusLine(28, 126, "GPS", gpsReady, gpsReady ? "READY" : "NO FIX");
 
-  tft.fillCircle(40, 146, 7, audioReady ? GREEN : YELLOW);
-  tft.setCursor(58, 139);
-  tft.println(audioReady ? "Audio READY" : "Audio WAIT");
+  drawAudioStatus(28, 149);
+  drawStateLine(28, 174, "UP", uploadState);
+  drawStateLine(112, 174, "TX", transcriptionState);
 
-  tft.fillCircle(40, 174, 7, ahrsReady ? GREEN : YELLOW);
-  tft.setCursor(58, 167);
-  tft.println(ahrsReady ? "AHRS READY" : "AHRS WAIT");
-
-  if (recording) {
+  tft.fillRect(36, 199, 168, 25, BLACK);
+  tft.setTextSize(2);
+  if (recordingPaused) {
+    tft.fillCircle(54, 212, 7, YELLOW);
+    tft.setTextColor(YELLOW);
+    tft.setCursor(74, 205);
+    tft.println("PAUSED");
+  } else if (recording) {
     tft.fillCircle(72, 212, 7, RED);
     tft.setTextColor(RED);
     tft.setCursor(92, 205);
@@ -699,10 +793,7 @@ void drawAHRSScreenFrame() {
   tft.setCursor(28, 180);
   tft.print("MAG");
 
-  tft.setTextSize(1);
-  tft.setTextColor(YELLOW);
-  tft.setCursor(67, 215);
-  tft.print("BNO085 FUSION");
+  drawRecordingFooter();
 }
 
 void clearValueArea(int y) {
@@ -744,10 +835,39 @@ void handleCommand(String cmd) {
     audioReady = true;
   } else if (cmd == "AUDIO=0") {
     audioReady = false;
+    audioLevelPct = 0;
+  } else if (cmd.startsWith("AUDIOLEVEL=")) {
+    audioLevelPct = constrain(cmd.substring(11).toInt(), 0, 100);
+    audioReady = audioLevelPct > 0;
+  } else if (cmd == "GPS=1") {
+    gpsReady = true;
+  } else if (cmd == "GPS=0") {
+    gpsReady = false;
   } else if (cmd == "REC=1") {
     recording = true;
+    recordingPaused = false;
   } else if (cmd == "REC=0") {
     recording = false;
+    recordingPaused = false;
+  } else if (cmd == "REC=PAUSE") {
+    recording = true;
+    recordingPaused = true;
+  } else if (cmd == "UPLOAD=WAIT") {
+    uploadState = 0;
+  } else if (cmd == "UPLOAD=BUSY") {
+    uploadState = 1;
+  } else if (cmd == "UPLOAD=OK") {
+    uploadState = 2;
+  } else if (cmd == "UPLOAD=FAIL") {
+    uploadState = 3;
+  } else if (cmd == "TX=WAIT") {
+    transcriptionState = 0;
+  } else if (cmd == "TX=BUSY") {
+    transcriptionState = 1;
+  } else if (cmd == "TX=OK") {
+    transcriptionState = 2;
+  } else if (cmd == "TX=FAIL") {
+    transcriptionState = 3;
   } else if (cmd == "BOOT") {
     drawSplashScreen();
     delay(1500);
@@ -758,11 +878,17 @@ void handleCommand(String cmd) {
   } else if (cmd == "ALL=1") {
     ipadReady = true;
     audioReady = true;
+    gpsReady = true;
     recording = true;
   } else if (cmd == "ALL=0") {
     ipadReady = false;
     audioReady = false;
+    gpsReady = false;
     recording = false;
+    recordingPaused = false;
+    audioLevelPct = 0;
+    uploadState = 0;
+    transcriptionState = 0;
   }
 
   screenDirty = true;

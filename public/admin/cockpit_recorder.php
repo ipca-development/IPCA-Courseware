@@ -69,6 +69,7 @@ cw_header('Cockpit Recorder POC');
       Public API: <code>POST /api/recordings/upload</code>, <code>GET /api/recordings/{id}/status</code>,
       <code>GET /api/recordings/{id}/transcript</code>, <code>GET /api/recordings</code>.
     </p>
+    <p><a href="/admin/cockpit_recorder_aircraft.php">Manage aircraft / ADS-B devices</a></p>
   </section>
 
   <?php if ($error !== ''): ?>
@@ -82,12 +83,14 @@ cw_header('Cockpit Recorder POC');
           <tr>
             <th>Date/time</th>
             <th>Recording</th>
+            <th>Aircraft</th>
             <th>Duration</th>
             <th>File size</th>
             <th>Language</th>
             <th>Upload</th>
             <th>Transcription</th>
             <th>AHRS</th>
+            <th>GPS</th>
             <th>Audio</th>
             <th>Transcript / Error</th>
           </tr>
@@ -95,7 +98,7 @@ cw_header('Cockpit Recorder POC');
         <tbody>
         <?php if (!$recordings): ?>
           <tr>
-            <td colspan="10" class="cockpit-muted">No cockpit recorder uploads yet.</td>
+            <td colspan="12" class="cockpit-muted">No cockpit recorder uploads yet.</td>
           </tr>
         <?php endif; ?>
         <?php foreach ($recordings as $row): ?>
@@ -105,6 +108,7 @@ cw_header('Cockpit Recorder POC');
             $transcription = (string)($row['transcription_status'] ?? '');
             $audioUrl = '/admin/cockpit_recorder_audio.php?id=' . $id;
             $ahrsUrl = '/admin/cockpit_recorder_ahrs.php?id=' . $id;
+            $gpsUrl = '/admin/cockpit_recorder_gps.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
             $rowError = trim((string)($row['error_message'] ?? ''));
           ?>
@@ -116,6 +120,20 @@ cw_header('Cockpit Recorder POC');
             <td>
               <strong><?= h((string)($row['recording_uid'] ?? '')) ?></strong>
               <div class="cockpit-muted"><?= h((string)($row['input_device'] ?? '')) ?></div>
+            </td>
+            <td>
+              <?php if (!empty($row['aircraft_registration']) || !empty($row['aircraft_display_name'])): ?>
+                <strong><?= h((string)($row['aircraft_display_name'] ?: $row['aircraft_registration'])) ?></strong>
+                <div class="cockpit-muted"><?= h((string)($row['aircraft_registration'] ?? '')) ?></div>
+                <?php if (!empty($row['aircraft_type'])): ?>
+                  <div class="cockpit-muted"><?= h((string)$row['aircraft_type']) ?></div>
+                <?php endif; ?>
+                <?php if (!empty($row['aircraft_adsb_hex'])): ?>
+                  <div class="cockpit-muted">ADS-B <code><?= h((string)$row['aircraft_adsb_hex']) ?></code></div>
+                <?php endif; ?>
+              <?php else: ?>
+                <span class="cockpit-muted">Not selected</span>
+              <?php endif; ?>
             </td>
             <td><?= h(cockpit_admin_fmt_duration((float)($row['duration_seconds'] ?? 0))) ?></td>
             <td><?= h(cockpit_admin_fmt_bytes((int)($row['file_size_bytes'] ?? 0))) ?></td>
@@ -133,6 +151,17 @@ cw_header('Cockpit Recorder POC');
                 <div><a href="<?= h($ahrsUrl) ?>">Download AHRS JSON</a></div>
               <?php else: ?>
                 <span class="cockpit-muted">No AHRS</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?php if (!empty($row['gps_storage_path'])): ?>
+                <span class="cockpit-badge cockpit-badge-ready">Saved</span>
+                <div class="cockpit-muted"><?= (int)($row['gps_sample_count'] ?? 0) ?> samples</div>
+                <div class="cockpit-muted"><?= h(cockpit_admin_fmt_bytes((int)($row['gps_file_size_bytes'] ?? 0))) ?></div>
+                <div><a href="<?= h($gpsUrl) ?>">Download GPS JSON</a></div>
+              <?php else: ?>
+                <span class="cockpit-badge">Missing</span>
+                <div class="cockpit-muted">No GPS JSON uploaded</div>
               <?php endif; ?>
             </td>
             <td>

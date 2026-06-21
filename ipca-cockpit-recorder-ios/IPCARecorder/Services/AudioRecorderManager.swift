@@ -20,6 +20,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var averagePowerDB: Float = -160
     @Published private(set) var peakPowerDB: Float = -160
     @Published private(set) var activeRecordingID: String?
+    @Published private(set) var activeRecordingStartedAt: Date?
     @Published var lastError: String = ""
 
     var sourceSummary: String {
@@ -105,7 +106,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             recordingURL = url
             recordingID = id
             activeRecordingID = id
-            startedAt = Date()
+            let startDate = Date()
+            startedAt = startDate
+            activeRecordingStartedAt = startDate
             elapsed = 0
             fileSize = 0
             level = 0
@@ -143,6 +146,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         self.recordingURL = nil
         self.recordingID = nil
         self.activeRecordingID = nil
+        self.activeRecordingStartedAt = nil
         self.startedAt = nil
         isRecording = false
         isPaused = false
@@ -158,6 +162,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             duration: max(elapsed, recorder.currentTime),
             filePath: recordingURL.path,
             inputDeviceName: selectedInputName,
+            aircraftID: nil,
+            aircraftRegistration: nil,
+            aircraftDisplayName: nil,
+            aircraftType: nil,
+            aircraftADSBHex: nil,
             fileSize: finalSize,
             uploadStatus: .pending,
             transcriptStatus: .pending,
@@ -166,7 +175,8 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             language: language,
             transcript: "",
             lastError: "",
-            ahrsSamplesPath: nil
+            ahrsSamplesPath: nil,
+            gpsSamplesPath: nil
         )
     }
 

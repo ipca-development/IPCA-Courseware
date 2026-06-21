@@ -48,6 +48,12 @@ struct TranscriptResponse: Codable {
     }
 }
 
+struct AircraftListResponse: Codable {
+    var ok: Bool
+    var aircraft: [CockpitAircraft]
+    var error: String?
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
@@ -98,6 +104,7 @@ struct APIClient {
             ("started_at", ISO8601DateFormatter().string(from: recording.startedAt)),
             ("duration", String(recording.duration)),
             ("input_device", recording.inputDeviceName),
+            ("aircraft_id", recording.aircraftID.map(String.init) ?? ""),
             ("language", language)
         ]
 
@@ -122,6 +129,20 @@ struct APIClient {
                 try appendFile(
                     fieldName: "ahrs",
                     fileURL: ahrsURL,
+                    contentType: "application/json",
+                    boundary: boundary,
+                    handle: handle,
+                    write: write
+                )
+            }
+        }
+
+        if let gpsPath = recording.gpsSamplesPath {
+            let gpsURL = URL(fileURLWithPath: gpsPath)
+            if FileManager.default.fileExists(atPath: gpsURL.path) {
+                try appendFile(
+                    fieldName: "gps",
+                    fileURL: gpsURL,
                     contentType: "application/json",
                     boundary: boundary,
                     handle: handle,
@@ -172,6 +193,13 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(from: url)
         try validate(response: response, data: data)
         return try decode(TranscriptResponse.self, from: data, response: response)
+    }
+
+    func aircraft() async throws -> AircraftListResponse {
+        let url = serverURL.appending(path: "api/recordings/aircraft.php")
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validate(response: response, data: data)
+        return try decode(AircraftListResponse.self, from: data, response: response)
     }
 
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {

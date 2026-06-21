@@ -32,6 +32,34 @@ enum TranscriptStatus: String, Codable, CaseIterable {
     }
 }
 
+struct CockpitAircraft: Identifiable, Codable, Equatable {
+    var id: Int
+    var registration: String
+    var displayName: String
+    var aircraftType: String
+    var adsbHex: String
+    var homeAirport: String
+    var active: Bool
+
+    var label: String {
+        let name = displayName.isEmpty ? registration : displayName
+        if aircraftType.isEmpty {
+            return name
+        }
+        return "\(name) (\(aircraftType))"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case registration
+        case displayName = "display_name"
+        case aircraftType = "aircraft_type"
+        case adsbHex = "adsb_hex"
+        case homeAirport = "home_airport"
+        case active
+    }
+}
+
 struct Recording: Identifiable, Codable, Equatable {
     var id: String
     var serverID: String?
@@ -39,6 +67,11 @@ struct Recording: Identifiable, Codable, Equatable {
     var duration: TimeInterval
     var filePath: String
     var inputDeviceName: String
+    var aircraftID: Int?
+    var aircraftRegistration: String?
+    var aircraftDisplayName: String?
+    var aircraftType: String?
+    var aircraftADSBHex: String?
     var fileSize: Int64
     var uploadStatus: UploadStatus
     var transcriptStatus: TranscriptStatus
@@ -48,9 +81,22 @@ struct Recording: Identifiable, Codable, Equatable {
     var transcript: String
     var lastError: String
     var ahrsSamplesPath: String?
+    var gpsSamplesPath: String?
 
     var fileURL: URL {
         URL(fileURLWithPath: filePath)
+    }
+
+    var aircraftLabel: String {
+        let name = aircraftDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let registration = aircraftRegistration?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty {
+            return name
+        }
+        if !registration.isEmpty {
+            return registration
+        }
+        return "Not selected"
     }
 
     var statusLabel: String {
@@ -84,10 +130,33 @@ enum AHRSConnectionState: String {
 
 struct AHRSSample: Codable, Equatable {
     var timestamp: Date
+    var secondsSinceRecordingStart: Double
     var roll: Double
     var pitch: Double
     var yaw: Double
     var acceleration: Double
     var magneticHeading: Double
     var rawLine: String
+}
+
+enum GPSConnectionState: String {
+    case unavailable
+    case permissionNeeded
+    case ready
+    case recording
+    case denied
+    case failed
+}
+
+struct GPSSample: Codable, Equatable {
+    var timestamp: Date
+    var secondsSinceRecordingStart: Double
+    var latitude: Double
+    var longitude: Double
+    var altitude: Double
+    var speedMetersPerSecond: Double
+    var speedKnots: Double
+    var course: Double
+    var horizontalAccuracy: Double
+    var verticalAccuracy: Double
 }

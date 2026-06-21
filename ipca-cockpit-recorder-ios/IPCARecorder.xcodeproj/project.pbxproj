@@ -22,6 +22,8 @@
 		10000000000000000000000D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* SettingsView.swift */; };
 		10000000000000000000000E /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* LaunchScreen.storyboard */; };
 		10000000000000000000000F /* AHRSBLEManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* AHRSBLEManager.swift */; };
+		100000000000000000000010 /* GPSLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* GPSLocationManager.swift */; };
+		100000000000000000000011 /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* IPCATheme.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +44,8 @@
 		20000000000000000000000F /* IPCARecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCARecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000010 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		200000000000000000000011 /* AHRSBLEManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AHRSBLEManager.swift; sourceTree = "<group>"; };
+		200000000000000000000012 /* GPSLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationManager.swift; sourceTree = "<group>"; };
+		200000000000000000000013 /* IPCATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCATheme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +94,7 @@
 				200000000000000000000011 /* AHRSBLEManager.swift */,
 				200000000000000000000007 /* AudioRecorderManager.swift */,
 				200000000000000000000005 /* APIClient.swift */,
+				200000000000000000000012 /* GPSLocationManager.swift */,
 				200000000000000000000004 /* RecordingStore.swift */,
 				200000000000000000000003 /* SettingsStore.swift */,
 				200000000000000000000006 /* UploadManager.swift */,
@@ -101,6 +106,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000008 /* ContentView.swift */,
+				200000000000000000000013 /* IPCATheme.swift */,
 				200000000000000000000009 /* LevelMeterView.swift */,
 				20000000000000000000000C /* RecordingDetailView.swift */,
 				20000000000000000000000B /* RecordingsView.swift */,
@@ -193,6 +199,7 @@
 				100000000000000000000004 /* RecordingStore.swift in Sources */,
 				100000000000000000000005 /* APIClient.swift in Sources */,
 				10000000000000000000000F /* AHRSBLEManager.swift in Sources */,
+				100000000000000000000010 /* GPSLocationManager.swift in Sources */,
 				100000000000000000000006 /* UploadManager.swift in Sources */,
 				100000000000000000000007 /* AudioRecorderManager.swift in Sources */,
 				100000000000000000000008 /* ContentView.swift in Sources */,
@@ -201,6 +208,7 @@
 				10000000000000000000000B /* RecordingsView.swift in Sources */,
 				10000000000000000000000C /* RecordingDetailView.swift in Sources */,
 				10000000000000000000000D /* SettingsView.swift in Sources */,
+				100000000000000000000011 /* IPCATheme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

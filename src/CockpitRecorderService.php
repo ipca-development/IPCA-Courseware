@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/openai.php';
+require_once __DIR__ . '/CockpitAircraftService.php';
 
 /**
  * Cockpit Recorder POC storage, upload metadata, and stub transcription workflow.
@@ -29,6 +30,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/ahrs';
     }
 
+    public static function gpsRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/gps';
+    }
+
     public static function tablesPresent(PDO $pdo): bool
     {
         $stmt = $pdo->query("SHOW TABLES LIKE 'ipca_cockpit_recordings'");
@@ -46,9 +52,10 @@ final class CockpitRecorderService
      * @param array<string,mixed> $file
      * @param array<string,mixed> $metadata
      * @param array<string,mixed>|null $ahrsFile
+     * @param array<string,mixed>|null $gpsFile
      * @return array<string,mixed>
      */
-    public function storeUploadedRecording(array $file, array $metadata, ?array $ahrsFile = null): array
+    public function storeUploadedRecording(array $file, array $metadata, ?array $ahrsFile = null, ?array $gpsFile = null): array
     {
         $this->requireTables();
 
@@ -166,8 +173,16 @@ final class CockpitRecorderService
             throw new RuntimeException('Stored recording could not be loaded.');
         }
 
+        $this->storeRecordingAircraftSnapshot((int)$recording['id'], $metadata);
+        $recording = $this->recordingByUid($recordingUid) ?: $recording;
+
         if ($ahrsFile !== null && $this->isPresentUpload($ahrsFile)) {
             $this->storeUploadedAHRS((int)$recording['id'], $recordingUid, $ahrsFile);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($gpsFile !== null && $this->isPresentUpload($gpsFile)) {
+            $this->storeUploadedGPS((int)$recording['id'], $recordingUid, $gpsFile);
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -317,6 +332,33 @@ final class CockpitRecorderService
     }
 
     /**
+     * @return array{path:string,mime:string,filename:string}|null
+     */
+    public function gpsFileForRecording(string $id): ?array
+    {
+        $recording = $this->recordingByAnyId($id);
+        if (!$recording) {
+            return null;
+        }
+        $relativePath = (string)($recording['gps_storage_path'] ?? '');
+        if ($relativePath === '') {
+            return null;
+        }
+        $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
+        $realPath = realpath($path);
+        $root = realpath(self::gpsRoot());
+        if ($root === false || $realPath === false || !str_starts_with($realPath, $root) || !is_file($realPath)) {
+            return null;
+        }
+        $filename = (string)($recording['recording_uid'] ?? 'recording') . '.gps.json';
+        return array(
+            'path' => $realPath,
+            'mime' => 'application/json',
+            'filename' => $filename,
+        );
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public function processTranscription(int $recordingId): array
@@ -441,6 +483,11 @@ final class CockpitRecorderService
             'started_at' => $recording['started_at'] ?? null,
             'duration' => (float)($recording['duration_seconds'] ?? 0),
             'input_device' => (string)($recording['input_device'] ?? ''),
+            'aircraft_id' => (int)($recording['aircraft_id'] ?? 0),
+            'aircraft_registration' => (string)($recording['aircraft_registration'] ?? ''),
+            'aircraft_display_name' => (string)($recording['aircraft_display_name'] ?? ''),
+            'aircraft_type' => (string)($recording['aircraft_type'] ?? ''),
+            'aircraft_adsb_hex' => (string)($recording['aircraft_adsb_hex'] ?? ''),
             'language' => (string)($recording['language'] ?? 'en'),
             'upload_status' => (string)($recording['upload_status'] ?? 'pending'),
             'transcription_status' => (string)($recording['transcription_status'] ?? 'pending'),
@@ -449,6 +496,9 @@ final class CockpitRecorderService
             'ahrs_available' => trim((string)($recording['ahrs_storage_path'] ?? '')) !== '',
             'ahrs_file_size' => (int)($recording['ahrs_file_size_bytes'] ?? 0),
             'ahrs_sample_count' => (int)($recording['ahrs_sample_count'] ?? 0),
+            'gps_available' => trim((string)($recording['gps_storage_path'] ?? '')) !== '',
+            'gps_file_size' => (int)($recording['gps_file_size_bytes'] ?? 0),
+            'gps_sample_count' => (int)($recording['gps_sample_count'] ?? 0),
             'original_filename' => (string)($recording['original_filename'] ?? ''),
             'uploaded_at' => $recording['uploaded_at'] ?? null,
             'created_at' => $recording['created_at'] ?? null,
@@ -524,6 +574,70 @@ final class CockpitRecorderService
     /**
      * @param array<string,mixed> $file
      */
+    private function storeUploadedGPS(int $recordingId, string $recordingUid, array $file): void
+    {
+        if (!$this->hasColumn('gps_storage_path')) {
+            return;
+        }
+
+        $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err === UPLOAD_ERR_NO_FILE) {
+            return;
+        }
+        if ($err !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('GPS upload failed: ' . self::uploadErrorText($err));
+        }
+
+        $tmp = (string)($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new RuntimeException('Invalid GPS upload.');
+        }
+
+        $size = (int)($file['size'] ?? 0);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 25 * 1024 * 1024) {
+            throw new RuntimeException('GPS JSON is too large (max 25 MB).');
+        }
+
+        $raw = file_get_contents($tmp);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Could not read GPS JSON.');
+        }
+
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new RuntimeException('Invalid GPS JSON: ' . $e->getMessage());
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException('GPS JSON must be an array of samples.');
+        }
+
+        $sampleCount = count($decoded);
+        $relativePath = self::relativeGPSPath($recordingUid);
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+
+        if (!move_uploaded_file($tmp, $absolutePath)) {
+            throw new RuntimeException('Could not store GPS JSON.');
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET gps_storage_path = ?,
+                gps_file_size_bytes = ?,
+                gps_sample_count = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
+        $stmt->execute(array($relativePath, $size, $sampleCount, $recordingId));
+    }
+
+    /**
+     * @param array<string,mixed> $file
+     */
     private function isPresentUpload(array $file): bool
     {
         return (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
@@ -546,6 +660,48 @@ final class CockpitRecorderService
         $stmt->execute(array(self::TABLE, $columnName));
         $cache[$columnName] = (int)$stmt->fetchColumn() > 0;
         return (bool)$cache[$columnName];
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
+    private function storeRecordingAircraftSnapshot(int $recordingId, array $metadata): void
+    {
+        if ($recordingId <= 0 || !$this->hasColumn('aircraft_id')) {
+            return;
+        }
+
+        $aircraftId = (int)($metadata['aircraft_id'] ?? 0);
+        if ($aircraftId <= 0 || !CockpitAircraftService::tablesPresent($this->pdo)) {
+            return;
+        }
+
+        $aircraftService = new CockpitAircraftService($this->pdo);
+        $aircraft = $aircraftService->aircraftById($aircraftId);
+        if (!$aircraft) {
+            return;
+        }
+
+        $sets = array('aircraft_id = ?');
+        $values = array($aircraftId);
+        $columns = array(
+            'aircraft_registration' => (string)($aircraft['registration'] ?? ''),
+            'aircraft_display_name' => (string)($aircraft['display_name'] ?? ''),
+            'aircraft_type' => (string)($aircraft['aircraft_type'] ?? ''),
+            'aircraft_adsb_hex' => (string)($aircraft['adsb_hex'] ?? ''),
+        );
+
+        foreach ($columns as $column => $value) {
+            if ($this->hasColumn($column)) {
+                $sets[] = $column . ' = ?';
+                $values[] = $value;
+            }
+        }
+
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $values[] = $recordingId;
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->execute($values);
     }
 
     /**
@@ -697,6 +853,12 @@ final class CockpitRecorderService
     {
         $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
         return 'storage/cockpit_recorder/ahrs/' . gmdate('Y/m/d') . '/' . $safeUid . '.ahrs.json';
+    }
+
+    private static function relativeGPSPath(string $recordingUid): string
+    {
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
+        return 'storage/cockpit_recorder/gps/' . gmdate('Y/m/d') . '/' . $safeUid . '.gps.json';
     }
 
     private static function ensureDirectory(string $dir): void

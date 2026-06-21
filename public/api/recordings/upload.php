@@ -33,12 +33,14 @@ try {
         'started_at' => $_POST['started_at'] ?? '',
         'duration' => $_POST['duration'] ?? 0,
         'input_device' => $_POST['input_device'] ?? '',
+        'aircraft_id' => $_POST['aircraft_id'] ?? 0,
         'language' => $_POST['language'] ?? 'en',
     );
 
     $service = new CockpitRecorderService($pdo);
     $ahrsFile = isset($_FILES['ahrs']) && is_array($_FILES['ahrs']) ? $_FILES['ahrs'] : null;
-    cockpit_upload_json(200, $service->storeUploadedRecording($_FILES['audio'], $metadata, $ahrsFile));
+    $gpsFile = isset($_FILES['gps']) && is_array($_FILES['gps']) ? $_FILES['gps'] : null;
+    cockpit_upload_json(200, $service->storeUploadedRecording($_FILES['audio'], $metadata, $ahrsFile, $gpsFile));
 } catch (Throwable $e) {
     cockpit_upload_json(400, array('ok' => false, 'error' => $e->getMessage()));
 }
