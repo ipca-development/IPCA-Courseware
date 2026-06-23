@@ -30,8 +30,13 @@ try {
         $recording = $payload['recording'];
         $status = (string)($recording['transcription_status'] ?? '');
         $progress = (int)($recording['progress'] ?? 0);
+        $duration = (float)($recording['duration'] ?? 0);
         if ($status === 'queued' || ($status === 'transcribing' && $progress === 0)) {
-            $service->processStubTranscription((int)($recording['id'] ?? 0));
+            if ($duration > 300) {
+                $service->spawnTranscriptionWorker((int)($recording['id'] ?? 0));
+            } else {
+                $service->processStubTranscription((int)($recording['id'] ?? 0));
+            }
             $payload = $service->status($id);
         }
     }

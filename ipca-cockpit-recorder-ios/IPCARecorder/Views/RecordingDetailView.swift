@@ -70,7 +70,7 @@ struct RecordingDetailView: View {
         IPCACard(title: "Transcript", systemImage: "text.quote") {
             if recording.transcript.isEmpty {
                 Text("Transcript not ready.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
             } else {
                 Text(recording.transcript)
                     .textSelection(.enabled)

@@ -15,6 +15,13 @@ final class GPSLocationManager: NSObject, ObservableObject {
 
     func prepare() {
         ensureManager()
+        requestPermissionIfNeeded()
+        updateAuthorizationState()
+    }
+
+    func requestPermission() {
+        ensureManager()
+        requestPermissionIfNeeded()
         updateAuthorizationState()
     }
 
@@ -63,7 +70,14 @@ final class GPSLocationManager: NSObject, ObservableObject {
             let url = directory.appendingPathComponent("\(recordingID).gps.json")
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .custom(Self.encodeFractionalUTCDate)
+            encoder.dateEncodingStrategy = .custom { @Sendable date, encoder in
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+                var container = encoder.singleValueContainer()
+                try container.encode(formatter.string(from: date))
+            }
             let data = try encoder.encode(capturedSamples)
             try data.write(to: url, options: [.atomic])
             capturedSamples = []
@@ -88,6 +102,17 @@ final class GPSLocationManager: NSObject, ObservableObject {
             manager.activityType = .otherNavigation
         }
         locationManager = manager
+    }
+
+    private func requestPermissionIfNeeded() {
+        guard let locationManager else {
+            state = .unavailable
+            return
+        }
+        if locationManager.authorizationStatus == .notDetermined {
+            state = .permissionNeeded
+            locationManager.requestWhenInUseAuthorization()
+        }
     }
 
     private func startLocationUpdates() {
@@ -141,17 +166,6 @@ final class GPSLocationManager: NSObject, ObservableObject {
         }
     }
 
-    private static func encodeFractionalUTCDate(_ date: Date, encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(fractionalUTCFormatter.string(from: date))
-    }
-
-    private static let fractionalUTCFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }()
 }
 
 extension GPSLocationManager: CLLocationManagerDelegate {

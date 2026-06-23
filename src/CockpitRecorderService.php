@@ -10,6 +10,8 @@ require_once __DIR__ . '/CockpitAircraftService.php';
 final class CockpitRecorderService
 {
     private const TABLE = 'ipca_cockpit_recordings';
+    private const CHUNK_TABLE = 'ipca_cockpit_recording_transcription_chunks';
+    private const TRANSCRIPTION_CHUNK_SECONDS = 300.0;
 
     public function __construct(private PDO $pdo)
     {
@@ -38,6 +40,12 @@ final class CockpitRecorderService
     public static function tablesPresent(PDO $pdo): bool
     {
         $stmt = $pdo->query("SHOW TABLES LIKE 'ipca_cockpit_recordings'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    }
+
+    public static function transcriptionChunkTablePresent(PDO $pdo): bool
+    {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'ipca_cockpit_recording_transcription_chunks'");
         return $stmt !== false && $stmt->fetchColumn() !== false;
     }
 
@@ -186,6 +194,9 @@ final class CockpitRecorderService
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
+        $this->storeRecordingHealthAnalysis((int)$recording['id']);
+        $recording = $this->recordingByUid($recordingUid) ?: $recording;
+
         $workerSpawned = $this->spawnTranscriptionWorker((int)$recording['id']);
 
         return array(
@@ -230,6 +241,27 @@ final class CockpitRecorderService
             LIMIT " . $limit
         );
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function adminTranscriptionChunks(int $recordingId): array
+    {
+        $this->requireTables();
+        if ($recordingId <= 0 || !self::transcriptionChunkTablePresent($this->pdo)) {
+            return array();
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM " . self::CHUNK_TABLE . "
+            WHERE recording_id = ?
+            ORDER BY chunk_index ASC
+        ");
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
     }
 
@@ -389,17 +421,33 @@ final class CockpitRecorderService
             WHERE id = ?
         ")->execute(array($recordingId));
 
-        $transcript = $this->transcribeWithOpenAI($recording);
+        $duration = (float)($recording['duration_seconds'] ?? 0);
+        $result = $duration > self::TRANSCRIPTION_CHUNK_SECONDS
+            ? $this->transcribeWithOpenAIChunks($recording)
+            : array(
+                'status' => 'ready',
+                'text' => $this->transcribeWithOpenAI($recording),
+                'error' => null,
+            );
+
+        $status = (string)($result['status'] ?? 'failed');
+        if (!in_array($status, array('ready', 'failed'), true)) {
+            $status = 'failed';
+        }
+        $transcript = trim((string)($result['text'] ?? ''));
+        $error = trim((string)($result['error'] ?? ''));
+        $progress = $status === 'ready' ? 100 : 0;
 
         $this->pdo->prepare("
             UPDATE " . self::TABLE . "
-            SET transcription_status = 'ready',
-                transcription_progress = 100,
+            SET transcription_status = ?,
+                transcription_progress = ?,
                 transcript_text = ?,
+                error_message = ?,
                 transcription_completed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        ")->execute(array($transcript, $recordingId));
+        ")->execute(array($status, $progress, $transcript !== '' ? $transcript : null, $error !== '' ? $error : null, $recordingId));
 
         $updated = $this->recordingByAnyId((string)$recordingId);
 
@@ -499,6 +547,8 @@ final class CockpitRecorderService
             'gps_available' => trim((string)($recording['gps_storage_path'] ?? '')) !== '',
             'gps_file_size' => (int)($recording['gps_file_size_bytes'] ?? 0),
             'gps_sample_count' => (int)($recording['gps_sample_count'] ?? 0),
+            'health_warning_count' => (int)($recording['health_warning_count'] ?? 0),
+            'health_analyzed_at' => $recording['health_analyzed_at'] ?? null,
             'original_filename' => (string)($recording['original_filename'] ?? ''),
             'uploaded_at' => $recording['uploaded_at'] ?? null,
             'created_at' => $recording['created_at'] ?? null,
@@ -704,10 +754,356 @@ final class CockpitRecorderService
         $stmt->execute($values);
     }
 
+    private function storeRecordingHealthAnalysis(int $recordingId): void
+    {
+        if ($recordingId <= 0 || !$this->hasColumn('health_summary_json')) {
+            return;
+        }
+
+        $recording = $this->recordingByAnyId((string)$recordingId);
+        if (!$recording) {
+            return;
+        }
+
+        try {
+            $summary = $this->buildRecordingHealthSummary($recording);
+        } catch (Throwable $e) {
+            $summary = array(
+                'analyzed_at' => gmdate('c'),
+                'audio' => array(),
+                'ahrs' => array(),
+                'gps' => array(),
+                'warnings' => array('Health analysis failed: ' . $e->getMessage()),
+            );
+        }
+
+        $warnings = isset($summary['warnings']) && is_array($summary['warnings']) ? $summary['warnings'] : array();
+        $json = json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return;
+        }
+
+        $sets = array('health_summary_json = ?');
+        $values = array($json);
+        if ($this->hasColumn('health_warning_count')) {
+            $sets[] = 'health_warning_count = ?';
+            $values[] = count($warnings);
+        }
+        if ($this->hasColumn('health_analyzed_at')) {
+            $sets[] = 'health_analyzed_at = CURRENT_TIMESTAMP';
+        }
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $values[] = $recordingId;
+
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->execute($values);
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array<string,mixed>
+     */
+    private function buildRecordingHealthSummary(array $recording): array
+    {
+        $warnings = array();
+        $audioPath = $this->safeStoredPath((string)($recording['storage_path'] ?? ''), self::audioRoot());
+        $audioPresent = $audioPath !== null && is_file($audioPath);
+
+        if ((string)($recording['upload_status'] ?? '') !== 'uploaded') {
+            $warnings[] = 'Incomplete upload: upload status is ' . (string)($recording['upload_status'] ?? 'unknown') . '.';
+        }
+        if (!$audioPresent || (int)($recording['file_size_bytes'] ?? 0) <= 0) {
+            $warnings[] = 'Incomplete upload: audio file is missing or empty.';
+        }
+
+        $ahrsPath = $this->safeStoredPath((string)($recording['ahrs_storage_path'] ?? ''), self::ahrsRoot());
+        if ($ahrsPath === null) {
+            $ahrs = $this->emptySensorHealth();
+            $warnings[] = 'Missing AHRS JSON.';
+        } else {
+            $ahrs = $this->analyzeSensorJson($ahrsPath, 'AHRS', 2.0, 1.5);
+            $warnings = array_merge($warnings, $ahrs['warnings']);
+            unset($ahrs['warnings']);
+        }
+
+        $gpsPath = $this->safeStoredPath((string)($recording['gps_storage_path'] ?? ''), self::gpsRoot());
+        if ($gpsPath === null) {
+            $gps = $this->emptySensorHealth();
+            $gps['max_groundspeed_kt'] = null;
+            $gps['first_coordinate'] = null;
+            $gps['last_coordinate'] = null;
+            $warnings[] = 'Missing GPS JSON.';
+        } else {
+            $gps = $this->analyzeSensorJson($gpsPath, 'GPS', 0.5, 5.0);
+            $warnings = array_merge($warnings, $gps['warnings']);
+            unset($gps['warnings']);
+        }
+
+        return array(
+            'analyzed_at' => gmdate('c'),
+            'audio' => array(
+                'duration_seconds' => (float)($recording['duration_seconds'] ?? 0),
+                'file_size_bytes' => (int)($recording['file_size_bytes'] ?? 0),
+                'file_present' => $audioPresent,
+            ),
+            'ahrs' => $ahrs,
+            'gps' => $gps,
+            'warnings' => array_values(array_unique($warnings)),
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function emptySensorHealth(): array
+    {
+        return array(
+            'sample_count' => 0,
+            'first_timestamp' => null,
+            'last_timestamp' => null,
+            'average_sample_rate_hz' => null,
+            'max_timestamp_gap_seconds' => null,
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function analyzeSensorJson(string $path, string $label, float $lowRateThresholdHz, float $gapThresholdSeconds): array
+    {
+        $health = $this->emptySensorHealth();
+        $health['warnings'] = array();
+        if ($label === 'GPS') {
+            $health['max_groundspeed_kt'] = null;
+            $health['first_coordinate'] = null;
+            $health['last_coordinate'] = null;
+        }
+
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            $health['warnings'][] = $label . ' JSON is missing or empty.';
+            return $health;
+        }
+
+        try {
+            $samples = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            $health['warnings'][] = $label . ' JSON is invalid: ' . $e->getMessage() . '.';
+            return $health;
+        }
+
+        if (!is_array($samples)) {
+            $health['warnings'][] = $label . ' JSON is not an array of samples.';
+            return $health;
+        }
+
+        $health['sample_count'] = count($samples);
+        if (count($samples) === 0) {
+            $health['warnings'][] = $label . ' JSON contains no samples.';
+            return $health;
+        }
+
+        $firstTime = null;
+        $lastTime = null;
+        $previousSeconds = null;
+        $maxGap = null;
+        $maxGroundspeed = null;
+        $firstCoordinate = null;
+        $lastCoordinate = null;
+
+        foreach ($samples as $sample) {
+            if (!is_array($sample)) {
+                continue;
+            }
+
+            $timestamp = isset($sample['timestamp']) ? (string)$sample['timestamp'] : '';
+            $seconds = self::parseTimestampSeconds($timestamp);
+            if ($timestamp !== '' && $seconds !== null) {
+                if ($firstTime === null) {
+                    $firstTime = $timestamp;
+                }
+                $lastTime = $timestamp;
+                if ($previousSeconds !== null) {
+                    $gap = $seconds - $previousSeconds;
+                    if ($gap >= 0 && ($maxGap === null || $gap > $maxGap)) {
+                        $maxGap = $gap;
+                    }
+                }
+                $previousSeconds = $seconds;
+            }
+
+            if ($label === 'GPS') {
+                $lat = $sample['latitude'] ?? null;
+                $lon = $sample['longitude'] ?? null;
+                if (is_numeric($lat) && is_numeric($lon)) {
+                    $coordinate = array('latitude' => (float)$lat, 'longitude' => (float)$lon);
+                    if ($firstCoordinate === null) {
+                        $firstCoordinate = $coordinate;
+                    }
+                    $lastCoordinate = $coordinate;
+                }
+
+                $speedKt = null;
+                if (isset($sample['speedKnots']) && is_numeric($sample['speedKnots'])) {
+                    $speedKt = (float)$sample['speedKnots'];
+                } elseif (isset($sample['speedMetersPerSecond']) && is_numeric($sample['speedMetersPerSecond'])) {
+                    $speedKt = (float)$sample['speedMetersPerSecond'] * 1.943844492;
+                }
+                if ($speedKt !== null && ($maxGroundspeed === null || $speedKt > $maxGroundspeed)) {
+                    $maxGroundspeed = $speedKt;
+                }
+            }
+        }
+
+        $health['first_timestamp'] = $firstTime;
+        $health['last_timestamp'] = $lastTime;
+        $health['max_timestamp_gap_seconds'] = $maxGap;
+
+        $firstSeconds = self::parseTimestampSeconds((string)$firstTime);
+        $lastSeconds = self::parseTimestampSeconds((string)$lastTime);
+        if ($firstSeconds !== null && $lastSeconds !== null && $lastSeconds > $firstSeconds && count($samples) > 1) {
+            $health['average_sample_rate_hz'] = (count($samples) - 1) / ($lastSeconds - $firstSeconds);
+        }
+
+        if ($health['average_sample_rate_hz'] !== null && (float)$health['average_sample_rate_hz'] < $lowRateThresholdHz) {
+            $health['warnings'][] = sprintf('%s sample rate is low: %.2f Hz.', $label, (float)$health['average_sample_rate_hz']);
+        }
+        if ($maxGap !== null && $maxGap > $gapThresholdSeconds) {
+            $health['warnings'][] = sprintf('%s timestamp gap detected: %.2f seconds.', $label, $maxGap);
+        }
+        if ($firstTime === null || $lastTime === null) {
+            $health['warnings'][] = $label . ' timestamps are missing or invalid.';
+        }
+
+        if ($label === 'GPS') {
+            $health['max_groundspeed_kt'] = $maxGroundspeed;
+            $health['first_coordinate'] = $firstCoordinate;
+            $health['last_coordinate'] = $lastCoordinate;
+        }
+
+        return $health;
+    }
+
+    private function safeStoredPath(string $relativePath, string $root): ?string
+    {
+        $relativePath = trim($relativePath);
+        if ($relativePath === '') {
+            return null;
+        }
+        $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
+        $realPath = realpath($path);
+        $realRoot = realpath($root);
+        if ($realPath === false || $realRoot === false || !str_starts_with($realPath, $realRoot) || !is_file($realPath)) {
+            return null;
+        }
+        return $realPath;
+    }
+
+    private static function parseTimestampSeconds(string $timestamp): ?float
+    {
+        $timestamp = trim($timestamp);
+        if ($timestamp === '') {
+            return null;
+        }
+        try {
+            $dt = new DateTimeImmutable($timestamp);
+            return (float)$dt->format('U.u');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     /**
      * @param array<string,mixed> $recording
      */
     private function transcribeWithOpenAI(array $recording): string
+    {
+        $realPath = $this->transcriptionAudioPath($recording);
+        $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
+        $mime = mime_content_type($realPath) ?: ((string)($recording['mime_type'] ?? '') ?: 'audio/mp4');
+        return $this->transcribeAudioFile($realPath, $mime, basename($realPath), $language);
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array{status:string,text:string,error:?string}
+     */
+    private function transcribeWithOpenAIChunks(array $recording): array
+    {
+        if (!self::transcriptionChunkTablePresent($this->pdo)) {
+            throw new RuntimeException('Apply scripts/sql/2026_06_22_cockpit_recorder_transcription_chunks.sql before transcribing long recordings.');
+        }
+
+        $recordingId = (int)($recording['id'] ?? 0);
+        if ($recordingId <= 0) {
+            throw new RuntimeException('Recording id is missing for chunked transcription.');
+        }
+
+        $realPath = $this->transcriptionAudioPath($recording);
+        $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+        if ($duration <= 0) {
+            $duration = self::TRANSCRIPTION_CHUNK_SECONDS;
+        }
+
+        $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
+        $chunkCount = max(1, (int)ceil($duration / self::TRANSCRIPTION_CHUNK_SECONDS));
+        $this->resetTranscriptionChunks($recordingId);
+
+        $texts = array();
+        $failedChunks = array();
+
+        for ($index = 0; $index < $chunkCount; $index++) {
+            $start = $index * self::TRANSCRIPTION_CHUNK_SECONDS;
+            $end = min($duration, $start + self::TRANSCRIPTION_CHUNK_SECONDS);
+            if ($end <= $start) {
+                $end = $start + self::TRANSCRIPTION_CHUNK_SECONDS;
+            }
+
+            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'queued', 0, null, null);
+            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'transcribing', 0, null, null);
+            $chunkPath = '';
+
+            try {
+                $chunkPath = $this->extractAudioChunk($realPath, $start, $end - $start, (string)($recording['recording_uid'] ?? 'recording'), $index);
+                $mime = mime_content_type($chunkPath) ?: 'audio/mp4';
+                $text = $this->transcribeAudioFile($chunkPath, $mime, basename($chunkPath), $language);
+                $texts[] = $text;
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
+            } catch (Throwable $e) {
+                $message = $e->getMessage();
+                $failedChunks[] = $index;
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'failed', 0, null, $message);
+            } finally {
+                if ($chunkPath !== '' && is_file($chunkPath)) {
+                    @unlink($chunkPath);
+                }
+            }
+
+            $progress = min(95, 10 + (int)round((($index + 1) / $chunkCount) * 85));
+            $this->pdo->prepare("
+                UPDATE " . self::TABLE . "
+                SET transcription_progress = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ")->execute(array($progress, $recordingId));
+        }
+
+        $combined = trim(implode("\n\n", array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== '')));
+        if ($failedChunks) {
+            $failedLabel = implode(', ', array_map(fn(int $i): string => (string)($i + 1), $failedChunks));
+            $message = 'Partial transcript: chunk(s) ' . $failedLabel . ' failed. '
+                . ($combined !== '' ? 'Partial transcript retained.' : 'No usable transcript text was returned.');
+            return array('status' => 'failed', 'text' => $combined, 'error' => $message);
+        }
+
+        if ($combined === '') {
+            return array('status' => 'failed', 'text' => '', 'error' => 'Chunked transcription returned no text.');
+        }
+
+        return array('status' => 'ready', 'text' => $combined, 'error' => null);
+    }
+
+    private function transcriptionAudioPath(array $recording): string
     {
         $relativePath = (string)($recording['storage_path'] ?? '');
         $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
@@ -717,17 +1113,20 @@ final class CockpitRecorderService
             throw new RuntimeException('Uploaded audio file is missing.');
         }
 
+        return $realPath;
+    }
+
+    private function transcribeAudioFile(string $realPath, string $mime, string $filename, string $language): string
+    {
         $model = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: ''));
         if ($model === '') {
             $model = 'gpt-4o-transcribe';
         }
 
-        $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
         $prompt = self::transcriptionPrompt();
-        $mime = mime_content_type($realPath) ?: ((string)($recording['mime_type'] ?? '') ?: 'audio/mp4');
 
         $postFields = array(
-            'file' => new CURLFile($realPath, $mime, basename($realPath)),
+            'file' => new CURLFile($realPath, $mime, $filename),
             'model' => $model,
             'prompt' => $prompt,
             'response_format' => 'json',
@@ -772,6 +1171,140 @@ final class CockpitRecorderService
         }
 
         return $text;
+    }
+
+    private function resetTranscriptionChunks(int $recordingId): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM ' . self::CHUNK_TABLE . ' WHERE recording_id = ?');
+        $stmt->execute(array($recordingId));
+    }
+
+    private function storeTranscriptionChunk(
+        int $recordingId,
+        int $index,
+        float $start,
+        float $end,
+        string $status,
+        int $textLength,
+        ?string $text,
+        ?string $error
+    ): void {
+        $stmt = $this->pdo->prepare("
+            INSERT INTO " . self::CHUNK_TABLE . " (
+                recording_id,
+                chunk_index,
+                start_seconds,
+                end_seconds,
+                status,
+                text_length,
+                transcript_text,
+                error_message,
+                created_at,
+                updated_at
+            ) VALUES (
+                :recording_id,
+                :chunk_index,
+                :start_seconds,
+                :end_seconds,
+                :status,
+                :text_length,
+                :transcript_text,
+                :error_message,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            ON DUPLICATE KEY UPDATE
+                start_seconds = VALUES(start_seconds),
+                end_seconds = VALUES(end_seconds),
+                status = VALUES(status),
+                text_length = VALUES(text_length),
+                transcript_text = VALUES(transcript_text),
+                error_message = VALUES(error_message),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        $stmt->execute(array(
+            ':recording_id' => $recordingId,
+            ':chunk_index' => $index,
+            ':start_seconds' => $start,
+            ':end_seconds' => $end,
+            ':status' => $status,
+            ':text_length' => max(0, $textLength),
+            ':transcript_text' => $text,
+            ':error_message' => $error !== null ? substr($error, 0, 2000) : null,
+        ));
+    }
+
+    private function extractAudioChunk(string $sourcePath, float $startSeconds, float $durationSeconds, string $recordingUid, int $index): string
+    {
+        if (!self::shellExecAvailable()) {
+            throw new RuntimeException('ffmpeg chunking requires shell_exec to be available.');
+        }
+
+        $ffmpeg = self::findBinary(array('/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg', '/bin/ffmpeg', 'ffmpeg'));
+        if ($ffmpeg === '') {
+            throw new RuntimeException('ffmpeg is required for long recording chunked transcription.');
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'ipca_cvr_chunk_');
+        if ($tmp === false) {
+            throw new RuntimeException('Could not create temporary audio chunk.');
+        }
+        @unlink($tmp);
+
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: 'recording';
+        $outPath = $tmp . '_' . $safeUid . '_' . $index . '.m4a';
+        $cmd = escapeshellcmd($ffmpeg)
+            . ' -y -v error'
+            . ' -ss ' . escapeshellarg(sprintf('%.3F', max(0.0, $startSeconds)))
+            . ' -t ' . escapeshellarg(sprintf('%.3F', max(1.0, $durationSeconds)))
+            . ' -i ' . escapeshellarg($sourcePath)
+            . ' -vn -ac 1 -ar 44100 -c:a aac -b:a 96k '
+            . escapeshellarg($outPath)
+            . ' 2>&1';
+
+        $output = (string)@shell_exec($cmd);
+        if (!is_file($outPath) || filesize($outPath) <= 0) {
+            @unlink($outPath);
+            throw new RuntimeException('Failed to extract audio chunk. ' . trim($output));
+        }
+
+        return $outPath;
+    }
+
+    /**
+     * @param list<string> $candidates
+     */
+    private static function findBinary(array $candidates): string
+    {
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+            if (str_contains($candidate, '/') && is_executable($candidate)) {
+                return $candidate;
+            }
+            if (!str_contains($candidate, '/') && self::shellExecAvailable()) {
+                $resolved = trim((string)@shell_exec('command -v ' . escapeshellarg($candidate) . ' 2>/dev/null'));
+                if ($resolved !== '' && is_executable($resolved)) {
+                    return $resolved;
+                }
+            }
+        }
+        return '';
+    }
+
+    private static function shellExecAvailable(): bool
+    {
+        if (!function_exists('shell_exec')) {
+            return false;
+        }
+        $disabled = (string)ini_get('disable_functions');
+        if ($disabled === '') {
+            return true;
+        }
+        $parts = array_map('trim', explode(',', $disabled));
+        return !in_array('shell_exec', $parts, true);
     }
 
     private static function transcriptionPrompt(): string

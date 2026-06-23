@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var audio: AudioRecorderManager
+    @EnvironmentObject private var gps: GPSLocationManager
 
     var body: some View {
         NavigationStack {
@@ -15,8 +16,10 @@ struct SettingsView: View {
                     )
 
                     serverCard
+                    appearanceCard
                     languageCard
                     aircraftCard
+                    locationCard
                     debugAudioCard
                 }
                 .padding()
@@ -24,6 +27,23 @@ struct SettingsView: View {
             .background(IPCATheme.pageBackground.ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var appearanceCard: some View {
+        IPCACard(title: "Appearance", systemImage: "app.badge") {
+                    Picker("App logo style", selection: $settings.logoStyle) {
+                        ForEach(settings.supportedLogoStyles, id: \.code) { style in
+                            Text(style.label).tag(style.code)
+                        }
+                    }
+
+                    HStack(spacing: 14) {
+                        IPCALogoMark(compact: true)
+                        Text("This logo style is used in the app headers.")
+                            .font(.caption)
+                            .foregroundStyle(IPCATheme.secondaryText)
+                    }
         }
     }
 
@@ -35,7 +55,7 @@ struct SettingsView: View {
                         .keyboardType(.URL)
                     Text(settings.serverURLHelp)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(IPCATheme.secondaryText)
                     LabeledContent("Normalized server", value: settings.normalizedServerURL?.absoluteString ?? "Invalid")
                     LabeledContent("Upload endpoint", value: settings.uploadEndpointPreview)
                     LabeledContent("Aircraft endpoint", value: settings.aircraftEndpointPreview)
@@ -78,11 +98,29 @@ struct SettingsView: View {
                         }
                     } else {
                         Text("Select an aircraft before recording to attach the ownship ADS-B hex to the upload.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(IPCATheme.secondaryText)
                     }
 
                     if !settings.aircraftError.isEmpty {
                         Text(settings.aircraftError).foregroundStyle(IPCATheme.danger)
+                    }
+        }
+    }
+
+    private var locationCard: some View {
+        IPCACard(title: "GPS Location", systemImage: "location.circle") {
+                    LabeledContent("Permission state", value: gps.state.rawValue)
+
+                    Button("Request GPS Permission") {
+                        gps.requestPermission()
+                    }
+
+                    Text("The app appears in iPadOS Location Services after it asks for GPS permission at least once.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+
+                    if !gps.lastError.isEmpty {
+                        Text(gps.lastError).foregroundStyle(IPCATheme.danger)
                     }
         }
     }
@@ -95,7 +133,7 @@ struct SettingsView: View {
 
                     if audio.availableInputs.isEmpty {
                         Text("No inputs reported by AVAudioSession.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(IPCATheme.secondaryText)
                     }
 
                     ForEach(audio.availableInputs) { input in
@@ -114,7 +152,7 @@ struct SettingsView: View {
                             }
                             Text(input.portType)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(IPCATheme.secondaryText)
                         }
                     }
         }

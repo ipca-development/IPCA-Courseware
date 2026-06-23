@@ -18,6 +18,7 @@ struct IPCARecorderApp: App {
                 .environmentObject(uploadManager)
                 .environmentObject(ahrsBLE)
                 .environmentObject(gps)
+                .preferredColorScheme(.light)
                 .task {
                     await recordingStore.load()
                     ahrsBLE.start()

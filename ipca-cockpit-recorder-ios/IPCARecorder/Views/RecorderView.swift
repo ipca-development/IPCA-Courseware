@@ -7,6 +7,8 @@ struct RecorderView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var ahrsBLE: AHRSBLEManager
     @EnvironmentObject private var gps: GPSLocationManager
+    @State private var lastAudioLevelStatusSentAt = Date.distantPast
+    @State private var lastAudioLevelStatusPct = -100
 
     var body: some View {
         NavigationStack {
@@ -38,7 +40,7 @@ struct RecorderView: View {
                 sendGPSStatus()
             }
             .onChange(of: audio.level) { _, level in
-                ahrsBLE.sendStatusCommand("AUDIOLEVEL=\(Int(max(0, min(1, level)) * 100))")
+                sendThrottledAudioLevelStatus(level)
             }
             .onChange(of: audio.isUSBActive) { _, isUSBActive in
                 ahrsBLE.sendStatusCommand(isUSBActive ? "AUDIO=1" : "AUDIO=0")
@@ -61,7 +63,7 @@ struct RecorderView: View {
         IPCACard(title: "Aircraft", systemImage: "airplane.circle") {
             if settings.aircraft.isEmpty {
                 Text("No active aircraft loaded. Add aircraft in the Courseware admin page, then refresh.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
             } else {
                 Picker("Selected aircraft", selection: $settings.selectedAircraftID) {
                     Text("Not selected").tag(0)
@@ -121,7 +123,7 @@ struct RecorderView: View {
             if audio.availableInputs.isEmpty {
                 Text("No inputs reported. Tap Refresh Inputs after connecting the USB interface.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
             }
             ForEach(audio.availableInputs) { input in
                 HStack {
@@ -130,7 +132,7 @@ struct RecorderView: View {
                             .font(.subheadline)
                         Text(input.portType)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(IPCATheme.secondaryText)
                     }
                     Spacer()
                     if input.id == audio.selectedInputID {
@@ -164,7 +166,7 @@ struct RecorderView: View {
                 Text("Peak \(Formatters.decibels(audio.peakPowerDB))")
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(IPCATheme.secondaryText)
             if audio.isRecording && audio.level < 0.02 && audio.peakLevel < 0.02 {
                 Text("No meaningful input level detected yet. Check the USB interface gain, cabling, and selected input.")
                     .font(.caption)
@@ -176,6 +178,8 @@ struct RecorderView: View {
                     Task {
                         let started = await audio.startRecording(language: settings.language)
                         if started, let recordingID = audio.activeRecordingID, let startedAt = audio.activeRecordingStartedAt {
+                            lastAudioLevelStatusSentAt = .distantPast
+                            lastAudioLevelStatusPct = -100
                             ahrsBLE.startCapture(recordingID: recordingID, startedAt: startedAt)
                             gps.startCapture(recordingID: recordingID, startedAt: startedAt)
                             ahrsBLE.sendStatusCommand("REC=1")
@@ -234,7 +238,7 @@ struct RecorderView: View {
                     Text(recording.lastError).foregroundStyle(.red)
                 }
             } else {
-                Text("No recordings yet.").foregroundStyle(.secondary)
+                Text("No recordings yet.").foregroundStyle(IPCATheme.secondaryText)
             }
             if !settings.isServerURLConfigured {
                 Text("Set the backend server URL in Settings before recording. Use the site origin only, for example https://courseware.example.com.")
@@ -246,6 +250,11 @@ struct RecorderView: View {
     private var gpsCard: some View {
         IPCACard(title: "GPS", systemImage: "location.circle") {
             LabeledContent("State", value: gps.state.rawValue)
+            if gps.state == .permissionNeeded {
+                Button("Request GPS Permission") {
+                    gps.requestPermission()
+                }
+            }
             if let sample = gps.latestSample {
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
@@ -270,12 +279,12 @@ struct RecorderView: View {
                     }
                     GridRow {
                         Text("Accuracy")
-                        Text(String(format: "H %.0f m / V %.0f m", sample.horizontalAccuracy, sample.verticalAccuracy)).foregroundStyle(.secondary)
+                        Text(String(format: "H %.0f m / V %.0f m", sample.horizontalAccuracy, sample.verticalAccuracy)).foregroundStyle(IPCATheme.secondaryText)
                     }
                 }
             } else {
                 Text("GPS is optional. Samples are saved during recording when location is available.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
             }
             if !gps.lastError.isEmpty {
                 Text(gps.lastError).foregroundStyle(.red)
@@ -286,6 +295,10 @@ struct RecorderView: View {
     private var ahrsCard: some View {
         IPCACard(title: "BLE AHRS", systemImage: "gyroscope") {
             LabeledContent("State", value: ahrsBLE.connectionState.rawValue)
+            LabeledContent("Receive rate", value: String(format: "%.1f Hz", ahrsBLE.receiveRateHz))
+            Text(ahrsBLE.receiveHealthMessage)
+                .font(.caption)
+                .foregroundStyle(ahrsBLE.receiveRateHz > 0 && ahrsBLE.receiveRateHz < 2.0 ? IPCATheme.warning : IPCATheme.secondaryText)
             if let sample = ahrsBLE.latestSample {
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
@@ -311,11 +324,11 @@ struct RecorderView: View {
                 }
                 Text(sample.rawLine)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
                     .textSelection(.enabled)
             } else {
                 Text("Waiting for IPCA-CVR BLE AHRS data.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(IPCATheme.secondaryText)
             }
             if !ahrsBLE.lastError.isEmpty {
                 Text(ahrsBLE.lastError).foregroundStyle(.red)
@@ -353,6 +366,17 @@ struct RecorderView: View {
         sendGPSStatus()
         store.add(recording)
         uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+    }
+
+    private func sendThrottledAudioLevelStatus(_ level: Float) {
+        let pct = Int(max(0, min(1, level)) * 100)
+        let now = Date()
+        guard now.timeIntervalSince(lastAudioLevelStatusSentAt) >= 1 else { return }
+        guard abs(pct - lastAudioLevelStatusPct) >= 5 else { return }
+
+        lastAudioLevelStatusSentAt = now
+        lastAudioLevelStatusPct = pct
+        ahrsBLE.sendStatusCommand("AUDIOLEVEL=\(pct)")
     }
 
     private func sendGPSStatus() {

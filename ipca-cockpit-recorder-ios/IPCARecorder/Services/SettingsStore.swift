@@ -15,6 +15,10 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(selectedAircraftID, forKey: Keys.selectedAircraftID) }
     }
 
+    @Published var logoStyle: String {
+        didSet { UserDefaults.standard.set(logoStyle, forKey: Keys.logoStyle) }
+    }
+
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
 
@@ -22,10 +26,17 @@ final class SettingsStore: ObservableObject {
         ("en", "English")
     ]
 
+    let supportedLogoStyles: [(code: String, label: String)] = [
+        ("standard", "Standard"),
+        ("dark", "Dark"),
+        ("alternate", "Alternate")
+    ]
+
     init() {
         serverURL = UserDefaults.standard.string(forKey: Keys.serverURL) ?? ""
         language = UserDefaults.standard.string(forKey: Keys.language) ?? "en"
         selectedAircraftID = UserDefaults.standard.integer(forKey: Keys.selectedAircraftID)
+        logoStyle = UserDefaults.standard.string(forKey: Keys.logoStyle) ?? "standard"
     }
 
     var normalizedServerURL: URL? {
@@ -113,5 +124,6 @@ final class SettingsStore: ObservableObject {
         static let serverURL = "ipca.recorder.serverURL"
         static let language = "ipca.recorder.language"
         static let selectedAircraftID = "ipca.recorder.selectedAircraftID"
+        static let logoStyle = "ipca.recorder.logoStyle"
     }
 }

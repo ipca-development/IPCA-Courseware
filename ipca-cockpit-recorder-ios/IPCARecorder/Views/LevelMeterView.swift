@@ -29,7 +29,7 @@ struct LevelMeterView: View {
                 Text("Loud")
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(IPCATheme.secondaryText)
         }
         .accessibilityLabel("Audio level")
         .accessibilityValue("\(Int(level * 100)) percent")

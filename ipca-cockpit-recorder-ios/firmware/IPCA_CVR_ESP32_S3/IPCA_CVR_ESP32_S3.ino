@@ -9,10 +9,12 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "ipca_fdm_splash.h"
 
 // =======================================================
 // IPCA CVR 1.0 + BNO085 AHRS
-// Status screen: 5 sec
+// Splash screen: 5 sec
+// Status screen: 10 sec
 // AHRS screen: 10 sec
 // AHRS screen frame does NOT refresh; only values update.
 // BLE AHRS notifications for iPad test app.
@@ -30,7 +32,8 @@
 #define SCREEN_STATUS 0
 #define SCREEN_AHRS   1
 
-#define STATUS_SCREEN_MS 5000
+#define SPLASH_SCREEN_MS 5000
+#define STATUS_SCREEN_MS 10000
 #define AHRS_SCREEN_MS   10000
 #define AHRS_VALUE_REFRESH_MS 250
 
@@ -68,6 +71,8 @@ unsigned long screenStartedAt = 0;
 unsigned long lastAHRSPrint = 0;
 unsigned long lastAHRSValueDraw = 0;
 bool screenDirty = true;
+bool statusDynamicDirty = true;
+bool ahrsFooterDirty = true;
 
 float rollDeg = 0;
 float pitchDeg = 0;
@@ -460,13 +465,13 @@ class IPCABLEServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *server) override {
     bleCentralConnected = true;
     ipadReady = true;
-    screenDirty = true;
+    statusDynamicDirty = true;
   }
 
   void onDisconnect(BLEServer *server) override {
     bleCentralConnected = false;
     ipadReady = false;
-    screenDirty = true;
+    statusDynamicDirty = true;
     server->getAdvertising()->start();
   }
 };
@@ -630,25 +635,11 @@ void readAHRS() {
 }
 
 void drawSplashScreen() {
-  tft.fillScreen(IPCA_BLUE);
-
-  int logoX = (240 - LOGO_W) / 2;
-  int logoY = 24;
-  tft.drawBitmap(logoX, logoY, ipca_logo_bitmap, LOGO_W, LOGO_H, WHITE);
-
-  tft.drawLine(42, 133, 198, 133, WHITE);
-
-  tft.setTextColor(WHITE);
-  tft.setTextSize(5);
-  tft.setCursor(50, 150);
-  tft.println("CVR");
-
-  tft.setTextSize(3);
-  tft.setCursor(93, 205);
-  tft.println("1.0");
+  tft.drawRGBBitmap(0, 0, ipca_fdm_splash, IPCA_FDM_SPLASH_W, IPCA_FDM_SPLASH_H);
 }
 
 void drawStatusLine(int x, int y, const char *label, bool ok, const char *value) {
+  tft.fillRect(x - 8, y - 2, 184, 16, BLACK);
   tft.fillCircle(x, y + 6, 5, ok ? GREEN : YELLOW);
   tft.setTextSize(1);
   tft.setTextColor(WHITE);
@@ -673,6 +664,7 @@ void drawStateLine(int x, int y, const char *label, int state) {
     value = "FAIL";
   }
 
+  tft.fillRect(x - 8, y - 2, 78, 16, BLACK);
   tft.fillCircle(x, y + 6, 5, color);
   tft.setTextSize(1);
   tft.setTextColor(WHITE);
@@ -686,6 +678,7 @@ void drawStateLine(int x, int y, const char *label, int state) {
 void drawAudioStatus(int x, int y) {
   int barW = 78;
   int fillW = map(audioLevelPct, 0, 100, 0, barW);
+  tft.fillRect(x - 8, y - 2, 188, 16, BLACK);
   tft.fillCircle(x, y + 6, 5, audioReady ? GREEN : YELLOW);
   tft.setTextSize(1);
   tft.setTextColor(WHITE);
@@ -697,6 +690,34 @@ void drawAudioStatus(int x, int y) {
   tft.setTextColor(audioReady ? GREEN : YELLOW);
   tft.print(audioLevelPct);
   tft.print("%");
+}
+
+void drawStatusDynamicFields() {
+  drawStatusLine(28, 86, "iPad", ipadReady, ipadReady ? "BLE OK" : "WAIT");
+  drawStatusLine(28, 106, "AHRS", ahrsReady, ahrsReady ? "READY" : "WAIT");
+  drawStatusLine(28, 126, "GPS", gpsReady, gpsReady ? "READY" : "NO FIX");
+  drawAudioStatus(28, 149);
+  drawStateLine(28, 174, "UP", uploadState);
+  drawStateLine(112, 174, "TX", transcriptionState);
+
+  tft.fillRect(36, 199, 168, 25, BLACK);
+  tft.setTextSize(2);
+  if (recordingPaused) {
+    tft.fillCircle(54, 212, 7, YELLOW);
+    tft.setTextColor(YELLOW);
+    tft.setCursor(74, 205);
+    tft.println("PAUSED");
+  } else if (recording) {
+    tft.fillCircle(72, 212, 7, RED);
+    tft.setTextColor(RED);
+    tft.setCursor(92, 205);
+    tft.println("REC");
+  } else {
+    tft.fillCircle(50, 212, 7, YELLOW);
+    tft.setTextColor(YELLOW);
+    tft.setCursor(70, 205);
+    tft.println("STANDBY");
+  }
 }
 
 void drawRecordingFooter() {
@@ -732,32 +753,7 @@ void drawStatusScreen() {
   tft.setCursor(74, 54);
   tft.println("STATUS");
 
-  drawStatusLine(28, 86, "iPad", ipadReady, ipadReady ? "BLE OK" : "WAIT");
-  drawStatusLine(28, 106, "AHRS", ahrsReady, ahrsReady ? "READY" : "WAIT");
-  drawStatusLine(28, 126, "GPS", gpsReady, gpsReady ? "READY" : "NO FIX");
-
-  drawAudioStatus(28, 149);
-  drawStateLine(28, 174, "UP", uploadState);
-  drawStateLine(112, 174, "TX", transcriptionState);
-
-  tft.fillRect(36, 199, 168, 25, BLACK);
-  tft.setTextSize(2);
-  if (recordingPaused) {
-    tft.fillCircle(54, 212, 7, YELLOW);
-    tft.setTextColor(YELLOW);
-    tft.setCursor(74, 205);
-    tft.println("PAUSED");
-  } else if (recording) {
-    tft.fillCircle(72, 212, 7, RED);
-    tft.setTextColor(RED);
-    tft.setCursor(92, 205);
-    tft.println("REC");
-  } else {
-    tft.fillCircle(50, 212, 7, YELLOW);
-    tft.setTextColor(YELLOW);
-    tft.setCursor(70, 205);
-    tft.println("STANDBY");
-  }
+  drawStatusDynamicFields();
 }
 
 void drawAHRSScreenFrame() {
@@ -827,59 +823,89 @@ void handleCommand(String cmd) {
   cmd.trim();
   cmd.toUpperCase();
 
+  bool fullRedraw = false;
+  bool statusUpdate = false;
+  bool footerUpdate = false;
+
   if (cmd == "IPAD=1") {
     ipadReady = true;
+    statusUpdate = true;
   } else if (cmd == "IPAD=0") {
     ipadReady = false;
+    statusUpdate = true;
   } else if (cmd == "AUDIO=1") {
     audioReady = true;
+    statusUpdate = true;
   } else if (cmd == "AUDIO=0") {
     audioReady = false;
     audioLevelPct = 0;
+    statusUpdate = true;
   } else if (cmd.startsWith("AUDIOLEVEL=")) {
     audioLevelPct = constrain(cmd.substring(11).toInt(), 0, 100);
     audioReady = audioLevelPct > 0;
+    statusUpdate = true;
   } else if (cmd == "GPS=1") {
     gpsReady = true;
+    statusUpdate = true;
   } else if (cmd == "GPS=0") {
     gpsReady = false;
+    statusUpdate = true;
   } else if (cmd == "REC=1") {
     recording = true;
     recordingPaused = false;
+    statusUpdate = true;
+    footerUpdate = true;
   } else if (cmd == "REC=0") {
     recording = false;
     recordingPaused = false;
+    statusUpdate = true;
+    footerUpdate = true;
   } else if (cmd == "REC=PAUSE") {
     recording = true;
     recordingPaused = true;
+    statusUpdate = true;
+    footerUpdate = true;
   } else if (cmd == "UPLOAD=WAIT") {
     uploadState = 0;
+    statusUpdate = true;
   } else if (cmd == "UPLOAD=BUSY") {
     uploadState = 1;
+    statusUpdate = true;
   } else if (cmd == "UPLOAD=OK") {
     uploadState = 2;
+    statusUpdate = true;
   } else if (cmd == "UPLOAD=FAIL") {
     uploadState = 3;
+    statusUpdate = true;
   } else if (cmd == "TX=WAIT") {
     transcriptionState = 0;
+    statusUpdate = true;
   } else if (cmd == "TX=BUSY") {
     transcriptionState = 1;
+    statusUpdate = true;
   } else if (cmd == "TX=OK") {
     transcriptionState = 2;
+    statusUpdate = true;
   } else if (cmd == "TX=FAIL") {
     transcriptionState = 3;
+    statusUpdate = true;
   } else if (cmd == "BOOT") {
     drawSplashScreen();
-    delay(1500);
+    delay(SPLASH_SCREEN_MS);
+    fullRedraw = true;
   } else if (cmd == "SCREEN=0") {
     switchToScreen(SCREEN_STATUS);
+    fullRedraw = false;
   } else if (cmd == "SCREEN=1") {
     switchToScreen(SCREEN_AHRS);
+    fullRedraw = false;
   } else if (cmd == "ALL=1") {
     ipadReady = true;
     audioReady = true;
     gpsReady = true;
     recording = true;
+    statusUpdate = true;
+    footerUpdate = true;
   } else if (cmd == "ALL=0") {
     ipadReady = false;
     audioReady = false;
@@ -889,9 +915,19 @@ void handleCommand(String cmd) {
     audioLevelPct = 0;
     uploadState = 0;
     transcriptionState = 0;
+    statusUpdate = true;
+    footerUpdate = true;
   }
 
-  screenDirty = true;
+  if (fullRedraw) {
+    screenDirty = true;
+  }
+  if (statusUpdate) {
+    statusDynamicDirty = true;
+  }
+  if (footerUpdate) {
+    ahrsFooterDirty = true;
+  }
 }
 
 void readSerialCommands() {
@@ -923,14 +959,16 @@ void setup() {
   tft.begin();
   tft.setRotation(0);
 
+  unsigned long splashStartedAt = millis();
   drawSplashScreen();
 
   setupAHRS();
 
-  delay(3000);
+  while (millis() - splashStartedAt < SPLASH_SCREEN_MS) {
+    delay(10);
+  }
 
   switchToScreen(SCREEN_STATUS);
-  drawStatusScreen();
 }
 
 void loop() {
@@ -951,6 +989,10 @@ void loop() {
     if (screenDirty) {
       drawStatusScreen();
       screenDirty = false;
+      statusDynamicDirty = false;
+    } else if (statusDynamicDirty) {
+      drawStatusDynamicFields();
+      statusDynamicDirty = false;
     }
   }
 
@@ -960,6 +1002,12 @@ void loop() {
       updateAHRSScreenValues();
       lastAHRSValueDraw = now;
       screenDirty = false;
+      ahrsFooterDirty = false;
+    }
+
+    if (ahrsFooterDirty) {
+      drawRecordingFooter();
+      ahrsFooterDirty = false;
     }
 
     if (now - lastAHRSValueDraw >= AHRS_VALUE_REFRESH_MS) {
@@ -968,5 +1016,3 @@ void loop() {
     }
   }
 }
-
-</user_query>

@@ -7,44 +7,35 @@ enum IPCATheme {
     static let lightBlue = Color(red: 0.82, green: 0.91, blue: 1.0)
     static let pageBackground = Color(red: 0.94, green: 0.97, blue: 1.0)
     static let cardBackground = Color.white.opacity(0.94)
+    static let secondaryText = Color(red: 0.29, green: 0.36, blue: 0.47)
     static let success = Color(red: 0.0, green: 0.56, blue: 0.30)
     static let warning = Color(red: 0.86, green: 0.50, blue: 0.05)
     static let danger = Color(red: 0.78, green: 0.08, blue: 0.10)
 }
 
 struct IPCALogoMark: View {
+    @AppStorage("ipca.recorder.logoStyle") private var logoStyle = "standard"
     var compact = false
 
     var body: some View {
-        HStack(spacing: compact ? 8 : 12) {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.16))
-                Circle()
-                    .stroke(.white.opacity(0.75), lineWidth: 2)
-                Text("I")
-                    .font(.system(size: compact ? 17 : 24, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: compact ? 34 : 46, height: compact ? 34 : 46)
-            .shadow(color: .black.opacity(0.25), radius: 7, y: 4)
+        Image(assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: compact ? 58 : 86, height: compact ? 58 : 86, alignment: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 14 : 22))
+            .shadow(color: .black.opacity(0.28), radius: 8, y: 5)
+            .accessibilityLabel("IPCA Cockpit Recorder")
+    }
 
-            VStack(alignment: .leading, spacing: compact ? 0 : 2) {
-                Text("IPCA")
-                    .font(.system(size: compact ? 22 : 32, weight: .heavy, design: .rounded))
-                    .tracking(1.5)
-                    .foregroundStyle(.white)
-                if !compact {
-                    Text("Cockpit Recorder")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .textCase(.uppercase)
-                        .tracking(1.1)
-                }
-            }
+    private var assetName: String {
+        switch logoStyle {
+        case "dark":
+            "IPCAAppLogoDark"
+        case "alternate":
+            "IPCAAppLogoAlternate"
+        default:
+            "IPCAAppLogoStandard"
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("IPCA Cockpit Recorder")
     }
 }
 
@@ -123,6 +114,7 @@ struct IPCACard<Content: View>: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(IPCATheme.navy)
         .background(IPCATheme.cardBackground, in: RoundedRectangle(cornerRadius: 20))
         .overlay {
             RoundedRectangle(cornerRadius: 20)

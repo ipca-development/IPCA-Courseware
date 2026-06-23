@@ -8,6 +8,8 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     @Published private(set) var latestSample: AHRSSample?
     @Published private(set) var lastLine: String = ""
     @Published private(set) var lastError: String = ""
+    @Published private(set) var receiveRateHz: Double = 0
+    @Published private(set) var receiveHealthMessage: String = "Waiting for AHRS samples."
 
     private let deviceName = "IPCA-CVR"
     private let serviceUUID = CBUUID(string: "7b7f1000-9a7b-4f6a-9f0c-6c9c1f8b0001")
@@ -21,6 +23,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     private var captureRecordingID: String?
     private var captureStartedAt: Date?
     private var capturedSamples: [AHRSSample] = []
+    private var recentSampleTimes: [Date] = []
 
     func start() {
         if centralManager == nil {
@@ -34,6 +37,9 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         captureRecordingID = recordingID
         captureStartedAt = startedAt
         capturedSamples = []
+        recentSampleTimes = []
+        receiveRateHz = 0
+        receiveHealthMessage = "Measuring AHRS receive rate."
     }
 
     func stopCaptureAndSave(recordingID: String) -> String? {
@@ -52,7 +58,14 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             let url = directory.appendingPathComponent("\(recordingID).ahrs.json")
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .custom(Self.encodeFractionalUTCDate)
+            encoder.dateEncodingStrategy = .custom { @Sendable date, encoder in
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+                var container = encoder.singleValueContainer()
+                try container.encode(formatter.string(from: date))
+            }
             let data = try encoder.encode(capturedSamples)
             try data.write(to: url, options: [.atomic])
             capturedSamples = []
@@ -94,8 +107,32 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         }
         latestSample = sample
         lastLine = line
+        updateReceiveRate(sample.timestamp)
         if captureRecordingID != nil {
             capturedSamples.append(sample)
+        }
+    }
+
+    private func updateReceiveRate(_ timestamp: Date) {
+        recentSampleTimes.append(timestamp)
+        recentSampleTimes = recentSampleTimes.filter { timestamp.timeIntervalSince($0) <= 10 }
+
+        guard let first = recentSampleTimes.first,
+              recentSampleTimes.count >= 2
+        else {
+            receiveRateHz = 0
+            receiveHealthMessage = "Measuring AHRS receive rate."
+            return
+        }
+
+        let span = timestamp.timeIntervalSince(first)
+        guard span > 0 else { return }
+
+        receiveRateHz = Double(recentSampleTimes.count - 1) / span
+        if receiveRateHz < 2.0 && recentSampleTimes.count >= 5 {
+            receiveHealthMessage = String(format: "Low AHRS rate: %.1f Hz. Expected near 4 Hz.", receiveRateHz)
+        } else {
+            receiveHealthMessage = String(format: "AHRS rate %.1f Hz", receiveRateHz)
         }
     }
 
@@ -134,17 +171,6 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         )
     }
 
-    private static func encodeFractionalUTCDate(_ date: Date, encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(fractionalUTCFormatter.string(from: date))
-    }
-
-    private static let fractionalUTCFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }()
 }
 
 extension AHRSBLEManager: CBCentralManagerDelegate {
@@ -205,6 +231,9 @@ extension AHRSBLEManager: CBCentralManagerDelegate {
             self.connectionState = .disconnected
             self.characteristic = nil
             self.statusCharacteristic = nil
+            self.receiveRateHz = 0
+            self.receiveHealthMessage = "Waiting for AHRS samples."
+            self.recentSampleTimes = []
             if let error {
                 self.lastError = error.localizedDescription
             }

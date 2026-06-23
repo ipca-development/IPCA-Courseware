@@ -30,8 +30,47 @@ function cockpit_admin_fmt_duration(float $seconds): string
     return $h > 0 ? sprintf('%d:%02d:%02d', $h, $m, $s) : sprintf('%d:%02d', $m, $s);
 }
 
+function cockpit_admin_fmt_rate(mixed $rate): string
+{
+    return is_numeric($rate) ? number_format((float)$rate, 2) . ' Hz' : '--';
+}
+
+function cockpit_admin_fmt_timestamp(mixed $timestamp): string
+{
+    $timestamp = trim((string)$timestamp);
+    return $timestamp !== '' ? $timestamp : '--';
+}
+
+function cockpit_admin_fmt_coordinate(mixed $coordinate): string
+{
+    if (!is_array($coordinate) || !isset($coordinate['latitude'], $coordinate['longitude'])) {
+        return '--';
+    }
+    return number_format((float)$coordinate['latitude'], 6) . ', ' . number_format((float)$coordinate['longitude'], 6);
+}
+
+function cockpit_admin_fmt_chunk_range(float $start, float $end): string
+{
+    return cockpit_admin_fmt_duration($start) . '-' . cockpit_admin_fmt_duration($end);
+}
+
+/**
+ * @param array<string,mixed> $row
+ * @return array<string,mixed>
+ */
+function cockpit_admin_health(array $row): array
+{
+    $raw = trim((string)($row['health_summary_json'] ?? ''));
+    if ($raw === '') {
+        return array();
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : array();
+}
+
 $error = '';
 $recordings = array();
+$service = null;
 try {
     $service = new CockpitRecorderService($pdo);
     $recordings = $service->adminRecordings(100);
@@ -53,9 +92,16 @@ cw_header('Cockpit Recorder POC');
 .cockpit-badge-ready, .cockpit-badge-uploaded { background: #dcfce7; color: #166534; }
 .cockpit-badge-queued, .cockpit-badge-transcribing { background: #dbeafe; color: #1d4ed8; }
 .cockpit-badge-failed { background: #fee2e2; color: #991b1b; }
+.cockpit-badge-warning { background: #fef3c7; color: #92400e; }
 .cockpit-transcript { max-width: 520px; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; font-size: 13px; }
 .cockpit-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
 .cockpit-audio { width: 260px; max-width: 100%; }
+.cockpit-health { min-width: 260px; }
+.cockpit-health-grid { display: grid; gap: 4px; font-size: 12px; color: #334155; }
+.cockpit-health-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+.cockpit-warning-list { margin: 6px 0 0; padding-left: 18px; color: #92400e; font-size: 12px; }
+.cockpit-chunks { display: grid; gap: 6px; min-width: 190px; font-size: 12px; }
+.cockpit-chunk-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 </style>
 
 <div class="cockpit-recorder-page">
@@ -89,8 +135,10 @@ cw_header('Cockpit Recorder POC');
             <th>Language</th>
             <th>Upload</th>
             <th>Transcription</th>
+            <th>Chunks</th>
             <th>AHRS</th>
             <th>GPS</th>
+            <th>Health</th>
             <th>Audio</th>
             <th>Transcript / Error</th>
           </tr>
@@ -98,7 +146,7 @@ cw_header('Cockpit Recorder POC');
         <tbody>
         <?php if (!$recordings): ?>
           <tr>
-            <td colspan="12" class="cockpit-muted">No cockpit recorder uploads yet.</td>
+            <td colspan="14" class="cockpit-muted">No cockpit recorder uploads yet.</td>
           </tr>
         <?php endif; ?>
         <?php foreach ($recordings as $row): ?>
@@ -111,6 +159,21 @@ cw_header('Cockpit Recorder POC');
             $gpsUrl = '/admin/cockpit_recorder_gps.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
             $rowError = trim((string)($row['error_message'] ?? ''));
+            $health = cockpit_admin_health($row);
+            $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
+            $healthAudio = isset($health['audio']) && is_array($health['audio']) ? $health['audio'] : array();
+            $healthAhrs = isset($health['ahrs']) && is_array($health['ahrs']) ? $health['ahrs'] : array();
+            $healthGps = isset($health['gps']) && is_array($health['gps']) ? $health['gps'] : array();
+            $chunks = $service instanceof CockpitRecorderService ? $service->adminTranscriptionChunks($id) : array();
+            $chunkReady = 0;
+            $chunkFailed = 0;
+            foreach ($chunks as $chunkForCount) {
+                if ((string)($chunkForCount['status'] ?? '') === 'ready') {
+                    $chunkReady++;
+                } elseif ((string)($chunkForCount['status'] ?? '') === 'failed') {
+                    $chunkFailed++;
+                }
+            }
           ?>
           <tr>
             <td>
@@ -144,6 +207,29 @@ cw_header('Cockpit Recorder POC');
               <div class="cockpit-muted"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div>
             </td>
             <td>
+              <?php if ($chunks): ?>
+                <div class="cockpit-chunks">
+                  <div>
+                    <strong><?= count($chunks) ?> chunk<?= count($chunks) === 1 ? '' : 's' ?></strong>
+                    <div class="cockpit-muted"><?= $chunkReady ?> ready<?= $chunkFailed > 0 ? ', ' . $chunkFailed . ' failed' : '' ?></div>
+                  </div>
+                  <?php foreach ($chunks as $chunk): ?>
+                    <?php
+                      $chunkStatus = (string)($chunk['status'] ?? '');
+                      $chunkError = trim((string)($chunk['error_message'] ?? ''));
+                    ?>
+                    <div class="cockpit-chunk-row">
+                      <span><?= h(cockpit_admin_fmt_chunk_range((float)($chunk['start_seconds'] ?? 0), (float)($chunk['end_seconds'] ?? 0))) ?></span>
+                      <span class="cockpit-badge cockpit-badge-<?= h($chunkStatus) ?>"><?= h($chunkStatus) ?></span>
+                    </div>
+                    <div class="cockpit-muted"><?= (int)($chunk['text_length'] ?? 0) ?> chars<?= $chunkError !== '' ? ' - ' . h($chunkError) : '' ?></div>
+                  <?php endforeach; ?>
+                </div>
+              <?php else: ?>
+                <span class="cockpit-muted">Single pass</span>
+              <?php endif; ?>
+            </td>
+            <td>
               <?php if (!empty($row['ahrs_storage_path'])): ?>
                 <span class="cockpit-badge cockpit-badge-ready">Saved</span>
                 <div class="cockpit-muted"><?= (int)($row['ahrs_sample_count'] ?? 0) ?> samples</div>
@@ -162,6 +248,51 @@ cw_header('Cockpit Recorder POC');
               <?php else: ?>
                 <span class="cockpit-badge">Missing</span>
                 <div class="cockpit-muted">No GPS JSON uploaded</div>
+              <?php endif; ?>
+            </td>
+            <td class="cockpit-health">
+              <?php if ($health): ?>
+                <?php if ($healthWarnings): ?>
+                  <span class="cockpit-badge cockpit-badge-warning"><?= count($healthWarnings) ?> warning<?= count($healthWarnings) === 1 ? '' : 's' ?></span>
+                <?php else: ?>
+                  <span class="cockpit-badge cockpit-badge-ready">Healthy</span>
+                <?php endif; ?>
+                <div class="cockpit-muted">Analyzed <?= h((string)($row['health_analyzed_at'] ?? ($health['analyzed_at'] ?? ''))) ?></div>
+
+                <div class="cockpit-health-grid cockpit-health-section">
+                  <strong>Audio</strong>
+                  <div>Duration: <?= h(cockpit_admin_fmt_duration((float)($healthAudio['duration_seconds'] ?? $row['duration_seconds'] ?? 0))) ?></div>
+                </div>
+
+                <div class="cockpit-health-grid cockpit-health-section">
+                  <strong>AHRS</strong>
+                  <div>Samples: <?= (int)($healthAhrs['sample_count'] ?? 0) ?></div>
+                  <div>Rate: <?= h(cockpit_admin_fmt_rate($healthAhrs['average_sample_rate_hz'] ?? null)) ?></div>
+                  <div>First: <?= h(cockpit_admin_fmt_timestamp($healthAhrs['first_timestamp'] ?? null)) ?></div>
+                  <div>Last: <?= h(cockpit_admin_fmt_timestamp($healthAhrs['last_timestamp'] ?? null)) ?></div>
+                </div>
+
+                <div class="cockpit-health-grid cockpit-health-section">
+                  <strong>GPS</strong>
+                  <div>Samples: <?= (int)($healthGps['sample_count'] ?? 0) ?></div>
+                  <div>Rate: <?= h(cockpit_admin_fmt_rate($healthGps['average_sample_rate_hz'] ?? null)) ?></div>
+                  <div>Max GS: <?= is_numeric($healthGps['max_groundspeed_kt'] ?? null) ? h(number_format((float)$healthGps['max_groundspeed_kt'], 1) . ' kt') : '--' ?></div>
+                  <div>First: <?= h(cockpit_admin_fmt_timestamp($healthGps['first_timestamp'] ?? null)) ?></div>
+                  <div>Last: <?= h(cockpit_admin_fmt_timestamp($healthGps['last_timestamp'] ?? null)) ?></div>
+                  <div>From: <?= h(cockpit_admin_fmt_coordinate($healthGps['first_coordinate'] ?? null)) ?></div>
+                  <div>To: <?= h(cockpit_admin_fmt_coordinate($healthGps['last_coordinate'] ?? null)) ?></div>
+                </div>
+
+                <?php if ($healthWarnings): ?>
+                  <ul class="cockpit-warning-list">
+                    <?php foreach ($healthWarnings as $warning): ?>
+                      <li><?= h((string)$warning) ?></li>
+                    <?php endforeach; ?>
+                  </ul>
+                <?php endif; ?>
+              <?php else: ?>
+                <span class="cockpit-muted">Not analyzed</span>
+                <div class="cockpit-muted">Apply health migration and upload again.</div>
               <?php endif; ?>
             </td>
             <td>
