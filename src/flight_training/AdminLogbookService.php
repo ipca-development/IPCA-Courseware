@@ -197,6 +197,99 @@ final class AdminLogbookService
         );
     }
 
+    public function logbookIdForStudent(int $studentUserId): int
+    {
+        $this->requireSchema();
+        if ($studentUserId <= 0) {
+            return 0;
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_admin_logbooks
+            WHERE student_user_id = :student_user_id
+              AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array(':student_user_id' => $studentUserId));
+        return (int)($stmt->fetchColumn() ?: 0);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function loadStudentWorkspace(int $studentUserId): array
+    {
+        $logbookId = $this->logbookIdForStudent($studentUserId);
+        if ($logbookId <= 0) {
+            return array(
+                'logbook' => array('student_user_id' => $studentUserId),
+                'entries' => array(),
+                'student_entries' => array(),
+                'totals' => $this->totals->calculate(array()),
+            );
+        }
+
+        $workspace = $this->loadWorkspace($logbookId);
+        $trustedEntries = array_values(array_filter(
+            is_array($workspace['entries'] ?? null) ? $workspace['entries'] : array(),
+            fn (mixed $entry): bool => is_array($entry) && $this->isTrustedOfficialEntry($entry)
+        ));
+        $workspace['entries'] = $trustedEntries;
+        $workspace['totals'] = $this->totals->calculate($trustedEntries);
+        $workspace['student_entries'] = $this->listStudentEnteredEntries($logbookId, $studentUserId);
+        return $workspace;
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public function saveStudentEnteredEntry(int $studentUserId, string $sourceType, array $data): array
+    {
+        $this->requireSchema();
+        $logbookId = $this->getOrCreateLogbook($studentUserId, null, $studentUserId);
+        $sourceType = in_array($sourceType, array('student_prior_experience', 'student_external_flight'), true)
+            ? $sourceType
+            : 'student_external_flight';
+        $entry = $data;
+        $entry['id'] = 0;
+        $entry['external_system'] = 'STUDENT';
+        $entry['import_profile'] = $sourceType;
+        $entry['review_status'] = 'needs_review';
+        $entry['metadata'] = array(
+            'source' => $sourceType,
+            'student_entered' => true,
+            'created_by_user_id' => $studentUserId,
+            'verification_status' => 'unverified',
+        );
+        $saved = $this->saveEntry($logbookId, $entry, $studentUserId);
+        $this->writeAudit($logbookId, (int)($saved['id'] ?? 0), $studentUserId, 'student_entered_logbook_entry_created', null, $saved);
+        return $saved;
+    }
+
+    public function deleteStudentEnteredEntry(int $studentUserId, int $entryId): void
+    {
+        $this->requireSchema();
+        $logbookId = $this->logbookIdForStudent($studentUserId);
+        if ($logbookId <= 0 || $entryId <= 0) {
+            throw new RuntimeException('Student-entered logbook entry not found.');
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM ipca_admin_logbook_entries
+            WHERE id = :id
+              AND logbook_id = :logbook_id
+            LIMIT 1
+        ");
+        $stmt->execute(array(':id' => $entryId, ':logbook_id' => $logbookId));
+        $entry = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($entry) || !$this->isStudentEnteredEntry($entry, $studentUserId)) {
+            throw new RuntimeException('Only student-entered logbook entries can be erased by the student.');
+        }
+        $this->deleteEntry($logbookId, $entryId, $studentUserId);
+    }
+
     /**
      * @return array<string,mixed>|null
      */
@@ -928,6 +1021,51 @@ final class AdminLogbookService
         $stmt->execute(array(':id' => $logbookId));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         return array_map(fn (array $row): array => $this->hydrateEntryFromSource($row), $rows);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function isTrustedOfficialEntry(array $entry): bool
+    {
+        $status = strtolower(trim((string)($entry['review_status'] ?? '')));
+        if (!in_array($status, array('accepted', 'ok', 'merged', 'split'), true)) {
+            return false;
+        }
+        $metadata = $this->decodeJson((string)($entry['metadata_json'] ?? '{}'));
+        return empty($metadata['student_entered']);
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function listStudentEnteredEntries(int $logbookId, int $studentUserId): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM ipca_admin_logbook_entries
+            WHERE logbook_id = :logbook_id
+              AND review_status <> 'deleted'
+              AND JSON_EXTRACT(metadata_json, '$.student_entered') = true
+              AND CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.created_by_user_id')) AS UNSIGNED) = :student_user_id
+            ORDER BY entry_date IS NULL, entry_date DESC, id DESC
+        ");
+        $stmt->execute(array(
+            ':logbook_id' => $logbookId,
+            ':student_user_id' => $studentUserId,
+        ));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return array_map(fn (array $row): array => $this->hydrateEntryFromSource($row), $rows);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     */
+    private function isStudentEnteredEntry(array $entry, int $studentUserId): bool
+    {
+        $metadata = $this->decodeJson((string)($entry['metadata_json'] ?? '{}'));
+        return !empty($metadata['student_entered'])
+            && (int)($metadata['created_by_user_id'] ?? 0) === $studentUserId;
     }
 
     /**

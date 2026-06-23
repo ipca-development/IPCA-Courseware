@@ -5,22 +5,13 @@ require_once __DIR__ . '/../../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../../src/flight_training/AdminLogbookService.php';
 require_once __DIR__ . '/../../../../src/flight_training/UserFlightCredentialService.php';
 
-cw_require_login();
-$currentUser = cw_current_user($pdo) ?: array();
-$currentRole = strtolower(trim((string)($currentUser['role'] ?? '')));
-$studentPrintMode = $currentRole === 'student'
-    || ($currentRole === 'admin' && in_array(strtolower(trim((string)($_GET['student_view'] ?? ''))), array('1', 'true', 'yes'), true));
-if ($currentRole !== 'admin' && !$studentPrintMode) {
-    redirect(cw_home_path_for_role($currentRole));
-}
+cw_require_admin();
 
 const IPCA_EASA_LOGBOOK_TEMPLATE_VERSION = '1.0';
 const IPCA_FAA_LOGBOOK_TEMPLATE_VERSION = '1.0';
 
 $service = new AdminLogbookService($pdo);
-$logbookId = $currentRole === 'student'
-    ? $service->logbookIdForStudent((int)($currentUser['id'] ?? 0))
-    : (int)($_GET['logbook_id'] ?? 0);
+$logbookId = (int)($_GET['logbook_id'] ?? 0);
 $format = strtolower(trim((string)($_GET['format'] ?? 'easa')));
 if (!in_array($format, array('easa', 'faa'), true)) {
     $format = 'easa';
@@ -46,19 +37,7 @@ try {
 
 $entries = array_values(array_filter(
     $workspace['entries'] ?? array(),
-    static function (mixed $entry) use ($studentPrintMode): bool {
-        if (!is_array($entry) || strtolower((string)($entry['review_status'] ?? '')) === 'deleted') {
-            return false;
-        }
-        if (!$studentPrintMode) {
-            return true;
-        }
-        $status = strtolower(trim((string)($entry['review_status'] ?? '')));
-        $metadata = json_decode((string)($entry['metadata_json'] ?? '{}'), true);
-        $metadata = is_array($metadata) ? $metadata : array();
-        return in_array($status, array('accepted', 'ok', 'merged', 'split'), true)
-            && empty($metadata['student_entered']);
-    }
+    static fn (mixed $entry): bool => is_array($entry) && strtolower((string)($entry['review_status'] ?? '')) !== 'deleted'
 ));
 $studentCredentials = array();
 try {

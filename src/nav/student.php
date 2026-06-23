@@ -66,7 +66,18 @@ return [
         'label' => 'Flight Training',
         'icon' => 'flight',
         'href' => null,
-        'coming_soon' => true,
+        'children' => [
+            [
+                'key' => 'my_logbook',
+                'label' => 'My Logbook',
+                'icon' => 'flight',
+                'href' => '/student/logbook.php',
+                'match_paths' => [
+                    '/student/logbook.php',
+                    '/student/logbook_print.php',
+                ],
+            ],
+        ],
     ],
     [
         'key' => 'safety',
