@@ -26,6 +26,12 @@
 	<string>IPCA Cockpit Recorder logs GPS position, speed, altitude, and course during cockpit recording tests.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>IPCA Cockpit Recorder records cockpit audio from the connected USB audio interface for transcription testing.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>bluetooth-central</string>
+		<string>location</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>

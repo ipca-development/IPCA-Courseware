@@ -1,0 +1,324 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/CockpitRecorderService.php';
+
+cw_require_admin();
+
+$id = trim((string)($_GET['id'] ?? ''));
+$error = '';
+$recording = null;
+
+try {
+    if ($id === '') {
+        throw new RuntimeException('Recording id is required.');
+    }
+    $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);
+    if (!$recording) {
+        throw new RuntimeException('Recording not found.');
+    }
+} catch (Throwable $e) {
+    $error = $e->getMessage();
+}
+
+cw_header('Cockpit Recorder Replay');
+?>
+<style>
+.replay-page { display: grid; gap: 16px; }
+.replay-card { background: #fff; border: 1px solid rgba(15, 23, 42, .12); border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(15, 23, 42, .07); }
+.replay-muted { color: #64748b; font-size: 13px; }
+.replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
+.replay-layout { display: grid; grid-template-columns: minmax(210px, .8fr) minmax(440px, 2fr) minmax(260px, 1fr); gap: 14px; align-items: stretch; }
+.replay-left, .replay-center, .replay-right { min-height: 520px; }
+.phase-list { display: grid; gap: 8px; }
+.phase-row { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #f8fafc; display: grid; gap: 4px; }
+.phase-row.is-active { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .12); background: #eff6ff; }
+.phase-row button, .replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 6px 9px; cursor: pointer; }
+.replay-map { height: 360px; border-radius: 14px; border: 1px solid #dbeafe; background: linear-gradient(135deg, #eef6ff, #ffffff); overflow: hidden; }
+.replay-map svg { width: 100%; height: 100%; display: block; }
+.replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
+.replay-range { width: 100%; accent-color: #1d4ed8; }
+.replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.graph-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #f8fafc; }
+.graph-card h4 { margin: 0 0 6px; font-size: 12px; color: #334155; text-transform: uppercase; letter-spacing: .04em; }
+.graph-card svg { width: 100%; height: 78px; display: block; }
+.detail-grid { display: grid; gap: 8px; font-size: 13px; }
+.detail-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+.event-list { display: grid; gap: 6px; margin-top: 10px; }
+.event-row { border-left: 3px solid #1d4ed8; padding: 6px 8px; background: #f8fafc; border-radius: 8px; font-size: 12px; }
+.replay-audio { width: 100%; margin-top: 10px; }
+.replay-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+@media (max-width: 1180px) { .replay-layout { grid-template-columns: 1fr; } .replay-left, .replay-center, .replay-right { min-height: auto; } .replay-graphs { grid-template-columns: 1fr; } }
+</style>
+
+<div class="replay-page">
+  <section class="replay-card">
+    <div class="replay-topbar">
+      <div>
+        <h2 style="margin:0">Cockpit Recorder Replay</h2>
+        <?php if ($recording): ?>
+          <div class="replay-muted">
+            <?= h((string)($recording['recording_uid'] ?? '')) ?>
+            <?php if (!empty($recording['aircraft_registration']) || !empty($recording['aircraft_display_name'])): ?>
+              · <?= h((string)($recording['aircraft_display_name'] ?: $recording['aircraft_registration'])) ?>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+      <div>
+        <a href="/admin/cockpit_recorder.php">Back to uploads</a>
+        <?php if ($recording): ?>
+          · <a href="/admin/cockpit_recorder_g3x.php?id=<?= h((string)$id) ?>">G3X CSV</a>
+        <?php endif; ?>
+      </div>
+    </div>
+  </section>
+
+  <?php if ($error !== ''): ?>
+    <div class="replay-error"><?= h($error) ?></div>
+  <?php else: ?>
+    <section class="replay-layout" data-replay-id="<?= h((string)$id) ?>">
+      <aside class="replay-card replay-left">
+        <h3 style="margin-top:0">Flight Phases</h3>
+        <div class="phase-list" id="phaseList"><div class="replay-muted">Loading phases...</div></div>
+      </aside>
+
+      <main class="replay-card replay-center">
+        <h3 style="margin-top:0">Flight Replay</h3>
+        <div class="replay-map" id="flightMap"></div>
+        <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
+        <div class="replay-controls">
+          <button class="replay-button" type="button" id="playButton">Play</button>
+          <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
+          <span id="timeLabel" class="replay-muted">0:00</span>
+        </div>
+      </main>
+
+      <aside class="replay-card replay-right">
+        <h3 style="margin-top:0">Flight Details</h3>
+        <div class="detail-grid" id="details"><div class="replay-muted">Loading details...</div></div>
+        <h4>Events</h4>
+        <div class="event-list" id="eventList"></div>
+      </aside>
+    </section>
+
+    <section class="replay-card">
+      <h3 style="margin-top:0">Parameters</h3>
+      <div class="replay-graphs" id="graphs"></div>
+    </section>
+  <?php endif; ?>
+</div>
+
+<?php if ($error === ''): ?>
+<script>
+(function() {
+  const root = document.querySelector('[data-replay-id]');
+  const id = root ? root.getAttribute('data-replay-id') : '';
+  const phaseList = document.getElementById('phaseList');
+  const flightMap = document.getElementById('flightMap');
+  const eventList = document.getElementById('eventList');
+  const details = document.getElementById('details');
+  const graphs = document.getElementById('graphs');
+  const timeline = document.getElementById('timeline');
+  const timeLabel = document.getElementById('timeLabel');
+  const audio = document.getElementById('audio');
+  const playButton = document.getElementById('playButton');
+  let payload = null;
+  let activeT = 0;
+
+  const fmtTime = (seconds) => {
+    seconds = Math.max(0, Math.round(Number(seconds) || 0));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const number = (value, suffix, digits = 1) => value === null || value === undefined || Number.isNaN(Number(value)) ? '--' : `${Number(value).toFixed(digits)}${suffix}`;
+
+  function sampleAt(t) {
+    if (!payload || !payload.samples.length) return null;
+    let best = payload.samples[0];
+    for (const sample of payload.samples) {
+      if (sample.t > t) break;
+      best = sample;
+    }
+    return best;
+  }
+
+  function activePhase(t) {
+    if (!payload) return null;
+    return payload.phases.find((phase) => t >= phase.start && t <= phase.end) || payload.phases[0] || null;
+  }
+
+  function projectSamples(samples, width, height) {
+    const points = samples.filter((s) => s.lat !== null && s.lon !== null);
+    if (!points.length) return [];
+    const lats = points.map((s) => Number(s.lat));
+    const lons = points.map((s) => Number(s.lon));
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const pad = 24;
+    return points.map((s) => {
+      const x = pad + ((Number(s.lon) - minLon) / Math.max(0.000001, maxLon - minLon)) * (width - pad * 2);
+      const y = height - pad - ((Number(s.lat) - minLat) / Math.max(0.000001, maxLat - minLat)) * (height - pad * 2);
+      return Object.assign({}, s, { x, y });
+    });
+  }
+
+  function renderMap() {
+    const width = 900, height = 420;
+    const points = projectSamples(payload.samples, width, height);
+    const current = sampleAt(activeT);
+    const pointForTime = (t) => {
+      if (!points.length) return null;
+      let best = points[0];
+      for (const point of points) {
+        if (point.t > t) break;
+        best = point;
+      }
+      return best;
+    };
+    const currentPoint = current ? pointForTime(current.t) : null;
+    const path = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const eventMarkers = (payload.events || []).map((event) => {
+      const projected = pointForTime(event.start);
+      if (!projected) return '';
+      return `<circle cx="${projected.x}" cy="${projected.y}" r="5" fill="#f97316"><title>${event.event_type} ${fmtTime(event.start)}</title></circle>`;
+    }).join('');
+    flightMap.innerHTML = `
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
+        <rect width="${width}" height="${height}" fill="url(#bg)"></rect>
+        <defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
+        ${path ? `<polyline points="${path}" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></polyline>` : '<text x="24" y="40" fill="#64748b">No GPS path available</text>'}
+        ${eventMarkers}
+        ${currentPoint ? `<circle cx="${currentPoint.x}" cy="${currentPoint.y}" r="8" fill="#0f172a" stroke="#fff" stroke-width="3"></circle>` : ''}
+      </svg>`;
+  }
+
+  function renderPhases() {
+    phaseList.innerHTML = '';
+    for (const phase of payload.phases) {
+      const row = document.createElement('div');
+      row.className = 'phase-row';
+      row.dataset.start = String(phase.start);
+      row.innerHTML = `
+        <strong>${phase.phase}</strong>
+        <span class="replay-muted">${fmtTime(phase.start)} · ${fmtTime(phase.duration)} · ${(Number(phase.confidence) * 100).toFixed(0)}%</span>
+        <button type="button">Jump</button>`;
+      row.querySelector('button').addEventListener('click', () => seek(phase.start, true));
+      phaseList.appendChild(row);
+    }
+    updateActivePhase();
+  }
+
+  function renderDetails() {
+    const s = sampleAt(activeT) || {};
+    const phase = activePhase(activeT);
+    details.innerHTML = `
+      <div class="detail-row"><span>Selected phase</span><strong>${phase ? phase.phase : '--'}</strong></div>
+      <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
+      <div class="detail-row"><span>GPS altitude</span><strong>${number(s.gps_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Groundspeed</span><strong>${number(s.groundspeed_kt, ' kt')}</strong></div>
+      <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
+      <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
+      <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
+      <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>`;
+    eventList.innerHTML = (payload.events || []).map((event) => `
+      <div class="event-row"><strong>${event.event_type}</strong><br><span class="replay-muted">${fmtTime(event.start)} · ${event.phase || 'Timeline'} · ${(Number(event.confidence) * 100).toFixed(0)}%</span></div>
+    `).join('') || '<div class="replay-muted">No timeline events detected yet.</div>';
+  }
+
+  function renderGraphs() {
+    graphs.innerHTML = '';
+    [
+      ['GPS altitude', 'gps_altitude_ft', '#1d4ed8', 'ft'],
+      ['Groundspeed', 'groundspeed_kt', '#16a34a', 'kt'],
+      ['Pitch', 'pitch_deg', '#f97316', 'deg'],
+      ['Bank', 'bank_deg', '#dc2626', 'deg'],
+      ['Heading', 'heading_deg', '#7c3aed', 'deg'],
+      ['Track', 'track_deg', '#0891b2', 'deg'],
+    ].forEach(([label, key, color, unit]) => {
+      const card = document.createElement('div');
+      card.className = 'graph-card';
+      card.innerHTML = `<h4>${label}</h4>${graphSvg(key, color, unit)}`;
+      graphs.appendChild(card);
+    });
+  }
+
+  function graphSvg(key, color, unit) {
+    const width = 420, height = 90, pad = 10;
+    const values = payload.samples.filter((s) => s[key] !== null && s[key] !== undefined).map((s) => ({ t: Number(s.t), v: Number(s[key]) }));
+    if (!values.length) return '<div class="replay-muted">No data</div>';
+    const maxT = Math.max(1, Number(payload.recording.duration) || values[values.length - 1].t || 1);
+    const minV = Math.min(...values.map((p) => p.v));
+    const maxV = Math.max(...values.map((p) => p.v));
+    const points = values.map((p) => {
+      const x = pad + (p.t / maxT) * (width - pad * 2);
+      const y = height - pad - ((p.v - minV) / Math.max(0.000001, maxV - minV)) * (height - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const currentX = pad + (activeT / maxT) * (width - pad * 2);
+    return `<svg viewBox="0 0 ${width} ${height}"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="3"/><line x1="${currentX}" x2="${currentX}" y1="6" y2="${height - 6}" stroke="#0f172a" stroke-width="1.5"/><text x="12" y="18" fill="#64748b" font-size="12">${minV.toFixed(0)}-${maxV.toFixed(0)} ${unit}</text></svg>`;
+  }
+
+  function updateActivePhase() {
+    const phase = activePhase(activeT);
+    document.querySelectorAll('.phase-row').forEach((row) => {
+      const start = Number(row.dataset.start || 0);
+      row.classList.toggle('is-active', !!phase && Math.abs(start - phase.start) < 0.001);
+    });
+  }
+
+  function seek(seconds, syncAudio) {
+    activeT = Math.max(0, Number(seconds) || 0);
+    timeline.value = String(activeT);
+    timeLabel.textContent = fmtTime(activeT);
+    if (syncAudio && Number.isFinite(audio.duration)) {
+      audio.currentTime = Math.min(activeT, audio.duration || activeT);
+    }
+    updateActivePhase();
+    renderMap();
+    renderDetails();
+    renderGraphs();
+  }
+
+  timeline.addEventListener('input', () => seek(Number(timeline.value), true));
+  audio.addEventListener('timeupdate', () => seek(audio.currentTime, false));
+  playButton.addEventListener('click', () => {
+    if (audio.paused) {
+      audio.play();
+      playButton.textContent = 'Pause';
+    } else {
+      audio.pause();
+      playButton.textContent = 'Play';
+    }
+  });
+  audio.addEventListener('pause', () => playButton.textContent = 'Play');
+  audio.addEventListener('play', () => playButton.textContent = 'Pause');
+
+  fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`)
+    .then((response) => response.json())
+    .then((data) => {
+      if (!data.ok) throw new Error(data.error || 'Replay data not available.');
+      payload = data;
+      const maxT = Math.max(Number(payload.recording.duration) || 0, ...payload.samples.map((s) => Number(s.t) || 0), 1);
+      timeline.max = String(maxT);
+      renderPhases();
+      renderMap();
+      renderDetails();
+      renderGraphs();
+    })
+    .catch((err) => {
+      flightMap.innerHTML = `<div class="replay-error">${err.message}</div>`;
+      phaseList.innerHTML = '<div class="replay-muted">Reconstruct the recording first.</div>';
+      details.innerHTML = '<div class="replay-muted">No replay data loaded.</div>';
+    });
+})();
+</script>
+<?php endif; ?>
+
+<?php
+cw_footer();

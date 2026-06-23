@@ -42,8 +42,17 @@ struct RecorderView: View {
             .onChange(of: audio.level) { _, level in
                 sendThrottledAudioLevelStatus(level)
             }
-            .onChange(of: audio.isUSBActive) { _, isUSBActive in
-                ahrsBLE.sendStatusCommand(isUSBActive ? "AUDIO=1" : "AUDIO=0")
+            .onChange(of: audio.isUSBActive) { _, _ in
+                ahrsBLE.sendStatusCommand(audio.isAcceptedExternalInputActive ? "AUDIO=1" : "AUDIO=0")
+            }
+            .onChange(of: audio.isAcceptedExternalInputActive) { _, isExternalActive in
+                ahrsBLE.sendStatusCommand(isExternalActive ? "AUDIO=1" : "AUDIO=0")
+            }
+            .onChange(of: audio.recordingSignalActive) { _, _ in
+                sendRecordingStatus()
+            }
+            .onChange(of: audio.isPaused) { _, _ in
+                sendRecordingStatus()
             }
             .onChange(of: latestUploadStatusKey) { _, _ in
                 sendUploadStatus()
@@ -98,7 +107,7 @@ struct RecorderView: View {
             LabeledContent("Active input type", value: audio.selectedInputPortType)
             LabeledContent("Preferred input", value: audio.preferredInputName)
             if audio.isInternalMicWarning {
-                Text("Warning: the current audio route is the iPad microphone. Connect the USB interface, then tap Refresh Inputs before recording cockpit audio.")
+                Text("Warning: the current audio route is not the accepted cockpit input. Connect the USB-C audio adapter/EarPods interface, then tap Refresh Inputs before recording cockpit audio.")
                     .foregroundStyle(.red)
             }
             inputList
@@ -109,12 +118,12 @@ struct RecorderView: View {
     }
 
     private var sourceBanner: some View {
-        Label(audio.sourceSummary, systemImage: audio.isUSBActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        Label(audio.sourceSummary, systemImage: audio.isAcceptedExternalInputActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
             .font(.title3.weight(.semibold))
-            .foregroundStyle(audio.isUSBActive ? IPCATheme.success : IPCATheme.danger)
+            .foregroundStyle(audio.isAcceptedExternalInputActive ? IPCATheme.success : IPCATheme.danger)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background((audio.isUSBActive ? IPCATheme.success : IPCATheme.danger).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .background((audio.isAcceptedExternalInputActive ? IPCATheme.success : IPCATheme.danger).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var inputList: some View {
@@ -141,6 +150,9 @@ struct RecorderView: View {
                     if input.isUSB {
                         IPCAStatusPill(text: "USB", color: IPCATheme.success)
                     }
+                    if input.isAcceptedExternalInput && !input.isUSB {
+                        IPCAStatusPill(text: "EXTERNAL", color: IPCATheme.success)
+                    }
                     if input.isBuiltInMic {
                         IPCAStatusPill(text: "IPAD MIC", color: IPCATheme.warning)
                     }
@@ -159,6 +171,7 @@ struct RecorderView: View {
             LabeledContent("Recording source", value: audio.selectedInputName)
             LabeledContent("Elapsed", value: Formatters.duration(audio.elapsed))
             LabeledContent("File size", value: Formatters.bytes(audio.fileSize))
+            LabeledContent("Background audio", value: audio.backgroundRecordingStatus)
             LevelMeterView(level: audio.level, peakLevel: audio.peakLevel)
             HStack {
                 Text("Average \(Formatters.decibels(audio.averagePowerDB))")
@@ -185,7 +198,7 @@ struct RecorderView: View {
                             ahrsBLE.sendStatusCommand("REC=1")
                             ahrsBLE.sendStatusCommand("UPLOAD=WAIT")
                             ahrsBLE.sendStatusCommand("TX=WAIT")
-                            ahrsBLE.sendStatusCommand(audio.isUSBActive ? "AUDIO=1" : "AUDIO=0")
+                            ahrsBLE.sendStatusCommand(audio.isAcceptedExternalInputActive ? "AUDIO=1" : "AUDIO=0")
                             sendGPSStatus()
                         }
                     }
@@ -366,6 +379,16 @@ struct RecorderView: View {
         sendGPSStatus()
         store.add(recording)
         uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+    }
+
+    private func sendRecordingStatus() {
+        if !audio.isRecording {
+            ahrsBLE.sendStatusCommand("REC=0")
+        } else if audio.recordingSignalActive {
+            ahrsBLE.sendStatusCommand("REC=1")
+        } else {
+            ahrsBLE.sendStatusCommand("REC=PAUSE")
+        }
     }
 
     private func sendThrottledAudioLevelStatus(_ level: Float) {

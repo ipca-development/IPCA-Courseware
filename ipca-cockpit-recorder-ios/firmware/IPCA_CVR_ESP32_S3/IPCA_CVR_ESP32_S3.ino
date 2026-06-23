@@ -14,9 +14,8 @@
 // =======================================================
 // IPCA CVR 1.0 + BNO085 AHRS
 // Splash screen: 5 sec
-// Status screen: 10 sec
-// AHRS screen: 10 sec
-// AHRS screen frame does NOT refresh; only values update.
+// Status screen remains visible after splash.
+// BLE AHRS notifications continue; detailed AHRS values are shown on the iPad.
 // BLE AHRS notifications for iPad test app.
 // =======================================================
 
@@ -33,9 +32,7 @@
 #define SCREEN_AHRS   1
 
 #define SPLASH_SCREEN_MS 5000
-#define STATUS_SCREEN_MS 10000
-#define AHRS_SCREEN_MS   10000
-#define AHRS_VALUE_REFRESH_MS 250
+#define AHRS_SETUP_RETRY_MS 5000
 
 #define BLE_DEVICE_NAME "IPCA-CVR"
 #define BLE_SERVICE_UUID "7b7f1000-9a7b-4f6a-9f0c-6c9c1f8b0001"
@@ -555,14 +552,29 @@ void setupAHRS() {
 
   Serial.println("Searching for BNO085...");
 
-  if (bno08x.begin_I2C(0x4A, &Wire)) {
-    Serial.println("BNO085 FOUND at 0x4A");
-  } else if (bno08x.begin_I2C(0x4B, &Wire)) {
-    Serial.println("BNO085 FOUND at 0x4B");
-  } else {
+  bool found = false;
+  unsigned long startedAt = millis();
+  while (millis() - startedAt < AHRS_SETUP_RETRY_MS) {
+    if (bno08x.begin_I2C(0x4A, &Wire)) {
+      Serial.println("BNO085 FOUND at 0x4A");
+      found = true;
+      break;
+    }
+    if (bno08x.begin_I2C(0x4B, &Wire)) {
+      Serial.println("BNO085 FOUND at 0x4B");
+      found = true;
+      break;
+    }
+
+    Serial.println("BNO085 not ready yet, retrying...");
+    delay(250);
+  }
+
+  if (!found) {
     Serial.println("BNO085 NOT FOUND at 0x4A or 0x4B");
     ahrsReady = false;
     screenDirty = true;
+    statusDynamicDirty = true;
     return;
   }
 
@@ -570,6 +582,7 @@ void setupAHRS() {
     Serial.println("ROTATION VECTOR FAILED");
     ahrsReady = false;
     screenDirty = true;
+    statusDynamicDirty = true;
     return;
   }
 
@@ -578,6 +591,7 @@ void setupAHRS() {
 
   ahrsReady = true;
   screenDirty = true;
+  statusDynamicDirty = true;
 }
 
 void readAHRS() {
@@ -897,7 +911,7 @@ void handleCommand(String cmd) {
     switchToScreen(SCREEN_STATUS);
     fullRedraw = false;
   } else if (cmd == "SCREEN=1") {
-    switchToScreen(SCREEN_AHRS);
+    switchToScreen(SCREEN_STATUS);
     fullRedraw = false;
   } else if (cmd == "ALL=1") {
     ipadReady = true;
@@ -975,16 +989,6 @@ void loop() {
   readSerialCommands();
   readAHRS();
 
-  unsigned long now = millis();
-
-  if (currentScreen == SCREEN_STATUS && now - screenStartedAt >= STATUS_SCREEN_MS) {
-    switchToScreen(SCREEN_AHRS);
-  }
-
-  if (currentScreen == SCREEN_AHRS && now - screenStartedAt >= AHRS_SCREEN_MS) {
-    switchToScreen(SCREEN_STATUS);
-  }
-
   if (currentScreen == SCREEN_STATUS) {
     if (screenDirty) {
       drawStatusScreen();
@@ -993,26 +997,6 @@ void loop() {
     } else if (statusDynamicDirty) {
       drawStatusDynamicFields();
       statusDynamicDirty = false;
-    }
-  }
-
-  if (currentScreen == SCREEN_AHRS) {
-    if (screenDirty) {
-      drawAHRSScreenFrame();
-      updateAHRSScreenValues();
-      lastAHRSValueDraw = now;
-      screenDirty = false;
-      ahrsFooterDirty = false;
-    }
-
-    if (ahrsFooterDirty) {
-      drawRecordingFooter();
-      ahrsFooterDirty = false;
-    }
-
-    if (now - lastAHRSValueDraw >= AHRS_VALUE_REFRESH_MS) {
-      updateAHRSScreenValues();
-      lastAHRSValueDraw = now;
     }
   }
 }

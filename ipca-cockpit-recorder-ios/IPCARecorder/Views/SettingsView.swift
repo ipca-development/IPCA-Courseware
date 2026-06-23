@@ -146,6 +146,9 @@ struct SettingsView: View {
                                 if input.isUSB {
                                     IPCAStatusPill(text: "USB", color: IPCATheme.success)
                                 }
+                                if input.isAcceptedExternalInput && !input.isUSB {
+                                    IPCAStatusPill(text: "External", color: IPCATheme.success)
+                                }
                                 if input.isBuiltInMic {
                                     IPCAStatusPill(text: "Built-in Mic", color: IPCATheme.warning)
                                 }

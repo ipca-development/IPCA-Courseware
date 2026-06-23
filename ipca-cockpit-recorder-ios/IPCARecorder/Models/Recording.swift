@@ -118,6 +118,7 @@ struct AudioInputInfo: Identifiable, Equatable {
     var name: String
     var portType: String
     var isUSB: Bool
+    var isAcceptedExternalInput: Bool
     var isBuiltInMic: Bool
 }
 

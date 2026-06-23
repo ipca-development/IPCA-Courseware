@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
+require_once __DIR__ . '/../../src/CockpitReconstructionService.php';
 
 cw_require_admin();
 
@@ -68,6 +69,20 @@ function cockpit_admin_health(array $row): array
     return is_array($decoded) ? $decoded : array();
 }
 
+/**
+ * @param array<string,mixed> $row
+ * @return array<string,mixed>
+ */
+function cockpit_admin_reconstruction_summary(array $row): array
+{
+    $raw = trim((string)($row['reconstruction_summary_json'] ?? ''));
+    if ($raw === '') {
+        return array();
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : array();
+}
+
 $error = '';
 $recordings = array();
 $service = null;
@@ -102,6 +117,10 @@ cw_header('Cockpit Recorder POC');
 .cockpit-warning-list { margin: 6px 0 0; padding-left: 18px; color: #92400e; font-size: 12px; }
 .cockpit-chunks { display: grid; gap: 6px; min-width: 190px; font-size: 12px; }
 .cockpit-chunk-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.cockpit-actions { display: grid; gap: 6px; min-width: 210px; }
+.cockpit-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 7px 10px; cursor: pointer; }
+.cockpit-link-grid { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 12px; }
+.cockpit-summary-grid { display: grid; gap: 3px; margin-top: 6px; font-size: 12px; color: #334155; }
 </style>
 
 <div class="cockpit-recorder-page">
@@ -139,6 +158,7 @@ cw_header('Cockpit Recorder POC');
             <th>AHRS</th>
             <th>GPS</th>
             <th>Health</th>
+            <th>Reconstruction</th>
             <th>Audio</th>
             <th>Transcript / Error</th>
           </tr>
@@ -146,7 +166,7 @@ cw_header('Cockpit Recorder POC');
         <tbody>
         <?php if (!$recordings): ?>
           <tr>
-            <td colspan="14" class="cockpit-muted">No cockpit recorder uploads yet.</td>
+            <td colspan="15" class="cockpit-muted">No cockpit recorder uploads yet.</td>
           </tr>
         <?php endif; ?>
         <?php foreach ($recordings as $row): ?>
@@ -165,6 +185,13 @@ cw_header('Cockpit Recorder POC');
             $healthAhrs = isset($health['ahrs']) && is_array($health['ahrs']) ? $health['ahrs'] : array();
             $healthGps = isset($health['gps']) && is_array($health['gps']) ? $health['gps'] : array();
             $chunks = $service instanceof CockpitRecorderService ? $service->adminTranscriptionChunks($id) : array();
+            $reconSummary = cockpit_admin_reconstruction_summary($row);
+            $reconStatus = (string)($row['reconstruction_status'] ?? 'not_started');
+            $timelineStatus = (string)($row['timeline_status'] ?? 'not_started');
+            $adsbStatus = (string)($row['adsb_status'] ?? 'not_started');
+            $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
+            $replayJsonUrl = '/api/recordings/replay.php?id=' . $id;
+            $g3xUrl = '/admin/cockpit_recorder_g3x.php?id=' . $id;
             $chunkReady = 0;
             $chunkFailed = 0;
             foreach ($chunks as $chunkForCount) {
@@ -294,6 +321,34 @@ cw_header('Cockpit Recorder POC');
                 <span class="cockpit-muted">Not analyzed</span>
                 <div class="cockpit-muted">Apply health migration and upload again.</div>
               <?php endif; ?>
+            </td>
+            <td>
+              <div class="cockpit-actions">
+                <div>
+                  <span class="cockpit-badge cockpit-badge-<?= h($reconStatus) ?>"><?= h($reconStatus) ?></span>
+                  <div class="cockpit-muted">Timeline: <?= h($timelineStatus) ?></div>
+                  <div class="cockpit-muted">ADS-B: <?= h($adsbStatus) ?></div>
+                </div>
+                <?php if ($reconSummary): ?>
+                  <div class="cockpit-summary-grid">
+                    <strong>Timeline summary</strong>
+                    <div>Samples: <?= (int)($reconSummary['sample_count'] ?? 0) ?></div>
+                    <div>Phases: <?= (int)($reconSummary['phase_count'] ?? 0) ?> · Events: <?= (int)($reconSummary['event_count'] ?? 0) ?></div>
+                    <div>Max alt: <?= is_numeric($reconSummary['max_altitude_ft'] ?? null) ? h(number_format((float)$reconSummary['max_altitude_ft'], 0) . ' ft') : '--' ?></div>
+                    <div>Max GS: <?= is_numeric($reconSummary['max_groundspeed_kt'] ?? null) ? h(number_format((float)$reconSummary['max_groundspeed_kt'], 1) . ' kt') : '--' ?></div>
+                    <div>Max bank: <?= is_numeric($reconSummary['max_bank_deg'] ?? null) ? h(number_format((float)$reconSummary['max_bank_deg'], 1) . ' deg') : '--' ?></div>
+                  </div>
+                <?php endif; ?>
+                <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php">
+                  <input type="hidden" name="id" value="<?= $id ?>">
+                  <button class="cockpit-button" type="submit">Reconstruct</button>
+                </form>
+                <div class="cockpit-link-grid">
+                  <a href="<?= h($replayUrl) ?>">Replay</a>
+                  <a href="<?= h($replayJsonUrl) ?>">Replay JSON</a>
+                  <a href="<?= h($g3xUrl) ?>">G3X CSV</a>
+                </div>
+              </div>
             </td>
             <td>
               <?php if ($id > 0 && !empty($row['storage_path'])): ?>

@@ -96,6 +96,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = kCLDistanceFilterNone
         manager.pausesLocationUpdatesAutomatically = false
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
         if #available(iOS 12.0, *) {
             manager.activityType = .airborne
         } else {
