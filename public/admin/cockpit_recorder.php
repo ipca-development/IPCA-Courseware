@@ -235,7 +235,8 @@ cw_header('Cockpit Recorder POC');
               <?php if ($id > 0 && $transcription !== 'ready'): ?>
                 <form method="post" action="/admin/api/cockpit_recorder_transcribe.php" style="margin-top:6px">
                   <input type="hidden" name="id" value="<?= $id ?>">
-                  <button class="cockpit-button" type="submit">Start transcript</button>
+                  <input type="hidden" name="mode" value="spawn">
+                  <button class="cockpit-button" type="submit">Start / restart transcript</button>
                 </form>
               <?php endif; ?>
             </td>

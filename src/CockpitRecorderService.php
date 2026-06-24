@@ -551,6 +551,29 @@ final class CockpitRecorderService
         ")->execute(array(substr($error, 0, 2000), $recordingId));
     }
 
+    public function resetTranscriptionForRetry(int $recordingId): void
+    {
+        if ($recordingId <= 0) {
+            return;
+        }
+
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_status = 'queued',
+                transcription_progress = 0,
+                transcript_text = NULL,
+                error_message = NULL,
+                transcription_started_at = NULL,
+                transcription_completed_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($recordingId));
+
+        if (self::transcriptionChunkTablePresent($this->pdo)) {
+            $this->resetTranscriptionChunks($recordingId);
+        }
+    }
+
     public function spawnTranscriptionWorker(int $recordingId): bool
     {
         if ($recordingId <= 0) {

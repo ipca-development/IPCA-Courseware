@@ -10,7 +10,7 @@ cw_require_admin();
 @ini_set('max_execution_time', '0');
 
 $id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
-$mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'run'));
+$mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'spawn'));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
 function cockpit_transcribe_response(bool $ok, string $message, array $payload = array()): void
@@ -41,6 +41,7 @@ try {
 
     $service = new CockpitRecorderService($pdo);
     if ($mode === 'spawn') {
+        $service->resetTranscriptionForRetry($id);
         $spawned = $service->spawnTranscriptionWorker($id);
         cockpit_transcribe_response($spawned, $spawned ? 'worker_started' : 'worker_start_failed', array('worker_spawned' => $spawned));
     }
