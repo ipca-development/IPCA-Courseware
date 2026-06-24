@@ -48,11 +48,16 @@ cw_header('Cockpit Recorder Replay');
 .replay-map-toolbar button { border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 800; padding: 5px 10px; cursor: pointer; }
 .replay-map-toolbar button.is-active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
 .replay-map-toolbar .zoom-button { min-width: 34px; padding-left: 0; padding-right: 0; }
+.replay-3d { height: 220px; margin-top: 12px; border: 1px solid #dbeafe; border-radius: 14px; background: linear-gradient(180deg, #eff6ff 0%, #fff 62%, #f8fafc 100%); overflow: hidden; position: relative; }
+.replay-3d svg { width: 100%; height: 100%; display: block; }
+.replay-3d-label { position: absolute; left: 12px; top: 10px; z-index: 2; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .graph-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #f8fafc; }
 .graph-card h4 { margin: 0 0 6px; font-size: 12px; color: #334155; text-transform: uppercase; letter-spacing: .04em; }
+.graph-value { font-size: 22px; font-weight: 900; color: #0f172a; line-height: 1; }
+.graph-range { color: #64748b; font-size: 11px; margin-top: 2px; }
 .graph-card svg { width: 100%; height: 78px; display: block; }
 .detail-grid { display: grid; gap: 8px; font-size: 13px; }
 .detail-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
@@ -109,6 +114,9 @@ cw_header('Cockpit Recorder Replay');
           </div>
         </div>
         <div class="replay-map" id="flightMap"></div>
+        <div class="replay-3d" id="flight3D">
+          <div class="replay-3d-label">3D GPS altitude view</div>
+        </div>
         <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
         <div class="replay-controls">
           <button class="replay-button" type="button" id="playButton">Play</button>
@@ -139,6 +147,7 @@ cw_header('Cockpit Recorder Replay');
   const id = root ? root.getAttribute('data-replay-id') : '';
   const phaseList = document.getElementById('phaseList');
   const flightMap = document.getElementById('flightMap');
+  const flight3D = document.getElementById('flight3D');
   const eventList = document.getElementById('eventList');
   const details = document.getElementById('details');
   const graphs = document.getElementById('graphs');
@@ -155,6 +164,8 @@ cw_header('Cockpit Recorder Replay');
   let activeT = 0;
   let mapMode = 'route';
   let zoomOffset = 0;
+  let animationFrame = null;
+  let lastAnimationRenderMs = 0;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -168,12 +179,45 @@ cw_header('Cockpit Recorder Replay');
 
   function sampleAt(t) {
     if (!payload || !payload.samples.length) return null;
-    let best = payload.samples[0];
-    for (const sample of payload.samples) {
-      if (sample.t > t) break;
-      best = sample;
+    const samples = payload.samples;
+    if (t <= samples[0].t) return samples[0];
+    if (t >= samples[samples.length - 1].t) return samples[samples.length - 1];
+
+    let before = samples[0];
+    let after = samples[samples.length - 1];
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i].t >= t) {
+        before = samples[i - 1];
+        after = samples[i];
+        break;
+      }
     }
-    return best;
+
+    const span = Math.max(0.001, Number(after.t) - Number(before.t));
+    const ratio = Math.max(0, Math.min(1, (Number(t) - Number(before.t)) / span));
+    const lerp = (a, b) => {
+      if (a === null || a === undefined || b === null || b === undefined) return a ?? b ?? null;
+      return Number(a) + (Number(b) - Number(a)) * ratio;
+    };
+    const lerpAngle = (a, b) => {
+      if (a === null || a === undefined || b === null || b === undefined) return a ?? b ?? null;
+      const start = Number(a);
+      const end = Number(b);
+      let delta = ((end - start + 540) % 360) - 180;
+      return (start + delta * ratio + 360) % 360;
+    };
+
+    return Object.assign({}, before, {
+      t: Number(t),
+      lat: lerp(before.lat, after.lat),
+      lon: lerp(before.lon, after.lon),
+      gps_altitude_ft: lerp(before.gps_altitude_ft, after.gps_altitude_ft),
+      groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
+      pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
+      bank_deg: lerp(before.bank_deg, after.bank_deg),
+      heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
+      track_deg: lerpAngle(before.track_deg, after.track_deg),
+    });
   }
 
   function activePhase(t) {
@@ -349,6 +393,74 @@ cw_header('Cockpit Recorder Replay');
       </svg>`;
   }
 
+  function render3DView() {
+    const width = Math.max(320, Math.round(flight3D.clientWidth || 900));
+    const height = Math.max(180, Math.round(flight3D.clientHeight || 220));
+    const samples = payload.samples.filter((s) => s.lat !== null && s.lon !== null);
+    if (!samples.length) {
+      flight3D.innerHTML = '<div class="replay-3d-label">3D GPS altitude view</div><svg viewBox="0 0 900 220"><text x="24" y="62" fill="#64748b">No GPS data available</text></svg>';
+      return;
+    }
+
+    const bounds = gpsBounds(samples);
+    const altitudes = samples
+      .map((s) => Number(s.gps_altitude_ft))
+      .filter((v) => Number.isFinite(v));
+    const minAlt = altitudes.length ? Math.min(...altitudes) : 0;
+    const maxAlt = altitudes.length ? Math.max(...altitudes) : 1;
+    const altSpan = Math.max(50, maxAlt - minAlt);
+    const pad = 34;
+    const groundY = height - 34;
+    const horizonY = 48;
+    const current = sampleAt(activeT);
+
+    const project = (sample, elevated) => {
+      const nx = (Number(sample.lon) - bounds.minLon) / Math.max(0.000001, bounds.maxLon - bounds.minLon);
+      const ny = (Number(sample.lat) - bounds.minLat) / Math.max(0.000001, bounds.maxLat - bounds.minLat);
+      const baseX = pad + nx * (width - pad * 2);
+      const baseY = groundY - ny * (height * 0.32);
+      const perspectiveX = baseX + (ny - 0.5) * 70;
+      const alt = Number.isFinite(Number(sample.gps_altitude_ft)) ? Number(sample.gps_altitude_ft) : minAlt;
+      const z = ((alt - minAlt) / altSpan) * (height * 0.58);
+      return {
+        x: perspectiveX,
+        groundY: baseY,
+        y: elevated ? Math.max(horizonY, baseY - z) : baseY,
+        altitude: alt,
+      };
+    };
+
+    const groundPath = samples.map((s) => {
+      const p = project(s, false);
+      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    }).join(' ');
+    const altitudePath = samples.map((s) => {
+      const p = project(s, true);
+      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    }).join(' ');
+    const currentPoint = current && current.lat !== null && current.lon !== null ? project(current, true) : null;
+    const currentGround = current && current.lat !== null && current.lon !== null ? project(current, false) : null;
+    const currentAlt = currentPoint ? `${currentPoint.altitude.toFixed(0)} ft` : '--';
+
+    flight3D.innerHTML = `
+      <div class="replay-3d-label">3D GPS altitude view · ${currentAlt}</div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="3D GPS altitude view">
+        <defs>
+          <linearGradient id="altitudeFill" x1="0" x2="0" y1="0" y2="1">
+            <stop stop-color="#2563eb" stop-opacity=".22"/>
+            <stop offset="1" stop-color="#2563eb" stop-opacity=".02"/>
+          </linearGradient>
+        </defs>
+        <line x1="${pad}" y1="${groundY}" x2="${width - pad}" y2="${groundY}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 6"/>
+        <text x="${pad}" y="${groundY - 8}" fill="#64748b" font-size="12">Ground track</text>
+        <text x="${width - pad}" y="${horizonY + 12}" text-anchor="end" fill="#64748b" font-size="12">${maxAlt.toFixed(0)} ft</text>
+        <text x="${width - pad}" y="${groundY - 8}" text-anchor="end" fill="#64748b" font-size="12">${minAlt.toFixed(0)} ft</text>
+        <polyline points="${groundPath}" fill="none" stroke="#64748b" stroke-width="2" opacity=".55"/>
+        <polyline points="${altitudePath}" fill="none" stroke="#2563eb" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+        ${currentPoint && currentGround ? `<line x1="${currentPoint.x.toFixed(1)}" y1="${currentPoint.y.toFixed(1)}" x2="${currentGround.x.toFixed(1)}" y2="${currentGround.y.toFixed(1)}" stroke="#f97316" stroke-width="3" stroke-linecap="round"/><circle cx="${currentGround.x.toFixed(1)}" cy="${currentGround.y.toFixed(1)}" r="5" fill="#f97316" opacity=".7"/><circle cx="${currentPoint.x.toFixed(1)}" cy="${currentPoint.y.toFixed(1)}" r="10" fill="#0f172a" stroke="#fff" stroke-width="4"/><circle cx="${currentPoint.x.toFixed(1)}" cy="${currentPoint.y.toFixed(1)}" r="5" fill="#2563eb"/><text x="${(currentPoint.x + 14).toFixed(1)}" y="${(currentPoint.y - 12).toFixed(1)}" fill="#0f172a" font-size="13" font-weight="800">${currentAlt}</text>` : ''}
+      </svg>`;
+  }
+
   function renderPhases() {
     phaseList.innerHTML = '';
     for (const phase of payload.phases) {
@@ -401,7 +513,11 @@ cw_header('Cockpit Recorder Replay');
     ].forEach(([label, key, color, unit]) => {
       const card = document.createElement('div');
       card.className = 'graph-card';
-      card.innerHTML = `<h4>${label}</h4>${graphSvg(key, color, unit)}`;
+      const current = sampleAt(activeT) || {};
+      const value = current[key] === null || current[key] === undefined || Number.isNaN(Number(current[key]))
+        ? '--'
+        : `${Number(current[key]).toFixed(unit === 'ft' || unit === 'deg' && (key === 'heading_deg' || key === 'track_deg') ? 0 : 1)} ${unit}`;
+      card.innerHTML = `<h4>${label}</h4><div class="graph-value">${value}</div>${graphSvg(key, color, unit)}`;
       graphs.appendChild(card);
     });
   }
@@ -419,7 +535,7 @@ cw_header('Cockpit Recorder Replay');
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
     const currentX = pad + (activeT / maxT) * (width - pad * 2);
-    return `<svg viewBox="0 0 ${width} ${height}"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="3"/><line x1="${currentX}" x2="${currentX}" y1="6" y2="${height - 6}" stroke="#0f172a" stroke-width="1.5"/><text x="12" y="18" fill="#64748b" font-size="12">${minV.toFixed(0)}-${maxV.toFixed(0)} ${unit}</text></svg>`;
+    return `<div class="graph-range">Range ${minV.toFixed(0)}-${maxV.toFixed(0)} ${unit}</div><svg viewBox="0 0 ${width} ${height}"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="3"/><line x1="${currentX}" x2="${currentX}" y1="6" y2="${height - 6}" stroke="#0f172a" stroke-width="1.5"/></svg>`;
   }
 
   function updateActivePhase() {
@@ -454,6 +570,7 @@ cw_header('Cockpit Recorder Replay');
     }
     updateActivePhase();
     renderMap();
+    render3DView();
     renderDetails();
     renderGraphs();
   }
@@ -483,11 +600,34 @@ cw_header('Cockpit Recorder Replay');
       playButton.textContent = 'Play';
     }
   });
-  audio.addEventListener('pause', () => playButton.textContent = 'Play');
-  audio.addEventListener('play', () => playButton.textContent = 'Pause');
+  audio.addEventListener('pause', () => {
+    playButton.textContent = 'Play';
+    if (animationFrame !== null) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  });
+  audio.addEventListener('play', () => {
+    playButton.textContent = 'Pause';
+    lastAnimationRenderMs = 0;
+    animatePlayback();
+  });
+
+  function animatePlayback(timestamp = 0) {
+    if (audio.paused || !payload) {
+      animationFrame = null;
+      return;
+    }
+    if (timestamp - lastAnimationRenderMs >= 100) {
+      seek(audio.currentTime, false);
+      lastAnimationRenderMs = timestamp;
+    }
+    animationFrame = requestAnimationFrame(animatePlayback);
+  }
   window.addEventListener('resize', () => {
     if (!payload) return;
     renderMap();
+    render3DView();
     renderGraphs();
   });
 
@@ -500,6 +640,7 @@ cw_header('Cockpit Recorder Replay');
       timeline.max = String(maxT);
       renderPhases();
       renderMap();
+      render3DView();
       renderDetails();
       renderGraphs();
     })
