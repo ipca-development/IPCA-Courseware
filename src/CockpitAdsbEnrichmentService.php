@@ -365,7 +365,7 @@ final class CockpitAdsbEnrichmentService
      */
     private function storeJson(array $recording, string $type, array $payload): string
     {
-        $uid = CockpitRecorderService::normalizeRecordingUid((string)($recording['recording_uid'] ?? 'recording')) ?: 'recording';
+        $uid = self::safeStorageName((string)($recording['recording_uid'] ?? 'recording')) ?: 'recording';
         $relativePath = 'storage/cockpit_recorder/adsb/' . $uid . '.' . $type . '.json';
         $absolutePath = CockpitRecorderService::projectRoot() . '/' . $relativePath;
         if (!is_dir(dirname($absolutePath)) && !mkdir(dirname($absolutePath), 0775, true) && !is_dir(dirname($absolutePath))) {
@@ -376,6 +376,13 @@ final class CockpitAdsbEnrichmentService
             throw new RuntimeException('Could not store ADS-B ' . $type . ' JSON.');
         }
         return $relativePath;
+    }
+
+    private static function safeStorageName(string $value): string
+    {
+        $value = trim($value);
+        $value = preg_replace('/[^A-Za-z0-9_.-]+/', '_', $value) ?? '';
+        return trim($value, '._-');
     }
 
     /**
