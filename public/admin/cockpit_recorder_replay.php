@@ -43,6 +43,11 @@ cw_header('Cockpit Recorder Replay');
 .replay-map-overlay { position: absolute; inset: 0; z-index: 2; }
 .replay-map-label { position: absolute; left: 12px; top: 12px; z-index: 3; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; backdrop-filter: blur(6px); }
 .replay-map-attribution { position: absolute; right: 8px; bottom: 6px; z-index: 3; border-radius: 6px; background: rgba(255, 255, 255, .82); color: #334155; font-size: 11px; padding: 3px 6px; }
+.replay-map-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.replay-map-toolbar-group { display: inline-flex; gap: 6px; align-items: center; }
+.replay-map-toolbar button { border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 800; padding: 5px 10px; cursor: pointer; }
+.replay-map-toolbar button.is-active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.replay-map-toolbar .zoom-button { min-width: 34px; padding-left: 0; padding-right: 0; }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -92,6 +97,17 @@ cw_header('Cockpit Recorder Replay');
 
       <main class="replay-card replay-center">
         <h3 style="margin-top:0">Flight Replay</h3>
+        <div class="replay-map-toolbar">
+          <div class="replay-map-toolbar-group" role="group" aria-label="Map view mode">
+            <button type="button" id="routeViewButton" class="is-active">Route</button>
+            <button type="button" id="aircraftViewButton">Aircraft</button>
+            <button type="button" id="followViewButton">Follow aircraft</button>
+          </div>
+          <div class="replay-map-toolbar-group" role="group" aria-label="Map zoom">
+            <button type="button" class="zoom-button" id="zoomOutButton">-</button>
+            <button type="button" class="zoom-button" id="zoomInButton">+</button>
+          </div>
+        </div>
         <div class="replay-map" id="flightMap"></div>
         <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
         <div class="replay-controls">
@@ -130,8 +146,15 @@ cw_header('Cockpit Recorder Replay');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
   const playButton = document.getElementById('playButton');
+  const routeViewButton = document.getElementById('routeViewButton');
+  const aircraftViewButton = document.getElementById('aircraftViewButton');
+  const followViewButton = document.getElementById('followViewButton');
+  const zoomOutButton = document.getElementById('zoomOutButton');
+  const zoomInButton = document.getElementById('zoomInButton');
   let payload = null;
   let activeT = 0;
+  let mapMode = 'route';
+  let zoomOffset = 0;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -213,6 +236,30 @@ cw_header('Cockpit Recorder Replay');
     return { centerLat, centerLon, zoom: 4 };
   }
 
+  function clampZoom(zoom) {
+    return Math.max(4, Math.min(19, Math.round(Number(zoom) || 4)));
+  }
+
+  function chooseActiveMapView(samples, width, height, stationary, current) {
+    const routeView = chooseMapView(samples, width, height, stationary);
+    if (!routeView) return null;
+
+    if ((mapMode === 'aircraft' || mapMode === 'follow') && current && current.lat !== null && current.lon !== null) {
+      const baseZoom = stationary ? 18 : Math.max(routeView.zoom + 4, 15);
+      return {
+        centerLat: Number(current.lat),
+        centerLon: Number(current.lon),
+        zoom: clampZoom(baseZoom + zoomOffset),
+      };
+    }
+
+    return {
+      centerLat: routeView.centerLat,
+      centerLon: routeView.centerLon,
+      zoom: clampZoom(routeView.zoom + zoomOffset),
+    };
+  }
+
   function projectGeoPoint(sample, view, width, height) {
     if (!view || sample.lat === null || sample.lon === null) return null;
     const centerX = lonToWorldX(view.centerLon, view.zoom);
@@ -249,11 +296,11 @@ cw_header('Cockpit Recorder Replay');
   function renderMap() {
     const width = 900, height = 420;
     const stationary = isStationaryRecording(payload.samples);
-    const view = chooseMapView(payload.samples, width, height, stationary);
+    const current = sampleAt(activeT);
+    const view = chooseActiveMapView(payload.samples, width, height, stationary, current);
     const points = payload.samples
       .map((sample) => projectGeoPoint(sample, view, width, height))
       .filter(Boolean);
-    const current = sampleAt(activeT);
     const pointForTime = (t) => {
       if (!points.length) return null;
       let best = points[0];
@@ -265,6 +312,10 @@ cw_header('Cockpit Recorder Replay');
     };
     const currentPoint = current ? pointForTime(current.t) : null;
     const path = stationary ? '' : points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const recentTrail = points
+      .filter((p) => p.t >= activeT - 60 && p.t <= activeT + 3)
+      .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      .join(' ');
     const eventMarkers = (payload.events || []).map((event) => {
       const projected = pointForTime(event.start);
       if (!projected) return '';
@@ -277,17 +328,21 @@ cw_header('Cockpit Recorder Replay');
       ? `<text x="${width / 2}" y="${height / 2 + 34}" text-anchor="middle" fill="#475569" font-size="18">GPS position recorded, no significant movement detected yet.</text>
          <text x="${width / 2}" y="${height / 2 + 58}" text-anchor="middle" fill="#64748b" font-size="14">A real flight or taxi test will draw the plan-view track here.</text>`
       : '';
+    const aircraftAngle = current
+      ? (Number.isFinite(Number(current.heading_deg)) ? Number(current.heading_deg) : (Number.isFinite(Number(current.track_deg)) ? Number(current.track_deg) : 0))
+      : 0;
     flightMap.innerHTML = `
       ${renderSatelliteTiles(view, width, height)}
-      <div class="replay-map-label">${view ? `Satellite plan view · Z${view.zoom}` : 'Replay plan view'}</div>
+      <div class="replay-map-label">${view ? `${mapMode === 'route' ? 'Route' : (mapMode === 'follow' ? 'Follow aircraft' : 'Aircraft')} · Satellite Z${view.zoom}` : 'Replay plan view'}</div>
       ${view ? '<div class="replay-map-attribution">Imagery: Esri World Imagery</div>' : ''}
       <svg class="replay-map-overlay" viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
         <rect width="${width}" height="${height}" fill="${view ? 'rgba(15, 23, 42, .08)' : 'url(#bg)'}"></rect>
         <defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
         ${pathLayer}
+        ${recentTrail ? `<polyline points="${recentTrail}" fill="none" stroke="#f97316" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" opacity=".9"></polyline>` : ''}
         ${eventMarkers}
         ${stationaryMessage}
-        ${currentPoint ? `<g><circle cx="${currentPoint.x}" cy="${currentPoint.y}" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M ${currentPoint.x} ${currentPoint.y - 22} L ${currentPoint.x + 9} ${currentPoint.y + 12} L ${currentPoint.x} ${currentPoint.y + 7} L ${currentPoint.x - 9} ${currentPoint.y + 12} Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path></g>` : ''}
+        ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><circle cx="0" cy="0" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M 0 -24 L 10 14 L 0 8 L -10 14 Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path><line x1="0" y1="-34" x2="0" y2="-46" stroke="#fff" stroke-width="3" stroke-linecap="round"></line></g>` : ''}
       </svg>`;
   }
 
@@ -301,7 +356,12 @@ cw_header('Cockpit Recorder Replay');
         <strong>${phase.phase}</strong>
         <span class="replay-muted">${fmtTime(phase.start)} · ${fmtTime(phase.duration)} · ${(Number(phase.confidence) * 100).toFixed(0)}%</span>
         <button type="button">Jump</button>`;
-      row.querySelector('button').addEventListener('click', () => seek(phase.start, true));
+      row.querySelector('button').addEventListener('click', () => {
+        mapMode = 'aircraft';
+        zoomOffset = 0;
+        updateMapButtons();
+        seek(phase.start, true);
+      });
       phaseList.appendChild(row);
     }
     updateActivePhase();
@@ -365,6 +425,21 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
+  function updateMapButtons() {
+    routeViewButton.classList.toggle('is-active', mapMode === 'route');
+    aircraftViewButton.classList.toggle('is-active', mapMode === 'aircraft');
+    followViewButton.classList.toggle('is-active', mapMode === 'follow');
+  }
+
+  function setMapMode(mode) {
+    mapMode = mode;
+    if (mode === 'route') {
+      zoomOffset = 0;
+    }
+    updateMapButtons();
+    renderMap();
+  }
+
   function seek(seconds, syncAudio) {
     activeT = Math.max(0, Number(seconds) || 0);
     timeline.value = String(activeT);
@@ -380,6 +455,20 @@ cw_header('Cockpit Recorder Replay');
 
   timeline.addEventListener('input', () => seek(Number(timeline.value), true));
   audio.addEventListener('timeupdate', () => seek(audio.currentTime, false));
+  routeViewButton.addEventListener('click', () => setMapMode('route'));
+  aircraftViewButton.addEventListener('click', () => setMapMode('aircraft'));
+  followViewButton.addEventListener('click', () => setMapMode('follow'));
+  zoomOutButton.addEventListener('click', () => {
+    zoomOffset -= 1;
+    if (mapMode === 'route' && zoomOffset < -3) zoomOffset = -3;
+    if (mapMode !== 'route' && zoomOffset < -6) zoomOffset = -6;
+    renderMap();
+  });
+  zoomInButton.addEventListener('click', () => {
+    zoomOffset += 1;
+    if (zoomOffset > 6) zoomOffset = 6;
+    renderMap();
+  });
   playButton.addEventListener('click', () => {
     if (audio.paused) {
       audio.play();
