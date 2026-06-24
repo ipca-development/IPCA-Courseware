@@ -260,7 +260,7 @@ final class CockpitReconstructionService
             'summary' => self::decodeJson((string)($recording['reconstruction_summary_json'] ?? '')),
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
-            'samples' => $this->sampleRows($recordingId),
+            'samples' => $this->sampleRows($recordingId, 20000),
         );
     }
 
