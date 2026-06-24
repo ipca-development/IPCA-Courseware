@@ -37,6 +37,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/gps';
     }
 
+    public static function uploadSessionRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/upload_sessions';
+    }
+
     public static function tablesPresent(PDO $pdo): bool
     {
         $stmt = $pdo->query("SHOW TABLES LIKE 'ipca_cockpit_recordings'");
@@ -82,26 +87,78 @@ final class CockpitRecorderService
             throw new RuntimeException('Uploaded audio file is empty.');
         }
 
+        $originalName = trim((string)($file['name'] ?? 'recording.m4a'));
+        return $this->storeRecordingFromLocalPaths(
+            $tmp,
+            true,
+            $metadata,
+            $originalName,
+            (string)($file['type'] ?? ''),
+            $ahrsFile,
+            $gpsFile,
+            null,
+            null
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     * @return array<string,mixed>
+     */
+    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null): array
+    {
+        $this->requireTables();
+        if (!is_file($audioPath)) {
+            throw new RuntimeException('Assembled audio file is missing.');
+        }
+        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath);
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     * @param array<string,mixed>|null $ahrsFile
+     * @param array<string,mixed>|null $gpsFile
+     * @return array<string,mixed>
+     */
+    private function storeRecordingFromLocalPaths(
+        string $audioSourcePath,
+        bool $audioIsUploadedFile,
+        array $metadata,
+        string $originalName,
+        string $mimeType,
+        ?array $ahrsFile,
+        ?array $gpsFile,
+        ?string $ahrsPath,
+        ?string $gpsPath
+    ): array {
         $recordingUid = self::normalizeRecordingUid((string)($metadata['recording_id'] ?? ''));
         if ($recordingUid === '') {
             $recordingUid = bin2hex(random_bytes(16));
         }
 
-        $originalName = trim((string)($file['name'] ?? 'recording.m4a'));
-        $ext = self::safeExtension($originalName, (string)($file['type'] ?? ''));
+        $originalName = trim($originalName) !== '' ? trim($originalName) : 'recording.m4a';
+        $mimeType = trim($mimeType);
+        $ext = self::safeExtension($originalName, $mimeType);
         $relativePath = self::relativeAudioPath($recordingUid, $ext);
         $absolutePath = self::projectRoot() . '/' . $relativePath;
         self::ensureDirectory(dirname($absolutePath));
 
-        if (!move_uploaded_file($tmp, $absolutePath)) {
+        $stored = $audioIsUploadedFile
+            ? move_uploaded_file($audioSourcePath, $absolutePath)
+            : copy($audioSourcePath, $absolutePath);
+        if (!$stored) {
             throw new RuntimeException('Could not store uploaded audio.');
+        }
+
+        $size = (int)filesize($absolutePath);
+        if ($size <= 0) {
+            throw new RuntimeException('Uploaded audio file is empty.');
         }
 
         $startedAt = self::normalizeDateTime((string)($metadata['started_at'] ?? ''));
         $duration = max(0.0, (float)($metadata['duration'] ?? 0));
         $inputDevice = trim((string)($metadata['input_device'] ?? ''));
         $language = self::normalizeLanguage((string)($metadata['language'] ?? 'en'));
-        $mimeType = trim((string)($file['type'] ?? ''));
 
         $stmt = $this->pdo->prepare("
             INSERT INTO " . self::TABLE . " (
@@ -191,6 +248,16 @@ final class CockpitRecorderService
 
         if ($gpsFile !== null && $this->isPresentUpload($gpsFile)) {
             $this->storeUploadedGPS((int)$recording['id'], $recordingUid, $gpsFile);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($ahrsPath !== null && is_file($ahrsPath)) {
+            $this->storeLocalAHRS((int)$recording['id'], $recordingUid, $ahrsPath);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($gpsPath !== null && is_file($gpsPath)) {
+            $this->storeLocalGPS((int)$recording['id'], $recordingUid, $gpsPath);
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -683,6 +750,73 @@ final class CockpitRecorderService
             WHERE id = ?
         ");
         $stmt->execute(array($relativePath, $size, $sampleCount, $recordingId));
+    }
+
+    private function storeLocalAHRS(int $recordingId, string $recordingUid, string $path): void
+    {
+        if (!$this->hasColumn('ahrs_storage_path')) {
+            return;
+        }
+        $this->storeLocalSensorJson($recordingId, $recordingUid, $path, 'AHRS', self::relativeAHRSPath($recordingUid), 'ahrs_storage_path', 'ahrs_file_size_bytes', 'ahrs_sample_count');
+    }
+
+    private function storeLocalGPS(int $recordingId, string $recordingUid, string $path): void
+    {
+        if (!$this->hasColumn('gps_storage_path')) {
+            return;
+        }
+        $this->storeLocalSensorJson($recordingId, $recordingUid, $path, 'GPS', self::relativeGPSPath($recordingUid), 'gps_storage_path', 'gps_file_size_bytes', 'gps_sample_count');
+    }
+
+    private function storeLocalSensorJson(
+        int $recordingId,
+        string $recordingUid,
+        string $sourcePath,
+        string $label,
+        string $relativePath,
+        string $pathColumn,
+        string $sizeColumn,
+        string $countColumn
+    ): void {
+        unset($recordingUid);
+        if (!is_file($sourcePath)) {
+            return;
+        }
+        $size = (int)filesize($sourcePath);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 25 * 1024 * 1024) {
+            throw new RuntimeException($label . ' JSON is too large (max 25 MB).');
+        }
+        $raw = file_get_contents($sourcePath);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Could not read ' . $label . ' JSON.');
+        }
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new RuntimeException('Invalid ' . $label . ' JSON: ' . $e->getMessage());
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException($label . ' JSON must be an array of samples.');
+        }
+
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+        if (!copy($sourcePath, $absolutePath)) {
+            throw new RuntimeException('Could not store ' . $label . ' JSON.');
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET {$pathColumn} = ?,
+                {$sizeColumn} = ?,
+                {$countColumn} = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
+        $stmt->execute(array($relativePath, $size, count($decoded), $recordingId));
     }
 
     /**

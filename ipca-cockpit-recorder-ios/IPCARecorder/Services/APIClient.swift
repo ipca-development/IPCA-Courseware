@@ -24,6 +24,22 @@ struct UploadResponse: Codable {
     var error: String?
 }
 
+struct ChunkUploadResponse: Codable {
+    var ok: Bool
+    var error: String?
+    var fileType: String?
+    var chunkIndex: Int?
+    var totalChunks: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case error
+        case fileType = "file_type"
+        case chunkIndex = "chunk_index"
+        case totalChunks = "total_chunks"
+    }
+}
+
 struct StatusResponse: Codable {
     var ok: Bool
     var recording: APIRecording?
@@ -79,6 +95,48 @@ struct APIClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 3600
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
+    func chunkUploadRequest(
+        recording: Recording,
+        fileType: String,
+        chunkIndex: Int,
+        totalChunks: Int,
+        totalSize: Int64,
+        originalFilename: String,
+        mimeType: String
+    ) -> URLRequest {
+        let url = serverURL.appending(path: "api/recordings/upload_chunk.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue(recording.id, forHTTPHeaderField: "X-IPCA-Recording-ID")
+        request.setValue(fileType, forHTTPHeaderField: "X-IPCA-File-Type")
+        request.setValue(String(chunkIndex), forHTTPHeaderField: "X-IPCA-Chunk-Index")
+        request.setValue(String(totalChunks), forHTTPHeaderField: "X-IPCA-Total-Chunks")
+        request.setValue(String(totalSize), forHTTPHeaderField: "X-IPCA-Total-Size")
+        request.setValue(originalFilename, forHTTPHeaderField: "X-IPCA-Original-Filename")
+        request.setValue(mimeType, forHTTPHeaderField: "X-IPCA-Mime-Type")
+        return request
+    }
+
+    func finalizeChunkedUploadRequest(for recording: Recording, language: String) throws -> URLRequest {
+        let url = serverURL.appending(path: "api/recordings/upload_finalize.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3600
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = [
+            "recording_id": recording.id,
+            "started_at": ISO8601DateFormatter().string(from: recording.startedAt),
+            "duration": recording.duration,
+            "input_device": recording.inputDeviceName,
+            "aircraft_id": recording.aircraftID ?? 0,
+            "language": language
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         return request
     }
 
@@ -205,6 +263,11 @@ struct APIClient {
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {
         try validate(response: response, data: data)
         return try decode(UploadResponse.self, from: data, response: response)
+    }
+
+    func decodeChunkUploadResponse(data: Data, response: URLResponse) throws -> ChunkUploadResponse {
+        try validate(response: response, data: data)
+        return try decode(ChunkUploadResponse.self, from: data, response: response)
     }
 
     private func validate(response: URLResponse, data: Data) throws {
