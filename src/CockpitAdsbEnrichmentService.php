@@ -9,6 +9,10 @@ require_once __DIR__ . '/tv_adsb_status.php';
  *
  * Phase 1 fetches ownship historical/recent trace data by ICAO hex.
  */
+final class CockpitAdsbTraceNotAvailable extends RuntimeException
+{
+}
+
 final class CockpitAdsbEnrichmentService
 {
     private const RECORDINGS_TABLE = 'ipca_cockpit_recordings';
@@ -70,6 +74,7 @@ final class CockpitAdsbEnrichmentService
             $rawPath = $this->storeJson($recording, 'raw', $raw);
             $samples = $this->normalizeTrace($raw, $window['start_epoch'], $window['end_epoch']);
             if (!$samples) {
+                $this->clearOwnshipSamples($recordingId);
                 $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, 'No ADS-B trace samples found inside recording time window.');
                 return array('ok' => false, 'status' => 'not_available', 'error' => 'No ADS-B trace samples found inside recording time window.', 'raw_storage_path' => $rawPath);
             }
@@ -95,6 +100,19 @@ final class CockpitAdsbEnrichmentService
                 'raw_storage_path' => $rawPath,
                 'normalized_storage_path' => $normalizedPath,
             );
+        } catch (CockpitAdsbTraceNotAvailable $e) {
+            $this->clearOwnshipSamples($recordingId);
+            $diagnosticsPath = $this->storeJson($recording, 'raw', array(
+                'provider' => 'adsbexchange_trace',
+                'hex' => $hex,
+                'recording_id' => (string)$recording['recording_uid'],
+                'query_start_utc' => $window['start_iso'],
+                'query_end_utc' => $window['end_iso'],
+                'status' => 'not_available',
+                'error' => $e->getMessage(),
+            ));
+            $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $e->getMessage(), $diagnosticsPath, null);
+            return array('ok' => false, 'status' => 'not_available', 'error' => $e->getMessage(), 'raw_storage_path' => $diagnosticsPath);
         } catch (Throwable $e) {
             $this->setStatus($recordingId, 'failed', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $e->getMessage());
             throw $e;
@@ -202,7 +220,7 @@ final class CockpitAdsbEnrichmentService
             }
         }
 
-        throw new RuntimeException('ADS-B trace fetch failed. ' . implode(' | ', $errors));
+        throw new CockpitAdsbTraceNotAvailable('ADS-B trace not available from configured providers. ' . implode(' | ', $errors));
     }
 
     /**
@@ -213,15 +231,15 @@ final class CockpitAdsbEnrichmentService
     {
         $start = new DateTimeImmutable((string)$window['start_iso']);
         $end = new DateTimeImmutable((string)$window['end_iso']);
-        $dates = array();
-        for ($day = $start->setTime(0, 0); $day <= $end->setTime(0, 0); $day = $day->modify('+1 day')) {
-            $dates[] = $day;
+        $datesByKey = array();
+        for ($day = $start->setTime(0, 0)->modify('-1 day'); $day <= $end->setTime(0, 0)->modify('+1 day'); $day = $day->modify('+1 day')) {
+            $datesByKey[$day->format('Y-m-d')] = $day;
         }
 
         $trace = array();
         $sources = array();
         $errors = array();
-        foreach ($dates as $day) {
+        foreach (array_values($datesByKey) as $day) {
             try {
                 $payload = $this->fetchHistoricalTraceForDate($hex, $day);
             } catch (Throwable $e) {
@@ -273,6 +291,7 @@ final class CockpitAdsbEnrichmentService
                 'Accept: application/json',
                 'Accept-Encoding: gzip',
                 'Referer: https://globe.adsbexchange.com/',
+                'User-Agent: Mozilla/5.0 (compatible; IPCA-CockpitRecorder/1.0)',
             ),
         ));
         $body = curl_exec($ch);
@@ -364,7 +383,7 @@ final class CockpitAdsbEnrichmentService
      */
     private function storeOwnshipSamples(int $recordingId, array $samples): void
     {
-        $this->pdo->prepare('DELETE FROM ' . self::OWNSHIP_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
+        $this->clearOwnshipSamples($recordingId);
         $stmt = $this->pdo->prepare('
             INSERT INTO ' . self::OWNSHIP_TABLE . ' (
                 recording_id, sample_time_utc, seconds_since_start, latitude, longitude, baro_altitude_ft,
@@ -387,6 +406,11 @@ final class CockpitAdsbEnrichmentService
                 json_encode($sample['raw'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             ));
         }
+    }
+
+    private function clearOwnshipSamples(int $recordingId): void
+    {
+        $this->pdo->prepare('DELETE FROM ' . self::OWNSHIP_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
     }
 
     private function setStatus(
