@@ -294,7 +294,8 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function renderMap() {
-    const width = 900, height = 420;
+    const width = Math.max(320, Math.round(flightMap.clientWidth || 900));
+    const height = Math.max(240, Math.round(flightMap.clientHeight || 420));
     const stationary = isStationaryRecording(payload.samples);
     const current = sampleAt(activeT);
     const view = chooseActiveMapView(payload.samples, width, height, stationary, current);
@@ -328,9 +329,11 @@ cw_header('Cockpit Recorder Replay');
       ? `<text x="${width / 2}" y="${height / 2 + 34}" text-anchor="middle" fill="#475569" font-size="18">GPS position recorded, no significant movement detected yet.</text>
          <text x="${width / 2}" y="${height / 2 + 58}" text-anchor="middle" fill="#64748b" font-size="14">A real flight or taxi test will draw the plan-view track here.</text>`
       : '';
-    const aircraftAngle = current
-      ? (Number.isFinite(Number(current.heading_deg)) ? Number(current.heading_deg) : (Number.isFinite(Number(current.track_deg)) ? Number(current.track_deg) : 0))
-      : 0;
+    const trackAngle = current && Number.isFinite(Number(current.track_deg)) ? Number(current.track_deg) : null;
+    const headingAngle = current && Number.isFinite(Number(current.heading_deg)) ? Number(current.heading_deg) : null;
+    const groundspeed = current && Number.isFinite(Number(current.groundspeed_kt)) ? Number(current.groundspeed_kt) : 0;
+    const aircraftAngle = trackAngle !== null && groundspeed >= 5 ? trackAngle : (headingAngle ?? trackAngle ?? 0);
+    const aircraftAngleSource = trackAngle !== null && groundspeed >= 5 ? 'GPS track' : (headingAngle !== null ? 'heading' : 'GPS track');
     flightMap.innerHTML = `
       ${renderSatelliteTiles(view, width, height)}
       <div class="replay-map-label">${view ? `${mapMode === 'route' ? 'Route' : (mapMode === 'follow' ? 'Follow aircraft' : 'Aircraft')} · Satellite Z${view.zoom}` : 'Replay plan view'}</div>
@@ -342,7 +345,7 @@ cw_header('Cockpit Recorder Replay');
         ${recentTrail ? `<polyline points="${recentTrail}" fill="none" stroke="#f97316" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" opacity=".9"></polyline>` : ''}
         ${eventMarkers}
         ${stationaryMessage}
-        ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><circle cx="0" cy="0" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M 0 -24 L 10 14 L 0 8 L -10 14 Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path><line x1="0" y1="-34" x2="0" y2="-46" stroke="#fff" stroke-width="3" stroke-linecap="round"></line></g>` : ''}
+        ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><title>Aircraft marker rotated by ${aircraftAngleSource}: ${aircraftAngle.toFixed(0)} deg</title><circle cx="0" cy="0" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M 0 -24 L 10 14 L 0 8 L -10 14 Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path><line x1="0" y1="-34" x2="0" y2="-46" stroke="#fff" stroke-width="3" stroke-linecap="round"></line></g>` : ''}
       </svg>`;
   }
 
@@ -370,6 +373,7 @@ cw_header('Cockpit Recorder Replay');
   function renderDetails() {
     const s = sampleAt(activeT) || {};
     const phase = activePhase(activeT);
+    const markerSource = Number(s.groundspeed_kt || 0) >= 5 && s.track_deg !== null && s.track_deg !== undefined ? 'GPS track' : 'heading';
     details.innerHTML = `
       <div class="detail-row"><span>Selected phase</span><strong>${phase ? phase.phase : '--'}</strong></div>
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
@@ -378,7 +382,8 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
-      <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>`;
+      <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>
+      <div class="detail-row"><span>Marker direction</span><strong>${markerSource}</strong></div>`;
     eventList.innerHTML = (payload.events || []).map((event) => `
       <div class="event-row"><strong>${event.event_type}</strong><br><span class="replay-muted">${fmtTime(event.start)} · ${event.phase || 'Timeline'} · ${(Number(event.confidence) * 100).toFixed(0)}%</span></div>
     `).join('') || '<div class="replay-muted">No timeline events detected yet.</div>';
@@ -480,6 +485,11 @@ cw_header('Cockpit Recorder Replay');
   });
   audio.addEventListener('pause', () => playButton.textContent = 'Play');
   audio.addEventListener('play', () => playButton.textContent = 'Pause');
+  window.addEventListener('resize', () => {
+    if (!payload) return;
+    renderMap();
+    renderGraphs();
+  });
 
   fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`)
     .then((response) => response.json())
