@@ -9,6 +9,9 @@ struct RecorderView: View {
     @EnvironmentObject private var gps: GPSLocationManager
     @State private var lastAudioLevelStatusSentAt = Date.distantPast
     @State private var lastAudioLevelStatusPct = -100
+    @State private var knownMagneticHeadingText = ""
+    @State private var compassDeviationText = ""
+    @State private var magneticVariationText = ""
 
     var body: some View {
         NavigationStack {
@@ -60,7 +63,13 @@ struct RecorderView: View {
             .onChange(of: latestTranscriptStatusKey) { _, _ in
                 sendTranscriptStatus()
             }
+            .onChange(of: settings.ahrsCalibration) { _, calibration in
+                syncCalibrationTextFields(calibration)
+                ahrsBLE.updateCalibration(calibration)
+            }
             .task {
+                syncCalibrationTextFields(settings.ahrsCalibration)
+                ahrsBLE.updateCalibration(settings.ahrsCalibration)
                 if settings.isServerURLConfigured {
                     await settings.refreshAircraft()
                 }
@@ -315,12 +324,20 @@ struct RecorderView: View {
             if let sample = ahrsBLE.latestSample {
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
-                        Text("Roll")
+                        Text("Raw roll")
                         Text(String(format: "%.1f", sample.roll)).foregroundStyle(IPCATheme.success)
                     }
                     GridRow {
-                        Text("Pitch")
+                        Text("Raw pitch")
                         Text(String(format: "%.1f", sample.pitch)).foregroundStyle(IPCATheme.success)
+                    }
+                    GridRow {
+                        Text("Calibrated roll")
+                        Text(String(format: "%.1f", sample.calibratedRoll ?? sample.roll)).foregroundStyle(IPCATheme.brightBlue)
+                    }
+                    GridRow {
+                        Text("Calibrated pitch")
+                        Text(String(format: "%.1f", sample.calibratedPitch ?? -sample.pitch)).foregroundStyle(IPCATheme.brightBlue)
                     }
                     GridRow {
                         Text("Yaw")
@@ -331,14 +348,42 @@ struct RecorderView: View {
                         Text(String(format: "%.2f", sample.acceleration)).foregroundStyle(IPCATheme.success)
                     }
                     GridRow {
-                        Text("Mag heading")
-                        Text(String(format: "%.0f", sample.magneticHeading)).foregroundStyle(IPCATheme.success)
+                        Text("Compass heading")
+                        Text(String(format: "%.0f", sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                    }
+                    GridRow {
+                        Text("Magnetic Heading")
+                        Text(String(format: "%.0f", sample.correctedMagneticHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                    }
+                    GridRow {
+                        Text("True Heading")
+                        Text(String(format: "%.0f", sample.trueHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                    }
+                    GridRow {
+                        Text("Heading quality")
+                        Text(headingQualityLabel(sample.headingQuality)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                    }
+                    GridRow {
+                        Text("BNO rotation acc")
+                        Text(accuracyLabel(sample.rotationVectorAccuracy)).foregroundStyle(ahrsDiagnosticColor(sample.rotationVectorAccuracy))
+                    }
+                    GridRow {
+                        Text("BNO mag acc")
+                        Text(accuracyLabel(sample.magneticFieldAccuracy)).foregroundStyle(ahrsDiagnosticColor(sample.magneticFieldAccuracy))
+                    }
+                    if let magX = sample.magneticX, let magY = sample.magneticY, let magZ = sample.magneticZ {
+                        GridRow {
+                            Text("Mag vector")
+                            Text(String(format: "X %.1f  Y %.1f  Z %.1f", magX, magY, magZ))
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
                     }
                 }
                 Text(sample.rawLine)
                     .font(.caption)
                     .foregroundStyle(IPCATheme.secondaryText)
                     .textSelection(.enabled)
+                calibrationControls(sample: sample)
             } else {
                 Text("Waiting for IPCA-CVR BLE AHRS data.")
                     .foregroundStyle(IPCATheme.secondaryText)
@@ -346,6 +391,80 @@ struct RecorderView: View {
             if !ahrsBLE.lastError.isEmpty {
                 Text(ahrsBLE.lastError).foregroundStyle(.red)
             }
+        }
+    }
+
+    private func calibrationControls(sample: AHRSSample) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Text("AHRS Calibration")
+                .font(.subheadline.weight(.semibold))
+            Text("Raw chip data is preserved. These settings define aircraft level reference, compass deviation d, and local Variation V.")
+                .font(.caption)
+                .foregroundStyle(IPCATheme.secondaryText)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], alignment: .leading, spacing: 10) {
+                LabeledContent("Pitch level offset", value: String(format: "%.1f", settings.ahrsCalibration.pitchLevelOffset))
+                LabeledContent("Roll level offset", value: String(format: "%.1f", settings.ahrsCalibration.rollLevelOffset))
+                LabeledContent("Compass deviation d", value: String(format: "%.1f deg", settings.ahrsCalibration.compassDeviation))
+                LabeledContent("Variation V", value: String(format: "%.1f deg", settings.ahrsCalibration.magneticVariation))
+            }
+
+            HStack {
+                Button("Set Level Reference") {
+                    settings.setLevelReference(from: sample)
+                    ahrsBLE.updateCalibration(settings.ahrsCalibration)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(IPCATheme.brightBlue)
+
+                Button("Reset AHRS Calibration") {
+                    settings.resetAHRSCalibration()
+                    ahrsBLE.updateCalibration(settings.ahrsCalibration)
+                }
+                .buttonStyle(.bordered)
+                .tint(IPCATheme.warning)
+            }
+
+            HStack {
+                TextField("Known Magnetic Heading", text: $knownMagneticHeadingText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                Button("Set Magnetic Heading") {
+                    guard let known = Double(knownMagneticHeadingText) else { return }
+                    settings.setCompassDeviation(knownMagneticHeading: known, rawCompassHeading: sample.magneticHeading)
+                    ahrsBLE.updateCalibration(settings.ahrsCalibration)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            HStack {
+                TextField("Compass deviation d", text: $compassDeviationText)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textFieldStyle(.roundedBorder)
+                Button("Apply d") {
+                    guard let deviation = Double(compassDeviationText) else { return }
+                    settings.updateCompassDeviation(deviation)
+                    ahrsBLE.updateCalibration(settings.ahrsCalibration)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            HStack {
+                TextField("Local Variation V", text: $magneticVariationText)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textFieldStyle(.roundedBorder)
+                Button("Apply V") {
+                    guard let variation = Double(magneticVariationText) else { return }
+                    settings.updateMagneticVariation(variation)
+                    ahrsBLE.updateCalibration(settings.ahrsCalibration)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text("Formula: Compass heading + deviation d = Magnetic Heading. Magnetic Heading + Variation V = True Heading. East Variation positive, West Variation negative.")
+                .font(.caption)
+                .foregroundStyle(IPCATheme.secondaryText)
         }
     }
 
@@ -437,6 +556,39 @@ struct RecorderView: View {
         case .failed:
             ahrsBLE.sendStatusCommand("TX=FAIL")
         }
+    }
+
+    private func syncCalibrationTextFields(_ calibration: AHRSCalibration) {
+        compassDeviationText = String(format: "%.1f", calibration.compassDeviation)
+        magneticVariationText = String(format: "%.1f", calibration.magneticVariation)
+    }
+
+    private func accuracyLabel(_ value: Int?) -> String {
+        guard let value else { return "Unknown" }
+        switch value {
+        case 0: return "Unreliable (0)"
+        case 1: return "Low (1)"
+        case 2: return "Medium (2)"
+        case 3: return "High (3)"
+        default: return "Value \(value)"
+        }
+    }
+
+    private func headingQualityLabel(_ value: Int?) -> String {
+        guard let value else { return "Unknown" }
+        switch value {
+        case 0: return "Invalid / not calibrated"
+        case 1: return "Low confidence"
+        case 2: return "Chip calibrated"
+        default: return "Value \(value)"
+        }
+    }
+
+    private func ahrsDiagnosticColor(_ value: Int?) -> Color {
+        guard let value else { return IPCATheme.secondaryText }
+        if value >= 2 { return IPCATheme.success }
+        if value == 1 { return IPCATheme.warning }
+        return IPCATheme.danger
     }
 }
 

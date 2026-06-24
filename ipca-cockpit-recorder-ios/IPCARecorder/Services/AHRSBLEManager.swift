@@ -24,6 +24,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     private var captureStartedAt: Date?
     private var capturedSamples: [AHRSSample] = []
     private var recentSampleTimes: [Date] = []
+    private var calibration: AHRSCalibration = .empty
 
     func start() {
         if centralManager == nil {
@@ -40,6 +41,10 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         recentSampleTimes = []
         receiveRateHz = 0
         receiveHealthMessage = "Measuring AHRS receive rate."
+    }
+
+    func updateCalibration(_ calibration: AHRSCalibration) {
+        self.calibration = calibration
     }
 
     func stopCaptureAndSave(recordingID: String) -> String? {
@@ -102,7 +107,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
     }
 
     private func handle(line: String) {
-        guard let sample = Self.parseAHRSLine(line, recordingStartedAt: captureStartedAt) else {
+        guard let sample = Self.parseAHRSLine(line, recordingStartedAt: captureStartedAt, calibration: calibration) else {
             return
         }
         latestSample = sample
@@ -136,7 +141,7 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         }
     }
 
-    private static func parseAHRSLine(_ rawLine: String, recordingStartedAt: Date?) -> AHRSSample? {
+    private static func parseAHRSLine(_ rawLine: String, recordingStartedAt: Date?, calibration: AHRSCalibration) -> AHRSSample? {
         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard line.hasPrefix("AHRS,") else {
             return nil
@@ -159,6 +164,12 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         }
 
         let timestamp = Date()
+        let aviationPitch = -pitch
+        let aviationRoll = roll
+        let calibratedPitch = aviationPitch - calibration.pitchLevelOffset
+        let calibratedRoll = aviationRoll - calibration.rollLevelOffset
+        let correctedMagneticHeading = Self.normalizeDegrees(magHeading + calibration.compassDeviation)
+        let trueHeading = Self.normalizeDegrees(correctedMagneticHeading + calibration.magneticVariation)
         return AHRSSample(
             timestamp: timestamp,
             secondsSinceRecordingStart: recordingStartedAt.map { timestamp.timeIntervalSince($0) } ?? 0,
@@ -167,8 +178,29 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             yaw: yaw,
             acceleration: acc,
             magneticHeading: magHeading,
+            rotationVectorAccuracy: values["RVACC"].map(Int.init),
+            magneticFieldAccuracy: values["MAGACC"].map(Int.init),
+            magneticX: values["MAGX"],
+            magneticY: values["MAGY"],
+            magneticZ: values["MAGZ"],
+            headingQuality: values["HDGQ"].map(Int.init),
+            aviationPitch: aviationPitch,
+            aviationRoll: aviationRoll,
+            calibratedPitch: calibratedPitch,
+            calibratedRoll: calibratedRoll,
+            pitchLevelOffset: calibration.pitchLevelOffset,
+            rollLevelOffset: calibration.rollLevelOffset,
+            compassDeviation: calibration.compassDeviation,
+            magneticVariation: calibration.magneticVariation,
+            correctedMagneticHeading: correctedMagneticHeading,
+            trueHeading: trueHeading,
             rawLine: line
         )
+    }
+
+    private static func normalizeDegrees(_ value: Double) -> Double {
+        let remainder = value.truncatingRemainder(dividingBy: 360)
+        return remainder < 0 ? remainder + 360 : remainder
     }
 
 }

@@ -21,6 +21,9 @@ final class CockpitReconstructionService
     /** @var array<string,mixed> */
     private array $lastAhrsCalibration = array();
 
+    /** @var array<string,mixed> */
+    private array $lastSourceAlignment = array();
+
     /** @var list<string> */
     private const G3X_COLUMNS = array(
         'Date (yyyy-mm-dd)',
@@ -444,6 +447,7 @@ final class CockpitReconstructionService
         usort($adsb, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         $calibration = $this->buildAhrsCalibration($gps, $ahrs);
         $this->lastAhrsCalibration = $calibration;
+        $this->lastSourceAlignment = $this->buildSourceAlignment($recording, $gps, $ahrs, $adsb);
 
         $times = array();
         foreach ($gps as $row) {
@@ -460,7 +464,6 @@ final class CockpitReconstructionService
         $samples = array();
         $lastGps = null;
         $lastAhrs = null;
-        $lastAdsb = null;
         foreach (array_values($times) as $seconds) {
             $gpsNear = $this->nearestBySeconds($gps, $seconds, 3.0);
             if ($gpsNear !== null) {
@@ -470,13 +473,9 @@ final class CockpitReconstructionService
             if ($ahrsNear !== null) {
                 $lastAhrs = $ahrsNear;
             }
-            $adsbNear = $this->nearestBySeconds($adsb, $seconds, 5.0);
-            if ($adsbNear !== null) {
-                $lastAdsb = $adsbNear;
-            }
             $gpsUse = $gpsNear ?? $lastGps;
             $ahrsUse = $ahrsNear ?? $lastAhrs;
-            $adsbUse = $adsbNear ?? $lastAdsb;
+            $adsbUse = $this->interpolateAdsbBySeconds($adsb, $seconds, 30.0);
             $sample = $this->mergeSample($recording, $seconds, $gpsUse, $ahrsUse, $adsbUse, $calibration);
             $sample['sample_index'] = count($samples);
             $samples[] = $sample;
@@ -503,6 +502,150 @@ final class CockpitReconstructionService
             }
         }
         return $best;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>|null
+     */
+    private function interpolateAdsbBySeconds(array $rows, float $seconds, float $maxGapSeconds): ?array
+    {
+        if (!$rows) {
+            return null;
+        }
+
+        $before = null;
+        $after = null;
+        foreach ($rows as $row) {
+            $rowSeconds = (float)$row['seconds'];
+            if ($rowSeconds <= $seconds) {
+                $before = $row;
+                continue;
+            }
+            $after = $row;
+            break;
+        }
+
+        if ($before === null) {
+            return isset($after['seconds']) && abs((float)$after['seconds'] - $seconds) <= $maxGapSeconds ? $after : null;
+        }
+        if ($after === null) {
+            return abs((float)$before['seconds'] - $seconds) <= $maxGapSeconds ? $before : null;
+        }
+
+        $beforeSeconds = (float)$before['seconds'];
+        $afterSeconds = (float)$after['seconds'];
+        $gap = max(0.001, $afterSeconds - $beforeSeconds);
+        if ($gap > $maxGapSeconds) {
+            return null;
+        }
+        $ratio = max(0.0, min(1.0, ($seconds - $beforeSeconds) / $gap));
+        $nearest = ($seconds - $beforeSeconds) <= ($afterSeconds - $seconds) ? $before : $after;
+
+        return array(
+            'seconds' => $seconds,
+            'timestamp' => $nearest['timestamp'] ?? '',
+            'latitude' => self::lerpNullable($before['latitude'] ?? null, $after['latitude'] ?? null, $ratio),
+            'longitude' => self::lerpNullable($before['longitude'] ?? null, $after['longitude'] ?? null, $ratio),
+            'baro_altitude_ft' => self::lerpNullable($before['baro_altitude_ft'] ?? null, $after['baro_altitude_ft'] ?? null, $ratio),
+            'vertical_speed_fpm' => self::lerpNullable($before['vertical_speed_fpm'] ?? null, $after['vertical_speed_fpm'] ?? null, $ratio),
+            'groundspeed_kt' => self::lerpNullable($before['groundspeed_kt'] ?? null, $after['groundspeed_kt'] ?? null, $ratio),
+            'track_deg' => self::lerpAngleNullable($before['track_deg'] ?? null, $after['track_deg'] ?? null, $ratio),
+            'heading_deg' => self::lerpAngleNullable($before['heading_deg'] ?? null, $after['heading_deg'] ?? null, $ratio),
+            'on_ground' => $nearest['on_ground'] ?? null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param list<array<string,mixed>> $gps
+     * @param list<array<string,mixed>> $ahrs
+     * @param list<array<string,mixed>> $adsb
+     * @return array<string,mixed>
+     */
+    private function buildSourceAlignment(array $recording, array $gps, array $ahrs, array $adsb): array
+    {
+        $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+        $sources = array(
+            'audio' => array(
+                'duration_seconds' => round($duration, 3),
+                'coverage_percent' => $duration > 0 ? 100.0 : 0.0,
+            ),
+            'gps' => $this->sourceMetrics($gps, $duration, 3.0),
+            'ahrs' => $this->sourceMetrics($ahrs, $duration, 1.0),
+            'adsb' => $this->sourceMetrics($adsb, $duration, 15.0),
+        );
+
+        $warnings = array();
+        foreach (array('gps', 'ahrs', 'adsb') as $source) {
+            $coverage = (float)($sources[$source]['coverage_percent'] ?? 0);
+            if ($source !== 'adsb' && $coverage > 0 && $coverage < 90.0) {
+                $warnings[] = strtoupper($source) . ' coverage below 90%.';
+            }
+            if ((int)($sources[$source]['large_gap_count'] ?? 0) > 0) {
+                $warnings[] = strtoupper($source) . ' has ' . (int)$sources[$source]['large_gap_count'] . ' large gap(s).';
+            }
+        }
+        if ((int)($sources['adsb']['sample_count'] ?? 0) === 0) {
+            $warnings[] = 'ADS-B not available for this reconstruction.';
+        }
+
+        return array(
+            'generated_at' => gmdate('c'),
+            'recording_duration_seconds' => round($duration, 3),
+            'sources' => $sources,
+            'warnings' => $warnings,
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>
+     */
+    private function sourceMetrics(array $rows, float $duration, float $largeGapThresholdSeconds): array
+    {
+        if (!$rows) {
+            return array(
+                'sample_count' => 0,
+                'first_seconds' => null,
+                'last_seconds' => null,
+                'coverage_seconds' => 0.0,
+                'coverage_percent' => 0.0,
+                'average_rate_hz' => null,
+                'max_gap_seconds' => null,
+                'large_gap_count' => 0,
+                'first_utc' => null,
+                'last_utc' => null,
+            );
+        }
+
+        $seconds = array_map(fn(array $row): float => (float)$row['seconds'], $rows);
+        sort($seconds, SORT_NUMERIC);
+        $first = (float)$seconds[0];
+        $last = (float)$seconds[count($seconds) - 1];
+        $maxGap = 0.0;
+        $largeGaps = 0;
+        for ($i = 1; $i < count($seconds); $i++) {
+            $gap = (float)$seconds[$i] - (float)$seconds[$i - 1];
+            $maxGap = max($maxGap, $gap);
+            if ($gap > $largeGapThresholdSeconds) {
+                $largeGaps++;
+            }
+        }
+        $coverage = max(0.0, $last - $first);
+
+        return array(
+            'sample_count' => count($rows),
+            'first_seconds' => round($first, 3),
+            'last_seconds' => round($last, 3),
+            'coverage_seconds' => round($coverage, 3),
+            'coverage_percent' => $duration > 0 ? round(min(100.0, ($coverage / $duration) * 100.0), 1) : 0.0,
+            'average_rate_hz' => $coverage > 0 ? round(max(0, count($rows) - 1) / $coverage, 3) : null,
+            'max_gap_seconds' => round($maxGap, 3),
+            'large_gap_count' => $largeGaps,
+            'first_utc' => (string)($rows[0]['timestamp'] ?? ''),
+            'last_utc' => (string)($rows[count($rows) - 1]['timestamp'] ?? ''),
+        );
     }
 
     /**
@@ -541,12 +684,21 @@ final class CockpitReconstructionService
             $calibration['notes'][] = 'No stable 10 second ground window found; pitch/roll offsets left at zero.';
         }
 
-        $headingCalibration = $this->magneticHeadingCalibration($gps, $ahrs, $calibration);
-        $calibration['magnetic_heading_offset_deg'] = $headingCalibration['offset_deg'];
-        $calibration['magnetic_heading_quality'] = $headingCalibration['quality'];
-        $calibration['magnetic_heading_sample_count'] = $headingCalibration['sample_count'];
-        $calibration['magnetic_heading_spread_deg'] = $headingCalibration['spread_deg'];
-        $calibration['notes'][] = $headingCalibration['note'];
+        $hasManualHeadingCalibration = count(array_filter($ahrs, fn(array $sample): bool => isset($sample['compass_deviation_deg']) || isset($sample['magnetic_variation_deg']))) > 0;
+        if ($hasManualHeadingCalibration) {
+            $calibration['magnetic_heading_offset_deg'] = 0.0;
+            $calibration['magnetic_heading_quality'] = 'LOW';
+            $calibration['magnetic_heading_sample_count'] = 0;
+            $calibration['magnetic_heading_spread_deg'] = null;
+            $calibration['notes'][] = 'Manual iPad compass deviation/Variation present; backend did not apply an additional GPS-track magnetic heading offset.';
+        } else {
+            $headingCalibration = $this->magneticHeadingCalibration($gps, $ahrs, $calibration);
+            $calibration['magnetic_heading_offset_deg'] = $headingCalibration['offset_deg'];
+            $calibration['magnetic_heading_quality'] = $headingCalibration['quality'];
+            $calibration['magnetic_heading_sample_count'] = $headingCalibration['sample_count'];
+            $calibration['magnetic_heading_spread_deg'] = $headingCalibration['spread_deg'];
+            $calibration['notes'][] = $headingCalibration['note'];
+        }
 
         return $calibration;
     }
@@ -697,7 +849,7 @@ final class CockpitReconstructionService
             'roll_deg' => $roll,
             'yaw_deg' => $yaw,
             'magnetic_heading_deg' => $heading,
-            'true_heading_deg' => null,
+            'true_heading_deg' => $ahrs['true_heading_deg'] ?? null,
             'acceleration_g' => isset($ahrs['acceleration_g']) ? (float)$ahrs['acceleration_g'] : null,
             'wind_direction_deg' => null,
             'wind_speed_kt' => null,
@@ -732,14 +884,24 @@ final class CockpitReconstructionService
      */
     private function normalizeAHRS(array $row): array
     {
+        $rawPitch = isset($row['pitch']) ? (float)$row['pitch'] : null;
+        $rawRoll = isset($row['roll']) ? (float)$row['roll'] : null;
+        $pitch = isset($row['calibratedPitch']) ? (float)$row['calibratedPitch'] : ($rawPitch !== null ? -$rawPitch : null);
+        $roll = isset($row['calibratedRoll']) ? (float)$row['calibratedRoll'] : $rawRoll;
+        $magneticHeading = isset($row['correctedMagneticHeading']) ? (float)$row['correctedMagneticHeading'] : (isset($row['magneticHeading']) ? (float)$row['magneticHeading'] : null);
         return array(
             'seconds' => isset($row['secondsSinceRecordingStart']) ? (float)$row['secondsSinceRecordingStart'] : null,
             'timestamp' => (string)($row['timestamp'] ?? ''),
-            'pitch_deg' => isset($row['pitch']) ? (float)$row['pitch'] : null,
-            'roll_deg' => isset($row['roll']) ? (float)$row['roll'] : null,
+            'pitch_deg' => $pitch,
+            'roll_deg' => $roll,
             'yaw_deg' => isset($row['yaw']) ? (float)$row['yaw'] : null,
             'acceleration_g' => isset($row['acceleration']) ? (float)$row['acceleration'] : null,
-            'magnetic_heading_deg' => isset($row['magneticHeading']) ? (float)$row['magneticHeading'] : null,
+            'magnetic_heading_deg' => $magneticHeading,
+            'true_heading_deg' => isset($row['trueHeading']) ? (float)$row['trueHeading'] : null,
+            'raw_pitch_deg' => $rawPitch,
+            'raw_roll_deg' => $rawRoll,
+            'compass_deviation_deg' => isset($row['compassDeviation']) ? (float)$row['compassDeviation'] : null,
+            'magnetic_variation_deg' => isset($row['magneticVariation']) ? (float)$row['magneticVariation'] : null,
         );
     }
 
@@ -960,6 +1122,7 @@ final class CockpitReconstructionService
             'full_stop_time' => $this->eventTime($events, 'Full Stop'),
             'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
             'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
+            'source_alignment' => $this->lastSourceAlignment,
             'ahrs_calibration' => $this->lastAhrsCalibration,
             'heading_replay_policy' => array(
                 'primary_source' => 'gps_track_when_groundspeed_at_least_5kt',
@@ -1128,6 +1291,34 @@ final class CockpitReconstructionService
         return $prefix . number_format((float)$value, $decimals, '.', '');
     }
 
+    private static function lerpNullable(mixed $a, mixed $b, float $ratio): ?float
+    {
+        if (!is_numeric($a) && !is_numeric($b)) {
+            return null;
+        }
+        if (!is_numeric($a)) {
+            return (float)$b;
+        }
+        if (!is_numeric($b)) {
+            return (float)$a;
+        }
+        return (float)$a + ((float)$b - (float)$a) * $ratio;
+    }
+
+    private static function lerpAngleNullable(mixed $a, mixed $b, float $ratio): ?float
+    {
+        if (!is_numeric($a) && !is_numeric($b)) {
+            return null;
+        }
+        if (!is_numeric($a)) {
+            return self::normalizeDegrees((float)$b);
+        }
+        if (!is_numeric($b)) {
+            return self::normalizeDegrees((float)$a);
+        }
+        return self::normalizeDegrees((float)$a + self::angleDelta((float)$a, (float)$b) * $ratio);
+    }
+
     /**
      * @param list<float> $values
      */
@@ -1232,6 +1423,7 @@ final class CockpitReconstructionService
             'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
             'heading_deg' => $heading,
             'track_deg' => $track,
+            'true_heading_deg' => $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null,
             'heading_source' => $headingSource,
             'heading_quality' => $headingQuality,
         );

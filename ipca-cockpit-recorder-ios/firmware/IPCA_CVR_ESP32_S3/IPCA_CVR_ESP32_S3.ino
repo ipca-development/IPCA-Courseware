@@ -84,6 +84,8 @@ float magX = 0;
 float magY = 0;
 float magZ = 0;
 float magHeadingDeg = 0;
+uint8_t rotationVectorAccuracy = 0;
+uint8_t magneticFieldAccuracy = 0;
 
 BLEServer *bleServer = nullptr;
 BLECharacteristic *ahrsCharacteristic = nullptr;
@@ -483,18 +485,38 @@ class IPCAStatusCallbacks : public BLECharacteristicCallbacks {
 };
 
 String buildAHRSLine() {
-  char line[96];
+  char line[180];
   snprintf(
     line,
     sizeof(line),
-    "AHRS,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,ACC=%.2f,MAGHDG=%.1f",
+    "AHRS,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,ACC=%.2f,MAGHDG=%.1f,RVACC=%u,MAGACC=%u,MAGX=%.1f,MAGY=%.1f,MAGZ=%.1f,HDGQ=%u",
     rollDeg,
     pitchDeg,
     yawDeg,
     accTotal,
-    magHeadingDeg
+    magHeadingDeg,
+    rotationVectorAccuracy,
+    magneticFieldAccuracy,
+    magX,
+    magY,
+    magZ,
+    headingQualityCode()
   );
   return String(line);
+}
+
+uint8_t headingQualityCode() {
+  if (!ahrsReady) return 0;
+  if (rotationVectorAccuracy >= 2 && magneticFieldAccuracy >= 2) return 2;
+  if (rotationVectorAccuracy >= 1 || magneticFieldAccuracy >= 1) return 1;
+  return 0;
+}
+
+const char *headingQualityLabel() {
+  uint8_t quality = headingQualityCode();
+  if (quality >= 2) return "MAG OK";
+  if (quality == 1) return "MAG LOW";
+  return "MAG BAD";
 }
 
 void notifyAHRSLine(const String &line) {
@@ -605,6 +627,7 @@ void readAHRS() {
 
   while (bno08x.getSensorEvent(&sensorValue)) {
     if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
+      rotationVectorAccuracy = sensorValue.status;
       quatToEuler(
         sensorValue.un.rotationVector.real,
         sensorValue.un.rotationVector.i,
@@ -621,6 +644,7 @@ void readAHRS() {
     }
 
     if (sensorValue.sensorId == SH2_MAGNETIC_FIELD_CALIBRATED) {
+      magneticFieldAccuracy = sensorValue.status;
       magX = sensorValue.un.magneticField.x;
       magY = sensorValue.un.magneticField.y;
       magZ = sensorValue.un.magneticField.z;
@@ -640,7 +664,19 @@ void readAHRS() {
     Serial.print(",ACC=");
     Serial.print(accTotal, 2);
     Serial.print(",MAGHDG=");
-    Serial.println(magHeadingDeg, 1);
+    Serial.print(magHeadingDeg, 1);
+    Serial.print(",RVACC=");
+    Serial.print(rotationVectorAccuracy);
+    Serial.print(",MAGACC=");
+    Serial.print(magneticFieldAccuracy);
+    Serial.print(",MAGX=");
+    Serial.print(magX, 1);
+    Serial.print(",MAGY=");
+    Serial.print(magY, 1);
+    Serial.print(",MAGZ=");
+    Serial.print(magZ, 1);
+    Serial.print(",HDGQ=");
+    Serial.println(headingQualityCode());
 
     notifyAHRSLine(buildAHRSLine());
 
@@ -708,7 +744,7 @@ void drawAudioStatus(int x, int y) {
 
 void drawStatusDynamicFields() {
   drawStatusLine(28, 86, "iPad", ipadReady, ipadReady ? "BLE OK" : "WAIT");
-  drawStatusLine(28, 106, "AHRS", ahrsReady, ahrsReady ? "READY" : "WAIT");
+  drawStatusLine(28, 106, "AHRS", ahrsReady && headingQualityCode() >= 1, ahrsReady ? headingQualityLabel() : "WAIT");
   drawStatusLine(28, 126, "GPS", gpsReady, gpsReady ? "READY" : "NO FIX");
   drawAudioStatus(28, 149);
   drawStateLine(28, 174, "UP", uploadState);

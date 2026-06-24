@@ -189,6 +189,9 @@ cw_header('Cockpit Recorder POC');
             $healthGps = isset($health['gps']) && is_array($health['gps']) ? $health['gps'] : array();
             $chunks = $service instanceof CockpitRecorderService ? $service->adminTranscriptionChunks($id) : array();
             $reconSummary = cockpit_admin_reconstruction_summary($row);
+            $sourceAlignment = isset($reconSummary['source_alignment']) && is_array($reconSummary['source_alignment']) ? $reconSummary['source_alignment'] : array();
+            $alignmentSources = isset($sourceAlignment['sources']) && is_array($sourceAlignment['sources']) ? $sourceAlignment['sources'] : array();
+            $alignmentWarnings = isset($sourceAlignment['warnings']) && is_array($sourceAlignment['warnings']) ? $sourceAlignment['warnings'] : array();
             $reconStatus = (string)($row['reconstruction_status'] ?? 'not_started');
             $timelineStatus = (string)($row['timeline_status'] ?? 'not_started');
             $adsbStatus = (string)($row['adsb_status'] ?? 'not_started');
@@ -386,6 +389,16 @@ cw_header('Cockpit Recorder POC');
                     <div>Max alt: <?= is_numeric($reconSummary['max_altitude_ft'] ?? null) ? h(number_format((float)$reconSummary['max_altitude_ft'], 0) . ' ft') : '--' ?></div>
                     <div>Max GS: <?= is_numeric($reconSummary['max_groundspeed_kt'] ?? null) ? h(number_format((float)$reconSummary['max_groundspeed_kt'], 1) . ' kt') : '--' ?></div>
                     <div>Max bank: <?= is_numeric($reconSummary['max_bank_deg'] ?? null) ? h(number_format((float)$reconSummary['max_bank_deg'], 1) . ' deg') : '--' ?></div>
+                    <?php if ($alignmentSources): ?>
+                      <strong>Source alignment</strong>
+                      <?php foreach (array('gps' => 'GPS', 'ahrs' => 'AHRS', 'adsb' => 'ADS-B') as $sourceKey => $sourceLabel): ?>
+                        <?php $source = isset($alignmentSources[$sourceKey]) && is_array($alignmentSources[$sourceKey]) ? $alignmentSources[$sourceKey] : array(); ?>
+                        <div><?= h($sourceLabel) ?>: <?= (int)($source['sample_count'] ?? 0) ?> samples · <?= is_numeric($source['coverage_percent'] ?? null) ? h(number_format((float)$source['coverage_percent'], 1) . '%') : '--' ?> coverage<?= is_numeric($source['max_gap_seconds'] ?? null) ? h(' · max gap ' . number_format((float)$source['max_gap_seconds'], 1) . 's') : '' ?></div>
+                      <?php endforeach; ?>
+                      <?php foreach ($alignmentWarnings as $warning): ?>
+                        <div class="cockpit-muted"><?= h((string)$warning) ?></div>
+                      <?php endforeach; ?>
+                    <?php endif; ?>
                   </div>
                 <?php endif; ?>
                 <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php">

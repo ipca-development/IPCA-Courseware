@@ -141,7 +141,45 @@ struct AHRSSample: Codable, Equatable {
     var yaw: Double
     var acceleration: Double
     var magneticHeading: Double
+    var rotationVectorAccuracy: Int?
+    var magneticFieldAccuracy: Int?
+    var magneticX: Double?
+    var magneticY: Double?
+    var magneticZ: Double?
+    var headingQuality: Int?
+    var aviationPitch: Double?
+    var aviationRoll: Double?
+    var calibratedPitch: Double?
+    var calibratedRoll: Double?
+    var pitchLevelOffset: Double?
+    var rollLevelOffset: Double?
+    var compassDeviation: Double?
+    var magneticVariation: Double?
+    var correctedMagneticHeading: Double?
+    var trueHeading: Double?
     var rawLine: String
+}
+
+struct AHRSCalibration: Codable, Equatable {
+    var pitchLevelOffset: Double
+    var rollLevelOffset: Double
+    var compassDeviation: Double
+    var magneticVariation: Double
+    var levelReferenceSetAt: Date?
+    var magneticHeadingReferenceSetAt: Date?
+    var knownMagneticHeadingUsed: Double?
+    var rawCompassHeadingAtCalibration: Double?
+
+    static let empty = AHRSCalibration(
+        pitchLevelOffset: 0,
+        rollLevelOffset: 0,
+        compassDeviation: 0,
+        magneticVariation: 0,
+        levelReferenceSetAt: nil,
+        magneticHeadingReferenceSetAt: nil,
+        knownMagneticHeadingUsed: nil,
+        rawCompassHeadingAtCalibration: nil
+    )
 }
 
 enum GPSConnectionState: String {

@@ -218,6 +218,7 @@ cw_header('Cockpit Recorder Replay');
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       bank_deg: lerp(before.bank_deg, after.bank_deg),
       heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
+      true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       track_deg: lerpAngle(before.track_deg, after.track_deg),
     });
   }
@@ -502,6 +503,7 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
+      <div class="detail-row"><span>True heading</span><strong>${number(s.true_heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>Marker direction</span><strong>${markerSource}</strong></div>
       <div class="detail-row"><span>Heading quality</span><strong>${headingQuality}</strong></div>`;
