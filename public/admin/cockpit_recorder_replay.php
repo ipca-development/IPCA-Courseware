@@ -168,9 +168,35 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
+  function gpsBounds(samples) {
+    const points = samples.filter((s) => s.lat !== null && s.lon !== null);
+    if (!points.length) return null;
+    const lats = points.map((s) => Number(s.lat));
+    const lons = points.map((s) => Number(s.lon));
+    return {
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+      minLon: Math.min(...lons),
+      maxLon: Math.max(...lons),
+      count: points.length,
+    };
+  }
+
+  function isStationaryRecording(samples) {
+    const bounds = gpsBounds(samples);
+    if (!bounds) return false;
+    const latSpanMeters = Math.abs(bounds.maxLat - bounds.minLat) * 111320;
+    const avgLatRad = ((bounds.maxLat + bounds.minLat) / 2) * Math.PI / 180;
+    const lonSpanMeters = Math.abs(bounds.maxLon - bounds.minLon) * 111320 * Math.max(0.1, Math.cos(avgLatRad));
+    return Math.max(latSpanMeters, lonSpanMeters) < 30;
+  }
+
   function renderMap() {
     const width = 900, height = 420;
-    const points = projectSamples(payload.samples, width, height);
+    const stationary = isStationaryRecording(payload.samples);
+    const points = stationary
+      ? projectSamples(payload.samples, width, height).map((point) => Object.assign({}, point, { x: width / 2, y: height / 2 }))
+      : projectSamples(payload.samples, width, height);
     const current = sampleAt(activeT);
     const pointForTime = (t) => {
       if (!points.length) return null;
@@ -182,19 +208,27 @@ cw_header('Cockpit Recorder Replay');
       return best;
     };
     const currentPoint = current ? pointForTime(current.t) : null;
-    const path = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const path = stationary ? '' : points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     const eventMarkers = (payload.events || []).map((event) => {
       const projected = pointForTime(event.start);
       if (!projected) return '';
       return `<circle cx="${projected.x}" cy="${projected.y}" r="5" fill="#f97316"><title>${event.event_type} ${fmtTime(event.start)}</title></circle>`;
     }).join('');
+    const pathLayer = path
+      ? `<polyline points="${path}" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></polyline>`
+      : (!points.length ? '<text x="24" y="40" fill="#64748b">No GPS path available</text>' : '');
+    const stationaryMessage = stationary
+      ? `<text x="${width / 2}" y="${height / 2 + 34}" text-anchor="middle" fill="#475569" font-size="18">GPS position recorded, no significant movement detected yet.</text>
+         <text x="${width / 2}" y="${height / 2 + 58}" text-anchor="middle" fill="#64748b" font-size="14">A real flight or taxi test will draw the plan-view track here.</text>`
+      : '';
     flightMap.innerHTML = `
       <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
         <rect width="${width}" height="${height}" fill="url(#bg)"></rect>
         <defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
-        ${path ? `<polyline points="${path}" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></polyline>` : '<text x="24" y="40" fill="#64748b">No GPS path available</text>'}
+        ${pathLayer}
         ${eventMarkers}
-        ${currentPoint ? `<circle cx="${currentPoint.x}" cy="${currentPoint.y}" r="8" fill="#0f172a" stroke="#fff" stroke-width="3"></circle>` : ''}
+        ${stationaryMessage}
+        ${currentPoint ? `<g><circle cx="${currentPoint.x}" cy="${currentPoint.y}" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M ${currentPoint.x} ${currentPoint.y - 22} L ${currentPoint.x + 9} ${currentPoint.y + 12} L ${currentPoint.x} ${currentPoint.y + 7} L ${currentPoint.x - 9} ${currentPoint.y + 12} Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path></g>` : ''}
       </svg>`;
   }
 
