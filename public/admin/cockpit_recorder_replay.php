@@ -36,8 +36,13 @@ cw_header('Cockpit Recorder Replay');
 .phase-row { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #f8fafc; display: grid; gap: 4px; }
 .phase-row.is-active { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .12); background: #eff6ff; }
 .phase-row button, .replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 6px 9px; cursor: pointer; }
-.replay-map { height: 360px; border-radius: 14px; border: 1px solid #dbeafe; background: linear-gradient(135deg, #eef6ff, #ffffff); overflow: hidden; }
+.replay-map { height: 360px; border-radius: 14px; border: 1px solid #dbeafe; background: linear-gradient(135deg, #eef6ff, #ffffff); overflow: hidden; position: relative; }
 .replay-map svg { width: 100%; height: 100%; display: block; }
+.replay-map-layer { position: absolute; inset: 0; overflow: hidden; background: #0f172a; }
+.replay-map-layer img { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; pointer-events: none; }
+.replay-map-overlay { position: absolute; inset: 0; z-index: 2; }
+.replay-map-label { position: absolute; left: 12px; top: 12px; z-index: 3; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; backdrop-filter: blur(6px); }
+.replay-map-attribution { position: absolute; right: 8px; bottom: 6px; z-index: 3; border-radius: 6px; background: rgba(255, 255, 255, .82); color: #334155; font-size: 11px; padding: 3px 6px; }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -153,21 +158,6 @@ cw_header('Cockpit Recorder Replay');
     return payload.phases.find((phase) => t >= phase.start && t <= phase.end) || payload.phases[0] || null;
   }
 
-  function projectSamples(samples, width, height) {
-    const points = samples.filter((s) => s.lat !== null && s.lon !== null);
-    if (!points.length) return [];
-    const lats = points.map((s) => Number(s.lat));
-    const lons = points.map((s) => Number(s.lon));
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-    const pad = 24;
-    return points.map((s) => {
-      const x = pad + ((Number(s.lon) - minLon) / Math.max(0.000001, maxLon - minLon)) * (width - pad * 2);
-      const y = height - pad - ((Number(s.lat) - minLat) / Math.max(0.000001, maxLat - minLat)) * (height - pad * 2);
-      return Object.assign({}, s, { x, y });
-    });
-  }
-
   function gpsBounds(samples) {
     const points = samples.filter((s) => s.lat !== null && s.lon !== null);
     if (!points.length) return null;
@@ -191,12 +181,78 @@ cw_header('Cockpit Recorder Replay');
     return Math.max(latSpanMeters, lonSpanMeters) < 30;
   }
 
+  const tileSize = 256;
+  const satelliteTileUrl = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  const clampLat = (lat) => Math.max(-85.05112878, Math.min(85.05112878, Number(lat)));
+  const wrapTileX = (x, z) => {
+    const max = 2 ** z;
+    return ((x % max) + max) % max;
+  };
+  const lonToWorldX = (lon, z) => ((Number(lon) + 180) / 360) * (2 ** z) * tileSize;
+  const latToWorldY = (lat, z) => {
+    const rad = clampLat(lat) * Math.PI / 180;
+    return (0.5 - Math.log((1 + Math.sin(rad)) / (1 - Math.sin(rad))) / (4 * Math.PI)) * (2 ** z) * tileSize;
+  };
+
+  function chooseMapView(samples, width, height, stationary) {
+    const bounds = gpsBounds(samples);
+    if (!bounds) return null;
+    const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+    const centerLon = (bounds.minLon + bounds.maxLon) / 2;
+    if (stationary) return { centerLat, centerLon, zoom: 18 };
+
+    for (let zoom = 18; zoom >= 4; zoom--) {
+      const minX = lonToWorldX(bounds.minLon, zoom);
+      const maxX = lonToWorldX(bounds.maxLon, zoom);
+      const minY = latToWorldY(bounds.maxLat, zoom);
+      const maxY = latToWorldY(bounds.minLat, zoom);
+      if ((maxX - minX) <= width * 0.76 && (maxY - minY) <= height * 0.76) {
+        return { centerLat, centerLon, zoom };
+      }
+    }
+    return { centerLat, centerLon, zoom: 4 };
+  }
+
+  function projectGeoPoint(sample, view, width, height) {
+    if (!view || sample.lat === null || sample.lon === null) return null;
+    const centerX = lonToWorldX(view.centerLon, view.zoom);
+    const centerY = latToWorldY(view.centerLat, view.zoom);
+    return Object.assign({}, sample, {
+      x: lonToWorldX(sample.lon, view.zoom) - centerX + width / 2,
+      y: latToWorldY(sample.lat, view.zoom) - centerY + height / 2,
+    });
+  }
+
+  function renderSatelliteTiles(view, width, height) {
+    if (!view) return '';
+    const centerX = lonToWorldX(view.centerLon, view.zoom);
+    const centerY = latToWorldY(view.centerLat, view.zoom);
+    const startTileX = Math.floor((centerX - width / 2) / tileSize);
+    const endTileX = Math.floor((centerX + width / 2) / tileSize);
+    const startTileY = Math.floor((centerY - height / 2) / tileSize);
+    const endTileY = Math.floor((centerY + height / 2) / tileSize);
+    const maxTile = (2 ** view.zoom) - 1;
+    let html = '<div class="replay-map-layer">';
+    for (let tileX = startTileX; tileX <= endTileX; tileX++) {
+      for (let tileY = startTileY; tileY <= endTileY; tileY++) {
+        if (tileY < 0 || tileY > maxTile) continue;
+        const wrappedX = wrapTileX(tileX, view.zoom);
+        const left = tileX * tileSize - centerX + width / 2;
+        const top = tileY * tileSize - centerY + height / 2;
+        html += `<img alt="" src="${satelliteTileUrl(view.zoom, wrappedX, tileY)}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px">`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
   function renderMap() {
     const width = 900, height = 420;
     const stationary = isStationaryRecording(payload.samples);
-    const points = stationary
-      ? projectSamples(payload.samples, width, height).map((point) => Object.assign({}, point, { x: width / 2, y: height / 2 }))
-      : projectSamples(payload.samples, width, height);
+    const view = chooseMapView(payload.samples, width, height, stationary);
+    const points = payload.samples
+      .map((sample) => projectGeoPoint(sample, view, width, height))
+      .filter(Boolean);
     const current = sampleAt(activeT);
     const pointForTime = (t) => {
       if (!points.length) return null;
@@ -222,8 +278,11 @@ cw_header('Cockpit Recorder Replay');
          <text x="${width / 2}" y="${height / 2 + 58}" text-anchor="middle" fill="#64748b" font-size="14">A real flight or taxi test will draw the plan-view track here.</text>`
       : '';
     flightMap.innerHTML = `
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
-        <rect width="${width}" height="${height}" fill="url(#bg)"></rect>
+      ${renderSatelliteTiles(view, width, height)}
+      <div class="replay-map-label">${view ? `Satellite plan view · Z${view.zoom}` : 'Replay plan view'}</div>
+      ${view ? '<div class="replay-map-attribution">Imagery: Esri World Imagery</div>' : ''}
+      <svg class="replay-map-overlay" viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
+        <rect width="${width}" height="${height}" fill="${view ? 'rgba(15, 23, 42, .08)' : 'url(#bg)'}"></rect>
         <defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
         ${pathLayer}
         ${eventMarkers}
