@@ -73,10 +73,18 @@ final class CockpitAdsbEnrichmentService
             $raw = $this->fetchTrace($hex, $window);
             $rawPath = $this->storeJson($recording, 'raw', $raw);
             $samples = $this->normalizeTrace($raw, $window['start_epoch'], $window['end_epoch']);
+            $usedSpatialFallback = false;
+            if (!$samples) {
+                $samples = $this->normalizeTraceByGpsPath($raw, $recording);
+                $usedSpatialFallback = $samples !== array();
+            }
             if (!$samples) {
                 $this->clearOwnshipSamples($recordingId);
-                $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, 'No ADS-B trace samples found inside recording time window.');
-                return array('ok' => false, 'status' => 'not_available', 'error' => 'No ADS-B trace samples found inside recording time window.', 'raw_storage_path' => $rawPath);
+                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples found inside recording time window or near GPS track.');
+                $diagnosticsPath = $this->storeJson($recording, 'normalized', $diagnostics);
+                $message = $this->diagnosticMessage($diagnostics);
+                $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $message, $rawPath, $diagnosticsPath);
+                return array('ok' => false, 'status' => 'not_available', 'error' => $message, 'raw_storage_path' => $rawPath, 'normalized_storage_path' => $diagnosticsPath);
             }
 
             $this->setStatus($recordingId, 'processing', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, null, $rawPath, null);
@@ -86,6 +94,8 @@ final class CockpitAdsbEnrichmentService
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
                 'query_end_utc' => $window['end_iso'],
+                'alignment' => $usedSpatialFallback ? 'gps_spatial_fallback' : 'timestamp_window',
+                'diagnostics' => $this->traceDiagnostics($raw, $recording, $window, count($samples), count($samples), null),
                 'samples' => $samples,
             );
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
@@ -429,6 +439,210 @@ final class CockpitAdsbEnrichmentService
 
         usort($samples, fn(array $a, array $b): int => ((float)$a['seconds_since_start']) <=> ((float)$b['seconds_since_start']));
         return $samples;
+    }
+
+    /**
+     * Fallback for recordings where device timestamps and ADS-B trace timestamps do not overlap.
+     * Aligns ADS-B rows to the closest recorded GPS point by position, then uses the GPS
+     * secondsSinceRecordingStart value for replay synchronization.
+     *
+     * @param array<string,mixed> $trace
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeTraceByGpsPath(array $trace, array $recording): array
+    {
+        $gpsRows = $this->gpsAlignmentRows($recording);
+        $base = isset($trace['timestamp']) && is_numeric($trace['timestamp']) ? (float)$trace['timestamp'] : null;
+        $rows = isset($trace['trace']) && is_array($trace['trace']) ? $trace['trace'] : array();
+        if (!$gpsRows || $base === null || !$rows) {
+            return array();
+        }
+
+        $samples = array();
+        foreach ($rows as $row) {
+            if (!is_array($row) || count($row) < 3 || !isset($row[0], $row[1], $row[2]) || !is_numeric($row[0]) || !is_numeric($row[1]) || !is_numeric($row[2])) {
+                continue;
+            }
+
+            $bestGps = null;
+            $bestDistance = 0.35;
+            $lat = (float)$row[1];
+            $lon = (float)$row[2];
+            foreach ($gpsRows as $gps) {
+                $distance = self::distanceNm($lat, $lon, (float)$gps['latitude'], (float)$gps['longitude']);
+                if ($distance <= $bestDistance) {
+                    $bestDistance = $distance;
+                    $bestGps = $gps;
+                }
+            }
+            if ($bestGps === null) {
+                continue;
+            }
+
+            $epoch = $base + (float)$row[0];
+            $dt = DateTimeImmutable::createFromFormat('U.u', sprintf('%.6F', $epoch), new DateTimeZone('UTC'));
+            if (!$dt) {
+                continue;
+            }
+            $alt = $row[3] ?? null;
+            $samples[] = array(
+                'sample_time_utc' => $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z'),
+                'seconds_since_start' => max(0.0, (float)$bestGps['seconds']),
+                'latitude' => $lat,
+                'longitude' => $lon,
+                'baro_altitude_ft' => is_numeric($alt) ? (float)$alt : null,
+                'vertical_speed_fpm' => isset($row[7]) && is_numeric($row[7]) ? (float)$row[7] : null,
+                'groundspeed_kt' => isset($row[4]) && is_numeric($row[4]) ? (float)$row[4] : null,
+                'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
+                'heading_deg' => isset($row[8]) && is_array($row[8]) && isset($row[8]['mag_heading']) && is_numeric($row[8]['mag_heading']) ? (float)$row[8]['mag_heading'] : null,
+                'on_ground' => is_string($alt) && strtolower($alt) === 'ground',
+                'alignment_distance_nm' => $bestDistance,
+                'raw' => $row,
+            );
+        }
+
+        usort($samples, fn(array $a, array $b): int => ((float)$a['seconds_since_start']) <=> ((float)$b['seconds_since_start']));
+        return $samples;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    private function gpsAlignmentRows(array $recording): array
+    {
+        $path = $this->safeStoredPath((string)($recording['gps_storage_path'] ?? ''), CockpitRecorderService::gpsRoot());
+        if ($path === null) {
+            return array();
+        }
+        $raw = file_get_contents($path);
+        $decoded = $raw !== false ? json_decode($raw, true) : null;
+        if (!is_array($decoded) || array_keys($decoded) !== range(0, count($decoded) - 1)) {
+            return array();
+        }
+
+        $rows = array();
+        foreach ($decoded as $row) {
+            if (!is_array($row) || !isset($row['secondsSinceRecordingStart'], $row['latitude'], $row['longitude']) || !is_numeric($row['secondsSinceRecordingStart']) || !is_numeric($row['latitude']) || !is_numeric($row['longitude'])) {
+                continue;
+            }
+            $rows[] = array(
+                'seconds' => (float)$row['secondsSinceRecordingStart'],
+                'timestamp' => (string)($row['timestamp'] ?? ''),
+                'latitude' => (float)$row['latitude'],
+                'longitude' => (float)$row['longitude'],
+            );
+        }
+        usort($rows, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
+        return $rows;
+    }
+
+    /**
+     * @param array<string,mixed> $trace
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return array<string,mixed>
+     */
+    private function traceDiagnostics(array $trace, array $recording, array $window, int $filteredCount, int $spatialCount, ?string $note): array
+    {
+        $base = isset($trace['timestamp']) && is_numeric($trace['timestamp']) ? (float)$trace['timestamp'] : null;
+        $rows = isset($trace['trace']) && is_array($trace['trace']) ? $trace['trace'] : array();
+        $firstEpoch = null;
+        $lastEpoch = null;
+        $numericAltitudes = 0;
+        $numericRates = 0;
+        $timeWindowRows = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row) || !isset($row[0]) || !is_numeric($row[0]) || $base === null) {
+                continue;
+            }
+            $epoch = $base + (float)$row[0];
+            $firstEpoch = $firstEpoch === null ? $epoch : min($firstEpoch, $epoch);
+            $lastEpoch = $lastEpoch === null ? $epoch : max($lastEpoch, $epoch);
+            if ($epoch >= (float)$window['start_epoch'] - 30 && $epoch <= (float)$window['end_epoch'] + 30) {
+                $timeWindowRows++;
+            }
+            if (isset($row[3]) && is_numeric($row[3])) {
+                $numericAltitudes++;
+            }
+            if (isset($row[7]) && is_numeric($row[7])) {
+                $numericRates++;
+            }
+        }
+
+        $gpsRows = $this->gpsAlignmentRows($recording);
+        $gpsFirst = $gpsRows ? (string)$gpsRows[0]['timestamp'] : null;
+        $gpsLast = $gpsRows ? (string)$gpsRows[count($gpsRows) - 1]['timestamp'] : null;
+
+        return array(
+            'status' => $filteredCount > 0 ? 'matched' : 'not_matched',
+            'note' => $note,
+            'recording' => array(
+                'id' => (int)($recording['id'] ?? 0),
+                'recording_uid' => (string)($recording['recording_uid'] ?? ''),
+                'started_at' => $recording['started_at'] ?? null,
+                'duration_seconds' => (float)($recording['duration_seconds'] ?? 0),
+            ),
+            'filter_window_utc' => array(
+                'start' => $window['start_iso'] ?? null,
+                'end' => $window['end_iso'] ?? null,
+            ),
+            'gps' => array(
+                'sample_count' => count($gpsRows),
+                'first_timestamp' => $gpsFirst,
+                'last_timestamp' => $gpsLast,
+                'first_seconds' => $gpsRows ? (float)$gpsRows[0]['seconds'] : null,
+                'last_seconds' => $gpsRows ? (float)$gpsRows[count($gpsRows) - 1]['seconds'] : null,
+            ),
+            'adsb_trace' => array(
+                'source' => (string)($trace['source'] ?? 'configured_provider'),
+                'source_dates' => $trace['source_dates'] ?? array(),
+                'raw_row_count' => count($rows),
+                'first_timestamp' => self::epochIso($firstEpoch),
+                'last_timestamp' => self::epochIso($lastEpoch),
+                'rows_inside_time_window' => $timeWindowRows,
+                'rows_matched_by_spatial_fallback' => $spatialCount,
+                'numeric_baro_altitude_rows' => $numericAltitudes,
+                'numeric_vertical_speed_rows' => $numericRates,
+            ),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $diagnostics
+     */
+    private function diagnosticMessage(array $diagnostics): string
+    {
+        $window = $diagnostics['filter_window_utc'] ?? array();
+        $gps = $diagnostics['gps'] ?? array();
+        $adsb = $diagnostics['adsb_trace'] ?? array();
+        return 'No ADS-B samples matched. Filter UTC '
+            . (string)($window['start'] ?? '--') . ' to ' . (string)($window['end'] ?? '--')
+            . '; GPS UTC ' . (string)($gps['first_timestamp'] ?? '--') . ' to ' . (string)($gps['last_timestamp'] ?? '--')
+            . '; ADS-B UTC ' . (string)($adsb['first_timestamp'] ?? '--') . ' to ' . (string)($adsb['last_timestamp'] ?? '--')
+            . '; raw rows ' . (string)($adsb['raw_row_count'] ?? 0)
+            . '; rows inside window ' . (string)($adsb['rows_inside_time_window'] ?? 0) . '.';
+    }
+
+    private static function epochIso(?float $epoch): ?string
+    {
+        if ($epoch === null) {
+            return null;
+        }
+        $dt = DateTimeImmutable::createFromFormat('U.u', sprintf('%.6F', $epoch), new DateTimeZone('UTC'));
+        return $dt ? $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z') : null;
+    }
+
+    private static function distanceNm(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $earthRadiusNm = 3440.065;
+        $lat1Rad = deg2rad($lat1);
+        $lat2Rad = deg2rad($lat2);
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        $a = sin($dLat / 2) ** 2 + cos($lat1Rad) * cos($lat2Rad) * sin($dLon / 2) ** 2;
+        return $earthRadiusNm * 2 * atan2(sqrt($a), sqrt(max(0.0, 1 - $a)));
     }
 
     /**
