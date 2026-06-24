@@ -175,6 +175,63 @@ final class CockpitAdsbEnrichmentService
         $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
         $end = $start->modify('+' . (string)max(1, (int)ceil($duration)) . ' seconds');
 
+        $window = array(
+            'start_epoch' => (float)$start->format('U.u'),
+            'end_epoch' => (float)$end->format('U.u'),
+            'start_iso' => $start->format('c'),
+            'end_iso' => $end->format('c'),
+            'start_mysql' => $start->format('Y-m-d H:i:s'),
+            'end_mysql' => $end->format('Y-m-d H:i:s'),
+        );
+
+        return $this->gpsTimestampWindow($recording, $window) ?? $window;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param array{start_epoch:float,end_epoch:float,start_iso:string,end_iso:string,start_mysql:string,end_mysql:string} $fallback
+     * @return array{start_epoch:float,end_epoch:float,start_iso:string,end_iso:string,start_mysql:string,end_mysql:string}|null
+     */
+    private function gpsTimestampWindow(array $recording, array $fallback): ?array
+    {
+        $path = $this->safeStoredPath((string)($recording['gps_storage_path'] ?? ''), CockpitRecorderService::gpsRoot());
+        if ($path === null) {
+            return null;
+        }
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            return null;
+        }
+        $rows = json_decode($raw, true);
+        if (!is_array($rows) || array_keys($rows) !== range(0, count($rows) - 1)) {
+            return null;
+        }
+
+        $times = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $timestamp = trim((string)($row['timestamp'] ?? ''));
+            if ($timestamp === '') {
+                continue;
+            }
+            try {
+                $times[] = (new DateTimeImmutable($timestamp))->setTimezone(new DateTimeZone('UTC'));
+            } catch (Throwable) {
+                continue;
+            }
+        }
+        if (!$times) {
+            return null;
+        }
+        usort($times, fn(DateTimeImmutable $a, DateTimeImmutable $b): int => ((float)$a->format('U.u')) <=> ((float)$b->format('U.u')));
+        $start = $times[0]->modify('-30 seconds');
+        $end = $times[count($times) - 1]->modify('+30 seconds');
+        if ((float)$end->format('U.u') <= (float)$start->format('U.u')) {
+            return null;
+        }
+
         return array(
             'start_epoch' => (float)$start->format('U.u'),
             'end_epoch' => (float)$end->format('U.u'),
@@ -183,6 +240,21 @@ final class CockpitAdsbEnrichmentService
             'start_mysql' => $start->format('Y-m-d H:i:s'),
             'end_mysql' => $end->format('Y-m-d H:i:s'),
         );
+    }
+
+    private function safeStoredPath(string $relativePath, string $root): ?string
+    {
+        $relativePath = trim($relativePath);
+        if ($relativePath === '') {
+            return null;
+        }
+        $path = CockpitRecorderService::projectRoot() . '/' . ltrim($relativePath, '/');
+        $real = realpath($path);
+        $realRoot = realpath($root);
+        if ($real === false || $realRoot === false || !str_starts_with($real, $realRoot) || !is_file($real)) {
+            return null;
+        }
+        return $real;
     }
 
     /**
