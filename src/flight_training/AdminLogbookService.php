@@ -249,11 +249,26 @@ final class AdminLogbookService
     {
         $this->requireSchema();
         $logbookId = $this->getOrCreateLogbook($studentUserId, null, $studentUserId);
+        $entryId = (int)($data['id'] ?? 0);
+        if ($entryId > 0) {
+            $stmt = $this->pdo->prepare("
+                SELECT *
+                FROM ipca_admin_logbook_entries
+                WHERE id = :id
+                  AND logbook_id = :logbook_id
+                LIMIT 1
+            ");
+            $stmt->execute(array(':id' => $entryId, ':logbook_id' => $logbookId));
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($existing) || !$this->isStudentEnteredEntry($existing, $studentUserId)) {
+                throw new RuntimeException('Only student-entered logbook entries can be edited by the student.');
+            }
+        }
         $sourceType = in_array($sourceType, array('student_prior_experience', 'student_external_flight'), true)
             ? $sourceType
             : 'student_external_flight';
         $entry = $data;
-        $entry['id'] = 0;
+        $entry['id'] = $entryId;
         $entry['external_system'] = 'STUDENT';
         $entry['import_profile'] = $sourceType;
         $entry['review_status'] = 'needs_review';
