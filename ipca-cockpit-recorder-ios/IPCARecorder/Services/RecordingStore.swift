@@ -23,6 +23,9 @@ final class RecordingStore: ObservableObject {
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             let data = try Data(contentsOf: url)
             recordings = try decoder.decode([Recording].self, from: data)
+            if repairStaleFilePaths() {
+                save()
+            }
         } catch {
             print("RecordingStore load failed: \(error)")
         }
@@ -53,7 +56,7 @@ final class RecordingStore: ObservableObject {
         }
     }
 
-    static func recordingsDirectory() throws -> URL {
+    nonisolated static func recordingsDirectory() throws -> URL {
         let base = try FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -63,6 +66,32 @@ final class RecordingStore: ObservableObject {
         let url = base.appendingPathComponent("Recordings", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    nonisolated static func resolvedFileURL(preferredPath: String, recordingID: String, fallbackFilename: String) throws -> URL {
+        let preferred = URL(fileURLWithPath: preferredPath)
+        if FileManager.default.fileExists(atPath: preferred.path) {
+            return preferred
+        }
+
+        let directory = try recordingsDirectory()
+        let fallback = directory.appendingPathComponent(fallbackFilename)
+        if FileManager.default.fileExists(atPath: fallback.path) {
+            return fallback
+        }
+
+        let originalName = preferred.lastPathComponent
+        if !originalName.isEmpty {
+            let byName = directory.appendingPathComponent(originalName)
+            if FileManager.default.fileExists(atPath: byName.path) {
+                return byName
+            }
+        }
+
+        throw CocoaError(.fileNoSuchFile, userInfo: [
+            NSFilePathErrorKey: fallback.path,
+            NSLocalizedDescriptionKey: "Recording file \(fallbackFilename) is missing for \(recordingID)."
+        ])
     }
 
     private func storeURL() throws -> URL {
@@ -75,5 +104,44 @@ final class RecordingStore: ObservableObject {
         let dir = base.appendingPathComponent("IPCARecorder", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("recordings.json")
+    }
+
+    private func repairStaleFilePaths() -> Bool {
+        var changed = false
+        for index in recordings.indices {
+            let id = recordings[index].id
+
+            if let audioURL = try? Self.resolvedFileURL(
+                preferredPath: recordings[index].filePath,
+                recordingID: id,
+                fallbackFilename: "\(id).m4a"
+            ), audioURL.path != recordings[index].filePath {
+                recordings[index].filePath = audioURL.path
+                changed = true
+            }
+
+            if let path = recordings[index].ahrsSamplesPath,
+               let ahrsURL = try? Self.resolvedFileURL(
+                preferredPath: path,
+                recordingID: id,
+                fallbackFilename: "\(id).ahrs.json"
+               ),
+               ahrsURL.path != path {
+                recordings[index].ahrsSamplesPath = ahrsURL.path
+                changed = true
+            }
+
+            if let path = recordings[index].gpsSamplesPath,
+               let gpsURL = try? Self.resolvedFileURL(
+                preferredPath: path,
+                recordingID: id,
+                fallbackFilename: "\(id).gps.json"
+               ),
+               gpsURL.path != path {
+                recordings[index].gpsSamplesPath = gpsURL.path
+                changed = true
+            }
+        }
+        return changed
     }
 }

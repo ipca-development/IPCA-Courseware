@@ -84,7 +84,11 @@ struct Recording: Identifiable, Codable, Equatable {
     var gpsSamplesPath: String?
 
     var fileURL: URL {
-        URL(fileURLWithPath: filePath)
+        (try? RecordingStore.resolvedFileURL(
+            preferredPath: filePath,
+            recordingID: id,
+            fallbackFilename: "\(id).m4a"
+        )) ?? URL(fileURLWithPath: filePath)
     }
 
     var aircraftLabel: String {

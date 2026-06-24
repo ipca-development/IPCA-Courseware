@@ -80,26 +80,44 @@ final class UploadManager: ObservableObject {
     }
 
     private func performChunkedUpload(recording: Recording, language: String, client: APIClient, store: RecordingStore) async throws -> UploadResponse {
+        let audioURL = try RecordingStore.resolvedFileURL(
+            preferredPath: recording.filePath,
+            recordingID: recording.id,
+            fallbackFilename: "\(recording.id).m4a"
+        )
         var files: [(type: String, url: URL, filename: String, mime: String, size: Int64)] = [
-            ("audio", recording.fileURL, recording.fileURL.lastPathComponent, "audio/mp4", try fileSize(recording.fileURL))
+            ("audio", audioURL, audioURL.lastPathComponent, "audio/mp4", try fileSize(audioURL))
         ]
 
         if let ahrsPath = recording.ahrsSamplesPath {
-            let url = URL(fileURLWithPath: ahrsPath)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: ahrsPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).ahrs.json"
+            ) {
                 files.append(("ahrs", url, url.lastPathComponent, "application/json", try fileSize(url)))
             }
         }
 
         if let gpsPath = recording.gpsSamplesPath {
-            let url = URL(fileURLWithPath: gpsPath)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: gpsPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).gps.json"
+            ) {
                 files.append(("gps", url, url.lastPathComponent, "application/json", try fileSize(url)))
             }
         }
 
         let totalBytes = max(1, files.reduce(Int64(0)) { $0 + max(0, $1.size) })
         var uploadedBytes: Int64 = 0
+
+        await MainActor.run {
+            store.update(recording.id) {
+                $0.uploadProgress = 0.01
+                $0.lastError = "Preparing chunked upload..."
+            }
+        }
 
         for file in files where file.size > 0 {
             uploadedBytes = try await uploadFileChunks(
@@ -146,8 +164,7 @@ final class UploadManager: ObservableObject {
         for chunkIndex in 0..<totalChunks {
             let offset = Int64(chunkIndex * chunkSize)
             let count = min(chunkSize, Int(fileSize - offset))
-            let chunkURL = try makeChunkFile(fileURL: fileURL, offset: offset, count: count, fileType: fileType, chunkIndex: chunkIndex)
-            defer { try? FileManager.default.removeItem(at: chunkURL) }
+            let chunkData = try readChunk(fileURL: fileURL, offset: offset, count: count, fileType: fileType, chunkIndex: chunkIndex)
 
             let request = client.chunkUploadRequest(
                 recording: recording,
@@ -159,10 +176,18 @@ final class UploadManager: ObservableObject {
                 mimeType: mimeType
             )
 
+            await MainActor.run {
+                store.update(recording.id) {
+                    let baseProgress = Double(completedBytes) / Double(totalBytes) * 0.98
+                    $0.uploadProgress = max(0.01, min(0.98, baseProgress))
+                    $0.lastError = "Uploading \(fileType) chunk \(chunkIndex + 1)/\(totalChunks)..."
+                }
+            }
+
             var lastError: Error?
             for attempt in 1...maxChunkAttempts {
                 do {
-                    let (data, response) = try await upload(request: request, bodyURL: chunkURL)
+                    let (data, response) = try await send(request: request, body: chunkData)
                     let chunkResponse = try client.decodeChunkUploadResponse(data: data, response: response)
                     if !chunkResponse.ok {
                         throw APIClientError.badResponse(chunkResponse.error ?? "Chunk upload failed.")
@@ -198,9 +223,12 @@ final class UploadManager: ObservableObject {
         return completedBytes
     }
 
-    private func upload(request: URLRequest, bodyURL: URL) async throws -> (Data, URLResponse) {
+    private func send(request: URLRequest, body: Data) async throws -> (Data, URLResponse) {
         try await withCheckedThrowingContinuation { continuation in
-            let task = session.uploadTask(with: request, fromFile: bodyURL) { data, response, error in
+            var request = request
+            request.httpBody = body
+            request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
+            let task = session.dataTask(with: request) { data, response, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -233,7 +261,7 @@ final class UploadManager: ObservableObject {
         }
     }
 
-    private func makeChunkFile(fileURL: URL, offset: Int64, count: Int, fileType: String, chunkIndex: Int) throws -> URL {
+    private func readChunk(fileURL: URL, offset: Int64, count: Int, fileType: String, chunkIndex: Int) throws -> Data {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(offset))
@@ -241,10 +269,7 @@ final class UploadManager: ObservableObject {
         if data.isEmpty {
             throw APIClientError.badResponse("Could not read \(fileType) chunk \(chunkIndex + 1).")
         }
-        let chunkURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ipca-\(fileType)-\(UUID().uuidString)-\(chunkIndex).part")
-        try data.write(to: chunkURL, options: .atomic)
-        return chunkURL
+        return data
     }
 
     private func fileSize(_ url: URL) throws -> Int64 {
