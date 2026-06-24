@@ -73,14 +73,9 @@ final class CockpitAdsbEnrichmentService
             $raw = $this->fetchTrace($hex, $window);
             $rawPath = $this->storeJson($recording, 'raw', $raw);
             $samples = $this->normalizeTrace($raw, $window['start_epoch'], $window['end_epoch']);
-            $usedSpatialFallback = false;
-            if (!$samples) {
-                $samples = $this->normalizeTraceByGpsPath($raw, $recording);
-                $usedSpatialFallback = $samples !== array();
-            }
             if (!$samples) {
                 $this->clearOwnshipSamples($recordingId);
-                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples found inside recording time window or near GPS track.');
+                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples found inside recording time window. Spatial fallback is disabled for altitude/vertical-speed because it can misalign repeated or nearby track segments.');
                 $diagnosticsPath = $this->storeJson($recording, 'normalized', $diagnostics);
                 $message = $this->diagnosticMessage($diagnostics);
                 $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $message, $rawPath, $diagnosticsPath);
@@ -94,8 +89,8 @@ final class CockpitAdsbEnrichmentService
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
                 'query_end_utc' => $window['end_iso'],
-                'alignment' => $usedSpatialFallback ? 'gps_spatial_fallback' : 'timestamp_window',
-                'diagnostics' => $this->traceDiagnostics($raw, $recording, $window, count($samples), count($samples), null),
+                'alignment' => 'timestamp_window',
+                'diagnostics' => $this->traceDiagnostics($raw, $recording, $window, count($samples), 0, null),
                 'samples' => $samples,
             );
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
