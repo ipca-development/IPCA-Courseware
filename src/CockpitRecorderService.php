@@ -535,6 +535,113 @@ final class CockpitRecorderService
         return $this->processTranscription($recordingId);
     }
 
+    /**
+     * Processes at most one transcription chunk and returns quickly enough for admin/status polling.
+     *
+     * @return array<string,mixed>
+     */
+    public function processTranscriptionStep(int $recordingId): array
+    {
+        $this->requireTables();
+        if ($recordingId <= 0) {
+            return array('ok' => false, 'done' => true, 'error' => 'Invalid recording id.');
+        }
+
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE id = ? LIMIT 1');
+        $stmt->execute(array($recordingId));
+        $recording = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($recording)) {
+            return array('ok' => false, 'done' => true, 'error' => 'Recording not found.');
+        }
+        if ((string)($recording['transcription_status'] ?? '') === 'ready') {
+            return array('ok' => true, 'done' => true, 'recording' => $this->publicRecordingPayload($recording));
+        }
+
+        $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+        if ($duration <= self::TRANSCRIPTION_CHUNK_SECONDS) {
+            return $this->processTranscription($recordingId);
+        }
+        if (!self::transcriptionChunkTablePresent($this->pdo)) {
+            return array('ok' => false, 'done' => true, 'error' => 'Apply scripts/sql/2026_06_22_cockpit_recorder_transcription_chunks.sql first.');
+        }
+
+        $chunkCount = max(1, (int)ceil($duration / self::TRANSCRIPTION_CHUNK_SECONDS));
+        $existing = $this->transcriptionChunksForRecording($recordingId);
+        if (!$existing) {
+            for ($index = 0; $index < $chunkCount; $index++) {
+                $start = $index * self::TRANSCRIPTION_CHUNK_SECONDS;
+                $end = min($duration, $start + self::TRANSCRIPTION_CHUNK_SECONDS);
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'queued', 0, null, null);
+            }
+        }
+
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_status = 'transcribing',
+                transcription_progress = GREATEST(transcription_progress, 10),
+                transcription_started_at = COALESCE(transcription_started_at, CURRENT_TIMESTAMP),
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($recordingId));
+
+        $chunks = $this->transcriptionChunksForRecording($recordingId);
+        $next = null;
+        foreach ($chunks as $chunk) {
+            $status = (string)($chunk['status'] ?? '');
+            if ($status === 'queued' || $status === 'transcribing') {
+                $next = $chunk;
+                break;
+            }
+        }
+
+        if ($next === null) {
+            return $this->finishSteppedTranscription($recordingId);
+        }
+
+        $index = (int)$next['chunk_index'];
+        $start = (float)$next['start_seconds'];
+        $end = (float)$next['end_seconds'];
+        $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'transcribing', 0, null, null);
+
+        $chunkPath = '';
+        try {
+            $realPath = $this->transcriptionAudioPath($recording);
+            $chunkPath = $this->extractAudioChunk($realPath, $start, max(1.0, $end - $start), (string)($recording['recording_uid'] ?? 'recording'), $index);
+            $mime = mime_content_type($chunkPath) ?: 'audio/mp4';
+            $text = $this->transcribeAudioFile($chunkPath, $mime, basename($chunkPath), self::normalizeLanguage((string)($recording['language'] ?? 'en')));
+            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
+        } catch (Throwable $e) {
+            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'failed', 0, null, $e->getMessage());
+        } finally {
+            if ($chunkPath !== '' && is_file($chunkPath)) {
+                @unlink($chunkPath);
+            }
+        }
+
+        $readyCount = $this->countTranscriptionChunksByStatus($recordingId, 'ready');
+        $failedCount = $this->countTranscriptionChunksByStatus($recordingId, 'failed');
+        $progress = min(95, 10 + (int)round((($readyCount + $failedCount) / $chunkCount) * 85));
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_progress = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($progress, $recordingId));
+
+        if (($readyCount + $failedCount) >= $chunkCount) {
+            return $this->finishSteppedTranscription($recordingId);
+        }
+
+        $updated = $this->recordingByAnyId((string)$recordingId);
+        return array(
+            'ok' => true,
+            'done' => false,
+            'processed_chunk' => $index,
+            'recording' => $updated ? $this->publicRecordingPayload($updated) : null,
+        );
+    }
+
     public function markTranscriptionFailed(int $recordingId, string $error): void
     {
         if ($recordingId <= 0) {
@@ -1346,6 +1453,74 @@ final class CockpitRecorderService
     {
         $stmt = $this->pdo->prepare('DELETE FROM ' . self::CHUNK_TABLE . ' WHERE recording_id = ?');
         $stmt->execute(array($recordingId));
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function transcriptionChunksForRecording(int $recordingId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . self::CHUNK_TABLE . ' WHERE recording_id = ? ORDER BY chunk_index ASC');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function countTranscriptionChunksByStatus(int $recordingId, string $status): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM ' . self::CHUNK_TABLE . ' WHERE recording_id = ? AND status = ?');
+        $stmt->execute(array($recordingId, $status));
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function finishSteppedTranscription(int $recordingId): array
+    {
+        $chunks = $this->transcriptionChunksForRecording($recordingId);
+        $texts = array();
+        $failed = array();
+        foreach ($chunks as $chunk) {
+            if ((string)($chunk['status'] ?? '') === 'ready') {
+                $text = trim((string)($chunk['transcript_text'] ?? ''));
+                if ($text !== '') {
+                    $texts[] = $text;
+                }
+            } elseif ((string)($chunk['status'] ?? '') === 'failed') {
+                $failed[] = (int)($chunk['chunk_index'] ?? 0) + 1;
+            }
+        }
+
+        $combined = trim(implode("\n\n", $texts));
+        $status = $failed ? 'failed' : 'ready';
+        $error = null;
+        if ($failed) {
+            $error = 'Partial transcript: chunk(s) ' . implode(', ', array_map('strval', $failed)) . ' failed. '
+                . ($combined !== '' ? 'Partial transcript retained.' : 'No usable transcript text was returned.');
+        } elseif ($combined === '') {
+            $status = 'failed';
+            $error = 'Chunked transcription returned no text.';
+        }
+
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_status = ?,
+                transcription_progress = ?,
+                transcript_text = ?,
+                error_message = ?,
+                transcription_completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($status, $status === 'ready' ? 100 : 0, $combined !== '' ? $combined : null, $error, $recordingId));
+
+        $updated = $this->recordingByAnyId((string)$recordingId);
+        return array(
+            'ok' => $status === 'ready',
+            'done' => true,
+            'recording' => $updated ? $this->publicRecordingPayload($updated) : null,
+            'error' => $error,
+        );
     }
 
     private function storeTranscriptionChunk(

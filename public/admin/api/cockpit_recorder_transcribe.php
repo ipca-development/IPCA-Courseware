@@ -10,7 +10,7 @@ cw_require_admin();
 @ini_set('max_execution_time', '0');
 
 $id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
-$mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'spawn'));
+$mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'step'));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
 function cockpit_transcribe_response(bool $ok, string $message, array $payload = array()): void
@@ -46,9 +46,14 @@ try {
         cockpit_transcribe_response($spawned, $spawned ? 'worker_started' : 'worker_start_failed', array('worker_spawned' => $spawned));
     }
 
-    $result = $service->processTranscription($id);
+    if ($mode === 'run') {
+        $result = $service->processTranscription($id);
+    } else {
+        $result = $service->processTranscriptionStep($id);
+    }
     $ok = (bool)($result['ok'] ?? false);
-    cockpit_transcribe_response($ok, $ok ? 'completed' : (string)($result['error'] ?? 'Transcription failed.'), $result);
+    $done = (bool)($result['done'] ?? false);
+    cockpit_transcribe_response($ok || !$done, $done ? ($ok ? 'completed' : (string)($result['error'] ?? 'Transcription failed.')) : 'processed_next_chunk', $result);
 } catch (Throwable $e) {
     cockpit_transcribe_response(false, $e->getMessage());
 }
