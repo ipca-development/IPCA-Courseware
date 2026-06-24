@@ -212,6 +212,8 @@ cw_header('Cockpit Recorder Replay');
       lat: lerp(before.lat, after.lat),
       lon: lerp(before.lon, after.lon),
       gps_altitude_ft: lerp(before.gps_altitude_ft, after.gps_altitude_ft),
+      baro_altitude_ft: lerp(before.baro_altitude_ft, after.baro_altitude_ft),
+      vertical_speed_fpm: lerp(before.vertical_speed_fpm, after.vertical_speed_fpm),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       bank_deg: lerp(before.bank_deg, after.bank_deg),
@@ -489,7 +491,10 @@ cw_header('Cockpit Recorder Replay');
     details.innerHTML = `
       <div class="detail-row"><span>Selected phase</span><strong>${phase ? phase.phase : '--'}</strong></div>
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
+      <div class="detail-row"><span>ADS-B status</span><strong>${payload.recording.adsb_status || '--'}</strong></div>
       <div class="detail-row"><span>GPS altitude</span><strong>${number(s.gps_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Baro altitude</span><strong>${number(s.baro_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Vertical speed</span><strong>${number(s.vertical_speed_fpm, ' fpm', 0)}</strong></div>
       <div class="detail-row"><span>Groundspeed</span><strong>${number(s.groundspeed_kt, ' kt')}</strong></div>
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
@@ -505,6 +510,8 @@ cw_header('Cockpit Recorder Replay');
     graphs.innerHTML = '';
     [
       ['GPS altitude', 'gps_altitude_ft', '#1d4ed8', 'ft'],
+      ['Baro altitude', 'baro_altitude_ft', '#7c3aed', 'ft'],
+      ['Vertical speed', 'vertical_speed_fpm', '#0f766e', 'fpm'],
       ['Groundspeed', 'groundspeed_kt', '#16a34a', 'kt'],
       ['Pitch', 'pitch_deg', '#f97316', 'deg'],
       ['Bank', 'bank_deg', '#dc2626', 'deg'],
@@ -514,9 +521,10 @@ cw_header('Cockpit Recorder Replay');
       const card = document.createElement('div');
       card.className = 'graph-card';
       const current = sampleAt(activeT) || {};
+      const zeroDecimalUnit = unit === 'ft' || unit === 'fpm' || (unit === 'deg' && (key === 'heading_deg' || key === 'track_deg'));
       const value = current[key] === null || current[key] === undefined || Number.isNaN(Number(current[key]))
         ? '--'
-        : `${Number(current[key]).toFixed(unit === 'ft' || unit === 'deg' && (key === 'heading_deg' || key === 'track_deg') ? 0 : 1)} ${unit}`;
+        : `${Number(current[key]).toFixed(zeroDecimalUnit ? 0 : 1)} ${unit}`;
       card.innerHTML = `<h4>${label}</h4><div class="graph-value">${value}</div>${graphSvg(key, color, unit)}`;
       graphs.appendChild(card);
     });

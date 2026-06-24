@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 require_once __DIR__ . '/../../src/CockpitReconstructionService.php';
+require_once __DIR__ . '/../../src/CockpitAdsbEnrichmentService.php';
 
 cw_require_admin();
 
@@ -86,8 +87,10 @@ function cockpit_admin_reconstruction_summary(array $row): array
 $error = '';
 $recordings = array();
 $service = null;
+$adsbService = null;
 try {
     $service = new CockpitRecorderService($pdo);
+    $adsbService = new CockpitAdsbEnrichmentService($pdo);
     $recordings = $service->adminRecordings(100);
 } catch (Throwable $e) {
     $error = $e->getMessage();
@@ -192,6 +195,12 @@ cw_header('Cockpit Recorder POC');
             $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
             $replayJsonUrl = '/api/recordings/replay.php?id=' . $id;
             $g3xUrl = '/admin/cockpit_recorder_g3x.php?id=' . $id;
+            $adsbDetail = $adsbService instanceof CockpitAdsbEnrichmentService ? $adsbService->statusForRecording($id) : array();
+            $adsbDisplayStatus = (string)($adsbDetail['status'] ?? $adsbStatus);
+            $adsbOwnshipCount = (int)($adsbDetail['ownship_sample_count'] ?? 0);
+            $adsbError = trim((string)($adsbDetail['error_message'] ?? ''));
+            $adsbRawUrl = '/admin/cockpit_recorder_adsb.php?id=' . $id . '&type=raw';
+            $adsbNormalizedUrl = '/admin/cockpit_recorder_adsb.php?id=' . $id . '&type=normalized';
             $chunkReady = 0;
             $chunkFailed = 0;
             foreach ($chunks as $chunkForCount) {
@@ -334,13 +343,46 @@ cw_header('Cockpit Recorder POC');
                 <div>
                   <span class="cockpit-badge cockpit-badge-<?= h($reconStatus) ?>"><?= h($reconStatus) ?></span>
                   <div class="cockpit-muted">Timeline: <?= h($timelineStatus) ?></div>
-                  <div class="cockpit-muted">ADS-B: <?= h($adsbStatus) ?></div>
+                  <div class="cockpit-muted">ADS-B: <?= h($adsbDisplayStatus) ?></div>
+                </div>
+                <div class="cockpit-summary-grid">
+                  <strong>ADS-B enrichment</strong>
+                  <?php if (!empty($row['aircraft_adsb_hex'])): ?>
+                    <div>Hex: <code><?= h((string)$row['aircraft_adsb_hex']) ?></code></div>
+                    <div>Ownship samples: <?= $adsbOwnshipCount ?></div>
+                    <?php if ($adsbError !== ''): ?>
+                      <div class="cockpit-muted"><?= h($adsbError) ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($adsbDetail['raw_storage_path']) || !empty($adsbDetail['normalized_storage_path'])): ?>
+                      <div class="cockpit-link-grid">
+                        <?php if (!empty($adsbDetail['raw_storage_path'])): ?>
+                          <a href="<?= h($adsbRawUrl) ?>">Raw ADS-B JSON</a>
+                        <?php endif; ?>
+                        <?php if (!empty($adsbDetail['normalized_storage_path'])): ?>
+                          <a href="<?= h($adsbNormalizedUrl) ?>">Normalized ADS-B JSON</a>
+                        <?php endif; ?>
+                      </div>
+                    <?php endif; ?>
+                    <form method="post" action="/admin/api/cockpit_recorder_adsb_enrich.php" style="margin-top:6px">
+                      <input type="hidden" name="id" value="<?= $id ?>">
+                      <button class="cockpit-button" type="submit">Fetch ADS-B</button>
+                    </form>
+                    <?php if ($adsbDisplayStatus === 'ready'): ?>
+                      <div class="cockpit-muted">Reconstruct again to include ADS-B in replay/G3X.</div>
+                    <?php endif; ?>
+                  <?php else: ?>
+                    <div><span class="cockpit-badge">not_available</span></div>
+                    <div class="cockpit-muted">No selected aircraft hex.</div>
+                  <?php endif; ?>
                 </div>
                 <?php if ($reconSummary): ?>
                   <div class="cockpit-summary-grid">
                     <strong>Timeline summary</strong>
                     <div>Samples: <?= (int)($reconSummary['sample_count'] ?? 0) ?></div>
                     <div>Phases: <?= (int)($reconSummary['phase_count'] ?? 0) ?> · Events: <?= (int)($reconSummary['event_count'] ?? 0) ?></div>
+                    <?php if (isset($reconSummary['adsb_sample_count'])): ?>
+                      <div>ADS-B samples: <?= (int)$reconSummary['adsb_sample_count'] ?></div>
+                    <?php endif; ?>
                     <div>Max alt: <?= is_numeric($reconSummary['max_altitude_ft'] ?? null) ? h(number_format((float)$reconSummary['max_altitude_ft'], 0) . ' ft') : '--' ?></div>
                     <div>Max GS: <?= is_numeric($reconSummary['max_groundspeed_kt'] ?? null) ? h(number_format((float)$reconSummary['max_groundspeed_kt'], 1) . ' kt') : '--' ?></div>
                     <div>Max bank: <?= is_numeric($reconSummary['max_bank_deg'] ?? null) ? h(number_format((float)$reconSummary['max_bank_deg'], 1) . ' deg') : '--' ?></div>

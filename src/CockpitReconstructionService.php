@@ -16,6 +16,7 @@ final class CockpitReconstructionService
     private const PHASE_TABLE = 'ipca_cockpit_flight_phases';
     private const EVENT_TABLE = 'ipca_cockpit_timeline_events';
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
+    private const ADSB_OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
 
     /** @var list<string> */
     private const G3X_COLUMNS = array(
@@ -175,7 +176,8 @@ final class CockpitReconstructionService
                 throw new RuntimeException('No GPS or AHRS samples available for reconstruction.');
             }
 
-            $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples);
+            $adsbSamples = $this->loadAdsbOwnship($recordingId);
+            $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples, $adsbSamples);
             $this->storeSamples($recordingId, $samples);
             $this->updateJob($jobId, 'processing', 45, null);
 
@@ -377,6 +379,20 @@ final class CockpitReconstructionService
     /**
      * @return list<array<string,mixed>>
      */
+    private function loadAdsbOwnship(int $recordingId): array
+    {
+        if (!$this->tablePresent(self::ADSB_OWNSHIP_TABLE)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . self::ADSB_OWNSHIP_TABLE . ' WHERE recording_id = ? ORDER BY seconds_since_start ASC');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
     private function loadJsonList(string $path): array
     {
         $raw = file_get_contents($path);
@@ -412,14 +428,17 @@ final class CockpitReconstructionService
      * @param array<string,mixed> $recording
      * @param list<array<string,mixed>> $gpsSamples
      * @param list<array<string,mixed>> $ahrsSamples
+     * @param list<array<string,mixed>> $adsbSamples
      * @return list<array<string,mixed>>
      */
-    private function buildCanonicalSamples(array $recording, array $gpsSamples, array $ahrsSamples): array
+    private function buildCanonicalSamples(array $recording, array $gpsSamples, array $ahrsSamples, array $adsbSamples): array
     {
         $gps = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples), fn(array $row): bool => isset($row['seconds'])));
         $ahrs = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAHRS($row), $ahrsSamples), fn(array $row): bool => isset($row['seconds'])));
+        $adsb = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAdsbOwnship($row), $adsbSamples), fn(array $row): bool => isset($row['seconds'])));
         usort($gps, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         usort($ahrs, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
+        usort($adsb, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
 
         $times = array();
         foreach ($gps as $row) {
@@ -428,11 +447,15 @@ final class CockpitReconstructionService
         foreach ($ahrs as $row) {
             $times[(string)round((float)$row['seconds'], 1)] = (float)$row['seconds'];
         }
+        foreach ($adsb as $row) {
+            $times[(string)round((float)$row['seconds'], 1)] = (float)$row['seconds'];
+        }
         asort($times);
 
         $samples = array();
         $lastGps = null;
         $lastAhrs = null;
+        $lastAdsb = null;
         foreach (array_values($times) as $seconds) {
             $gpsNear = $this->nearestBySeconds($gps, $seconds, 3.0);
             if ($gpsNear !== null) {
@@ -442,9 +465,14 @@ final class CockpitReconstructionService
             if ($ahrsNear !== null) {
                 $lastAhrs = $ahrsNear;
             }
+            $adsbNear = $this->nearestBySeconds($adsb, $seconds, 5.0);
+            if ($adsbNear !== null) {
+                $lastAdsb = $adsbNear;
+            }
             $gpsUse = $gpsNear ?? $lastGps;
             $ahrsUse = $ahrsNear ?? $lastAhrs;
-            $sample = $this->mergeSample($recording, $seconds, $gpsUse, $ahrsUse);
+            $adsbUse = $adsbNear ?? $lastAdsb;
+            $sample = $this->mergeSample($recording, $seconds, $gpsUse, $ahrsUse, $adsbUse);
             $sample['sample_index'] = count($samples);
             $samples[] = $sample;
         }
@@ -476,30 +504,33 @@ final class CockpitReconstructionService
      * @param array<string,mixed> $recording
      * @param array<string,mixed>|null $gps
      * @param array<string,mixed>|null $ahrs
+     * @param array<string,mixed>|null $adsb
      * @return array<string,mixed>
      */
-    private function mergeSample(array $recording, float $seconds, ?array $gps, ?array $ahrs): array
+    private function mergeSample(array $recording, float $seconds, ?array $gps, ?array $ahrs, ?array $adsb): array
     {
-        $sampleTime = $gps['timestamp'] ?? $ahrs['timestamp'] ?? $this->timestampFromRecordingStart($recording, $seconds);
+        $sampleTime = $gps['timestamp'] ?? $ahrs['timestamp'] ?? $adsb['timestamp'] ?? $this->timestampFromRecordingStart($recording, $seconds);
         $gpsAltM = isset($gps['altitude_m']) ? (float)$gps['altitude_m'] : null;
         $gpsAltFt = $gpsAltM !== null ? $gpsAltM * 3.280839895 : null;
-        $groundspeed = isset($gps['groundspeed_kt']) ? (float)$gps['groundspeed_kt'] : null;
-        $track = isset($gps['track_deg']) && (float)$gps['track_deg'] >= 0 ? (float)$gps['track_deg'] : null;
+        $groundspeed = isset($gps['groundspeed_kt']) ? (float)$gps['groundspeed_kt'] : (isset($adsb['groundspeed_kt']) ? (float)$adsb['groundspeed_kt'] : null);
+        $track = isset($gps['track_deg']) && (float)$gps['track_deg'] >= 0 ? (float)$gps['track_deg'] : (isset($adsb['track_deg']) ? (float)$adsb['track_deg'] : null);
         $pitch = isset($ahrs['pitch_deg']) ? (float)$ahrs['pitch_deg'] : null;
         $roll = isset($ahrs['roll_deg']) ? (float)$ahrs['roll_deg'] : null;
         $yaw = isset($ahrs['yaw_deg']) ? (float)$ahrs['yaw_deg'] : null;
-        $heading = isset($ahrs['magnetic_heading_deg']) ? (float)$ahrs['magnetic_heading_deg'] : null;
+        $heading = isset($ahrs['magnetic_heading_deg']) ? (float)$ahrs['magnetic_heading_deg'] : (isset($adsb['heading_deg']) ? (float)$adsb['heading_deg'] : null);
+        $baroAlt = isset($adsb['baro_altitude_ft']) ? (float)$adsb['baro_altitude_ft'] : null;
+        $verticalSpeed = isset($adsb['vertical_speed_fpm']) ? (float)$adsb['vertical_speed_fpm'] : null;
 
         $row = array(
             'sample_time_utc' => $sampleTime,
             'seconds_since_start' => $seconds,
-            'source_mask' => trim(($gps ? 'gps ' : '') . ($ahrs ? 'ahrs' : '')),
-            'latitude' => $gps['latitude'] ?? null,
-            'longitude' => $gps['longitude'] ?? null,
+            'source_mask' => trim(($gps ? 'gps ' : '') . ($ahrs ? 'ahrs ' : '') . ($adsb ? 'adsb' : '')),
+            'latitude' => $gps['latitude'] ?? $adsb['latitude'] ?? null,
+            'longitude' => $gps['longitude'] ?? $adsb['longitude'] ?? null,
             'gps_altitude_m' => $gpsAltM,
             'gps_altitude_ft' => $gpsAltFt,
-            'baro_altitude_ft' => null,
-            'vertical_speed_fpm' => null,
+            'baro_altitude_ft' => $baroAlt,
+            'vertical_speed_fpm' => $verticalSpeed,
             'groundspeed_kt' => $groundspeed,
             'magnetic_track_deg' => $track,
             'true_track_deg' => $track,
@@ -550,6 +581,26 @@ final class CockpitReconstructionService
             'yaw_deg' => isset($row['yaw']) ? (float)$row['yaw'] : null,
             'acceleration_g' => isset($row['acceleration']) ? (float)$row['acceleration'] : null,
             'magnetic_heading_deg' => isset($row['magneticHeading']) ? (float)$row['magneticHeading'] : null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function normalizeAdsbOwnship(array $row): array
+    {
+        return array(
+            'seconds' => isset($row['seconds_since_start']) ? (float)$row['seconds_since_start'] : null,
+            'timestamp' => (string)($row['sample_time_utc'] ?? ''),
+            'latitude' => isset($row['latitude']) ? (float)$row['latitude'] : null,
+            'longitude' => isset($row['longitude']) ? (float)$row['longitude'] : null,
+            'baro_altitude_ft' => isset($row['baro_altitude_ft']) ? (float)$row['baro_altitude_ft'] : null,
+            'vertical_speed_fpm' => isset($row['vertical_speed_fpm']) ? (float)$row['vertical_speed_fpm'] : null,
+            'groundspeed_kt' => isset($row['groundspeed_kt']) ? (float)$row['groundspeed_kt'] : null,
+            'track_deg' => isset($row['track_deg']) ? (float)$row['track_deg'] : null,
+            'heading_deg' => isset($row['heading_deg']) ? (float)$row['heading_deg'] : null,
+            'on_ground' => isset($row['on_ground']) ? (bool)$row['on_ground'] : null,
         );
     }
 
@@ -726,7 +777,7 @@ final class CockpitReconstructionService
      */
     private function buildSummary(array $recording, array $samples, array $phases, array $events): array
     {
-        $alts = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['gps_altitude_ft']) ? (float)$s['gps_altitude_ft'] : null, $samples), fn($v): bool => $v !== null));
+        $alts = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['gps_altitude_ft']) ? (float)$s['gps_altitude_ft'] : (isset($s['baro_altitude_ft']) ? (float)$s['baro_altitude_ft'] : null), $samples), fn($v): bool => $v !== null));
         $speeds = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['groundspeed_kt']) ? (float)$s['groundspeed_kt'] : null, $samples), fn($v): bool => $v !== null));
         $rolls = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['roll_deg']) ? abs((float)$s['roll_deg']) : null, $samples), fn($v): bool => $v !== null));
         $pitches = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['pitch_deg']) ? abs((float)$s['pitch_deg']) : null, $samples), fn($v): bool => $v !== null));
@@ -749,6 +800,7 @@ final class CockpitReconstructionService
             'touchdown_time' => $this->eventTime($events, 'Touchdown'),
             'full_stop_time' => $this->eventTime($events, 'Full Stop'),
             'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
+            'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
         );
     }
 
@@ -845,7 +897,10 @@ final class CockpitReconstructionService
         $status = $hex !== '' ? 'not_started' : 'not_available';
         $stmt = $this->pdo->prepare('INSERT INTO ' . self::ADSB_TABLE . ' (recording_id, status, aircraft_hex, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE status = IF(status = \'not_started\', VALUES(status), status), aircraft_hex = VALUES(aircraft_hex), updated_at = CURRENT_TIMESTAMP');
         $stmt->execute(array($recordingId, $status, $hex));
-        $this->pdo->prepare('UPDATE ' . self::RECORDINGS_TABLE . ' SET adsb_status = ? WHERE id = ?')->execute(array($status, $recordingId));
+        $actual = $this->pdo->prepare('SELECT status FROM ' . self::ADSB_TABLE . ' WHERE recording_id = ? LIMIT 1');
+        $actual->execute(array($recordingId));
+        $actualStatus = (string)($actual->fetchColumn() ?: $status);
+        $this->pdo->prepare('UPDATE ' . self::RECORDINGS_TABLE . ' SET adsb_status = ? WHERE id = ?')->execute(array($actualStatus, $recordingId));
     }
 
     private function tablePresent(string $table): bool
@@ -887,6 +942,9 @@ final class CockpitReconstructionService
         $row['GPS Ground Speed (kt)'] = self::fmt($sample['groundspeed_kt'] ?? null, 1);
         $row['GPS Ground Track (deg)'] = self::fmt($sample['magnetic_track_deg'] ?? null, 0);
         $row['Magnetic Heading (deg)'] = self::fmt($sample['magnetic_heading_deg'] ?? null, 0);
+        $row['Pressure Altitude (ft)'] = self::fmt($sample['baro_altitude_ft'] ?? null, 0);
+        $row['Baro Altitude (ft)'] = self::fmt($sample['baro_altitude_ft'] ?? null, 0);
+        $row['Vertical Speed (ft/min)'] = self::fmt($sample['vertical_speed_fpm'] ?? null, 0);
         $row['Pitch (deg)'] = self::fmt($sample['pitch_deg'] ?? null, 1);
         $row['Roll (deg)'] = self::fmt($sample['roll_deg'] ?? null, 1);
         $row['Normal Acceleration (G)'] = self::fmt($sample['acceleration_g'] ?? null, 3);
@@ -941,6 +999,8 @@ final class CockpitReconstructionService
             'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
             'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
             'gps_altitude_ft' => $row['gps_altitude_ft'] !== null ? (float)$row['gps_altitude_ft'] : null,
+            'baro_altitude_ft' => $row['baro_altitude_ft'] !== null ? (float)$row['baro_altitude_ft'] : null,
+            'vertical_speed_fpm' => $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : null,
             'groundspeed_kt' => $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
