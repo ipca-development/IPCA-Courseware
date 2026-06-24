@@ -232,6 +232,12 @@ cw_header('Cockpit Recorder POC');
             <td>
               <span class="cockpit-badge cockpit-badge-<?= h($transcription) ?>"><?= h($transcription) ?></span>
               <div class="cockpit-muted"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div>
+              <?php if ($id > 0 && $transcription !== 'ready'): ?>
+                <form method="post" action="/admin/api/cockpit_recorder_transcribe.php" style="margin-top:6px">
+                  <input type="hidden" name="id" value="<?= $id ?>">
+                  <button class="cockpit-button" type="submit">Start transcript</button>
+                </form>
+              <?php endif; ?>
             </td>
             <td>
               <?php if ($chunks): ?>

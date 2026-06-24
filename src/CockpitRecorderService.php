@@ -556,6 +556,9 @@ final class CockpitRecorderService
         if ($recordingId <= 0) {
             return false;
         }
+        if (!function_exists('exec')) {
+            return false;
+        }
 
         $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
         $script = realpath(__DIR__ . '/../scripts/run_cockpit_recorder_transcription.php');
@@ -567,7 +570,11 @@ final class CockpitRecorderService
         if (!is_dir($logDir)) {
             @mkdir($logDir, 0775, true);
         }
+        if (!is_dir($logDir) || !is_writable($logDir)) {
+            return false;
+        }
         $logFile = $logDir . '/cockpit_recorder_' . $recordingId . '.log';
+        @file_put_contents($logFile, '[' . gmdate('c') . '] Spawning cockpit transcription worker.' . PHP_EOL, FILE_APPEND);
 
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             $cmd = 'start /B "" '
@@ -582,7 +589,12 @@ final class CockpitRecorderService
                 . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
         }
 
-        exec($cmd);
+        @file_put_contents($logFile, '[' . gmdate('c') . '] Command: ' . $cmd . PHP_EOL, FILE_APPEND);
+        exec($cmd, $output, $exitCode);
+        if ($exitCode !== 0) {
+            @file_put_contents($logFile, '[' . gmdate('c') . '] Worker spawn command exited with code ' . $exitCode . PHP_EOL, FILE_APPEND);
+            return false;
+        }
         return true;
     }
 
