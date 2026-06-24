@@ -18,6 +18,9 @@ final class CockpitReconstructionService
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const ADSB_OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
 
+    /** @var array<string,mixed> */
+    private array $lastAhrsCalibration = array();
+
     /** @var list<string> */
     private const G3X_COLUMNS = array(
         'Date (yyyy-mm-dd)',
@@ -439,6 +442,8 @@ final class CockpitReconstructionService
         usort($gps, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         usort($ahrs, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         usort($adsb, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
+        $calibration = $this->buildAhrsCalibration($gps, $ahrs);
+        $this->lastAhrsCalibration = $calibration;
 
         $times = array();
         foreach ($gps as $row) {
@@ -472,7 +477,7 @@ final class CockpitReconstructionService
             $gpsUse = $gpsNear ?? $lastGps;
             $ahrsUse = $ahrsNear ?? $lastAhrs;
             $adsbUse = $adsbNear ?? $lastAdsb;
-            $sample = $this->mergeSample($recording, $seconds, $gpsUse, $ahrsUse, $adsbUse);
+            $sample = $this->mergeSample($recording, $seconds, $gpsUse, $ahrsUse, $adsbUse, $calibration);
             $sample['sample_index'] = count($samples);
             $samples[] = $sample;
         }
@@ -501,23 +506,177 @@ final class CockpitReconstructionService
     }
 
     /**
+     * @param list<array<string,mixed>> $gps
+     * @param list<array<string,mixed>> $ahrs
+     * @return array<string,mixed>
+     */
+    private function buildAhrsCalibration(array $gps, array $ahrs): array
+    {
+        $calibration = array(
+            'status' => 'not_available',
+            'pitch_offset_deg' => 0.0,
+            'roll_offset_deg' => 0.0,
+            'magnetic_heading_offset_deg' => 0.0,
+            'magnetic_heading_quality' => 'INVALID',
+            'pitch_roll_quality' => 'INVALID',
+            'source' => 'derived_from_raw_ahrs',
+            'notes' => array(),
+        );
+        if (!$ahrs) {
+            $calibration['notes'][] = 'No AHRS samples available.';
+            return $calibration;
+        }
+
+        $groundWindow = $this->stableGroundWindow($gps, $ahrs);
+        if ($groundWindow !== null) {
+            $calibration['status'] = 'ready';
+            $calibration['pitch_offset_deg'] = $groundWindow['pitch_offset_deg'];
+            $calibration['roll_offset_deg'] = $groundWindow['roll_offset_deg'];
+            $calibration['pitch_roll_quality'] = 'GOOD';
+            $calibration['ground_window'] = $groundWindow;
+            $calibration['notes'][] = 'Pitch/roll offsets derived from stable initial ground window.';
+        } else {
+            $calibration['status'] = 'partial';
+            $calibration['pitch_roll_quality'] = 'LOW';
+            $calibration['notes'][] = 'No stable 10 second ground window found; pitch/roll offsets left at zero.';
+        }
+
+        $headingCalibration = $this->magneticHeadingCalibration($gps, $ahrs, $calibration);
+        $calibration['magnetic_heading_offset_deg'] = $headingCalibration['offset_deg'];
+        $calibration['magnetic_heading_quality'] = $headingCalibration['quality'];
+        $calibration['magnetic_heading_sample_count'] = $headingCalibration['sample_count'];
+        $calibration['magnetic_heading_spread_deg'] = $headingCalibration['spread_deg'];
+        $calibration['notes'][] = $headingCalibration['note'];
+
+        return $calibration;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $gps
+     * @param list<array<string,mixed>> $ahrs
+     * @return array<string,mixed>|null
+     */
+    private function stableGroundWindow(array $gps, array $ahrs): ?array
+    {
+        foreach ($ahrs as $startIndex => $startSample) {
+            $start = (float)($startSample['seconds'] ?? 0);
+            if ($start > 120.0) {
+                break;
+            }
+            $window = array_values(array_filter($ahrs, fn(array $sample): bool => (float)($sample['seconds'] ?? -999) >= $start && (float)($sample['seconds'] ?? -999) <= $start + 10.0));
+            if (count($window) < 8) {
+                continue;
+            }
+            $end = (float)($window[count($window) - 1]['seconds'] ?? $start);
+            if ($end - $start < 9.5) {
+                continue;
+            }
+
+            $gpsWindow = array_values(array_filter($gps, fn(array $sample): bool => (float)($sample['seconds'] ?? -999) >= $start && (float)($sample['seconds'] ?? -999) <= $end));
+            $maxSpeed = $gpsWindow ? max(array_map(fn(array $sample): float => (float)($sample['groundspeed_kt'] ?? 999), $gpsWindow)) : 0.0;
+            if ($maxSpeed >= 1.0) {
+                continue;
+            }
+
+            $pitches = array_values(array_filter(array_map(fn(array $sample): ?float => isset($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : null, $window), fn($value): bool => $value !== null));
+            $rolls = array_values(array_filter(array_map(fn(array $sample): ?float => isset($sample['roll_deg']) ? (float)$sample['roll_deg'] : null, $window), fn($value): bool => $value !== null));
+            $accels = array_values(array_filter(array_map(fn(array $sample): ?float => isset($sample['acceleration_g']) ? (float)$sample['acceleration_g'] : null, $window), fn($value): bool => $value !== null));
+            if (!$pitches || !$rolls || !$accels) {
+                continue;
+            }
+            if ((max($pitches) - min($pitches)) > 3.0 || (max($rolls) - min($rolls)) > 3.0 || (max($accels) - min($accels)) > 0.12) {
+                continue;
+            }
+
+            return array(
+                'start_seconds' => round($start, 3),
+                'end_seconds' => round($end, 3),
+                'sample_count' => count($window),
+                'pitch_offset_deg' => round(self::median($pitches), 3),
+                'roll_offset_deg' => round(self::median($rolls), 3),
+                'max_groundspeed_kt' => round($maxSpeed, 2),
+                'pitch_range_deg' => round(max($pitches) - min($pitches), 3),
+                'roll_range_deg' => round(max($rolls) - min($rolls), 3),
+                'acceleration_range_g' => round(max($accels) - min($accels), 4),
+            );
+        }
+        return null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $gps
+     * @param list<array<string,mixed>> $ahrs
+     * @param array<string,mixed> $calibration
+     * @return array{offset_deg:float,quality:string,sample_count:int,spread_deg:?float,note:string}
+     */
+    private function magneticHeadingCalibration(array $gps, array $ahrs, array $calibration): array
+    {
+        $deltas = array();
+        foreach ($gps as $gpsSample) {
+            $seconds = (float)($gpsSample['seconds'] ?? 0);
+            $speed = (float)($gpsSample['groundspeed_kt'] ?? 0);
+            $track = isset($gpsSample['track_deg']) ? (float)$gpsSample['track_deg'] : -1.0;
+            if ($speed < 8.0 || $speed > 45.0 || $track < 0) {
+                continue;
+            }
+            $ahrsNear = $this->nearestBySeconds($ahrs, $seconds, 1.5);
+            if ($ahrsNear === null || !isset($ahrsNear['magnetic_heading_deg'])) {
+                continue;
+            }
+            $roll = isset($ahrsNear['roll_deg']) ? (float)$ahrsNear['roll_deg'] - (float)($calibration['roll_offset_deg'] ?? 0) : 0.0;
+            $pitch = isset($ahrsNear['pitch_deg']) ? (float)$ahrsNear['pitch_deg'] - (float)($calibration['pitch_offset_deg'] ?? 0) : 0.0;
+            if (abs($roll) > 8.0 || abs($pitch) > 10.0) {
+                continue;
+            }
+            $deltas[] = self::angleDelta((float)$ahrsNear['magnetic_heading_deg'], $track);
+        }
+
+        if (count($deltas) < 8) {
+            return array(
+                'offset_deg' => 0.0,
+                'quality' => isset($ahrs[0]['magnetic_heading_deg']) ? 'LOW' : 'INVALID',
+                'sample_count' => count($deltas),
+                'spread_deg' => null,
+                'note' => 'Magnetic heading is low confidence: not enough straight moving GPS-track samples for calibration.',
+            );
+        }
+
+        $offset = self::circularMean($deltas);
+        $spread = self::angleSpread($deltas, $offset);
+        $quality = $spread <= 25.0 ? 'LOW' : 'INVALID';
+        return array(
+            'offset_deg' => round($offset, 3),
+            'quality' => $quality,
+            'sample_count' => count($deltas),
+            'spread_deg' => round($spread, 3),
+            'note' => $quality === 'LOW'
+                ? 'Magnetic heading offset derived from GPS track, but remains LOW confidence because GPS track is not true heading.'
+                : 'Magnetic heading calibration rejected: spread versus GPS track is too large.',
+        );
+    }
+
+    /**
      * @param array<string,mixed> $recording
      * @param array<string,mixed>|null $gps
      * @param array<string,mixed>|null $ahrs
      * @param array<string,mixed>|null $adsb
+     * @param array<string,mixed> $calibration
      * @return array<string,mixed>
      */
-    private function mergeSample(array $recording, float $seconds, ?array $gps, ?array $ahrs, ?array $adsb): array
+    private function mergeSample(array $recording, float $seconds, ?array $gps, ?array $ahrs, ?array $adsb, array $calibration): array
     {
         $sampleTime = $gps['timestamp'] ?? $ahrs['timestamp'] ?? $adsb['timestamp'] ?? $this->timestampFromRecordingStart($recording, $seconds);
         $gpsAltM = isset($gps['altitude_m']) ? (float)$gps['altitude_m'] : null;
         $gpsAltFt = $gpsAltM !== null ? $gpsAltM * 3.280839895 : null;
         $groundspeed = isset($gps['groundspeed_kt']) ? (float)$gps['groundspeed_kt'] : (isset($adsb['groundspeed_kt']) ? (float)$adsb['groundspeed_kt'] : null);
         $track = isset($gps['track_deg']) && (float)$gps['track_deg'] >= 0 ? (float)$gps['track_deg'] : (isset($adsb['track_deg']) ? (float)$adsb['track_deg'] : null);
-        $pitch = isset($ahrs['pitch_deg']) ? (float)$ahrs['pitch_deg'] : null;
-        $roll = isset($ahrs['roll_deg']) ? (float)$ahrs['roll_deg'] : null;
+        $pitchOffset = (float)($calibration['pitch_offset_deg'] ?? 0.0);
+        $rollOffset = (float)($calibration['roll_offset_deg'] ?? 0.0);
+        $headingOffset = (float)($calibration['magnetic_heading_offset_deg'] ?? 0.0);
+        $pitch = isset($ahrs['pitch_deg']) ? (float)$ahrs['pitch_deg'] - $pitchOffset : null;
+        $roll = isset($ahrs['roll_deg']) ? (float)$ahrs['roll_deg'] - $rollOffset : null;
         $yaw = isset($ahrs['yaw_deg']) ? (float)$ahrs['yaw_deg'] : null;
-        $heading = isset($ahrs['magnetic_heading_deg']) ? (float)$ahrs['magnetic_heading_deg'] : (isset($adsb['heading_deg']) ? (float)$adsb['heading_deg'] : null);
+        $heading = isset($ahrs['magnetic_heading_deg']) ? self::normalizeDegrees((float)$ahrs['magnetic_heading_deg'] + $headingOffset) : (isset($adsb['heading_deg']) ? (float)$adsb['heading_deg'] : null);
         $baroAlt = isset($adsb['baro_altitude_ft']) ? (float)$adsb['baro_altitude_ft'] : null;
         $verticalSpeed = isset($adsb['vertical_speed_fpm']) ? (float)$adsb['vertical_speed_fpm'] : null;
 
@@ -801,6 +960,12 @@ final class CockpitReconstructionService
             'full_stop_time' => $this->eventTime($events, 'Full Stop'),
             'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
             'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
+            'ahrs_calibration' => $this->lastAhrsCalibration,
+            'heading_replay_policy' => array(
+                'primary_source' => 'gps_track_when_groundspeed_at_least_5kt',
+                'fallback_source' => 'calibrated_magnetic_heading_low_confidence',
+                'notes' => 'AHRS magnetic heading remains low confidence until BNO085 calibration and cockpit interference are validated.',
+            ),
         );
     }
 
@@ -963,6 +1128,62 @@ final class CockpitReconstructionService
         return $prefix . number_format((float)$value, $decimals, '.', '');
     }
 
+    /**
+     * @param list<float> $values
+     */
+    private static function median(array $values): float
+    {
+        sort($values, SORT_NUMERIC);
+        $count = count($values);
+        if ($count === 0) {
+            return 0.0;
+        }
+        $mid = intdiv($count, 2);
+        return $count % 2 === 1 ? (float)$values[$mid] : ((float)$values[$mid - 1] + (float)$values[$mid]) / 2.0;
+    }
+
+    private static function normalizeDegrees(float $value): float
+    {
+        $value = fmod($value, 360.0);
+        return $value < 0 ? $value + 360.0 : $value;
+    }
+
+    private static function angleDelta(float $from, float $to): float
+    {
+        $delta = fmod(($to - $from + 540.0), 360.0) - 180.0;
+        return $delta <= -180.0 ? $delta + 360.0 : $delta;
+    }
+
+    /**
+     * @param list<float> $angles
+     */
+    private static function circularMean(array $angles): float
+    {
+        if (!$angles) {
+            return 0.0;
+        }
+        $sin = 0.0;
+        $cos = 0.0;
+        foreach ($angles as $angle) {
+            $sin += sin(deg2rad($angle));
+            $cos += cos(deg2rad($angle));
+        }
+        return self::angleDelta(0.0, rad2deg(atan2($sin / count($angles), $cos / count($angles))));
+    }
+
+    /**
+     * @param list<float> $angles
+     */
+    private static function angleSpread(array $angles, float $center): float
+    {
+        if (!$angles) {
+            return 0.0;
+        }
+        $deltas = array_map(fn(float $angle): float => abs(self::angleDelta($center, $angle)), $angles);
+        sort($deltas, SORT_NUMERIC);
+        return (float)$deltas[(int)floor((count($deltas) - 1) * 0.90)];
+    }
+
     private function timestampFromRecordingStart(array $recording, float $seconds): string
     {
         $start = self::dateTime((string)($recording['started_at'] ?? ''));
@@ -993,6 +1214,11 @@ final class CockpitReconstructionService
      */
     private function publicSample(array $row): array
     {
+        $groundspeed = $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null;
+        $track = $row['magnetic_track_deg'] !== null ? (float)$row['magnetic_track_deg'] : null;
+        $heading = $row['magnetic_heading_deg'] !== null ? (float)$row['magnetic_heading_deg'] : null;
+        $headingSource = $groundspeed !== null && $groundspeed >= 5.0 && $track !== null ? 'gps_track' : ($heading !== null ? 'calibrated_magnetic_heading' : 'none');
+        $headingQuality = $headingSource === 'gps_track' ? 'GOOD' : ($headingSource === 'calibrated_magnetic_heading' ? 'LOW' : 'INVALID');
         return array(
             't' => (float)$row['seconds_since_start'],
             'time_utc' => $row['sample_time_utc'],
@@ -1004,8 +1230,10 @@ final class CockpitReconstructionService
             'groundspeed_kt' => $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
-            'heading_deg' => $row['magnetic_heading_deg'] !== null ? (float)$row['magnetic_heading_deg'] : null,
-            'track_deg' => $row['magnetic_track_deg'] !== null ? (float)$row['magnetic_track_deg'] : null,
+            'heading_deg' => $heading,
+            'track_deg' => $track,
+            'heading_source' => $headingSource,
+            'heading_quality' => $headingQuality,
         );
     }
 

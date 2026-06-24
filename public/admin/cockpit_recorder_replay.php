@@ -487,7 +487,10 @@ cw_header('Cockpit Recorder Replay');
   function renderDetails() {
     const s = sampleAt(activeT) || {};
     const phase = activePhase(activeT);
-    const markerSource = Number(s.groundspeed_kt || 0) >= 5 && s.track_deg !== null && s.track_deg !== undefined ? 'GPS track' : 'heading';
+    const markerSource = s.heading_source === 'gps_track'
+      ? 'GPS track'
+      : (s.heading_source === 'calibrated_magnetic_heading' ? 'Calibrated magnetic heading' : 'Unavailable');
+    const headingQuality = s.heading_quality || (markerSource === 'GPS track' ? 'GOOD' : (s.heading_deg !== null && s.heading_deg !== undefined ? 'LOW' : 'INVALID'));
     details.innerHTML = `
       <div class="detail-row"><span>Selected phase</span><strong>${phase ? phase.phase : '--'}</strong></div>
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
@@ -500,7 +503,8 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>
-      <div class="detail-row"><span>Marker direction</span><strong>${markerSource}</strong></div>`;
+      <div class="detail-row"><span>Marker direction</span><strong>${markerSource}</strong></div>
+      <div class="detail-row"><span>Heading quality</span><strong>${headingQuality}</strong></div>`;
     eventList.innerHTML = (payload.events || []).map((event) => `
       <div class="event-row"><strong>${event.event_type}</strong><br><span class="replay-muted">${fmtTime(event.start)} · ${event.phase || 'Timeline'} · ${(Number(event.confidence) * 100).toFixed(0)}%</span></div>
     `).join('') || '<div class="replay-muted">No timeline events detected yet.</div>';
