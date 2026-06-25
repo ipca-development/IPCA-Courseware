@@ -19,6 +19,18 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(logoStyle, forKey: Keys.logoStyle) }
     }
 
+    @Published var altimeterSettingInHg: String {
+        didSet { UserDefaults.standard.set(altimeterSettingInHg, forKey: Keys.altimeterSettingInHg) }
+    }
+
+    @Published var airportElevationFt: String {
+        didSet { UserDefaults.standard.set(airportElevationFt, forKey: Keys.airportElevationFt) }
+    }
+
+    @Published var oatC: String {
+        didSet { UserDefaults.standard.set(oatC, forKey: Keys.oatC) }
+    }
+
     @Published var ahrsCalibration: AHRSCalibration {
         didSet { Self.saveCalibration(ahrsCalibration) }
     }
@@ -41,6 +53,9 @@ final class SettingsStore: ObservableObject {
         language = UserDefaults.standard.string(forKey: Keys.language) ?? "en"
         selectedAircraftID = UserDefaults.standard.integer(forKey: Keys.selectedAircraftID)
         logoStyle = UserDefaults.standard.string(forKey: Keys.logoStyle) ?? "standard"
+        altimeterSettingInHg = UserDefaults.standard.string(forKey: Keys.altimeterSettingInHg) ?? ""
+        airportElevationFt = UserDefaults.standard.string(forKey: Keys.airportElevationFt) ?? ""
+        oatC = UserDefaults.standard.string(forKey: Keys.oatC) ?? ""
         ahrsCalibration = Self.loadCalibration()
     }
 
@@ -71,6 +86,18 @@ final class SettingsStore: ObservableObject {
             return "Invalid server URL"
         }
         return url.appending(path: "api/recordings/aircraft.php").absoluteString
+    }
+
+    var altimeterSettingValue: Double? {
+        Self.number(from: altimeterSettingInHg, min: 25, max: 33.5)
+    }
+
+    var airportElevationValue: Double? {
+        Self.number(from: airportElevationFt, min: -1500, max: 30000)
+    }
+
+    var oatValue: Double? {
+        Self.number(from: oatC, min: -80, max: 70)
     }
 
     var serverURLHelp: String {
@@ -182,11 +209,20 @@ final class SettingsStore: ObservableObject {
         return delta <= -180 ? delta + 360 : delta
     }
 
+    private static func number(from text: String, min: Double, max: Double) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Double(trimmed), value >= min, value <= max else { return nil }
+        return value
+    }
+
     private enum Keys {
         static let serverURL = "ipca.recorder.serverURL"
         static let language = "ipca.recorder.language"
         static let selectedAircraftID = "ipca.recorder.selectedAircraftID"
         static let logoStyle = "ipca.recorder.logoStyle"
         static let ahrsCalibration = "ipca.recorder.ahrsCalibration"
+        static let altimeterSettingInHg = "ipca.recorder.altimeterSettingInHg"
+        static let airportElevationFt = "ipca.recorder.airportElevationFt"
+        static let oatC = "ipca.recorder.oatC"
     }
 }

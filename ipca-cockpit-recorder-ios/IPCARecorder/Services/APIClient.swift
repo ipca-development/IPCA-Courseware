@@ -128,7 +128,7 @@ struct APIClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 3600
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "recording_id": recording.id,
             "started_at": ISO8601DateFormatter().string(from: recording.startedAt),
             "duration": recording.duration,
@@ -136,6 +136,18 @@ struct APIClient {
             "aircraft_id": recording.aircraftID ?? 0,
             "language": language
         ]
+        if let altimeter = recording.altimeterSettingInHg {
+            payload["altimeter_setting_inhg"] = altimeter
+            payload["altimeter_setting_source"] = "app_logged"
+        }
+        if let elevation = recording.airportElevationFt {
+            payload["airport_elevation_ft"] = elevation
+            payload["airport_elevation_source"] = "app_logged"
+        }
+        if let oat = recording.oatC {
+            payload["oat_c"] = oat
+            payload["oat_source"] = "app_logged"
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         return request
     }
@@ -157,7 +169,7 @@ struct APIClient {
             try handle.write(contentsOf: data)
         }
 
-        let fields: [(String, String)] = [
+        var fields: [(String, String)] = [
             ("recording_id", recording.id),
             ("started_at", ISO8601DateFormatter().string(from: recording.startedAt)),
             ("duration", String(recording.duration)),
@@ -165,6 +177,18 @@ struct APIClient {
             ("aircraft_id", recording.aircraftID.map(String.init) ?? ""),
             ("language", language)
         ]
+        if let altimeter = recording.altimeterSettingInHg {
+            fields.append(("altimeter_setting_inhg", String(altimeter)))
+            fields.append(("altimeter_setting_source", "app_logged"))
+        }
+        if let elevation = recording.airportElevationFt {
+            fields.append(("airport_elevation_ft", String(elevation)))
+            fields.append(("airport_elevation_source", "app_logged"))
+        }
+        if let oat = recording.oatC {
+            fields.append(("oat_c", String(oat)))
+            fields.append(("oat_source", "app_logged"))
+        }
 
         for field in fields {
             try write("--\(boundary)\r\n")

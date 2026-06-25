@@ -218,7 +218,11 @@ cw_header('Cockpit Recorder Replay');
       adsb_vertical_speed_fpm: lerp(before.adsb_vertical_speed_fpm, after.adsb_vertical_speed_fpm),
       estimated_baro_altitude_ft: lerp(before.estimated_baro_altitude_ft, after.estimated_baro_altitude_ft),
       estimated_vertical_speed_fpm: lerp(before.estimated_vertical_speed_fpm, after.estimated_vertical_speed_fpm),
+      field_calibrated_altitude_ft: lerp(before.field_calibrated_altitude_ft, after.field_calibrated_altitude_ft),
       altimeter_setting_inhg: lerp(before.altimeter_setting_inhg, after.altimeter_setting_inhg),
+      airport_elevation_ft: lerp(before.airport_elevation_ft, after.airport_elevation_ft),
+      field_altitude_offset_ft: lerp(before.field_altitude_offset_ft, after.field_altitude_offset_ft),
+      oat_c: lerp(before.oat_c, after.oat_c),
       estimated_slip_skid_g: lerp(before.estimated_slip_skid_g, after.estimated_slip_skid_g),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
@@ -513,6 +517,8 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Estimated Baro Alt.</span><strong>${number(s.estimated_baro_altitude_ft, ' ft', 0)}</strong></div>
       <div class="detail-row"><span>Estimated VS</span><strong>${number(s.estimated_vertical_speed_fpm, ' fpm', 0)}</strong></div>
       <div class="detail-row"><span>Altimeter setting</span><strong>${number(s.altimeter_setting_inhg, ' inHg', 2)}</strong></div>
+      <div class="detail-row"><span>OAT</span><strong>${number(s.oat_c, ' °C', 1)}</strong></div>
+      <div class="detail-row"><span>Airport elevation</span><strong>${number(s.airport_elevation_ft, ' ft', 0)}</strong></div>
       <div class="detail-row"><span>Altitude quality</span><strong>${s.altitude_quality || 'unavailable'}</strong></div>
       <div class="detail-row"><span>VS quality</span><strong>${s.vertical_speed_quality || 'unavailable'}</strong></div>
       ${adsbAltitudeDetail}

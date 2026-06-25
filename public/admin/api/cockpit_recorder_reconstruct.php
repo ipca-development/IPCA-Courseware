@@ -10,6 +10,8 @@ cw_require_admin();
 
 $id = trim((string)($_POST['id'] ?? $_GET['id'] ?? ''));
 $altimeterSetting = trim((string)($_POST['altimeter_setting_inhg'] ?? $_GET['altimeter_setting_inhg'] ?? ''));
+$airportElevation = trim((string)($_POST['airport_elevation_ft'] ?? $_GET['airport_elevation_ft'] ?? ''));
+$oatC = trim((string)($_POST['oat_c'] ?? $_GET['oat_c'] ?? ''));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
 try {
@@ -24,6 +26,18 @@ try {
             throw new RuntimeException('Altimeter setting must be numeric.');
         }
         $options['altimeter_setting_inhg'] = (float)$altimeterSetting;
+    }
+    if ($airportElevation !== '') {
+        if (!is_numeric($airportElevation)) {
+            throw new RuntimeException('Airport elevation must be numeric.');
+        }
+        $options['airport_elevation_ft'] = (float)$airportElevation;
+    }
+    if ($oatC !== '') {
+        if (!is_numeric($oatC)) {
+            throw new RuntimeException('OAT must be numeric.');
+        }
+        $options['oat_c'] = (float)$oatC;
     }
     $result = $service->reconstruct($id, $options);
 

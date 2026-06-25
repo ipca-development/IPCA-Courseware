@@ -72,6 +72,9 @@ struct Recording: Identifiable, Codable, Equatable {
     var aircraftDisplayName: String?
     var aircraftType: String?
     var aircraftADSBHex: String?
+    var altimeterSettingInHg: Double?
+    var airportElevationFt: Double?
+    var oatC: Double?
     var fileSize: Int64
     var uploadStatus: UploadStatus
     var transcriptStatus: TranscriptStatus

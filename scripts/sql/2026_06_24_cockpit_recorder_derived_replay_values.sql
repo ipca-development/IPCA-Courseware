@@ -39,6 +39,62 @@ DEALLOCATE PREPARE stmt;
 SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'airport_elevation_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_recordings ADD COLUMN airport_elevation_ft DECIMAL(10,1) NULL AFTER altimeter_setting_source',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'airport_elevation_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_recordings ADD COLUMN airport_elevation_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER airport_elevation_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'oat_c'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_recordings ADD COLUMN oat_c DECIMAL(5,1) NULL AFTER airport_elevation_source',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'oat_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_recordings ADD COLUMN oat_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER oat_c',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_adsb_ownship_samples'
     AND COLUMN_NAME = 'altimeter_setting_inhg'
 );
@@ -110,10 +166,24 @@ SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'field_calibrated_altitude_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN field_calibrated_altitude_ft DECIMAL(10,1) NULL AFTER estimated_vertical_speed_fpm',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
     AND COLUMN_NAME = 'altimeter_setting_inhg'
 );
 SET @sql := IF(@col_exists = 0,
-  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN altimeter_setting_inhg DECIMAL(5,2) NULL AFTER estimated_vertical_speed_fpm',
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN altimeter_setting_inhg DECIMAL(5,2) NULL AFTER field_calibrated_altitude_ft',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -128,6 +198,76 @@ SET @col_exists := (
 );
 SET @sql := IF(@col_exists = 0,
   'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN altimeter_setting_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER altimeter_setting_inhg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'airport_elevation_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN airport_elevation_ft DECIMAL(10,1) NULL AFTER altimeter_setting_source',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'airport_elevation_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN airport_elevation_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER airport_elevation_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'field_altitude_offset_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN field_altitude_offset_ft DECIMAL(10,1) NULL AFTER airport_elevation_source',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'oat_c'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN oat_c DECIMAL(5,1) NULL AFTER field_altitude_offset_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'oat_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN oat_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER oat_c',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;

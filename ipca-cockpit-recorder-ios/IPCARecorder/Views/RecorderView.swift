@@ -491,6 +491,9 @@ struct RecorderView: View {
             recording.aircraftType = aircraft.aircraftType
             recording.aircraftADSBHex = aircraft.adsbHex
         }
+        recording.altimeterSettingInHg = settings.altimeterSettingValue
+        recording.airportElevationFt = settings.airportElevationValue
+        recording.oatC = settings.oatValue
         recording.ahrsSamplesPath = ahrsBLE.stopCaptureAndSave(recordingID: recording.id)
         recording.gpsSamplesPath = gps.stopCaptureAndSave(recordingID: recording.id)
         ahrsBLE.sendStatusCommand("REC=0")

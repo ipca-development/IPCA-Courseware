@@ -19,6 +19,7 @@ struct SettingsView: View {
                     appearanceCard
                     languageCard
                     aircraftCard
+                    atmosphereCard
                     locationCard
                     debugAudioCard
                 }
@@ -104,6 +105,23 @@ struct SettingsView: View {
                     if !settings.aircraftError.isEmpty {
                         Text(settings.aircraftError).foregroundStyle(IPCATheme.danger)
                     }
+        }
+    }
+
+    private var atmosphereCard: some View {
+        IPCACard(title: "ATIS / ASOS", systemImage: "thermometer.sun") {
+                    Text("Enter the current field values before recording. They are saved with the recording and used to field-calibrate replay altitude.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+                    TextField("Altimeter setting / QNH inHg, e.g. 29.92", text: $settings.altimeterSettingInHg)
+                        .keyboardType(.decimalPad)
+                    TextField("Airport field elevation ft, e.g. 115", text: $settings.airportElevationFt)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("OAT °C, e.g. 35", text: $settings.oatC)
+                        .keyboardType(.numbersAndPunctuation)
+                    LabeledContent("Altimeter", value: settings.altimeterSettingValue.map { String(format: "%.2f inHg", $0) } ?? "Not logged")
+                    LabeledContent("Field elevation", value: settings.airportElevationValue.map { String(format: "%.0f ft", $0) } ?? "Not logged")
+                    LabeledContent("OAT", value: settings.oatValue.map { String(format: "%.1f °C", $0) } ?? "Not logged")
         }
     }
 

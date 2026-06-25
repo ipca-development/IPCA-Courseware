@@ -240,6 +240,7 @@ final class CockpitRecorderService
 
         $this->storeRecordingAircraftSnapshot((int)$recording['id'], $metadata);
         $this->storeRecordingAltimeterSetting((int)$recording['id'], $metadata);
+        $this->storeRecordingAtmosphereMetadata((int)$recording['id'], $metadata);
         $recording = $this->recordingByUid($recordingUid) ?: $recording;
 
         if ($ahrsFile !== null && $this->isPresentUpload($ahrsFile)) {
@@ -1022,6 +1023,44 @@ final class CockpitRecorderService
     /**
      * @param array<string,mixed> $metadata
      */
+    private function storeRecordingAtmosphereMetadata(int $recordingId, array $metadata): void
+    {
+        if ($recordingId <= 0) {
+            return;
+        }
+
+        $sets = array();
+        $values = array();
+        if ($this->hasColumn('airport_elevation_ft') && $this->hasColumn('airport_elevation_source')) {
+            $elevation = $this->metadataFloat($metadata, array('airport_elevation_ft', 'field_elevation_ft', 'departure_airport_elevation_ft'), -1500.0, 30000.0);
+            if ($elevation !== null) {
+                $sets[] = 'airport_elevation_ft = ?';
+                $values[] = round($elevation, 1);
+                $sets[] = 'airport_elevation_source = ?';
+                $values[] = substr(trim((string)($metadata['airport_elevation_source'] ?? 'app_logged')), 0, 64) ?: 'app_logged';
+            }
+        }
+        if ($this->hasColumn('oat_c') && $this->hasColumn('oat_source')) {
+            $oat = $this->metadataFloat($metadata, array('oat_c', 'temperature_c', 'outside_air_temperature_c'), -80.0, 70.0);
+            if ($oat !== null) {
+                $sets[] = 'oat_c = ?';
+                $values[] = round($oat, 1);
+                $sets[] = 'oat_source = ?';
+                $values[] = substr(trim((string)($metadata['oat_source'] ?? 'app_logged')), 0, 64) ?: 'app_logged';
+            }
+        }
+
+        if (!$sets) {
+            return;
+        }
+        $values[] = $recordingId;
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ', updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        $stmt->execute($values);
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
     private function metadataAltimeterSettingInhg(array $metadata): ?float
     {
         foreach (array('altimeter_setting_inhg', 'qnh_inhg', 'altimeter_inhg', 'altimeter') as $key) {
@@ -1032,6 +1071,23 @@ final class CockpitRecorderService
         foreach (array('qnh_hpa', 'altimeter_hpa') as $key) {
             if (isset($metadata[$key]) && is_numeric($metadata[$key])) {
                 return self::normalizeAltimeterSettingInhg((float)$metadata[$key]);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     * @param list<string> $keys
+     */
+    private function metadataFloat(array $metadata, array $keys, float $min, float $max): ?float
+    {
+        foreach ($keys as $key) {
+            if (isset($metadata[$key]) && is_numeric($metadata[$key])) {
+                $value = (float)$metadata[$key];
+                if ($value >= $min && $value <= $max) {
+                    return $value;
+                }
             }
         }
         return null;
