@@ -49,6 +49,9 @@ final class CockpitAdsbEnrichmentService
         if (!self::tablesPresent($this->pdo)) {
             throw new RuntimeException('Apply scripts/sql/2026_06_23_cockpit_recorder_reconstruction_foundation.sql first.');
         }
+        if (!$this->columnPresent(self::OWNSHIP_TABLE, 'altimeter_setting_inhg')) {
+            throw new RuntimeException('Apply scripts/sql/2026_06_24_cockpit_recorder_derived_replay_values.sql before fetching ADS-B.');
+        }
     }
 
     /**
@@ -268,6 +271,19 @@ final class CockpitAdsbEnrichmentService
         return $real;
     }
 
+    private function columnPresent(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ');
+        $stmt->execute(array($table, $column));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
     /**
      * @param array<string,mixed> $window
      * @return array<string,mixed>
@@ -434,6 +450,7 @@ final class CockpitAdsbEnrichmentService
                 'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
                 'heading_deg' => isset($row[8]) && is_array($row[8]) && isset($row[8]['mag_heading']) && is_numeric($row[8]['mag_heading']) ? (float)$row[8]['mag_heading'] : null,
                 'on_ground' => $onGround,
+                'altimeter_setting_inhg' => $this->traceAltimeterSettingInhg($row),
                 'raw' => $row,
             );
         }
@@ -639,6 +656,7 @@ final class CockpitAdsbEnrichmentService
                 'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
                 'heading_deg' => isset($row[8]) && is_array($row[8]) && isset($row[8]['mag_heading']) && is_numeric($row[8]['mag_heading']) ? (float)$row[8]['mag_heading'] : null,
                 'on_ground' => is_string($alt) && strtolower($alt) === 'ground',
+                'altimeter_setting_inhg' => $this->traceAltimeterSettingInhg($row),
                 'alignment_distance_nm' => $bestDistance,
                 'raw' => $row,
             );
@@ -815,6 +833,36 @@ final class CockpitAdsbEnrichmentService
         return null;
     }
 
+    /**
+     * @param array<int,mixed> $row
+     */
+    private function traceAltimeterSettingInhg(array $row): ?float
+    {
+        $keys = array('nav_qnh', 'qnh', 'altimeter', 'altimeter_inhg', 'altimeter_in_hg');
+        foreach ($row as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                if (isset($value[$key]) && is_numeric($value[$key])) {
+                    return self::normalizeAltimeterSetting((float)$value[$key]);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static function normalizeAltimeterSetting(float $value): ?float
+    {
+        if ($value >= 25.0 && $value <= 33.5) {
+            return round($value, 2);
+        }
+        if ($value >= 800.0 && $value <= 1100.0) {
+            return round($value / 33.8638866667, 2);
+        }
+        return null;
+    }
+
     private static function lerpNullable(mixed $a, mixed $b, float $ratio): ?float
     {
         if (!is_numeric($a) || !is_numeric($b)) {
@@ -904,8 +952,9 @@ final class CockpitAdsbEnrichmentService
         $stmt = $this->pdo->prepare('
             INSERT INTO ' . self::OWNSHIP_TABLE . ' (
                 recording_id, sample_time_utc, seconds_since_start, latitude, longitude, baro_altitude_ft,
-                vertical_speed_fpm, groundspeed_kt, track_deg, heading_deg, on_ground, raw_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                vertical_speed_fpm, groundspeed_kt, track_deg, heading_deg, on_ground, altimeter_setting_inhg,
+                raw_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ');
         foreach ($samples as $sample) {
             $stmt->execute(array(
@@ -920,6 +969,7 @@ final class CockpitAdsbEnrichmentService
                 $sample['track_deg'],
                 $sample['heading_deg'],
                 !empty($sample['on_ground']) ? 1 : 0,
+                $sample['altimeter_setting_inhg'] ?? null,
                 json_encode($sample['raw'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             ));
         }

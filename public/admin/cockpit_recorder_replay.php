@@ -214,6 +214,12 @@ cw_header('Cockpit Recorder Replay');
       gps_altitude_ft: lerp(before.gps_altitude_ft, after.gps_altitude_ft),
       baro_altitude_ft: lerp(before.baro_altitude_ft, after.baro_altitude_ft),
       vertical_speed_fpm: lerp(before.vertical_speed_fpm, after.vertical_speed_fpm),
+      adsb_baro_altitude_ft: lerp(before.adsb_baro_altitude_ft, after.adsb_baro_altitude_ft),
+      adsb_vertical_speed_fpm: lerp(before.adsb_vertical_speed_fpm, after.adsb_vertical_speed_fpm),
+      estimated_baro_altitude_ft: lerp(before.estimated_baro_altitude_ft, after.estimated_baro_altitude_ft),
+      estimated_vertical_speed_fpm: lerp(before.estimated_vertical_speed_fpm, after.estimated_vertical_speed_fpm),
+      altimeter_setting_inhg: lerp(before.altimeter_setting_inhg, after.altimeter_setting_inhg),
+      estimated_slip_skid_g: lerp(before.estimated_slip_skid_g, after.estimated_slip_skid_g),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       bank_deg: lerp(before.bank_deg, after.bank_deg),
@@ -488,6 +494,13 @@ cw_header('Cockpit Recorder Replay');
   function renderDetails() {
     const s = sampleAt(activeT) || {};
     const phase = activePhase(activeT);
+    const slipSkid = s.estimated_slip_skid_g === null || s.estimated_slip_skid_g === undefined
+      ? 'Unavailable'
+      : (Math.abs(Number(s.estimated_slip_skid_g)) < 0.02 ? 'Centered' : (Number(s.estimated_slip_skid_g) > 0 ? 'Right/skid' : 'Left/slip'));
+    const adsbAltitudeDetail = s.adsb_baro_altitude_quality === 'good'
+      ? `<div class="detail-row"><span>ADS-B baro altitude</span><strong>${number(s.adsb_baro_altitude_ft, ' ft', 0)}</strong></div>
+         <div class="detail-row"><span>ADS-B VS</span><strong>${number(s.adsb_vertical_speed_fpm, ' fpm', 0)}</strong></div>`
+      : '';
     const markerSource = s.heading_source === 'gps_track'
       ? 'GPS track'
       : (s.heading_source === 'calibrated_magnetic_heading' ? 'Calibrated magnetic heading' : 'Unavailable');
@@ -497,11 +510,16 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
       <div class="detail-row"><span>ADS-B status</span><strong>${payload.recording.adsb_status || '--'}</strong></div>
       <div class="detail-row"><span>GPS altitude</span><strong>${number(s.gps_altitude_ft, ' ft', 0)}</strong></div>
-      <div class="detail-row"><span>Baro altitude</span><strong>${number(s.baro_altitude_ft, ' ft', 0)}</strong></div>
-      <div class="detail-row"><span>Vertical speed</span><strong>${number(s.vertical_speed_fpm, ' fpm', 0)}</strong></div>
+      <div class="detail-row"><span>Estimated Baro Alt.</span><strong>${number(s.estimated_baro_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Estimated VS</span><strong>${number(s.estimated_vertical_speed_fpm, ' fpm', 0)}</strong></div>
+      <div class="detail-row"><span>Altimeter setting</span><strong>${number(s.altimeter_setting_inhg, ' inHg', 2)}</strong></div>
+      <div class="detail-row"><span>Altitude quality</span><strong>${s.altitude_quality || 'unavailable'}</strong></div>
+      <div class="detail-row"><span>VS quality</span><strong>${s.vertical_speed_quality || 'unavailable'}</strong></div>
+      ${adsbAltitudeDetail}
       <div class="detail-row"><span>Groundspeed</span><strong>${number(s.groundspeed_kt, ' kt')}</strong></div>
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
+      <div class="detail-row"><span>Estimated Slip/Skid</span><strong>${s.estimated_slip_skid_g === null || s.estimated_slip_skid_g === undefined ? '--' : `${slipSkid} · ${Number(s.estimated_slip_skid_g).toFixed(3)} g`}</strong></div>
       <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>True heading</span><strong>${number(s.true_heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>
@@ -516,11 +534,12 @@ cw_header('Cockpit Recorder Replay');
     graphs.innerHTML = '';
     [
       ['GPS altitude', 'gps_altitude_ft', '#1d4ed8', 'ft'],
-      ['Baro altitude', 'baro_altitude_ft', '#7c3aed', 'ft'],
-      ['Vertical speed', 'vertical_speed_fpm', '#0f766e', 'fpm'],
+      ['Estimated Baro Alt.', 'estimated_baro_altitude_ft', '#7c3aed', 'ft'],
+      ['Estimated VS', 'estimated_vertical_speed_fpm', '#0f766e', 'fpm'],
       ['Groundspeed', 'groundspeed_kt', '#16a34a', 'kt'],
       ['Pitch', 'pitch_deg', '#f97316', 'deg'],
       ['Bank', 'bank_deg', '#dc2626', 'deg'],
+      ['Estimated Slip/Skid', 'estimated_slip_skid_g', '#be123c', 'g'],
       ['Heading', 'heading_deg', '#7c3aed', 'deg'],
       ['Track', 'track_deg', '#0891b2', 'deg'],
     ].forEach(([label, key, color, unit]) => {
@@ -528,9 +547,10 @@ cw_header('Cockpit Recorder Replay');
       card.className = 'graph-card';
       const current = sampleAt(activeT) || {};
       const zeroDecimalUnit = unit === 'ft' || unit === 'fpm' || (unit === 'deg' && (key === 'heading_deg' || key === 'track_deg'));
+      const decimals = unit === 'g' ? 3 : (zeroDecimalUnit ? 0 : 1);
       const value = current[key] === null || current[key] === undefined || Number.isNaN(Number(current[key]))
         ? '--'
-        : `${Number(current[key]).toFixed(zeroDecimalUnit ? 0 : 1)} ${unit}`;
+        : `${Number(current[key]).toFixed(decimals)} ${unit}`;
       card.innerHTML = `<h4>${label}</h4><div class="graph-value">${value}</div>${graphSvg(key, color, unit)}`;
       graphs.appendChild(card);
     });

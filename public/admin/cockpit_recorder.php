@@ -389,6 +389,14 @@ cw_header('Cockpit Recorder POC');
                     <div>Max alt: <?= is_numeric($reconSummary['max_altitude_ft'] ?? null) ? h(number_format((float)$reconSummary['max_altitude_ft'], 0) . ' ft') : '--' ?></div>
                     <div>Max GS: <?= is_numeric($reconSummary['max_groundspeed_kt'] ?? null) ? h(number_format((float)$reconSummary['max_groundspeed_kt'], 1) . ' kt') : '--' ?></div>
                     <div>Max bank: <?= is_numeric($reconSummary['max_bank_deg'] ?? null) ? h(number_format((float)$reconSummary['max_bank_deg'], 1) . ' deg') : '--' ?></div>
+                    <?php $derivedReplay = isset($reconSummary['derived_replay_values']) && is_array($reconSummary['derived_replay_values']) ? $reconSummary['derived_replay_values'] : array(); ?>
+                    <?php if ($derivedReplay): ?>
+                      <strong>Derived replay values</strong>
+                      <div>Estimated baro samples: <?= (int)($derivedReplay['estimated_baro_altitude_samples'] ?? 0) ?></div>
+                      <div>Estimated VS samples: <?= (int)($derivedReplay['estimated_vertical_speed_samples'] ?? 0) ?></div>
+                      <div>Altimeter source: <?= h((string)($derivedReplay['altimeter_setting_source'] ?? 'unavailable')) ?><?= is_numeric($derivedReplay['altimeter_setting_inhg'] ?? null) ? h(' · ' . number_format((float)$derivedReplay['altimeter_setting_inhg'], 2) . ' inHg') : '' ?></div>
+                      <div class="cockpit-muted">GPS altitude is primary. Estimated baro/VS are derived replay values, not raw aircraft instrument values.</div>
+                    <?php endif; ?>
                     <?php if ($alignmentSources): ?>
                       <strong>Source alignment</strong>
                       <?php foreach (array('gps' => 'GPS', 'ahrs' => 'AHRS', 'adsb' => 'ADS-B') as $sourceKey => $sourceLabel): ?>

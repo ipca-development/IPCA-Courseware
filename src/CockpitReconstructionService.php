@@ -156,6 +156,9 @@ final class CockpitReconstructionService
         if (!self::tablesPresent($this->pdo)) {
             throw new RuntimeException('Apply scripts/sql/2026_06_23_cockpit_recorder_reconstruction_foundation.sql first.');
         }
+        if (!$this->columnPresent(self::SAMPLE_TABLE, 'estimated_baro_altitude_ft')) {
+            throw new RuntimeException('Apply scripts/sql/2026_06_24_cockpit_recorder_derived_replay_values.sql before reconstructing.');
+        }
     }
 
     /**
@@ -481,6 +484,139 @@ final class CockpitReconstructionService
             $samples[] = $sample;
         }
 
+        $samples = $this->addDerivedReplayValues($recording, $samples);
+        return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function addDerivedReplayValues(array $recording, array $samples): array
+    {
+        $altimeter = $this->stableAltimeterSetting($samples);
+        foreach ($samples as $index => $sample) {
+            $gpsAltFt = isset($sample['gps_altitude_ft']) ? (float)$sample['gps_altitude_ft'] : null;
+            if ($altimeter !== null && $gpsAltFt !== null) {
+                $estimated = $gpsAltFt + (29.92 - (float)$altimeter['setting_inhg']) * 1000.0;
+                $samples[$index]['estimated_baro_altitude_ft'] = round($estimated, 1);
+                $samples[$index]['baro_altitude_ft'] = round($estimated, 1);
+                $samples[$index]['altimeter_setting_inhg'] = (float)$altimeter['setting_inhg'];
+                $samples[$index]['altimeter_setting_source'] = (string)$altimeter['source'];
+                $samples[$index]['altitude_quality'] = 'fair';
+            } else {
+                $samples[$index]['estimated_baro_altitude_ft'] = null;
+                $samples[$index]['baro_altitude_ft'] = null;
+                $samples[$index]['altimeter_setting_inhg'] = null;
+                $samples[$index]['altimeter_setting_source'] = 'unavailable';
+                $samples[$index]['altitude_quality'] = $gpsAltFt !== null ? 'good' : 'unavailable';
+            }
+            $samples[$index]['altitude_source'] = $gpsAltFt !== null ? 'gps' : ($samples[$index]['estimated_baro_altitude_ft'] !== null ? 'estimated_baro' : 'unavailable');
+            $samples[$index]['vertical_speed_fpm'] = null;
+            $samples[$index]['estimated_vertical_speed_fpm'] = null;
+            $samples[$index]['vertical_speed_source'] = 'unavailable';
+            $samples[$index]['vertical_speed_quality'] = 'unavailable';
+            $samples[$index]['estimated_slip_skid_g'] = null;
+            $samples[$index]['estimated_slip_skid_quality'] = 'unavailable';
+            $samples[$index]['estimated_slip_skid_source'] = 'unavailable';
+        }
+
+        if ($altimeter !== null) {
+            $samples = $this->addEstimatedVerticalSpeed($samples, 8.0);
+        }
+
+        foreach ($samples as $index => $sample) {
+            $samples[$index]['g3x_row'] = $this->buildG3XRow($recording, $samples[$index]);
+        }
+
+        return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return array{setting_inhg:float,source:string,quality:string,sample_count:int,spread_inhg:float}|null
+     */
+    private function stableAltimeterSetting(array $samples): ?array
+    {
+        $settings = array_values(array_filter(array_map(
+            fn(array $sample): ?float => isset($sample['altimeter_setting_inhg']) && is_numeric($sample['altimeter_setting_inhg']) ? (float)$sample['altimeter_setting_inhg'] : null,
+            $samples
+        ), fn($value): bool => $value !== null));
+        if (count($settings) < 3) {
+            return null;
+        }
+
+        $median = self::median($settings);
+        $spread = self::percentile(array_map(fn(float $value): float => abs($value - $median), $settings), 0.90);
+        if ($spread > 0.08) {
+            return null;
+        }
+
+        return array(
+            'setting_inhg' => round($median, 2),
+            'source' => 'adsb_altimeter_setting',
+            'quality' => 'fair',
+            'sample_count' => count($settings),
+            'spread_inhg' => round($spread, 3),
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function addEstimatedVerticalSpeed(array $samples, float $windowSeconds): array
+    {
+        $rawRates = array();
+        foreach ($samples as $index => $sample) {
+            if (!isset($sample['estimated_baro_altitude_ft']) || !is_numeric($sample['estimated_baro_altitude_ft'])) {
+                $rawRates[$index] = null;
+                continue;
+            }
+            $seconds = (float)$sample['seconds_since_start'];
+            $window = array_values(array_filter($samples, static function (array $candidate) use ($seconds, $windowSeconds): bool {
+                return isset($candidate['estimated_baro_altitude_ft'])
+                    && is_numeric($candidate['estimated_baro_altitude_ft'])
+                    && abs((float)$candidate['seconds_since_start'] - $seconds) <= ($windowSeconds / 2.0);
+            }));
+            if (count($window) < 3) {
+                $rawRates[$index] = null;
+                continue;
+            }
+            $first = $window[0];
+            $last = $window[count($window) - 1];
+            $dt = (float)$last['seconds_since_start'] - (float)$first['seconds_since_start'];
+            if ($dt < 4.0) {
+                $rawRates[$index] = null;
+                continue;
+            }
+            $rawRates[$index] = (((float)$last['estimated_baro_altitude_ft'] - (float)$first['estimated_baro_altitude_ft']) / $dt) * 60.0;
+        }
+
+        foreach ($samples as $index => $sample) {
+            if ($rawRates[$index] === null) {
+                continue;
+            }
+            $seconds = (float)$sample['seconds_since_start'];
+            $nearbyRates = array();
+            foreach ($samples as $rateIndex => $candidate) {
+                if ($rawRates[$rateIndex] === null) {
+                    continue;
+                }
+                if (abs((float)$candidate['seconds_since_start'] - $seconds) <= 2.0) {
+                    $nearbyRates[] = (float)$rawRates[$rateIndex];
+                }
+            }
+            if (!$nearbyRates) {
+                continue;
+            }
+            $rate = max(-4000.0, min(4000.0, self::median($nearbyRates)));
+            $samples[$index]['estimated_vertical_speed_fpm'] = round($rate, 1);
+            $samples[$index]['vertical_speed_fpm'] = round($rate, 1);
+            $samples[$index]['vertical_speed_source'] = 'estimated_baro';
+            $samples[$index]['vertical_speed_quality'] = 'fair';
+        }
+
         return $samples;
     }
 
@@ -553,6 +689,7 @@ final class CockpitReconstructionService
             'track_deg' => self::lerpAngleNullable($before['track_deg'] ?? null, $after['track_deg'] ?? null, $ratio),
             'heading_deg' => self::lerpAngleNullable($before['heading_deg'] ?? null, $after['heading_deg'] ?? null, $ratio),
             'on_ground' => $nearest['on_ground'] ?? null,
+            'altimeter_setting_inhg' => self::lerpNullable($before['altimeter_setting_inhg'] ?? null, $after['altimeter_setting_inhg'] ?? null, $ratio),
         );
     }
 
@@ -829,8 +966,8 @@ final class CockpitReconstructionService
         $roll = isset($ahrs['roll_deg']) ? (float)$ahrs['roll_deg'] - $rollOffset : null;
         $yaw = isset($ahrs['yaw_deg']) ? (float)$ahrs['yaw_deg'] : null;
         $heading = isset($ahrs['magnetic_heading_deg']) ? self::normalizeDegrees((float)$ahrs['magnetic_heading_deg'] + $headingOffset) : (isset($adsb['heading_deg']) ? (float)$adsb['heading_deg'] : null);
-        $baroAlt = isset($adsb['baro_altitude_ft']) ? (float)$adsb['baro_altitude_ft'] : null;
-        $verticalSpeed = isset($adsb['vertical_speed_fpm']) ? (float)$adsb['vertical_speed_fpm'] : null;
+        $adsbBaroAlt = isset($adsb['baro_altitude_ft']) ? (float)$adsb['baro_altitude_ft'] : null;
+        $adsbVerticalSpeed = isset($adsb['vertical_speed_fpm']) ? (float)$adsb['vertical_speed_fpm'] : null;
 
         $row = array(
             'sample_time_utc' => $sampleTime,
@@ -840,8 +977,21 @@ final class CockpitReconstructionService
             'longitude' => $gps['longitude'] ?? $adsb['longitude'] ?? null,
             'gps_altitude_m' => $gpsAltM,
             'gps_altitude_ft' => $gpsAltFt,
-            'baro_altitude_ft' => $baroAlt,
-            'vertical_speed_fpm' => $verticalSpeed,
+            'baro_altitude_ft' => null,
+            'vertical_speed_fpm' => null,
+            'adsb_baro_altitude_ft' => $adsbBaroAlt,
+            'adsb_vertical_speed_fpm' => $adsbVerticalSpeed,
+            'estimated_baro_altitude_ft' => null,
+            'estimated_vertical_speed_fpm' => null,
+            'altimeter_setting_inhg' => $adsb['altimeter_setting_inhg'] ?? null,
+            'altimeter_setting_source' => 'unavailable',
+            'altitude_source' => $gpsAltFt !== null ? 'gps' : 'unavailable',
+            'altitude_quality' => $gpsAltFt !== null ? 'good' : 'unavailable',
+            'vertical_speed_source' => 'unavailable',
+            'vertical_speed_quality' => 'unavailable',
+            'estimated_slip_skid_g' => null,
+            'estimated_slip_skid_quality' => 'unavailable',
+            'estimated_slip_skid_source' => 'unavailable',
             'groundspeed_kt' => $groundspeed,
             'magnetic_track_deg' => $track,
             'true_track_deg' => $track,
@@ -857,7 +1007,7 @@ final class CockpitReconstructionService
             'altitude_bug_ft' => null,
             'autopilot_status' => null,
         );
-        $row['g3x_row'] = $this->buildG3XRow($recording, $row);
+        $row['g3x_row'] = array();
         return $row;
     }
 
@@ -922,6 +1072,7 @@ final class CockpitReconstructionService
             'track_deg' => isset($row['track_deg']) ? (float)$row['track_deg'] : null,
             'heading_deg' => isset($row['heading_deg']) ? (float)$row['heading_deg'] : null,
             'on_ground' => isset($row['on_ground']) ? (bool)$row['on_ground'] : null,
+            'altimeter_setting_inhg' => isset($row['altimeter_setting_inhg']) ? (float)$row['altimeter_setting_inhg'] : null,
         );
     }
 
@@ -1124,6 +1275,15 @@ final class CockpitReconstructionService
             'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
             'source_alignment' => $this->lastSourceAlignment,
             'ahrs_calibration' => $this->lastAhrsCalibration,
+            'derived_replay_values' => array(
+                'gps_altitude_primary' => true,
+                'estimated_baro_altitude_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_baro_altitude_ft']) && $s['estimated_baro_altitude_ft'] !== null)),
+                'estimated_vertical_speed_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_vertical_speed_fpm']) && $s['estimated_vertical_speed_fpm'] !== null)),
+                'altimeter_setting_source' => (string)($samples[0]['altimeter_setting_source'] ?? 'unavailable'),
+                'altimeter_setting_inhg' => $samples && isset($samples[0]['altimeter_setting_inhg']) ? $samples[0]['altimeter_setting_inhg'] : null,
+                'slip_skid_status' => 'unavailable_until_lateral_acceleration_is_recorded',
+                'notes' => 'GPS altitude remains the primary smooth replay altitude. Estimated baro altitude and estimated vertical speed are derived replay values, not raw aircraft instrument values.',
+            ),
             'heading_replay_policy' => array(
                 'primary_source' => 'gps_track_when_groundspeed_at_least_5kt',
                 'fallback_source' => 'calibrated_magnetic_heading_low_confidence',
@@ -1154,11 +1314,15 @@ final class CockpitReconstructionService
             INSERT INTO ' . self::SAMPLE_TABLE . ' (
                 recording_id, sample_index, sample_time_utc, seconds_since_start, source_mask,
                 latitude, longitude, gps_altitude_m, gps_altitude_ft, baro_altitude_ft, vertical_speed_fpm,
+                adsb_baro_altitude_ft, adsb_vertical_speed_fpm, estimated_baro_altitude_ft,
+                estimated_vertical_speed_fpm, altimeter_setting_inhg, altimeter_setting_source,
+                altitude_source, altitude_quality, vertical_speed_source, vertical_speed_quality,
+                estimated_slip_skid_g, estimated_slip_skid_quality, estimated_slip_skid_source,
                 groundspeed_kt, magnetic_track_deg, true_track_deg, pitch_deg, roll_deg, yaw_deg,
                 magnetic_heading_deg, true_heading_deg, acceleration_g, wind_direction_deg, wind_speed_kt,
                 heading_bug_deg, altitude_bug_ft, autopilot_status, g3x_row_json, created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
             )
         ');
         foreach ($samples as $sample) {
@@ -1174,6 +1338,19 @@ final class CockpitReconstructionService
                 $sample['gps_altitude_ft'],
                 $sample['baro_altitude_ft'],
                 $sample['vertical_speed_fpm'],
+                $sample['adsb_baro_altitude_ft'],
+                $sample['adsb_vertical_speed_fpm'],
+                $sample['estimated_baro_altitude_ft'],
+                $sample['estimated_vertical_speed_fpm'],
+                $sample['altimeter_setting_inhg'],
+                $sample['altimeter_setting_source'],
+                $sample['altitude_source'],
+                $sample['altitude_quality'],
+                $sample['vertical_speed_source'],
+                $sample['vertical_speed_quality'],
+                $sample['estimated_slip_skid_g'],
+                $sample['estimated_slip_skid_quality'],
+                $sample['estimated_slip_skid_source'],
                 $sample['groundspeed_kt'],
                 $sample['magnetic_track_deg'],
                 $sample['true_track_deg'],
@@ -1238,6 +1415,19 @@ final class CockpitReconstructionService
         return $stmt->fetchColumn() !== false;
     }
 
+    private function columnPresent(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ');
+        $stmt->execute(array($table, $column));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
     private function countRows(string $table, int $recordingId): int
     {
         if (!$this->tablePresent($table)) {
@@ -1270,13 +1460,15 @@ final class CockpitReconstructionService
         $row['GPS Ground Speed (kt)'] = self::fmt($sample['groundspeed_kt'] ?? null, 1);
         $row['GPS Ground Track (deg)'] = self::fmt($sample['magnetic_track_deg'] ?? null, 0);
         $row['Magnetic Heading (deg)'] = self::fmt($sample['magnetic_heading_deg'] ?? null, 0);
-        $row['Pressure Altitude (ft)'] = self::fmt($sample['baro_altitude_ft'] ?? null, 0);
-        $row['Baro Altitude (ft)'] = self::fmt($sample['baro_altitude_ft'] ?? null, 0);
-        $row['Vertical Speed (ft/min)'] = self::fmt($sample['vertical_speed_fpm'] ?? null, 0);
+        $row['Pressure Altitude (ft)'] = self::fmt($sample['estimated_baro_altitude_ft'] ?? null, 0);
+        $row['Baro Altitude (ft)'] = self::fmt($sample['estimated_baro_altitude_ft'] ?? null, 0);
+        $row['Vertical Speed (ft/min)'] = self::fmt($sample['estimated_vertical_speed_fpm'] ?? null, 0);
         $row['Pitch (deg)'] = self::fmt($sample['pitch_deg'] ?? null, 1);
         $row['Roll (deg)'] = self::fmt($sample['roll_deg'] ?? null, 1);
+        $row['Lateral Acceleration (G)'] = self::fmt($sample['estimated_slip_skid_g'] ?? null, 3);
         $row['Normal Acceleration (G)'] = self::fmt($sample['acceleration_g'] ?? null, 3);
         $row['AHRS/Mag 1 Status'] = ($sample['pitch_deg'] ?? null) !== null ? 'OK' : '';
+        $row['Baro Setting (inch Hg)'] = self::fmt($sample['altimeter_setting_inhg'] ?? null, 2);
         $row['Wind Speed (kt)'] = self::fmt($sample['wind_speed_kt'] ?? null, 1);
         $row['Wind Direction (deg)'] = self::fmt($sample['wind_direction_deg'] ?? null, 0);
         return $row;
@@ -1331,6 +1523,19 @@ final class CockpitReconstructionService
         }
         $mid = intdiv($count, 2);
         return $count % 2 === 1 ? (float)$values[$mid] : ((float)$values[$mid - 1] + (float)$values[$mid]) / 2.0;
+    }
+
+    /**
+     * @param list<float> $values
+     */
+    private static function percentile(array $values, float $percentile): float
+    {
+        if (!$values) {
+            return 0.0;
+        }
+        sort($values, SORT_NUMERIC);
+        $index = (int)floor((count($values) - 1) * max(0.0, min(1.0, $percentile)));
+        return (float)$values[$index];
     }
 
     private static function normalizeDegrees(float $value): float
@@ -1418,6 +1623,19 @@ final class CockpitReconstructionService
             'gps_altitude_ft' => $row['gps_altitude_ft'] !== null ? (float)$row['gps_altitude_ft'] : null,
             'baro_altitude_ft' => $row['baro_altitude_ft'] !== null ? (float)$row['baro_altitude_ft'] : null,
             'vertical_speed_fpm' => $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : null,
+            'adsb_baro_altitude_ft' => isset($row['adsb_baro_altitude_ft']) && $row['adsb_baro_altitude_ft'] !== null ? (float)$row['adsb_baro_altitude_ft'] : null,
+            'adsb_vertical_speed_fpm' => isset($row['adsb_vertical_speed_fpm']) && $row['adsb_vertical_speed_fpm'] !== null ? (float)$row['adsb_vertical_speed_fpm'] : null,
+            'estimated_baro_altitude_ft' => isset($row['estimated_baro_altitude_ft']) && $row['estimated_baro_altitude_ft'] !== null ? (float)$row['estimated_baro_altitude_ft'] : null,
+            'estimated_vertical_speed_fpm' => isset($row['estimated_vertical_speed_fpm']) && $row['estimated_vertical_speed_fpm'] !== null ? (float)$row['estimated_vertical_speed_fpm'] : null,
+            'altimeter_setting_inhg' => isset($row['altimeter_setting_inhg']) && $row['altimeter_setting_inhg'] !== null ? (float)$row['altimeter_setting_inhg'] : null,
+            'altimeter_setting_source' => (string)($row['altimeter_setting_source'] ?? 'unavailable'),
+            'altitude_source' => (string)($row['altitude_source'] ?? 'unavailable'),
+            'altitude_quality' => (string)($row['altitude_quality'] ?? 'unavailable'),
+            'vertical_speed_source' => (string)($row['vertical_speed_source'] ?? 'unavailable'),
+            'vertical_speed_quality' => (string)($row['vertical_speed_quality'] ?? 'unavailable'),
+            'estimated_slip_skid_g' => isset($row['estimated_slip_skid_g']) && $row['estimated_slip_skid_g'] !== null ? (float)$row['estimated_slip_skid_g'] : null,
+            'estimated_slip_skid_quality' => (string)($row['estimated_slip_skid_quality'] ?? 'unavailable'),
+            'estimated_slip_skid_source' => (string)($row['estimated_slip_skid_source'] ?? 'unavailable'),
             'groundspeed_kt' => $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
