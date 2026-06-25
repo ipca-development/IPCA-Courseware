@@ -248,7 +248,16 @@ struct RecorderView: View {
 
     private var lastRecordingCard: some View {
         IPCACard(title: "Last Recording Status", systemImage: "checklist") {
-            if let recording = store.recordings.first {
+            if let failed = latestFailedRecordingForStatus {
+                Text("Last upload failed. Use the Recordings tab to retry or review the error.")
+                    .font(.caption)
+                    .foregroundStyle(IPCATheme.warning)
+                LabeledContent("Failed recording", value: failed.id)
+                if !failed.lastError.isEmpty {
+                    Text(failed.lastError).foregroundStyle(.red)
+                }
+            }
+            if let recording = latestActiveRecordingForStatus {
                 LabeledContent("Recording", value: recording.id)
                 LabeledContent("Input used", value: recording.inputDeviceName)
                 LabeledContent("Aircraft", value: recording.aircraftLabel)
@@ -259,7 +268,7 @@ struct RecorderView: View {
                 if !recording.lastError.isEmpty {
                     Text(recording.lastError).foregroundStyle(.red)
                 }
-            } else {
+            } else if latestFailedRecordingForStatus == nil {
                 Text("No recordings yet.").foregroundStyle(IPCATheme.secondaryText)
             }
             if !settings.isServerURLConfigured {
@@ -487,6 +496,21 @@ struct RecorderView: View {
 
     private var latestTranscriptStatusKey: String {
         store.recordings.first?.transcriptStatus.rawValue ?? ""
+    }
+
+    private var latestActiveRecordingForStatus: Recording? {
+        store.recordings.first {
+            $0.uploadStatus != .failed && $0.transcriptStatus != .failed
+        }
+    }
+
+    private var latestFailedRecordingForStatus: Recording? {
+        guard let latest = store.recordings.first,
+              latest.uploadStatus == .failed || latest.transcriptStatus == .failed
+        else {
+            return nil
+        }
+        return latest
     }
 
     private func stopAndUpload() {

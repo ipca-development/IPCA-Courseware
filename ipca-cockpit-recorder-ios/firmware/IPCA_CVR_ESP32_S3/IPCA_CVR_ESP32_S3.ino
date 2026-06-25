@@ -86,6 +86,7 @@ float magZ = 0;
 float magHeadingDeg = 0;
 uint8_t rotationVectorAccuracy = 0;
 uint8_t magneticFieldAccuracy = 0;
+uint8_t lastHeadingQualityCode = 255;
 
 BLEServer *bleServer = nullptr;
 BLECharacteristic *ahrsCharacteristic = nullptr;
@@ -657,6 +658,12 @@ void readAHRS() {
     }
   }
 
+  uint8_t currentHeadingQuality = headingQualityCode();
+  if (currentHeadingQuality != lastHeadingQualityCode) {
+    lastHeadingQualityCode = currentHeadingQuality;
+    statusDynamicDirty = true;
+  }
+
   if (millis() - lastAHRSPrint > 250) {
     Serial.print("AHRS,ROLL=");
     Serial.print(rollDeg, 1);
@@ -753,7 +760,7 @@ void drawAudioStatus(int x, int y) {
 
 void drawStatusDynamicFields() {
   drawStatusLine(28, 86, "iPad", ipadReady, ipadReady ? "BLE OK" : "WAIT");
-  drawStatusLine(28, 106, "AHRS", ahrsReady && headingQualityCode() >= 1, ahrsReady ? headingQualityLabel() : "WAIT");
+  drawStatusLine(28, 106, "AHRS", ahrsReady && headingQualityCode() >= 2, ahrsReady ? headingQualityLabel() : "WAIT");
   drawStatusLine(28, 126, "GPS", gpsReady, gpsReady ? "READY" : "NO FIX");
   drawAudioStatus(28, 149);
   drawStateLine(28, 174, "UP", uploadState);
