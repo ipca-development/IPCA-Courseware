@@ -485,15 +485,18 @@ class IPCAStatusCallbacks : public BLECharacteristicCallbacks {
 };
 
 String buildAHRSLine() {
-  char line[180];
+  char line[230];
   snprintf(
     line,
     sizeof(line),
-    "AHRS,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,ACC=%.2f,MAGHDG=%.1f,RVACC=%u,MAGACC=%u,MAGX=%.1f,MAGY=%.1f,MAGZ=%.1f,HDGQ=%u",
+    "AHRS,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,ACC=%.2f,ACCX=%.2f,ACCY=%.2f,ACCZ=%.2f,MAGHDG=%.1f,RVACC=%u,MAGACC=%u,MAGX=%.1f,MAGY=%.1f,MAGZ=%.1f,HDGQ=%u",
     rollDeg,
     pitchDeg,
     yawDeg,
     accTotal,
+    accX,
+    accY,
+    accZ,
     magHeadingDeg,
     rotationVectorAccuracy,
     magneticFieldAccuracy,
@@ -663,6 +666,12 @@ void readAHRS() {
     Serial.print(yawDeg, 1);
     Serial.print(",ACC=");
     Serial.print(accTotal, 2);
+    Serial.print(",ACCX=");
+    Serial.print(accX, 2);
+    Serial.print(",ACCY=");
+    Serial.print(accY, 2);
+    Serial.print(",ACCZ=");
+    Serial.print(accZ, 2);
     Serial.print(",MAGHDG=");
     Serial.print(magHeadingDeg, 1);
     Serial.print(",RVACC=");

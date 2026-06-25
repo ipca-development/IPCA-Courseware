@@ -398,6 +398,7 @@ cw_header('Cockpit Recorder POC');
                       <div>Field offset: <?= is_numeric($derivedReplay['field_altitude_offset_ft'] ?? null) ? h(number_format((float)$derivedReplay['field_altitude_offset_ft'], 0) . ' ft') : '--' ?></div>
                       <div>Altimeter source: <?= h((string)($derivedReplay['altimeter_setting_source'] ?? 'unavailable')) ?><?= is_numeric($derivedReplay['altimeter_setting_inhg'] ?? null) ? h(' · ' . number_format((float)$derivedReplay['altimeter_setting_inhg'], 2) . ' inHg') : '' ?></div>
                       <div>OAT: <?= is_numeric($derivedReplay['oat_c'] ?? null) ? h(number_format((float)$derivedReplay['oat_c'], 1) . ' °C') : '--' ?> · <?= h((string)($derivedReplay['oat_source'] ?? 'unavailable')) ?></div>
+                      <div>Estimated wind samples: <?= (int)($derivedReplay['estimated_wind_samples'] ?? 0) ?> · <?= h((string)($derivedReplay['wind_status'] ?? 'unavailable')) ?></div>
                       <div class="cockpit-muted">GPS altitude is raw geometric altitude. Estimated indicated/VS are derived replay values, not raw aircraft instrument values.</div>
                     <?php endif; ?>
                     <?php if ($alignmentSources): ?>

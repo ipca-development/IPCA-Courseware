@@ -347,6 +347,13 @@ struct RecorderView: View {
                         Text("Acceleration")
                         Text(String(format: "%.2f", sample.acceleration)).foregroundStyle(IPCATheme.success)
                     }
+                    if let accX = sample.accelerationX, let accY = sample.accelerationY, let accZ = sample.accelerationZ {
+                        GridRow {
+                            Text("Accel vector")
+                            Text(String(format: "X %.2f  Y %.2f  Z %.2f", accX, accY, accZ))
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
                     GridRow {
                         Text("Compass heading")
                         Text(String(format: "%.0f", sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))

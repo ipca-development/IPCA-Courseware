@@ -390,6 +390,132 @@ SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_wind_speed_kt'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_wind_speed_kt DECIMAL(7,2) NULL AFTER wind_speed_kt',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_wind_direction_deg_true'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_wind_direction_deg_true DECIMAL(7,2) NULL AFTER estimated_wind_speed_kt',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_wind_quality'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_wind_quality VARCHAR(32) NOT NULL DEFAULT ''unavailable'' AFTER estimated_wind_direction_deg_true',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_wind_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_wind_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER estimated_wind_quality',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_tas_kt'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_tas_kt DECIMAL(7,2) NULL AFTER estimated_wind_source',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'wind_estimation_method'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN wind_estimation_method VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER estimated_tas_kt',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'ahrs_acceleration_x_g'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN ahrs_acceleration_x_g DECIMAL(8,3) NULL AFTER estimated_slip_skid_g',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'ahrs_acceleration_y_g'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN ahrs_acceleration_y_g DECIMAL(8,3) NULL AFTER ahrs_acceleration_x_g',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'ahrs_acceleration_z_g'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN ahrs_acceleration_z_g DECIMAL(8,3) NULL AFTER ahrs_acceleration_y_g',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
     AND COLUMN_NAME = 'estimated_slip_skid_quality'
 );
 SET @sql := IF(@col_exists = 0,

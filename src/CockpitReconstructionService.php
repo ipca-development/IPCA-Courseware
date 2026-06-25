@@ -157,7 +157,7 @@ final class CockpitReconstructionService
         if (!self::tablesPresent($this->pdo)) {
             throw new RuntimeException('Apply scripts/sql/2026_06_23_cockpit_recorder_reconstruction_foundation.sql first.');
         }
-        if (!$this->columnPresent(self::SAMPLE_TABLE, 'estimated_indicated_altitude_ft')) {
+        if (!$this->columnPresent(self::SAMPLE_TABLE, 'estimated_indicated_altitude_ft') || !$this->columnPresent(self::SAMPLE_TABLE, 'ahrs_acceleration_y_g') || !$this->columnPresent(self::SAMPLE_TABLE, 'estimated_wind_speed_kt')) {
             throw new RuntimeException('Apply scripts/sql/2026_06_24_cockpit_recorder_derived_replay_values.sql before reconstructing.');
         }
     }
@@ -551,17 +551,248 @@ final class CockpitReconstructionService
             $samples[$index]['estimated_vertical_speed_fpm'] = null;
             $samples[$index]['vertical_speed_source'] = 'unavailable';
             $samples[$index]['vertical_speed_quality'] = 'unavailable';
-            $samples[$index]['estimated_slip_skid_g'] = null;
-            $samples[$index]['estimated_slip_skid_quality'] = 'unavailable';
-            $samples[$index]['estimated_slip_skid_source'] = 'unavailable';
         }
 
         if ($altimeter !== null) {
             $samples = $this->addEstimatedVerticalSpeed($samples, 8.0);
         }
+        $samples = $this->addEstimatedSlipSkid($samples, 1.5);
+        $samples = $this->addEstimatedWind($samples, $this->transcriptWindEvidence($recording));
 
         foreach ($samples as $index => $sample) {
             $samples[$index]['g3x_row'] = $this->buildG3XRow($recording, $samples[$index]);
+        }
+
+        return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @param array<string,mixed>|null $transcriptWind
+     * @return list<array<string,mixed>>
+     */
+    private function addEstimatedWind(array $samples, ?array $transcriptWind): array
+    {
+        foreach ($samples as $index => $sample) {
+            $samples[$index]['estimated_wind_speed_kt'] = null;
+            $samples[$index]['estimated_wind_direction_deg_true'] = null;
+            $samples[$index]['estimated_wind_quality'] = 'unavailable';
+            $samples[$index]['estimated_wind_source'] = 'unavailable';
+            $samples[$index]['estimated_tas_kt'] = null;
+            $samples[$index]['wind_estimation_method'] = 'unavailable';
+            $samples[$index]['wind_speed_kt'] = null;
+            $samples[$index]['wind_direction_deg'] = null;
+        }
+
+        foreach ($this->stableTurnWindSegments($samples) as $segment) {
+            $quality = ($segment['duration_seconds'] >= 25.0 && (float)$segment['heading_rate_spread_dps'] <= 1.2) ? 'fair' : 'low';
+            if ($transcriptWind !== null) {
+                $quality = $quality === 'fair' ? 'fair' : 'low';
+            }
+            for ($i = (int)$segment['start_index']; $i <= (int)$segment['end_index']; $i++) {
+                $samples[$i]['estimated_wind_speed_kt'] = $segment['wind_speed_kt'];
+                $samples[$i]['estimated_wind_direction_deg_true'] = $segment['wind_direction_deg_true'];
+                $samples[$i]['estimated_wind_quality'] = $quality;
+                $samples[$i]['estimated_wind_source'] = $transcriptWind !== null ? 'stable_turn_with_transcript_evidence' : 'stable_turn';
+                $samples[$i]['estimated_tas_kt'] = $segment['estimated_tas_kt'];
+                $samples[$i]['wind_estimation_method'] = 'bank_angle_heading_rate_gps_vector';
+                $samples[$i]['wind_speed_kt'] = $segment['wind_speed_kt'];
+                $samples[$i]['wind_direction_deg'] = $segment['wind_direction_deg_true'];
+            }
+        }
+
+        return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function stableTurnWindSegments(array $samples): array
+    {
+        $segments = array();
+        $run = array();
+        $previous = null;
+        foreach ($samples as $index => $sample) {
+            $heading = $this->sampleHeadingForWind($sample);
+            $roll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : null;
+            $gs = isset($sample['groundspeed_kt']) && is_numeric($sample['groundspeed_kt']) ? (float)$sample['groundspeed_kt'] : null;
+            $track = isset($sample['true_track_deg']) && is_numeric($sample['true_track_deg']) ? (float)$sample['true_track_deg'] : null;
+            $seconds = (float)($sample['seconds_since_start'] ?? 0);
+            $candidate = $heading !== null && $roll !== null && $gs !== null && $track !== null && abs($roll) >= 15.0 && abs($roll) <= 50.0 && $gs >= 45.0;
+            if ($candidate && $previous !== null && isset($previous['heading'], $previous['seconds'])) {
+                $dt = $seconds - (float)$previous['seconds'];
+                if ($dt > 0.2 && $dt <= 3.0) {
+                    $rate = self::angleDelta((float)$previous['heading'], $heading) / $dt;
+                    if (abs($rate) >= 1.0 && abs($rate) <= 8.0 && ($rate * $roll) >= 0.0) {
+                        $run[] = array('index' => $index, 'sample' => $sample, 'heading' => $heading, 'rate_dps' => $rate);
+                        $previous = array('heading' => $heading, 'seconds' => $seconds);
+                        continue;
+                    }
+                }
+            }
+
+            $this->appendWindSegmentIfValid($segments, $run);
+            $run = array();
+            if ($candidate) {
+                $run[] = array('index' => $index, 'sample' => $sample, 'heading' => $heading, 'rate_dps' => null);
+                $previous = array('heading' => $heading, 'seconds' => $seconds);
+            } else {
+                $previous = null;
+            }
+        }
+        $this->appendWindSegmentIfValid($segments, $run);
+        return $segments;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $segments
+     * @param list<array<string,mixed>> $run
+     */
+    private function appendWindSegmentIfValid(array &$segments, array $run): void
+    {
+        if (count($run) < 8) {
+            return;
+        }
+        $first = $run[0]['sample'];
+        $last = $run[count($run) - 1]['sample'];
+        $duration = (float)$last['seconds_since_start'] - (float)$first['seconds_since_start'];
+        if ($duration < 12.0) {
+            return;
+        }
+        $rates = array_values(array_filter(array_map(fn(array $row): ?float => is_numeric($row['rate_dps'] ?? null) ? (float)$row['rate_dps'] : null, $run), fn($v): bool => $v !== null));
+        $banks = array_map(fn(array $row): float => (float)($row['sample']['roll_deg'] ?? 0), $run);
+        if (!$rates || (max($banks) - min($banks)) > 14.0) {
+            return;
+        }
+        $rate = self::median($rates);
+        $rateSpread = self::percentile(array_map(fn(float $value): float => abs($value - $rate), $rates), 0.90);
+        if (abs($rate) < 1.0 || $rateSpread > 2.0) {
+            return;
+        }
+        $bank = self::median($banks);
+        $tasKt = (9.80665 * tan(deg2rad(abs($bank))) / deg2rad(abs($rate))) * 1.94384449;
+        if ($tasKt < 35.0 || $tasKt > 190.0) {
+            return;
+        }
+
+        $windEast = array();
+        $windNorth = array();
+        foreach ($run as $row) {
+            $sample = $row['sample'];
+            $heading = (float)$row['heading'];
+            $gs = (float)$sample['groundspeed_kt'];
+            $track = (float)$sample['true_track_deg'];
+            $ground = self::vectorFromTrack($track, $gs);
+            $air = self::vectorFromTrack($heading, $tasKt);
+            $windEast[] = $ground['east'] - $air['east'];
+            $windNorth[] = $ground['north'] - $air['north'];
+        }
+        $east = self::median($windEast);
+        $north = self::median($windNorth);
+        $speed = sqrt($east * $east + $north * $north);
+        if ($speed > 80.0) {
+            return;
+        }
+        $toDirection = self::normalizeDegrees(rad2deg(atan2($east, $north)));
+        $fromDirection = self::normalizeDegrees($toDirection + 180.0);
+        $segments[] = array(
+            'start_index' => (int)$run[0]['index'],
+            'end_index' => (int)$run[count($run) - 1]['index'],
+            'duration_seconds' => round($duration, 2),
+            'estimated_tas_kt' => round($tasKt, 1),
+            'wind_speed_kt' => round($speed, 1),
+            'wind_direction_deg_true' => round($fromDirection, 0),
+            'heading_rate_spread_dps' => round($rateSpread, 3),
+        );
+    }
+
+    private function sampleHeadingForWind(array $sample): ?float
+    {
+        if (isset($sample['true_heading_deg']) && is_numeric($sample['true_heading_deg'])) {
+            return (float)$sample['true_heading_deg'];
+        }
+        if (isset($sample['magnetic_heading_deg']) && is_numeric($sample['magnetic_heading_deg'])) {
+            return (float)$sample['magnetic_heading_deg'];
+        }
+        return null;
+    }
+
+    /**
+     * @return array{east:float,north:float}
+     */
+    private static function vectorFromTrack(float $degreesTrue, float $speedKt): array
+    {
+        $rad = deg2rad($degreesTrue);
+        return array('east' => $speedKt * sin($rad), 'north' => $speedKt * cos($rad));
+    }
+
+    /**
+     * @return array{direction_deg:int,speed_kt:int,source:string}|null
+     */
+    private function transcriptWindEvidence(array $recording): ?array
+    {
+        $text = strtolower((string)($recording['transcript_text'] ?? ''));
+        if ($text === '') {
+            return null;
+        }
+        if (preg_match('/\bwind\s+([0-3]?\d{2})\s*(?:at|@|\/)?\s*(\d{1,2})\b/i', $text, $m) === 1) {
+            $direction = (int)$m[1];
+            $speed = (int)$m[2];
+            if ($direction >= 0 && $direction <= 360 && $speed >= 0 && $speed <= 80) {
+                return array('direction_deg' => $direction, 'speed_kt' => $speed, 'source' => 'transcript_wind_readout');
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function addEstimatedSlipSkid(array $samples, float $windowSeconds): array
+    {
+        $count = count($samples);
+        if ($count === 0) {
+            return $samples;
+        }
+
+        $left = 0;
+        $right = 0;
+        $halfWindow = $windowSeconds / 2.0;
+        foreach ($samples as $index => $sample) {
+            if (!isset($sample['ahrs_acceleration_y_g']) || !is_numeric($sample['ahrs_acceleration_y_g'])) {
+                $samples[$index]['estimated_slip_skid_g'] = null;
+                $samples[$index]['estimated_slip_skid_quality'] = 'unavailable';
+                $samples[$index]['estimated_slip_skid_source'] = 'unavailable';
+                continue;
+            }
+
+            $seconds = (float)$sample['seconds_since_start'];
+            while ($left < $count && (float)$samples[$left]['seconds_since_start'] < $seconds - $halfWindow) {
+                $left++;
+            }
+            while ($right + 1 < $count && (float)$samples[$right + 1]['seconds_since_start'] <= $seconds + $halfWindow) {
+                $right++;
+            }
+
+            $values = array();
+            for ($i = $left; $i <= $right; $i++) {
+                if (isset($samples[$i]['ahrs_acceleration_y_g']) && is_numeric($samples[$i]['ahrs_acceleration_y_g'])) {
+                    $values[] = (float)$samples[$i]['ahrs_acceleration_y_g'];
+                }
+            }
+            if (!$values) {
+                $samples[$index]['estimated_slip_skid_g'] = null;
+                $samples[$index]['estimated_slip_skid_quality'] = 'unavailable';
+                $samples[$index]['estimated_slip_skid_source'] = 'unavailable';
+                continue;
+            }
+
+            $groundspeed = isset($sample['groundspeed_kt']) && is_numeric($sample['groundspeed_kt']) ? (float)$sample['groundspeed_kt'] : 0.0;
+            $samples[$index]['estimated_slip_skid_g'] = round(max(-1.5, min(1.5, self::median($values))), 3);
+            $samples[$index]['estimated_slip_skid_quality'] = $groundspeed >= 35.0 ? 'fair' : 'low';
+            $samples[$index]['estimated_slip_skid_source'] = 'bno085_linear_acceleration_y';
         }
 
         return $samples;
@@ -1313,6 +1544,9 @@ final class CockpitReconstructionService
             'estimated_slip_skid_g' => null,
             'estimated_slip_skid_quality' => 'unavailable',
             'estimated_slip_skid_source' => 'unavailable',
+            'ahrs_acceleration_x_g' => isset($ahrs['acceleration_x_g']) ? (float)$ahrs['acceleration_x_g'] : null,
+            'ahrs_acceleration_y_g' => isset($ahrs['acceleration_y_g']) ? (float)$ahrs['acceleration_y_g'] : null,
+            'ahrs_acceleration_z_g' => isset($ahrs['acceleration_z_g']) ? (float)$ahrs['acceleration_z_g'] : null,
             'groundspeed_kt' => $groundspeed,
             'magnetic_track_deg' => $track,
             'true_track_deg' => $track,
@@ -1324,6 +1558,12 @@ final class CockpitReconstructionService
             'acceleration_g' => isset($ahrs['acceleration_g']) ? (float)$ahrs['acceleration_g'] : null,
             'wind_direction_deg' => null,
             'wind_speed_kt' => null,
+            'estimated_wind_speed_kt' => null,
+            'estimated_wind_direction_deg_true' => null,
+            'estimated_wind_quality' => 'unavailable',
+            'estimated_wind_source' => 'unavailable',
+            'estimated_tas_kt' => null,
+            'wind_estimation_method' => 'unavailable',
             'heading_bug_deg' => null,
             'altitude_bug_ft' => null,
             'autopilot_status' => null,
@@ -1367,6 +1607,9 @@ final class CockpitReconstructionService
             'roll_deg' => $roll,
             'yaw_deg' => isset($row['yaw']) ? (float)$row['yaw'] : null,
             'acceleration_g' => isset($row['acceleration']) ? (float)$row['acceleration'] : null,
+            'acceleration_x_g' => isset($row['accelerationX']) ? (float)$row['accelerationX'] / 9.80665 : null,
+            'acceleration_y_g' => isset($row['accelerationY']) ? (float)$row['accelerationY'] / 9.80665 : null,
+            'acceleration_z_g' => isset($row['accelerationZ']) ? (float)$row['accelerationZ'] / 9.80665 : null,
             'magnetic_heading_deg' => $magneticHeading,
             'true_heading_deg' => isset($row['trueHeading']) ? (float)$row['trueHeading'] : null,
             'raw_pitch_deg' => $rawPitch,
@@ -1608,7 +1851,10 @@ final class CockpitReconstructionService
                 'altimeter_setting_inhg' => $samples && isset($samples[0]['altimeter_setting_inhg']) ? $samples[0]['altimeter_setting_inhg'] : null,
                 'oat_c' => $samples && isset($samples[0]['oat_c']) ? $samples[0]['oat_c'] : null,
                 'oat_source' => (string)($samples[0]['oat_source'] ?? 'unavailable'),
-                'slip_skid_status' => 'unavailable_until_lateral_acceleration_is_recorded',
+                'estimated_slip_skid_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_slip_skid_g']) && $s['estimated_slip_skid_g'] !== null)),
+                'slip_skid_status' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_slip_skid_g']) && $s['estimated_slip_skid_g'] !== null)) > 0 ? 'estimated_from_bno085_lateral_acceleration' : 'unavailable_until_lateral_acceleration_is_recorded',
+                'estimated_wind_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_wind_speed_kt']) && $s['estimated_wind_speed_kt'] !== null)),
+                'wind_status' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_wind_speed_kt']) && $s['estimated_wind_speed_kt'] !== null)) > 0 ? 'experimental_stable_turn_estimate' : 'unavailable_no_stable_turn_segment',
                 'notes' => 'GPS altitude remains raw geometric altitude. Field-calibrated true altitude is GPS shifted to airport elevation. Estimated indicated altitude applies the hot/cold day approximation from OAT.',
             ),
             'heading_replay_policy' => array(
@@ -1649,11 +1895,14 @@ final class CockpitReconstructionService
                 field_altitude_offset_ft, oat_c, oat_source,
                 altitude_source, altitude_quality, vertical_speed_source, vertical_speed_quality,
                 estimated_slip_skid_g, estimated_slip_skid_quality, estimated_slip_skid_source,
+                ahrs_acceleration_x_g, ahrs_acceleration_y_g, ahrs_acceleration_z_g,
                 groundspeed_kt, magnetic_track_deg, true_track_deg, pitch_deg, roll_deg, yaw_deg,
                 magnetic_heading_deg, true_heading_deg, acceleration_g, wind_direction_deg, wind_speed_kt,
+                estimated_wind_speed_kt, estimated_wind_direction_deg_true, estimated_wind_quality,
+                estimated_wind_source, estimated_tas_kt, wind_estimation_method,
                 heading_bug_deg, altitude_bug_ft, autopilot_status, g3x_row_json, created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
             )
         ');
         foreach ($samples as $sample) {
@@ -1691,6 +1940,9 @@ final class CockpitReconstructionService
                 $sample['estimated_slip_skid_g'],
                 $sample['estimated_slip_skid_quality'],
                 $sample['estimated_slip_skid_source'],
+                $sample['ahrs_acceleration_x_g'],
+                $sample['ahrs_acceleration_y_g'],
+                $sample['ahrs_acceleration_z_g'],
                 $sample['groundspeed_kt'],
                 $sample['magnetic_track_deg'],
                 $sample['true_track_deg'],
@@ -1702,6 +1954,12 @@ final class CockpitReconstructionService
                 $sample['acceleration_g'],
                 $sample['wind_direction_deg'],
                 $sample['wind_speed_kt'],
+                $sample['estimated_wind_speed_kt'],
+                $sample['estimated_wind_direction_deg_true'],
+                $sample['estimated_wind_quality'],
+                $sample['estimated_wind_source'],
+                $sample['estimated_tas_kt'],
+                $sample['wind_estimation_method'],
                 $sample['heading_bug_deg'],
                 $sample['altitude_bug_ft'],
                 $sample['autopilot_status'],
@@ -2008,6 +2266,15 @@ final class CockpitReconstructionService
             'estimated_slip_skid_g' => isset($row['estimated_slip_skid_g']) && $row['estimated_slip_skid_g'] !== null ? (float)$row['estimated_slip_skid_g'] : null,
             'estimated_slip_skid_quality' => (string)($row['estimated_slip_skid_quality'] ?? 'unavailable'),
             'estimated_slip_skid_source' => (string)($row['estimated_slip_skid_source'] ?? 'unavailable'),
+            'ahrs_acceleration_x_g' => isset($row['ahrs_acceleration_x_g']) && $row['ahrs_acceleration_x_g'] !== null ? (float)$row['ahrs_acceleration_x_g'] : null,
+            'ahrs_acceleration_y_g' => isset($row['ahrs_acceleration_y_g']) && $row['ahrs_acceleration_y_g'] !== null ? (float)$row['ahrs_acceleration_y_g'] : null,
+            'ahrs_acceleration_z_g' => isset($row['ahrs_acceleration_z_g']) && $row['ahrs_acceleration_z_g'] !== null ? (float)$row['ahrs_acceleration_z_g'] : null,
+            'estimated_wind_speed_kt' => isset($row['estimated_wind_speed_kt']) && $row['estimated_wind_speed_kt'] !== null ? (float)$row['estimated_wind_speed_kt'] : null,
+            'estimated_wind_direction_deg_true' => isset($row['estimated_wind_direction_deg_true']) && $row['estimated_wind_direction_deg_true'] !== null ? (float)$row['estimated_wind_direction_deg_true'] : null,
+            'estimated_wind_quality' => (string)($row['estimated_wind_quality'] ?? 'unavailable'),
+            'estimated_wind_source' => (string)($row['estimated_wind_source'] ?? 'unavailable'),
+            'estimated_tas_kt' => isset($row['estimated_tas_kt']) && $row['estimated_tas_kt'] !== null ? (float)$row['estimated_tas_kt'] : null,
+            'wind_estimation_method' => (string)($row['wind_estimation_method'] ?? 'unavailable'),
             'groundspeed_kt' => $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,

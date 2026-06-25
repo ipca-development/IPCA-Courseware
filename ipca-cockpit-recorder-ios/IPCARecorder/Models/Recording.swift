@@ -143,6 +143,9 @@ struct AHRSSample: Codable, Equatable {
     var pitch: Double
     var yaw: Double
     var acceleration: Double
+    var accelerationX: Double?
+    var accelerationY: Double?
+    var accelerationZ: Double?
     var magneticHeading: Double
     var rotationVectorAccuracy: Int?
     var magneticFieldAccuracy: Int?

@@ -227,6 +227,9 @@ cw_header('Cockpit Recorder Replay');
       field_altitude_offset_ft: lerp(before.field_altitude_offset_ft, after.field_altitude_offset_ft),
       oat_c: lerp(before.oat_c, after.oat_c),
       estimated_slip_skid_g: lerp(before.estimated_slip_skid_g, after.estimated_slip_skid_g),
+      estimated_wind_speed_kt: lerp(before.estimated_wind_speed_kt, after.estimated_wind_speed_kt),
+      estimated_wind_direction_deg_true: lerpAngle(before.estimated_wind_direction_deg_true, after.estimated_wind_direction_deg_true),
+      estimated_tas_kt: lerp(before.estimated_tas_kt, after.estimated_tas_kt),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       bank_deg: lerp(before.bank_deg, after.bank_deg),
@@ -530,6 +533,10 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
       <div class="detail-row"><span>Estimated Slip/Skid</span><strong>${s.estimated_slip_skid_g === null || s.estimated_slip_skid_g === undefined ? '--' : `${slipSkid} · ${Number(s.estimated_slip_skid_g).toFixed(3)} g`}</strong></div>
+      <div class="detail-row"><span>Slip/Skid quality</span><strong>${s.estimated_slip_skid_quality || 'unavailable'}</strong></div>
+      <div class="detail-row"><span>Estimated Wind</span><strong>${s.estimated_wind_speed_kt === null || s.estimated_wind_speed_kt === undefined ? '--' : `${number(s.estimated_wind_direction_deg_true, '°', 0)} / ${number(s.estimated_wind_speed_kt, ' kt', 1)}`}</strong></div>
+      <div class="detail-row"><span>Estimated TAS</span><strong>${number(s.estimated_tas_kt, ' kt', 1)}</strong></div>
+      <div class="detail-row"><span>Wind quality</span><strong>${s.estimated_wind_quality || 'unavailable'}</strong></div>
       <div class="detail-row"><span>Heading</span><strong>${number(s.heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>True heading</span><strong>${number(s.true_heading_deg, ' deg', 0)}</strong></div>
       <div class="detail-row"><span>Track</span><strong>${number(s.track_deg, ' deg', 0)}</strong></div>
@@ -551,6 +558,8 @@ cw_header('Cockpit Recorder Replay');
       ['Pitch', 'pitch_deg', '#f97316', 'deg'],
       ['Bank', 'bank_deg', '#dc2626', 'deg'],
       ['Estimated Slip/Skid', 'estimated_slip_skid_g', '#be123c', 'g'],
+      ['Estimated Wind', 'estimated_wind_speed_kt', '#0284c7', 'kt'],
+      ['Estimated TAS', 'estimated_tas_kt', '#4f46e5', 'kt'],
       ['Heading', 'heading_deg', '#7c3aed', 'deg'],
       ['Track', 'track_deg', '#0891b2', 'deg'],
     ].forEach(([label, key, color, unit]) => {
