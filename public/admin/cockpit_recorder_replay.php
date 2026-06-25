@@ -219,6 +219,9 @@ cw_header('Cockpit Recorder Replay');
       estimated_baro_altitude_ft: lerp(before.estimated_baro_altitude_ft, after.estimated_baro_altitude_ft),
       estimated_vertical_speed_fpm: lerp(before.estimated_vertical_speed_fpm, after.estimated_vertical_speed_fpm),
       field_calibrated_altitude_ft: lerp(before.field_calibrated_altitude_ft, after.field_calibrated_altitude_ft),
+      field_calibrated_true_altitude_ft: lerp(before.field_calibrated_true_altitude_ft, after.field_calibrated_true_altitude_ft),
+      estimated_indicated_altitude_ft: lerp(before.estimated_indicated_altitude_ft, after.estimated_indicated_altitude_ft),
+      estimated_true_altitude_from_indicated_ft: lerp(before.estimated_true_altitude_from_indicated_ft, after.estimated_true_altitude_from_indicated_ft),
       altimeter_setting_inhg: lerp(before.altimeter_setting_inhg, after.altimeter_setting_inhg),
       airport_elevation_ft: lerp(before.airport_elevation_ft, after.airport_elevation_ft),
       field_altitude_offset_ft: lerp(before.field_altitude_offset_ft, after.field_altitude_offset_ft),
@@ -514,7 +517,8 @@ cw_header('Cockpit Recorder Replay');
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
       <div class="detail-row"><span>ADS-B status</span><strong>${payload.recording.adsb_status || '--'}</strong></div>
       <div class="detail-row"><span>GPS altitude</span><strong>${number(s.gps_altitude_ft, ' ft', 0)}</strong></div>
-      <div class="detail-row"><span>Estimated Baro Alt.</span><strong>${number(s.estimated_baro_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Estimated Indicated Alt.</span><strong>${number(s.estimated_indicated_altitude_ft, ' ft', 0)}</strong></div>
+      <div class="detail-row"><span>Estimated True Alt.</span><strong>${number(s.estimated_true_altitude_from_indicated_ft, ' ft', 0)}</strong></div>
       <div class="detail-row"><span>Estimated VS</span><strong>${number(s.estimated_vertical_speed_fpm, ' fpm', 0)}</strong></div>
       <div class="detail-row"><span>Altimeter setting</span><strong>${number(s.altimeter_setting_inhg, ' inHg', 2)}</strong></div>
       <div class="detail-row"><span>OAT</span><strong>${number(s.oat_c, ' °C', 1)}</strong></div>
@@ -540,7 +544,8 @@ cw_header('Cockpit Recorder Replay');
     graphs.innerHTML = '';
     [
       ['GPS altitude', 'gps_altitude_ft', '#1d4ed8', 'ft'],
-      ['Estimated Baro Alt.', 'estimated_baro_altitude_ft', '#7c3aed', 'ft'],
+      ['Estimated Indicated Alt.', 'estimated_indicated_altitude_ft', '#7c3aed', 'ft'],
+      ['Estimated True Alt.', 'estimated_true_altitude_from_indicated_ft', '#2563eb', 'ft'],
       ['Estimated VS', 'estimated_vertical_speed_fpm', '#0f766e', 'fpm'],
       ['Groundspeed', 'groundspeed_kt', '#16a34a', 'kt'],
       ['Pitch', 'pitch_deg', '#f97316', 'deg'],

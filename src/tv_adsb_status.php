@@ -67,7 +67,7 @@ function tv_adsb_default_home_airport(): string
 function tv_adsb_airports(): array
 {
     return array(
-        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156, 'elev_ft' => 115, 'surface_nm' => 1.8, 'boundary_nm' => 5.0),
+        'KTRM' => array('name' => 'Thermal', 'lat' => 33.626701, 'lon' => -116.160156, 'elev_ft' => -115, 'surface_nm' => 1.8, 'boundary_nm' => 5.0),
         'KPSP' => array('name' => 'Palm Springs', 'lat' => 33.829667, 'lon' => -116.506667, 'elev_ft' => 477, 'surface_nm' => 2.0, 'boundary_nm' => 6.0),
         'KHMT' => array('name' => 'Hemet Ryan', 'lat' => 33.734000, 'lon' => -117.023000, 'elev_ft' => 1517, 'surface_nm' => 1.5, 'boundary_nm' => 5.0),
         'KUDD' => array('name' => 'Bermuda Dunes', 'lat' => 33.748333, 'lon' => -116.274722, 'elev_ft' => 73, 'surface_nm' => 1.5, 'boundary_nm' => 5.0),

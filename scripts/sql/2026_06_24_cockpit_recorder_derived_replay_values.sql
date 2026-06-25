@@ -180,10 +180,52 @@ SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'field_calibrated_true_altitude_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN field_calibrated_true_altitude_ft DECIMAL(10,1) NULL AFTER field_calibrated_altitude_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_indicated_altitude_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_indicated_altitude_ft DECIMAL(10,1) NULL AFTER field_calibrated_true_altitude_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
+    AND COLUMN_NAME = 'estimated_true_altitude_from_indicated_ft'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN estimated_true_altitude_from_indicated_ft DECIMAL(10,1) NULL AFTER estimated_indicated_altitude_ft',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_flight_samples'
     AND COLUMN_NAME = 'altimeter_setting_inhg'
 );
 SET @sql := IF(@col_exists = 0,
-  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN altimeter_setting_inhg DECIMAL(5,2) NULL AFTER field_calibrated_altitude_ft',
+  'ALTER TABLE ipca_cockpit_flight_samples ADD COLUMN altimeter_setting_inhg DECIMAL(5,2) NULL AFTER estimated_true_altitude_from_indicated_ft',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;

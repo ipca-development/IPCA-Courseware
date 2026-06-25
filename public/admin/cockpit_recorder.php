@@ -392,13 +392,13 @@ cw_header('Cockpit Recorder POC');
                     <?php $derivedReplay = isset($reconSummary['derived_replay_values']) && is_array($reconSummary['derived_replay_values']) ? $reconSummary['derived_replay_values'] : array(); ?>
                     <?php if ($derivedReplay): ?>
                       <strong>Derived replay values</strong>
-                      <div>Estimated baro samples: <?= (int)($derivedReplay['estimated_baro_altitude_samples'] ?? 0) ?></div>
+                      <div>Estimated indicated samples: <?= (int)($derivedReplay['estimated_indicated_altitude_samples'] ?? ($derivedReplay['estimated_baro_altitude_samples'] ?? 0)) ?></div>
                       <div>Estimated VS samples: <?= (int)($derivedReplay['estimated_vertical_speed_samples'] ?? 0) ?></div>
                       <div>Airport elevation: <?= is_numeric($derivedReplay['airport_elevation_ft'] ?? null) ? h(number_format((float)$derivedReplay['airport_elevation_ft'], 0) . ' ft') : '--' ?> · <?= h((string)($derivedReplay['airport_elevation_source'] ?? 'unavailable')) ?></div>
                       <div>Field offset: <?= is_numeric($derivedReplay['field_altitude_offset_ft'] ?? null) ? h(number_format((float)$derivedReplay['field_altitude_offset_ft'], 0) . ' ft') : '--' ?></div>
                       <div>Altimeter source: <?= h((string)($derivedReplay['altimeter_setting_source'] ?? 'unavailable')) ?><?= is_numeric($derivedReplay['altimeter_setting_inhg'] ?? null) ? h(' · ' . number_format((float)$derivedReplay['altimeter_setting_inhg'], 2) . ' inHg') : '' ?></div>
                       <div>OAT: <?= is_numeric($derivedReplay['oat_c'] ?? null) ? h(number_format((float)$derivedReplay['oat_c'], 1) . ' °C') : '--' ?> · <?= h((string)($derivedReplay['oat_source'] ?? 'unavailable')) ?></div>
-                      <div class="cockpit-muted">GPS altitude is raw. Estimated baro/VS are field-calibrated replay values, not raw aircraft instrument values.</div>
+                      <div class="cockpit-muted">GPS altitude is raw geometric altitude. Estimated indicated/VS are derived replay values, not raw aircraft instrument values.</div>
                     <?php endif; ?>
                     <?php if ($alignmentSources): ?>
                       <strong>Source alignment</strong>

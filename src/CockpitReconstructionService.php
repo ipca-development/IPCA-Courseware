@@ -157,7 +157,7 @@ final class CockpitReconstructionService
         if (!self::tablesPresent($this->pdo)) {
             throw new RuntimeException('Apply scripts/sql/2026_06_23_cockpit_recorder_reconstruction_foundation.sql first.');
         }
-        if (!$this->columnPresent(self::SAMPLE_TABLE, 'field_calibrated_altitude_ft')) {
+        if (!$this->columnPresent(self::SAMPLE_TABLE, 'estimated_indicated_altitude_ft')) {
             throw new RuntimeException('Apply scripts/sql/2026_06_24_cockpit_recorder_derived_replay_values.sql before reconstructing.');
         }
     }
@@ -511,10 +511,17 @@ final class CockpitReconstructionService
                 ? $gpsAltFt + (float)$fieldCalibration['field_offset_ft']
                 : null;
             if ($fieldAlt !== null) {
-                $estimated = $fieldAlt;
+                $estimatedIndicated = $this->estimatedIndicatedAltitudeFt(
+                    $fieldAlt,
+                    (float)$fieldCalibration['airport_elevation_ft'],
+                    $oat !== null ? (float)$oat['oat_c'] : null
+                );
                 $samples[$index]['field_calibrated_altitude_ft'] = round($fieldAlt, 1);
-                $samples[$index]['estimated_baro_altitude_ft'] = round($estimated, 1);
-                $samples[$index]['baro_altitude_ft'] = round($estimated, 1);
+                $samples[$index]['field_calibrated_true_altitude_ft'] = round($fieldAlt, 1);
+                $samples[$index]['estimated_indicated_altitude_ft'] = round($estimatedIndicated, 1);
+                $samples[$index]['estimated_true_altitude_from_indicated_ft'] = round($fieldAlt, 1);
+                $samples[$index]['estimated_baro_altitude_ft'] = round($estimatedIndicated, 1);
+                $samples[$index]['baro_altitude_ft'] = round($estimatedIndicated, 1);
                 $samples[$index]['airport_elevation_ft'] = (float)$fieldCalibration['airport_elevation_ft'];
                 $samples[$index]['airport_elevation_source'] = (string)$fieldCalibration['source'];
                 $samples[$index]['field_altitude_offset_ft'] = (float)$fieldCalibration['field_offset_ft'];
@@ -525,6 +532,9 @@ final class CockpitReconstructionService
                 $samples[$index]['altitude_quality'] = $altimeter !== null && $oat !== null ? 'good' : ($altimeter !== null ? 'fair' : 'low');
             } else {
                 $samples[$index]['field_calibrated_altitude_ft'] = null;
+                $samples[$index]['field_calibrated_true_altitude_ft'] = null;
+                $samples[$index]['estimated_indicated_altitude_ft'] = null;
+                $samples[$index]['estimated_true_altitude_from_indicated_ft'] = null;
                 $samples[$index]['estimated_baro_altitude_ft'] = null;
                 $samples[$index]['baro_altitude_ft'] = null;
                 $samples[$index]['airport_elevation_ft'] = $fieldCalibration !== null ? (float)$fieldCalibration['airport_elevation_ft'] : null;
@@ -536,7 +546,7 @@ final class CockpitReconstructionService
                 $samples[$index]['oat_source'] = $oat !== null ? (string)$oat['source'] : 'unavailable';
                 $samples[$index]['altitude_quality'] = $gpsAltFt !== null ? 'low' : 'unavailable';
             }
-            $samples[$index]['altitude_source'] = $samples[$index]['estimated_baro_altitude_ft'] !== null ? 'estimated_baro' : ($gpsAltFt !== null ? 'gps' : 'unavailable');
+            $samples[$index]['altitude_source'] = $samples[$index]['estimated_indicated_altitude_ft'] !== null ? 'estimated_indicated' : ($gpsAltFt !== null ? 'gps' : 'unavailable');
             $samples[$index]['vertical_speed_fpm'] = null;
             $samples[$index]['estimated_vertical_speed_fpm'] = null;
             $samples[$index]['vertical_speed_source'] = 'unavailable';
@@ -620,6 +630,19 @@ final class CockpitReconstructionService
             'sample_count' => count($settings),
             'spread_inhg' => round($spread, 3),
         );
+    }
+
+    private function estimatedIndicatedAltitudeFt(float $trueAltitudeFt, float $airportElevationFt, ?float $oatC): float
+    {
+        if ($oatC === null) {
+            return $trueAltitudeFt;
+        }
+
+        $heightAboveFieldFt = max(0.0, $trueAltitudeFt - $airportElevationFt);
+        $isaFieldTempC = 15.0 - (2.0 * ($airportElevationFt / 1000.0));
+        $isaDeviationC = $oatC - $isaFieldTempC;
+        $trueToIndicatedFactor = max(0.75, min(1.35, 1.0 + (0.004 * $isaDeviationC)));
+        return $airportElevationFt + ($heightAboveFieldFt / $trueToIndicatedFactor);
     }
 
     /**
@@ -821,7 +844,7 @@ final class CockpitReconstructionService
         $halfWindow = $windowSeconds / 2.0;
 
         foreach ($samples as $index => $sample) {
-            if (!isset($sample['estimated_baro_altitude_ft']) || !is_numeric($sample['estimated_baro_altitude_ft'])) {
+            if (!isset($sample['estimated_indicated_altitude_ft']) || !is_numeric($sample['estimated_indicated_altitude_ft'])) {
                 $rawRates[$index] = null;
                 continue;
             }
@@ -846,7 +869,7 @@ final class CockpitReconstructionService
                 $rawRates[$index] = null;
                 continue;
             }
-            $rawRates[$index] = (((float)$last['estimated_baro_altitude_ft'] - (float)$first['estimated_baro_altitude_ft']) / $dt) * 60.0;
+            $rawRates[$index] = (((float)$last['estimated_indicated_altitude_ft'] - (float)$first['estimated_indicated_altitude_ft']) / $dt) * 60.0;
         }
 
         $smoothLeft = 0;
@@ -889,7 +912,7 @@ final class CockpitReconstructionService
     private function firstEstimatedAltitudeIndex(array $samples, int $left, int $right): ?int
     {
         for ($i = $left; $i <= $right; $i++) {
-            if (isset($samples[$i]['estimated_baro_altitude_ft']) && is_numeric($samples[$i]['estimated_baro_altitude_ft'])) {
+            if (isset($samples[$i]['estimated_indicated_altitude_ft']) && is_numeric($samples[$i]['estimated_indicated_altitude_ft'])) {
                 return $i;
             }
         }
@@ -902,7 +925,7 @@ final class CockpitReconstructionService
     private function lastEstimatedAltitudeIndex(array $samples, int $left, int $right): ?int
     {
         for ($i = $right; $i >= $left; $i--) {
-            if (isset($samples[$i]['estimated_baro_altitude_ft']) && is_numeric($samples[$i]['estimated_baro_altitude_ft'])) {
+            if (isset($samples[$i]['estimated_indicated_altitude_ft']) && is_numeric($samples[$i]['estimated_indicated_altitude_ft'])) {
                 return $i;
             }
         }
@@ -1272,8 +1295,17 @@ final class CockpitReconstructionService
             'adsb_vertical_speed_fpm' => $adsbVerticalSpeed,
             'estimated_baro_altitude_ft' => null,
             'estimated_vertical_speed_fpm' => null,
+            'field_calibrated_altitude_ft' => null,
+            'field_calibrated_true_altitude_ft' => null,
+            'estimated_indicated_altitude_ft' => null,
+            'estimated_true_altitude_from_indicated_ft' => null,
             'altimeter_setting_inhg' => $adsb['altimeter_setting_inhg'] ?? null,
             'altimeter_setting_source' => 'unavailable',
+            'airport_elevation_ft' => null,
+            'airport_elevation_source' => 'unavailable',
+            'field_altitude_offset_ft' => null,
+            'oat_c' => null,
+            'oat_source' => 'unavailable',
             'altitude_source' => $gpsAltFt !== null ? 'gps' : 'unavailable',
             'altitude_quality' => $gpsAltFt !== null ? 'good' : 'unavailable',
             'vertical_speed_source' => 'unavailable',
@@ -1566,7 +1598,7 @@ final class CockpitReconstructionService
             'ahrs_calibration' => $this->lastAhrsCalibration,
             'derived_replay_values' => array(
                 'gps_altitude_primary' => true,
-                'estimated_baro_altitude_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_baro_altitude_ft']) && $s['estimated_baro_altitude_ft'] !== null)),
+                'estimated_indicated_altitude_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_indicated_altitude_ft']) && $s['estimated_indicated_altitude_ft'] !== null)),
                 'estimated_vertical_speed_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['estimated_vertical_speed_fpm']) && $s['estimated_vertical_speed_fpm'] !== null)),
                 'field_calibrated_altitude_samples' => count(array_filter($samples, fn(array $s): bool => isset($s['field_calibrated_altitude_ft']) && $s['field_calibrated_altitude_ft'] !== null)),
                 'airport_elevation_ft' => $samples && isset($samples[0]['airport_elevation_ft']) ? $samples[0]['airport_elevation_ft'] : null,
@@ -1577,7 +1609,7 @@ final class CockpitReconstructionService
                 'oat_c' => $samples && isset($samples[0]['oat_c']) ? $samples[0]['oat_c'] : null,
                 'oat_source' => (string)($samples[0]['oat_source'] ?? 'unavailable'),
                 'slip_skid_status' => 'unavailable_until_lateral_acceleration_is_recorded',
-                'notes' => 'GPS altitude remains raw. Estimated baro altitude is field-calibrated from GPS using the stationary start window and known airport elevation.',
+                'notes' => 'GPS altitude remains raw geometric altitude. Field-calibrated true altitude is GPS shifted to airport elevation. Estimated indicated altitude applies the hot/cold day approximation from OAT.',
             ),
             'heading_replay_policy' => array(
                 'primary_source' => 'gps_track_when_groundspeed_at_least_5kt',
@@ -1611,7 +1643,9 @@ final class CockpitReconstructionService
                 latitude, longitude, gps_altitude_m, gps_altitude_ft, baro_altitude_ft, vertical_speed_fpm,
                 adsb_baro_altitude_ft, adsb_vertical_speed_fpm, estimated_baro_altitude_ft,
                 estimated_vertical_speed_fpm, field_calibrated_altitude_ft, altimeter_setting_inhg,
-                altimeter_setting_source, airport_elevation_ft, airport_elevation_source,
+                field_calibrated_true_altitude_ft, estimated_indicated_altitude_ft,
+                estimated_true_altitude_from_indicated_ft, altimeter_setting_source,
+                airport_elevation_ft, airport_elevation_source,
                 field_altitude_offset_ft, oat_c, oat_source,
                 altitude_source, altitude_quality, vertical_speed_source, vertical_speed_quality,
                 estimated_slip_skid_g, estimated_slip_skid_quality, estimated_slip_skid_source,
@@ -1619,7 +1653,7 @@ final class CockpitReconstructionService
                 magnetic_heading_deg, true_heading_deg, acceleration_g, wind_direction_deg, wind_speed_kt,
                 heading_bug_deg, altitude_bug_ft, autopilot_status, g3x_row_json, created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
             )
         ');
         foreach ($samples as $sample) {
@@ -1641,6 +1675,9 @@ final class CockpitReconstructionService
                 $sample['estimated_vertical_speed_fpm'],
                 $sample['field_calibrated_altitude_ft'],
                 $sample['altimeter_setting_inhg'],
+                $sample['field_calibrated_true_altitude_ft'],
+                $sample['estimated_indicated_altitude_ft'],
+                $sample['estimated_true_altitude_from_indicated_ft'],
                 $sample['altimeter_setting_source'],
                 $sample['airport_elevation_ft'],
                 $sample['airport_elevation_source'],
@@ -1763,8 +1800,8 @@ final class CockpitReconstructionService
         $row['GPS Ground Speed (kt)'] = self::fmt($sample['groundspeed_kt'] ?? null, 1);
         $row['GPS Ground Track (deg)'] = self::fmt($sample['magnetic_track_deg'] ?? null, 0);
         $row['Magnetic Heading (deg)'] = self::fmt($sample['magnetic_heading_deg'] ?? null, 0);
-        $row['Pressure Altitude (ft)'] = self::fmt($sample['estimated_baro_altitude_ft'] ?? null, 0);
-        $row['Baro Altitude (ft)'] = self::fmt($sample['estimated_baro_altitude_ft'] ?? null, 0);
+        $row['Pressure Altitude (ft)'] = self::fmt($sample['estimated_indicated_altitude_ft'] ?? null, 0);
+        $row['Baro Altitude (ft)'] = self::fmt($sample['estimated_indicated_altitude_ft'] ?? null, 0);
         $row['Vertical Speed (ft/min)'] = self::fmt($sample['estimated_vertical_speed_fpm'] ?? null, 0);
         $row['Pitch (deg)'] = self::fmt($sample['pitch_deg'] ?? null, 1);
         $row['Roll (deg)'] = self::fmt($sample['roll_deg'] ?? null, 1);
@@ -1954,6 +1991,9 @@ final class CockpitReconstructionService
             'estimated_baro_altitude_ft' => isset($row['estimated_baro_altitude_ft']) && $row['estimated_baro_altitude_ft'] !== null ? (float)$row['estimated_baro_altitude_ft'] : null,
             'estimated_vertical_speed_fpm' => isset($row['estimated_vertical_speed_fpm']) && $row['estimated_vertical_speed_fpm'] !== null ? (float)$row['estimated_vertical_speed_fpm'] : null,
             'field_calibrated_altitude_ft' => isset($row['field_calibrated_altitude_ft']) && $row['field_calibrated_altitude_ft'] !== null ? (float)$row['field_calibrated_altitude_ft'] : null,
+            'field_calibrated_true_altitude_ft' => isset($row['field_calibrated_true_altitude_ft']) && $row['field_calibrated_true_altitude_ft'] !== null ? (float)$row['field_calibrated_true_altitude_ft'] : null,
+            'estimated_indicated_altitude_ft' => isset($row['estimated_indicated_altitude_ft']) && $row['estimated_indicated_altitude_ft'] !== null ? (float)$row['estimated_indicated_altitude_ft'] : null,
+            'estimated_true_altitude_from_indicated_ft' => isset($row['estimated_true_altitude_from_indicated_ft']) && $row['estimated_true_altitude_from_indicated_ft'] !== null ? (float)$row['estimated_true_altitude_from_indicated_ft'] : null,
             'altimeter_setting_inhg' => isset($row['altimeter_setting_inhg']) && $row['altimeter_setting_inhg'] !== null ? (float)$row['altimeter_setting_inhg'] : null,
             'altimeter_setting_source' => (string)($row['altimeter_setting_source'] ?? 'unavailable'),
             'airport_elevation_ft' => isset($row['airport_elevation_ft']) && $row['airport_elevation_ft'] !== null ? (float)$row['airport_elevation_ft'] : null,
