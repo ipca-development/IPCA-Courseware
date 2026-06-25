@@ -239,6 +239,7 @@ final class CockpitRecorderService
         }
 
         $this->storeRecordingAircraftSnapshot((int)$recording['id'], $metadata);
+        $this->storeRecordingAltimeterSetting((int)$recording['id'], $metadata);
         $recording = $this->recordingByUid($recordingUid) ?: $recording;
 
         if ($ahrsFile !== null && $this->isPresentUpload($ahrsFile)) {
@@ -986,6 +987,65 @@ final class CockpitRecorderService
         $stmt->execute(array(self::TABLE, $columnName));
         $cache[$columnName] = (int)$stmt->fetchColumn() > 0;
         return (bool)$cache[$columnName];
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
+    private function storeRecordingAltimeterSetting(int $recordingId, array $metadata): void
+    {
+        if ($recordingId <= 0 || !$this->hasColumn('altimeter_setting_inhg')) {
+            return;
+        }
+
+        $setting = $this->metadataAltimeterSettingInhg($metadata);
+        if ($setting === null) {
+            return;
+        }
+
+        $source = trim((string)($metadata['altimeter_setting_source'] ?? 'app_logged'));
+        if ($source === '') {
+            $source = 'app_logged';
+        }
+        $source = substr($source, 0, 64);
+
+        $stmt = $this->pdo->prepare('
+            UPDATE ' . self::TABLE . '
+            SET altimeter_setting_inhg = ?,
+                altimeter_setting_source = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ');
+        $stmt->execute(array($setting, $source, $recordingId));
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
+    private function metadataAltimeterSettingInhg(array $metadata): ?float
+    {
+        foreach (array('altimeter_setting_inhg', 'qnh_inhg', 'altimeter_inhg', 'altimeter') as $key) {
+            if (isset($metadata[$key]) && is_numeric($metadata[$key])) {
+                return self::normalizeAltimeterSettingInhg((float)$metadata[$key]);
+            }
+        }
+        foreach (array('qnh_hpa', 'altimeter_hpa') as $key) {
+            if (isset($metadata[$key]) && is_numeric($metadata[$key])) {
+                return self::normalizeAltimeterSettingInhg((float)$metadata[$key]);
+            }
+        }
+        return null;
+    }
+
+    private static function normalizeAltimeterSettingInhg(float $value): ?float
+    {
+        if ($value >= 25.0 && $value <= 33.5) {
+            return round($value, 2);
+        }
+        if ($value >= 800.0 && $value <= 1100.0) {
+            return round($value / 33.8638866667, 2);
+        }
+        return null;
     }
 
     /**

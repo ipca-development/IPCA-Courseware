@@ -6,7 +6,10 @@ require_once __DIR__ . '/../../../src/CockpitReconstructionService.php';
 
 cw_require_admin();
 
+@set_time_limit(0);
+
 $id = trim((string)($_POST['id'] ?? $_GET['id'] ?? ''));
+$altimeterSetting = trim((string)($_POST['altimeter_setting_inhg'] ?? $_GET['altimeter_setting_inhg'] ?? ''));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
 try {
@@ -15,7 +18,14 @@ try {
     }
 
     $service = new CockpitReconstructionService($pdo);
-    $result = $service->reconstruct($id);
+    $options = array();
+    if ($altimeterSetting !== '') {
+        if (!is_numeric($altimeterSetting)) {
+            throw new RuntimeException('Altimeter setting must be numeric.');
+        }
+        $options['altimeter_setting_inhg'] = (float)$altimeterSetting;
+    }
+    $result = $service->reconstruct($id, $options);
 
     if ($wantsJson) {
         header('Content-Type: application/json; charset=utf-8');

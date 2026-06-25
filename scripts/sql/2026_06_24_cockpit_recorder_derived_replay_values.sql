@@ -5,6 +5,40 @@
 SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'altimeter_setting_inhg'
+);
+SET @after_clause := IF((
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'aircraft_adsb_hex'
+) > 0, ' AFTER aircraft_adsb_hex', '');
+SET @sql := IF(@col_exists = 0,
+  CONCAT('ALTER TABLE ipca_cockpit_recordings ADD COLUMN altimeter_setting_inhg DECIMAL(5,2) NULL', @after_clause),
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_recordings'
+    AND COLUMN_NAME = 'altimeter_setting_source'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_recordings ADD COLUMN altimeter_setting_source VARCHAR(64) NOT NULL DEFAULT ''unavailable'' AFTER altimeter_setting_inhg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_adsb_ownship_samples'
     AND COLUMN_NAME = 'altimeter_setting_inhg'
 );

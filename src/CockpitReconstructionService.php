@@ -164,7 +164,7 @@ final class CockpitReconstructionService
     /**
      * @return array<string,mixed>
      */
-    public function reconstruct(string $id): array
+    public function reconstruct(string $id, array $options = array()): array
     {
         $this->requireTables();
         $recorder = new CockpitRecorderService($this->pdo);
@@ -176,9 +176,9 @@ final class CockpitReconstructionService
         $recordingId = (int)$recording['id'];
         $jobId = $this->createJob($recordingId);
         $this->setRecordingStatus($recordingId, 'processing', 'processing', 'not_started', null);
+        $inTransaction = false;
 
         try {
-            $this->clearDerivedData($recordingId);
             $gpsSamples = $this->loadGPS($recording);
             $ahrsSamples = $this->loadAHRS($recording);
             if (!$gpsSamples && !$ahrsSamples) {
@@ -186,19 +186,23 @@ final class CockpitReconstructionService
             }
 
             $adsbSamples = $this->loadAdsbOwnship($recordingId);
-            $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples, $adsbSamples);
+            $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples, $adsbSamples, $options);
+            $timeline = $this->detectTimeline($recording, $samples);
+            $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
+            $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+            $this->pdo->beginTransaction();
+            $inTransaction = true;
+            $this->clearDerivedData($recordingId);
             $this->storeSamples($recordingId, $samples);
             $this->updateJob($jobId, 'processing', 45, null);
-
-            $timeline = $this->detectTimeline($recording, $samples);
             $this->storePhases($recordingId, $timeline['phases']);
             $this->storeEvents($recordingId, $timeline['events']);
-            $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
-
-            $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $this->setRecordingStatus($recordingId, 'ready', 'ready', (string)($recording['adsb_status'] ?? 'not_started'), $json ?: null);
             $this->ensureAdsbScaffold($recording);
             $this->updateJob($jobId, 'ready', 100, null);
+            $this->pdo->commit();
+            $inTransaction = false;
 
             return array(
                 'ok' => true,
@@ -209,6 +213,9 @@ final class CockpitReconstructionService
                 'summary' => $summary,
             );
         } catch (Throwable $e) {
+            if ($inTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             $this->setRecordingStatus($recordingId, 'failed', 'failed', (string)($recording['adsb_status'] ?? 'not_started'), null);
             $this->updateJob($jobId, 'failed', 0, $e->getMessage());
             throw $e;
@@ -440,7 +447,7 @@ final class CockpitReconstructionService
      * @param list<array<string,mixed>> $adsbSamples
      * @return list<array<string,mixed>>
      */
-    private function buildCanonicalSamples(array $recording, array $gpsSamples, array $ahrsSamples, array $adsbSamples): array
+    private function buildCanonicalSamples(array $recording, array $gpsSamples, array $ahrsSamples, array $adsbSamples, array $options = array()): array
     {
         $gps = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples), fn(array $row): bool => isset($row['seconds'])));
         $ahrs = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAHRS($row), $ahrsSamples), fn(array $row): bool => isset($row['seconds'])));
@@ -484,7 +491,7 @@ final class CockpitReconstructionService
             $samples[] = $sample;
         }
 
-        $samples = $this->addDerivedReplayValues($recording, $samples);
+        $samples = $this->addDerivedReplayValues($recording, $samples, $options);
         return $samples;
     }
 
@@ -492,9 +499,9 @@ final class CockpitReconstructionService
      * @param list<array<string,mixed>> $samples
      * @return list<array<string,mixed>>
      */
-    private function addDerivedReplayValues(array $recording, array $samples): array
+    private function addDerivedReplayValues(array $recording, array $samples, array $options = array()): array
     {
-        $altimeter = $this->stableAltimeterSetting($samples);
+        $altimeter = $this->selectAltimeterSetting($recording, $samples, $options);
         foreach ($samples as $index => $sample) {
             $gpsAltFt = isset($sample['gps_altitude_ft']) ? (float)$sample['gps_altitude_ft'] : null;
             if ($altimeter !== null && $gpsAltFt !== null) {
@@ -536,7 +543,43 @@ final class CockpitReconstructionService
      * @param list<array<string,mixed>> $samples
      * @return array{setting_inhg:float,source:string,quality:string,sample_count:int,spread_inhg:float}|null
      */
-    private function stableAltimeterSetting(array $samples): ?array
+    private function selectAltimeterSetting(array $recording, array $samples, array $options): ?array
+    {
+        $manual = isset($options['altimeter_setting_inhg']) && is_numeric($options['altimeter_setting_inhg'])
+            ? self::normalizeAltimeterSettingInhg((float)$options['altimeter_setting_inhg'])
+            : null;
+        if ($manual !== null) {
+            return array(
+                'setting_inhg' => $manual,
+                'source' => 'manual_reconstruct',
+                'quality' => 'fair',
+                'sample_count' => 0,
+                'spread_inhg' => 0.0,
+            );
+        }
+
+        $recordingSetting = isset($recording['altimeter_setting_inhg']) && is_numeric($recording['altimeter_setting_inhg'])
+            ? self::normalizeAltimeterSettingInhg((float)$recording['altimeter_setting_inhg'])
+            : null;
+        if ($recordingSetting !== null) {
+            $source = trim((string)($recording['altimeter_setting_source'] ?? 'app_logged'));
+            return array(
+                'setting_inhg' => $recordingSetting,
+                'source' => $source !== '' ? $source : 'app_logged',
+                'quality' => 'fair',
+                'sample_count' => 0,
+                'spread_inhg' => 0.0,
+            );
+        }
+
+        return $this->stableAdsbAltimeterSetting($samples);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return array{setting_inhg:float,source:string,quality:string,sample_count:int,spread_inhg:float}|null
+     */
+    private function stableAdsbAltimeterSetting(array $samples): ?array
     {
         $settings = array_values(array_filter(array_map(
             fn(array $sample): ?float => isset($sample['altimeter_setting_inhg']) && is_numeric($sample['altimeter_setting_inhg']) ? (float)$sample['altimeter_setting_inhg'] : null,
@@ -568,23 +611,32 @@ final class CockpitReconstructionService
     private function addEstimatedVerticalSpeed(array $samples, float $windowSeconds): array
     {
         $rawRates = array();
+        $count = count($samples);
+        $left = 0;
+        $right = 0;
+        $halfWindow = $windowSeconds / 2.0;
+
         foreach ($samples as $index => $sample) {
             if (!isset($sample['estimated_baro_altitude_ft']) || !is_numeric($sample['estimated_baro_altitude_ft'])) {
                 $rawRates[$index] = null;
                 continue;
             }
             $seconds = (float)$sample['seconds_since_start'];
-            $window = array_values(array_filter($samples, static function (array $candidate) use ($seconds, $windowSeconds): bool {
-                return isset($candidate['estimated_baro_altitude_ft'])
-                    && is_numeric($candidate['estimated_baro_altitude_ft'])
-                    && abs((float)$candidate['seconds_since_start'] - $seconds) <= ($windowSeconds / 2.0);
-            }));
-            if (count($window) < 3) {
+            while ($left < $count && (float)$samples[$left]['seconds_since_start'] < $seconds - $halfWindow) {
+                $left++;
+            }
+            while ($right + 1 < $count && (float)$samples[$right + 1]['seconds_since_start'] <= $seconds + $halfWindow) {
+                $right++;
+            }
+
+            $firstIndex = $this->firstEstimatedAltitudeIndex($samples, $left, $right);
+            $lastIndex = $this->lastEstimatedAltitudeIndex($samples, $left, $right);
+            if ($firstIndex === null || $lastIndex === null || $lastIndex <= $firstIndex) {
                 $rawRates[$index] = null;
                 continue;
             }
-            $first = $window[0];
-            $last = $window[count($window) - 1];
+            $first = $samples[$firstIndex];
+            $last = $samples[$lastIndex];
             $dt = (float)$last['seconds_since_start'] - (float)$first['seconds_since_start'];
             if ($dt < 4.0) {
                 $rawRates[$index] = null;
@@ -593,19 +645,26 @@ final class CockpitReconstructionService
             $rawRates[$index] = (((float)$last['estimated_baro_altitude_ft'] - (float)$first['estimated_baro_altitude_ft']) / $dt) * 60.0;
         }
 
+        $smoothLeft = 0;
+        $smoothRight = 0;
         foreach ($samples as $index => $sample) {
             if ($rawRates[$index] === null) {
                 continue;
             }
             $seconds = (float)$sample['seconds_since_start'];
+            while ($smoothLeft < $count && (float)$samples[$smoothLeft]['seconds_since_start'] < $seconds - 2.0) {
+                $smoothLeft++;
+            }
+            while ($smoothRight + 1 < $count && (float)$samples[$smoothRight + 1]['seconds_since_start'] <= $seconds + 2.0) {
+                $smoothRight++;
+            }
+
             $nearbyRates = array();
-            foreach ($samples as $rateIndex => $candidate) {
+            for ($rateIndex = $smoothLeft; $rateIndex <= $smoothRight; $rateIndex++) {
                 if ($rawRates[$rateIndex] === null) {
                     continue;
                 }
-                if (abs((float)$candidate['seconds_since_start'] - $seconds) <= 2.0) {
-                    $nearbyRates[] = (float)$rawRates[$rateIndex];
-                }
+                $nearbyRates[] = (float)$rawRates[$rateIndex];
             }
             if (!$nearbyRates) {
                 continue;
@@ -618,6 +677,32 @@ final class CockpitReconstructionService
         }
 
         return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     */
+    private function firstEstimatedAltitudeIndex(array $samples, int $left, int $right): ?int
+    {
+        for ($i = $left; $i <= $right; $i++) {
+            if (isset($samples[$i]['estimated_baro_altitude_ft']) && is_numeric($samples[$i]['estimated_baro_altitude_ft'])) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     */
+    private function lastEstimatedAltitudeIndex(array $samples, int $left, int $right): ?int
+    {
+        for ($i = $right; $i >= $left; $i--) {
+            if (isset($samples[$i]['estimated_baro_altitude_ft']) && is_numeric($samples[$i]['estimated_baro_altitude_ft'])) {
+                return $i;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1536,6 +1621,17 @@ final class CockpitReconstructionService
         sort($values, SORT_NUMERIC);
         $index = (int)floor((count($values) - 1) * max(0.0, min(1.0, $percentile)));
         return (float)$values[$index];
+    }
+
+    private static function normalizeAltimeterSettingInhg(float $value): ?float
+    {
+        if ($value >= 25.0 && $value <= 33.5) {
+            return round($value, 2);
+        }
+        if ($value >= 800.0 && $value <= 1100.0) {
+            return round($value / 33.8638866667, 2);
+        }
+        return null;
     }
 
     private static function normalizeDegrees(float $value): float

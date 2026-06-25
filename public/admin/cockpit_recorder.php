@@ -411,6 +411,10 @@ cw_header('Cockpit Recorder POC');
                 <?php endif; ?>
                 <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php">
                   <input type="hidden" name="id" value="<?= $id ?>">
+                  <label class="cockpit-muted" style="display:block;margin-top:6px">
+                    Altimeter setting / QNH (optional, inHg)
+                    <input type="number" name="altimeter_setting_inhg" min="25" max="33.5" step="0.01" placeholder="29.92" style="display:block;width:140px;margin-top:4px">
+                  </label>
                   <button class="cockpit-button" type="submit">Reconstruct</button>
                 </form>
                 <div class="cockpit-link-grid">
