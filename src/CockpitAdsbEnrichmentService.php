@@ -19,6 +19,9 @@ final class CockpitAdsbEnrichmentService
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
     private const TRAFFIC_TABLE = 'ipca_cockpit_adsb_traffic_samples';
+    private const MAX_ADSB_GPS_DISTANCE_NM = 1.0;
+    private const MAX_ADSB_GPS_SPEED_DELTA_KT = 45.0;
+    private const MAX_ADSB_GPS_TRACK_DELTA_DEG = 60.0;
 
     public function __construct(private PDO $pdo)
     {
@@ -73,9 +76,11 @@ final class CockpitAdsbEnrichmentService
             $raw = $this->fetchTrace($hex, $window);
             $rawPath = $this->storeJson($recording, 'raw', $raw);
             $samples = $this->normalizeTrace($raw, $window['start_epoch'], $window['end_epoch']);
+            $validation = $this->validateTraceAlignment($samples, $recording);
+            $samples = $validation['samples'];
             if (!$samples) {
                 $this->clearOwnshipSamples($recordingId);
-                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples found inside recording time window. Spatial fallback is disabled for altitude/vertical-speed because it can misalign repeated or nearby track segments.');
+                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples passed UTC plus GPS same-time validation. Spatial fallback is disabled for altitude/vertical-speed because it can misalign repeated or nearby track segments.', $validation['stats']);
                 $diagnosticsPath = $this->storeJson($recording, 'normalized', $diagnostics);
                 $message = $this->diagnosticMessage($diagnostics);
                 $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $message, $rawPath, $diagnosticsPath);
@@ -89,8 +94,9 @@ final class CockpitAdsbEnrichmentService
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
                 'query_end_utc' => $window['end_iso'],
-                'alignment' => 'timestamp_window',
-                'diagnostics' => $this->traceDiagnostics($raw, $recording, $window, count($samples), 0, null),
+                'alignment' => 'timestamp_window_plus_gps_validation',
+                'validation' => $validation['stats'],
+                'diagnostics' => $this->traceDiagnostics($raw, $recording, $window, count($samples), 0, null, $validation['stats']),
                 'samples' => $samples,
             );
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
@@ -423,7 +429,7 @@ final class CockpitAdsbEnrichmentService
                 'latitude' => (float)$row[1],
                 'longitude' => (float)$row[2],
                 'baro_altitude_ft' => $baroAlt,
-                'vertical_speed_fpm' => isset($row[7]) && is_numeric($row[7]) ? (float)$row[7] : null,
+                'vertical_speed_fpm' => $this->traceVerticalSpeedFpm($row),
                 'groundspeed_kt' => isset($row[4]) && is_numeric($row[4]) ? (float)$row[4] : null,
                 'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
                 'heading_deg' => isset($row[8]) && is_array($row[8]) && isset($row[8]['mag_heading']) && is_numeric($row[8]['mag_heading']) ? (float)$row[8]['mag_heading'] : null,
@@ -434,6 +440,147 @@ final class CockpitAdsbEnrichmentService
 
         usort($samples, fn(array $a, array $b): int => ((float)$a['seconds_since_start']) <=> ((float)$b['seconds_since_start']));
         return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @param array<string,mixed> $recording
+     * @return array{samples:list<array<string,mixed>>,stats:array<string,mixed>}
+     */
+    private function validateTraceAlignment(array $samples, array $recording): array
+    {
+        $gpsRows = $this->gpsAlignmentRows($recording);
+        $stats = array(
+            'status' => 'not_checked',
+            'input_sample_count' => count($samples),
+            'accepted_sample_count' => count($samples),
+            'rejected_sample_count' => 0,
+            'missing_gps_match_count' => 0,
+            'position_reject_count' => 0,
+            'speed_reject_count' => 0,
+            'track_reject_count' => 0,
+            'max_allowed_distance_nm' => self::MAX_ADSB_GPS_DISTANCE_NM,
+            'median_distance_nm' => null,
+            'max_distance_nm' => null,
+            'median_groundspeed_delta_kt' => null,
+            'median_track_delta_deg' => null,
+            'median_gps_to_baro_altitude_delta_ft' => null,
+        );
+
+        if (!$samples || !$gpsRows) {
+            $stats['status'] = $gpsRows ? 'no_adsb_samples' : 'no_gps_reference';
+            return array('samples' => $samples, 'stats' => $stats);
+        }
+
+        $accepted = array();
+        $distances = array();
+        $speedDeltas = array();
+        $trackDeltas = array();
+        $altitudeDeltas = array();
+        foreach ($samples as $sample) {
+            $gps = $this->gpsAtSeconds($gpsRows, (float)$sample['seconds_since_start']);
+            if ($gps === null) {
+                $stats['missing_gps_match_count']++;
+                continue;
+            }
+
+            $distanceNm = self::distanceNm((float)$sample['latitude'], (float)$sample['longitude'], (float)$gps['latitude'], (float)$gps['longitude']);
+            $distances[] = $distanceNm;
+            if ($distanceNm > self::MAX_ADSB_GPS_DISTANCE_NM) {
+                $stats['position_reject_count']++;
+                continue;
+            }
+
+            $speedDelta = null;
+            if (isset($sample['groundspeed_kt'], $gps['groundspeed_kt']) && is_numeric($sample['groundspeed_kt']) && is_numeric($gps['groundspeed_kt'])) {
+                $speedDelta = abs((float)$sample['groundspeed_kt'] - (float)$gps['groundspeed_kt']);
+                $speedDeltas[] = $speedDelta;
+                if ((float)$gps['groundspeed_kt'] >= 10.0 && $speedDelta > self::MAX_ADSB_GPS_SPEED_DELTA_KT) {
+                    $stats['speed_reject_count']++;
+                    continue;
+                }
+            }
+
+            $trackDelta = null;
+            if (isset($sample['track_deg'], $gps['track_deg'], $sample['groundspeed_kt'], $gps['groundspeed_kt'])
+                && is_numeric($sample['track_deg']) && is_numeric($gps['track_deg'])
+                && (float)$sample['groundspeed_kt'] >= 20.0 && (float)$gps['groundspeed_kt'] >= 20.0
+            ) {
+                $trackDelta = abs(self::angleDelta((float)$sample['track_deg'], (float)$gps['track_deg']));
+                $trackDeltas[] = $trackDelta;
+                if ($trackDelta > self::MAX_ADSB_GPS_TRACK_DELTA_DEG) {
+                    $stats['track_reject_count']++;
+                    continue;
+                }
+            }
+
+            if (isset($sample['baro_altitude_ft'], $gps['altitude_ft']) && is_numeric($sample['baro_altitude_ft']) && is_numeric($gps['altitude_ft'])) {
+                $altitudeDeltas[] = (float)$gps['altitude_ft'] - (float)$sample['baro_altitude_ft'];
+            }
+
+            $sample['validation'] = array(
+                'gps_distance_nm' => round($distanceNm, 4),
+                'gps_groundspeed_delta_kt' => $speedDelta !== null ? round($speedDelta, 2) : null,
+                'gps_track_delta_deg' => $trackDelta !== null ? round($trackDelta, 2) : null,
+            );
+            $accepted[] = $sample;
+        }
+
+        $stats['status'] = $accepted ? 'passed' : 'failed';
+        $stats['accepted_sample_count'] = count($accepted);
+        $stats['rejected_sample_count'] = count($samples) - count($accepted);
+        $stats['median_distance_nm'] = $distances ? round(self::median($distances), 4) : null;
+        $stats['max_distance_nm'] = $distances ? round(max($distances), 4) : null;
+        $stats['median_groundspeed_delta_kt'] = $speedDeltas ? round(self::median($speedDeltas), 2) : null;
+        $stats['median_track_delta_deg'] = $trackDeltas ? round(self::median($trackDeltas), 2) : null;
+        $stats['median_gps_to_baro_altitude_delta_ft'] = $altitudeDeltas ? round(self::median($altitudeDeltas), 1) : null;
+
+        return array('samples' => $accepted, 'stats' => $stats);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $gpsRows
+     * @return array<string,mixed>|null
+     */
+    private function gpsAtSeconds(array $gpsRows, float $seconds): ?array
+    {
+        $before = null;
+        $after = null;
+        foreach ($gpsRows as $row) {
+            $rowSeconds = (float)$row['seconds'];
+            if ($rowSeconds <= $seconds) {
+                $before = $row;
+                continue;
+            }
+            $after = $row;
+            break;
+        }
+
+        if ($before === null) {
+            return $after !== null && abs((float)$after['seconds'] - $seconds) <= 45.0 ? $after : null;
+        }
+        if ($after === null) {
+            return abs((float)$before['seconds'] - $seconds) <= 45.0 ? $before : null;
+        }
+
+        $beforeSeconds = (float)$before['seconds'];
+        $afterSeconds = (float)$after['seconds'];
+        $gap = $afterSeconds - $beforeSeconds;
+        if ($gap <= 0.0 || $gap > 60.0) {
+            $nearest = abs($seconds - $beforeSeconds) <= abs($afterSeconds - $seconds) ? $before : $after;
+            return abs((float)$nearest['seconds'] - $seconds) <= 45.0 ? $nearest : null;
+        }
+
+        $ratio = max(0.0, min(1.0, ($seconds - $beforeSeconds) / $gap));
+        return array(
+            'seconds' => $seconds,
+            'timestamp' => $before['timestamp'] ?? '',
+            'latitude' => self::lerpNullable($before['latitude'] ?? null, $after['latitude'] ?? null, $ratio),
+            'longitude' => self::lerpNullable($before['longitude'] ?? null, $after['longitude'] ?? null, $ratio),
+            'altitude_ft' => self::lerpNullable($before['altitude_ft'] ?? null, $after['altitude_ft'] ?? null, $ratio),
+            'groundspeed_kt' => self::lerpNullable($before['groundspeed_kt'] ?? null, $after['groundspeed_kt'] ?? null, $ratio),
+            'track_deg' => self::lerpAngleNullable($before['track_deg'] ?? null, $after['track_deg'] ?? null, $ratio),
+        );
     }
 
     /**
@@ -487,7 +634,7 @@ final class CockpitAdsbEnrichmentService
                 'latitude' => $lat,
                 'longitude' => $lon,
                 'baro_altitude_ft' => is_numeric($alt) ? (float)$alt : null,
-                'vertical_speed_fpm' => isset($row[7]) && is_numeric($row[7]) ? (float)$row[7] : null,
+                'vertical_speed_fpm' => $this->traceVerticalSpeedFpm($row),
                 'groundspeed_kt' => isset($row[4]) && is_numeric($row[4]) ? (float)$row[4] : null,
                 'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
                 'heading_deg' => isset($row[8]) && is_array($row[8]) && isset($row[8]['mag_heading']) && is_numeric($row[8]['mag_heading']) ? (float)$row[8]['mag_heading'] : null,
@@ -527,6 +674,9 @@ final class CockpitAdsbEnrichmentService
                 'timestamp' => (string)($row['timestamp'] ?? ''),
                 'latitude' => (float)$row['latitude'],
                 'longitude' => (float)$row['longitude'],
+                'altitude_ft' => isset($row['altitude']) && is_numeric($row['altitude']) ? (float)$row['altitude'] * 3.280839895 : null,
+                'groundspeed_kt' => isset($row['speedKnots']) && is_numeric($row['speedKnots']) ? (float)$row['speedKnots'] : null,
+                'track_deg' => isset($row['course']) && is_numeric($row['course']) ? (float)$row['course'] : null,
             );
         }
         usort($rows, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
@@ -539,7 +689,7 @@ final class CockpitAdsbEnrichmentService
      * @param array<string,mixed> $window
      * @return array<string,mixed>
      */
-    private function traceDiagnostics(array $trace, array $recording, array $window, int $filteredCount, int $spatialCount, ?string $note): array
+    private function traceDiagnostics(array $trace, array $recording, array $window, int $filteredCount, int $spatialCount, ?string $note, ?array $validation = null): array
     {
         $base = isset($trace['timestamp']) && is_numeric($trace['timestamp']) ? (float)$trace['timestamp'] : null;
         $rows = isset($trace['trace']) && is_array($trace['trace']) ? $trace['trace'] : array();
@@ -601,6 +751,7 @@ final class CockpitAdsbEnrichmentService
                 'numeric_baro_altitude_rows' => $numericAltitudes,
                 'numeric_vertical_speed_rows' => $numericRates,
             ),
+            'validation' => $validation ?? array(),
         );
     }
 
@@ -612,12 +763,22 @@ final class CockpitAdsbEnrichmentService
         $window = $diagnostics['filter_window_utc'] ?? array();
         $gps = $diagnostics['gps'] ?? array();
         $adsb = $diagnostics['adsb_trace'] ?? array();
+        $validation = isset($diagnostics['validation']) && is_array($diagnostics['validation']) ? $diagnostics['validation'] : array();
+        $validationText = $validation
+            ? '; GPS validation accepted ' . (string)($validation['accepted_sample_count'] ?? 0)
+                . ' of ' . (string)($validation['input_sample_count'] ?? 0)
+                . ' samples'
+                . '; position rejects ' . (string)($validation['position_reject_count'] ?? 0)
+                . '; speed rejects ' . (string)($validation['speed_reject_count'] ?? 0)
+                . '; track rejects ' . (string)($validation['track_reject_count'] ?? 0)
+            : '';
         return 'No ADS-B samples matched. Filter UTC '
             . (string)($window['start'] ?? '--') . ' to ' . (string)($window['end'] ?? '--')
             . '; GPS UTC ' . (string)($gps['first_timestamp'] ?? '--') . ' to ' . (string)($gps['last_timestamp'] ?? '--')
             . '; ADS-B UTC ' . (string)($adsb['first_timestamp'] ?? '--') . ' to ' . (string)($adsb['last_timestamp'] ?? '--')
             . '; raw rows ' . (string)($adsb['raw_row_count'] ?? 0)
-            . '; rows inside window ' . (string)($adsb['rows_inside_time_window'] ?? 0) . '.';
+            . '; rows inside window ' . (string)($adsb['rows_inside_time_window'] ?? 0)
+            . $validationText . '.';
     }
 
     private static function epochIso(?float $epoch): ?string
@@ -638,6 +799,74 @@ final class CockpitAdsbEnrichmentService
         $dLon = deg2rad($lon2 - $lon1);
         $a = sin($dLat / 2) ** 2 + cos($lat1Rad) * cos($lat2Rad) * sin($dLon / 2) ** 2;
         return $earthRadiusNm * 2 * atan2(sqrt($a), sqrt(max(0.0, 1 - $a)));
+    }
+
+    /**
+     * @param array<int,mixed> $row
+     */
+    private function traceVerticalSpeedFpm(array $row): ?float
+    {
+        if (isset($row[6]) && is_numeric($row[6])) {
+            return (float)$row[6];
+        }
+        if (isset($row[7]) && is_numeric($row[7])) {
+            return (float)$row[7];
+        }
+        return null;
+    }
+
+    private static function lerpNullable(mixed $a, mixed $b, float $ratio): ?float
+    {
+        if (!is_numeric($a) || !is_numeric($b)) {
+            return is_numeric($a) ? (float)$a : (is_numeric($b) ? (float)$b : null);
+        }
+        return (float)$a + ((float)$b - (float)$a) * $ratio;
+    }
+
+    private static function lerpAngleNullable(mixed $a, mixed $b, float $ratio): ?float
+    {
+        if (!is_numeric($a) || !is_numeric($b)) {
+            return is_numeric($a) ? self::normalizeDegrees((float)$a) : (is_numeric($b) ? self::normalizeDegrees((float)$b) : null);
+        }
+        return self::normalizeDegrees((float)$a + self::angleDelta((float)$a, (float)$b) * $ratio);
+    }
+
+    private static function normalizeDegrees(float $degrees): float
+    {
+        $normalized = fmod($degrees, 360.0);
+        if ($normalized < 0) {
+            $normalized += 360.0;
+        }
+        return $normalized;
+    }
+
+    private static function angleDelta(float $from, float $to): float
+    {
+        $delta = self::normalizeDegrees($to) - self::normalizeDegrees($from);
+        while ($delta > 180.0) {
+            $delta -= 360.0;
+        }
+        while ($delta < -180.0) {
+            $delta += 360.0;
+        }
+        return $delta;
+    }
+
+    /**
+     * @param list<float> $values
+     */
+    private static function median(array $values): float
+    {
+        sort($values, SORT_NUMERIC);
+        $count = count($values);
+        if ($count === 0) {
+            return 0.0;
+        }
+        $middle = intdiv($count, 2);
+        if ($count % 2 === 1) {
+            return (float)$values[$middle];
+        }
+        return ((float)$values[$middle - 1] + (float)$values[$middle]) / 2.0;
     }
 
     /**
