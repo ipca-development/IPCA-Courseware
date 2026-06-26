@@ -359,6 +359,17 @@ final class CockpitReconstructionService
         $stmt->execute(array($status, max(0, min(100, $progress)), $error, $status, $jobId));
     }
 
+    public function markReconstructionFailed(string $id, string $error): void
+    {
+        $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId($id);
+        if (!$recording) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('UPDATE ' . self::RECORDINGS_TABLE . ' SET reconstruction_status = \'failed\', timeline_status = \'failed\', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        $stmt->execute(array(substr($error, 0, 2000), (int)$recording['id']));
+    }
+
     private function clearDerivedData(int $recordingId): void
     {
         foreach (array(self::SAMPLE_TABLE, self::PHASE_TABLE, self::EVENT_TABLE) as $table) {

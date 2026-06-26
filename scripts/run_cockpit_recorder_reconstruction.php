@@ -45,6 +45,11 @@ try {
         . (int)($result['sample_count'] ?? 0) . ' samples.' . PHP_EOL;
     exit(0);
 } catch (Throwable $e) {
+    try {
+        (new CockpitReconstructionService($pdo))->markReconstructionFailed($recordingId, $e->getMessage());
+    } catch (Throwable) {
+        // The original reconstruction failure is the useful error for the worker log.
+    }
     fwrite(STDERR, 'Cockpit recorder reconstruction failed: ' . $e->getMessage() . PHP_EOL);
     exit(1);
 }

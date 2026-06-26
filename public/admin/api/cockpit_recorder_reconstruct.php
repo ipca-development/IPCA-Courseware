@@ -30,7 +30,10 @@ function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
         return false;
     }
 
-    $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+    $php = cockpit_reconstruct_cli_php();
+    if ($php === '') {
+        return false;
+    }
     $script = realpath(__DIR__ . '/../../../scripts/run_cockpit_recorder_reconstruction.php');
     if ($script === false) {
         return false;
@@ -66,7 +69,7 @@ function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
         $cmd = 'start /B "" ' . implode(' ', $parts) . ' >> ' . escapeshellarg($logFile) . ' 2>&1';
     } else {
-        $cmd = implode(' ', $parts) . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
+        $cmd = 'nohup ' . implode(' ', $parts) . ' >> ' . escapeshellarg($logFile) . ' 2>&1 < /dev/null & echo $!';
     }
 
     @file_put_contents($logFile, '[' . gmdate('c') . '] Command: ' . $cmd . PHP_EOL, FILE_APPEND);
@@ -76,6 +79,33 @@ function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
         return false;
     }
     return true;
+}
+
+function cockpit_reconstruct_cli_php(): string
+{
+    $candidates = array();
+    $bindir = trim((string)PHP_BINDIR);
+    if ($bindir !== '') {
+        $candidates[] = $bindir . '/php';
+    }
+    $candidates[] = '/usr/bin/php';
+    $candidates[] = '/usr/local/bin/php';
+    $candidates[] = '/opt/homebrew/bin/php';
+
+    foreach ($candidates as $candidate) {
+        if (is_file($candidate) && is_executable($candidate) && !str_contains(basename($candidate), 'php-fpm')) {
+            return $candidate;
+        }
+    }
+
+    if (function_exists('shell_exec')) {
+        $resolved = trim((string)@shell_exec('command -v php 2>/dev/null'));
+        if ($resolved !== '' && is_executable($resolved)) {
+            return $resolved;
+        }
+    }
+
+    return '';
 }
 
 try {
@@ -118,6 +148,7 @@ try {
         ")->execute(array((int)$recording['id']));
 
         if (!cockpit_reconstruct_spawn_worker((string)$recording['id'], $options)) {
+            $service->markReconstructionFailed((string)$recording['id'], 'Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
             throw new RuntimeException('Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
         }
 
