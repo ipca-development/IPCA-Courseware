@@ -85,6 +85,10 @@ function cockpit_admin_reconstruction_summary(array $row): array
 }
 
 $error = trim((string)($_GET['error'] ?? ''));
+$notice = '';
+if ((string)($_GET['reconstruction'] ?? '') === 'started') {
+    $notice = 'Reconstruction started in the background. Refresh this page in a minute, then open Replay when the status is ready.';
+}
 $recordings = array();
 $service = null;
 $adsbService = null;
@@ -113,6 +117,7 @@ cw_header('Cockpit Recorder POC');
 .cockpit-badge-warning { background: #fef3c7; color: #92400e; }
 .cockpit-transcript { max-width: 520px; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; font-size: 13px; }
 .cockpit-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
+.cockpit-notice { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; border-radius: 10px; padding: 12px; }
 .cockpit-audio { width: 260px; max-width: 100%; }
 .cockpit-health { min-width: 260px; }
 .cockpit-health-grid { display: grid; gap: 4px; font-size: 12px; color: #334155; }
@@ -142,6 +147,9 @@ cw_header('Cockpit Recorder POC');
 
   <?php if ($error !== ''): ?>
     <div class="cockpit-error"><?= h($error) ?></div>
+  <?php endif; ?>
+  <?php if ($notice !== ''): ?>
+    <div class="cockpit-notice"><?= h($notice) ?></div>
   <?php endif; ?>
 
   <section class="cockpit-card">

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/CockpitReconstructionService.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
 
 cw_require_admin();
 
@@ -20,7 +21,62 @@ $id = trim((string)(
 $altimeterSetting = trim((string)($_POST['altimeter_setting_inhg'] ?? $_GET['altimeter_setting_inhg'] ?? ''));
 $airportElevation = trim((string)($_POST['airport_elevation_ft'] ?? $_GET['airport_elevation_ft'] ?? ''));
 $oatC = trim((string)($_POST['oat_c'] ?? $_GET['oat_c'] ?? ''));
+$mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'async'));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
+
+function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
+{
+    if (!function_exists('exec')) {
+        return false;
+    }
+
+    $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+    $script = realpath(__DIR__ . '/../../../scripts/run_cockpit_recorder_reconstruction.php');
+    if ($script === false) {
+        return false;
+    }
+
+    $logDir = CockpitRecorderService::projectRoot() . '/storage/logs';
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0775, true);
+    }
+    if (!is_dir($logDir) || !is_writable($logDir)) {
+        return false;
+    }
+
+    $safeId = preg_replace('/[^A-Za-z0-9._-]+/', '-', $id) ?: 'recording';
+    $logFile = $logDir . '/cockpit_reconstruction_' . $safeId . '.log';
+    @file_put_contents($logFile, '[' . gmdate('c') . '] Spawning cockpit reconstruction worker.' . PHP_EOL, FILE_APPEND);
+
+    $parts = array(
+        escapeshellarg($php),
+        escapeshellarg($script),
+        escapeshellarg('--recording-id=' . $id),
+    );
+    if (isset($options['altimeter_setting_inhg'])) {
+        $parts[] = escapeshellarg('--altimeter-setting-inhg=' . (string)$options['altimeter_setting_inhg']);
+    }
+    if (isset($options['airport_elevation_ft'])) {
+        $parts[] = escapeshellarg('--airport-elevation-ft=' . (string)$options['airport_elevation_ft']);
+    }
+    if (isset($options['oat_c'])) {
+        $parts[] = escapeshellarg('--oat-c=' . (string)$options['oat_c']);
+    }
+
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        $cmd = 'start /B "" ' . implode(' ', $parts) . ' >> ' . escapeshellarg($logFile) . ' 2>&1';
+    } else {
+        $cmd = implode(' ', $parts) . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
+    }
+
+    @file_put_contents($logFile, '[' . gmdate('c') . '] Command: ' . $cmd . PHP_EOL, FILE_APPEND);
+    exec($cmd, $output, $exitCode);
+    if ($exitCode !== 0) {
+        @file_put_contents($logFile, '[' . gmdate('c') . '] Worker spawn command exited with code ' . $exitCode . PHP_EOL, FILE_APPEND);
+        return false;
+    }
+    return true;
+}
 
 try {
     if ($id === '') {
@@ -47,6 +103,28 @@ try {
         }
         $options['oat_c'] = (float)$oatC;
     }
+    if ($mode !== 'sync' && !$wantsJson) {
+        $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);
+        if (!$recording) {
+            throw new RuntimeException('Recording not found.');
+        }
+        $pdo->prepare("
+            UPDATE ipca_cockpit_recordings
+            SET reconstruction_status = 'processing',
+                timeline_status = 'processing',
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array((int)$recording['id']));
+
+        if (!cockpit_reconstruct_spawn_worker((string)$recording['id'], $options)) {
+            throw new RuntimeException('Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
+        }
+
+        header('Location: /admin/cockpit_recorder.php?reconstruction=started&id=' . urlencode((string)$recording['id']));
+        exit;
+    }
+
     $result = $service->reconstruct($id, $options);
 
     if ($wantsJson) {
