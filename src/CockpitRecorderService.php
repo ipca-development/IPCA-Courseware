@@ -1480,7 +1480,7 @@ final class CockpitRecorderService
             ")->execute(array($progress, $recordingId));
         }
 
-        $combined = trim(implode("\n\n", array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== '')));
+        $combined = self::cleanTranscriptText(trim(implode("\n\n", array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== ''))));
         if ($failedChunks) {
             $failedLabel = implode(', ', array_map(fn(int $i): string => (string)($i + 1), $failedChunks));
             $message = 'Partial transcript: chunk(s) ' . $failedLabel . ' failed. '
@@ -1557,7 +1557,7 @@ final class CockpitRecorderService
             throw new RuntimeException('OpenAI transcription error: ' . $msg);
         }
 
-        $text = trim((string)($json['text'] ?? ''));
+        $text = self::cleanTranscriptText(trim((string)($json['text'] ?? '')));
         if ($text === '') {
             throw new RuntimeException('OpenAI transcription returned no text.');
         }
@@ -1608,7 +1608,7 @@ final class CockpitRecorderService
             }
         }
 
-        $combined = trim(implode("\n\n", $texts));
+        $combined = self::cleanTranscriptText(trim(implode("\n\n", $texts)));
         $status = $failed ? 'failed' : 'ready';
         $error = null;
         if ($failed) {
@@ -1770,9 +1770,56 @@ final class CockpitRecorderService
     private static function transcriptionPrompt(): string
     {
         return "You are transcribing cockpit audio for flight training analysis.\n\n"
-            . "The audio may contain ATC radio transmissions, cockpit intercom speech, aircraft noise, static, clicks, clipped transmissions, and accented English.\n"
+            . "The audio may contain ATC radio transmissions, cockpit intercom speech, aircraft noise, static, clicks, clipped transmissions, English, Dutch, and accented speech.\n"
             . "Preserve aviation phraseology, callsigns, runway numbers, headings, altitudes, frequencies, readbacks, airport names, and short radio transmissions as accurately as possible.\n"
-            . "Do not invent words when unclear; mark unclear speech as [unclear] when necessary.";
+            . "Do not invent words when unclear; mark unclear speech as [unclear] when necessary. Do not repeat a phrase to fill silence or noise.";
+    }
+
+    private static function cleanTranscriptText(string $text): string
+    {
+        $text = trim(preg_replace('/[ \t]+/', ' ', $text) ?? $text);
+        if ($text === '') {
+            return '';
+        }
+
+        $sentences = preg_split('/(?<=[.!?])\s+/u', $text) ?: array($text);
+        if (count($sentences) < 3) {
+            return $text;
+        }
+
+        $clean = array();
+        $seen = array();
+        $lastKey = '';
+        foreach ($sentences as $sentence) {
+            $sentence = trim($sentence);
+            if ($sentence === '') {
+                continue;
+            }
+
+            $key = self::transcriptRepeatKey($sentence);
+            if ($key !== '' && strlen($key) > 30) {
+                $count = (int)($seen[$key] ?? 0);
+                $seen[$key] = $count + 1;
+                if ($key === $lastKey || $count >= 1) {
+                    continue;
+                }
+                $lastKey = $key;
+            } else {
+                $lastKey = '';
+            }
+
+            $clean[] = $sentence;
+        }
+
+        $cleaned = trim(implode(' ', $clean));
+        return $cleaned !== '' ? $cleaned : $text;
+    }
+
+    private static function transcriptRepeatKey(string $sentence): string
+    {
+        $key = strtolower($sentence);
+        $key = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $key) ?? $key;
+        return trim(preg_replace('/\s+/', ' ', $key) ?? $key);
     }
 
     private static function uploadErrorText(int $code): string

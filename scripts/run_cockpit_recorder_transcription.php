@@ -19,7 +19,23 @@ if ($recordingId <= 0) {
 $service = new CockpitRecorderService($pdo);
 
 try {
-    $result = $service->processTranscription($recordingId);
+    $result = array('ok' => false, 'done' => false);
+    for ($attempt = 0; $attempt < 500; $attempt++) {
+        $result = $service->processTranscriptionStep($recordingId);
+        if (array_key_exists('processed_chunk', $result)) {
+            echo 'Processed cockpit recorder transcription chunk ' . ((int)$result['processed_chunk'] + 1) . PHP_EOL;
+        }
+        if ((bool)($result['done'] ?? false)) {
+            break;
+        }
+    }
+
+    if (!($result['done'] ?? false)) {
+        $service->markTranscriptionFailed($recordingId, 'Transcription worker stopped before all chunks completed.');
+        fwrite(STDERR, "Cockpit recorder transcription failed: worker stopped before all chunks completed.\n");
+        exit(1);
+    }
+
     if (!($result['ok'] ?? false)) {
         $error = (string)($result['error'] ?? 'Unknown transcription error.');
         $service->markTranscriptionFailed($recordingId, $error);

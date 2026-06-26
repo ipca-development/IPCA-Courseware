@@ -48,6 +48,17 @@ try {
 
     if ($mode === 'run') {
         $result = $service->processTranscription($id);
+    } elseif ($mode === 'run_steps') {
+        $result = array('ok' => false, 'done' => false);
+        for ($attempt = 0; $attempt < 500; $attempt++) {
+            $result = $service->processTranscriptionStep($id);
+            if ((bool)($result['done'] ?? false)) {
+                break;
+            }
+        }
+        if (!($result['done'] ?? false)) {
+            $result = array('ok' => false, 'done' => true, 'error' => 'Transcription stopped before all chunks completed.');
+        }
     } else {
         $result = $service->processTranscriptionStep($id);
     }

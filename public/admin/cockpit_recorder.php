@@ -84,7 +84,7 @@ function cockpit_admin_reconstruction_summary(array $row): array
     return is_array($decoded) ? $decoded : array();
 }
 
-$error = '';
+$error = trim((string)($_GET['error'] ?? ''));
 $recordings = array();
 $service = null;
 $adsbService = null;
@@ -93,7 +93,7 @@ try {
     $adsbService = new CockpitAdsbEnrichmentService($pdo);
     $recordings = $service->adminRecordings(100);
 } catch (Throwable $e) {
-    $error = $e->getMessage();
+    $error = $error !== '' ? $error : $e->getMessage();
 }
 
 cw_header('Cockpit Recorder POC');
@@ -249,6 +249,11 @@ cw_header('Cockpit Recorder POC');
                   <input type="hidden" name="id" value="<?= $id ?>">
                   <input type="hidden" name="mode" value="step">
                   <button class="cockpit-button" type="submit">Process next transcript chunk</button>
+                </form>
+                <form method="post" action="/admin/api/cockpit_recorder_transcribe.php" style="margin-top:6px">
+                  <input type="hidden" name="id" value="<?= $id ?>">
+                  <input type="hidden" name="mode" value="run_steps">
+                  <button class="cockpit-button" type="submit">Process all transcript chunks</button>
                 </form>
               <?php endif; ?>
             </td>
@@ -413,7 +418,7 @@ cw_header('Cockpit Recorder POC');
                     <?php endif; ?>
                   </div>
                 <?php endif; ?>
-                <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php">
+                <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php?id=<?= $id ?>">
                   <input type="hidden" name="id" value="<?= $id ?>">
                   <label class="cockpit-muted" style="display:block;margin-top:6px">
                     Altimeter setting / QNH (optional, inHg)

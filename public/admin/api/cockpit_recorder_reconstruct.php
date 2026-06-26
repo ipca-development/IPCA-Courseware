@@ -8,7 +8,15 @@ cw_require_admin();
 
 @set_time_limit(0);
 
-$id = trim((string)($_POST['id'] ?? $_GET['id'] ?? ''));
+$id = trim((string)(
+    $_POST['id']
+    ?? $_GET['id']
+    ?? $_POST['recording_id']
+    ?? $_GET['recording_id']
+    ?? $_POST['recording_uid']
+    ?? $_GET['recording_uid']
+    ?? ''
+));
 $altimeterSetting = trim((string)($_POST['altimeter_setting_inhg'] ?? $_GET['altimeter_setting_inhg'] ?? ''));
 $airportElevation = trim((string)($_POST['airport_elevation_ft'] ?? $_GET['airport_elevation_ft'] ?? ''));
 $oatC = trim((string)($_POST['oat_c'] ?? $_GET['oat_c'] ?? ''));
@@ -57,8 +65,6 @@ try {
         exit;
     }
 
-    http_response_code(500);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo $e->getMessage();
+    header('Location: /admin/cockpit_recorder.php?error=' . urlencode($e->getMessage()));
     exit;
 }
