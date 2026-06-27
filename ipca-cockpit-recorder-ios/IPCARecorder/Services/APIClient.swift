@@ -30,6 +30,7 @@ struct ChunkUploadResponse: Codable {
     var fileType: String?
     var chunkIndex: Int?
     var totalChunks: Int?
+    var alreadyPresent: Bool?
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -37,6 +38,27 @@ struct ChunkUploadResponse: Codable {
         case fileType = "file_type"
         case chunkIndex = "chunk_index"
         case totalChunks = "total_chunks"
+        case alreadyPresent = "already_present"
+    }
+}
+
+struct ChunkUploadStatusResponse: Codable {
+    var ok: Bool
+    var error: String?
+    var fileType: String?
+    var receivedChunks: [Int]?
+    var receivedCount: Int?
+    var totalChunks: Int?
+    var totalSize: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case error
+        case fileType = "file_type"
+        case receivedChunks = "received_chunks"
+        case receivedCount = "received_count"
+        case totalChunks = "total_chunks"
+        case totalSize = "total_size"
     }
 }
 
@@ -104,22 +126,37 @@ struct APIClient {
         chunkIndex: Int,
         totalChunks: Int,
         totalSize: Int64,
+        chunkSize: Int,
         originalFilename: String,
         mimeType: String
     ) -> URLRequest {
         let url = serverURL.appending(path: "api/recordings/upload_chunk.php")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 300
+        request.timeoutInterval = 120
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(recording.id, forHTTPHeaderField: "X-IPCA-Recording-ID")
         request.setValue(fileType, forHTTPHeaderField: "X-IPCA-File-Type")
         request.setValue(String(chunkIndex), forHTTPHeaderField: "X-IPCA-Chunk-Index")
         request.setValue(String(totalChunks), forHTTPHeaderField: "X-IPCA-Total-Chunks")
         request.setValue(String(totalSize), forHTTPHeaderField: "X-IPCA-Total-Size")
+        request.setValue(String(chunkSize), forHTTPHeaderField: "X-IPCA-Chunk-Size")
         request.setValue(originalFilename, forHTTPHeaderField: "X-IPCA-Original-Filename")
         request.setValue(mimeType, forHTTPHeaderField: "X-IPCA-Mime-Type")
         return request
+    }
+
+    func chunkUploadStatus(recordingID: String, fileType: String) async throws -> ChunkUploadStatusResponse {
+        let url = try endpoint("api/recordings/upload_chunk.php", queryItems: [
+            URLQueryItem(name: "recording_id", value: recordingID),
+            URLQueryItem(name: "file_type", value: fileType),
+        ])
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 60
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(ChunkUploadStatusResponse.self, from: data, response: response)
     }
 
     func finalizeChunkedUploadRequest(for recording: Recording, language: String) throws -> URLRequest {

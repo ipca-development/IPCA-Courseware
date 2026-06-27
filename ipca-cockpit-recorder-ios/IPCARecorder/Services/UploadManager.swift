@@ -5,13 +5,13 @@ import Foundation
 final class UploadManager: ObservableObject {
     @Published private(set) var activeUploads: Set<String> = []
     private let chunkSize = 512 * 1024
-    private let maxChunkAttempts = 5
+    private let maxChunkAttempts = 8
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 3600
-        configuration.timeoutIntervalForResource = 24 * 3600
-        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 6 * 3600
+        configuration.waitsForConnectivity = false
         return URLSession(configuration: configuration)
     }()
 
@@ -160,8 +160,34 @@ final class UploadManager: ObservableObject {
     ) async throws -> Int64 {
         let totalChunks = Int(ceil(Double(fileSize) / Double(chunkSize)))
         var completedBytes = uploadedBytes
+        var receivedChunks = Set<Int>()
 
-        for chunkIndex in 0..<totalChunks {
+        do {
+            let status = try await client.chunkUploadStatus(recordingID: recording.id, fileType: fileType)
+            if status.ok, let chunks = status.receivedChunks {
+                receivedChunks = Set(chunks)
+            }
+        } catch {
+            // Resume is optional; continue from the beginning if status is unavailable.
+        }
+
+        let startIndex = firstMissingChunkIndex(received: receivedChunks, totalChunks: totalChunks)
+        if startIndex >= totalChunks {
+            return uploadedBytes + fileSize
+        }
+
+        if startIndex > 0 {
+            let bytesAlreadyUploadedForFile = Int64(min(Int64(startIndex) * Int64(chunkSize), fileSize))
+            completedBytes = uploadedBytes + bytesAlreadyUploadedForFile
+            await MainActor.run {
+                store.update(recording.id) {
+                    $0.uploadProgress = min(0.98, Double(completedBytes) / Double(totalBytes) * 0.98)
+                    $0.lastError = "Resuming \(fileType) upload at chunk \(startIndex + 1)/\(totalChunks)..."
+                }
+            }
+        }
+
+        for chunkIndex in startIndex..<totalChunks {
             let offset = Int64(chunkIndex * chunkSize)
             let count = min(chunkSize, Int(fileSize - offset))
             let chunkData = try readChunk(fileURL: fileURL, offset: offset, count: count, fileType: fileType, chunkIndex: chunkIndex)
@@ -172,6 +198,7 @@ final class UploadManager: ObservableObject {
                 chunkIndex: chunkIndex,
                 totalChunks: totalChunks,
                 totalSize: fileSize,
+                chunkSize: count,
                 originalFilename: originalFilename,
                 mimeType: mimeType
             )
@@ -197,18 +224,21 @@ final class UploadManager: ObservableObject {
                 } catch {
                     lastError = error
                     if attempt < maxChunkAttempts {
+                        let delayNs = UInt64(min(30, attempt * attempt * 2)) * 1_000_000_000
                         await MainActor.run {
                             store.update(recording.id) {
-                                $0.lastError = "Retrying \(fileType) chunk \(chunkIndex + 1)/\(totalChunks)..."
+                                $0.lastError = "Retrying \(fileType) chunk \(chunkIndex + 1)/\(totalChunks) (attempt \(attempt + 1)/\(maxChunkAttempts)): \(error.localizedDescription)"
                             }
                         }
-                        try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+                        try await Task.sleep(nanoseconds: delayNs)
                     }
                 }
             }
 
             if let lastError {
-                throw lastError
+                throw APIClientError.badResponse(
+                    "Failed \(fileType) chunk \(chunkIndex + 1)/\(totalChunks): \(lastError.localizedDescription)"
+                )
             }
 
             completedBytes += Int64(count)
@@ -223,12 +253,24 @@ final class UploadManager: ObservableObject {
         return completedBytes
     }
 
+    private func firstMissingChunkIndex(received: Set<Int>, totalChunks: Int) -> Int {
+        guard !received.isEmpty else { return 0 }
+        for index in 0..<totalChunks where !received.contains(index) {
+            return index
+        }
+        return totalChunks
+    }
+
     private func send(request: URLRequest, body: Data) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ipca-chunk-\(UUID().uuidString).bin")
+        try body.write(to: tempURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        return try await withCheckedThrowingContinuation { continuation in
             var request = request
-            request.httpBody = body
-            request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
-            let task = session.dataTask(with: request) { data, response, error in
+            request.httpBody = nil
+            let task = session.uploadTask(with: request, fromFile: tempURL) { data, response, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -266,14 +308,20 @@ final class UploadManager: ObservableObject {
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(offset))
         let data = try handle.read(upToCount: count) ?? Data()
-        if data.isEmpty {
-            throw APIClientError.badResponse("Could not read \(fileType) chunk \(chunkIndex + 1).")
+        if data.count != count {
+            throw APIClientError.badResponse(
+                "Could not read \(fileType) chunk \(chunkIndex + 1). Expected \(count) bytes, got \(data.count)."
+            )
         }
         return data
     }
 
     private func fileSize(_ url: URL) throws -> Int64 {
-        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey])
+        if values.isUbiquitousItem == true,
+           values.ubiquitousItemDownloadingStatus != URLUbiquitousItemDownloadingStatus.current {
+            throw APIClientError.badResponse("Recording file is still downloading from iCloud. Open Files and wait for it to finish, then retry upload.")
+        }
         return Int64(values.fileSize ?? 0)
     }
 
