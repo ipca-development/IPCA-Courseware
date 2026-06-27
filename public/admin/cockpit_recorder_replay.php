@@ -66,7 +66,7 @@ cw_header('Cockpit Recorder Replay');
 .hud-tape-label { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-size: 10px; font-weight: 800; opacity: .9; }
 .hud-altimeter-setting { position: absolute; right: 128px; top: 414px; border-radius: 999px; background: rgba(0,0,0,.76); font-size: 12px; font-weight: 800; padding: 5px 9px; }
 .hud-attitude { position: absolute; left: 50%; top: 46%; width: 380px; height: 230px; transform: translate(-50%, -50%); }
-.hud-horizon-line { position: absolute; left: -35%; right: -35%; top: 50%; height: 3px; background: rgba(255,255,255,.70); box-shadow: 0 0 10px rgba(255,255,255,.30); transform-origin: 50% 50%; }
+.hud-horizon-line { position: absolute; left: 0; top: 0; width: 140%; height: 3px; background: rgba(255,255,255,.70); box-shadow: 0 0 10px rgba(255,255,255,.30); transform-origin: center center; pointer-events: none; }
 .hud-bank-arc { position: absolute; left: 50%; top: 6px; width: 310px; height: 155px; transform: translateX(-50%); border-top: 3px solid rgba(255,255,255,.78); border-radius: 310px 310px 0 0; }
 .hud-aircraft-symbol { position: absolute; left: 50%; top: 132px; width: 170px; height: 44px; transform: translateX(-50%); }
 .hud-aircraft-symbol:before { content: ""; position: absolute; left: 0; right: 0; top: 20px; height: 5px; background: #ffd400; box-shadow: 0 0 0 1px rgba(0,0,0,.35); clip-path: polygon(0 40%, 42% 40%, 50% 0, 58% 40%, 100% 40%, 100% 60%, 58% 60%, 50% 100%, 42% 60%, 0 60%); }
@@ -250,6 +250,7 @@ cw_header('Cockpit Recorder Replay');
 
   const number = (value, suffix, digits = 1) => value === null || value === undefined || Number.isNaN(Number(value)) ? '--' : `${Number(value).toFixed(digits)}${suffix}`;
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
+  const PILOT_EYE_HEIGHT_M = feetToMeters(5);
   const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
   const normalizeDeg = (deg) => ((Number(deg) % 360) + 360) % 360;
   const normalizeSignedDeg = (deg) => {
@@ -289,6 +290,7 @@ cw_header('Cockpit Recorder Replay');
       : (Number.isFinite(Number(sample.field_calibrated_true_altitude_ft)) ? Number(sample.field_calibrated_true_altitude_ft)
       : (Number.isFinite(Number(sample.gps_altitude_ft)) ? Number(sample.gps_altitude_ft) : 0)));
   };
+  const cameraEyeAltitudeM = (sample) => Math.max(0, feetToMeters(bestAltitudeFt(sample))) + PILOT_EYE_HEIGHT_M;
 
   function sampleAt(t) {
     if (!payload || !payload.samples.length) return null;
@@ -704,10 +706,11 @@ cw_header('Cockpit Recorder Replay');
       cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
       cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
 
+      const firstSample = gpsSamples[0];
       const firstPosition = Cesium.Cartesian3.fromDegrees(
-        Number(gpsSamples[0].lon),
-        Number(gpsSamples[0].lat),
-        Math.max(0, feetToMeters(bestAltitudeFt(gpsSamples[0])))
+        Number(firstSample.lon),
+        Number(firstSample.lat),
+        cameraEyeAltitudeM(firstSample)
       );
       cesiumAircraft = cesiumViewer.entities.add({
         name: 'Aircraft',
@@ -743,8 +746,8 @@ cw_header('Cockpit Recorder Replay');
     if (!cesiumReady || !cesiumViewer || !cesiumAircraft) return;
     const s = smoothedSampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
-    const altitudeM = Math.max(5, feetToMeters(bestAltitudeFt(s)));
-    const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM + 8);
+    const altitudeM = cameraEyeAltitudeM(s);
+    const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM);
     cesiumAircraft.position = position;
     const groundspeed = Number.isFinite(Number(s.groundspeed_kt)) ? Number(s.groundspeed_kt) : 0;
     const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
@@ -759,33 +762,25 @@ cw_header('Cockpit Recorder Replay');
     const targetState = {
       lat: Number(s.lat),
       lon: Number(s.lon),
-      altitudeM: altitudeM + 8,
+      altitudeM,
       heading: normalizeDeg(cameraHeading),
-      pitch: Math.max(-18, Math.min(8, pitch - 2)),
-      roll: Math.max(-35, Math.min(35, bank)),
+      pitch: Math.max(-30, Math.min(30, pitch)),
+      roll: Math.max(-45, Math.min(45, bank)),
     };
     cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
     const headingRad = degToRad(cesiumCameraState.heading);
     const pitchRad = degToRad(cesiumCameraState.pitch);
     const rollRad = degToRad(cesiumCameraState.roll);
-    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(smoothedPosition);
-    const forwardOffset = Cesium.Matrix4.multiplyByPointAsVector(
-      enu,
-      new Cesium.Cartesian3(Math.sin(headingRad) * 22, Math.cos(headingRad) * 22, 0),
-      new Cesium.Cartesian3()
-    );
-    const eye = Cesium.Cartesian3.add(smoothedPosition, forwardOffset, new Cesium.Cartesian3());
-    eye.z += 2.0;
     cesiumViewer.camera.setView({
-      destination: eye,
+      destination: smoothedPosition,
       orientation: {
         heading: headingRad,
         pitch: pitchRad,
         roll: rollRad,
       },
     });
-    renderCesiumHud(s, heading, targetState);
+    renderCesiumHud(s, heading);
   }
 
   function safeRenderCesium() {
@@ -808,16 +803,77 @@ cw_header('Cockpit Recorder Replay');
     }
   }
 
-  function renderSyntheticHorizon(cameraState) {
-    if (!hudHorizonLine || !cesiumReplay || !cameraState) return;
-    const height = Math.max(320, cesiumReplay.clientHeight || 540);
-    const pxPerPitchDegree = height / 55;
-    const y = Math.max(-height * 0.55, Math.min(height * 0.55, Number(cameraState.pitch) * pxPerPitchDegree));
-    hudHorizonLine.style.transform = `translateY(${y.toFixed(1)}px) rotate(${Number(cameraState.roll).toFixed(2)}deg)`;
+  function worldToHudCoords(scene, worldPoint) {
+    if (!worldPoint) return null;
+    const transforms = Cesium.SceneTransforms;
+    const projected = transforms.worldToWindowCoordinates
+      ? transforms.worldToWindowCoordinates(scene, worldPoint)
+      : transforms.wgs84ToWindowCoordinates(scene, worldPoint);
+    if (!projected) return null;
+    const canvas = scene.canvas;
+    const scaleX = (cesiumReplay.clientWidth || canvas.clientWidth) / Math.max(1, canvas.clientWidth);
+    const scaleY = (cesiumReplay.clientHeight || canvas.clientHeight) / Math.max(1, canvas.clientHeight);
+    return {
+      x: projected.x * scaleX,
+      y: projected.y * scaleY,
+    };
   }
 
-  function renderCesiumHud(s, heading, cameraState) {
-    renderSyntheticHorizon(cameraState);
+  function horizonSurfacePoint(latRad, lonRad, heightM, azimuthRad, ellipsoid) {
+    const earthRadius = ellipsoid.maximumRadius;
+    const dist = Math.sqrt(Math.max(0, heightM * (2 * earthRadius + heightM)));
+    const angularDist = dist / earthRadius;
+    const sinLat1 = Math.sin(latRad);
+    const cosLat1 = Math.cos(latRad);
+    const sinDelta = Math.sin(angularDist);
+    const cosDelta = Math.cos(angularDist);
+    const sinAz = Math.sin(azimuthRad);
+    const cosAz = Math.cos(azimuthRad);
+    const sinLat2 = sinLat1 * cosDelta + cosLat1 * sinDelta * cosAz;
+    const lat2 = Math.asin(Math.max(-1, Math.min(1, sinLat2)));
+    const lon2 = lonRad + Math.atan2(sinAz * sinDelta * cosLat1, cosDelta - sinLat1 * Math.sin(lat2));
+    return Cesium.Cartesian3.fromRadians(lon2, lat2, 0);
+  }
+
+  function renderSyntheticHorizon() {
+    if (!hudHorizonLine || !cesiumViewer || !cesiumReplay) return;
+    const scene = cesiumViewer.scene;
+    const camera = scene.camera;
+    const ellipsoid = scene.globe.ellipsoid;
+    const carto = Cesium.Cartographic.fromCartesian(camera.positionWC, ellipsoid);
+    if (!carto) return;
+
+    const leftWorld = horizonSurfacePoint(
+      carto.latitude,
+      carto.longitude,
+      Math.max(5, carto.height),
+      camera.heading - Math.PI / 2,
+      ellipsoid
+    );
+    const rightWorld = horizonSurfacePoint(
+      carto.latitude,
+      carto.longitude,
+      Math.max(5, carto.height),
+      camera.heading + Math.PI / 2,
+      ellipsoid
+    );
+    const left = worldToHudCoords(scene, leftWorld);
+    const right = worldToHudCoords(scene, rightWorld);
+    if (!left || !right) return;
+
+    const midX = (left.x + right.x) / 2;
+    const midY = (left.y + right.y) / 2;
+    const angle = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+    const length = Math.max(cesiumReplay.clientWidth * 1.4, Math.hypot(right.x - left.x, right.y - left.y) * 1.35);
+    hudHorizonLine.style.left = `${midX.toFixed(1)}px`;
+    hudHorizonLine.style.top = `${midY.toFixed(1)}px`;
+    hudHorizonLine.style.width = `${length.toFixed(1)}px`;
+    hudHorizonLine.style.transform = `translate(-50%, -50%) rotate(${angle.toFixed(2)}deg)`;
+    hudHorizonLine.hidden = false;
+  }
+
+  function renderCesiumHud(s, heading) {
+    renderSyntheticHorizon();
     hudSpeed.textContent = Number.isFinite(Number(s.groundspeed_kt)) ? `${Number(s.groundspeed_kt).toFixed(0)} KT` : '-- KT';
     hudAltitude.textContent = `${bestAltitudeFt(s).toFixed(0)} FT`;
     hudVsi.textContent = Number.isFinite(Number(s.estimated_vertical_speed_fpm)) ? Number(s.estimated_vertical_speed_fpm).toFixed(0) : '--';
