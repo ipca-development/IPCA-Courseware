@@ -260,6 +260,8 @@ final class CockpitReconstructionService
         }
 
         $recordingId = (int)$recording['id'];
+        $sampleCount = $this->countRows(self::SAMPLE_TABLE, $recordingId);
+        $samples = $this->sampleRows($recordingId, 30000);
         return array(
             'ok' => true,
             'recording' => array(
