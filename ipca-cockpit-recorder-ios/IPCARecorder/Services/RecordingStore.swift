@@ -23,9 +23,16 @@ final class RecordingStore: ObservableObject {
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             let data = try Data(contentsOf: url)
             recordings = try decoder.decode([Recording].self, from: data)
-            if repairStaleFilePaths() {
-                save()
+            var changed = repairStaleFilePaths()
+            if releaseInterruptedUploads() {
+                changed = true
             }
+            if changed {
+                save()
+            } else {
+                syncSharedRecordingIndex()
+            }
+            processPendingG3XImports()
         } catch {
             print("RecordingStore load failed: \(error)")
         }
@@ -143,9 +150,94 @@ final class RecordingStore: ObservableObject {
             let url = try storeURL()
             let data = try encoder.encode(recordings)
             try data.write(to: url, options: [.atomic])
+            syncSharedRecordingIndex()
         } catch {
             print("RecordingStore save failed: \(error)")
         }
+    }
+
+    func attachG3X(
+        recordingID: String,
+        csvSourceURL: URL,
+        metadata: G3XFlightStreamMetadata,
+        matchMethod: String
+    ) throws {
+        let directory = try Self.recordingsDirectory()
+        let destination = directory.appendingPathComponent("\(recordingID).g3x.csv")
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: csvSourceURL, to: destination)
+
+        update(recordingID) { recording in
+            recording.g3xCsvPath = destination.path
+            recording.g3xImportedAt = Date()
+            recording.g3xAircraftIdent = metadata.aircraftIdent
+            recording.g3xMatchMethod = matchMethod
+            recording.g3xRowCount = metadata.rowCount
+            recording.g3xServerSynced = false
+            if recording.uploadStatus == .uploaded {
+                recording.lastError = "G3X CSV attached. Syncing panel data to server..."
+            } else if recording.uploadStatus == .pending || recording.uploadStatus == .failed {
+                recording.uploadStatus = .pending
+                recording.lastError = "G3X CSV attached. Upload again to send audio and G3X data."
+            }
+        }
+    }
+
+    func processPendingG3XImports() {
+        let pending = SharedRecordingIndexStore.readPendingImports()
+        guard !pending.isEmpty else { return }
+
+        var remaining: [PendingG3XImport] = []
+        for item in pending {
+            guard let importsDir = AppGroupStorage.importsDirectoryURL else {
+                remaining.append(item)
+                continue
+            }
+            let csvURL = importsDir.appendingPathComponent(item.csvRelativePath)
+            guard FileManager.default.fileExists(atPath: csvURL.path) else {
+                continue
+            }
+
+            if let recordingID = item.suggestedRecordingID,
+               recording(id: recordingID) != nil {
+                do {
+                    let parsed = try G3XFlightStreamParser.parse(fileURL: csvURL)
+                    try attachG3X(
+                        recordingID: recordingID,
+                        csvSourceURL: csvURL,
+                        metadata: parsed.metadata,
+                        matchMethod: item.matchMethod
+                    )
+                    try? FileManager.default.removeItem(at: csvURL)
+                    continue
+                } catch {
+                    print("Pending G3X import failed for \(recordingID): \(error)")
+                    remaining.append(item)
+                    continue
+                }
+            }
+
+            remaining.append(item)
+        }
+
+        SharedRecordingIndexStore.writePendingImports(remaining)
+        syncSharedRecordingIndex()
+    }
+
+    func syncSharedRecordingIndex() {
+        let entries = recordings.map { recording in
+            SharedRecordingEntry(
+                id: recording.id,
+                startedAt: recording.startedAt,
+                duration: recording.duration,
+                aircraftRegistration: recording.aircraftRegistration,
+                aircraftDisplayName: recording.aircraftDisplayName,
+                hasG3X: recording.hasG3XData
+            )
+        }
+        SharedRecordingIndexStore.writeIndex(entries)
     }
 
     nonisolated static func recordingsDirectory() throws -> URL {
@@ -198,6 +290,17 @@ final class RecordingStore: ObservableObject {
         return dir.appendingPathComponent("recordings.json")
     }
 
+    private func releaseInterruptedUploads() -> Bool {
+        var changed = false
+        for index in recordings.indices where recordings[index].uploadStatus == .uploading {
+            let progress = Int(recordings[index].uploadProgress * 100)
+            recordings[index].uploadStatus = .pending
+            recordings[index].lastError = "Upload paused at \(progress)%. Tap Retry Upload to continue. Your local audio and flight data are safe on this iPad."
+            changed = true
+        }
+        return changed
+    }
+
     private func repairStaleFilePaths() -> Bool {
         var changed = false
         for index in recordings.indices {
@@ -231,6 +334,17 @@ final class RecordingStore: ObservableObject {
                ),
                gpsURL.path != path {
                 recordings[index].gpsSamplesPath = gpsURL.path
+                changed = true
+            }
+
+            if let path = recordings[index].g3xCsvPath,
+               let g3xURL = try? Self.resolvedFileURL(
+                preferredPath: path,
+                recordingID: id,
+                fallbackFilename: "\(id).g3x.csv"
+               ),
+               g3xURL.path != path {
+                recordings[index].g3xCsvPath = g3xURL.path
                 changed = true
             }
         }

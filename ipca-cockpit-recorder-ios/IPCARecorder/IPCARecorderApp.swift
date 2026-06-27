@@ -9,10 +9,11 @@ struct IPCARecorderApp: App {
     @StateObject private var uploadManager = UploadManager()
     @StateObject private var ahrsBLE = AHRSBLEManager()
     @StateObject private var gps = GPSLocationManager()
+    @State private var pendingNavigationRecordingID: String?
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(pendingNavigationRecordingID: $pendingNavigationRecordingID)
                 .environmentObject(settings)
                 .environmentObject(recordingStore)
                 .environmentObject(audioRecorder)
@@ -24,6 +25,10 @@ struct IPCARecorderApp: App {
                     await recordingStore.load()
                     ahrsBLE.start()
                     gps.prepare()
+                    handlePendingG3XWorkflow()
+                }
+                .onOpenURL { url in
+                    handleIncomingURL(url)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
@@ -31,10 +36,43 @@ struct IPCARecorderApp: App {
                         audioRecorder.appDidEnterBackground()
                     case .active:
                         audioRecorder.appWillEnterForeground()
+                        handlePendingG3XWorkflow()
                     default:
                         break
                     }
                 }
+        }
+    }
+
+    private func handlePendingG3XWorkflow() {
+        recordingStore.processPendingG3XImports()
+        uploadManager.syncPendingG3XUploads(store: recordingStore, settings: settings)
+        guard settings.isServerURLConfigured else { return }
+        for recording in recordingStore.recordings where recording.hasG3XData && recording.needsUploadRetry {
+            uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
+        }
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "ipcarecorder" else { return }
+
+        if url.host?.lowercased() == "import-g3x" {
+            handlePendingG3XWorkflow()
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let recordingID = components.queryItems?.first(where: { $0.name == "recording" })?.value {
+                pendingNavigationRecordingID = recordingID
+            }
+            return
+        }
+
+        if url.isFileURL || url.pathExtension.lowercased() == "csv" {
+            do {
+                let recordingID = try G3XDocumentImporter.importFile(url, store: recordingStore)
+                handlePendingG3XWorkflow()
+                pendingNavigationRecordingID = recordingID
+            } catch {
+                print("G3X document import failed: \(error)")
+            }
         }
     }
 }

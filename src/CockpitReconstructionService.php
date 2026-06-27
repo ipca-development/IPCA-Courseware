@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/CockpitRecorderService.php';
+require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -24,6 +25,9 @@ final class CockpitReconstructionService
 
     /** @var array<string,mixed> */
     private array $lastSourceAlignment = array();
+
+    /** @var array<string,mixed> */
+    private array $lastG3XAlignment = array();
 
     /** @var list<string> */
     private const G3X_COLUMNS = array(
@@ -470,6 +474,292 @@ final class CockpitReconstructionService
     }
 
     /**
+     * @param array<string,mixed> $recording
+     * @param list<array<string,mixed>> $gps
+     * @return list<array{seconds: float, row: array<string,string>}>
+     */
+    private function loadG3XNormalized(array $recording, array $gps): array
+    {
+        if (!$this->columnPresent(self::RECORDINGS_TABLE, 'g3x_storage_path')) {
+            return array();
+        }
+        $path = $this->safeStoredPath((string)($recording['g3x_storage_path'] ?? ''), CockpitRecorderService::g3xRoot());
+        if ($path === null) {
+            return array();
+        }
+
+        try {
+            $parsed = G3XFlightStreamParser::parseFile($path);
+        } catch (Throwable) {
+            return array();
+        }
+
+        $startedAt = self::dateTime((string)($recording['started_at'] ?? ''));
+        if ($startedAt === null) {
+            return array();
+        }
+
+        $offsetSeconds = $this->computeG3XOffsetSeconds($recording, $gps, $parsed['rows'], $startedAt);
+        $this->lastG3XAlignment = array(
+            'available' => true,
+            'row_count' => (int)$parsed['row_count'],
+            'aircraft_ident' => (string)$parsed['aircraft_ident'],
+            'offset_seconds' => $offsetSeconds,
+        );
+
+        $normalized = array();
+        foreach ($parsed['rows'] as $row) {
+            $utc = G3XFlightStreamParser::rowUtcTimestamp($row);
+            if ($utc === null) {
+                continue;
+            }
+            $seconds = $utc->getTimestamp() - $startedAt->getTimestamp() + $offsetSeconds;
+            $normalized[] = array(
+                'seconds' => (float)$seconds,
+                'row' => $row,
+            );
+        }
+        usort($normalized, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
+        return $normalized;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param list<array<string,mixed>> $gps
+     * @param list<array<string,string>> $g3xRows
+     */
+    private function computeG3XOffsetSeconds(array $recording, array $gps, array $g3xRows, DateTimeImmutable $startedAt): float
+    {
+        $stored = isset($recording['g3x_time_offset_seconds']) && is_numeric($recording['g3x_time_offset_seconds'])
+            ? (float)$recording['g3x_time_offset_seconds']
+            : null;
+        if ($stored !== null) {
+            return $stored;
+        }
+
+        $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($g3xRows);
+        if ($firstUtc === null) {
+            return 0.0;
+        }
+
+        $baseOffset = 0.0;
+        $deltas = array();
+        foreach ($gps as $gpsRow) {
+            if (!isset($gpsRow['seconds'], $gpsRow['latitude'], $gpsRow['longitude'])) {
+                continue;
+            }
+            $seconds = (float)$gpsRow['seconds'];
+            if ($seconds < 0 || $seconds > 180.0) {
+                continue;
+            }
+            $lat = (float)$gpsRow['latitude'];
+            $lon = (float)$gpsRow['longitude'];
+            $bestDelta = null;
+            $bestDistance = INF;
+            foreach ($g3xRows as $g3xRow) {
+                $utc = G3XFlightStreamParser::rowUtcTimestamp($g3xRow);
+                $gLat = G3XFlightStreamParser::numericValue($g3xRow, 'Latitude (deg)');
+                $gLon = G3XFlightStreamParser::numericValue($g3xRow, 'Longitude (deg)', 'Longitude');
+                if ($utc === null || $gLat === null || $gLon === null) {
+                    continue;
+                }
+                $g3xSeconds = (float)($utc->getTimestamp() - $firstUtc->getTimestamp());
+                $distance = self::haversineMeters($lat, $lon, $gLat, $gLon);
+                if ($distance < $bestDistance) {
+                    $bestDistance = $distance;
+                    $bestDelta = $seconds - $g3xSeconds;
+                }
+            }
+            if ($bestDelta !== null && $bestDistance <= 250.0) {
+                $deltas[] = $bestDelta;
+            }
+        }
+
+        if ($deltas) {
+            sort($deltas, SORT_NUMERIC);
+            $mid = intdiv(count($deltas), 2);
+            $baseOffset = count($deltas) % 2 === 1
+                ? (float)$deltas[$mid]
+                : (((float)$deltas[$mid - 1] + (float)$deltas[$mid]) / 2.0);
+        }
+
+        return $baseOffset + ($startedAt->getTimestamp() - $firstUtc->getTimestamp());
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @param list<array{seconds: float, row: array<string,string>}> $g3xSamples
+     * @return list<array<string,mixed>>
+     */
+    private function applyG3XEnrichment(array $samples, array $g3xSamples): array
+    {
+        foreach ($samples as $index => $sample) {
+            $seconds = (float)($sample['seconds_since_start'] ?? 0);
+            $near = $this->nearestG3XBySeconds($g3xSamples, $seconds, 1.25);
+            if ($near === null) {
+                continue;
+            }
+            $row = $near['row'];
+            $samples[$index] = $this->mergeG3XIntoSample($sample, $row);
+        }
+        return $samples;
+    }
+
+    /**
+     * @param list<array{seconds: float, row: array<string,string>}> $g3xSamples
+     * @return array{seconds: float, row: array<string,string>}|null
+     */
+    private function nearestG3XBySeconds(array $g3xSamples, float $seconds, float $maxDelta): ?array
+    {
+        $best = null;
+        $bestDelta = $maxDelta;
+        foreach ($g3xSamples as $sample) {
+            $delta = abs((float)$sample['seconds'] - $seconds);
+            if ($delta <= $bestDelta) {
+                $bestDelta = $delta;
+                $best = $sample;
+            }
+        }
+        return $best;
+    }
+
+    /**
+     * @param array<string,mixed> $sample
+     * @param array<string,string> $row
+     * @return array<string,mixed>
+     */
+    private function mergeG3XIntoSample(array $sample, array $row): array
+    {
+        $pitch = G3XFlightStreamParser::numericValue($row, 'Pitch (deg)');
+        $roll = G3XFlightStreamParser::numericValue($row, 'Roll (deg)');
+        $heading = G3XFlightStreamParser::numericValue($row, 'Magnetic Heading (deg)');
+        $baroAlt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)');
+        $vs = G3XFlightStreamParser::numericValue($row, 'Vertical Speed (ft/min)');
+        $ias = G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)');
+        $tas = G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)');
+        $latAc = G3XFlightStreamParser::numericValue($row, 'Lateral Acceleration (G)');
+        $normAc = G3XFlightStreamParser::numericValue($row, 'Normal Acceleration (G)');
+        $oat = G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)');
+        $baro = G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)');
+        $windSpeed = G3XFlightStreamParser::numericValue($row, 'Wind Speed (kt)');
+        $windDir = G3XFlightStreamParser::numericValue($row, 'Wind Direction (deg)');
+        $groundspeed = G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)');
+        $track = G3XFlightStreamParser::numericValue($row, 'GPS Ground Track (deg)');
+        $gpsAlt = G3XFlightStreamParser::numericValue($row, 'GPS Altitude (ft)');
+        $latitude = G3XFlightStreamParser::numericValue($row, 'Latitude (deg)');
+        $longitude = G3XFlightStreamParser::numericValue($row, 'Longitude (deg)', 'Longitude');
+        $apState = trim((string)($row['Autopilot State'] ?? ''));
+
+        if ($pitch !== null) {
+            $sample['pitch_deg'] = $pitch;
+        }
+        if ($roll !== null) {
+            $sample['roll_deg'] = $roll;
+        }
+        if ($heading !== null) {
+            $sample['magnetic_heading_deg'] = self::normalizeDegrees($heading);
+        }
+        if ($baroAlt !== null) {
+            $sample['baro_altitude_ft'] = $baroAlt;
+            $sample['estimated_baro_altitude_ft'] = $baroAlt;
+            $sample['estimated_indicated_altitude_ft'] = $baroAlt;
+            $sample['altitude_source'] = 'g3x_baro';
+            $sample['altitude_quality'] = 'good';
+        }
+        if ($vs !== null) {
+            $sample['vertical_speed_fpm'] = $vs;
+            $sample['estimated_vertical_speed_fpm'] = $vs;
+            $sample['vertical_speed_source'] = 'g3x';
+            $sample['vertical_speed_quality'] = 'good';
+        }
+        if ($latAc !== null) {
+            $sample['estimated_slip_skid_g'] = $latAc;
+            $sample['estimated_slip_skid_source'] = 'g3x';
+            $sample['estimated_slip_skid_quality'] = 'good';
+        }
+        if ($normAc !== null) {
+            $sample['acceleration_g'] = $normAc;
+        }
+        if ($oat !== null) {
+            $sample['oat_c'] = $oat;
+            $sample['oat_source'] = 'g3x';
+        }
+        if ($baro !== null) {
+            $sample['altimeter_setting_inhg'] = $baro;
+            $sample['altimeter_setting_source'] = 'g3x';
+        }
+        if ($windSpeed !== null) {
+            $sample['wind_speed_kt'] = $windSpeed;
+            $sample['estimated_wind_speed_kt'] = $windSpeed;
+            $sample['estimated_wind_source'] = 'g3x';
+            $sample['estimated_wind_quality'] = 'good';
+        }
+        if ($windDir !== null) {
+            $sample['wind_direction_deg'] = $windDir;
+            $sample['estimated_wind_direction_deg_true'] = $windDir;
+        }
+        if ($tas !== null) {
+            $sample['estimated_tas_kt'] = $tas;
+        }
+        if ($groundspeed !== null) {
+            $sample['groundspeed_kt'] = $groundspeed;
+        }
+        if ($track !== null) {
+            $sample['magnetic_track_deg'] = $track;
+            $sample['true_track_deg'] = $track;
+        }
+        if ($gpsAlt !== null && ($sample['gps_altitude_ft'] ?? null) === null) {
+            $sample['gps_altitude_ft'] = $gpsAlt;
+            $sample['gps_altitude_m'] = $gpsAlt / 3.280839895;
+        }
+        if ($latitude !== null) {
+            $sample['latitude'] = $latitude;
+        }
+        if ($longitude !== null) {
+            $sample['longitude'] = $longitude;
+        }
+        if ($apState !== '') {
+            $sample['autopilot_status'] = $apState;
+        }
+        if ($ias !== null) {
+            $sample['wind_estimation_method'] = 'g3x_ias_' . number_format($ias, 1, '.', '');
+        }
+
+        $mask = trim((string)($sample['source_mask'] ?? ''));
+        if (!str_contains($mask, 'g3x')) {
+            $sample['source_mask'] = trim($mask . ' g3x');
+        }
+        $sample['g3x_row'] = $this->buildImportedG3XRow($row);
+        return $sample;
+    }
+
+    /**
+     * @param array<string,string> $row
+     * @return array<string,string>
+     */
+    private function buildImportedG3XRow(array $row): array
+    {
+        $mapped = array_fill_keys(self::G3X_COLUMNS, '');
+        foreach (self::G3X_COLUMNS as $column) {
+            if (isset($row[$column])) {
+                $mapped[$column] = (string)$row[$column];
+            }
+        }
+        return $mapped;
+    }
+
+    private static function haversineMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $earthRadius = 6371000.0;
+        $phi1 = deg2rad($lat1);
+        $phi2 = deg2rad($lat2);
+        $dPhi = deg2rad($lat2 - $lat1);
+        $dLambda = deg2rad($lon2 - $lon1);
+        $a = sin($dPhi / 2) ** 2 + cos($phi1) * cos($phi2) * sin($dLambda / 2) ** 2;
+        return 2 * $earthRadius * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     private function loadAdsbOwnship(int $recordingId): array
@@ -569,6 +859,10 @@ final class CockpitReconstructionService
         }
 
         $samples = $this->addDerivedReplayValues($recording, $samples, $options);
+        $g3xSamples = $this->loadG3XNormalized($recording, $gps);
+        if ($g3xSamples) {
+            $samples = $this->applyG3XEnrichment($samples, $g3xSamples);
+        }
         return $samples;
     }
 

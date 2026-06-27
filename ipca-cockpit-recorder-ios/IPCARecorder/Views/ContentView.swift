@@ -2,12 +2,14 @@ import SwiftUI
 import Foundation
 
 struct ContentView: View {
+    @Binding var pendingNavigationRecordingID: String?
+
     var body: some View {
         TabView {
             RecorderView()
                 .tabItem { Label("Recorder", systemImage: "waveform") }
 
-            RecordingsView()
+            RecordingsView(pendingNavigationRecordingID: $pendingNavigationRecordingID)
                 .tabItem { Label("Recordings", systemImage: "list.bullet.rectangle") }
 
             RealisticCockpitSetupView()

@@ -9,21 +9,21 @@ require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-function cockpit_finalize_json(int $code, array $payload): void
+function cockpit_g3x_finalize_json(int $code, array $payload): void
 {
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
-function cockpit_finalize_uid(string $value): string
+function cockpit_g3x_finalize_uid(string $value): string
 {
     $value = trim($value);
     $value = preg_replace('/[^A-Za-z0-9_-]+/', '', $value) ?? '';
     return substr($value, 0, 96);
 }
 
-function cockpit_finalize_meta(string $sessionDir, string $fileType): ?array
+function cockpit_g3x_finalize_meta(string $sessionDir, string $fileType): ?array
 {
     $path = $sessionDir . '/' . $fileType . '.json';
     if (!is_file($path)) {
@@ -34,9 +34,9 @@ function cockpit_finalize_meta(string $sessionDir, string $fileType): ?array
     return is_array($decoded) ? $decoded : null;
 }
 
-function cockpit_finalize_assemble(string $sessionDir, string $fileType, string $extension): ?string
+function cockpit_g3x_finalize_assemble(string $sessionDir, string $fileType, string $extension): ?string
 {
-    $meta = cockpit_finalize_meta($sessionDir, $fileType);
+    $meta = cockpit_g3x_finalize_meta($sessionDir, $fileType);
     if ($meta === null) {
         return null;
     }
@@ -88,7 +88,7 @@ function cockpit_finalize_assemble(string $sessionDir, string $fileType, string 
     return $assembledPath;
 }
 
-function cockpit_finalize_remove_tree(string $path): void
+function cockpit_g3x_finalize_remove_tree(string $path): void
 {
     if (!is_dir($path)) {
         return;
@@ -103,7 +103,7 @@ function cockpit_finalize_remove_tree(string $path): void
         }
         $child = $path . '/' . $item;
         if (is_dir($child)) {
-            cockpit_finalize_remove_tree($child);
+            cockpit_g3x_finalize_remove_tree($child);
         } else {
             @unlink($child);
         }
@@ -113,71 +113,35 @@ function cockpit_finalize_remove_tree(string $path): void
 
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
-        cockpit_finalize_json(405, array('ok' => false, 'error' => 'Method not allowed.'));
+        cockpit_g3x_finalize_json(405, array('ok' => false, 'error' => 'Method not allowed.'));
     }
 
     $raw = file_get_contents('php://input');
     $payload = $raw !== false && trim($raw) !== '' ? json_decode($raw, true) : array();
     if (!is_array($payload)) {
-        cockpit_finalize_json(400, array('ok' => false, 'error' => 'Invalid JSON payload.'));
+        cockpit_g3x_finalize_json(400, array('ok' => false, 'error' => 'Invalid JSON payload.'));
     }
 
-    $recordingUid = cockpit_finalize_uid((string)($payload['recording_id'] ?? ''));
+    $recordingUid = cockpit_g3x_finalize_uid((string)($payload['recording_id'] ?? ''));
     if ($recordingUid === '') {
-        cockpit_finalize_json(400, array('ok' => false, 'error' => 'Recording id is required.'));
+        cockpit_g3x_finalize_json(400, array('ok' => false, 'error' => 'Recording id is required.'));
     }
 
     $sessionDir = CockpitRecorderService::uploadSessionRoot() . '/' . $recordingUid;
     if (!is_dir($sessionDir)) {
-        cockpit_finalize_json(404, array('ok' => false, 'error' => 'Upload session not found.'));
+        cockpit_g3x_finalize_json(404, array('ok' => false, 'error' => 'Upload session not found.'));
     }
 
-    $audioMeta = cockpit_finalize_meta($sessionDir, 'audio');
-    if ($audioMeta === null) {
-        cockpit_finalize_json(400, array('ok' => false, 'error' => 'Audio chunks are missing.'));
+    $g3xPath = cockpit_g3x_finalize_assemble($sessionDir, 'g3x', 'csv');
+    if ($g3xPath === null) {
+        cockpit_g3x_finalize_json(400, array('ok' => false, 'error' => 'G3X CSV chunks are missing.'));
     }
-
-    $audioPath = cockpit_finalize_assemble($sessionDir, 'audio', 'm4a');
-    if ($audioPath === null) {
-        cockpit_finalize_json(400, array('ok' => false, 'error' => 'Audio chunks are missing.'));
-    }
-    $ahrsPath = cockpit_finalize_assemble($sessionDir, 'ahrs', 'json');
-    $gpsPath = cockpit_finalize_assemble($sessionDir, 'gps', 'json');
-    $g3xPath = cockpit_finalize_assemble($sessionDir, 'g3x', 'csv');
-
-    $metadata = array(
-        'recording_id' => $recordingUid,
-        'started_at' => (string)($payload['started_at'] ?? ''),
-        'duration' => (float)($payload['duration'] ?? 0),
-        'input_device' => (string)($payload['input_device'] ?? ''),
-        'aircraft_id' => (int)($payload['aircraft_id'] ?? 0),
-        'language' => (string)($payload['language'] ?? 'en'),
-        'altimeter_setting_inhg' => $payload['altimeter_setting_inhg'] ?? null,
-        'altimeter_setting_source' => (string)($payload['altimeter_setting_source'] ?? ''),
-        'airport_elevation_ft' => $payload['airport_elevation_ft'] ?? null,
-        'airport_elevation_source' => (string)($payload['airport_elevation_source'] ?? ''),
-        'oat_c' => $payload['oat_c'] ?? null,
-        'oat_source' => (string)($payload['oat_source'] ?? ''),
-        'flight_session_uid' => (string)($payload['flight_session_uid'] ?? ''),
-        'flight_segment_index' => (int)($payload['flight_segment_index'] ?? 1),
-        'previous_segment_uid' => (string)($payload['previous_segment_uid'] ?? ''),
-        'is_test_recording' => (int)($payload['is_test_recording'] ?? 0),
-        'source_gap_summary' => (string)($payload['source_gap_summary'] ?? ''),
-    );
 
     $service = new CockpitRecorderService($pdo);
-    $result = $service->storeAssembledRecording(
-        $audioPath,
-        $metadata,
-        (string)($audioMeta['original_filename'] ?? ($recordingUid . '.m4a')),
-        (string)($audioMeta['mime_type'] ?? 'audio/mp4'),
-        $ahrsPath,
-        $gpsPath,
-        $g3xPath
-    );
+    $result = $service->storeSupplementalG3X($recordingUid, $g3xPath);
 
-    cockpit_finalize_remove_tree($sessionDir);
-    cockpit_finalize_json(200, $result);
+    cockpit_g3x_finalize_remove_tree($sessionDir);
+    cockpit_g3x_finalize_json(200, $result);
 } catch (Throwable $e) {
-    cockpit_finalize_json(500, array('ok' => false, 'error' => $e->getMessage()));
+    cockpit_g3x_finalize_json(500, array('ok' => false, 'error' => $e->getMessage()));
 }

@@ -1,9 +1,15 @@
 import SwiftUI
 
+private struct RecordingNavigationID: Identifiable, Hashable {
+    var id: String
+}
+
 struct RecordingsView: View {
+    @Binding var pendingNavigationRecordingID: String?
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var store: RecordingStore
     @EnvironmentObject private var uploadManager: UploadManager
+    @State private var selectedRecordingID: RecordingNavigationID?
 
     var body: some View {
         NavigationStack {
@@ -38,7 +44,20 @@ struct RecordingsView: View {
             .background(IPCATheme.pageBackground.ignoresSafeArea())
             .navigationTitle("Recordings")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $selectedRecordingID) { target in
+                RecordingDetailView(recordingID: target.id)
+            }
+            .onAppear(perform: consumePendingNavigation)
+            .onChange(of: pendingNavigationRecordingID) { _, _ in
+                consumePendingNavigation()
+            }
         }
+    }
+
+    private func consumePendingNavigation() {
+        guard let recordingID = pendingNavigationRecordingID else { return }
+        selectedRecordingID = RecordingNavigationID(id: recordingID)
+        pendingNavigationRecordingID = nil
     }
 
     private func recordingRow(_ recording: Recording) -> some View {
@@ -58,11 +77,30 @@ struct RecordingsView: View {
                     if recording.isTestRecording {
                         IPCAStatusPill(text: "TEST", color: IPCATheme.warning)
                     }
+                    if recording.hasG3XData {
+                        IPCAStatusPill(text: "G3X", color: IPCATheme.brightBlue)
+                    }
                 }
 
                 if recording.uploadStatus == .uploading {
                     ProgressView(value: recording.uploadProgress)
                         .tint(IPCATheme.brightBlue)
+                }
+
+                if recording.needsUploadRetry {
+                    let isUploadingNow = uploadManager.activeUploads.contains(recording.id)
+                    Button(isUploadingNow ? "Uploading..." : "Retry Upload") {
+                        uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(IPCATheme.brightBlue)
+                    .disabled(isUploadingNow)
+                }
+
+                if !recording.lastError.isEmpty {
+                    Text(recording.lastError)
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.danger)
                 }
             }
         }

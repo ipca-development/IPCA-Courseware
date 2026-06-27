@@ -37,6 +37,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/gps';
     }
 
+    public static function g3xRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/g3x';
+    }
+
     public static function uploadSessionRoot(): string
     {
         return self::projectRoot() . '/storage/cockpit_recorder/upload_sessions';
@@ -97,6 +102,7 @@ final class CockpitRecorderService
             $ahrsFile,
             $gpsFile,
             null,
+            null,
             null
         );
     }
@@ -105,13 +111,37 @@ final class CockpitRecorderService
      * @param array<string,mixed> $metadata
      * @return array<string,mixed>
      */
-    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null): array
+    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null, ?string $g3xPath = null): array
     {
         $this->requireTables();
         if (!is_file($audioPath)) {
             throw new RuntimeException('Assembled audio file is missing.');
         }
-        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath);
+        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath, $g3xPath);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function storeSupplementalG3X(string $recordingUid, string $g3xPath): array
+    {
+        $this->requireTables();
+        $recording = $this->recordingByUid(self::normalizeRecordingUid($recordingUid));
+        if (!$recording) {
+            throw new RuntimeException('Recording not found.');
+        }
+        if (!is_file($g3xPath)) {
+            throw new RuntimeException('Assembled G3X CSV is missing.');
+        }
+
+        $this->storeLocalG3X((int)$recording['id'], (string)$recording['recording_uid'], $g3xPath);
+        $recording = $this->recordingByUid((string)$recording['recording_uid']) ?: $recording;
+        $this->markReconstructionStale((int)$recording['id']);
+
+        return array(
+            'ok' => true,
+            'recording' => $this->publicRecordingPayload($recording),
+        );
     }
 
     /**
@@ -129,7 +159,8 @@ final class CockpitRecorderService
         ?array $ahrsFile,
         ?array $gpsFile,
         ?string $ahrsPath,
-        ?string $gpsPath
+        ?string $gpsPath,
+        ?string $g3xPath = null
     ): array {
         $recordingUid = self::normalizeRecordingUid((string)($metadata['recording_id'] ?? ''));
         if ($recordingUid === '') {
@@ -261,6 +292,11 @@ final class CockpitRecorderService
 
         if ($gpsPath !== null && is_file($gpsPath)) {
             $this->storeLocalGPS((int)$recording['id'], $recordingUid, $gpsPath);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($g3xPath !== null && is_file($g3xPath)) {
+            $this->storeLocalG3X((int)$recording['id'], $recordingUid, $g3xPath);
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -773,6 +809,11 @@ final class CockpitRecorderService
             'gps_available' => trim((string)($recording['gps_storage_path'] ?? '')) !== '',
             'gps_file_size' => (int)($recording['gps_file_size_bytes'] ?? 0),
             'gps_sample_count' => (int)($recording['gps_sample_count'] ?? 0),
+            'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
+            'g3x_file_size' => (int)($recording['g3x_file_size_bytes'] ?? 0),
+            'g3x_row_count' => (int)($recording['g3x_row_count'] ?? 0),
+            'g3x_aircraft_ident' => (string)($recording['g3x_aircraft_ident'] ?? ''),
+            'g3x_imported_at' => $recording['g3x_imported_at'] ?? null,
             'health_warning_count' => (int)($recording['health_warning_count'] ?? 0),
             'health_analyzed_at' => $recording['health_analyzed_at'] ?? null,
             'original_filename' => (string)($recording['original_filename'] ?? ''),
@@ -925,6 +966,72 @@ final class CockpitRecorderService
             return;
         }
         $this->storeLocalSensorJson($recordingId, $recordingUid, $path, 'GPS', self::relativeGPSPath($recordingUid), 'gps_storage_path', 'gps_file_size_bytes', 'gps_sample_count');
+    }
+
+    private function storeLocalG3X(int $recordingId, string $recordingUid, string $path): void
+    {
+        if (!$this->hasColumn('g3x_storage_path')) {
+            return;
+        }
+        if (!is_file($path)) {
+            return;
+        }
+
+        require_once __DIR__ . '/G3XFlightStreamParser.php';
+        $size = (int)filesize($path);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 50 * 1024 * 1024) {
+            throw new RuntimeException('G3X CSV is too large (max 50 MB).');
+        }
+
+        $parsed = G3XFlightStreamParser::parseFile($path);
+        $relativePath = self::relativeG3XPath($recordingUid);
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+        if (!copy($path, $absolutePath)) {
+            throw new RuntimeException('Could not store G3X CSV.');
+        }
+
+        $columns = array(
+            'g3x_storage_path' => $relativePath,
+            'g3x_file_size_bytes' => $size,
+            'g3x_row_count' => (int)$parsed['row_count'],
+            'g3x_aircraft_ident' => (string)$parsed['aircraft_ident'],
+            'g3x_imported_at' => gmdate('Y-m-d H:i:s'),
+        );
+        $sets = array();
+        $params = array();
+        foreach ($columns as $column => $value) {
+            if (!$this->hasColumn($column)) {
+                continue;
+            }
+            $sets[] = $column . ' = ?';
+            $params[] = $value;
+        }
+        if (!$sets) {
+            return;
+        }
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $params[] = $recordingId;
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->execute($params);
+    }
+
+    private function markReconstructionStale(int $recordingId): void
+    {
+        if (!$this->hasColumn('reconstruction_status')) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('
+            UPDATE ' . self::TABLE . '
+            SET reconstruction_status = \'not_started\',
+                timeline_status = \'not_started\',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ');
+        $stmt->execute(array($recordingId));
     }
 
     private function storeLocalSensorJson(
@@ -1956,6 +2063,12 @@ final class CockpitRecorderService
     {
         $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
         return 'storage/cockpit_recorder/gps/' . gmdate('Y/m/d') . '/' . $safeUid . '.gps.json';
+    }
+
+    private static function relativeG3XPath(string $recordingUid): string
+    {
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
+        return 'storage/cockpit_recorder/g3x/' . gmdate('Y/m/d') . '/' . $safeUid . '.g3x.csv';
     }
 
     private static function ensureDirectory(string $dir): void

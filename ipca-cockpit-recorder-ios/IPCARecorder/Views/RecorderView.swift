@@ -253,13 +253,14 @@ struct RecorderView: View {
     private var lastRecordingCard: some View {
         IPCACard(title: "Last Recording Status", systemImage: "checklist") {
             if let failed = latestFailedRecordingForStatus {
-                Text("Last upload failed. Use the Recordings tab to retry or review the error.")
+                Text("Upload can be retried safely. Your audio and flight data remain on this iPad.")
                     .font(.caption)
                     .foregroundStyle(IPCATheme.warning)
                 LabeledContent("Failed recording", value: failed.id)
                 if !failed.lastError.isEmpty {
                     Text(failed.lastError).foregroundStyle(.red)
                 }
+                retryUploadButton(for: failed)
             }
             if let recording = latestActiveRecordingForStatus {
                 LabeledContent("Recording", value: recording.id)
@@ -271,6 +272,9 @@ struct RecorderView: View {
                 LabeledContent("Transcript", value: "\(recording.transcriptStatus.label) \(recording.transcriptProgress)%")
                 if !recording.lastError.isEmpty {
                     Text(recording.lastError).foregroundStyle(.red)
+                }
+                if recording.needsUploadRetry {
+                    retryUploadButton(for: recording)
                 }
             } else if latestFailedRecordingForStatus == nil {
                 Text("No recordings yet.").foregroundStyle(IPCATheme.secondaryText)
@@ -515,6 +519,16 @@ struct RecorderView: View {
             return nil
         }
         return latest
+    }
+
+    private func retryUploadButton(for recording: Recording) -> some View {
+        let isUploadingNow = uploadManager.activeUploads.contains(recording.id)
+        return Button(isUploadingNow ? "Uploading..." : "Retry Upload") {
+            uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(IPCATheme.brightBlue)
+        .disabled(isUploadingNow)
     }
 
     private func stopAndUpload() {

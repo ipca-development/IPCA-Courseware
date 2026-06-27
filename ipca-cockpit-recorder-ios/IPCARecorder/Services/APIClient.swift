@@ -165,6 +165,23 @@ struct APIClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 3600
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: finalizePayload(for: recording, language: language))
+        return request
+    }
+
+    func finalizeG3XUploadRequest(recordingID: String) throws -> URLRequest {
+        let url = serverURL.appending(path: "api/recordings/g3x_finalize.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3600
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "recording_id": recordingID,
+        ])
+        return request
+    }
+
+    private func finalizePayload(for recording: Recording, language: String) -> [String: Any] {
         var payload: [String: Any] = [
             "recording_id": recording.id,
             "started_at": ISO8601DateFormatter().string(from: recording.startedAt),
@@ -190,8 +207,7 @@ struct APIClient {
             payload["oat_c"] = oat
             payload["oat_source"] = "app_logged"
         }
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        return request
+        return payload
     }
 
     func makeMultipartBodyFile(for recording: Recording, language: String, boundary: String) throws -> URL {

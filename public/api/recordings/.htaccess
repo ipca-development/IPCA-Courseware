@@ -8,5 +8,6 @@ RewriteEngine On
 RewriteRule ^upload/?$ upload.php [L]
 RewriteRule ^upload_chunk/?$ upload_chunk.php [L]
 RewriteRule ^upload_finalize/?$ upload_finalize.php [L]
+RewriteRule ^g3x_finalize/?$ g3x_finalize.php [L]
 RewriteRule ^([A-Za-z0-9._-]+)/status/?$ status.php?id=$1 [QSA,L]
 RewriteRule ^([A-Za-z0-9._-]+)/transcript/?$ transcript.php?id=$1 [QSA,L]

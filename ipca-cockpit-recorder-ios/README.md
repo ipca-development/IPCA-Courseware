@@ -11,7 +11,20 @@ Native iPad-only SwiftUI test app for recording audio from a connected USB audio
 
 ```sh
 mysql ... < scripts/sql/2026_06_17_cockpit_recorder_poc.sql
+mysql ... < scripts/sql/2026_06_27_cockpit_recorder_g3x_upload.sql
 ```
+
+## Garmin G3X CSV import
+
+After a flight, export CSV from Garmin Pilot and share it to **IPCA Flight Recorder** in the iOS share sheet.
+
+1. Build the `IPCARecorder` app and the embedded `IPCARecorderShare` extension.
+2. In the Apple Developer portal, enable App Group `group.com.ipca.cockpitrecorder.poc` for both bundle IDs:
+   - `com.ipca.cockpitrecorder.poc`
+   - `com.ipca.cockpitrecorder.poc.share`
+3. Share the Garmin CSV from Garmin Pilot → **IPCA Flight Recorder**.
+4. Confirm the suggested local recording, tap **Attach to Flight**.
+5. The app stores `{recordingID}.g3x.csv`, uploads it with the flight (or syncs it afterward), and the server uses G3X data during reconstruction/replay.
 
 ## Backend API
 
@@ -23,7 +36,9 @@ https://courseware.example.com
 
 The app calls:
 
-- `POST /api/recordings/upload`
+- `POST /api/recordings/upload_chunk`
+- `POST /api/recordings/upload_finalize`
+- `POST /api/recordings/g3x_finalize`
 - `GET /api/recordings/{id}/status`
 - `GET /api/recordings/{id}/transcript`
 - `GET /api/recordings`

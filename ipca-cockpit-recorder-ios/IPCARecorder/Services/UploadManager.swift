@@ -16,7 +16,6 @@ final class UploadManager: ObservableObject {
     }()
 
     func upload(recordingID: String, store: RecordingStore, settings: SettingsStore) {
-        guard !activeUploads.contains(recordingID) else { return }
         guard settings.isServerURLConfigured else {
             store.update(recordingID) {
                 $0.uploadStatus = .failed
@@ -25,11 +24,18 @@ final class UploadManager: ObservableObject {
             return
         }
 
+        guard !activeUploads.contains(recordingID) else { return }
+
         activeUploads.insert(recordingID)
         store.update(recordingID) {
-            $0.uploadStatus = .uploading
-            $0.uploadProgress = 0
-            $0.lastError = ""
+            if $0.uploadStatus != .uploaded {
+                $0.uploadStatus = .uploading
+            }
+            if $0.lastError.hasPrefix("Upload paused at") {
+                $0.lastError = "Resuming upload..."
+            } else if $0.uploadStatus == .uploading && $0.uploadProgress < 0.01 {
+                $0.lastError = "Starting upload..."
+            }
         }
 
         Task {
@@ -73,6 +79,9 @@ final class UploadManager: ObservableObject {
                 $0.transcriptStatus = .transcribing
                 $0.transcriptProgress = uploadResponse.recording?.progress ?? 0
                 $0.lastError = ""
+                if $0.hasG3XData {
+                    $0.g3xServerSynced = true
+                }
             }
         }
 
@@ -106,6 +115,16 @@ final class UploadManager: ObservableObject {
                 fallbackFilename: "\(recording.id).gps.json"
             ) {
                 files.append(("gps", url, url.lastPathComponent, "application/json", try fileSize(url)))
+            }
+        }
+
+        if let g3xPath = recording.g3xCsvPath {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: g3xPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).g3x.csv"
+            ) {
+                files.append(("g3x", url, url.lastPathComponent, "text/csv", try fileSize(url)))
             }
         }
 
@@ -337,6 +356,94 @@ final class UploadManager: ObservableObject {
             return "audio/x-caf"
         default:
             return "audio/mp4"
+        }
+    }
+
+    func uploadG3XSupplement(recordingID: String, store: RecordingStore, settings: SettingsStore) {
+        guard settings.isServerURLConfigured else {
+            store.update(recordingID) {
+                $0.lastError = "Server URL is not configured. Open Settings and enter the IPCA Courseware site URL."
+            }
+            return
+        }
+        guard let recording = store.recording(id: recordingID), recording.hasG3XData, !recording.g3xServerSynced else {
+            return
+        }
+        guard !activeUploads.contains(recordingID) else { return }
+
+        activeUploads.insert(recordingID)
+        store.update(recordingID) {
+            $0.lastError = "Uploading G3X CSV to server..."
+        }
+
+        Task {
+            defer {
+                Task { @MainActor in
+                    self.activeUploads.remove(recordingID)
+                }
+            }
+
+            do {
+                try await performG3XSupplementUpload(recordingID: recordingID, store: store, settings: settings)
+            } catch {
+                await MainActor.run {
+                    store.update(recordingID) {
+                        $0.lastError = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    func syncPendingG3XUploads(store: RecordingStore, settings: SettingsStore) {
+        for recording in store.recordings where recording.needsG3XUpload && recording.uploadStatus == .uploaded {
+            uploadG3XSupplement(recordingID: recording.id, store: store, settings: settings)
+        }
+    }
+
+    private func performG3XSupplementUpload(recordingID: String, store: RecordingStore, settings: SettingsStore) async throws {
+        guard let baseURL = settings.normalizedServerURL else {
+            throw APIClientError.invalidServerURL
+        }
+        guard let recording = store.recording(id: recordingID),
+              let g3xPath = recording.g3xCsvPath else {
+            return
+        }
+
+        let g3xURL = try RecordingStore.resolvedFileURL(
+            preferredPath: g3xPath,
+            recordingID: recording.id,
+            fallbackFilename: "\(recording.id).g3x.csv"
+        )
+        let client = APIClient(serverURL: baseURL)
+        let fileSize = try fileSize(g3xURL)
+        guard fileSize > 0 else { return }
+
+        _ = try await uploadFileChunks(
+            recording: recording,
+            client: client,
+            fileType: "g3x",
+            fileURL: g3xURL,
+            originalFilename: g3xURL.lastPathComponent,
+            mimeType: "text/csv",
+            fileSize: fileSize,
+            uploadedBytes: 0,
+            totalBytes: fileSize,
+            store: store
+        )
+
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recording.id)
+        let (data, response) = try await data(for: finalizeRequest)
+        let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
+        if !uploadResponse.ok {
+            throw APIClientError.badResponse(uploadResponse.error ?? "G3X upload failed.")
+        }
+
+        await MainActor.run {
+            store.update(recordingID) {
+                $0.g3xServerSynced = true
+                $0.lastError = "G3X panel data synced to server."
+            }
         }
     }
 

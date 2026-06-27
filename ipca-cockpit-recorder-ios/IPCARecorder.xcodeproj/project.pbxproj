@@ -25,7 +25,41 @@
 		100000000000000000000010 /* GPSLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* GPSLocationManager.swift */; };
 		100000000000000000000011 /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* IPCATheme.swift */; };
 		100000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* Assets.xcassets */; };
+		100000000000000000000013 /* AppGroupStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* AppGroupStorage.swift */; };
+		100000000000000000000014 /* G3XFlightStreamParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* G3XFlightStreamParser.swift */; };
+		100000000000000000000015 /* G3XRecordingMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* G3XRecordingMatcher.swift */; };
+		100000000000000000000016 /* G3XDocumentImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* G3XDocumentImporter.swift */; };
+		100000000000000000000020 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* ShareViewController.swift */; };
+		100000000000000000000021 /* ShareExtensionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* ShareExtensionView.swift */; };
+		100000000000000000000022 /* AppGroupStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* AppGroupStorage.swift */; };
+		100000000000000000000023 /* G3XFlightStreamParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* G3XFlightStreamParser.swift */; };
+		100000000000000000000024 /* G3XRecordingMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* G3XRecordingMatcher.swift */; };
+		100000000000000000000030 /* IPCARecorderShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 200000000000000000000100 /* IPCARecorderShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B00000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 600000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000002;
+			remoteInfo = IPCARecorderShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C00000000000000000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				100000000000000000000030 /* IPCARecorderShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		200000000000000000000001 /* IPCARecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCARecorderApp.swift; sourceTree = "<group>"; };
@@ -48,10 +82,27 @@
 		200000000000000000000012 /* GPSLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationManager.swift; sourceTree = "<group>"; };
 		200000000000000000000013 /* IPCATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCATheme.swift; sourceTree = "<group>"; };
 		200000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		200000000000000000000020 /* AppGroupStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupStorage.swift; sourceTree = "<group>"; };
+		200000000000000000000021 /* G3XFlightStreamParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G3XFlightStreamParser.swift; sourceTree = "<group>"; };
+		200000000000000000000022 /* G3XRecordingMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G3XRecordingMatcher.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* G3XDocumentImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G3XDocumentImporter.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* ShareExtensionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareExtensionView.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		200000000000000000000027 /* IPCARecorderShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IPCARecorderShare.entitlements; sourceTree = "<group>"; };
+		200000000000000000000028 /* IPCARecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IPCARecorder.entitlements; sourceTree = "<group>"; };
+		200000000000000000000100 /* IPCARecorderShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = IPCARecorderShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		300000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -65,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				400000000000000000000002 /* IPCARecorder */,
+				400000000000000000000007 /* IPCARecorderShare */,
 				400000000000000000000006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -76,9 +128,11 @@
 				400000000000000000000003 /* Models */,
 				400000000000000000000004 /* Services */,
 				400000000000000000000005 /* Views */,
+				400000000000000000000008 /* Shared */,
 				200000000000000000000014 /* Assets.xcassets */,
 				200000000000000000000010 /* LaunchScreen.storyboard */,
 				20000000000000000000000E /* Info.plist */,
+				200000000000000000000028 /* IPCARecorder.entitlements */,
 			);
 			path = IPCARecorder;
 			sourceTree = "<group>";
@@ -97,6 +151,7 @@
 				200000000000000000000011 /* AHRSBLEManager.swift */,
 				200000000000000000000007 /* AudioRecorderManager.swift */,
 				200000000000000000000005 /* APIClient.swift */,
+				200000000000000000000023 /* G3XDocumentImporter.swift */,
 				200000000000000000000012 /* GPSLocationManager.swift */,
 				200000000000000000000004 /* RecordingStore.swift */,
 				200000000000000000000003 /* SettingsStore.swift */,
@@ -123,8 +178,30 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000F /* IPCARecorder.app */,
+				200000000000000000000100 /* IPCARecorderShare.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		400000000000000000000007 /* IPCARecorderShare */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000024 /* ShareViewController.swift */,
+				200000000000000000000025 /* ShareExtensionView.swift */,
+				200000000000000000000026 /* Info.plist */,
+				200000000000000000000027 /* IPCARecorderShare.entitlements */,
+			);
+			path = IPCARecorderShare;
+			sourceTree = "<group>";
+		};
+		400000000000000000000008 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000020 /* AppGroupStorage.swift */,
+				200000000000000000000021 /* G3XFlightStreamParser.swift */,
+				200000000000000000000022 /* G3XRecordingMatcher.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -137,15 +214,34 @@
 				700000000000000000000001 /* Sources */,
 				300000000000000000000001 /* Frameworks */,
 				800000000000000000000001 /* Resources */,
+				C00000000000000000000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B00000000000000000000001 /* PBXTargetDependency */,
 			);
 			name = IPCARecorder;
 			productName = IPCARecorder;
 			productReference = 20000000000000000000000F /* IPCARecorder.app */;
 			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000002 /* IPCARecorderShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000003 /* Build configuration list for PBXNativeTarget "IPCARecorderShare" */;
+			buildPhases = (
+				700000000000000000000002 /* Sources */,
+				300000000000000000000002 /* Frameworks */,
+				800000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IPCARecorderShare;
+			productName = IPCARecorderShare;
+			productReference = 200000000000000000000100 /* IPCARecorderShare.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -158,6 +254,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					500000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					500000000000000000000002 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -176,6 +275,7 @@
 			projectRoot = "";
 			targets = (
 				500000000000000000000001 /* IPCARecorder */,
+				500000000000000000000002 /* IPCARecorderShare */,
 			);
 		};
 /* End PBXProject section */
@@ -187,6 +287,13 @@
 			files = (
 				100000000000000000000012 /* Assets.xcassets in Resources */,
 				10000000000000000000000E /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		800000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -213,10 +320,34 @@
 				10000000000000000000000C /* RecordingDetailView.swift in Sources */,
 				10000000000000000000000D /* SettingsView.swift in Sources */,
 				100000000000000000000011 /* IPCATheme.swift in Sources */,
+				100000000000000000000013 /* AppGroupStorage.swift in Sources */,
+				100000000000000000000014 /* G3XFlightStreamParser.swift in Sources */,
+				100000000000000000000015 /* G3XRecordingMatcher.swift in Sources */,
+				100000000000000000000016 /* G3XDocumentImporter.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		700000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000020 /* ShareViewController.swift in Sources */,
+				100000000000000000000021 /* ShareExtensionView.swift in Sources */,
+				100000000000000000000022 /* AppGroupStorage.swift in Sources */,
+				100000000000000000000023 /* G3XFlightStreamParser.swift in Sources */,
+				100000000000000000000024 /* G3XRecordingMatcher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B00000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000002 /* IPCARecorderShare */;
+			targetProxy = B00000000000000000000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A00000000000000000000001 /* Debug */ = {
@@ -343,6 +474,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = IPCARecorder/IPCARecorder.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -371,6 +503,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = IPCARecorder/IPCARecorder.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -394,6 +527,56 @@
 			};
 			name = Release;
 		};
+		A00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = IPCARecorderShare/IPCARecorderShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCARecorderShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.cockpitrecorder.poc.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		A00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = IPCARecorderShare/IPCARecorderShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCARecorderShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.cockpitrecorder.poc.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -411,6 +594,15 @@
 			buildConfigurations = (
 				A00000000000000000000003 /* Debug */,
 				A00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		900000000000000000000003 /* Build configuration list for PBXNativeTarget "IPCARecorderShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000005 /* Debug */,
+				A00000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

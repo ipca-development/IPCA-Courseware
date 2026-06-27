@@ -85,6 +85,12 @@ struct Recording: Identifiable, Codable, Equatable {
     var lastError: String
     var ahrsSamplesPath: String?
     var gpsSamplesPath: String?
+    var g3xCsvPath: String?
+    var g3xImportedAt: Date?
+    var g3xAircraftIdent: String?
+    var g3xMatchMethod: String?
+    var g3xRowCount: Int
+    var g3xServerSynced: Bool
     var flightSessionID: String
     var segmentIndex: Int
     var previousSegmentID: String?
@@ -116,6 +122,12 @@ struct Recording: Identifiable, Codable, Equatable {
         lastError: String,
         ahrsSamplesPath: String?,
         gpsSamplesPath: String?,
+        g3xCsvPath: String? = nil,
+        g3xImportedAt: Date? = nil,
+        g3xAircraftIdent: String? = nil,
+        g3xMatchMethod: String? = nil,
+        g3xRowCount: Int = 0,
+        g3xServerSynced: Bool = false,
         flightSessionID: String? = nil,
         segmentIndex: Int = 1,
         previousSegmentID: String? = nil,
@@ -146,6 +158,12 @@ struct Recording: Identifiable, Codable, Equatable {
         self.lastError = lastError
         self.ahrsSamplesPath = ahrsSamplesPath
         self.gpsSamplesPath = gpsSamplesPath
+        self.g3xCsvPath = g3xCsvPath
+        self.g3xImportedAt = g3xImportedAt
+        self.g3xAircraftIdent = g3xAircraftIdent
+        self.g3xMatchMethod = g3xMatchMethod
+        self.g3xRowCount = g3xRowCount
+        self.g3xServerSynced = g3xServerSynced
         self.flightSessionID = flightSessionID ?? id
         self.segmentIndex = max(1, segmentIndex)
         self.previousSegmentID = previousSegmentID
@@ -178,6 +196,12 @@ struct Recording: Identifiable, Codable, Equatable {
         case lastError
         case ahrsSamplesPath
         case gpsSamplesPath
+        case g3xCsvPath
+        case g3xImportedAt
+        case g3xAircraftIdent
+        case g3xMatchMethod
+        case g3xRowCount
+        case g3xServerSynced
         case flightSessionID
         case segmentIndex
         case previousSegmentID
@@ -211,6 +235,12 @@ struct Recording: Identifiable, Codable, Equatable {
         lastError = try container.decode(String.self, forKey: .lastError)
         ahrsSamplesPath = try container.decodeIfPresent(String.self, forKey: .ahrsSamplesPath)
         gpsSamplesPath = try container.decodeIfPresent(String.self, forKey: .gpsSamplesPath)
+        g3xCsvPath = try container.decodeIfPresent(String.self, forKey: .g3xCsvPath)
+        g3xImportedAt = try container.decodeIfPresent(Date.self, forKey: .g3xImportedAt)
+        g3xAircraftIdent = try container.decodeIfPresent(String.self, forKey: .g3xAircraftIdent)
+        g3xMatchMethod = try container.decodeIfPresent(String.self, forKey: .g3xMatchMethod)
+        g3xRowCount = try container.decodeIfPresent(Int.self, forKey: .g3xRowCount) ?? 0
+        g3xServerSynced = try container.decodeIfPresent(Bool.self, forKey: .g3xServerSynced) ?? false
         flightSessionID = try container.decodeIfPresent(String.self, forKey: .flightSessionID) ?? id
         segmentIndex = max(1, try container.decodeIfPresent(Int.self, forKey: .segmentIndex) ?? 1)
         previousSegmentID = try container.decodeIfPresent(String.self, forKey: .previousSegmentID)
@@ -256,6 +286,37 @@ struct Recording: Identifiable, Codable, Equatable {
             return "Failed"
         }
         return uploadStatus.label
+    }
+
+    var needsUploadRetry: Bool {
+        uploadStatus == .pending || uploadStatus == .failed || uploadStatus == .uploading
+    }
+
+    var hasG3XData: Bool {
+        g3xCsvPath != nil
+    }
+
+    var needsG3XUpload: Bool {
+        hasG3XData && !g3xServerSynced
+    }
+
+    var g3xLabel: String {
+        guard hasG3XData else { return "Not attached" }
+        var parts: [String] = []
+        if let ident = g3xAircraftIdent, !ident.isEmpty {
+            parts.append(ident)
+        }
+        if g3xRowCount > 0 {
+            parts.append("\(g3xRowCount) rows")
+        }
+        if g3xServerSynced {
+            parts.append("synced")
+        } else if uploadStatus == .uploaded {
+            parts.append("pending sync")
+        } else {
+            parts.append("will upload with flight")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

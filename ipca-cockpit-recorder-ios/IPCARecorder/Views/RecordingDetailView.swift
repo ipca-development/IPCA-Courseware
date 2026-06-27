@@ -21,6 +21,7 @@ struct RecordingDetailView: View {
                         systemImage: "doc.text.magnifyingglass"
                     )
                     metadataCard(recording)
+                    g3xCard(recording)
                     mergeCard(recording)
                     transcriptCard(recording)
                 }
@@ -71,11 +72,55 @@ struct RecordingDetailView: View {
             }
             LabeledContent("AHRS samples", value: recording.ahrsSamplesPath == nil ? "None saved" : "Saved")
             LabeledContent("GPS samples", value: recording.gpsSamplesPath == nil ? "None saved" : "Saved")
+            LabeledContent("G3X CSV", value: recording.g3xLabel)
+            if let importedAt = recording.g3xImportedAt {
+                LabeledContent("G3X imported", value: importedAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            if let matchMethod = recording.g3xMatchMethod, !matchMethod.isEmpty {
+                LabeledContent("G3X match", value: matchMethod)
+            }
             LabeledContent("Language", value: recording.language)
             LabeledContent("Upload", value: "\(recording.uploadStatus.label) \(Int(recording.uploadProgress * 100))%")
             LabeledContent("Transcript", value: "\(recording.transcriptStatus.label) \(recording.transcriptProgress)%")
             if !recording.lastError.isEmpty {
                 Text(recording.lastError).foregroundStyle(IPCATheme.danger)
+            }
+            if recording.needsUploadRetry {
+                uploadRetryButton(for: recording)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func uploadRetryButton(for recording: Recording) -> some View {
+        let isUploadingNow = uploadManager.activeUploads.contains(recording.id)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Your audio and flight data stay on this iPad until upload completes. Reinstalling the app is not required.")
+                .font(.caption)
+                .foregroundStyle(IPCATheme.secondaryText)
+            Button(isUploadingNow ? "Uploading..." : "Retry Upload") {
+                uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(IPCATheme.brightBlue)
+            .disabled(isUploadingNow)
+        }
+        .padding(.top, 4)
+    }
+
+    private func g3xCard(_ recording: Recording) -> some View {
+        IPCACard(title: "Garmin G3X", systemImage: "airplane.circle") {
+            Text("Share a Garmin Pilot G3X CSV to this app after the flight to enrich replay with panel AHRS, air data, and engine values.")
+                .font(.caption)
+                .foregroundStyle(IPCATheme.secondaryText)
+            LabeledContent("Status", value: recording.g3xLabel)
+            if recording.needsG3XUpload && recording.uploadStatus == .uploaded {
+                Button(uploadManager.activeUploads.contains(recording.id) ? "Syncing G3X..." : "Sync G3X to Server") {
+                    uploadManager.uploadG3XSupplement(recordingID: recording.id, store: store, settings: settings)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(IPCATheme.brightBlue)
+                .disabled(uploadManager.activeUploads.contains(recording.id))
             }
         }
     }
