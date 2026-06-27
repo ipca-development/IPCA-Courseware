@@ -39,24 +39,24 @@ cw_header('Cockpit Recorder Replay');
 .phase-row { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #f8fafc; display: grid; gap: 4px; }
 .phase-row.is-active { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .12); background: #eff6ff; }
 .phase-row button, .replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 6px 9px; cursor: pointer; }
-.replay-map { height: 360px; border-radius: 14px; border: 1px solid #dbeafe; background: linear-gradient(135deg, #eef6ff, #ffffff); overflow: hidden; position: relative; }
+.replay-map { height: 100%; border-radius: 10px; background: rgba(15, 23, 42, .18); overflow: hidden; position: relative; }
 .replay-map svg { width: 100%; height: 100%; display: block; }
-.replay-map-layer { position: absolute; inset: 0; overflow: hidden; background: #0f172a; }
+.replay-map-layer { position: absolute; inset: 0; overflow: hidden; background: transparent; opacity: .68; }
 .replay-map-layer img { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; pointer-events: none; }
 .replay-map-overlay { position: absolute; inset: 0; z-index: 2; }
-.replay-map-label { position: absolute; left: 12px; top: 12px; z-index: 3; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; backdrop-filter: blur(6px); }
-.replay-map-attribution { position: absolute; right: 8px; bottom: 6px; z-index: 3; border-radius: 6px; background: rgba(255, 255, 255, .82); color: #334155; font-size: 11px; padding: 3px 6px; }
-.replay-map-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.replay-map-label { position: absolute; left: 8px; top: 8px; z-index: 3; border-radius: 999px; background: rgba(15, 23, 42, .72); color: #fff; font-size: 10px; font-weight: 800; padding: 4px 7px; backdrop-filter: blur(6px); }
+.replay-map-attribution { position: absolute; right: 6px; bottom: 4px; z-index: 3; border-radius: 5px; background: rgba(15, 23, 42, .48); color: rgba(255,255,255,.82); font-size: 9px; padding: 2px 5px; }
+.replay-map-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .replay-map-toolbar-group { display: inline-flex; gap: 6px; align-items: center; }
-.replay-map-toolbar button { border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 800; padding: 5px 10px; cursor: pointer; }
-.replay-map-toolbar button.is-active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.replay-map-toolbar button { border: 1px solid rgba(255,255,255,.48); border-radius: 999px; background: rgba(15, 23, 42, .72); color: #fff; font-weight: 900; padding: 4px 9px; cursor: pointer; backdrop-filter: blur(6px); }
+.replay-map-toolbar button.is-active { background: rgba(217, 70, 239, .82); color: #fff; border-color: rgba(255,255,255,.7); }
 .replay-map-toolbar .zoom-button { min-width: 34px; padding-left: 0; padding-right: 0; }
 .replay-3d { height: 220px; margin-top: 12px; border: 1px solid #dbeafe; border-radius: 14px; background: linear-gradient(180deg, #eff6ff 0%, #fff 62%, #f8fafc 100%); overflow: hidden; position: relative; }
 .replay-3d svg { width: 100%; height: 100%; display: block; }
 .replay-3d-label { position: absolute; left: 12px; top: 10px; z-index: 2; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; }
 .cesium-cockpit { height: 540px; border-radius: 16px; border: 1px solid #dbeafe; background: #0f172a; overflow: hidden; position: relative; }
 .cesium-cockpit .cesium-widget, .cesium-cockpit canvas { width: 100%; height: 100%; }
-.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #0f172a, #1d4ed8); text-align: center; padding: 28px; z-index: 5; }
+.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #0f172a, #1d4ed8); text-align: center; padding: 28px; z-index: 10; }
 .cesium-hud { position: absolute; inset: 0; z-index: 4; pointer-events: none; color: #fff; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-shadow: 0 2px 8px rgba(0,0,0,.72); }
 .hud-tape { position: absolute; top: 84px; width: 78px; height: 318px; border: 1px solid rgba(255,255,255,.72); border-radius: 10px; background: rgba(15,23,42,.34); backdrop-filter: blur(4px); }
 .hud-tape-left { left: 22px; }
@@ -76,8 +76,9 @@ cw_header('Cockpit Recorder Replay');
 .hud-slip:after { right: 46px; }
 .hud-slip-ball { position: absolute; top: 4px; left: 54px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .18s linear; }
 .hud-heading { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); min-width: 96px; text-align: center; border-radius: 8px; background: rgba(0,0,0,.78); font-size: 20px; font-weight: 900; padding: 6px 10px; }
-.cesium-mini-map-label { margin: 12px 0 8px; font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: .04em; }
-.cesium-cockpit + .cesium-mini-map-label + .replay-map { height: 220px; }
+.cockpit-map-overlay { position: absolute; left: 16px; bottom: 48px; z-index: 7; width: 190px; height: 168px; border-radius: 13px; padding: 8px; background: rgba(15, 23, 42, .28); border: 1px solid rgba(255,255,255,.26); box-shadow: 0 14px 30px rgba(0,0,0,.24); backdrop-filter: blur(3px); pointer-events: auto; }
+.cockpit-map-overlay .replay-map { height: 130px; }
+.cockpit-map-title { color: #fff; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -129,17 +130,6 @@ cw_header('Cockpit Recorder Replay');
 
       <main class="replay-card replay-center">
         <h3 style="margin-top:0">Flight Replay</h3>
-        <div class="replay-map-toolbar">
-          <div class="replay-map-toolbar-group" role="group" aria-label="Map view mode">
-            <button type="button" id="routeViewButton" class="is-active">Route</button>
-            <button type="button" id="aircraftViewButton">Aircraft</button>
-            <button type="button" id="followViewButton">Follow aircraft</button>
-          </div>
-          <div class="replay-map-toolbar-group" role="group" aria-label="Map zoom">
-            <button type="button" class="zoom-button" id="zoomOutButton">-</button>
-            <button type="button" class="zoom-button" id="zoomInButton">+</button>
-          </div>
-        </div>
         <div class="cesium-cockpit" id="cesiumReplay" data-cesium-token="<?= h($cesiumIonToken) ?>">
           <?php if ($cesiumIonToken === ''): ?>
             <div class="cesium-unavailable">
@@ -159,9 +149,17 @@ cw_header('Cockpit Recorder Replay');
             <div class="hud-heading" id="hudHeading">HDG ---</div>
             <div class="hud-slip"><div class="hud-slip-ball" id="hudSlipBall"></div></div>
           </div>
+          <div class="cockpit-map-overlay" aria-label="Track overlay map">
+            <div class="replay-map-toolbar">
+              <div class="cockpit-map-title">Track</div>
+              <div class="replay-map-toolbar-group" role="group" aria-label="Map zoom">
+                <button type="button" class="zoom-button" id="zoomOutButton">-</button>
+                <button type="button" class="zoom-button" id="zoomInButton">+</button>
+              </div>
+            </div>
+            <div class="replay-map" id="flightMap"></div>
+          </div>
         </div>
-        <div class="cesium-mini-map-label">Track log and events</div>
-        <div class="replay-map" id="flightMap"></div>
         <div class="replay-3d" id="flight3D" hidden>
           <div class="replay-3d-label">3D GPS altitude view</div>
         </div>
@@ -213,20 +211,17 @@ cw_header('Cockpit Recorder Replay');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
   const playButton = document.getElementById('playButton');
-  const routeViewButton = document.getElementById('routeViewButton');
-  const aircraftViewButton = document.getElementById('aircraftViewButton');
-  const followViewButton = document.getElementById('followViewButton');
   const zoomOutButton = document.getElementById('zoomOutButton');
   const zoomInButton = document.getElementById('zoomInButton');
   let payload = null;
   let activeT = 0;
-  let mapMode = 'route';
+  let mapMode = 'aircraft';
   let zoomOffset = 0;
   let animationFrame = null;
   let lastAnimationRenderMs = 0;
+  let lastPanelRenderMs = 0;
   let cesiumViewer = null;
   let cesiumAircraft = null;
-  let cesiumTrack = null;
   let cesiumReady = false;
   let cesiumCameraState = null;
 
@@ -445,8 +440,8 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function renderMap() {
-    const width = Math.max(320, Math.round(flightMap.clientWidth || 900));
-    const height = Math.max(240, Math.round(flightMap.clientHeight || 420));
+    const width = Math.max(150, Math.round(flightMap.clientWidth || 190));
+    const height = Math.max(110, Math.round(flightMap.clientHeight || 130));
     const stationary = isStationaryRecording(payload.samples);
     const current = sampleAt(activeT);
     const view = chooseActiveMapView(payload.samples, width, height, stationary, current);
@@ -463,11 +458,11 @@ cw_header('Cockpit Recorder Replay');
       return best;
     };
     const currentPoint = current ? pointForTime(current.t) : null;
-    const drawablePoints = downsamplePoints(points, 6000);
+    const drawablePoints = downsamplePoints(points, 1600);
     const path = stationary ? '' : drawablePoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     const recentTrail = downsamplePoints(points
-      .filter((p) => p.t >= activeT - 60 && p.t <= activeT + 3)
-      , 1200)
+      .filter((p) => p.t >= activeT - 90 && p.t <= activeT + 3)
+      , 500)
       .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(' ');
     const eventMarkers = (payload.events || []).map((event) => {
@@ -476,11 +471,10 @@ cw_header('Cockpit Recorder Replay');
       return `<circle cx="${projected.x}" cy="${projected.y}" r="5" fill="#f97316"><title>${event.event_type} ${fmtTime(event.start)}</title></circle>`;
     }).join('');
     const pathLayer = path
-      ? `<polyline points="${path}" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></polyline>`
-      : (!points.length ? '<text x="24" y="40" fill="#64748b">No GPS path available</text>' : '');
+      ? `<polyline points="${path}" fill="none" stroke="#d946ef" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round" opacity=".92"></polyline>`
+      : (!points.length ? '<text x="12" y="28" fill="#fff" font-size="11">No GPS</text>' : '');
     const stationaryMessage = stationary
-      ? `<text x="${width / 2}" y="${height / 2 + 34}" text-anchor="middle" fill="#475569" font-size="18">GPS position recorded, no significant movement detected yet.</text>
-         <text x="${width / 2}" y="${height / 2 + 58}" text-anchor="middle" fill="#64748b" font-size="14">A real flight or taxi test will draw the plan-view track here.</text>`
+      ? `<text x="${width / 2}" y="${height / 2 + 16}" text-anchor="middle" fill="#fff" font-size="11">Stationary GPS</text>`
       : '';
     const trackAngle = current && Number.isFinite(Number(current.track_deg)) ? Number(current.track_deg) : null;
     const headingAngle = current && Number.isFinite(Number(current.heading_deg)) ? Number(current.heading_deg) : null;
@@ -488,17 +482,15 @@ cw_header('Cockpit Recorder Replay');
     const aircraftAngle = trackAngle !== null && groundspeed >= 5 ? trackAngle : (headingAngle ?? trackAngle ?? 0);
     const aircraftAngleSource = trackAngle !== null && groundspeed >= 5 ? 'GPS track' : (headingAngle !== null ? 'heading' : 'GPS track');
     flightMap.innerHTML = `
-      ${renderSatelliteTiles(view, width, height)}
-      <div class="replay-map-label">${view ? `${mapMode === 'route' ? 'Route' : (mapMode === 'follow' ? 'Follow aircraft' : 'Aircraft')} · Satellite Z${view.zoom}` : 'Replay plan view'}</div>
-      ${view ? '<div class="replay-map-attribution">Imagery: Esri World Imagery</div>' : ''}
+      <div class="replay-map-label">${view ? `Z${view.zoom}` : 'Track'}</div>
       <svg class="replay-map-overlay" viewBox="0 0 ${width} ${height}" role="img" aria-label="Flight path">
-        <rect width="${width}" height="${height}" fill="${view ? 'rgba(15, 23, 42, .08)' : 'url(#bg)'}"></rect>
+        <rect width="${width}" height="${height}" fill="rgba(15, 23, 42, .22)"></rect>
         <defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
         ${pathLayer}
-        ${recentTrail ? `<polyline points="${recentTrail}" fill="none" stroke="#f97316" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" opacity=".9"></polyline>` : ''}
+        ${recentTrail ? `<polyline points="${recentTrail}" fill="none" stroke="#f0abfc" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".95"></polyline>` : ''}
         ${eventMarkers}
         ${stationaryMessage}
-        ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><title>Aircraft marker rotated by ${aircraftAngleSource}: ${aircraftAngle.toFixed(0)} deg</title><circle cx="0" cy="0" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M 0 -24 L 10 14 L 0 8 L -10 14 Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path><line x1="0" y1="-34" x2="0" y2="-46" stroke="#fff" stroke-width="3" stroke-linecap="round"></line></g>` : ''}
+        ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><title>Aircraft marker rotated by ${aircraftAngleSource}: ${aircraftAngle.toFixed(0)} deg</title><circle cx="0" cy="0" r="9" fill="rgba(15,23,42,.86)" stroke="#fff" stroke-width="2.5"></circle><path d="M 0 -18 L 8 10 L 0 5 L -8 10 Z" fill="#fff" stroke="#d946ef" stroke-width="1.8"></path></g>` : ''}
       </svg>`;
   }
 
@@ -611,23 +603,14 @@ cw_header('Cockpit Recorder Replay');
       cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
       cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
 
-      const positions = gpsSamples.map((s) => Cesium.Cartesian3.fromDegrees(
-        Number(s.lon),
-        Number(s.lat),
-        Math.max(0, feetToMeters(bestAltitudeFt(s)))
-      ));
-      cesiumTrack = cesiumViewer.entities.add({
-        name: 'Flight track',
-        polyline: {
-          positions,
-          width: 4,
-          material: Cesium.Color.CYAN.withAlpha(0.82),
-          clampToGround: false,
-        },
-      });
+      const firstPosition = Cesium.Cartesian3.fromDegrees(
+        Number(gpsSamples[0].lon),
+        Number(gpsSamples[0].lat),
+        Math.max(0, feetToMeters(bestAltitudeFt(gpsSamples[0])))
+      );
       cesiumAircraft = cesiumViewer.entities.add({
         name: 'Aircraft',
-        position: positions[0],
+        position: firstPosition,
         point: {
           pixelSize: 1,
           color: Cesium.Color.WHITE.withAlpha(0.0),
@@ -753,7 +736,6 @@ cw_header('Cockpit Recorder Replay');
       row.querySelector('button').addEventListener('click', () => {
         mapMode = 'aircraft';
         zoomOffset = 0;
-        updateMapButtons();
         seek(phase.start, true);
       });
       phaseList.appendChild(row);
@@ -860,21 +842,6 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
-  function updateMapButtons() {
-    routeViewButton.classList.toggle('is-active', mapMode === 'route');
-    aircraftViewButton.classList.toggle('is-active', mapMode === 'aircraft');
-    followViewButton.classList.toggle('is-active', mapMode === 'follow');
-  }
-
-  function setMapMode(mode) {
-    mapMode = mode;
-    if (mode === 'route') {
-      zoomOffset = 0;
-    }
-    updateMapButtons();
-    safeRender('map', renderMap);
-  }
-
   function seek(seconds, syncAudio) {
     const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
@@ -894,22 +861,45 @@ cw_header('Cockpit Recorder Replay');
     safeRender('graphs', renderGraphs);
   }
 
+  function updateCockpitPlayback(seconds, timestamp) {
+    const previousT = activeT;
+    activeT = Math.max(0, Number(seconds) || 0);
+    if (Math.abs(activeT - previousT) > 3) {
+      cesiumCameraState = null;
+    }
+    timeline.value = String(activeT);
+    timeLabel.textContent = fmtTime(activeT);
+    safeRenderCesium();
+
+    if (timestamp - lastAnimationRenderMs >= 160) {
+      safeRender('map', renderMap);
+      lastAnimationRenderMs = timestamp;
+    }
+    if (timestamp - lastPanelRenderMs >= 500) {
+      updateActivePhase();
+      safeRender('details', renderDetails);
+      lastPanelRenderMs = timestamp;
+    }
+  }
+
   timeline.addEventListener('input', () => seek(Number(timeline.value), true));
-  audio.addEventListener('timeupdate', () => seek(audio.currentTime, false));
-  routeViewButton.addEventListener('click', () => setMapMode('route'));
-  aircraftViewButton.addEventListener('click', () => setMapMode('aircraft'));
-  followViewButton.addEventListener('click', () => setMapMode('follow'));
-  zoomOutButton.addEventListener('click', () => {
-    zoomOffset -= 1;
-    if (mapMode === 'route' && zoomOffset < -3) zoomOffset = -3;
-    if (mapMode !== 'route' && zoomOffset < -6) zoomOffset = -6;
-    safeRender('map', renderMap);
+  audio.addEventListener('timeupdate', () => {
+    if (audio.paused) {
+      seek(audio.currentTime, false);
+    }
   });
-  zoomInButton.addEventListener('click', () => {
-    zoomOffset += 1;
+  function adjustMapZoom(delta) {
+    zoomOffset += delta;
+    if (zoomOffset < -6) zoomOffset = -6;
     if (zoomOffset > 6) zoomOffset = 6;
     safeRender('map', renderMap);
-  });
+  }
+  zoomOutButton.addEventListener('click', () => adjustMapZoom(-1));
+  zoomInButton.addEventListener('click', () => adjustMapZoom(1));
+  flightMap.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    adjustMapZoom(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
   playButton.addEventListener('click', () => {
     if (audio.paused) {
       audio.play();
@@ -929,6 +919,7 @@ cw_header('Cockpit Recorder Replay');
   audio.addEventListener('play', () => {
     playButton.textContent = 'Pause';
     lastAnimationRenderMs = 0;
+    lastPanelRenderMs = 0;
     animatePlayback();
   });
 
@@ -937,10 +928,7 @@ cw_header('Cockpit Recorder Replay');
       animationFrame = null;
       return;
     }
-    if (timestamp - lastAnimationRenderMs >= 100) {
-      seek(audio.currentTime, false);
-      lastAnimationRenderMs = timestamp;
-    }
+    updateCockpitPlayback(audio.currentTime, timestamp);
     animationFrame = requestAnimationFrame(animatePlayback);
   }
   window.addEventListener('resize', () => {
