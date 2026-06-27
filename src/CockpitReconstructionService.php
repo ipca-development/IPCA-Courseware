@@ -235,7 +235,7 @@ final class CockpitReconstructionService
 
         $recordingId = (int)$recording['id'];
         $sampleCount = $this->countRows(self::SAMPLE_TABLE, $recordingId);
-        $samples = $this->sampleRows($recordingId, 30000);
+        $samples = $this->sampleRows($recordingId, 20000);
         return array(
             'ok' => true,
             'recording_id' => $recordingId,
@@ -319,17 +319,63 @@ final class CockpitReconstructionService
     {
         $limit = max(1, min(100000, $limit));
         $count = $this->countRows(self::SAMPLE_TABLE, $recordingId);
+        $columns = implode(', ', array(
+            'sample_time_utc',
+            'seconds_since_start',
+            'latitude',
+            'longitude',
+            'gps_altitude_ft',
+            'baro_altitude_ft',
+            'vertical_speed_fpm',
+            'adsb_baro_altitude_ft',
+            'adsb_vertical_speed_fpm',
+            'estimated_baro_altitude_ft',
+            'estimated_vertical_speed_fpm',
+            'field_calibrated_altitude_ft',
+            'field_calibrated_true_altitude_ft',
+            'estimated_indicated_altitude_ft',
+            'estimated_true_altitude_from_indicated_ft',
+            'altimeter_setting_inhg',
+            'altimeter_setting_source',
+            'airport_elevation_ft',
+            'airport_elevation_source',
+            'field_altitude_offset_ft',
+            'oat_c',
+            'oat_source',
+            'altitude_source',
+            'altitude_quality',
+            'vertical_speed_source',
+            'vertical_speed_quality',
+            'estimated_slip_skid_g',
+            'estimated_slip_skid_quality',
+            'estimated_slip_skid_source',
+            'ahrs_acceleration_x_g',
+            'ahrs_acceleration_y_g',
+            'ahrs_acceleration_z_g',
+            'estimated_wind_speed_kt',
+            'estimated_wind_direction_deg_true',
+            'estimated_wind_quality',
+            'estimated_wind_source',
+            'estimated_tas_kt',
+            'wind_estimation_method',
+            'groundspeed_kt',
+            'magnetic_track_deg',
+            'pitch_deg',
+            'roll_deg',
+            'magnetic_heading_deg',
+            'true_heading_deg',
+        ));
         if ($count > $limit) {
             $stride = max(1, (int)ceil($count / $limit));
             $stmt = $this->pdo->query('
-                SELECT *
+                SELECT ' . $columns . '
                 FROM ' . self::SAMPLE_TABLE . '
                 WHERE recording_id = ' . (int)$recordingId . '
                   AND (MOD(sample_index, ' . $stride . ') = 0 OR sample_index = ' . ($count - 1) . ')
                 ORDER BY sample_index ASC
             ');
         } else {
-            $stmt = $this->pdo->query('SELECT * FROM ' . self::SAMPLE_TABLE . ' WHERE recording_id = ' . (int)$recordingId . ' ORDER BY sample_index ASC');
+            $stmt = $this->pdo->query('SELECT ' . $columns . ' FROM ' . self::SAMPLE_TABLE . ' WHERE recording_id = ' . (int)$recordingId . ' ORDER BY sample_index ASC');
         }
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
         return is_array($rows) ? array_map(fn(array $row): array => $this->publicSample($row), $rows) : array();
