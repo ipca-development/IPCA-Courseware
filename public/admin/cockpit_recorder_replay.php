@@ -189,6 +189,7 @@ cw_header('Cockpit Recorder Replay');
 </div>
 
 <?php if ($error === ''): ?>
+<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/';</script>
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Cesium.js"></script>
 <script>
 (function() {
@@ -565,16 +566,16 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function initCesium() {
-    if (cesiumReady || !cesiumReplay || !payload) return;
-    const token = (cesiumReplay.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '');
-    if (!token || typeof Cesium === 'undefined') return;
-    const gpsSamples = payload.samples.filter((s) => s.lat !== null && s.lon !== null);
-    if (!gpsSamples.length) {
-      cesiumReplay.insertAdjacentHTML('beforeend', '<div class="cesium-unavailable"><div><strong>No GPS samples available for Cesium replay.</strong></div></div>');
-      return;
-    }
-
     try {
+      if (cesiumReady || !cesiumReplay || !payload) return;
+      const token = (cesiumReplay.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '');
+      if (!token || typeof Cesium === 'undefined') return;
+      const gpsSamples = payload.samples.filter((s) => s.lat !== null && s.lon !== null);
+      if (!gpsSamples.length) {
+        showCesiumError('No GPS samples available for Cesium replay.');
+        return;
+      }
+
       Cesium.Ion.defaultAccessToken = token;
       cesiumViewer = new Cesium.Viewer(cesiumReplay, {
         animation: false,
@@ -589,61 +590,52 @@ cw_header('Cockpit Recorder Replay');
         timeline: false,
         shouldAnimate: false,
       });
-    } catch (err) {
-      cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(err.message || err)}</div></div>`);
-      return;
-    }
-    cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
-    cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
-    if (Cesium.createWorldTerrainAsync) {
-      Cesium.createWorldTerrainAsync().then((terrainProvider) => {
-        if (cesiumViewer && !cesiumViewer.isDestroyed()) cesiumViewer.terrainProvider = terrainProvider;
-      }).catch(() => {});
-    }
 
-    const positions = gpsSamples.map((s) => Cesium.Cartesian3.fromDegrees(
-      Number(s.lon),
-      Number(s.lat),
-      Math.max(0, feetToMeters(bestAltitudeFt(s)))
-    ));
-    cesiumTrack = cesiumViewer.entities.add({
-      name: 'Flight track',
-      polyline: {
-        positions,
-        width: 4,
-        material: Cesium.Color.CYAN.withAlpha(0.82),
-        clampToGround: false,
-      },
-    });
-    cesiumAircraft = cesiumViewer.entities.add({
-      name: 'Aircraft',
-      position: positions[0],
-      point: {
-        pixelSize: 1,
-        color: Cesium.Color.TRANSPARENT,
-      },
-    });
-    (payload.events || []).forEach((event) => {
-      const s = sampleAt(event.start);
-      if (!s || s.lat === null || s.lon === null) return;
-      cesiumViewer.entities.add({
-        name: event.event_type || 'Event',
-        position: Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), Math.max(0, feetToMeters(bestAltitudeFt(s))) + 20),
-        point: { pixelSize: 10, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
-        label: {
-          text: event.event_type || 'Event',
-          font: '12px sans-serif',
-          fillColor: Cesium.Color.WHITE,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 3,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
+      cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
+      cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+
+      const positions = gpsSamples.map((s) => Cesium.Cartesian3.fromDegrees(
+        Number(s.lon),
+        Number(s.lat),
+        Math.max(0, feetToMeters(bestAltitudeFt(s)))
+      ));
+      cesiumTrack = cesiumViewer.entities.add({
+        name: 'Flight track',
+        polyline: {
+          positions,
+          width: 4,
+          material: Cesium.Color.CYAN.withAlpha(0.82),
+          clampToGround: false,
         },
       });
-    });
-    cesiumHud.hidden = false;
-    cesiumReady = true;
-    renderCesium();
+      cesiumAircraft = cesiumViewer.entities.add({
+        name: 'Aircraft',
+        position: positions[0],
+        point: {
+          pixelSize: 1,
+          color: Cesium.Color.WHITE.withAlpha(0.0),
+        },
+      });
+      (payload.events || []).forEach((event) => {
+        const s = sampleAt(event.start);
+        if (!s || s.lat === null || s.lon === null) return;
+        cesiumViewer.entities.add({
+          name: event.event_type || 'Event',
+          position: Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), Math.max(0, feetToMeters(bestAltitudeFt(s))) + 20),
+          point: { pixelSize: 10, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+        });
+      });
+      cesiumHud.hidden = false;
+      cesiumReady = true;
+      renderCesium();
+    } catch (err) {
+      showCesiumError(String(err.message || err));
+    }
+  }
+
+  function showCesiumError(message) {
+    if (!cesiumReplay) return;
+    cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(message).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div></div>`);
   }
 
   function renderCesium() {
@@ -930,7 +922,11 @@ cw_header('Cockpit Recorder Replay');
       const maxT = Math.max(Number(payload.recording.duration) || 0, ...payload.samples.map((s) => Number(s.t) || 0), 1);
       timeline.max = String(maxT);
       renderPhases();
-      initCesium();
+      try {
+        initCesium();
+      } catch (err) {
+        showCesiumError(String(err.message || err));
+      }
       renderMap();
       renderCesium();
       render3DView();
