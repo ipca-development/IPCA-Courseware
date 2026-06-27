@@ -1,8 +1,7 @@
 import Foundation
-import SwiftUI
-import UniformTypeIdentifiers
 
 enum G3XDocumentImporter {
+    @MainActor
     static func importFile(_ url: URL, store: RecordingStore) throws -> String? {
         let parsed = try G3XFlightStreamParser.parse(fileURL: url)
         let candidates = G3XRecordingMatcher.rankedCandidates(

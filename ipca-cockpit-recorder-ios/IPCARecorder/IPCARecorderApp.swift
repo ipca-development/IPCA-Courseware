@@ -28,7 +28,9 @@ struct IPCARecorderApp: App {
                     handlePendingG3XWorkflow()
                 }
                 .onOpenURL { url in
-                    handleIncomingURL(url)
+                    Task { @MainActor in
+                        handleIncomingURL(url)
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
@@ -44,6 +46,7 @@ struct IPCARecorderApp: App {
         }
     }
 
+    @MainActor
     private func handlePendingG3XWorkflow() {
         recordingStore.processPendingG3XImports()
         uploadManager.syncPendingG3XUploads(store: recordingStore, settings: settings)
@@ -53,6 +56,7 @@ struct IPCARecorderApp: App {
         }
     }
 
+    @MainActor
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme?.lowercased() == "ipcarecorder" else { return }
 
