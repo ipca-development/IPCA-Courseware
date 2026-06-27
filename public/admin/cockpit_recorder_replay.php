@@ -597,10 +597,8 @@ cw_header('Cockpit Recorder Replay');
       name: 'Aircraft',
       position: positions[0],
       point: {
-        pixelSize: 12,
-        color: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.DODGERBLUE,
-        outlineWidth: 3,
+        pixelSize: 1,
+        color: Cesium.Color.TRANSPARENT,
       },
     });
     (payload.events || []).forEach((event) => {
@@ -631,7 +629,7 @@ cw_header('Cockpit Recorder Replay');
     const s = sampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
     const altitudeM = Math.max(5, feetToMeters(bestAltitudeFt(s)));
-    const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM + 12);
+    const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM + 8);
     cesiumAircraft.position = position;
     const groundspeed = Number.isFinite(Number(s.groundspeed_kt)) ? Number(s.groundspeed_kt) : 0;
     const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
@@ -640,12 +638,23 @@ cw_header('Cockpit Recorder Replay');
     const cameraHeading = track !== null && groundspeed >= 5 ? track : heading;
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
+    const headingRad = degToRad(cameraHeading);
+    const pitchRad = degToRad(Math.max(-18, Math.min(8, pitch - 2)));
+    const rollRad = degToRad(Math.max(-45, Math.min(45, bank)));
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+    const forwardOffset = Cesium.Matrix4.multiplyByPointAsVector(
+      enu,
+      new Cesium.Cartesian3(Math.sin(headingRad) * 22, Math.cos(headingRad) * 22, 0),
+      new Cesium.Cartesian3()
+    );
+    const eye = Cesium.Cartesian3.add(position, forwardOffset, new Cesium.Cartesian3());
+    eye.z += 2.0;
     cesiumViewer.camera.setView({
-      destination: position,
+      destination: eye,
       orientation: {
-        heading: degToRad(cameraHeading),
-        pitch: degToRad(Math.max(-35, Math.min(15, pitch - 8))),
-        roll: degToRad(Math.max(-60, Math.min(60, bank))),
+        heading: headingRad,
+        pitch: pitchRad,
+        roll: rollRad,
       },
     });
     renderCesiumHud(s, heading);
