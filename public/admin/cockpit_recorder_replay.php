@@ -955,7 +955,13 @@ cw_header('Cockpit Recorder Replay');
     let data = null;
     try {
       const response = await fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`);
-      data = await response.json();
+      const text = await response.text();
+      try {
+        data = JSON.parse(text);
+      } catch (jsonErr) {
+        throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+      }
+      if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
       if (!data.ok) throw new Error(data.error || 'Replay data not available.');
     } catch (err) {
       flightMap.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err)}</div>`;

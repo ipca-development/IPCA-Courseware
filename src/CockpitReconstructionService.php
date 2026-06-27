@@ -234,6 +234,8 @@ final class CockpitReconstructionService
         }
 
         $recordingId = (int)$recording['id'];
+        $sampleCount = $this->countRows(self::SAMPLE_TABLE, $recordingId);
+        $samples = $this->sampleRows($recordingId, 30000);
         return array(
             'ok' => true,
             'recording_id' => $recordingId,
@@ -279,8 +281,10 @@ final class CockpitReconstructionService
             'summary' => self::decodeJson((string)($recording['reconstruction_summary_json'] ?? '')),
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
-            'sample_count' => $this->countRows(self::SAMPLE_TABLE, $recordingId),
-            'samples' => $this->sampleRows($recordingId, 100000),
+            'sample_count' => $sampleCount,
+            'sample_payload_count' => count($samples),
+            'sample_payload_downsampled' => $sampleCount > count($samples),
+            'samples' => $samples,
         );
     }
 
@@ -312,7 +316,19 @@ final class CockpitReconstructionService
     public function sampleRows(int $recordingId, int $limit = 5000): array
     {
         $limit = max(1, min(100000, $limit));
-        $stmt = $this->pdo->query('SELECT * FROM ' . self::SAMPLE_TABLE . ' WHERE recording_id = ' . (int)$recordingId . ' ORDER BY sample_index ASC LIMIT ' . $limit);
+        $count = $this->countRows(self::SAMPLE_TABLE, $recordingId);
+        if ($count > $limit) {
+            $stride = max(1, (int)ceil($count / $limit));
+            $stmt = $this->pdo->query('
+                SELECT *
+                FROM ' . self::SAMPLE_TABLE . '
+                WHERE recording_id = ' . (int)$recordingId . '
+                  AND (MOD(sample_index, ' . $stride . ') = 0 OR sample_index = ' . ($count - 1) . ')
+                ORDER BY sample_index ASC
+            ');
+        } else {
+            $stmt = $this->pdo->query('SELECT * FROM ' . self::SAMPLE_TABLE . ' WHERE recording_id = ' . (int)$recordingId . ' ORDER BY sample_index ASC');
+        }
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
         return is_array($rows) ? array_map(fn(array $row): array => $this->publicSample($row), $rows) : array();
     }
