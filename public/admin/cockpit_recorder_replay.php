@@ -460,9 +460,11 @@ cw_header('Cockpit Recorder Replay');
       return best;
     };
     const currentPoint = current ? pointForTime(current.t) : null;
-    const path = stationary ? '' : points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    const recentTrail = points
+    const drawablePoints = downsamplePoints(points, 6000);
+    const path = stationary ? '' : drawablePoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const recentTrail = downsamplePoints(points
       .filter((p) => p.t >= activeT - 60 && p.t <= activeT + 3)
+      , 1200)
       .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(' ');
     const eventMarkers = (payload.events || []).map((event) => {
@@ -495,6 +497,18 @@ cw_header('Cockpit Recorder Replay');
         ${stationaryMessage}
         ${currentPoint ? `<g transform="translate(${currentPoint.x.toFixed(1)} ${currentPoint.y.toFixed(1)}) rotate(${aircraftAngle.toFixed(1)})"><title>Aircraft marker rotated by ${aircraftAngleSource}: ${aircraftAngle.toFixed(0)} deg</title><circle cx="0" cy="0" r="13" fill="#0f172a" stroke="#fff" stroke-width="4"></circle><path d="M 0 -24 L 10 14 L 0 8 L -10 14 Z" fill="#2563eb" stroke="#fff" stroke-width="2"></path><line x1="0" y1="-34" x2="0" y2="-46" stroke="#fff" stroke-width="3" stroke-linecap="round"></line></g>` : ''}
       </svg>`;
+  }
+
+  function downsamplePoints(points, maxPoints) {
+    if (!Array.isArray(points) || points.length <= maxPoints) return points;
+    const step = Math.ceil(points.length / maxPoints);
+    const sampled = [];
+    for (let i = 0; i < points.length; i += step) {
+      sampled.push(points[i]);
+    }
+    const last = points[points.length - 1];
+    if (sampled[sampled.length - 1] !== last) sampled.push(last);
+    return sampled;
   }
 
   function render3DView() {
@@ -699,6 +713,17 @@ cw_header('Cockpit Recorder Replay');
     } catch (err) {
       showCesiumError(String(err.message || err));
       cesiumReady = false;
+    }
+  }
+
+  function safeRender(name, fn) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`Replay render failed: ${name}`, err);
+      if (name === 'map') {
+        flightMap.innerHTML = `<div class="replay-error">Track map render failed: ${String(err.message || err)}</div>`;
+      }
     }
   }
 
@@ -928,19 +953,19 @@ cw_header('Cockpit Recorder Replay');
     .then((data) => {
       if (!data.ok) throw new Error(data.error || 'Replay data not available.');
       payload = data;
-      const maxT = Math.max(Number(payload.recording.duration) || 0, ...payload.samples.map((s) => Number(s.t) || 0), 1);
+      const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
       timeline.max = String(maxT);
-      renderPhases();
+      safeRender('phases', renderPhases);
       try {
         initCesium();
       } catch (err) {
         showCesiumError(String(err.message || err));
       }
-      renderMap();
+      safeRender('map', renderMap);
       safeRenderCesium();
-      render3DView();
-      renderDetails();
-      renderGraphs();
+      safeRender('3d', render3DView);
+      safeRender('details', renderDetails);
+      safeRender('graphs', renderGraphs);
     })
     .catch((err) => {
       flightMap.innerHTML = `<div class="replay-error">${err.message}</div>`;
