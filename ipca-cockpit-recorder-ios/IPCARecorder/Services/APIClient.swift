@@ -134,7 +134,12 @@ struct APIClient {
             "duration": recording.duration,
             "input_device": recording.inputDeviceName,
             "aircraft_id": recording.aircraftID ?? 0,
-            "language": language
+            "language": language,
+            "flight_session_uid": recording.flightSessionID,
+            "flight_segment_index": recording.segmentIndex,
+            "previous_segment_uid": recording.previousSegmentID ?? "",
+            "is_test_recording": recording.isTestRecording ? 1 : 0,
+            "source_gap_summary": recording.sourceGapSummary ?? ""
         ]
         if let altimeter = recording.altimeterSettingInHg {
             payload["altimeter_setting_inhg"] = altimeter
@@ -175,7 +180,12 @@ struct APIClient {
             ("duration", String(recording.duration)),
             ("input_device", recording.inputDeviceName),
             ("aircraft_id", recording.aircraftID.map(String.init) ?? ""),
-            ("language", language)
+            ("language", language),
+            ("flight_session_uid", recording.flightSessionID),
+            ("flight_segment_index", String(recording.segmentIndex)),
+            ("previous_segment_uid", recording.previousSegmentID ?? ""),
+            ("is_test_recording", recording.isTestRecording ? "1" : "0"),
+            ("source_gap_summary", recording.sourceGapSummary ?? "")
         ]
         if let altimeter = recording.altimeterSettingInHg {
             fields.append(("altimeter_setting_inhg", String(altimeter)))

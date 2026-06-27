@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RecorderView: View {
     @EnvironmentObject private var settings: SettingsStore
@@ -53,6 +54,9 @@ struct RecorderView: View {
             }
             .onChange(of: audio.recordingSignalActive) { _, _ in
                 sendRecordingStatus()
+            }
+            .onChange(of: audio.isRecording) { _, isRecording in
+                UIApplication.shared.isIdleTimerDisabled = isRecording
             }
             .onChange(of: audio.isPaused) { _, _ in
                 sendRecordingStatus()
@@ -515,6 +519,7 @@ struct RecorderView: View {
 
     private func stopAndUpload() {
         guard var recording = audio.stopRecording(language: settings.language) else { return }
+        UIApplication.shared.isIdleTimerDisabled = false
         if let aircraft = settings.selectedAircraft {
             recording.aircraftID = aircraft.id
             recording.aircraftRegistration = aircraft.registration
@@ -527,10 +532,17 @@ struct RecorderView: View {
         recording.oatC = settings.oatValue
         recording.ahrsSamplesPath = ahrsBLE.stopCaptureAndSave(recordingID: recording.id)
         recording.gpsSamplesPath = gps.stopCaptureAndSave(recordingID: recording.id)
+        recording.flightSessionID = recording.id
+        recording.segmentIndex = 1
         ahrsBLE.sendStatusCommand("REC=0")
         ahrsBLE.sendStatusCommand("UPLOAD=BUSY")
         sendGPSStatus()
         store.add(recording)
+        if let previous = store.previousMergeCandidate(for: recording.id) {
+            store.update(recording.id) {
+                $0.lastError = "Possible continuation of previous flight \(previous.id). Open Recording Detail to merge if this is the same flight."
+            }
+        }
         uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
     }
 

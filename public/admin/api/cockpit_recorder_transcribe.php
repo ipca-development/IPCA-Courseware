@@ -40,8 +40,12 @@ try {
     }
 
     $service = new CockpitRecorderService($pdo);
-    if ($mode === 'spawn') {
+    if ($mode === 'retry') {
         $service->resetTranscriptionForRetry($id);
+        $spawned = $service->spawnTranscriptionWorker($id);
+        cockpit_transcribe_response($spawned, $spawned ? 'worker_started' : 'worker_start_failed', array('worker_spawned' => $spawned));
+    }
+    if ($mode === 'spawn') {
         $spawned = $service->spawnTranscriptionWorker($id);
         cockpit_transcribe_response($spawned, $spawned ? 'worker_started' : 'worker_start_failed', array('worker_spawned' => $spawned));
     }

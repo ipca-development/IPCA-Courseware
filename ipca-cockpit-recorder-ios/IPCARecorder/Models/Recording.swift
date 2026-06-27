@@ -85,6 +85,138 @@ struct Recording: Identifiable, Codable, Equatable {
     var lastError: String
     var ahrsSamplesPath: String?
     var gpsSamplesPath: String?
+    var flightSessionID: String
+    var segmentIndex: Int
+    var previousSegmentID: String?
+    var isTestRecording: Bool
+    var sourceGapSummary: String?
+
+    init(
+        id: String,
+        serverID: String?,
+        startedAt: Date,
+        duration: TimeInterval,
+        filePath: String,
+        inputDeviceName: String,
+        aircraftID: Int?,
+        aircraftRegistration: String?,
+        aircraftDisplayName: String?,
+        aircraftType: String?,
+        aircraftADSBHex: String?,
+        altimeterSettingInHg: Double?,
+        airportElevationFt: Double?,
+        oatC: Double?,
+        fileSize: Int64,
+        uploadStatus: UploadStatus,
+        transcriptStatus: TranscriptStatus,
+        uploadProgress: Double,
+        transcriptProgress: Int,
+        language: String,
+        transcript: String,
+        lastError: String,
+        ahrsSamplesPath: String?,
+        gpsSamplesPath: String?,
+        flightSessionID: String? = nil,
+        segmentIndex: Int = 1,
+        previousSegmentID: String? = nil,
+        isTestRecording: Bool = false,
+        sourceGapSummary: String? = nil
+    ) {
+        self.id = id
+        self.serverID = serverID
+        self.startedAt = startedAt
+        self.duration = duration
+        self.filePath = filePath
+        self.inputDeviceName = inputDeviceName
+        self.aircraftID = aircraftID
+        self.aircraftRegistration = aircraftRegistration
+        self.aircraftDisplayName = aircraftDisplayName
+        self.aircraftType = aircraftType
+        self.aircraftADSBHex = aircraftADSBHex
+        self.altimeterSettingInHg = altimeterSettingInHg
+        self.airportElevationFt = airportElevationFt
+        self.oatC = oatC
+        self.fileSize = fileSize
+        self.uploadStatus = uploadStatus
+        self.transcriptStatus = transcriptStatus
+        self.uploadProgress = uploadProgress
+        self.transcriptProgress = transcriptProgress
+        self.language = language
+        self.transcript = transcript
+        self.lastError = lastError
+        self.ahrsSamplesPath = ahrsSamplesPath
+        self.gpsSamplesPath = gpsSamplesPath
+        self.flightSessionID = flightSessionID ?? id
+        self.segmentIndex = max(1, segmentIndex)
+        self.previousSegmentID = previousSegmentID
+        self.isTestRecording = isTestRecording
+        self.sourceGapSummary = sourceGapSummary
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case serverID
+        case startedAt
+        case duration
+        case filePath
+        case inputDeviceName
+        case aircraftID
+        case aircraftRegistration
+        case aircraftDisplayName
+        case aircraftType
+        case aircraftADSBHex
+        case altimeterSettingInHg
+        case airportElevationFt
+        case oatC
+        case fileSize
+        case uploadStatus
+        case transcriptStatus
+        case uploadProgress
+        case transcriptProgress
+        case language
+        case transcript
+        case lastError
+        case ahrsSamplesPath
+        case gpsSamplesPath
+        case flightSessionID
+        case segmentIndex
+        case previousSegmentID
+        case isTestRecording
+        case sourceGapSummary
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        serverID = try container.decodeIfPresent(String.self, forKey: .serverID)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        filePath = try container.decode(String.self, forKey: .filePath)
+        inputDeviceName = try container.decode(String.self, forKey: .inputDeviceName)
+        aircraftID = try container.decodeIfPresent(Int.self, forKey: .aircraftID)
+        aircraftRegistration = try container.decodeIfPresent(String.self, forKey: .aircraftRegistration)
+        aircraftDisplayName = try container.decodeIfPresent(String.self, forKey: .aircraftDisplayName)
+        aircraftType = try container.decodeIfPresent(String.self, forKey: .aircraftType)
+        aircraftADSBHex = try container.decodeIfPresent(String.self, forKey: .aircraftADSBHex)
+        altimeterSettingInHg = try container.decodeIfPresent(Double.self, forKey: .altimeterSettingInHg)
+        airportElevationFt = try container.decodeIfPresent(Double.self, forKey: .airportElevationFt)
+        oatC = try container.decodeIfPresent(Double.self, forKey: .oatC)
+        fileSize = try container.decode(Int64.self, forKey: .fileSize)
+        uploadStatus = try container.decode(UploadStatus.self, forKey: .uploadStatus)
+        transcriptStatus = try container.decode(TranscriptStatus.self, forKey: .transcriptStatus)
+        uploadProgress = try container.decode(Double.self, forKey: .uploadProgress)
+        transcriptProgress = try container.decode(Int.self, forKey: .transcriptProgress)
+        language = try container.decode(String.self, forKey: .language)
+        transcript = try container.decode(String.self, forKey: .transcript)
+        lastError = try container.decode(String.self, forKey: .lastError)
+        ahrsSamplesPath = try container.decodeIfPresent(String.self, forKey: .ahrsSamplesPath)
+        gpsSamplesPath = try container.decodeIfPresent(String.self, forKey: .gpsSamplesPath)
+        flightSessionID = try container.decodeIfPresent(String.self, forKey: .flightSessionID) ?? id
+        segmentIndex = max(1, try container.decodeIfPresent(Int.self, forKey: .segmentIndex) ?? 1)
+        previousSegmentID = try container.decodeIfPresent(String.self, forKey: .previousSegmentID)
+        isTestRecording = try container.decodeIfPresent(Bool.self, forKey: .isTestRecording) ?? false
+        sourceGapSummary = try container.decodeIfPresent(String.self, forKey: .sourceGapSummary)
+    }
 
     var fileURL: URL {
         (try? RecordingStore.resolvedFileURL(
@@ -104,6 +236,13 @@ struct Recording: Identifiable, Codable, Equatable {
             return registration
         }
         return "Not selected"
+    }
+
+    var flightSessionLabel: String {
+        if segmentIndex <= 1 {
+            return flightSessionID == id ? "Single segment" : "Flight segment 1"
+        }
+        return "Flight segment \(segmentIndex)"
     }
 
     var statusLabel: String {

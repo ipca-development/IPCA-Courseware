@@ -241,6 +241,7 @@ final class CockpitRecorderService
         $this->storeRecordingAircraftSnapshot((int)$recording['id'], $metadata);
         $this->storeRecordingAltimeterSetting((int)$recording['id'], $metadata);
         $this->storeRecordingAtmosphereMetadata((int)$recording['id'], $metadata);
+        $this->storeRecordingSessionMetadata((int)$recording['id'], $metadata);
         $recording = $this->recordingByUid($recordingUid) ?: $recording;
 
         if ($ahrsFile !== null && $this->isPresentUpload($ahrsFile)) {
@@ -692,7 +693,16 @@ final class CockpitRecorderService
             return false;
         }
 
-        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $php = self::findBinary(array(
+            trim((string)PHP_BINDIR) !== '' ? rtrim((string)PHP_BINDIR, '/') . '/php' : '',
+            '/usr/bin/php',
+            '/usr/local/bin/php',
+            '/opt/homebrew/bin/php',
+            'php',
+        ));
+        if ($php === '') {
+            return false;
+        }
         $script = realpath(__DIR__ . '/../scripts/run_cockpit_recorder_transcription.php');
         if ($script === false) {
             return false;
@@ -715,10 +725,10 @@ final class CockpitRecorderService
                 . '--recording-id=' . $recordingId
                 . ' >> ' . escapeshellarg($logFile) . ' 2>&1';
         } else {
-            $cmd = escapeshellarg($php) . ' '
+            $cmd = 'nohup ' . escapeshellarg($php) . ' '
                 . escapeshellarg($script) . ' '
                 . '--recording-id=' . $recordingId
-                . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
+                . ' >> ' . escapeshellarg($logFile) . ' 2>&1 < /dev/null & echo $!';
         }
 
         @file_put_contents($logFile, '[' . gmdate('c') . '] Command: ' . $cmd . PHP_EOL, FILE_APPEND);
@@ -747,6 +757,11 @@ final class CockpitRecorderService
             'aircraft_display_name' => (string)($recording['aircraft_display_name'] ?? ''),
             'aircraft_type' => (string)($recording['aircraft_type'] ?? ''),
             'aircraft_adsb_hex' => (string)($recording['aircraft_adsb_hex'] ?? ''),
+            'flight_session_uid' => (string)($recording['flight_session_uid'] ?? ''),
+            'flight_segment_index' => (int)($recording['flight_segment_index'] ?? 1),
+            'previous_segment_uid' => (string)($recording['previous_segment_uid'] ?? ''),
+            'is_test_recording' => !empty($recording['is_test_recording']),
+            'source_gap_summary' => (string)($recording['source_gap_summary'] ?? ''),
             'language' => (string)($recording['language'] ?? 'en'),
             'upload_status' => (string)($recording['upload_status'] ?? 'pending'),
             'transcription_status' => (string)($recording['transcription_status'] ?? 'pending'),
@@ -1055,6 +1070,48 @@ final class CockpitRecorderService
         }
         $values[] = $recordingId;
         $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ', updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        $stmt->execute($values);
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     */
+    private function storeRecordingSessionMetadata(int $recordingId, array $metadata): void
+    {
+        if ($recordingId <= 0) {
+            return;
+        }
+
+        $sets = array();
+        $values = array();
+        $stringColumns = array(
+            'flight_session_uid' => substr(trim((string)($metadata['flight_session_uid'] ?? '')), 0, 96),
+            'previous_segment_uid' => substr(trim((string)($metadata['previous_segment_uid'] ?? '')), 0, 96),
+            'source_gap_summary' => substr(trim((string)($metadata['source_gap_summary'] ?? '')), 0, 2000),
+        );
+        foreach ($stringColumns as $column => $value) {
+            if ($this->hasColumn($column) && $value !== '') {
+                $sets[] = $column . ' = ?';
+                $values[] = $value;
+            }
+        }
+
+        if ($this->hasColumn('flight_segment_index')) {
+            $sets[] = 'flight_segment_index = ?';
+            $values[] = max(1, (int)($metadata['flight_segment_index'] ?? 1));
+        }
+        if ($this->hasColumn('is_test_recording')) {
+            $sets[] = 'is_test_recording = ?';
+            $values[] = !empty($metadata['is_test_recording']) ? 1 : 0;
+        }
+
+        if (!$sets) {
+            return;
+        }
+
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $values[] = $recordingId;
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
         $stmt->execute($values);
     }
 

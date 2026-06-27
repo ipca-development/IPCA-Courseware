@@ -52,6 +52,12 @@ struct RecordingsView: View {
                     IPCAStatusPill(text: Formatters.duration(recording.duration), color: IPCATheme.blue)
                     IPCAStatusPill(text: Formatters.bytes(recording.fileSize), color: IPCATheme.blue)
                     IPCAStatusPill(text: recording.statusLabel, color: statusColor(for: recording))
+                    if recording.segmentIndex > 1 {
+                        IPCAStatusPill(text: "SEG \(recording.segmentIndex)", color: IPCATheme.warning)
+                    }
+                    if recording.isTestRecording {
+                        IPCAStatusPill(text: "TEST", color: IPCATheme.warning)
+                    }
                 }
 
                 if recording.uploadStatus == .uploading {

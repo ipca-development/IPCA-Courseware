@@ -86,7 +86,7 @@ final class UploadManager: ObservableObject {
             fallbackFilename: "\(recording.id).m4a"
         )
         var files: [(type: String, url: URL, filename: String, mime: String, size: Int64)] = [
-            ("audio", audioURL, audioURL.lastPathComponent, "audio/mp4", try fileSize(audioURL))
+            ("audio", audioURL, audioURL.lastPathComponent, mimeType(for: audioURL), try fileSize(audioURL))
         ]
 
         if let ahrsPath = recording.ahrsSamplesPath {
@@ -275,6 +275,21 @@ final class UploadManager: ObservableObject {
     private func fileSize(_ url: URL) throws -> Int64 {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values.fileSize ?? 0)
+    }
+
+    private func mimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "wav":
+            return "audio/wav"
+        case "mp3":
+            return "audio/mpeg"
+        case "aac":
+            return "audio/aac"
+        case "caf":
+            return "audio/x-caf"
+        default:
+            return "audio/mp4"
+        }
     }
 
     private func pollTranscript(recordingID: String, serverRecordingID: String, store: RecordingStore, client: APIClient) async throws {

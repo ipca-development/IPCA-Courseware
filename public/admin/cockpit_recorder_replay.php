@@ -10,6 +10,7 @@ cw_require_admin();
 $id = trim((string)($_GET['id'] ?? ''));
 $error = '';
 $recording = null;
+$cesiumIonToken = trim((string)(getenv('CW_CESIUM_ION_TOKEN') ?: getenv('CESIUM_ION_TOKEN') ?: ''));
 
 try {
     if ($id === '') {
@@ -25,6 +26,7 @@ try {
 
 cw_header('Cockpit Recorder Replay');
 ?>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
 .replay-page { display: grid; gap: 16px; }
 .replay-card { background: #fff; border: 1px solid rgba(15, 23, 42, .12); border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(15, 23, 42, .07); }
@@ -51,6 +53,29 @@ cw_header('Cockpit Recorder Replay');
 .replay-3d { height: 220px; margin-top: 12px; border: 1px solid #dbeafe; border-radius: 14px; background: linear-gradient(180deg, #eff6ff 0%, #fff 62%, #f8fafc 100%); overflow: hidden; position: relative; }
 .replay-3d svg { width: 100%; height: 100%; display: block; }
 .replay-3d-label { position: absolute; left: 12px; top: 10px; z-index: 2; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 9px; }
+.cesium-cockpit { height: 540px; border-radius: 16px; border: 1px solid #dbeafe; background: #0f172a; overflow: hidden; position: relative; }
+.cesium-cockpit .cesium-widget, .cesium-cockpit canvas { width: 100%; height: 100%; }
+.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #0f172a, #1d4ed8); text-align: center; padding: 28px; z-index: 5; }
+.cesium-hud { position: absolute; inset: 0; z-index: 4; pointer-events: none; color: #fff; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-shadow: 0 2px 8px rgba(0,0,0,.72); }
+.hud-tape { position: absolute; top: 84px; width: 78px; height: 318px; border: 1px solid rgba(255,255,255,.72); border-radius: 10px; background: rgba(15,23,42,.34); backdrop-filter: blur(4px); }
+.hud-tape-left { left: 22px; }
+.hud-tape-right { right: 118px; }
+.hud-vsi { position: absolute; top: 122px; right: 38px; width: 48px; height: 240px; border: 1px solid rgba(255,255,255,.68); border-radius: 9px; background: rgba(15,23,42,.30); }
+.hud-value-box { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 74px; text-align: center; border-radius: 7px; background: rgba(0,0,0,.82); color: #fff; font-size: 22px; font-weight: 900; padding: 6px 9px; }
+.hud-tape-label { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-size: 10px; font-weight: 800; opacity: .9; }
+.hud-altimeter-setting { position: absolute; right: 128px; top: 414px; border-radius: 999px; background: rgba(0,0,0,.76); font-size: 12px; font-weight: 800; padding: 5px 9px; }
+.hud-attitude { position: absolute; left: 50%; top: 46%; width: 380px; height: 230px; transform: translate(-50%, -50%); }
+.hud-bank-arc { position: absolute; left: 50%; top: 6px; width: 310px; height: 155px; transform: translateX(-50%); border-top: 3px solid rgba(255,255,255,.78); border-radius: 310px 310px 0 0; }
+.hud-aircraft-symbol { position: absolute; left: 50%; top: 132px; width: 170px; height: 44px; transform: translateX(-50%); }
+.hud-aircraft-symbol:before { content: ""; position: absolute; left: 0; right: 0; top: 20px; height: 5px; background: #ffd400; box-shadow: 0 0 0 1px rgba(0,0,0,.35); clip-path: polygon(0 40%, 42% 40%, 50% 0, 58% 40%, 100% 40%, 100% 60%, 58% 60%, 50% 100%, 42% 60%, 0 60%); }
+.hud-slip { position: absolute; left: 50%; bottom: 34px; width: 132px; height: 30px; transform: translateX(-50%); border-radius: 999px; background: rgba(0,0,0,.82); }
+.hud-slip:before, .hud-slip:after { content: ""; position: absolute; top: 2px; width: 2px; height: 26px; background: rgba(255,255,255,.9); }
+.hud-slip:before { left: 46px; }
+.hud-slip:after { right: 46px; }
+.hud-slip-ball { position: absolute; top: 4px; left: 54px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .18s linear; }
+.hud-heading { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); min-width: 96px; text-align: center; border-radius: 8px; background: rgba(0,0,0,.78); font-size: 20px; font-weight: 900; padding: 6px 10px; }
+.cesium-mini-map-label { margin: 12px 0 8px; font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: .04em; }
+.cesium-cockpit + .cesium-mini-map-label + .replay-map { height: 220px; }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -65,7 +90,7 @@ cw_header('Cockpit Recorder Replay');
 .event-row { border-left: 3px solid #1d4ed8; padding: 6px 8px; background: #f8fafc; border-radius: 8px; font-size: 12px; }
 .replay-audio { width: 100%; margin-top: 10px; }
 .replay-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-@media (max-width: 1180px) { .replay-layout { grid-template-columns: 1fr; } .replay-left, .replay-center, .replay-right { min-height: auto; } .replay-graphs { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .replay-layout { grid-template-columns: 1fr; } .replay-left, .replay-center, .replay-right { min-height: auto; } .replay-graphs { grid-template-columns: 1fr; } .cesium-cockpit { height: 460px; } }
 </style>
 
 <div class="replay-page">
@@ -113,8 +138,28 @@ cw_header('Cockpit Recorder Replay');
             <button type="button" class="zoom-button" id="zoomInButton">+</button>
           </div>
         </div>
+        <div class="cesium-cockpit" id="cesiumReplay" data-cesium-token="<?= h($cesiumIonToken) ?>">
+          <?php if ($cesiumIonToken === ''): ?>
+            <div class="cesium-unavailable">
+              <div>
+                <strong>Cesium token not configured.</strong><br>
+                Set <code>CW_CESIUM_ION_TOKEN</code> or <code>CESIUM_ION_TOKEN</code> on the server.
+              </div>
+            </div>
+          <?php endif; ?>
+          <div class="cesium-hud" id="cesiumHud" hidden>
+            <div class="hud-tape hud-tape-left"><div class="hud-tape-label">GPS GS</div><div class="hud-value-box" id="hudSpeed">-- KT</div></div>
+            <div class="hud-attitude"><div class="hud-bank-arc"></div><div class="hud-aircraft-symbol"></div></div>
+            <div class="hud-tape hud-tape-right"><div class="hud-tape-label">ALT</div><div class="hud-value-box" id="hudAltitude">-- FT</div></div>
+            <div class="hud-vsi"><div class="hud-value-box" id="hudVsi">--</div></div>
+            <div class="hud-altimeter-setting" id="hudAltimeter">-- IN</div>
+            <div class="hud-heading" id="hudHeading">HDG ---</div>
+            <div class="hud-slip"><div class="hud-slip-ball" id="hudSlipBall"></div></div>
+          </div>
+        </div>
+        <div class="cesium-mini-map-label">Track log and events</div>
         <div class="replay-map" id="flightMap"></div>
-        <div class="replay-3d" id="flight3D">
+        <div class="replay-3d" id="flight3D" hidden>
           <div class="replay-3d-label">3D GPS altitude view</div>
         </div>
         <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
@@ -141,6 +186,7 @@ cw_header('Cockpit Recorder Replay');
 </div>
 
 <?php if ($error === ''): ?>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Cesium.js"></script>
 <script>
 (function() {
   const root = document.querySelector('[data-replay-id]');
@@ -148,6 +194,14 @@ cw_header('Cockpit Recorder Replay');
   const phaseList = document.getElementById('phaseList');
   const flightMap = document.getElementById('flightMap');
   const flight3D = document.getElementById('flight3D');
+  const cesiumReplay = document.getElementById('cesiumReplay');
+  const cesiumHud = document.getElementById('cesiumHud');
+  const hudSpeed = document.getElementById('hudSpeed');
+  const hudAltitude = document.getElementById('hudAltitude');
+  const hudVsi = document.getElementById('hudVsi');
+  const hudAltimeter = document.getElementById('hudAltimeter');
+  const hudHeading = document.getElementById('hudHeading');
+  const hudSlipBall = document.getElementById('hudSlipBall');
   const eventList = document.getElementById('eventList');
   const details = document.getElementById('details');
   const graphs = document.getElementById('graphs');
@@ -166,6 +220,10 @@ cw_header('Cockpit Recorder Replay');
   let zoomOffset = 0;
   let animationFrame = null;
   let lastAnimationRenderMs = 0;
+  let cesiumViewer = null;
+  let cesiumAircraft = null;
+  let cesiumTrack = null;
+  let cesiumReady = false;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -176,6 +234,15 @@ cw_header('Cockpit Recorder Replay');
   };
 
   const number = (value, suffix, digits = 1) => value === null || value === undefined || Number.isNaN(Number(value)) ? '--' : `${Number(value).toFixed(digits)}${suffix}`;
+  const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
+  const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
+  const bestAltitudeFt = (sample) => {
+    if (!sample) return 0;
+    return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
+      : (Number.isFinite(Number(sample.estimated_indicated_altitude_ft)) ? Number(sample.estimated_indicated_altitude_ft)
+      : (Number.isFinite(Number(sample.field_calibrated_true_altitude_ft)) ? Number(sample.field_calibrated_true_altitude_ft)
+      : (Number.isFinite(Number(sample.gps_altitude_ft)) ? Number(sample.gps_altitude_ft) : 0)));
+  };
 
   function sampleAt(t) {
     if (!payload || !payload.samples.length) return null;
@@ -480,6 +547,120 @@ cw_header('Cockpit Recorder Replay');
       </svg>`;
   }
 
+  function initCesium() {
+    if (cesiumReady || !cesiumReplay || !payload) return;
+    const token = (cesiumReplay.getAttribute('data-cesium-token') || '').trim();
+    if (!token || typeof Cesium === 'undefined') return;
+    const gpsSamples = payload.samples.filter((s) => s.lat !== null && s.lon !== null);
+    if (!gpsSamples.length) {
+      cesiumReplay.insertAdjacentHTML('beforeend', '<div class="cesium-unavailable"><div><strong>No GPS samples available for Cesium replay.</strong></div></div>');
+      return;
+    }
+
+    Cesium.Ion.defaultAccessToken = token;
+    cesiumViewer = new Cesium.Viewer(cesiumReplay, {
+      animation: false,
+      baseLayerPicker: false,
+      fullscreenButton: false,
+      geocoder: false,
+      homeButton: false,
+      infoBox: false,
+      navigationHelpButton: false,
+      sceneModePicker: false,
+      selectionIndicator: false,
+      timeline: false,
+      shouldAnimate: false,
+    });
+    cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
+    cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+    if (Cesium.createWorldTerrainAsync) {
+      Cesium.createWorldTerrainAsync().then((terrainProvider) => {
+        if (cesiumViewer && !cesiumViewer.isDestroyed()) cesiumViewer.terrainProvider = terrainProvider;
+      }).catch(() => {});
+    }
+
+    const positions = gpsSamples.map((s) => Cesium.Cartesian3.fromDegrees(
+      Number(s.lon),
+      Number(s.lat),
+      Math.max(0, feetToMeters(bestAltitudeFt(s)))
+    ));
+    cesiumTrack = cesiumViewer.entities.add({
+      name: 'Flight track',
+      polyline: {
+        positions,
+        width: 4,
+        material: Cesium.Color.CYAN.withAlpha(0.82),
+        clampToGround: false,
+      },
+    });
+    cesiumAircraft = cesiumViewer.entities.add({
+      name: 'Aircraft',
+      position: positions[0],
+      point: {
+        pixelSize: 12,
+        color: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.DODGERBLUE,
+        outlineWidth: 3,
+      },
+    });
+    (payload.events || []).forEach((event) => {
+      const s = sampleAt(event.start);
+      if (!s || s.lat === null || s.lon === null) return;
+      cesiumViewer.entities.add({
+        name: event.event_type || 'Event',
+        position: Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), Math.max(0, feetToMeters(bestAltitudeFt(s))) + 20),
+        point: { pixelSize: 10, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+        label: {
+          text: event.event_type || 'Event',
+          font: '12px sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -18),
+        },
+      });
+    });
+    cesiumHud.hidden = false;
+    cesiumReady = true;
+    renderCesium();
+  }
+
+  function renderCesium() {
+    if (!cesiumReady || !cesiumViewer || !cesiumAircraft) return;
+    const s = sampleAt(activeT);
+    if (!s || s.lat === null || s.lon === null) return;
+    const altitudeM = Math.max(5, feetToMeters(bestAltitudeFt(s)));
+    const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM + 12);
+    cesiumAircraft.position = position;
+    const groundspeed = Number.isFinite(Number(s.groundspeed_kt)) ? Number(s.groundspeed_kt) : 0;
+    const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
+    const heading = Number.isFinite(Number(s.true_heading_deg)) ? Number(s.true_heading_deg)
+      : (Number.isFinite(Number(s.heading_deg)) ? Number(s.heading_deg) : (track ?? 0));
+    const cameraHeading = track !== null && groundspeed >= 5 ? track : heading;
+    const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
+    const bank = Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
+    cesiumViewer.camera.setView({
+      destination: position,
+      orientation: {
+        heading: degToRad(cameraHeading),
+        pitch: degToRad(Math.max(-35, Math.min(15, pitch - 8))),
+        roll: degToRad(Math.max(-60, Math.min(60, bank))),
+      },
+    });
+    renderCesiumHud(s, heading);
+  }
+
+  function renderCesiumHud(s, heading) {
+    hudSpeed.textContent = Number.isFinite(Number(s.groundspeed_kt)) ? `${Number(s.groundspeed_kt).toFixed(0)} KT` : '-- KT';
+    hudAltitude.textContent = `${bestAltitudeFt(s).toFixed(0)} FT`;
+    hudVsi.textContent = Number.isFinite(Number(s.estimated_vertical_speed_fpm)) ? Number(s.estimated_vertical_speed_fpm).toFixed(0) : '--';
+    hudAltimeter.textContent = Number.isFinite(Number(s.altimeter_setting_inhg)) ? `${Number(s.altimeter_setting_inhg).toFixed(2)} IN` : '-- IN';
+    hudHeading.textContent = `HDG ${Number.isFinite(Number(heading)) ? String(Math.round(heading)).padStart(3, '0') : '---'}`;
+    const slip = Math.max(-0.25, Math.min(0.25, Number(s.estimated_slip_skid_g) || 0));
+    hudSlipBall.style.transform = `translateX(${(slip * 190).toFixed(1)}px)`;
+  }
+
   function renderPhases() {
     phaseList.innerHTML = '';
     for (const phase of payload.phases) {
@@ -624,6 +805,7 @@ cw_header('Cockpit Recorder Replay');
     }
     updateActivePhase();
     renderMap();
+    renderCesium();
     render3DView();
     renderDetails();
     renderGraphs();
@@ -681,6 +863,7 @@ cw_header('Cockpit Recorder Replay');
   window.addEventListener('resize', () => {
     if (!payload) return;
     renderMap();
+    renderCesium();
     render3DView();
     renderGraphs();
   });
@@ -693,7 +876,9 @@ cw_header('Cockpit Recorder Replay');
       const maxT = Math.max(Number(payload.recording.duration) || 0, ...payload.samples.map((s) => Number(s.t) || 0), 1);
       timeline.max = String(maxT);
       renderPhases();
+      initCesium();
       renderMap();
+      renderCesium();
       render3DView();
       renderDetails();
       renderGraphs();

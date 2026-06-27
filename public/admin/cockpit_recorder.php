@@ -190,6 +190,11 @@ cw_header('Cockpit Recorder POC');
             $gpsUrl = '/admin/cockpit_recorder_gps.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
             $rowError = trim((string)($row['error_message'] ?? ''));
+            $flightSessionUid = trim((string)($row['flight_session_uid'] ?? ''));
+            $flightSegmentIndex = max(1, (int)($row['flight_segment_index'] ?? 1));
+            $previousSegmentUid = trim((string)($row['previous_segment_uid'] ?? ''));
+            $sourceGapSummary = trim((string)($row['source_gap_summary'] ?? ''));
+            $isTestRecording = !empty($row['is_test_recording']);
             $health = cockpit_admin_health($row);
             $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
             $healthAudio = isset($health['audio']) && is_array($health['audio']) ? $health['audio'] : array();
@@ -230,6 +235,16 @@ cw_header('Cockpit Recorder POC');
             <td>
               <strong><?= h((string)($row['recording_uid'] ?? '')) ?></strong>
               <div class="cockpit-muted"><?= h((string)($row['input_device'] ?? '')) ?></div>
+              <?php if ($isTestRecording): ?>
+                <div><span class="cockpit-badge cockpit-badge-warning">TEST</span></div>
+              <?php endif; ?>
+              <?php if ($flightSessionUid !== '' || $flightSegmentIndex > 1): ?>
+                <div class="cockpit-muted">Session: <code><?= h($flightSessionUid !== '' ? $flightSessionUid : (string)($row['recording_uid'] ?? '')) ?></code></div>
+                <div class="cockpit-muted">Segment: <?= $flightSegmentIndex ?><?= $previousSegmentUid !== '' ? h(' after ' . $previousSegmentUid) : '' ?></div>
+              <?php endif; ?>
+              <?php if ($sourceGapSummary !== ''): ?>
+                <div class="cockpit-muted"><?= h($sourceGapSummary) ?></div>
+              <?php endif; ?>
             </td>
             <td>
               <?php if (!empty($row['aircraft_registration']) || !empty($row['aircraft_display_name'])): ?>
@@ -262,6 +277,11 @@ cw_header('Cockpit Recorder POC');
                   <input type="hidden" name="id" value="<?= $id ?>">
                   <input type="hidden" name="mode" value="run_steps">
                   <button class="cockpit-button" type="submit">Process all transcript chunks</button>
+                </form>
+                <form method="post" action="/admin/api/cockpit_recorder_transcribe.php" style="margin-top:6px">
+                  <input type="hidden" name="id" value="<?= $id ?>">
+                  <input type="hidden" name="mode" value="spawn">
+                  <button class="cockpit-button" type="submit">Restart transcription worker</button>
                 </form>
               <?php endif; ?>
             </td>

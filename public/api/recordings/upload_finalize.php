@@ -151,6 +151,17 @@ try {
         'input_device' => (string)($payload['input_device'] ?? ''),
         'aircraft_id' => (int)($payload['aircraft_id'] ?? 0),
         'language' => (string)($payload['language'] ?? 'en'),
+        'altimeter_setting_inhg' => $payload['altimeter_setting_inhg'] ?? null,
+        'altimeter_setting_source' => (string)($payload['altimeter_setting_source'] ?? ''),
+        'airport_elevation_ft' => $payload['airport_elevation_ft'] ?? null,
+        'airport_elevation_source' => (string)($payload['airport_elevation_source'] ?? ''),
+        'oat_c' => $payload['oat_c'] ?? null,
+        'oat_source' => (string)($payload['oat_source'] ?? ''),
+        'flight_session_uid' => (string)($payload['flight_session_uid'] ?? ''),
+        'flight_segment_index' => (int)($payload['flight_segment_index'] ?? 1),
+        'previous_segment_uid' => (string)($payload['previous_segment_uid'] ?? ''),
+        'is_test_recording' => (int)($payload['is_test_recording'] ?? 0),
+        'source_gap_summary' => (string)($payload['source_gap_summary'] ?? ''),
     );
 
     $service = new CockpitRecorderService($pdo);
