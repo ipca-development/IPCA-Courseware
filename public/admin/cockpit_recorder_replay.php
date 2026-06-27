@@ -662,16 +662,7 @@ cw_header('Cockpit Recorder Replay');
       pitch: Math.max(-18, Math.min(8, pitch - 2)),
       roll: Math.max(-45, Math.min(45, bank)),
     };
-    if (!cesiumCameraState) {
-      cesiumCameraState = Object.assign({}, targetState);
-    } else {
-      cesiumCameraState.lat = smoothNumber(cesiumCameraState.lat, targetState.lat, 0.18);
-      cesiumCameraState.lon = smoothNumber(cesiumCameraState.lon, targetState.lon, 0.18);
-      cesiumCameraState.altitudeM = smoothNumber(cesiumCameraState.altitudeM, targetState.altitudeM, 0.12);
-      cesiumCameraState.heading = smoothAngleDeg(cesiumCameraState.heading, targetState.heading, 0.14);
-      cesiumCameraState.pitch = smoothNumber(cesiumCameraState.pitch, targetState.pitch, 0.14);
-      cesiumCameraState.roll = smoothNumber(cesiumCameraState.roll, targetState.roll, 0.14);
-    }
+    cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
     const headingRad = degToRad(cesiumCameraState.heading);
     const pitchRad = degToRad(cesiumCameraState.pitch);
