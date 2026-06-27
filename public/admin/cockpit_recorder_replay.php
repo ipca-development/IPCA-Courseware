@@ -239,13 +239,6 @@ cw_header('Cockpit Recorder Replay');
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
   const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
   const normalizeDeg = (deg) => ((Number(deg) % 360) + 360) % 360;
-  const smoothNumber = (current, target, factor) => current + (target - current) * factor;
-  const smoothAngleDeg = (current, target, factor) => {
-    const start = normalizeDeg(current);
-    const end = normalizeDeg(target);
-    const delta = ((end - start + 540) % 360) - 180;
-    return normalizeDeg(start + delta * factor);
-  };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -318,6 +311,69 @@ cw_header('Cockpit Recorder Replay');
       heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       track_deg: lerpAngle(before.track_deg, after.track_deg),
+    });
+  }
+
+  function smoothedSampleAt(t) {
+    const base = sampleAt(t);
+    if (!base) return null;
+    const taps = [
+      { offset: -0.8, weight: 1 },
+      { offset: -0.4, weight: 2 },
+      { offset: 0, weight: 4 },
+      { offset: 0.4, weight: 2 },
+      { offset: 0.8, weight: 1 },
+    ];
+    const samples = taps
+      .map((tap) => ({ sample: sampleAt(Number(t) + tap.offset), weight: tap.weight }))
+      .filter((tap) => tap.sample);
+    const weightedNumber = (key) => {
+      let total = 0;
+      let weight = 0;
+      for (const tap of samples) {
+        const value = Number(tap.sample[key]);
+        if (!Number.isFinite(value)) continue;
+        total += value * tap.weight;
+        weight += tap.weight;
+      }
+      return weight > 0 ? total / weight : base[key];
+    };
+    const weightedAngle = (key) => {
+      let x = 0;
+      let y = 0;
+      let weight = 0;
+      for (const tap of samples) {
+        const value = Number(tap.sample[key]);
+        if (!Number.isFinite(value)) continue;
+        const rad = degToRad(value);
+        x += Math.cos(rad) * tap.weight;
+        y += Math.sin(rad) * tap.weight;
+        weight += tap.weight;
+      }
+      return weight > 0 ? normalizeDeg(Math.atan2(y, x) * 180 / Math.PI) : base[key];
+    };
+    return Object.assign({}, base, {
+      t: Number(t),
+      lat: weightedNumber('lat'),
+      lon: weightedNumber('lon'),
+      gps_altitude_ft: weightedNumber('gps_altitude_ft'),
+      baro_altitude_ft: weightedNumber('baro_altitude_ft'),
+      vertical_speed_fpm: weightedNumber('vertical_speed_fpm'),
+      adsb_baro_altitude_ft: weightedNumber('adsb_baro_altitude_ft'),
+      adsb_vertical_speed_fpm: weightedNumber('adsb_vertical_speed_fpm'),
+      estimated_baro_altitude_ft: weightedNumber('estimated_baro_altitude_ft'),
+      estimated_vertical_speed_fpm: weightedNumber('estimated_vertical_speed_fpm'),
+      field_calibrated_altitude_ft: weightedNumber('field_calibrated_altitude_ft'),
+      field_calibrated_true_altitude_ft: weightedNumber('field_calibrated_true_altitude_ft'),
+      estimated_indicated_altitude_ft: weightedNumber('estimated_indicated_altitude_ft'),
+      estimated_true_altitude_from_indicated_ft: weightedNumber('estimated_true_altitude_from_indicated_ft'),
+      estimated_slip_skid_g: weightedNumber('estimated_slip_skid_g'),
+      groundspeed_kt: weightedNumber('groundspeed_kt'),
+      pitch_deg: weightedNumber('pitch_deg'),
+      bank_deg: weightedNumber('bank_deg'),
+      heading_deg: weightedAngle('heading_deg'),
+      true_heading_deg: weightedAngle('true_heading_deg'),
+      track_deg: weightedAngle('track_deg'),
     });
   }
 
@@ -642,7 +698,7 @@ cw_header('Cockpit Recorder Replay');
 
   function renderCesium() {
     if (!cesiumReady || !cesiumViewer || !cesiumAircraft) return;
-    const s = sampleAt(activeT);
+    const s = smoothedSampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
     const altitudeM = Math.max(5, feetToMeters(bestAltitudeFt(s)));
     const position = Cesium.Cartesian3.fromDegrees(Number(s.lon), Number(s.lat), altitudeM + 8);
