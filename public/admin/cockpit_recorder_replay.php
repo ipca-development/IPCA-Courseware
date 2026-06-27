@@ -693,6 +693,15 @@ cw_header('Cockpit Recorder Replay');
     renderCesiumHud(s, heading);
   }
 
+  function safeRenderCesium() {
+    try {
+      renderCesium();
+    } catch (err) {
+      showCesiumError(String(err.message || err));
+      cesiumReady = false;
+    }
+  }
+
   function renderCesiumHud(s, heading) {
     hudSpeed.textContent = Number.isFinite(Number(s.groundspeed_kt)) ? `${Number(s.groundspeed_kt).toFixed(0)} KT` : '-- KT';
     hudAltitude.textContent = `${bestAltitudeFt(s).toFixed(0)} FT`;
@@ -851,7 +860,7 @@ cw_header('Cockpit Recorder Replay');
     }
     updateActivePhase();
     renderMap();
-    renderCesium();
+    safeRenderCesium();
     render3DView();
     renderDetails();
     renderGraphs();
@@ -909,7 +918,7 @@ cw_header('Cockpit Recorder Replay');
   window.addEventListener('resize', () => {
     if (!payload) return;
     renderMap();
-    renderCesium();
+    safeRenderCesium();
     render3DView();
     renderGraphs();
   });
@@ -928,7 +937,7 @@ cw_header('Cockpit Recorder Replay');
         showCesiumError(String(err.message || err));
       }
       renderMap();
-      renderCesium();
+      safeRenderCesium();
       render3DView();
       renderDetails();
       renderGraphs();
