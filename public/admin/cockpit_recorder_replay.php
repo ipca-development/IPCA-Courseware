@@ -410,12 +410,15 @@ cw_header('Cockpit Recorder Replay');
 
   function projectGeoPoint(sample, view, width, height) {
     if (!view || sample.lat === null || sample.lon === null) return null;
+    const lat = Number(sample.lat);
+    const lon = Number(sample.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
     const centerX = lonToWorldX(view.centerLon, view.zoom);
     const centerY = latToWorldY(view.centerLat, view.zoom);
-    return Object.assign({}, sample, {
-      x: lonToWorldX(sample.lon, view.zoom) - centerX + width / 2,
-      y: latToWorldY(sample.lat, view.zoom) - centerY + height / 2,
-    });
+    const x = lonToWorldX(lon, view.zoom) - centerX + width / 2;
+    const y = latToWorldY(lat, view.zoom) - centerY + height / 2;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return Object.assign({}, sample, { x, y });
   }
 
   function renderSatelliteTiles(view, width, height) {
@@ -869,7 +872,7 @@ cw_header('Cockpit Recorder Replay');
       zoomOffset = 0;
     }
     updateMapButtons();
-    renderMap();
+    safeRender('map', renderMap);
   }
 
   function seek(seconds, syncAudio) {
@@ -884,11 +887,11 @@ cw_header('Cockpit Recorder Replay');
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
     updateActivePhase();
-    renderMap();
+    safeRender('map', renderMap);
     safeRenderCesium();
-    render3DView();
-    renderDetails();
-    renderGraphs();
+    safeRender('3d', render3DView);
+    safeRender('details', renderDetails);
+    safeRender('graphs', renderGraphs);
   }
 
   timeline.addEventListener('input', () => seek(Number(timeline.value), true));
@@ -900,12 +903,12 @@ cw_header('Cockpit Recorder Replay');
     zoomOffset -= 1;
     if (mapMode === 'route' && zoomOffset < -3) zoomOffset = -3;
     if (mapMode !== 'route' && zoomOffset < -6) zoomOffset = -6;
-    renderMap();
+    safeRender('map', renderMap);
   });
   zoomInButton.addEventListener('click', () => {
     zoomOffset += 1;
     if (zoomOffset > 6) zoomOffset = 6;
-    renderMap();
+    safeRender('map', renderMap);
   });
   playButton.addEventListener('click', () => {
     if (audio.paused) {
@@ -942,36 +945,42 @@ cw_header('Cockpit Recorder Replay');
   }
   window.addEventListener('resize', () => {
     if (!payload) return;
-    renderMap();
+    safeRender('map', renderMap);
     safeRenderCesium();
-    render3DView();
-    renderGraphs();
+    safeRender('3d', render3DView);
+    safeRender('graphs', renderGraphs);
   });
 
-  fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`)
-    .then((response) => response.json())
-    .then((data) => {
+  async function loadReplay() {
+    let data = null;
+    try {
+      const response = await fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`);
+      data = await response.json();
       if (!data.ok) throw new Error(data.error || 'Replay data not available.');
-      payload = data;
-      const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
-      timeline.max = String(maxT);
-      safeRender('phases', renderPhases);
-      try {
-        initCesium();
-      } catch (err) {
-        showCesiumError(String(err.message || err));
-      }
-      safeRender('map', renderMap);
-      safeRenderCesium();
-      safeRender('3d', render3DView);
-      safeRender('details', renderDetails);
-      safeRender('graphs', renderGraphs);
-    })
-    .catch((err) => {
-      flightMap.innerHTML = `<div class="replay-error">${err.message}</div>`;
+    } catch (err) {
+      flightMap.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err)}</div>`;
       phaseList.innerHTML = '<div class="replay-muted">Reconstruct the recording first.</div>';
       details.innerHTML = '<div class="replay-muted">No replay data loaded.</div>';
-    });
+      return;
+    }
+
+    payload = data;
+    const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
+    timeline.max = String(maxT);
+    safeRender('phases', renderPhases);
+    try {
+      initCesium();
+    } catch (err) {
+      showCesiumError(String(err.message || err));
+    }
+    safeRender('map', renderMap);
+    safeRenderCesium();
+    safeRender('3d', render3DView);
+    safeRender('details', renderDetails);
+    safeRender('graphs', renderGraphs);
+  }
+
+  loadReplay();
 })();
 </script>
 <?php endif; ?>
