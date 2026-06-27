@@ -220,6 +220,8 @@ cw_header('Cockpit Recorder Replay');
   let animationFrame = null;
   let lastAnimationRenderMs = 0;
   let lastPanelRenderMs = 0;
+  let playbackClockBaseT = 0;
+  let playbackClockBaseMs = null;
   let cesiumViewer = null;
   let cesiumAircraft = null;
   let cesiumReady = false;
@@ -859,6 +861,28 @@ cw_header('Cockpit Recorder Replay');
     safeRender('3d', render3DView);
     safeRender('details', renderDetails);
     safeRender('graphs', renderGraphs);
+    resetPlaybackClock();
+  }
+
+  function resetPlaybackClock(timestamp = performance.now()) {
+    playbackClockBaseT = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT;
+    playbackClockBaseMs = timestamp;
+  }
+
+  function playbackClockTime(timestamp) {
+    if (playbackClockBaseMs === null) {
+      resetPlaybackClock(timestamp);
+    }
+    const rate = Number.isFinite(Number(audio.playbackRate)) ? Number(audio.playbackRate) : 1;
+    const elapsed = Math.max(0, (timestamp - playbackClockBaseMs) / 1000) * rate;
+    const predicted = playbackClockBaseT + elapsed;
+    const audioTime = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : predicted;
+    if (Math.abs(audioTime - predicted) > 0.35) {
+      resetPlaybackClock(timestamp);
+      return playbackClockBaseT;
+    }
+    const maxT = Number(timeline.max) || predicted;
+    return Math.max(0, Math.min(maxT, predicted));
   }
 
   function updateCockpitPlayback(seconds, timestamp) {
@@ -911,6 +935,7 @@ cw_header('Cockpit Recorder Replay');
   });
   audio.addEventListener('pause', () => {
     playButton.textContent = 'Play';
+    playbackClockBaseMs = null;
     if (animationFrame !== null) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
@@ -920,15 +945,18 @@ cw_header('Cockpit Recorder Replay');
     playButton.textContent = 'Pause';
     lastAnimationRenderMs = 0;
     lastPanelRenderMs = 0;
-    animatePlayback();
+    resetPlaybackClock();
+    if (animationFrame === null) {
+      animationFrame = requestAnimationFrame(animatePlayback);
+    }
   });
 
-  function animatePlayback(timestamp = 0) {
+  function animatePlayback(timestamp) {
     if (audio.paused || !payload) {
       animationFrame = null;
       return;
     }
-    updateCockpitPlayback(audio.currentTime, timestamp);
+    updateCockpitPlayback(playbackClockTime(timestamp), timestamp);
     animationFrame = requestAnimationFrame(animatePlayback);
   }
   window.addEventListener('resize', () => {
