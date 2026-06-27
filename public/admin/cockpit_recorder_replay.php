@@ -65,6 +65,7 @@ cw_header('Cockpit Recorder Replay');
 .hud-tape-label { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-size: 10px; font-weight: 800; opacity: .9; }
 .hud-altimeter-setting { position: absolute; right: 128px; top: 414px; border-radius: 999px; background: rgba(0,0,0,.76); font-size: 12px; font-weight: 800; padding: 5px 9px; }
 .hud-attitude { position: absolute; left: 50%; top: 46%; width: 380px; height: 230px; transform: translate(-50%, -50%); }
+.hud-horizon-line { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: rgba(255,255,255,.62); box-shadow: 0 0 10px rgba(255,255,255,.28); }
 .hud-bank-arc { position: absolute; left: 50%; top: 6px; width: 310px; height: 155px; transform: translateX(-50%); border-top: 3px solid rgba(255,255,255,.78); border-radius: 310px 310px 0 0; }
 .hud-aircraft-symbol { position: absolute; left: 50%; top: 132px; width: 170px; height: 44px; transform: translateX(-50%); }
 .hud-aircraft-symbol:before { content: ""; position: absolute; left: 0; right: 0; top: 20px; height: 5px; background: #ffd400; box-shadow: 0 0 0 1px rgba(0,0,0,.35); clip-path: polygon(0 40%, 42% 40%, 50% 0, 58% 40%, 100% 40%, 100% 60%, 58% 60%, 50% 100%, 42% 60%, 0 60%); }
@@ -149,6 +150,7 @@ cw_header('Cockpit Recorder Replay');
           <?php endif; ?>
           <div class="cesium-hud" id="cesiumHud" hidden>
             <div class="hud-tape hud-tape-left"><div class="hud-tape-label">GPS GS</div><div class="hud-value-box" id="hudSpeed">-- KT</div></div>
+            <div class="hud-horizon-line"></div>
             <div class="hud-attitude"><div class="hud-bank-arc"></div><div class="hud-aircraft-symbol"></div></div>
             <div class="hud-tape hud-tape-right"><div class="hud-tape-label">ALT</div><div class="hud-value-box" id="hudAltitude">-- FT</div></div>
             <div class="hud-vsi"><div class="hud-value-box" id="hudVsi">--</div></div>
@@ -224,6 +226,7 @@ cw_header('Cockpit Recorder Replay');
   let cesiumAircraft = null;
   let cesiumTrack = null;
   let cesiumReady = false;
+  let cesiumCameraState = null;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -236,6 +239,14 @@ cw_header('Cockpit Recorder Replay');
   const number = (value, suffix, digits = 1) => value === null || value === undefined || Number.isNaN(Number(value)) ? '--' : `${Number(value).toFixed(digits)}${suffix}`;
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
   const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
+  const normalizeDeg = (deg) => ((Number(deg) % 360) + 360) % 360;
+  const smoothNumber = (current, target, factor) => current + (target - current) * factor;
+  const smoothAngleDeg = (current, target, factor) => {
+    const start = normalizeDeg(current);
+    const end = normalizeDeg(target);
+    const delta = ((end - start + 540) % 360) - 180;
+    return normalizeDeg(start + delta * factor);
+  };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -250,15 +261,20 @@ cw_header('Cockpit Recorder Replay');
     if (t <= samples[0].t) return samples[0];
     if (t >= samples[samples.length - 1].t) return samples[samples.length - 1];
 
-    let before = samples[0];
-    let after = samples[samples.length - 1];
-    for (let i = 1; i < samples.length; i++) {
-      if (samples[i].t >= t) {
-        before = samples[i - 1];
-        after = samples[i];
-        break;
+    let low = 1;
+    let high = samples.length - 1;
+    let index = high;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (samples[mid].t >= t) {
+        index = mid;
+        high = mid - 1;
+      } else {
+        low = mid + 1;
       }
     }
+    const before = samples[index - 1];
+    const after = samples[index];
 
     const span = Math.max(0.001, Number(after.t) - Number(before.t));
     const ratio = Math.max(0, Math.min(1, (Number(t) - Number(before.t)) / span));
@@ -638,16 +654,35 @@ cw_header('Cockpit Recorder Replay');
     const cameraHeading = track !== null && groundspeed >= 5 ? track : heading;
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
-    const headingRad = degToRad(cameraHeading);
-    const pitchRad = degToRad(Math.max(-18, Math.min(8, pitch - 2)));
-    const rollRad = degToRad(Math.max(-45, Math.min(45, bank)));
-    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+    const targetState = {
+      lat: Number(s.lat),
+      lon: Number(s.lon),
+      altitudeM: altitudeM + 8,
+      heading: normalizeDeg(cameraHeading),
+      pitch: Math.max(-18, Math.min(8, pitch - 2)),
+      roll: Math.max(-45, Math.min(45, bank)),
+    };
+    if (!cesiumCameraState) {
+      cesiumCameraState = Object.assign({}, targetState);
+    } else {
+      cesiumCameraState.lat = smoothNumber(cesiumCameraState.lat, targetState.lat, 0.18);
+      cesiumCameraState.lon = smoothNumber(cesiumCameraState.lon, targetState.lon, 0.18);
+      cesiumCameraState.altitudeM = smoothNumber(cesiumCameraState.altitudeM, targetState.altitudeM, 0.12);
+      cesiumCameraState.heading = smoothAngleDeg(cesiumCameraState.heading, targetState.heading, 0.14);
+      cesiumCameraState.pitch = smoothNumber(cesiumCameraState.pitch, targetState.pitch, 0.14);
+      cesiumCameraState.roll = smoothNumber(cesiumCameraState.roll, targetState.roll, 0.14);
+    }
+    const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
+    const headingRad = degToRad(cesiumCameraState.heading);
+    const pitchRad = degToRad(cesiumCameraState.pitch);
+    const rollRad = degToRad(cesiumCameraState.roll);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(smoothedPosition);
     const forwardOffset = Cesium.Matrix4.multiplyByPointAsVector(
       enu,
       new Cesium.Cartesian3(Math.sin(headingRad) * 22, Math.cos(headingRad) * 22, 0),
       new Cesium.Cartesian3()
     );
-    const eye = Cesium.Cartesian3.add(position, forwardOffset, new Cesium.Cartesian3());
+    const eye = Cesium.Cartesian3.add(smoothedPosition, forwardOffset, new Cesium.Cartesian3());
     eye.z += 2.0;
     cesiumViewer.camera.setView({
       destination: eye,
@@ -806,7 +841,11 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function seek(seconds, syncAudio) {
+    const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
+    if (Math.abs(activeT - previousT) > 3) {
+      cesiumCameraState = null;
+    }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     if (syncAudio && Number.isFinite(audio.duration)) {
