@@ -66,7 +66,7 @@ cw_header('Cockpit Recorder Replay');
 .hud-tape-label { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-size: 10px; font-weight: 800; opacity: .9; }
 .hud-altimeter-setting { position: absolute; right: 128px; top: 414px; border-radius: 999px; background: rgba(0,0,0,.76); font-size: 12px; font-weight: 800; padding: 5px 9px; }
 .hud-attitude { position: absolute; left: 50%; top: 46%; width: 380px; height: 230px; transform: translate(-50%, -50%); }
-.hud-horizon-line { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: rgba(255,255,255,.62); box-shadow: 0 0 10px rgba(255,255,255,.28); }
+.hud-horizon-line { position: absolute; left: -35%; right: -35%; top: 50%; height: 3px; background: rgba(255,255,255,.70); box-shadow: 0 0 10px rgba(255,255,255,.30); transform-origin: 50% 50%; }
 .hud-bank-arc { position: absolute; left: 50%; top: 6px; width: 310px; height: 155px; transform: translateX(-50%); border-top: 3px solid rgba(255,255,255,.78); border-radius: 310px 310px 0 0; }
 .hud-aircraft-symbol { position: absolute; left: 50%; top: 132px; width: 170px; height: 44px; transform: translateX(-50%); }
 .hud-aircraft-symbol:before { content: ""; position: absolute; left: 0; right: 0; top: 20px; height: 5px; background: #ffd400; box-shadow: 0 0 0 1px rgba(0,0,0,.35); clip-path: polygon(0 40%, 42% 40%, 50% 0, 58% 40%, 100% 40%, 100% 60%, 58% 60%, 50% 100%, 42% 60%, 0 60%); }
@@ -79,6 +79,9 @@ cw_header('Cockpit Recorder Replay');
 .cockpit-map-overlay { position: absolute; left: 16px; bottom: 48px; z-index: 7; width: 190px; height: 168px; border-radius: 13px; padding: 8px; background: rgba(15, 23, 42, .28); border: 1px solid rgba(255,255,255,.26); box-shadow: 0 14px 30px rgba(0,0,0,.24); backdrop-filter: blur(3px); pointer-events: auto; }
 .cockpit-map-overlay .replay-map { height: 130px; }
 .cockpit-map-title { color: #fff; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+.cockpit-datum-controls { position: absolute; right: 16px; top: 16px; z-index: 7; display: flex; gap: 6px; align-items: center; padding: 7px; border-radius: 999px; background: rgba(15, 23, 42, .46); border: 1px solid rgba(255,255,255,.26); backdrop-filter: blur(5px); pointer-events: auto; }
+.cockpit-datum-controls button { border: 1px solid rgba(255,255,255,.46); border-radius: 999px; background: rgba(15, 23, 42, .76); color: #fff; font-size: 11px; font-weight: 900; padding: 5px 8px; cursor: pointer; }
+.cockpit-datum-label { color: #fff; font-size: 10px; font-weight: 900; min-width: 78px; text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
 .replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
 .replay-range { width: 100%; accent-color: #1d4ed8; }
 .replay-graphs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -141,13 +144,18 @@ cw_header('Cockpit Recorder Replay');
           <?php endif; ?>
           <div class="cesium-hud" id="cesiumHud" hidden>
             <div class="hud-tape hud-tape-left"><div class="hud-tape-label">GPS GS</div><div class="hud-value-box" id="hudSpeed">-- KT</div></div>
-            <div class="hud-horizon-line"></div>
+            <div class="hud-horizon-line" id="hudHorizonLine"></div>
             <div class="hud-attitude"><div class="hud-bank-arc"></div><div class="hud-aircraft-symbol"></div></div>
             <div class="hud-tape hud-tape-right"><div class="hud-tape-label">ALT</div><div class="hud-value-box" id="hudAltitude">-- FT</div></div>
             <div class="hud-vsi"><div class="hud-value-box" id="hudVsi">--</div></div>
             <div class="hud-altimeter-setting" id="hudAltimeter">-- IN</div>
             <div class="hud-heading" id="hudHeading">HDG ---</div>
             <div class="hud-slip"><div class="hud-slip-ball" id="hudSlipBall"></div></div>
+          </div>
+          <div class="cockpit-datum-controls" aria-label="Attitude datum controls">
+            <span class="cockpit-datum-label" id="bankDatumLabel">BANK REF 0°</span>
+            <button type="button" id="setBankDatumButton">Set Bank 0</button>
+            <button type="button" id="resetBankDatumButton">Reset</button>
           </div>
           <div class="cockpit-map-overlay" aria-label="Track overlay map">
             <div class="replay-map-toolbar">
@@ -204,6 +212,10 @@ cw_header('Cockpit Recorder Replay');
   const hudAltimeter = document.getElementById('hudAltimeter');
   const hudHeading = document.getElementById('hudHeading');
   const hudSlipBall = document.getElementById('hudSlipBall');
+  const hudHorizonLine = document.getElementById('hudHorizonLine');
+  const bankDatumLabel = document.getElementById('bankDatumLabel');
+  const setBankDatumButton = document.getElementById('setBankDatumButton');
+  const resetBankDatumButton = document.getElementById('resetBankDatumButton');
   const eventList = document.getElementById('eventList');
   const details = document.getElementById('details');
   const graphs = document.getElementById('graphs');
@@ -222,6 +234,7 @@ cw_header('Cockpit Recorder Replay');
   let lastPanelRenderMs = 0;
   let playbackClockBaseT = 0;
   let playbackClockBaseMs = null;
+  let bankDatumDeg = 0;
   let cesiumViewer = null;
   let cesiumAircraft = null;
   let cesiumReady = false;
@@ -239,6 +252,10 @@ cw_header('Cockpit Recorder Replay');
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
   const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
   const normalizeDeg = (deg) => ((Number(deg) % 360) + 360) % 360;
+  const normalizeSignedDeg = (deg) => {
+    const normalized = normalizeDeg(deg);
+    return normalized > 180 ? normalized - 360 : normalized;
+  };
   const bearingBetween = (from, to) => {
     if (!from || !to || from.lat === null || from.lon === null || to.lat === null || to.lon === null) return null;
     const lat1 = degToRad(from.lat);
@@ -249,6 +266,22 @@ cw_header('Cockpit Recorder Replay');
     const bearing = Math.atan2(y, x) * 180 / Math.PI;
     return Number.isFinite(bearing) ? normalizeDeg(bearing) : null;
   };
+  const bankDatumStorageKey = () => `cockpitReplayBankDatum:${id}`;
+  function loadBankDatum() {
+    const stored = window.localStorage ? Number(window.localStorage.getItem(bankDatumStorageKey())) : 0;
+    bankDatumDeg = Number.isFinite(stored) ? stored : 0;
+    updateBankDatumLabel();
+  }
+  function saveBankDatum() {
+    if (window.localStorage) {
+      window.localStorage.setItem(bankDatumStorageKey(), String(bankDatumDeg));
+    }
+    updateBankDatumLabel();
+  }
+  function updateBankDatumLabel() {
+    if (!bankDatumLabel) return;
+    bankDatumLabel.textContent = `BANK REF ${bankDatumDeg >= 0 ? '+' : ''}${bankDatumDeg.toFixed(1)}°`;
+  }
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -722,14 +755,14 @@ cw_header('Cockpit Recorder Replay');
       : null;
     const cameraHeading = pathHeading !== null ? pathHeading : (track !== null && groundspeed >= 5 ? track : heading);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
-    const bank = Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
+    const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg) - bankDatumDeg) : 0;
     const targetState = {
       lat: Number(s.lat),
       lon: Number(s.lon),
       altitudeM: altitudeM + 8,
       heading: normalizeDeg(cameraHeading),
       pitch: Math.max(-18, Math.min(8, pitch - 2)),
-      roll: Math.max(-28, Math.min(28, bank * 0.65)),
+      roll: Math.max(-35, Math.min(35, bank)),
     };
     cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
@@ -752,7 +785,7 @@ cw_header('Cockpit Recorder Replay');
         roll: rollRad,
       },
     });
-    renderCesiumHud(s, heading);
+    renderCesiumHud(s, heading, targetState);
   }
 
   function safeRenderCesium() {
@@ -775,7 +808,16 @@ cw_header('Cockpit Recorder Replay');
     }
   }
 
-  function renderCesiumHud(s, heading) {
+  function renderSyntheticHorizon(cameraState) {
+    if (!hudHorizonLine || !cesiumReplay || !cameraState) return;
+    const height = Math.max(320, cesiumReplay.clientHeight || 540);
+    const pxPerPitchDegree = height / 55;
+    const y = Math.max(-height * 0.55, Math.min(height * 0.55, Number(cameraState.pitch) * pxPerPitchDegree));
+    hudHorizonLine.style.transform = `translateY(${y.toFixed(1)}px) rotate(${Number(cameraState.roll).toFixed(2)}deg)`;
+  }
+
+  function renderCesiumHud(s, heading, cameraState) {
+    renderSyntheticHorizon(cameraState);
     hudSpeed.textContent = Number.isFinite(Number(s.groundspeed_kt)) ? `${Number(s.groundspeed_kt).toFixed(0)} KT` : '-- KT';
     hudAltitude.textContent = `${bestAltitudeFt(s).toFixed(0)} FT`;
     hudVsi.textContent = Number.isFinite(Number(s.estimated_vertical_speed_fpm)) ? Number(s.estimated_vertical_speed_fpm).toFixed(0) : '--';
@@ -819,6 +861,7 @@ cw_header('Cockpit Recorder Replay');
       ? 'GPS track'
       : (s.heading_source === 'calibrated_magnetic_heading' ? 'Calibrated magnetic heading' : 'Unavailable');
     const headingQuality = s.heading_quality || (markerSource === 'GPS track' ? 'GOOD' : (s.heading_deg !== null && s.heading_deg !== undefined ? 'LOW' : 'INVALID'));
+    const correctedBank = s.bank_deg === null || s.bank_deg === undefined ? null : normalizeSignedDeg(Number(s.bank_deg) - bankDatumDeg);
     details.innerHTML = `
       <div class="detail-row"><span>Selected phase</span><strong>${phase ? phase.phase : '--'}</strong></div>
       <div class="detail-row"><span>Time</span><strong>${fmtTime(activeT)}</strong></div>
@@ -835,7 +878,7 @@ cw_header('Cockpit Recorder Replay');
       ${adsbAltitudeDetail}
       <div class="detail-row"><span>Groundspeed</span><strong>${number(s.groundspeed_kt, ' kt')}</strong></div>
       <div class="detail-row"><span>Pitch</span><strong>${number(s.pitch_deg, ' deg')}</strong></div>
-      <div class="detail-row"><span>Bank</span><strong>${number(s.bank_deg, ' deg')}</strong></div>
+      <div class="detail-row"><span>Bank</span><strong>${correctedBank === null ? '--' : `${correctedBank.toFixed(1)} deg`} <span class="replay-muted">(raw ${number(s.bank_deg, ' deg')}, ref ${bankDatumDeg.toFixed(1)} deg)</span></strong></div>
       <div class="detail-row"><span>Estimated Slip/Skid</span><strong>${s.estimated_slip_skid_g === null || s.estimated_slip_skid_g === undefined ? '--' : `${slipSkid} · ${Number(s.estimated_slip_skid_g).toFixed(3)} g`}</strong></div>
       <div class="detail-row"><span>Slip/Skid quality</span><strong>${s.estimated_slip_skid_quality || 'unavailable'}</strong></div>
       <div class="detail-row"><span>Estimated Wind</span><strong>${s.estimated_wind_speed_kt === null || s.estimated_wind_speed_kt === undefined ? '--' : `${number(s.estimated_wind_direction_deg_true, '°', 0)} / ${number(s.estimated_wind_speed_kt, ' kt', 1)}`}</strong></div>
@@ -984,6 +1027,20 @@ cw_header('Cockpit Recorder Replay');
     event.preventDefault();
     adjustMapZoom(event.deltaY < 0 ? 1 : -1);
   }, { passive: false });
+  setBankDatumButton.addEventListener('click', () => {
+    const s = smoothedSampleAt(activeT);
+    const bank = s && Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
+    bankDatumDeg = normalizeSignedDeg(bank);
+    saveBankDatum();
+    safeRenderCesium();
+    safeRender('details', renderDetails);
+  });
+  resetBankDatumButton.addEventListener('click', () => {
+    bankDatumDeg = 0;
+    saveBankDatum();
+    safeRenderCesium();
+    safeRender('details', renderDetails);
+  });
   playButton.addEventListener('click', () => {
     if (audio.paused) {
       audio.play();
@@ -1047,6 +1104,7 @@ cw_header('Cockpit Recorder Replay');
     }
 
     payload = data;
+    loadBankDatum();
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
     timeline.max = String(maxT);
     safeRender('phases', renderPhases);
