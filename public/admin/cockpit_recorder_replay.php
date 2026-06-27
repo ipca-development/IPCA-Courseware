@@ -11,6 +11,7 @@ $id = trim((string)($_GET['id'] ?? ''));
 $error = '';
 $recording = null;
 $cesiumIonToken = trim((string)(getenv('CW_CESIUM_ION_TOKEN') ?: getenv('CESIUM_ION_TOKEN') ?: ''));
+$cesiumIonToken = trim($cesiumIonToken, " \t\n\r\0\x0B\"'");
 
 try {
     if ($id === '') {
@@ -565,7 +566,7 @@ cw_header('Cockpit Recorder Replay');
 
   function initCesium() {
     if (cesiumReady || !cesiumReplay || !payload) return;
-    const token = (cesiumReplay.getAttribute('data-cesium-token') || '').trim();
+    const token = (cesiumReplay.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '');
     if (!token || typeof Cesium === 'undefined') return;
     const gpsSamples = payload.samples.filter((s) => s.lat !== null && s.lon !== null);
     if (!gpsSamples.length) {
@@ -573,20 +574,25 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
 
-    Cesium.Ion.defaultAccessToken = token;
-    cesiumViewer = new Cesium.Viewer(cesiumReplay, {
-      animation: false,
-      baseLayerPicker: false,
-      fullscreenButton: false,
-      geocoder: false,
-      homeButton: false,
-      infoBox: false,
-      navigationHelpButton: false,
-      sceneModePicker: false,
-      selectionIndicator: false,
-      timeline: false,
-      shouldAnimate: false,
-    });
+    try {
+      Cesium.Ion.defaultAccessToken = token;
+      cesiumViewer = new Cesium.Viewer(cesiumReplay, {
+        animation: false,
+        baseLayerPicker: false,
+        fullscreenButton: false,
+        geocoder: false,
+        homeButton: false,
+        infoBox: false,
+        navigationHelpButton: false,
+        sceneModePicker: false,
+        selectionIndicator: false,
+        timeline: false,
+        shouldAnimate: false,
+      });
+    } catch (err) {
+      cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(err.message || err)}</div></div>`);
+      return;
+    }
     cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
     cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
     if (Cesium.createWorldTerrainAsync) {
