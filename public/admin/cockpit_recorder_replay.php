@@ -239,6 +239,16 @@ cw_header('Cockpit Recorder Replay');
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
   const degToRad = (deg) => Number(deg || 0) * Math.PI / 180;
   const normalizeDeg = (deg) => ((Number(deg) % 360) + 360) % 360;
+  const bearingBetween = (from, to) => {
+    if (!from || !to || from.lat === null || from.lon === null || to.lat === null || to.lon === null) return null;
+    const lat1 = degToRad(from.lat);
+    const lat2 = degToRad(to.lat);
+    const deltaLon = degToRad(Number(to.lon) - Number(from.lon));
+    const y = Math.sin(deltaLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+    const bearing = Math.atan2(y, x) * 180 / Math.PI;
+    return Number.isFinite(bearing) ? normalizeDeg(bearing) : null;
+  };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -318,11 +328,11 @@ cw_header('Cockpit Recorder Replay');
     const base = sampleAt(t);
     if (!base) return null;
     const taps = [
-      { offset: -0.8, weight: 1 },
-      { offset: -0.4, weight: 2 },
+      { offset: -1.2, weight: 1 },
+      { offset: -0.6, weight: 2 },
       { offset: 0, weight: 4 },
-      { offset: 0.4, weight: 2 },
-      { offset: 0.8, weight: 1 },
+      { offset: 0.6, weight: 2 },
+      { offset: 1.2, weight: 1 },
     ];
     const samples = taps
       .map((tap) => ({ sample: sampleAt(Number(t) + tap.offset), weight: tap.weight }))
@@ -707,7 +717,10 @@ cw_header('Cockpit Recorder Replay');
     const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
     const heading = Number.isFinite(Number(s.true_heading_deg)) ? Number(s.true_heading_deg)
       : (Number.isFinite(Number(s.heading_deg)) ? Number(s.heading_deg) : (track ?? 0));
-    const cameraHeading = track !== null && groundspeed >= 5 ? track : heading;
+    const pathHeading = groundspeed >= 5
+      ? bearingBetween(smoothedSampleAt(activeT - 1.4), smoothedSampleAt(activeT + 1.4))
+      : null;
+    const cameraHeading = pathHeading !== null ? pathHeading : (track !== null && groundspeed >= 5 ? track : heading);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? Number(s.bank_deg) : 0;
     const targetState = {
@@ -716,7 +729,7 @@ cw_header('Cockpit Recorder Replay');
       altitudeM: altitudeM + 8,
       heading: normalizeDeg(cameraHeading),
       pitch: Math.max(-18, Math.min(8, pitch - 2)),
-      roll: Math.max(-45, Math.min(45, bank)),
+      roll: Math.max(-28, Math.min(28, bank * 0.65)),
     };
     cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
