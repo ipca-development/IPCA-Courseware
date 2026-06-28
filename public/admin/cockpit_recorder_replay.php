@@ -149,6 +149,7 @@ cw_header('Cockpit Recorder Replay');
   };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
+    if (Number.isFinite(Number(sample.altitude_ft))) return Number(sample.altitude_ft);
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
       : (Number.isFinite(Number(sample.estimated_indicated_altitude_ft)) ? Number(sample.estimated_indicated_altitude_ft)
       : (Number.isFinite(Number(sample.field_calibrated_true_altitude_ft)) ? Number(sample.field_calibrated_true_altitude_ft)
@@ -503,7 +504,7 @@ cw_header('Cockpit Recorder Replay');
   async function loadReplay() {
     let data = null;
     try {
-      const response = await fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}`);
+      const response = await fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2`);
       const text = await response.text();
       try {
         data = JSON.parse(text);
@@ -519,7 +520,15 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
 
-    payload = data;
+    const samples = (data.samples || []).map((sample) => ({
+      ...sample,
+      bank_deg: sample.roll_deg ?? sample.bank_deg ?? null,
+      gps_altitude_ft: sample.altitude_ft ?? sample.gps_altitude_ft ?? null,
+      estimated_indicated_altitude_ft: sample.altitude_ft ?? sample.estimated_indicated_altitude_ft ?? null,
+      groundspeed_kt: sample.ground_speed_kt ?? sample.groundspeed_kt ?? null,
+    }));
+
+    payload = { ...data, samples };
     positionKeyframes = buildPositionKeyframes(payload.samples || []);
     if (loadStatus) loadStatus.remove();
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);

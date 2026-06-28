@@ -1,0 +1,29 @@
+{
+    "generated_at_utc": "2026-06-28T01:40:02+00:00",
+    "recording_id": 11,
+    "recording_uid": "95A0C8C2-C460-4E4B-9B07-4772849893DD",
+    "aircraft": "N392EA",
+    "files": [
+        {
+            "name": "manifest.json",
+            "included": true
+        },
+        {
+            "name": "replay.json",
+            "included": true
+        },
+        {
+            "name": "95A0C8C2-C460-4E4B-9B07-4772849893DD.gps.json",
+            "included": true
+        },
+        {
+            "name": "95A0C8C2-C460-4E4B-9B07-4772849893DD.ahrs.json",
+            "included": true
+        },
+        {
+            "name": "95A0C8C2-C460-4E4B-9B07-4772849893DD.g3x.csv",
+            "included": false,
+            "note": "No G3X file attached to this recording"
+        }
+    ]
+}

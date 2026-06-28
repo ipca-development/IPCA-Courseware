@@ -447,26 +447,7 @@ final class CockpitRecorderService
      */
     public function ahrsFileForRecording(string $id): ?array
     {
-        $recording = $this->recordingByAnyId($id);
-        if (!$recording) {
-            return null;
-        }
-        $relativePath = (string)($recording['ahrs_storage_path'] ?? '');
-        if ($relativePath === '') {
-            return null;
-        }
-        $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
-        $realPath = realpath($path);
-        $root = realpath(self::ahrsRoot());
-        if ($root === false || $realPath === false || !str_starts_with($realPath, $root) || !is_file($realPath)) {
-            return null;
-        }
-        $filename = (string)($recording['recording_uid'] ?? 'recording') . '.ahrs.json';
-        return array(
-            'path' => $realPath,
-            'mime' => 'application/json',
-            'filename' => $filename,
-        );
+        return $this->storedEvidenceFileForRecording($id, 'ahrs_storage_path', self::ahrsRoot(), '.ahrs.json', 'application/json');
     }
 
     /**
@@ -474,24 +455,48 @@ final class CockpitRecorderService
      */
     public function gpsFileForRecording(string $id): ?array
     {
+        return $this->storedEvidenceFileForRecording($id, 'gps_storage_path', self::gpsRoot(), '.gps.json', 'application/json');
+    }
+
+    /**
+     * @return array{path:string,mime:string,filename:string}|null
+     */
+    public function g3xFileForRecording(string $id): ?array
+    {
+        return $this->storedEvidenceFileForRecording($id, 'g3x_storage_path', self::g3xRoot(), '.g3x.csv', 'text/csv');
+    }
+
+    /**
+     * @return array{path:string,mime:string,filename:string}|null
+     */
+    private function storedEvidenceFileForRecording(
+        string $id,
+        string $column,
+        string $rootDir,
+        string $suffix,
+        string $mime
+    ): ?array {
         $recording = $this->recordingByAnyId($id);
         if (!$recording) {
             return null;
         }
-        $relativePath = (string)($recording['gps_storage_path'] ?? '');
+        if (!$this->hasColumn($column)) {
+            return null;
+        }
+        $relativePath = (string)($recording[$column] ?? '');
         if ($relativePath === '') {
             return null;
         }
         $path = self::projectRoot() . '/' . ltrim($relativePath, '/');
         $realPath = realpath($path);
-        $root = realpath(self::gpsRoot());
+        $root = realpath($rootDir);
         if ($root === false || $realPath === false || !str_starts_with($realPath, $root) || !is_file($realPath)) {
             return null;
         }
-        $filename = (string)($recording['recording_uid'] ?? 'recording') . '.gps.json';
+        $filename = (string)($recording['recording_uid'] ?? 'recording') . $suffix;
         return array(
             'path' => $realPath,
-            'mime' => 'application/json',
+            'mime' => $mime,
             'filename' => $filename,
         );
     }

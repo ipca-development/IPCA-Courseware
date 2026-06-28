@@ -210,6 +210,8 @@ cw_header('Cockpit Recorder POC');
             $adsbStatus = (string)($row['adsb_status'] ?? 'not_started');
             $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
             $replayJsonUrl = '/api/recordings/replay.php?id=' . $id;
+            $replayJsonV2Url = '/api/recordings/replay.php?id=' . $id . '&version=2';
+            $debugBundleUrl = '/admin/cockpit_recorder_debug_bundle.php?id=' . $id;
             $g3xUrl = '/admin/cockpit_recorder_g3x.php?id=' . $id;
             $adsbDetail = $adsbService instanceof CockpitAdsbEnrichmentService ? $adsbService->statusForRecording($id) : array();
             $adsbDisplayStatus = (string)($adsbDetail['status'] ?? $adsbStatus);
@@ -465,6 +467,8 @@ cw_header('Cockpit Recorder POC');
                 <div class="cockpit-link-grid">
                   <a href="<?= h($replayUrl) ?>">Replay</a>
                   <a href="<?= h($replayJsonUrl) ?>">Replay JSON</a>
+                  <a href="<?= h($replayJsonV2Url) ?>">Replay JSON v2</a>
+                  <a href="<?= h($debugBundleUrl) ?>">Debug bundle</a>
                   <a href="<?= h($g3xUrl) ?>">G3X CSV</a>
                 </div>
               </div>

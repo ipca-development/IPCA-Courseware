@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/CockpitRecorderService.php';
+require_once __DIR__ . '/CockpitReplayPipeline.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/PfdProfileService.php';
 require_once __DIR__ . '/CockpitAircraftService.php';
@@ -17,6 +18,7 @@ final class CockpitReconstructionService
     private const RECORDINGS_TABLE = 'ipca_cockpit_recordings';
     private const JOB_TABLE = 'ipca_cockpit_reconstruction_jobs';
     private const SAMPLE_TABLE = 'ipca_cockpit_flight_samples';
+    private const REPLAY_SAMPLE_TABLE = 'ipca_cockpit_replay_samples';
     private const PHASE_TABLE = 'ipca_cockpit_flight_phases';
     private const EVENT_TABLE = 'ipca_cockpit_timeline_events';
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
@@ -158,6 +160,13 @@ final class CockpitReconstructionService
         return true;
     }
 
+    public static function replaySamplesTablePresent(PDO $pdo): bool
+    {
+        $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
+        $stmt->execute(array(self::REPLAY_SAMPLE_TABLE));
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function requireTables(): void
     {
         if (!self::tablesPresent($this->pdo)) {
@@ -195,13 +204,34 @@ final class CockpitReconstructionService
             $adsbSamples = $this->loadAdsbOwnship($recordingId);
             $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples, $adsbSamples, $options);
             $timeline = $this->detectTimeline($recording, $samples);
+            $replayResult = null;
+            if (self::replaySamplesTablePresent($this->pdo)) {
+                $gpsForG3X = array_values(array_filter(
+                    array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples),
+                    fn(array $row): bool => isset($row['seconds'])
+                ));
+                $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X);
+                $replayResult = (new CockpitReplayPipeline())->build(
+                    $recording,
+                    $gpsSamples,
+                    $ahrsSamples,
+                    $g3xSamples,
+                    $timeline['phases']
+                );
+            }
             $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
+            if ($replayResult !== null) {
+                $summary['replay_v2'] = $replayResult['diagnostics'];
+            }
             $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
             $this->pdo->beginTransaction();
             $inTransaction = true;
             $this->clearDerivedData($recordingId);
             $this->storeSamples($recordingId, $samples);
+            if ($replayResult !== null) {
+                $this->storeReplaySamples($recordingId, $replayResult['samples']);
+            }
             $this->updateJob($jobId, 'processing', 45, null);
             $this->storePhases($recordingId, $timeline['phases']);
             $this->storeEvents($recordingId, $timeline['events']);
@@ -215,6 +245,7 @@ final class CockpitReconstructionService
                 'ok' => true,
                 'recording_id' => $recordingId,
                 'sample_count' => count($samples),
+                'replay_sample_count' => $replayResult !== null ? count($replayResult['samples']) : 0,
                 'phase_count' => count($timeline['phases']),
                 'event_count' => count($timeline['events']),
                 'summary' => $summary,
@@ -301,6 +332,112 @@ final class CockpitReconstructionService
             'sample_payload_count' => count($samples),
             'sample_payload_downsampled' => $sampleCount > count($samples),
             'samples' => $samples,
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function replayPayloadV2(string $id): array
+    {
+        if (!self::replaySamplesTablePresent($this->pdo)) {
+            return array(
+                'ok' => false,
+                'error' => 'Apply scripts/sql/2026_06_28_cockpit_recorder_replay_samples.sql before using replay v2.',
+            );
+        }
+
+        $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId($id);
+        if (!$recording) {
+            return array('ok' => false, 'error' => 'Recording not found.');
+        }
+
+        $recordingId = (int)$recording['id'];
+        $sampleCount = $this->countRows(self::REPLAY_SAMPLE_TABLE, $recordingId);
+        if ($sampleCount <= 0) {
+            return array(
+                'ok' => false,
+                'error' => 'Replay v2 samples are not available. Reconstruct this recording after applying the replay samples migration.',
+            );
+        }
+
+        $samples = $this->replaySampleRows($recordingId);
+        $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
+        $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
+        $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
+
+        return array(
+            'ok' => true,
+            'version' => 2,
+            'recording' => array(
+                'id' => $recordingId,
+                'recording_id' => (string)$recording['recording_uid'],
+                'duration' => (float)($recording['duration_seconds'] ?? 0),
+                'started_at' => $recording['started_at'] ?? null,
+                'aircraft' => array(
+                    'registration' => (string)($recording['aircraft_registration'] ?? ''),
+                    'display_name' => (string)($recording['aircraft_display_name'] ?? ''),
+                    'type' => (string)($recording['aircraft_type'] ?? ''),
+                ),
+                'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $recordingId,
+                'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
+                'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
+            ),
+            'sample_rate_hz' => (int)($diagnostics['sample_rate_hz'] ?? 10),
+            'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
+            'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
+            'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
+            'replay_sample_count' => $sampleCount,
+            'max_raw_gps_gap_s' => isset($diagnostics['max_raw_gps_gap_s']) ? (float)$diagnostics['max_raw_gps_gap_s'] : null,
+            'max_replay_dt_s' => isset($diagnostics['max_replay_dt_s']) ? (float)$diagnostics['max_replay_dt_s'] : null,
+            'warnings' => $warnings,
+            'phases' => $this->phaseRows($recordingId),
+            'events' => $this->eventRows($recordingId),
+            'samples' => $samples,
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function replaySampleRows(int $recordingId): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT time_s, latitude, longitude, altitude_ft, heading_deg, pitch_deg, roll_deg,
+                   ground_speed_kt, vertical_speed_fpm, phase,
+                   position_quality, altitude_quality, attitude_quality
+            FROM ' . self::REPLAY_SAMPLE_TABLE . '
+            WHERE recording_id = ?
+            ORDER BY sample_index ASC
+        ');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) {
+            return array();
+        }
+
+        return array_map(fn(array $row): array => $this->publicSlimReplaySample($row), $rows);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function publicSlimReplaySample(array $row): array
+    {
+        return array(
+            't' => (float)$row['time_s'],
+            'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
+            'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
+            'altitude_ft' => $row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null,
+            'heading_deg' => $row['heading_deg'] !== null ? (float)$row['heading_deg'] : null,
+            'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
+            'roll_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
+            'ground_speed_kt' => $row['ground_speed_kt'] !== null ? (float)$row['ground_speed_kt'] : null,
+            'vertical_speed_fpm' => $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : null,
+            'phase' => (string)($row['phase'] ?? ''),
+            'position_quality' => (string)($row['position_quality'] ?? 'unknown'),
+            'altitude_quality' => (string)($row['altitude_quality'] ?? 'unknown'),
+            'attitude_quality' => (string)($row['attitude_quality'] ?? 'unknown'),
         );
     }
 
@@ -399,6 +536,177 @@ final class CockpitReconstructionService
         return is_array($rows) ? array_map(fn(array $row): array => $this->publicSample($row), $rows) : array();
     }
 
+    /**
+     * @return list<array{name:string,path:string|null,contents:string|null,missing:bool}>
+     */
+    public function debugBundleEntries(string $id): array
+    {
+        $recorder = new CockpitRecorderService($this->pdo);
+        $recording = $recorder->recordingByAnyId($id);
+        if (!$recording) {
+            throw new RuntimeException('Recording not found.');
+        }
+
+        $uid = preg_replace('/[^A-Za-z0-9_.-]+/', '_', (string)($recording['recording_uid'] ?? ('recording_' . $id)));
+        if ($uid === '') {
+            $uid = 'recording_' . (string)($recording['id'] ?? $id);
+        }
+
+        $entries = array();
+
+        $replay = $this->replayPayload($id);
+        $entries[] = array(
+            'name' => 'replay.json',
+            'path' => null,
+            'contents' => json_encode($replay, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}',
+            'missing' => false,
+        );
+
+        foreach (array(
+            'gps' => $recorder->gpsFileForRecording($id),
+            'ahrs' => $recorder->ahrsFileForRecording($id),
+            'g3x' => $recorder->g3xFileForRecording($id),
+        ) as $key => $file) {
+            if ($file) {
+                $entries[] = array(
+                    'name' => (string)$file['filename'],
+                    'path' => (string)$file['path'],
+                    'contents' => null,
+                    'missing' => false,
+                );
+                continue;
+            }
+
+            $suffix = match ($key) {
+                'gps' => '.gps.json',
+                'ahrs' => '.ahrs.json',
+                default => '.g3x.csv',
+            };
+            $entries[] = array(
+                'name' => $uid . $suffix,
+                'path' => null,
+                'contents' => null,
+                'missing' => true,
+            );
+        }
+
+        $manifest = array(
+            'generated_at_utc' => gmdate('c'),
+            'recording_id' => (int)($recording['id'] ?? 0),
+            'recording_uid' => (string)($recording['recording_uid'] ?? ''),
+            'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
+            'files' => array_map(static function (array $entry): array {
+                return array(
+                    'name' => (string)$entry['name'],
+                    'included' => empty($entry['missing']),
+                );
+            }, $entries),
+        );
+        array_unshift($entries, array(
+            'name' => 'manifest.json',
+            'path' => null,
+            'contents' => json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}',
+            'missing' => false,
+        ));
+
+        return $entries;
+    }
+
+    public function streamDebugBundleZip(string $id): void
+    {
+        if (!class_exists('ZipArchive')) {
+            throw new RuntimeException('ZipArchive is not available on this server.');
+        }
+
+        $recorder = new CockpitRecorderService($this->pdo);
+        $recording = $recorder->recordingByAnyId($id);
+        if (!$recording) {
+            throw new RuntimeException('Recording not found.');
+        }
+
+        $uid = preg_replace('/[^A-Za-z0-9_.-]+/', '_', (string)($recording['recording_uid'] ?? ('recording_' . $id)));
+        if ($uid === '') {
+            $uid = 'recording_' . (string)($recording['id'] ?? $id);
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'ipca_debug_bundle_');
+        if ($tmp === false) {
+            throw new RuntimeException('Could not create temporary zip file.');
+        }
+        $zipPath = $tmp . '.zip';
+        @unlink($tmp);
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException('Could not open zip archive.');
+        }
+
+        foreach ($this->debugBundleEntries($id) as $entry) {
+            $name = (string)$entry['name'];
+            if (!empty($entry['missing'])) {
+                continue;
+            }
+            if (!empty($entry['path']) && is_file((string)$entry['path'])) {
+                $zip->addFile((string)$entry['path'], $name);
+                continue;
+            }
+            if (isset($entry['contents']) && is_string($entry['contents'])) {
+                $zip->addFromString($name, $entry['contents']);
+            }
+        }
+
+        $zip->close();
+
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $uid . '.debug_bundle.zip"');
+        header('Content-Length: ' . (string)filesize($zipPath));
+        header('Cache-Control: no-store');
+        readfile($zipPath);
+        @unlink($zipPath);
+    }
+
+    /**
+     * @return array{zip_path:string,entries:list<array{name:string,path:string|null,contents:string|null,missing:bool}>}
+     */
+    public function writeDebugBundleZip(string $id, string $outputPath): array
+    {
+        if (!class_exists('ZipArchive')) {
+            throw new RuntimeException('ZipArchive is not available on this server.');
+        }
+
+        $entries = $this->debugBundleEntries($id);
+        $dir = dirname($outputPath);
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new RuntimeException('Could not create output directory: ' . $dir);
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($outputPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException('Could not open zip archive: ' . $outputPath);
+        }
+
+        foreach ($entries as $entry) {
+            $name = (string)$entry['name'];
+            if (!empty($entry['missing'])) {
+                continue;
+            }
+            if (!empty($entry['path']) && is_file((string)$entry['path'])) {
+                $zip->addFile((string)$entry['path'], $name);
+                continue;
+            }
+            if (isset($entry['contents']) && is_string($entry['contents'])) {
+                $zip->addFromString($name, $entry['contents']);
+            }
+        }
+
+        $zip->close();
+
+        return array(
+            'zip_path' => $outputPath,
+            'entries' => $entries,
+        );
+    }
+
     public function streamG3XCsv(string $id): void
     {
         $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId($id);
@@ -455,7 +763,11 @@ final class CockpitReconstructionService
 
     private function clearDerivedData(int $recordingId): void
     {
-        foreach (array(self::SAMPLE_TABLE, self::PHASE_TABLE, self::EVENT_TABLE) as $table) {
+        $tables = array(self::SAMPLE_TABLE, self::PHASE_TABLE, self::EVENT_TABLE);
+        if (self::replaySamplesTablePresent($this->pdo)) {
+            $tables[] = self::REPLAY_SAMPLE_TABLE;
+        }
+        foreach ($tables as $table) {
             $stmt = $this->pdo->prepare('DELETE FROM ' . $table . ' WHERE recording_id = ?');
             $stmt->execute(array($recordingId));
         }
@@ -2348,6 +2660,41 @@ final class CockpitReconstructionService
                 $sample['altitude_bug_ft'],
                 $sample['autopilot_status'],
                 json_encode($sample['g3x_row'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ));
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     */
+    private function storeReplaySamples(int $recordingId, array $samples): void
+    {
+        $stmt = $this->pdo->prepare('
+            INSERT INTO ' . self::REPLAY_SAMPLE_TABLE . ' (
+                recording_id, sample_index, time_s, latitude, longitude, altitude_ft,
+                heading_deg, pitch_deg, roll_deg, ground_speed_kt, vertical_speed_fpm,
+                phase, position_quality, altitude_quality, attitude_quality, created_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+            )
+        ');
+        foreach ($samples as $sample) {
+            $stmt->execute(array(
+                $recordingId,
+                (int)$sample['sample_index'],
+                (float)$sample['t'],
+                $sample['lat'],
+                $sample['lon'],
+                $sample['altitude_ft'],
+                $sample['heading_deg'],
+                $sample['pitch_deg'],
+                $sample['roll_deg'],
+                $sample['ground_speed_kt'],
+                $sample['vertical_speed_fpm'],
+                (string)($sample['phase'] ?? ''),
+                (string)($sample['position_quality'] ?? 'unknown'),
+                (string)($sample['altitude_quality'] ?? 'unknown'),
+                (string)($sample['attitude_quality'] ?? 'unknown'),
             ));
         }
     }

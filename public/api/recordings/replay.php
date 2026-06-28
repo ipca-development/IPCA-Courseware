@@ -10,6 +10,7 @@ cw_require_admin();
 header('Content-Type: application/json; charset=utf-8');
 
 $id = trim((string)($_GET['id'] ?? ''));
+$version = trim((string)($_GET['version'] ?? ''));
 if ($id === '') {
     http_response_code(400);
     echo json_encode(array('ok' => false, 'error' => 'Recording id is required.'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -18,7 +19,9 @@ if ($id === '') {
 
 try {
     $service = new CockpitReconstructionService($pdo);
-    $payload = $service->replayPayload($id);
+    $payload = $version === '2'
+        ? $service->replayPayloadV2($id)
+        : $service->replayPayload($id);
     if (empty($payload['ok'])) {
         http_response_code(404);
     }
