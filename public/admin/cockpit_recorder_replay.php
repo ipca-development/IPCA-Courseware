@@ -109,16 +109,16 @@ cw_header('Cockpit Recorder Replay');
   let payload = null;
   let activeT = 0;
   let animationFrame = null;
-  let playbackClockBaseT = 0;
-  let playbackClockBaseMs = null;
   let cesiumViewer = null;
   let cesiumReady = false;
   let displayCamera = null;
   let lastRenderMs = null;
+  let positionKeyframes = [];
 
-  const CAMERA_POS_SMOOTH_RATE = 14;
-  const CAMERA_ROT_SMOOTH_RATE = 20;
+  const CAMERA_POS_SMOOTH_RATE = 10;
+  const CAMERA_ROT_SMOOTH_RATE = 16;
   const CAMERA_SNAP_SEEK_SEC = 0.75;
+  const POSITION_KEY_MIN_DIST_M = 0.2;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -168,6 +168,74 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
 
+  const smoothstep = (ratio) => {
+    const x = Math.max(0, Math.min(1, ratio));
+    return x * x * (3 - 2 * x);
+  };
+
+  const haversineM = (lat1, lon1, lat2, lon2) => {
+    const phi1 = degToRad(lat1);
+    const phi2 = degToRad(lat2);
+    const dPhi = degToRad(lat2 - lat1);
+    const dLambda = degToRad(lon2 - lon1);
+    const a = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+  };
+
+  function buildPositionKeyframes(samples) {
+    const keys = [];
+    let lastKey = null;
+    for (const sample of samples) {
+      const lat = Number(sample.lat);
+      const lon = Number(sample.lon);
+      const t = Number(sample.t);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(t)) continue;
+      const altitudeM = cameraEyeAltitudeM(sample);
+      if (!lastKey) {
+        lastKey = { t, lat, lon, altitudeM };
+        keys.push(lastKey);
+        continue;
+      }
+      const movedM = haversineM(lastKey.lat, lastKey.lon, lat, lon);
+      if (movedM >= POSITION_KEY_MIN_DIST_M) {
+        lastKey = { t, lat, lon, altitudeM };
+        keys.push(lastKey);
+      } else {
+        lastKey.altitudeM = altitudeM;
+      }
+    }
+    return keys;
+  }
+
+  function positionAt(t) {
+    if (!positionKeyframes.length) return null;
+    const time = Number(t);
+    if (time <= positionKeyframes[0].t) {
+      return Object.assign({}, positionKeyframes[0]);
+    }
+    const last = positionKeyframes[positionKeyframes.length - 1];
+    if (time >= last.t) {
+      return Object.assign({}, last);
+    }
+    let lo = 0;
+    let hi = positionKeyframes.length - 1;
+    while (lo + 1 < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (positionKeyframes[mid].t <= time) lo = mid;
+      else hi = mid;
+    }
+    const before = positionKeyframes[lo];
+    const after = positionKeyframes[hi];
+    const span = Math.max(0.001, after.t - before.t);
+    const ratio = smoothstep((time - before.t) / span);
+    return {
+      t: time,
+      lat: before.lat + (after.lat - before.lat) * ratio,
+      lon: before.lon + (after.lon - before.lon) * ratio,
+      altitudeM: before.altitudeM + (after.altitudeM - before.altitudeM) * ratio,
+    };
+  }
+
   function trueHeadingFromSample(sample) {
     if (!sample) return 0;
     if (Number.isFinite(Number(sample.camera_heading_deg))) {
@@ -186,13 +254,17 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function targetCameraAt(t) {
+    const pos = positionAt(t);
     const s = sampleAt(t);
-    if (!s || s.lat === null || s.lon === null) return null;
+    if (!pos || !s) return null;
+    const heading = Number.isFinite(Number(s.camera_heading_deg))
+      ? normalizeDeg(Number(s.camera_heading_deg))
+      : trueHeadingFromSample(s);
     return {
-      lat: Number(s.lat),
-      lon: Number(s.lon),
-      altitudeM: cameraEyeAltitudeM(s),
-      heading: trueHeadingFromSample(s),
+      lat: pos.lat,
+      lon: pos.lon,
+      altitudeM: pos.altitudeM,
+      heading,
       pitch: Math.max(-30, Math.min(30, Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0)),
       roll: Math.max(-45, Math.min(45, Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0)),
     };
@@ -391,32 +463,11 @@ cw_header('Cockpit Recorder Replay');
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
     safeRenderCesium(snap);
-    resetPlaybackClock();
   }
 
-  function resetPlaybackClock(timestamp = performance.now()) {
-    playbackClockBaseT = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT;
-    playbackClockBaseMs = timestamp;
-  }
-
-  function playbackClockTime(timestamp) {
-    if (playbackClockBaseMs === null) {
-      resetPlaybackClock(timestamp);
-    }
-    const rate = Number.isFinite(Number(audio.playbackRate)) ? Number(audio.playbackRate) : 1;
-    const elapsed = Math.max(0, (timestamp - playbackClockBaseMs) / 1000) * rate;
-    const predicted = playbackClockBaseT + elapsed;
-    const audioTime = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : predicted;
-    if (Math.abs(audioTime - predicted) > 0.35) {
-      resetPlaybackClock(timestamp);
-      return playbackClockBaseT;
-    }
-    const maxT = Number(timeline.max) || predicted;
-    return Math.max(0, Math.min(maxT, predicted));
-  }
-
-  function updateCockpitPlayback(seconds) {
-    activeT = Math.max(0, Number(seconds) || 0);
+  function updateCockpitPlayback() {
+    const maxT = Number(timeline.max) || 0;
+    activeT = Math.max(0, Math.min(maxT, Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT));
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     safeRenderCesium(false);
@@ -439,7 +490,6 @@ cw_header('Cockpit Recorder Replay');
   });
   audio.addEventListener('pause', () => {
     playButton.textContent = 'Play';
-    playbackClockBaseMs = null;
     if (animationFrame !== null) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
@@ -447,19 +497,18 @@ cw_header('Cockpit Recorder Replay');
   });
   audio.addEventListener('play', () => {
     playButton.textContent = 'Pause';
-    resetPlaybackClock();
     lastRenderMs = null;
     if (animationFrame === null) {
       animationFrame = requestAnimationFrame(animatePlayback);
     }
   });
 
-  function animatePlayback(timestamp) {
+  function animatePlayback() {
     if (audio.paused || !payload) {
       animationFrame = null;
       return;
     }
-    updateCockpitPlayback(playbackClockTime(timestamp));
+    updateCockpitPlayback();
     animationFrame = requestAnimationFrame(animatePlayback);
   }
 
@@ -488,6 +537,7 @@ cw_header('Cockpit Recorder Replay');
     }
 
     payload = data;
+    positionKeyframes = buildPositionKeyframes(payload.samples || []);
     if (loadStatus) loadStatus.remove();
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
     timeline.max = String(maxT);
