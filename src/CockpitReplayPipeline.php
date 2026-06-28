@@ -13,7 +13,7 @@ final class CockpitReplayPipeline
     private const EARTH_RADIUS_M = 6378137.0;
     private const STATIONARY_SPEED_KT = 1.0;
     private const STATIONARY_MIN_DURATION_S = 2.0;
-    private const GPS_HEADING_MIN_SPEED_KT = 5.0;
+    private const GPS_HEADING_MIN_SPEED_KT = 8.0;
     private const SLOW_TAXI_SPEED_KT = 5.0;
     private const GROUND_SPEED_MAX_KT = 20.0;
     private const FT_PER_M = 3.280839895;
@@ -83,6 +83,15 @@ final class CockpitReplayPipeline
             'max_heading_delta_stationary_deg' => 0.0,
             'max_heading_delta_ground_deg' => 0.0,
             'heading_source_counts' => array('g3x' => 0, 'ahrs' => 0, 'gps_course' => 0, 'held' => 0),
+            'max_groundspeed_delta_kt' => 0.0,
+            'max_taxi_implied_speed_kt' => 0.0,
+            'max_position_speed_mismatch_kt' => 0.0,
+            'count_position_outliers' => 0,
+            'count_speed_outliers' => 0,
+            'count_heading_outliers' => 0,
+            'count_low_quality_samples' => 0,
+            'count_degraded_samples' => 0,
+            'count_empty_phase_samples' => 0,
         );
 
         $positionKnots = $this->buildPositionKnots($gpsPoints, $g3xPoints);
@@ -128,6 +137,7 @@ final class CockpitReplayPipeline
         );
         $samples = $this->stabilizeHeadingSamples($samples);
         $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline);
+        $samples = $this->validateReplaySamples($samples);
         $this->profiling['enu_interpolation_s'] = round(microtime(true) - $enuStarted - $headingElapsed, 4);
         $this->profiling['heading_interpolation_s'] = round($headingElapsed, 4);
 
@@ -976,6 +986,269 @@ final class CockpitReplayPipeline
     private function smoothAngle(float $from, float $to, float $alpha): float
     {
         return self::normalizeDegrees($from + self::angleDelta($from, $to) * max(0.0, min(1.0, $alpha)));
+    }
+
+    /**
+     * Final replay-payload validation pass. This works on the fixed 10 Hz samples, so
+     * the quality flags describe what the frontend will actually render.
+     *
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function validateReplaySamples(array $samples): array
+    {
+        if (!$samples) {
+            return $samples;
+        }
+
+        $maxGroundspeedDelta = 0.0;
+        $maxTaxiImpliedSpeed = 0.0;
+        $maxMismatch = 0.0;
+        $countPositionOutliers = 0;
+        $countSpeedOutliers = 0;
+        $countHeadingOutliers = 0;
+        $countOriginalEmptyPhase = 0;
+        $maxGroundHeadingDelta = 0.0;
+
+        $lastSpeed = null;
+        $lastHeading = null;
+        $lastVisualPitch = null;
+        $lastVisualRoll = null;
+
+        for ($i = 0; $i < count($samples); $i++) {
+            $sample = $samples[$i];
+            $phase = trim((string)($sample['phase'] ?? ''));
+            if ($phase === '') {
+                $countOriginalEmptyPhase++;
+                $phase = $this->fallbackPhaseForSample($sample);
+                $sample['phase'] = $phase;
+            }
+
+            $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt'])
+                ? max(0.0, (float)$sample['ground_speed_kt'])
+                : 0.0;
+            $ground = $this->isGroundPhase($phase) || $speed < self::GROUND_SPEED_MAX_KT;
+            $groundStep = $ground || ($lastSpeed !== null && min($lastSpeed, $speed) < self::GROUND_SPEED_MAX_KT);
+
+            $rawDelta = 0.0;
+            if ($lastSpeed !== null) {
+                $rawDelta = $speed - $lastSpeed;
+                if ($groundStep && abs($rawDelta) > 0.3) {
+                    $countSpeedOutliers++;
+                    $speed = $lastSpeed + max(-0.3, min(0.3, $rawDelta));
+                    $sample['ground_speed_kt'] = round($speed, 2);
+                    $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                    $groundStep = $ground || min($lastSpeed, $speed) < self::GROUND_SPEED_MAX_KT;
+                }
+                if ($groundStep) {
+                    $maxGroundspeedDelta = max($maxGroundspeedDelta, abs($speed - $lastSpeed));
+                }
+            }
+
+            if ($i > 0) {
+                $prev = $samples[$i - 1];
+                $dt = max(0.001, (float)$sample['t'] - (float)$prev['t']);
+                $impliedSpeed = $this->impliedSpeedKt($prev, $sample, $dt);
+                $mismatch = abs($impliedSpeed - $speed);
+                if ($groundStep && ($impliedSpeed > 40.0 || $mismatch > 10.0)) {
+                    $countPositionOutliers++;
+                    $projected = $this->projectPositionFromSpeed($prev, $sample, $speed, $dt);
+                    if ($projected !== null) {
+                        $sample['lat'] = round($projected['lat'], 7);
+                        $sample['lon'] = round($projected['lon'], 7);
+                        $impliedSpeed = $this->impliedSpeedKt($prev, $sample, $dt);
+                        $mismatch = abs($impliedSpeed - $speed);
+                    }
+                    $sample['position_quality'] = 'LOW';
+                } elseif (!$ground && $mismatch > 15.0) {
+                    $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                } elseif ($mismatch > 5.0) {
+                    $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                }
+                $maxMismatch = max($maxMismatch, $mismatch);
+                if ($groundStep) {
+                    $maxTaxiImpliedSpeed = max($maxTaxiImpliedSpeed, $impliedSpeed);
+                }
+            } else {
+                $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+            }
+
+            $heading = isset($sample['heading_deg']) && is_numeric($sample['heading_deg'])
+                ? self::normalizeDegrees((float)$sample['heading_deg'])
+                : ($lastHeading ?? 0.0);
+            if ($lastHeading !== null) {
+                $headingDelta = self::angleDelta($lastHeading, $heading);
+                if ($groundStep && abs($headingDelta) > 10.0) {
+                    $countHeadingOutliers++;
+                    $heading = self::normalizeDegrees($lastHeading + max(-10.0, min(10.0, $headingDelta)));
+                    $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+                }
+                if ($groundStep) {
+                    $maxGroundHeadingDelta = max($maxGroundHeadingDelta, abs(self::angleDelta($lastHeading, $heading)));
+                }
+            }
+            $sample['heading_deg'] = round($heading, 2);
+
+            $rawPitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : ($lastVisualPitch ?? 0.0);
+            $rawRoll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : ($lastVisualRoll ?? 0.0);
+            $pitchLimit = $speed < self::GROUND_SPEED_MAX_KT ? 2.0 : 5.0;
+            $rollLimit = $speed < self::GROUND_SPEED_MAX_KT ? 2.0 : 5.0;
+            $visualPitch = $this->rateLimitScalar($lastVisualPitch, $rawPitch, $pitchLimit);
+            $visualRoll = $this->rateLimitScalar($lastVisualRoll, $rawRoll, $rollLimit);
+            if ($lastVisualPitch !== null && abs($rawPitch - $lastVisualPitch) > 5.0 && $speed < self::GROUND_SPEED_MAX_KT) {
+                $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+            }
+            if ($lastVisualRoll !== null && abs($rawRoll - $lastVisualRoll) > 5.0 && $speed < self::GROUND_SPEED_MAX_KT) {
+                $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+            }
+            $sample['visual_pitch_deg'] = round($visualPitch, 2);
+            $sample['visual_roll_deg'] = round($visualRoll, 2);
+
+            if ((string)$sample['position_quality'] === 'GOOD' && ($ground || $i === 0)) {
+                $sample['position_quality'] = 'DEGRADED';
+            }
+
+            $samples[$i] = $sample;
+            $lastSpeed = $speed;
+            $lastHeading = (float)$sample['heading_deg'];
+            $lastVisualPitch = $visualPitch;
+            $lastVisualRoll = $visualRoll;
+        }
+
+        $low = 0;
+        $degraded = 0;
+        $finalMaxGroundspeedDelta = 0.0;
+        $finalMaxTaxiImpliedSpeed = 0.0;
+        $finalMaxMismatch = 0.0;
+        foreach ($samples as $sample) {
+            $qualities = array(
+                (string)($sample['position_quality'] ?? ''),
+                (string)($sample['altitude_quality'] ?? ''),
+                (string)($sample['attitude_quality'] ?? ''),
+            );
+            if (in_array('LOW', $qualities, true)) {
+                $low++;
+            } elseif (in_array('DEGRADED', $qualities, true)) {
+                $degraded++;
+            }
+        }
+        for ($i = 1; $i < count($samples); $i++) {
+            $before = $samples[$i - 1];
+            $after = $samples[$i];
+            $dt = max(0.001, (float)$after['t'] - (float)$before['t']);
+            $beforeSpeed = isset($before['ground_speed_kt']) && is_numeric($before['ground_speed_kt']) ? (float)$before['ground_speed_kt'] : 0.0;
+            $afterSpeed = isset($after['ground_speed_kt']) && is_numeric($after['ground_speed_kt']) ? (float)$after['ground_speed_kt'] : 0.0;
+            $groundStep = min($beforeSpeed, $afterSpeed) < self::GROUND_SPEED_MAX_KT;
+            $implied = $this->impliedSpeedKt($before, $after, $dt);
+            $mismatch = abs($implied - $afterSpeed);
+            if ($groundStep) {
+                $finalMaxGroundspeedDelta = max($finalMaxGroundspeedDelta, abs($afterSpeed - $beforeSpeed));
+                $finalMaxTaxiImpliedSpeed = max($finalMaxTaxiImpliedSpeed, $implied);
+                $finalMaxMismatch = max($finalMaxMismatch, $mismatch);
+            }
+        }
+
+        $this->diagnostics['max_groundspeed_delta_kt'] = round($finalMaxGroundspeedDelta, 2);
+        $this->diagnostics['max_taxi_implied_speed_kt'] = round($finalMaxTaxiImpliedSpeed, 1);
+        $this->diagnostics['max_position_speed_mismatch_kt'] = round($finalMaxMismatch, 1);
+        $this->diagnostics['max_heading_delta_ground_deg'] = round($maxGroundHeadingDelta, 2);
+        $this->diagnostics['count_position_outliers'] = $countPositionOutliers;
+        $this->diagnostics['count_speed_outliers'] = $countSpeedOutliers;
+        $this->diagnostics['count_heading_outliers'] = $countHeadingOutliers;
+        $this->diagnostics['count_low_quality_samples'] = $low;
+        $this->diagnostics['count_degraded_samples'] = $degraded;
+        $this->diagnostics['count_empty_phase_samples'] = 0;
+        $this->diagnostics['count_original_empty_phase_samples'] = $countOriginalEmptyPhase;
+
+        return $samples;
+    }
+
+    private function impliedSpeedKt(array $before, array $after, float $dt): float
+    {
+        if (!isset($before['lat'], $before['lon'], $after['lat'], $after['lon']) || $before['lat'] === null || $before['lon'] === null || $after['lat'] === null || $after['lon'] === null) {
+            return 0.0;
+        }
+        $meters = $this->distanceMeters((float)$before['lat'], (float)$before['lon'], (float)$after['lat'], (float)$after['lon']);
+        return $this->metersPerSecondToKnots($meters / max(0.001, $dt));
+    }
+
+    private function distanceMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $lat1Rad = deg2rad($lat1);
+        $lat2Rad = deg2rad($lat2);
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        $a = sin($dLat / 2.0) ** 2 + cos($lat1Rad) * cos($lat2Rad) * sin($dLon / 2.0) ** 2;
+        return 6371000.0 * 2.0 * atan2(sqrt($a), sqrt(max(0.0, 1.0 - $a)));
+    }
+
+    private function rateLimitScalar(?float $previous, float $target, float $maxDelta): float
+    {
+        if ($previous === null) {
+            return $target;
+        }
+        return $previous + max(-$maxDelta, min($maxDelta, $target - $previous));
+    }
+
+    /**
+     * @return array{lat:float,lon:float}|null
+     */
+    private function projectPositionFromSpeed(array $before, array $after, float $speedKt, float $dt): ?array
+    {
+        if (!isset($before['lat'], $before['lon']) || $before['lat'] === null || $before['lon'] === null) {
+            return null;
+        }
+
+        $lat = (float)$before['lat'];
+        $lon = (float)$before['lon'];
+        $heading = isset($before['heading_deg']) && is_numeric($before['heading_deg'])
+            ? (float)$before['heading_deg']
+            : (isset($after['heading_deg']) && is_numeric($after['heading_deg']) ? (float)$after['heading_deg'] : 0.0);
+        $distanceM = max(0.0, $speedKt / 1.943844492) * max(0.0, $dt);
+        $headingRad = deg2rad($heading);
+        $north = cos($headingRad) * $distanceM;
+        $east = sin($headingRad) * $distanceM;
+        $latRad = deg2rad($lat);
+
+        return array(
+            'lat' => $lat + rad2deg($north / self::EARTH_RADIUS_M),
+            'lon' => $lon + rad2deg($east / (self::EARTH_RADIUS_M * max(0.001, cos($latRad)))),
+        );
+    }
+
+    private function worseQuality(string $current, string $candidate): string
+    {
+        $rank = array('GOOD' => 0, 'DEGRADED' => 1, 'LOW' => 2);
+        $currentRank = $rank[strtoupper($current)] ?? 1;
+        $candidateRank = $rank[strtoupper($candidate)] ?? 1;
+        return $candidateRank > $currentRank ? strtoupper($candidate) : strtoupper($current);
+    }
+
+    private function fallbackPhaseForSample(array $sample): string
+    {
+        $t = isset($sample['t']) && is_numeric($sample['t']) ? (float)$sample['t'] : 0.0;
+        $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
+        $alt = isset($sample['altitude_ft']) && is_numeric($sample['altitude_ft']) ? (float)$sample['altitude_ft'] : 0.0;
+
+        if ($speed < self::STATIONARY_SPEED_KT && $t < 180.0) {
+            return 'Preflight';
+        }
+        if ($speed < 35.0) {
+            return $t < 2400.0 ? 'Taxi Out' : 'Taxi Back / Stop';
+        }
+        if ($speed < 55.0 && $t < 900.0) {
+            return 'Takeoff';
+        }
+        if ($t > 2400.0 && $speed < 65.0) {
+            return 'Landing/Rollout';
+        }
+        if ($alt < 500.0 && $t < 1200.0) {
+            return 'Climb';
+        }
+        if ($t > 2000.0) {
+            return 'Descent';
+        }
+        return 'Cruise/Maneuvering';
     }
 
     /**

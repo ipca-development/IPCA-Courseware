@@ -525,6 +525,8 @@ cw_header('Cockpit Recorder Replay');
     const cameraPitch = view && Number.isFinite(Number(view.pitch)) ? Number(view.pitch) : null;
     const pitch = sample && Number.isFinite(Number(sample.pitch_deg)) ? Number(sample.pitch_deg) : null;
     const roll = sample && Number.isFinite(Number(sample.bank_deg ?? sample.roll_deg)) ? Number(sample.bank_deg ?? sample.roll_deg) : null;
+    const visualPitch = sample && Number.isFinite(Number(sample.visual_pitch_deg)) ? Number(sample.visual_pitch_deg) : null;
+    const visualRoll = sample && Number.isFinite(Number(sample.visual_roll_deg)) ? Number(sample.visual_roll_deg) : null;
     const altitudeFt = sample && Number.isFinite(Number(sample.altitude_ft_msl ?? sample.altitude_ft)) ? Number(sample.altitude_ft_msl ?? sample.altitude_ft) : null;
     const visualFt = Number.isFinite(lastVisualAltitudeM) ? lastVisualAltitudeM / 0.3048 : null;
     const vs = sample && Number.isFinite(Number(sample.vertical_speed_fpm)) ? Number(sample.vertical_speed_fpm) : null;
@@ -537,6 +539,8 @@ cw_header('Cockpit Recorder Replay');
       `camera mode: ${cameraMode}`,
       `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
       `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
+      `visual pitch: ${visualPitch === null ? '--' : visualPitch.toFixed(1)} deg`,
+      `visual roll: ${visualRoll === null ? '--' : visualRoll.toFixed(1)} deg`,
       `altitude MSL: ${altitudeFt === null ? '--' : altitudeFt.toFixed(1)} ft`,
       `visual altitude: ${visualFt === null ? '--' : visualFt.toFixed(1)} ft`,
       `vertical speed: ${vs === null ? '--' : vs.toFixed(1)} fpm`,

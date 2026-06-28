@@ -572,6 +572,7 @@ final class CockpitReconstructionService
             'replay_sample_count' => $sampleCount,
             'max_raw_gps_gap_s' => isset($diagnostics['max_raw_gps_gap_s']) ? (float)$diagnostics['max_raw_gps_gap_s'] : null,
             'max_replay_dt_s' => isset($diagnostics['max_replay_dt_s']) ? (float)$diagnostics['max_replay_dt_s'] : null,
+            'diagnostics' => $diagnostics,
             'warnings' => $warnings,
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
@@ -598,7 +599,8 @@ final class CockpitReconstructionService
             return array();
         }
 
-        return array_map(fn(array $row): array => $this->publicSlimReplaySample($row), $rows);
+        $samples = array_map(fn(array $row): array => $this->publicSlimReplaySample($row), $rows);
+        return $this->addVisualAttitudeReplayFields($samples);
     }
 
     /**
@@ -622,6 +624,32 @@ final class CockpitReconstructionService
             'altitude_quality' => (string)($row['altitude_quality'] ?? 'unknown'),
             'attitude_quality' => (string)($row['attitude_quality'] ?? 'unknown'),
         );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return list<array<string,mixed>>
+     */
+    private function addVisualAttitudeReplayFields(array $samples): array
+    {
+        $lastPitch = null;
+        $lastRoll = null;
+        foreach ($samples as &$sample) {
+            $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
+            $maxDelta = $speed < 20.0 ? 2.0 : 5.0;
+            $pitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : ($lastPitch ?? 0.0);
+            $roll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : ($lastRoll ?? 0.0);
+
+            $visualPitch = $lastPitch === null ? $pitch : $lastPitch + max(-$maxDelta, min($maxDelta, $pitch - $lastPitch));
+            $visualRoll = $lastRoll === null ? $roll : $lastRoll + max(-$maxDelta, min($maxDelta, $roll - $lastRoll));
+            $sample['visual_pitch_deg'] = round($visualPitch, 2);
+            $sample['visual_roll_deg'] = round($visualRoll, 2);
+
+            $lastPitch = $visualPitch;
+            $lastRoll = $visualRoll;
+        }
+        unset($sample);
+        return $samples;
     }
 
     /**
