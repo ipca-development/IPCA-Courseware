@@ -108,13 +108,10 @@
   overflow: hidden;
 }
 
-/* Layer 0: Cesium — attitude viewport only (matches world-attitude overlay) */
+/* Layer 0: Cesium — full main display behind tapes + HSI */
 .g3x-sv-layer {
   position: absolute;
-  left: 0;
-  top: 26px;
-  right: 0;
-  height: 336px;
+  inset: 0;
   z-index: 0;
   background: #1a3a5c;
   overflow: hidden;
@@ -134,15 +131,15 @@
   background: #000;
 }
 
-/* Ground tint — sides only, do not cover HSI */
+/* Subtle tint over lower HSI — terrain still visible through Cesium */
 .g3x-ground-fill {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: 360px;
-  z-index: 1;
-  background: linear-gradient(to bottom, rgba(40, 55, 30, 0) 0%, rgba(35, 50, 28, 0.35) 40%, rgba(28, 42, 22, 0.55) 100%);
+  z-index: 2;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.08) 55%, rgba(0, 0, 0, 0.18) 100%);
   pointer-events: none;
 }
 
@@ -192,13 +189,10 @@
   letter-spacing: 0.04em;
 }
 
-/* World-attitude layer — same box as Cesium SV viewport */
+/* World-attitude — full display; horizon from Cesium pick, ladder clipped to attitude band */
 .g3x-world-attitude {
   position: absolute;
-  left: 0;
-  top: 26px;
-  right: 0;
-  height: 336px;
+  inset: 0;
   z-index: 4;
   pointer-events: none;
   overflow: hidden;
@@ -210,7 +204,7 @@
   display: block;
 }
 
-/* Fixed cockpit symbology — same SV viewport */
+/* Fixed cockpit symbology — attitude band only */
 .g3x-attitude-overlay {
   position: absolute;
   left: 0;

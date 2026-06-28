@@ -349,9 +349,7 @@ cw_header('Cockpit Recorder Replay');
     if (!cesiumViewer || !cesiumViewer.camera || !cesiumViewer.camera.frustum) return;
     const fovy = cesiumViewer.camera.frustum.fovy;
     if (!Number.isFinite(Number(fovy)) || !window.CockpitPfd) return;
-    const canvas = cesiumViewer.scene.canvas;
-    const svHeight = canvas ? (canvas.clientHeight || canvas.height) : 336;
-    CockpitPfd.setCameraSync({ fovy: Number(fovy), svHeight });
+    CockpitPfd.setCameraSync({ fovy: Number(fovy), svHeight: 336 });
   }
 
   function computeHorizonLineFromCesium() {

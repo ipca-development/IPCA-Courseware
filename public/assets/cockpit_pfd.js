@@ -5,6 +5,8 @@
   const PFD_W = 1280;
   const PFD_H = 768;
   const FLIGHT_W = 1182;
+  const MAIN_H = 722;
+  const MAIN_W = FLIGHT_W;
   const FLIGHT_STACK_H = 362;
   const AP_H = 26;
   const SV_H = FLIGHT_STACK_H - AP_H;
@@ -12,7 +14,8 @@
   const TAPE_BODY_H = SV_H - 48;
   const TAPE_CENTER_Y = TAPE_BODY_H / 2;
   const ATT_CX = SV_W / 2;
-  const ATT_CY = SV_H / 2;
+  const ATT_CY_SYM = SV_H / 2;
+  const ATT_CY_MAIN = AP_H + SV_H / 2;
   let pitchPxPerDeg = SV_H / 60;
 
   const fmtNum = (v, d = 0) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '--' : Number(v).toFixed(d));
@@ -331,7 +334,7 @@
     const p = Number(pitch) || 0;
     const r = Number(roll) || 0;
     const cx = ATT_CX;
-    const cy = ATT_CY;
+    const cy = ATT_CY_MAIN;
     const px = pitchPxPerDeg;
 
     let ladder = '';
@@ -349,17 +352,17 @@
     if (horizonLine && Number.isFinite(horizonLine.x1) && Number.isFinite(horizonLine.y1)) {
       horizonSvg = `<line x1="${horizonLine.x1}" y1="${horizonLine.y1}" x2="${horizonLine.x2}" y2="${horizonLine.y2}" stroke="rgba(255,255,255,0.82)" stroke-width="2.5"/>`;
     } else {
-      const pitchOff = pitchOffsetPx(p);
-      horizonSvg = `<line x1="0" y1="${cy + pitchOff}" x2="${SV_W}" y2="${cy + pitchOff}" stroke="rgba(255,255,255,0.82)" stroke-width="2.5"/>`;
+      horizonSvg = `<line x1="0" y1="${cy + pitchOffsetPx(p)}" x2="${MAIN_W}" y2="${cy + pitchOffsetPx(p)}" stroke="rgba(255,255,255,0.82)" stroke-width="2.5"/>`;
     }
 
-    return `<svg viewBox="0 0 ${SV_W} ${SV_H}" aria-hidden="true">
-      <g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">
-        <g transform="translate(0 ${pitchOffsetPx(p)})">${ladder}</g>
+    return `<svg viewBox="0 0 ${MAIN_W} ${MAIN_H}" aria-hidden="true">
+      ${horizonSvg}
+      <defs><clipPath id="g3xAttClip"><rect x="0" y="0" width="${MAIN_W}" height="${FLIGHT_STACK_H}"/></clipPath></defs>
+      <g clip-path="url(#g3xAttClip)">
+        <g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">
+          <g transform="translate(0 ${pitchOffsetPx(p)})">${ladder}</g>
+        </g>
       </g>
-      ${horizonLine && Number.isFinite(horizonLine.x1)
-        ? horizonSvg
-        : `<g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">${horizonSvg}</g>`}
     </svg>`;
   }
 
@@ -367,7 +370,7 @@
     const r = Number(roll) || 0;
     const slipX = clamp((Number(slip) || 0) * 100, -44, 44);
     const cx = ATT_CX;
-    const cy = ATT_CY;
+    const cy = ATT_CY_SYM;
 
     const hcdi = Number(g3x?.hcdi) || 0;
     const vcdi = Number(g3x?.vcdi) || 0;
@@ -454,11 +457,11 @@
       <div class="g3x-engine-col" id="g3xEngine"></div>
       <div class="g3x-top-bar" id="g3xTop"></div>
       <div class="g3x-main-display">
+        <div class="g3x-sv-layer"><div class="cesium-cockpit" id="cesiumReplay"></div></div>
+        <div class="g3x-world-attitude" id="g3xWorldAtt"></div>
         <div class="g3x-ground-fill"></div>
         <div class="g3x-flight-stack">
           <div class="g3x-ap-bar" id="g3xAp"></div>
-          <div class="g3x-sv-layer"><div class="cesium-cockpit" id="cesiumReplay"></div></div>
-          <div class="g3x-world-attitude" id="g3xWorldAtt"></div>
           <div class="g3x-attitude-overlay" id="g3xAttitude"></div>
           <div class="g3x-ias-col" id="g3xIas"></div>
           <div class="g3x-alt-col" id="g3xAlt"></div>
