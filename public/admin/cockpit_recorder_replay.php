@@ -365,7 +365,7 @@ cw_header('Cockpit Recorder Replay');
       altitudeM,
       heading: normalizeDeg(cameraHeading),
       pitch: Math.max(-30, Math.min(30, pitch)),
-      roll: Math.max(-45, Math.min(45, bank)),
+      roll: 0,
     };
     cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);

@@ -73,7 +73,7 @@ textarea { width: 100%; min-height: 420px; font-family: ui-monospace, SFMono-Reg
 <form method="post" class="cockpit-card">
   <input type="hidden" name="aircraft_id" value="<?= $id ?>">
   <h3 style="margin-top:0">Profile JSON</h3>
-  <p class="cockpit-muted">Keys: <code>v_speeds</code>, <code>airspeed_arc</code>, <code>airspeed_tape</code>, <code>altitude_tape</code>, <code>gauges</code>, <code>units</code></p>
+  <p class="cockpit-muted">Keys: <code>v_speeds</code>, <code>airspeed_arc</code>, <code>decision_altitude_ft</code>, <code>gauges</code>, <code>units</code></p>
   <textarea name="pfd_profile_json" spellcheck="false"><?= h($profileJson) ?></textarea>
   <p style="margin-top:12px">
     <button class="cockpit-btn" type="submit">Save PFD Profile</button>

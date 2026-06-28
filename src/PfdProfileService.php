@@ -30,6 +30,7 @@ final class PfdProfileService
             ),
             'airspeed_tape' => array('min' => 20, 'max' => 200, 'major' => 10, 'minor' => 2),
             'altitude_tape' => array('min' => -1000, 'max' => 20000, 'major' => 100, 'minor' => 20),
+            'decision_altitude_ft' => 2500,
             'gauges' => array(
                 'rpm' => array(
                     'label' => 'RPM',

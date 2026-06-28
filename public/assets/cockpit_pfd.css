@@ -1,4 +1,4 @@
-/* G3X-style PFD layout — reference canvas 1280×768 */
+/* G3X PFD — reference canvas 1280×768 */
 
 .g3x-pfd-shell {
   width: 100%;
@@ -11,9 +11,9 @@
   width: min(100%, 1280px);
   aspect-ratio: 1280 / 768;
   background: #000;
-  border-radius: 8px;
+  border-radius: 2px;
   overflow: hidden;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
 .g3x-pfd {
@@ -25,88 +25,15 @@
   transform-origin: top left;
   background: #000;
   color: #fff;
-  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", Arial, sans-serif;
   font-weight: 700;
+  font-stretch: condensed;
   user-select: none;
   pointer-events: none;
 }
 
 .g3x-pfd * {
   box-sizing: border-box;
-}
-
-/* ── Top radio row ── */
-.g3x-top-bar {
-  position: absolute;
-  left: 98px;
-  top: 0;
-  width: 1182px;
-  height: 52px;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 8px;
-  padding: 4px 8px 0;
-}
-
-.g3x-radio-box {
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.88);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  padding: 2px 6px;
-}
-
-.g3x-radio-box .label {
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  color: #fff;
-  line-height: 1;
-}
-
-.g3x-radio-box .freq {
-  font-size: 28px;
-  line-height: 1.05;
-  margin-top: 2px;
-}
-
-.g3x-radio-box.com .freq { color: #39ff39; }
-.g3x-radio-box.nav .freq { color: #fff; }
-.g3x-radio-box.xpdr .freq { color: #fff; font-size: 32px; }
-
-/* ── AP status bar ── */
-.g3x-ap-bar {
-  position: absolute;
-  left: 286px;
-  top: 56px;
-  width: 708px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 12px;
-  background: rgba(20, 20, 20, 0.55);
-  border-radius: 6px;
-  font-size: 15px;
-  letter-spacing: 0.06em;
-}
-
-.g3x-ap-mode {
-  color: #fff;
-  opacity: 0.85;
-}
-
-.g3x-ap-mode.active {
-  color: #39ff39;
-  opacity: 1;
-}
-
-.g3x-ap-sep {
-  color: rgba(255, 255, 255, 0.45);
 }
 
 /* ── Engine column ── */
@@ -116,22 +43,480 @@
   top: 0;
   width: 98px;
   height: 768px;
-  background: rgba(0, 0, 0, 0.72);
-  padding: 52px 4px 8px 4px;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.82);
+  padding: 46px 3px 6px 3px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
+/* ── Top radio row ── */
+.g3x-top-bar {
+  position: absolute;
+  left: 98px;
+  top: 0;
+  width: 1182px;
+  height: 46px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 1.1fr 1.1fr 1fr 0.85fr;
+  gap: 0;
+  padding: 2px 0 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.g3x-radio-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 1px 4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.g3x-radio-box:last-child {
+  border-right: none;
+}
+
+.g3x-radio-box .label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1;
+}
+
+.g3x-radio-box .freq {
+  font-size: 22px;
+  line-height: 1.05;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+}
+
+.g3x-radio-box.com .freq { color: #39ff39; }
+.g3x-radio-box.nav .freq { color: #fff; }
+.g3x-radio-box.xpdr .freq { color: #fff; font-size: 24px; }
+
+/* ── Main flight display (SV + overlays) ── */
+.g3x-main-display {
+  position: absolute;
+  left: 98px;
+  top: 46px;
+  width: 1182px;
+  height: 722px;
+  overflow: hidden;
+}
+
+/* Layer 0: Cesium full-bleed behind everything */
+.g3x-sv-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #1a3a5c;
+}
+
+.g3x-sv-layer .cesium-cockpit,
+.g3x-sv-layer .cesium-widget,
+.g3x-sv-layer canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.g3x-sv-layer .cesium-cockpit {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: #000;
+}
+
+/* Ground tint below attitude (HSI backdrop) */
+.g3x-ground-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 228px;
+  z-index: 1;
+  background: linear-gradient(to bottom, rgba(40, 55, 30, 0.15) 0%, rgba(35, 50, 28, 0.92) 18%, rgba(28, 42, 22, 0.98) 100%);
+  pointer-events: none;
+}
+
+/* Attitude + tape stack */
+.g3x-flight-stack {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 496px;
+  z-index: 5;
+}
+
+/* AP bar — blue strip at top of attitude */
+.g3x-ap-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 26px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(0, 48, 120, 0.88);
+  border-bottom: 1px solid rgba(80, 140, 220, 0.45);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.g3x-ap-mode {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.g3x-ap-mode.active {
+  color: #39ff39;
+}
+
+.g3x-ap-sep {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.g3x-ap-empty {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+/* Attitude overlay spans full flight stack */
+.g3x-attitude-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.g3x-attitude-overlay svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── Airspeed tape (overlays left edge of SV) ── */
+.g3x-ias-col {
+  position: absolute;
+  left: 0;
+  top: 26px;
+  width: 108px;
+  height: 470px;
+  z-index: 10;
+}
+
+.g3x-ias-tas {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 5px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.g3x-ias-tape-wrap {
+  position: relative;
+  height: 422px;
+  background: rgba(0, 0, 0, 0.22);
+  border-right: 1px solid rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+}
+
+.g3x-ias-arc {
+  position: absolute;
+  right: 46px;
+  top: 0;
+  width: 16px;
+  height: 100%;
+  z-index: 1;
+}
+
+.g3x-ias-tape {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  transition: transform 0.08s linear;
+}
+
+.g3x-ias-tick {
+  position: absolute;
+  left: 0;
+  right: 48px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 20px;
+  font-size: 15px;
+  color: #fff;
+}
+
+.g3x-ias-tick.minor {
+  font-size: 0;
+}
+
+.g3x-ias-tick.minor::after {
+  content: "";
+  position: absolute;
+  right: 18px;
+  width: 10px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.g3x-ias-tick.major::after {
+  content: "";
+  position: absolute;
+  right: 16px;
+  width: 16px;
+  height: 2px;
+  background: #fff;
+}
+
+.g3x-ias-box {
+  position: absolute;
+  left: 0;
+  right: 46px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 40px;
+  background: #000;
+  border: 2px solid #fff;
+  border-right: none;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  z-index: 5;
+}
+
+.g3x-ias-bugs-layer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 44px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.g3x-ias-bug-row {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  color: #0ff;
+  white-space: nowrap;
+}
+
+.g3x-ias-bug-mark {
+  width: 8px;
+  height: 12px;
+  background: #000;
+  border: 1px solid #0ff;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 70%, 0 100%);
+}
+
+.g3x-ias-gs {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 5px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.g3x-ias-gs .val { color: #ff39ff; font-size: 13px; }
+
+/* ── Altimeter + VSI (overlays right edge) ── */
+.g3x-alt-col {
+  position: absolute;
+  right: 0;
+  top: 26px;
+  width: 132px;
+  height: 470px;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 92px 38px;
+}
+
+.g3x-alt-stack {
+  position: relative;
+  grid-column: 1;
+}
+
+.g3x-alt-bug {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 92px;
+  height: 24px;
+  border: 1px solid #0ff;
+  background: rgba(0, 0, 0, 0.85);
+  color: #0ff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.g3x-alt-tape-wrap {
+  position: relative;
+  height: 374px;
+  margin-top: 24px;
+  background: rgba(0, 0, 0, 0.22);
+  border-left: 1px solid rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+}
+
+.g3x-alt-tape {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100%;
+  transition: transform 0.08s linear;
+}
+
+.g3x-alt-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  font-size: 15px;
+}
+
+.g3x-alt-tick.major::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  width: 16px;
+  height: 2px;
+  background: #fff;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.g3x-alt-box {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 44px;
+  background: #000;
+  border: 2px solid #fff;
+  border-left: none;
+  clip-path: polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 0 50%);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-size: 22px;
+  z-index: 5;
+  letter-spacing: -1px;
+  padding-top: 4px;
+}
+
+.g3x-alt-box .sign {
+  font-size: 18px;
+  margin-right: 1px;
+  align-self: center;
+}
+
+.g3x-alt-box .hundreds {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.g3x-alt-box .tens {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.g3x-alt-da {
+  position: absolute;
+  left: 0;
+  bottom: 52px;
+  width: 92px;
+  height: 22px;
+  color: #0ff;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.g3x-alt-baro {
+  position: absolute;
+  left: 0;
+  bottom: 24px;
+  width: 92px;
+  height: 24px;
+  border: 1px solid #0ff;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #0ff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.g3x-vsi-wrap {
+  position: relative;
+  height: 374px;
+  margin-top: 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.g3x-vsi-pointer {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 12px solid #000;
+  filter: drop-shadow(0 0 1px #fff);
+  transition: top 0.08s linear;
+}
+
+/* ── Engine gauges ── */
 .g3x-gauge-arc {
   position: relative;
-  height: 72px;
-  margin-bottom: 2px;
+  height: 68px;
+  margin-bottom: 1px;
 }
 
 .g3x-gauge-arc svg {
   width: 90px;
-  height: 72px;
+  height: 68px;
   display: block;
 }
 
@@ -139,29 +524,29 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 2px;
+  bottom: 1px;
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .g3x-gauge-arc .lbl {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 18px;
+  bottom: 16px;
   text-align: center;
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.03em;
 }
 
 .g3x-gauge-bar {
   position: relative;
-  height: 28px;
+  height: 26px;
   display: grid;
-  grid-template-columns: 46px 1fr 28px;
+  grid-template-columns: 44px 1fr 26px;
   align-items: center;
   gap: 2px;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .g3x-gauge-bar .lbl {
@@ -169,26 +554,26 @@
   padding-right: 2px;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .g3x-gauge-bar .lbl.alert-red {
   background: #c00;
   color: #fff;
   padding: 1px 2px;
-  border-radius: 2px;
 }
 
 .g3x-gauge-bar .lbl.alert-yellow {
   background: #c90;
   color: #000;
   padding: 1px 2px;
-  border-radius: 2px;
 }
 
 .g3x-gauge-bar .track {
   position: relative;
-  height: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  height: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   background: #111;
   overflow: hidden;
 }
@@ -199,10 +584,7 @@
   display: flex;
 }
 
-.g3x-gauge-bar .zone {
-  height: 100%;
-}
-
+.g3x-gauge-bar .zone { height: 100%; }
 .g3x-gauge-bar .zone.white { background: #ddd; }
 .g3x-gauge-bar .zone.green { background: #0a0; }
 .g3x-gauge-bar .zone.yellow { background: #cc0; }
@@ -221,12 +603,12 @@
 
 .g3x-gauge-bar .val {
   text-align: left;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .g3x-gauge-unavail {
   grid-column: 2 / 4;
-  height: 22px;
+  height: 20px;
   background: #900;
   position: relative;
   border: 1px solid #fff;
@@ -246,390 +628,78 @@
 .g3x-gauge-unavail::before { transform: rotate(45deg); }
 .g3x-gauge-unavail::after { transform: rotate(-45deg); }
 
-/* ── Airspeed tape ── */
-.g3x-ias-col {
-  position: absolute;
-  left: 98px;
-  top: 88px;
-  width: 88px;
-  height: 480px;
-}
-
-.g3x-ias-tas {
-  height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px;
-  font-size: 11px;
-}
-
-.g3x-ias-tape-wrap {
-  position: relative;
-  height: 396px;
-  border-left: 1px solid rgba(255, 255, 255, 0.75);
-  border-right: 1px solid rgba(255, 255, 255, 0.75);
-  background: rgba(0, 0, 0, 0.28);
-  overflow: hidden;
-}
-
-.g3x-ias-arc {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  z-index: 2;
-}
-
-.g3x-ias-tape {
-  position: absolute;
-  left: 0;
-  right: 10px;
-  top: 50%;
-  transition: transform 0.08s linear;
-}
-
-.g3x-ias-tick {
-  position: relative;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 14px;
-  font-size: 16px;
-  color: #fff;
-}
-
-.g3x-ias-tick.minor {
-  font-size: 0;
-}
-
-.g3x-ias-tick.minor::after {
-  content: "";
-  position: absolute;
-  right: 8px;
-  width: 8px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.75);
-}
-
-.g3x-ias-tick.major::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  width: 14px;
-  height: 2px;
-  background: #fff;
-}
-
-.g3x-ias-box {
-  position: absolute;
-  left: 0;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 38px;
-  background: #000;
-  border: 2px solid #fff;
-  border-right: none;
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-  z-index: 3;
-}
-
-.g3x-ias-bugs {
-  position: absolute;
-  right: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 4;
-  font-size: 13px;
-  color: #0ff;
-  line-height: 1.35;
-  text-align: right;
-}
-
-.g3x-ias-bug-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.g3x-ias-bug-mark {
-  width: 10px;
-  height: 14px;
-  background: #000;
-  border: 1px solid #0ff;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 70%, 0 100%);
-}
-
-.g3x-ias-gs {
-  height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-top: 0;
-  border-radius: 0 0 6px 6px;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px;
-  font-size: 11px;
-}
-
-.g3x-ias-gs .val { color: #ff39ff; font-size: 14px; }
-
-/* ── Synthetic vision + attitude ── */
-.g3x-sv-col {
-  position: absolute;
-  left: 186px;
-  top: 88px;
-  width: 668px;
-  height: 480px;
-  overflow: hidden;
-}
-
-.g3x-sv-col .cesium-cockpit,
-.g3x-sv-col .cesium-widget,
-.g3x-sv-col canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.g3x-sv-col .cesium-cockpit {
-  position: absolute;
-  inset: 0;
-  border: none;
-  border-radius: 0;
-  background: #000;
-}
-
-.g3x-attitude-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.g3x-attitude-overlay svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-/* ── Altimeter + VSI ── */
-.g3x-alt-col {
-  position: absolute;
-  left: 854px;
-  top: 88px;
-  width: 130px;
-  height: 480px;
-  display: grid;
-  grid-template-columns: 88px 38px;
-}
-
-.g3x-alt-stack {
-  position: relative;
-  grid-column: 1;
-}
-
-.g3x-alt-bug {
-  position: absolute;
-  left: 0;
-  top: -32px;
-  width: 88px;
-  height: 26px;
-  border: 1px solid #0ff;
-  background: rgba(0, 0, 0, 0.82);
-  color: #0ff;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-
-.g3x-alt-bug::before {
-  content: "◀";
-  font-size: 10px;
-}
-
-.g3x-alt-tape-wrap {
-  position: relative;
-  height: 396px;
-  margin-top: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  background: rgba(0, 0, 0, 0.28);
-  overflow: hidden;
-}
-
-.g3x-alt-tape {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transition: transform 0.08s linear;
-}
-
-.g3x-alt-tick {
-  position: relative;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  padding-left: 8px;
-  font-size: 16px;
-}
-
-.g3x-alt-tick.major::after {
-  content: "";
-  position: absolute;
-  left: 4px;
-  width: 14px;
-  height: 2px;
-  background: #fff;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.g3x-alt-box {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 42px;
-  background: #000;
-  border: 2px solid #fff;
-  border-left: none;
-  clip-path: polygon(12px 0, 100% 0, 100% 100%, 12px 100%, 0 50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  z-index: 3;
-  letter-spacing: -1px;
-}
-
-.g3x-alt-box .tens {
-  font-size: 30px;
-}
-
-.g3x-alt-baro {
-  position: absolute;
-  left: 0;
-  bottom: 28px;
-  width: 88px;
-  height: 26px;
-  border: 1px solid #0ff;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.82);
-  color: #0ff;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.g3x-vsi-wrap {
-  position: relative;
-  height: 396px;
-  margin-top: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  background: rgba(0, 0, 0, 0.28);
-  overflow: hidden;
-}
-
-.g3x-vsi-scale {
-  position: absolute;
-  inset: 0;
-}
-
-.g3x-vsi-pointer {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  height: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  border-top: 8px solid transparent;
-  border-bottom: 8px solid transparent;
-  border-left: 14px solid #000;
-  filter: drop-shadow(0 0 1px #fff);
-  transition: top 0.08s linear;
-}
-
-/* ── Bottom: wind, HSI, OAT ── */
+/* ── Bottom: HSI, wind, OAT ── */
 .g3x-bottom-bar {
   position: absolute;
-  left: 98px;
-  top: 568px;
-  width: 886px;
-  height: 200px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 228px;
+  z-index: 8;
   display: grid;
-  grid-template-columns: 120px 1fr 80px;
+  grid-template-columns: 110px 1fr 72px;
   align-items: end;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 .g3x-wind-box {
   align-self: center;
-  margin-left: 8px;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.35;
+  margin-left: 6px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 11px;
+  line-height: 1.3;
   text-align: center;
   color: #fff;
 }
 
 .g3x-oat-box {
   align-self: center;
-  margin-right: 8px;
+  margin-right: 6px;
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
   color: #0ff;
 }
 
-.g3x-hsi-wrap {
+.g3x-hsi-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  padding-bottom: 4px;
+}
+
+.g3x-hsi-bugs {
   display: flex;
   justify-content: center;
   align-items: center;
-}
-
-.g3x-hsi-wrap svg {
-  width: 320px;
-  height: 320px;
-  display: block;
+  gap: 120px;
+  margin-bottom: 2px;
+  min-height: 22px;
 }
 
 .g3x-hsi-bug-left,
 .g3x-hsi-bug-right {
-  position: absolute;
-  top: 8px;
-  height: 24px;
+  height: 22px;
   padding: 0 8px;
   background: rgba(0, 0, 0, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 4px;
-  font-size: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-size: 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
 }
 
-.g3x-hsi-bug-left { left: 130px; color: #0ff; }
-.g3x-hsi-bug-right { right: 90px; color: #39ff39; }
+.g3x-hsi-bug-left { color: #0ff; }
+.g3x-hsi-bug-right { color: #39ff39; }
+
+.g3x-hsi-wrap svg {
+  width: 340px;
+  height: 340px;
+  display: block;
+}
 
 /* ── Replay page layout ── */
 .replay-page { display: grid; gap: 16px; }
