@@ -115,10 +115,9 @@ cw_header('Cockpit Recorder Replay');
   let lastRenderMs = null;
   let positionKeyframes = [];
 
-  const CAMERA_POS_SMOOTH_RATE = 10;
-  const CAMERA_ROT_SMOOTH_RATE = 16;
+  const CAMERA_ROT_SMOOTH_RATE = 22;
   const CAMERA_SNAP_SEEK_SEC = 0.75;
-  const POSITION_KEY_MIN_DIST_M = 0.2;
+  const POSITION_KEY_MIN_DIST_M = 0.15;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -167,11 +166,6 @@ cw_header('Cockpit Recorder Replay');
   };
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
-
-  const smoothstep = (ratio) => {
-    const x = Math.max(0, Math.min(1, ratio));
-    return x * x * (3 - 2 * x);
-  };
 
   const haversineM = (lat1, lon1, lat2, lon2) => {
     const phi1 = degToRad(lat1);
@@ -227,7 +221,7 @@ cw_header('Cockpit Recorder Replay');
     const before = positionKeyframes[lo];
     const after = positionKeyframes[hi];
     const span = Math.max(0.001, after.t - before.t);
-    const ratio = smoothstep((time - before.t) / span);
+    const ratio = Math.max(0, Math.min(1, (time - before.t) / span));
     return {
       t: time,
       lat: before.lat + (after.lat - before.lat) * ratio,
@@ -275,27 +269,35 @@ cw_header('Cockpit Recorder Replay');
     lastRenderMs = null;
   }
 
-  function smoothDisplayCamera(target, dtSec, snap) {
-    if (!target) return null;
-    if (snap || !displayCamera) {
-      displayCamera = Object.assign({}, target);
-      return displayCamera;
+  function renderCesium(snap = false) {
+    if (!cesiumReady || !cesiumViewer) return;
+    const now = performance.now();
+    const dtSec = lastRenderMs === null ? 1 / 60 : Math.min(0.1, Math.max(1 / 120, (now - lastRenderMs) / 1000));
+    lastRenderMs = now;
+    const target = targetCameraAt(activeT);
+    if (!target) return;
+
+    let view = target;
+    if (!snap && displayCamera) {
+      const rotAlpha = smoothFactor(CAMERA_ROT_SMOOTH_RATE, dtSec);
+      view = {
+        lat: target.lat,
+        lon: target.lon,
+        altitudeM: target.altitudeM,
+        heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
+        pitch: displayCamera.pitch + (target.pitch - displayCamera.pitch) * rotAlpha,
+        roll: displayCamera.roll + (target.roll - displayCamera.roll) * rotAlpha,
+      };
     }
-    const posAlpha = smoothFactor(CAMERA_POS_SMOOTH_RATE, dtSec);
-    const rotAlpha = smoothFactor(CAMERA_ROT_SMOOTH_RATE, dtSec);
-    const currentPos = Cesium.Cartesian3.fromDegrees(displayCamera.lon, displayCamera.lat, displayCamera.altitudeM);
-    const targetPos = Cesium.Cartesian3.fromDegrees(target.lon, target.lat, target.altitudeM);
-    const nextPos = Cesium.Cartesian3.lerp(currentPos, targetPos, posAlpha, new Cesium.Cartesian3());
-    const carto = Cesium.Cartographic.fromCartesian(nextPos);
-    displayCamera = {
-      lon: Cesium.Math.toDegrees(carto.longitude),
-      lat: Cesium.Math.toDegrees(carto.latitude),
-      altitudeM: carto.height,
-      heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
-      pitch: displayCamera.pitch + (target.pitch - displayCamera.pitch) * rotAlpha,
-      roll: displayCamera.roll + (target.roll - displayCamera.roll) * rotAlpha,
-    };
-    return displayCamera;
+    displayCamera = Object.assign({}, view);
+    cesiumViewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(view.lon, view.lat, view.altitudeM),
+      orientation: {
+        heading: degToRad(view.heading),
+        pitch: degToRad(view.pitch),
+        roll: degToRad(view.roll),
+      },
+    });
   }
 
   function sampleAt(t) {
@@ -420,25 +422,6 @@ cw_header('Cockpit Recorder Replay');
     const cesiumReplay = document.getElementById('cesiumReplay');
     if (!cesiumReplay) return;
     cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(message).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div></div>`);
-  }
-
-  function renderCesium(snap = false) {
-    if (!cesiumReady || !cesiumViewer) return;
-    const now = performance.now();
-    const dtSec = lastRenderMs === null ? 1 / 60 : Math.min(0.1, Math.max(1 / 120, (now - lastRenderMs) / 1000));
-    lastRenderMs = now;
-    const target = targetCameraAt(activeT);
-    if (!target) return;
-    const view = smoothDisplayCamera(target, dtSec, snap);
-    if (!view) return;
-    cesiumViewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(view.lon, view.lat, view.altitudeM),
-      orientation: {
-        heading: degToRad(view.heading),
-        pitch: degToRad(view.pitch),
-        roll: degToRad(view.roll),
-      },
-    });
   }
 
   function safeRenderCesium(snap = false) {
