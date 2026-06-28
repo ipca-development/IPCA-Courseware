@@ -100,6 +100,40 @@ cw_header('Cockpit Recorder Replay');
 .replay-quality-degraded { color: #fde68a; }
 .replay-quality-low { color: #fca5a5; }
 .replay-quality-unknown { color: #cbd5e1; }
+.replay-camera-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 64px;
+  z-index: 21;
+  width: min(420px, calc(100vw - 24px));
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, .78);
+  border: 1px solid rgba(148, 163, 184, .35);
+  border-radius: 10px;
+  padding: 10px;
+  font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.replay-camera-panel-title {
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #bfdbfe;
+  margin-bottom: 8px;
+}
+.replay-camera-control {
+  display: grid;
+  grid-template-columns: 118px 1fr 58px;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.replay-camera-control label { color: #cbd5e1; }
+.replay-camera-control input { width: 100%; accent-color: #60a5fa; }
+.replay-camera-control output {
+  color: #dbeafe;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 .replay-terrain-warning {
   position: absolute;
   top: 12px;
@@ -127,15 +161,39 @@ cw_header('Cockpit Recorder Replay');
     <div id="loadStatus" class="replay-load">Loading replay data…</div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="replayDebug" class="replay-debug">Replay debug initializing...</div>
+    <div id="cameraPanel" class="replay-camera-panel" aria-label="Replay camera controls" hidden>
+      <div class="replay-camera-panel-title">Chase / north-up tuning</div>
+      <div class="replay-camera-control">
+        <label for="cameraRange">Range</label>
+        <input id="cameraRange" type="range" min="60" max="260" step="5">
+        <output id="cameraRangeValue" for="cameraRange"></output>
+      </div>
+      <div class="replay-camera-control">
+        <label for="cameraHeight">Height offset</label>
+        <input id="cameraHeight" type="range" min="8" max="90" step="2">
+        <output id="cameraHeightValue" for="cameraHeight"></output>
+      </div>
+      <div class="replay-camera-control">
+        <label for="cameraPitch">Camera pitch</label>
+        <input id="cameraPitch" type="range" min="-30" max="-4" step="1">
+        <output id="cameraPitchValue" for="cameraPitch"></output>
+      </div>
+      <div class="replay-camera-control">
+        <label for="cameraSmoothing">Smoothing</label>
+        <input id="cameraSmoothing" type="range" min="1" max="12" step="0.5">
+        <output id="cameraSmoothingValue" for="cameraSmoothing"></output>
+      </div>
+    </div>
     <div id="terrainWarning" class="replay-terrain-warning" hidden></div>
     <audio id="audio" preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
     <div class="replay-dock">
       <a href="/admin/cockpit_recorder.php">← Back</a>
       <button class="replay-button" type="button" id="playButton">Play</button>
       <select class="replay-select" id="cameraMode" aria-label="Camera mode">
-        <option value="follow_heading" selected>Follow heading</option>
+        <option value="synthetic_vision" selected>Synthetic vision</option>
+        <option value="chase">Chase</option>
         <option value="north_up">North up</option>
-        <option value="free">Free camera</option>
+        <option value="free">Orbit / free</option>
       </select>
       <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
       <span id="timeLabel" class="replay-time">0:00</span>
@@ -158,6 +216,15 @@ cw_header('Cockpit Recorder Replay');
   const playButton = document.getElementById('playButton');
   const cameraModeSelect = document.getElementById('cameraMode');
   const debugOverlay = document.getElementById('replayDebug');
+  const cameraPanel = document.getElementById('cameraPanel');
+  const cameraRangeInput = document.getElementById('cameraRange');
+  const cameraHeightInput = document.getElementById('cameraHeight');
+  const cameraPitchInput = document.getElementById('cameraPitch');
+  const cameraSmoothingInput = document.getElementById('cameraSmoothing');
+  const cameraRangeValue = document.getElementById('cameraRangeValue');
+  const cameraHeightValue = document.getElementById('cameraHeightValue');
+  const cameraPitchValue = document.getElementById('cameraPitchValue');
+  const cameraSmoothingValue = document.getElementById('cameraSmoothingValue');
   const terrainWarning = document.getElementById('terrainWarning');
   let payload = null;
   let activeT = 0;
@@ -167,7 +234,7 @@ cw_header('Cockpit Recorder Replay');
   let displayCamera = null;
   let lastRenderMs = null;
   let positionKeyframes = [];
-  let cameraMode = 'follow_heading';
+  let cameraMode = 'synthetic_vision';
   let terrainEnabled = false;
   let terrainStatus = 'not_initialized';
   let terrainWarningMessage = '';
@@ -176,13 +243,24 @@ cw_header('Cockpit Recorder Replay');
   let lastTerrainRequestKey = '';
   let lastVisualAltitudeM = null;
 
-  const CAMERA_ROT_SMOOTH_RATE = 7;
-  const CAMERA_ALTITUDE_SMOOTH_RATE = 3;
+  const CAMERA_DEFAULTS = {
+    rangeM: 125,
+    heightM: 28,
+    pitchDeg: -10,
+    smoothing: 6,
+  };
+  const SYNTHETIC_VISION_DEFAULTS = {
+    eyeHeightM: 1.5,
+    forwardOffsetM: 2.0,
+    pitchOffsetDeg: -2,
+    pitchCoupling: 0.5,
+    rollCoupling: 0.5,
+    smoothing: 7,
+  };
+  const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
-  const CHASE_RANGE_M = 170;
-  const CHASE_HEIGHT_M = 65;
-  const CHASE_PITCH_DEG = -18;
+  const cameraSettings = loadCameraSettings();
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -282,6 +360,64 @@ cw_header('Cockpit Recorder Replay');
   };
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const lerpNumber = (from, to, alpha) => {
+    const start = Number(from);
+    const end = Number(to);
+    if (!Number.isFinite(start)) return end;
+    if (!Number.isFinite(end)) return start;
+    return start + (end - start) * alpha;
+  };
+
+  function loadCameraSettings() {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(CAMERA_STORAGE_KEY) || '{}') || {};
+    } catch (err) {
+      saved = {};
+    }
+    return {
+      rangeM: clamp(firstFinite(saved.rangeM, CAMERA_DEFAULTS.rangeM), 60, 260),
+      heightM: clamp(firstFinite(saved.heightM, CAMERA_DEFAULTS.heightM), 8, 90),
+      pitchDeg: clamp(firstFinite(saved.pitchDeg, CAMERA_DEFAULTS.pitchDeg), -30, -4),
+      smoothing: clamp(firstFinite(saved.smoothing, CAMERA_DEFAULTS.smoothing), 1, 12),
+    };
+  }
+
+  function saveCameraSettings() {
+    try {
+      localStorage.setItem(CAMERA_STORAGE_KEY, JSON.stringify(cameraSettings));
+    } catch (err) {
+      // Camera tuning is optional; replay should keep working if storage is unavailable.
+    }
+  }
+
+  function updateCameraControlLabels() {
+    if (cameraRangeValue) cameraRangeValue.textContent = `${Math.round(cameraSettings.rangeM)} m`;
+    if (cameraHeightValue) cameraHeightValue.textContent = `+${Math.round(cameraSettings.heightM)} m`;
+    if (cameraPitchValue) cameraPitchValue.textContent = `${Math.round(cameraSettings.pitchDeg)} deg`;
+    if (cameraSmoothingValue) cameraSmoothingValue.textContent = cameraSettings.smoothing.toFixed(1);
+  }
+
+  function syncCameraControls() {
+    if (cameraRangeInput) cameraRangeInput.value = String(cameraSettings.rangeM);
+    if (cameraHeightInput) cameraHeightInput.value = String(cameraSettings.heightM);
+    if (cameraPitchInput) cameraPitchInput.value = String(cameraSettings.pitchDeg);
+    if (cameraSmoothingInput) cameraSmoothingInput.value = String(cameraSettings.smoothing);
+    updateCameraControlLabels();
+  }
+
+  function updateCameraSetting(key, value) {
+    const next = finiteNumber(value);
+    if (next === null) return;
+    if (key === 'rangeM') cameraSettings.rangeM = clamp(next, 60, 260);
+    if (key === 'heightM') cameraSettings.heightM = clamp(next, 8, 90);
+    if (key === 'pitchDeg') cameraSettings.pitchDeg = clamp(next, -30, -4);
+    if (key === 'smoothing') cameraSettings.smoothing = clamp(next, 1, 12);
+    updateCameraControlLabels();
+    saveCameraSettings();
+    safeRenderCesium(false);
+  }
 
   const haversineM = (lat1, lon1, lat2, lon2) => {
     const phi1 = degToRad(lat1);
@@ -372,14 +508,44 @@ cw_header('Cockpit Recorder Replay');
     return trueHeadingFromSample(sample);
   }
 
+  function syntheticPitchDeg(sample) {
+    const pitch = firstFinite(sample && sample.visual_pitch_deg, sample && sample.pitch_deg, 0);
+    return clamp(
+      SYNTHETIC_VISION_DEFAULTS.pitchOffsetDeg + (pitch || 0) * SYNTHETIC_VISION_DEFAULTS.pitchCoupling,
+      -12,
+      10
+    );
+  }
+
+  function syntheticRollDeg(sample) {
+    const roll = firstFinite(sample && sample.visual_roll_deg, sample && sample.roll_deg, sample && sample.bank_deg, 0);
+    return clamp((roll || 0) * SYNTHETIC_VISION_DEFAULTS.rollCoupling, -18, 18);
+  }
+
   function targetCameraAt(t) {
     const pos = positionAt(t);
     const s = sampleAt(t);
     if (!pos || !s) return null;
     const aircraftHeading = aircraftHeadingFromSample(s);
-    const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     const altitudeM = visualAltitudeM(s);
+    if (cameraMode === 'synthetic_vision') {
+      const eye = offsetLatLon(pos.lat, pos.lon, aircraftHeading, -SYNTHETIC_VISION_DEFAULTS.forwardOffsetM, 0);
+      return {
+        mode: 'synthetic_vision',
+        lat: eye.lat,
+        lon: eye.lon,
+        altitudeM: altitudeM + SYNTHETIC_VISION_DEFAULTS.eyeHeightM,
+        rawAltitudeM: rawAltitudeM(s),
+        visualAltitudeM: altitudeM,
+        aircraftHeading,
+        heading: aircraftHeading,
+        pitch: syntheticPitchDeg(s),
+        roll: syntheticRollDeg(s),
+      };
+    }
+    const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     return {
+      mode: cameraMode === 'north_up' ? 'north_up' : 'chase',
       lat: pos.lat,
       lon: pos.lon,
       altitudeM,
@@ -387,7 +553,7 @@ cw_header('Cockpit Recorder Replay');
       visualAltitudeM: altitudeM,
       aircraftHeading,
       heading,
-      pitch: CHASE_PITCH_DEG,
+      pitch: cameraSettings.pitchDeg,
       roll: 0,
     };
   }
@@ -413,6 +579,7 @@ cw_header('Cockpit Recorder Replay');
     if (!cesiumViewer) return;
     const controller = cesiumViewer.scene.screenSpaceCameraController;
     const free = cameraMode === 'free';
+    if (cameraPanel) cameraPanel.hidden = !(cameraMode === 'chase' || cameraMode === 'north_up');
     controller.enableRotate = free;
     controller.enableTranslate = free;
     controller.enableZoom = free;
@@ -437,9 +604,12 @@ cw_header('Cockpit Recorder Replay');
 
     let view = target;
     if (!snap && displayCamera) {
-      const rotAlpha = smoothFactor(CAMERA_ROT_SMOOTH_RATE, dtSec);
-      const altAlpha = smoothFactor(CAMERA_ALTITUDE_SMOOTH_RATE, dtSec);
+      const smoothing = target.mode === 'synthetic_vision' ? SYNTHETIC_VISION_DEFAULTS.smoothing : cameraSettings.smoothing;
+      const rotAlpha = smoothFactor(smoothing, dtSec);
+      const altAlpha = smoothFactor(Math.max(1, smoothing * 0.55), dtSec);
+      const attitudeAlpha = smoothFactor(Math.max(1, smoothing * 0.65), dtSec);
       view = {
+        mode: target.mode,
         lat: target.lat,
         lon: target.lon,
         altitudeM: displayCamera.altitudeM + (target.altitudeM - displayCamera.altitudeM) * altAlpha,
@@ -447,15 +617,20 @@ cw_header('Cockpit Recorder Replay');
         visualAltitudeM: displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * altAlpha,
         aircraftHeading: target.aircraftHeading,
         heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
-        pitch: CHASE_PITCH_DEG,
-        roll: 0,
+        pitch: lerpNumber(displayCamera.pitch, target.pitch, attitudeAlpha),
+        roll: lerpNumber(displayCamera.roll, target.roll, attitudeAlpha),
       };
     }
     displayCamera = Object.assign({}, view);
     lastVisualAltitudeM = view.visualAltitudeM;
-    const cameraPos = offsetLatLon(view.lat, view.lon, view.heading, CHASE_RANGE_M, 0);
+    const cameraPos = view.mode === 'synthetic_vision'
+      ? { lat: view.lat, lon: view.lon }
+      : offsetLatLon(view.lat, view.lon, view.heading, cameraSettings.rangeM, 0);
+    const cameraAltitudeM = view.mode === 'synthetic_vision'
+      ? view.altitudeM
+      : view.altitudeM + cameraSettings.heightM;
     cesiumViewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, view.altitudeM + CHASE_HEIGHT_M),
+      destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, cameraAltitudeM),
       orientation: {
         heading: degToRad(view.heading),
         pitch: degToRad(view.pitch),
@@ -599,6 +774,19 @@ cw_header('Cockpit Recorder Replay');
       const suffix = [source, reason].filter(Boolean).join(' / ');
       return `<div class="replay-debug-quality-row"><span>${escapeHtml(label)}</span><span class="${qualityClass(quality)}">${escapeHtml(quality)}${suffix ? ` <span class="replay-quality-unknown">(${escapeHtml(suffix)})</span>` : ''}</span></div>`;
     }).join('');
+    const cameraConfigLines = cameraMode === 'synthetic_vision'
+      ? [
+        `synthetic eye: +${SYNTHETIC_VISION_DEFAULTS.eyeHeightM.toFixed(1)} m`,
+        `synthetic forward: ${SYNTHETIC_VISION_DEFAULTS.forwardOffsetM.toFixed(1)} m`,
+        `pitch coupling: ${SYNTHETIC_VISION_DEFAULTS.pitchCoupling.toFixed(2)}`,
+        `roll coupling: ${SYNTHETIC_VISION_DEFAULTS.rollCoupling.toFixed(2)}`,
+        `camera smoothing: ${SYNTHETIC_VISION_DEFAULTS.smoothing.toFixed(1)}`,
+      ]
+      : [
+        `camera range: ${cameraSettings.rangeM.toFixed(0)} m`,
+        `camera height: +${cameraSettings.heightM.toFixed(0)} m`,
+        `camera smoothing: ${cameraSettings.smoothing.toFixed(1)}`,
+      ];
     const lines = [
       `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,
       `aircraft heading true: ${heading === null ? '--' : heading.toFixed(1)} deg`,
@@ -607,6 +795,7 @@ cw_header('Cockpit Recorder Replay');
       `camera heading: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
       `camera pitch: ${cameraPitch === null ? '--' : cameraPitch.toFixed(1)} deg`,
       `camera mode: ${cameraMode}`,
+      ...cameraConfigLines,
       `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
       `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
       `visual pitch: ${visualPitch === null ? '--' : visualPitch.toFixed(1)} deg`,
@@ -736,11 +925,23 @@ cw_header('Cockpit Recorder Replay');
   }
 
   cameraModeSelect.addEventListener('change', () => {
-    cameraMode = cameraModeSelect.value || 'follow_heading';
+    cameraMode = cameraModeSelect.value || 'synthetic_vision';
     applyCameraModeControls();
     resetDisplayCamera();
     safeRenderCesium(true);
   });
+  if (cameraRangeInput) {
+    cameraRangeInput.addEventListener('input', () => updateCameraSetting('rangeM', cameraRangeInput.value));
+  }
+  if (cameraHeightInput) {
+    cameraHeightInput.addEventListener('input', () => updateCameraSetting('heightM', cameraHeightInput.value));
+  }
+  if (cameraPitchInput) {
+    cameraPitchInput.addEventListener('input', () => updateCameraSetting('pitchDeg', cameraPitchInput.value));
+  }
+  if (cameraSmoothingInput) {
+    cameraSmoothingInput.addEventListener('input', () => updateCameraSetting('smoothing', cameraSmoothingInput.value));
+  }
   timeline.addEventListener('input', () => seek(Number(timeline.value), true, true));
   audio.addEventListener('timeupdate', () => {
     if (audio.paused) {
@@ -825,6 +1026,7 @@ cw_header('Cockpit Recorder Replay');
     safeRenderCesium(true);
   }
 
+  syncCameraControls();
   loadReplay();
 })();
 </script>
