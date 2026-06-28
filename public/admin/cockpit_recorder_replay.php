@@ -190,7 +190,7 @@ cw_header('Cockpit Recorder Replay');
       <a href="/admin/cockpit_recorder.php">← Back</a>
       <button class="replay-button" type="button" id="playButton">Play</button>
       <select class="replay-select" id="cameraMode" aria-label="Camera mode">
-        <option value="synthetic_vision" selected>Synthetic vision</option>
+        <option value="synthetic_vision" selected>Garmin SVT</option>
         <option value="chase">Chase</option>
         <option value="north_up">North up</option>
         <option value="free">Orbit / free</option>
@@ -252,10 +252,6 @@ cw_header('Cockpit Recorder Replay');
   const SYNTHETIC_VISION_DEFAULTS = {
     eyeHeightM: 1.5,
     forwardOffsetM: 2.0,
-    pitchOffsetDeg: -2,
-    pitchCoupling: 0.5,
-    rollCoupling: 0.5,
-    smoothing: 7,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
@@ -361,13 +357,6 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const lerpNumber = (from, to, alpha) => {
-    const start = Number(from);
-    const end = Number(to);
-    if (!Number.isFinite(start)) return end;
-    if (!Number.isFinite(end)) return start;
-    return start + (end - start) * alpha;
-  };
 
   function loadCameraSettings() {
     let saved = {};
@@ -502,24 +491,15 @@ cw_header('Cockpit Recorder Replay');
     const explicitTrue = firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg, sample && sample.heading_deg);
     if (explicitTrue !== null) return normalizeDeg(explicitTrue);
 
-    const cameraHeading = Number(sample && sample.camera_heading_deg);
-    if (Number.isFinite(cameraHeading)) return normalizeDeg(cameraHeading);
-
     return trueHeadingFromSample(sample);
   }
 
-  function syntheticPitchDeg(sample) {
-    const pitch = firstFinite(sample && sample.visual_pitch_deg, sample && sample.pitch_deg, 0);
-    return clamp(
-      SYNTHETIC_VISION_DEFAULTS.pitchOffsetDeg + (pitch || 0) * SYNTHETIC_VISION_DEFAULTS.pitchCoupling,
-      -12,
-      10
-    );
+  function aircraftPitchFromSample(sample) {
+    return clamp(firstFinite(sample && sample.pitch_deg, sample && sample.visual_pitch_deg, 0) || 0, -45, 45);
   }
 
-  function syntheticRollDeg(sample) {
-    const roll = firstFinite(sample && sample.visual_roll_deg, sample && sample.roll_deg, sample && sample.bank_deg, 0);
-    return clamp((roll || 0) * SYNTHETIC_VISION_DEFAULTS.rollCoupling, -18, 18);
+  function aircraftRollFromSample(sample) {
+    return clamp(firstFinite(sample && sample.roll_deg, sample && sample.bank_deg, sample && sample.visual_roll_deg, 0) || 0, -75, 75);
   }
 
   function targetCameraAt(t) {
@@ -539,8 +519,11 @@ cw_header('Cockpit Recorder Replay');
         visualAltitudeM: altitudeM,
         aircraftHeading,
         heading: aircraftHeading,
-        pitch: syntheticPitchDeg(s),
-        roll: syntheticRollDeg(s),
+        pitch: aircraftPitchFromSample(s),
+        roll: aircraftRollFromSample(s),
+        modelYaw: aircraftHeading,
+        interpolatedHeading: aircraftHeading,
+        interpolatedTrack: firstFinite(s.track_deg_true, s.track_deg),
       };
     }
     const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
@@ -555,6 +538,9 @@ cw_header('Cockpit Recorder Replay');
       heading,
       pitch: cameraSettings.pitchDeg,
       roll: 0,
+      modelYaw: aircraftHeading,
+      interpolatedHeading: aircraftHeading,
+      interpolatedTrack: firstFinite(s.track_deg_true, s.track_deg),
     };
   }
 
@@ -603,11 +589,9 @@ cw_header('Cockpit Recorder Replay');
     if (!target) return;
 
     let view = target;
-    if (!snap && displayCamera) {
-      const smoothing = target.mode === 'synthetic_vision' ? SYNTHETIC_VISION_DEFAULTS.smoothing : cameraSettings.smoothing;
-      const rotAlpha = smoothFactor(smoothing, dtSec);
-      const altAlpha = smoothFactor(Math.max(1, smoothing * 0.55), dtSec);
-      const attitudeAlpha = smoothFactor(Math.max(1, smoothing * 0.65), dtSec);
+    if (!snap && displayCamera && target.mode !== 'synthetic_vision') {
+      const rotAlpha = smoothFactor(cameraSettings.smoothing, dtSec);
+      const altAlpha = smoothFactor(Math.max(1, cameraSettings.smoothing * 0.55), dtSec);
       view = {
         mode: target.mode,
         lat: target.lat,
@@ -617,8 +601,11 @@ cw_header('Cockpit Recorder Replay');
         visualAltitudeM: displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * altAlpha,
         aircraftHeading: target.aircraftHeading,
         heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
-        pitch: lerpNumber(displayCamera.pitch, target.pitch, attitudeAlpha),
-        roll: lerpNumber(displayCamera.roll, target.roll, attitudeAlpha),
+        pitch: target.pitch,
+        roll: target.roll,
+        modelYaw: target.modelYaw,
+        interpolatedHeading: target.interpolatedHeading,
+        interpolatedTrack: target.interpolatedTrack,
       };
     }
     displayCamera = Object.assign({}, view);
@@ -747,10 +734,17 @@ cw_header('Cockpit Recorder Replay');
 
   function updateDebugOverlay(sample, view) {
     if (!debugOverlay) return;
+    const headingDegTrue = firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg);
+    const headingLegacy = firstFinite(sample && sample.heading_deg);
     const heading = sample ? aircraftHeadingFromSample(sample) : null;
-    const track = sample && Number.isFinite(Number(sample.track_deg_true)) ? normalizeDeg(Number(sample.track_deg_true)) : null;
+    const interpolatedHeading = view && Number.isFinite(Number(view.interpolatedHeading)) ? normalizeDeg(Number(view.interpolatedHeading)) : heading;
+    const trackDegTrue = firstFinite(sample && sample.track_deg_true);
+    const track = trackDegTrue !== null ? normalizeDeg(trackDegTrue) : null;
+    const interpolatedTrack = view && Number.isFinite(Number(view.interpolatedTrack)) ? normalizeDeg(Number(view.interpolatedTrack)) : track;
     const crab = sample && Number.isFinite(Number(sample.crab_angle_deg)) ? normalizeSignedDeg(Number(sample.crab_angle_deg)) : null;
     const cameraHeading = view && Number.isFinite(Number(view.heading)) ? normalizeDeg(Number(view.heading)) : null;
+    const legacyCameraHeading = sample && Number.isFinite(Number(sample.camera_heading_deg)) ? normalizeDeg(Number(sample.camera_heading_deg)) : null;
+    const modelYaw = view && Number.isFinite(Number(view.modelYaw)) ? normalizeDeg(Number(view.modelYaw)) : null;
     const cameraPitch = view && Number.isFinite(Number(view.pitch)) ? Number(view.pitch) : null;
     const pitch = sample && Number.isFinite(Number(sample.pitch_deg)) ? Number(sample.pitch_deg) : null;
     const roll = sample && Number.isFinite(Number(sample.bank_deg ?? sample.roll_deg)) ? Number(sample.bank_deg ?? sample.roll_deg) : null;
@@ -778,9 +772,8 @@ cw_header('Cockpit Recorder Replay');
       ? [
         `synthetic eye: +${SYNTHETIC_VISION_DEFAULTS.eyeHeightM.toFixed(1)} m`,
         `synthetic forward: ${SYNTHETIC_VISION_DEFAULTS.forwardOffsetM.toFixed(1)} m`,
-        `pitch coupling: ${SYNTHETIC_VISION_DEFAULTS.pitchCoupling.toFixed(2)}`,
-        `roll coupling: ${SYNTHETIC_VISION_DEFAULTS.rollCoupling.toFixed(2)}`,
-        `camera smoothing: ${SYNTHETIC_VISION_DEFAULTS.smoothing.toFixed(1)}`,
+        `camera attached: aircraft state`,
+        `camera smoothing: none`,
       ]
       : [
         `camera range: ${cameraSettings.rangeM.toFixed(0)} m`,
@@ -789,10 +782,18 @@ cw_header('Cockpit Recorder Replay');
       ];
     const lines = [
       `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,
-      `aircraft heading true: ${heading === null ? '--' : heading.toFixed(1)} deg`,
-      `track true: ${track === null ? '--' : track.toFixed(1)} deg`,
+      `heading_deg_true: ${headingDegTrue === null ? '--' : normalizeDeg(headingDegTrue).toFixed(1)} deg`,
+      `heading_deg legacy: ${headingLegacy === null ? '--' : normalizeDeg(headingLegacy).toFixed(1)} deg`,
+      `track_deg_true: ${track === null ? '--' : track.toFixed(1)} deg`,
       `crab angle: ${crab === null ? '--' : crab.toFixed(1)} deg`,
-      `camera heading: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
+      `current interpolated heading: ${interpolatedHeading === null ? '--' : interpolatedHeading.toFixed(1)} deg`,
+      `current interpolated track: ${interpolatedTrack === null ? '--' : interpolatedTrack.toFixed(1)} deg`,
+      `camera_heading_deg legacy: ${legacyCameraHeading === null ? '--' : legacyCameraHeading.toFixed(1)} deg`,
+      `camera heading rendered: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
+      `model_yaw_deg: ${modelYaw === null ? '--' : modelYaw.toFixed(1)} deg`,
+      `heading_owner: ${sourceValue(sample, 'heading_owner') || '--'}`,
+      `heading_source: ${sourceValue(sample, 'heading_source') || '--'}`,
+      `track_source: ${sourceValue(sample, 'track_source') || '--'}`,
       `camera pitch: ${cameraPitch === null ? '--' : cameraPitch.toFixed(1)} deg`,
       `camera mode: ${cameraMode}`,
       ...cameraConfigLines,
