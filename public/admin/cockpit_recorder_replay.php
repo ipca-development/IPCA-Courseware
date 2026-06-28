@@ -349,14 +349,10 @@ cw_header('Cockpit Recorder Replay');
     const s = smoothedSampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
     const altitudeM = cameraEyeAltitudeM(s);
-    const groundspeed = Number.isFinite(Number(s.groundspeed_kt)) ? Number(s.groundspeed_kt) : 0;
     const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
-    const heading = Number.isFinite(Number(s.true_heading_deg)) ? Number(s.true_heading_deg)
-      : (Number.isFinite(Number(s.heading_deg)) ? Number(s.heading_deg) : (track ?? 0));
-    const pathHeading = groundspeed >= 5
-      ? bearingBetween(smoothedSampleAt(activeT - 1.4), smoothedSampleAt(activeT + 1.4))
-      : null;
-    const cameraHeading = pathHeading !== null ? pathHeading : (track !== null && groundspeed >= 5 ? track : heading);
+    const cameraHeading = Number.isFinite(Number(s.heading_deg))
+      ? Number(s.heading_deg)
+      : (track !== null ? track : 0);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg) - bankDatumDeg) : 0;
     const targetState = {
@@ -365,7 +361,7 @@ cw_header('Cockpit Recorder Replay');
       altitudeM,
       heading: normalizeDeg(cameraHeading),
       pitch: Math.max(-30, Math.min(30, pitch)),
-      roll: 0,
+      roll: Math.max(-45, Math.min(45, bank)),
     };
     cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);

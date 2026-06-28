@@ -130,15 +130,15 @@
   background: #000;
 }
 
-/* Ground tint below attitude (HSI backdrop) */
+/* Ground tint — sides only, do not cover HSI */
 .g3x-ground-fill {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 228px;
+  height: 360px;
   z-index: 1;
-  background: linear-gradient(to bottom, rgba(40, 55, 30, 0.15) 0%, rgba(35, 50, 28, 0.92) 18%, rgba(28, 42, 22, 0.98) 100%);
+  background: linear-gradient(to bottom, rgba(40, 55, 30, 0) 0%, rgba(35, 50, 28, 0.35) 40%, rgba(28, 42, 22, 0.55) 100%);
   pointer-events: none;
 }
 
@@ -148,7 +148,7 @@
   left: 0;
   top: 0;
   right: 0;
-  height: 496px;
+  height: 362px;
   z-index: 5;
 }
 
@@ -188,11 +188,26 @@
   letter-spacing: 0.04em;
 }
 
-/* Attitude overlay spans full flight stack */
+/* World-attitude layer (horizon + pitch ladder, synced with Cesium) */
+.g3x-world-attitude {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.g3x-world-attitude svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Fixed cockpit symbology (aircraft, bank arc, slip ball) */
 .g3x-attitude-overlay {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: 7;
   pointer-events: none;
   overflow: hidden;
 }
@@ -209,7 +224,7 @@
   left: 0;
   top: 26px;
   width: 108px;
-  height: 470px;
+  height: 336px;
   z-index: 10;
 }
 
@@ -226,7 +241,7 @@
 
 .g3x-ias-tape-wrap {
   position: relative;
-  height: 422px;
+  height: 288px;
   background: rgba(0, 0, 0, 0.22);
   border-right: 1px solid rgba(255, 255, 255, 0.45);
   overflow: hidden;
@@ -351,7 +366,7 @@
   right: 0;
   top: 26px;
   width: 132px;
-  height: 470px;
+  height: 336px;
   z-index: 10;
   display: grid;
   grid-template-columns: 92px 38px;
@@ -380,7 +395,7 @@
 
 .g3x-alt-tape-wrap {
   position: relative;
-  height: 374px;
+  height: 288px;
   margin-top: 24px;
   background: rgba(0, 0, 0, 0.22);
   border-left: 1px solid rgba(255, 255, 255, 0.45);
@@ -486,7 +501,7 @@
 
 .g3x-vsi-wrap {
   position: relative;
-  height: 374px;
+  height: 288px;
   margin-top: 24px;
   border-left: 1px solid rgba(255, 255, 255, 0.35);
   background: rgba(0, 0, 0, 0.22);
@@ -634,12 +649,13 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 228px;
+  height: 360px;
   z-index: 8;
   display: grid;
   grid-template-columns: 110px 1fr 72px;
   align-items: end;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
+  overflow: visible;
 }
 
 .g3x-wind-box {
@@ -669,7 +685,8 @@
   align-items: center;
   justify-content: flex-end;
   height: 100%;
-  padding-bottom: 4px;
+  padding-bottom: 0;
+  overflow: visible;
 }
 
 .g3x-hsi-bugs {
@@ -677,8 +694,13 @@
   justify-content: center;
   align-items: center;
   gap: 120px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   min-height: 22px;
+}
+
+.g3x-hsi-bug-left:empty,
+.g3x-hsi-bug-right:empty {
+  display: none;
 }
 
 .g3x-hsi-bug-left,
@@ -694,6 +716,10 @@
 
 .g3x-hsi-bug-left { color: #0ff; }
 .g3x-hsi-bug-right { color: #39ff39; }
+
+.g3x-hsi-wrap {
+  overflow: visible;
+}
 
 .g3x-hsi-wrap svg {
   width: 340px;

@@ -5,11 +5,14 @@
   const PFD_W = 1280;
   const PFD_H = 768;
   const FLIGHT_W = 1182;
-  const FLIGHT_H = 496;
-  const TAPE_CENTER_Y = 211; // center of tape wrap (422/2)
+  const FLIGHT_STACK_H = 362;
+  const FLIGHT_H = FLIGHT_STACK_H;
+  const AP_H = 26;
+  const TAPE_BODY_H = FLIGHT_STACK_H - AP_H - 48;
+  const TAPE_CENTER_Y = TAPE_BODY_H / 2;
   const PITCH_PX_PER_DEG = 8.5;
   const ATT_CX = FLIGHT_W / 2;
-  const ATT_CY = 26 + (FLIGHT_H - 26) / 2; // below AP bar
+  const ATT_CY = AP_H + (FLIGHT_STACK_H - AP_H) / 2;
 
   const fmtNum = (v, d = 0) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '--' : Number(v).toFixed(d));
   const fmtFreq = (v) => {
@@ -223,14 +226,14 @@
       <div class="g3x-alt-baro">${baroLabel}</div>
     </div>
     <div class="g3x-vsi-wrap">
-      <svg class="g3x-vsi-scale" viewBox="0 0 38 374" aria-hidden="true">
-        <line x1="19" y1="187" x2="19" y2="18" stroke="rgba(255,255,255,.5)" stroke-width="1"/>
-        <line x1="19" y1="187" x2="19" y2="356" stroke="rgba(255,255,255,.5)" stroke-width="1"/>
-        <text x="22" y="189" fill="#fff" font-size="10">0</text>
-        <text x="22" y="132" fill="#fff" font-size="10">1</text>
-        <text x="22" y="75" fill="#fff" font-size="10">2</text>
-        <text x="22" y="245" fill="#fff" font-size="10">1</text>
-        <text x="22" y="302" fill="#fff" font-size="10">2</text>
+      <svg class="g3x-vsi-scale" viewBox="0 0 38 ${TAPE_BODY_H}" aria-hidden="true">
+        <line x1="19" y1="${TAPE_CENTER_Y}" x2="19" y2="18" stroke="rgba(255,255,255,.5)" stroke-width="1"/>
+        <line x1="19" y1="${TAPE_CENTER_Y}" x2="19" y2="${TAPE_BODY_H - 18}" stroke="rgba(255,255,255,.5)" stroke-width="1"/>
+        <text x="22" y="${TAPE_CENTER_Y + 2}" fill="#fff" font-size="10">0</text>
+        <text x="22" y="${TAPE_CENTER_Y - 55}" fill="#fff" font-size="10">1</text>
+        <text x="22" y="${TAPE_CENTER_Y - 110}" fill="#fff" font-size="10">2</text>
+        <text x="22" y="${TAPE_CENTER_Y + 55}" fill="#fff" font-size="10">1</text>
+        <text x="22" y="${TAPE_CENTER_Y + 110}" fill="#fff" font-size="10">2</text>
       </svg>
       <div class="g3x-vsi-pointer" style="top:${vsiTop}%"></div>
     </div>`;
@@ -310,51 +313,63 @@
     </svg>`;
   }
 
-  function renderAttitudeSvg(pitch, roll, slip, g3x) {
+  function renderWorldAttitude(pitch, roll) {
     const p = Number(pitch) || 0;
+    const r = Number(roll) || 0;
+    const cx = ATT_CX;
+    const cy = ATT_CY;
+
+    let ladder = '';
+    for (let deg = -30; deg <= 30; deg += 5) {
+      const y = cy - deg * PITCH_PX_PER_DEG;
+      const w = deg % 10 === 0 ? 160 : 80;
+      const opacity = deg === 0 ? 0.85 : 0.65;
+      ladder += `<line x1="${cx - w / 2}" y1="${y}" x2="${cx + w / 2}" y2="${y}" stroke="rgba(255,255,255,${opacity})" stroke-width="${deg % 10 === 0 ? 2 : 1}"/>`;
+      if (deg % 10 === 0 && deg !== 0) {
+        ladder += `<text x="${cx + w / 2 + 6}" y="${y + 4}" fill="rgba(255,255,255,${opacity})" font-size="11">${Math.abs(deg)}</text>`;
+      }
+    }
+    ladder += `<line x1="${cx - FLIGHT_W / 2}" y1="${cy}" x2="${cx + FLIGHT_W / 2}" y2="${cy}" stroke="rgba(255,255,255,0.78)" stroke-width="2.5"/>`;
+
+    return `<svg viewBox="0 0 ${FLIGHT_W} ${FLIGHT_H}" aria-hidden="true">
+      <g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">
+        <g transform="translate(0 ${p * PITCH_PX_PER_DEG})">${ladder}</g>
+      </g>
+    </svg>`;
+  }
+
+  function renderCockpitSymbology(roll, slip, g3x) {
     const r = Number(roll) || 0;
     const slipX = clamp((Number(slip) || 0) * 100, -44, 44);
     const cx = ATT_CX;
     const cy = ATT_CY;
 
-    // FD chevrons offset from H/V CDI (scale to pixels)
     const hcdi = Number(g3x?.hcdi) || 0;
     const vcdi = Number(g3x?.vcdi) || 0;
     const fdX = clamp(hcdi * 55, -80, 80);
     const fdY = clamp(-vcdi * 55, -60, 60);
 
-    let ladder = '';
-    for (let deg = -30; deg <= 30; deg += 5) {
-      const y = cy - deg * PITCH_PX_PER_DEG;
-      const w = deg % 10 === 0 ? 140 : 70;
-      ladder += `<line x1="${cx - w / 2}" y1="${y}" x2="${cx + w / 2}" y2="${y}" stroke="#fff" stroke-width="${deg % 10 === 0 ? 2 : 1}"/>`;
-      if (deg % 10 === 0 && deg !== 0) {
-        ladder += `<text x="${cx + w / 2 + 6}" y="${y + 4}" fill="#fff" font-size="11">${Math.abs(deg)}</text>`;
-      }
-    }
-    // Horizon line (0 pitch)
-    ladder += `<line x1="${cx - 200}" y1="${cy}" x2="${cx + 200}" y2="${cy}" stroke="#fff" stroke-width="2"/>`;
-
     const bankMarks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60];
+    const arcCy = cy - 118;
     let bankArc = '';
     bankMarks.forEach((deg) => {
       const a = ((deg - 90) * Math.PI) / 180;
       const r0 = 168;
       const len = Math.abs(deg) >= 30 ? 18 : 11;
       const x1 = cx + r0 * Math.cos(a);
-      const y1 = cy - 120 + r0 * Math.sin(a);
+      const y1 = arcCy + r0 * Math.sin(a);
       const x2 = cx + (r0 - len) * Math.cos(a);
-      const y2 = cy - 120 + (r0 - len) * Math.sin(a);
+      const y2 = arcCy + (r0 - len) * Math.sin(a);
       bankArc += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#fff" stroke-width="${Math.abs(deg) >= 30 ? 3 : 2}"/>`;
     });
 
-    const slipY = cy + 148;
+    const slipY = cy + 118;
 
     return `<svg viewBox="0 0 ${FLIGHT_W} ${FLIGHT_H}" aria-hidden="true">
-      <g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">
-        <g transform="translate(0 ${p * PITCH_PX_PER_DEG})">${ladder}</g>
+      <g>${bankArc}<polygon points="${cx},${arcCy - 20} ${cx - 10},${arcCy - 2} ${cx + 10},${arcCy - 2}" fill="#fff"/></g>
+      <g transform="translate(${cx} ${arcCy}) rotate(${-r})">
+        <polygon points="0,-18 -8,0 8,0" fill="#fff"/>
       </g>
-      <g>${bankArc}<polygon points="${cx},${cy - 118} ${cx - 10},${cy - 98} ${cx + 10},${cy - 98}" fill="#fff"/></g>
       <g transform="translate(${cx + fdX} ${cy + fdY - 8})">
         <path d="M-16 0 L-6 0 L0 -14 L6 0 L16 0" fill="none" stroke="#ff39ff" stroke-width="3"/>
         <path d="M-8 6 L0 16 L8 6" fill="none" stroke="#ff39ff" stroke-width="2.5"/>
@@ -370,6 +385,10 @@
         <circle cx="${slipX}" cy="0" r="9" fill="#fff"/>
       </g>
     </svg>`;
+  }
+
+  function renderAttitudeSvg(pitch, roll, slip, g3x) {
+    return renderCockpitSymbology(roll, slip, g3x);
   }
 
   function renderApModes(g3x) {
@@ -414,6 +433,7 @@
         <div class="g3x-ground-fill"></div>
         <div class="g3x-flight-stack">
           <div class="g3x-ap-bar" id="g3xAp"></div>
+          <div class="g3x-world-attitude" id="g3xWorldAtt"></div>
           <div class="g3x-attitude-overlay" id="g3xAttitude"></div>
           <div class="g3x-ias-col" id="g3xIas"></div>
           <div class="g3x-alt-col" id="g3xAlt"></div>
@@ -475,14 +495,29 @@
           sample.vertical_speed_fpm ?? sample.estimated_vertical_speed_fpm ?? g.vs_fpm
         );
       }
+      if (el('g3xWorldAtt')) el('g3xWorldAtt').innerHTML = renderWorldAttitude(sample.pitch_deg, sample.bank_deg);
       if (el('g3xAttitude')) el('g3xAttitude').innerHTML = renderAttitudeSvg(sample.pitch_deg, sample.bank_deg, sample.estimated_slip_skid_g ?? g.slip_g, g);
       if (el('g3xHsi')) el('g3xHsi').innerHTML = renderHsi(sample.heading_deg, sample.heading_bug_deg ?? g.sel_hdg_deg, g.nav_course_deg, g.nav_source, g);
       if (el('g3xHdgBug')) {
         const hdg = sample.heading_bug_deg ?? g.sel_hdg_deg;
-        el('g3xHdgBug').textContent = hdg !== null && hdg !== undefined ? `HDG ${Math.round(hdg)}°` : '';
+        const bugEl = el('g3xHdgBug');
+        if (hdg !== null && hdg !== undefined) {
+          bugEl.textContent = `HDG ${Math.round(hdg)}°`;
+          bugEl.style.display = '';
+        } else {
+          bugEl.textContent = '';
+          bugEl.style.display = 'none';
+        }
       }
       if (el('g3xCrsBug')) {
-        el('g3xCrsBug').textContent = g.nav_course_deg !== null && g.nav_course_deg !== undefined ? `CRS ${Math.round(g.nav_course_deg)}°` : '';
+        const bugEl = el('g3xCrsBug');
+        if (g.nav_course_deg !== null && g.nav_course_deg !== undefined) {
+          bugEl.textContent = `CRS ${Math.round(g.nav_course_deg)}°`;
+          bugEl.style.display = '';
+        } else {
+          bugEl.textContent = '';
+          bugEl.style.display = 'none';
+        }
       }
 
       const windSpd = sample.estimated_wind_speed_kt ?? g.wind_speed_kt;

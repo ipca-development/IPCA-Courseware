@@ -2691,11 +2691,30 @@ final class CockpitReconstructionService
         $g3x = $this->publicG3XFields($row);
         $groundspeed = $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : ($g3x['groundspeed_kt'] ?? null);
         $track = $row['magnetic_track_deg'] !== null ? (float)$row['magnetic_track_deg'] : ($g3x['track_deg'] ?? null);
-        $heading = $row['magnetic_heading_deg'] !== null ? (float)$row['magnetic_heading_deg'] : ($g3x['heading_deg'] ?? null);
-        $headingSource = $groundspeed !== null && $groundspeed >= 5.0 && $track !== null ? 'gps_track' : ($heading !== null ? 'calibrated_magnetic_heading' : 'none');
-        $headingQuality = $headingSource === 'gps_track' ? 'GOOD' : ($headingSource === 'calibrated_magnetic_heading' ? 'LOW' : 'INVALID');
-        $pitch = $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : ($g3x['pitch_deg'] ?? null);
-        $bank = $row['roll_deg'] !== null ? (float)$row['roll_deg'] : ($g3x['roll_deg'] ?? null);
+
+        $bank = isset($g3x['roll_deg']) && $g3x['roll_deg'] !== null ? (float)$g3x['roll_deg'] : null;
+        if ($bank === null && $row['roll_deg'] !== null) {
+            $bank = (float)$row['roll_deg'];
+        }
+        $bankSource = isset($g3x['roll_deg']) && $g3x['roll_deg'] !== null ? 'g3x' : ($row['roll_deg'] !== null ? 'ahrs' : 'none');
+
+        $pitch = isset($g3x['pitch_deg']) && $g3x['pitch_deg'] !== null ? (float)$g3x['pitch_deg'] : null;
+        if ($pitch === null && $row['pitch_deg'] !== null) {
+            $pitch = (float)$row['pitch_deg'];
+        }
+        $pitchSource = isset($g3x['pitch_deg']) && $g3x['pitch_deg'] !== null ? 'g3x' : ($row['pitch_deg'] !== null ? 'ahrs' : 'none');
+
+        $heading = isset($g3x['heading_deg']) && $g3x['heading_deg'] !== null ? (float)$g3x['heading_deg'] : null;
+        if ($heading === null && $row['magnetic_heading_deg'] !== null) {
+            $heading = (float)$row['magnetic_heading_deg'];
+        }
+        if ($heading === null && $track !== null) {
+            $heading = (float)$track;
+        }
+        $headingSource = isset($g3x['heading_deg']) && $g3x['heading_deg'] !== null
+            ? 'g3x_magnetic'
+            : ($row['magnetic_heading_deg'] !== null ? 'ahrs_magnetic' : ($track !== null ? 'gps_track' : 'none'));
+        $headingQuality = $headingSource === 'g3x_magnetic' ? 'GOOD' : ($headingSource === 'ahrs_magnetic' ? 'LOW' : ($headingSource === 'gps_track' ? 'LOW' : 'INVALID'));
         $ias = $g3x['ias_kt'] ?? null;
         $tas = isset($row['estimated_tas_kt']) && $row['estimated_tas_kt'] !== null
             ? (float)$row['estimated_tas_kt']
@@ -2774,7 +2793,9 @@ final class CockpitReconstructionService
             'wind_estimation_method' => (string)($row['wind_estimation_method'] ?? 'unavailable'),
             'groundspeed_kt' => $groundspeed !== null ? (float)$groundspeed : null,
             'pitch_deg' => $pitch,
+            'pitch_source' => $pitchSource,
             'bank_deg' => $bank,
+            'bank_source' => $bankSource,
             'heading_deg' => $heading,
             'track_deg' => $track,
             'true_heading_deg' => $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null,
