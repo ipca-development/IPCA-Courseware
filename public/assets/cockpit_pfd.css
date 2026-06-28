@@ -108,12 +108,16 @@
   overflow: hidden;
 }
 
-/* Layer 0: Cesium full-bleed behind everything */
+/* Layer 0: Cesium — attitude viewport only (matches world-attitude overlay) */
 .g3x-sv-layer {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 26px;
+  right: 0;
+  height: 336px;
   z-index: 0;
   background: #1a3a5c;
+  overflow: hidden;
 }
 
 .g3x-sv-layer .cesium-cockpit,
@@ -188,10 +192,13 @@
   letter-spacing: 0.04em;
 }
 
-/* World-attitude layer (horizon + pitch ladder, synced with Cesium) */
+/* World-attitude layer — same box as Cesium SV viewport */
 .g3x-world-attitude {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 26px;
+  right: 0;
+  height: 336px;
   z-index: 4;
   pointer-events: none;
   overflow: hidden;
@@ -203,10 +210,13 @@
   display: block;
 }
 
-/* Fixed cockpit symbology (aircraft, bank arc, slip ball) */
+/* Fixed cockpit symbology — same SV viewport */
 .g3x-attitude-overlay {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 26px;
+  right: 0;
+  height: 336px;
   z-index: 7;
   pointer-events: none;
   overflow: hidden;

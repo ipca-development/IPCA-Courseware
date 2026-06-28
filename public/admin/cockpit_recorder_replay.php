@@ -332,6 +332,7 @@ cw_header('Cockpit Recorder Replay');
       cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
 
       cesiumReady = true;
+      syncCesiumCameraFov();
       renderCesium();
     } catch (err) {
       showCesiumError(String(err.message || err));
@@ -342,6 +343,38 @@ cw_header('Cockpit Recorder Replay');
     const cesiumReplay = document.getElementById('cesiumReplay');
     if (!cesiumReplay) return;
     cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(message).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div></div>`);
+  }
+
+  function syncCesiumCameraFov() {
+    if (!cesiumViewer || !cesiumViewer.camera || !cesiumViewer.camera.frustum) return;
+    const fovy = cesiumViewer.camera.frustum.fovy;
+    if (!Number.isFinite(Number(fovy)) || !window.CockpitPfd) return;
+    const canvas = cesiumViewer.scene.canvas;
+    const svHeight = canvas ? (canvas.clientHeight || canvas.height) : 336;
+    CockpitPfd.setCameraSync({ fovy: Number(fovy), svHeight });
+  }
+
+  function computeHorizonLineFromCesium() {
+    if (!cesiumViewer || !cesiumViewer.scene) return null;
+    const scene = cesiumViewer.scene;
+    scene.render();
+    const canvas = scene.canvas;
+    const w = canvas.clientWidth || canvas.width;
+    const h = canvas.clientHeight || canvas.height;
+    if (!w || !h) return null;
+
+    function horizonYAt(x) {
+      for (let y = 0; y < h; y += 1) {
+        const ray = cesiumViewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
+        if (!ray) continue;
+        if (scene.globe.pick(ray, scene)) return y;
+      }
+      return h * 0.5;
+    }
+
+    const x1 = w * 0.06;
+    const x2 = w * 0.94;
+    return { x1, y1: horizonYAt(x1), x2, y2: horizonYAt(x2) };
   }
 
   function renderCesium() {
@@ -373,6 +406,10 @@ cw_header('Cockpit Recorder Replay');
         roll: degToRad(cesiumCameraState.roll),
       },
     });
+    syncCesiumCameraFov();
+    if (window.CockpitPfd) {
+      CockpitPfd.setHorizonLine(computeHorizonLineFromCesium());
+    }
     renderPfd(s);
   }
 

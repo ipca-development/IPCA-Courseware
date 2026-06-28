@@ -6,13 +6,14 @@
   const PFD_H = 768;
   const FLIGHT_W = 1182;
   const FLIGHT_STACK_H = 362;
-  const FLIGHT_H = FLIGHT_STACK_H;
   const AP_H = 26;
-  const TAPE_BODY_H = FLIGHT_STACK_H - AP_H - 48;
+  const SV_H = FLIGHT_STACK_H - AP_H;
+  const SV_W = FLIGHT_W;
+  const TAPE_BODY_H = SV_H - 48;
   const TAPE_CENTER_Y = TAPE_BODY_H / 2;
-  const PITCH_PX_PER_DEG = 8.5;
-  const ATT_CX = FLIGHT_W / 2;
-  const ATT_CY = AP_H + (FLIGHT_STACK_H - AP_H) / 2;
+  const ATT_CX = SV_W / 2;
+  const ATT_CY = SV_H / 2;
+  let pitchPxPerDeg = SV_H / 60;
 
   const fmtNum = (v, d = 0) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '--' : Number(v).toFixed(d));
   const fmtFreq = (v) => {
@@ -313,28 +314,52 @@
     </svg>`;
   }
 
-  function renderWorldAttitude(pitch, roll) {
+  function setCameraSync(opts) {
+    if (!opts) return;
+    const fovy = Number(opts.fovy);
+    const svHeight = Number(opts.svHeight) || SV_H;
+    if (Number.isFinite(fovy) && fovy > 0) {
+      pitchPxPerDeg = (svHeight / 2) / Math.tan(fovy / 2) * (Math.PI / 180);
+    }
+  }
+
+  function pitchOffsetPx(pitchDeg) {
+    return (Number(pitchDeg) || 0) * pitchPxPerDeg;
+  }
+
+  function renderWorldAttitude(pitch, roll, horizonLine) {
     const p = Number(pitch) || 0;
     const r = Number(roll) || 0;
     const cx = ATT_CX;
     const cy = ATT_CY;
+    const px = pitchPxPerDeg;
 
     let ladder = '';
     for (let deg = -30; deg <= 30; deg += 5) {
-      const y = cy - deg * PITCH_PX_PER_DEG;
+      const y = cy - deg * px;
       const w = deg % 10 === 0 ? 160 : 80;
-      const opacity = deg === 0 ? 0.85 : 0.65;
+      const opacity = deg === 0 ? 0.55 : 0.45;
       ladder += `<line x1="${cx - w / 2}" y1="${y}" x2="${cx + w / 2}" y2="${y}" stroke="rgba(255,255,255,${opacity})" stroke-width="${deg % 10 === 0 ? 2 : 1}"/>`;
       if (deg % 10 === 0 && deg !== 0) {
         ladder += `<text x="${cx + w / 2 + 6}" y="${y + 4}" fill="rgba(255,255,255,${opacity})" font-size="11">${Math.abs(deg)}</text>`;
       }
     }
-    ladder += `<line x1="${cx - FLIGHT_W / 2}" y1="${cy}" x2="${cx + FLIGHT_W / 2}" y2="${cy}" stroke="rgba(255,255,255,0.78)" stroke-width="2.5"/>`;
 
-    return `<svg viewBox="0 0 ${FLIGHT_W} ${FLIGHT_H}" aria-hidden="true">
+    let horizonSvg;
+    if (horizonLine && Number.isFinite(horizonLine.x1) && Number.isFinite(horizonLine.y1)) {
+      horizonSvg = `<line x1="${horizonLine.x1}" y1="${horizonLine.y1}" x2="${horizonLine.x2}" y2="${horizonLine.y2}" stroke="rgba(255,255,255,0.82)" stroke-width="2.5"/>`;
+    } else {
+      const pitchOff = pitchOffsetPx(p);
+      horizonSvg = `<line x1="0" y1="${cy + pitchOff}" x2="${SV_W}" y2="${cy + pitchOff}" stroke="rgba(255,255,255,0.82)" stroke-width="2.5"/>`;
+    }
+
+    return `<svg viewBox="0 0 ${SV_W} ${SV_H}" aria-hidden="true">
       <g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">
-        <g transform="translate(0 ${p * PITCH_PX_PER_DEG})">${ladder}</g>
+        <g transform="translate(0 ${pitchOffsetPx(p)})">${ladder}</g>
       </g>
+      ${horizonLine && Number.isFinite(horizonLine.x1)
+        ? horizonSvg
+        : `<g transform="translate(${cx} ${cy}) rotate(${-r}) translate(${-cx} ${-cy})">${horizonSvg}</g>`}
     </svg>`;
   }
 
@@ -365,7 +390,7 @@
 
     const slipY = cy + 118;
 
-    return `<svg viewBox="0 0 ${FLIGHT_W} ${FLIGHT_H}" aria-hidden="true">
+    return `<svg viewBox="0 0 ${SV_W} ${SV_H}" aria-hidden="true">
       <g>${bankArc}<polygon points="${cx},${arcCy - 20} ${cx - 10},${arcCy - 2} ${cx + 10},${arcCy - 2}" fill="#fff"/></g>
       <g transform="translate(${cx} ${arcCy}) rotate(${-r})">
         <polygon points="0,-18 -8,0 8,0" fill="#fff"/>
@@ -429,10 +454,10 @@
       <div class="g3x-engine-col" id="g3xEngine"></div>
       <div class="g3x-top-bar" id="g3xTop"></div>
       <div class="g3x-main-display">
-        <div class="g3x-sv-layer"><div class="cesium-cockpit" id="cesiumReplay"></div></div>
         <div class="g3x-ground-fill"></div>
         <div class="g3x-flight-stack">
           <div class="g3x-ap-bar" id="g3xAp"></div>
+          <div class="g3x-sv-layer"><div class="cesium-cockpit" id="cesiumReplay"></div></div>
           <div class="g3x-world-attitude" id="g3xWorldAtt"></div>
           <div class="g3x-attitude-overlay" id="g3xAttitude"></div>
           <div class="g3x-ias-col" id="g3xIas"></div>
@@ -465,6 +490,7 @@
   const CockpitPfd = {
     profile: null,
     g3xAvail: {},
+    horizonLine: null,
     mount(container) {
       container.innerHTML = buildDom();
       window.addEventListener('resize', scalePfd);
@@ -476,6 +502,10 @@
     setSamples(samples) {
       this.g3xAvail = computeG3xAvailability(samples);
     },
+    setHorizonLine(line) {
+      this.horizonLine = line || null;
+    },
+    setCameraSync,
     render(sample) {
       if (!sample || !this.profile) return;
       const g = sample.g3x || {};
@@ -495,7 +525,7 @@
           sample.vertical_speed_fpm ?? sample.estimated_vertical_speed_fpm ?? g.vs_fpm
         );
       }
-      if (el('g3xWorldAtt')) el('g3xWorldAtt').innerHTML = renderWorldAttitude(sample.pitch_deg, sample.bank_deg);
+      if (el('g3xWorldAtt')) el('g3xWorldAtt').innerHTML = renderWorldAttitude(sample.pitch_deg, sample.bank_deg, this.horizonLine);
       if (el('g3xAttitude')) el('g3xAttitude').innerHTML = renderAttitudeSvg(sample.pitch_deg, sample.bank_deg, sample.estimated_slip_skid_g ?? g.slip_g, g);
       if (el('g3xHsi')) el('g3xHsi').innerHTML = renderHsi(sample.heading_deg, sample.heading_bug_deg ?? g.sel_hdg_deg, g.nav_course_deg, g.nav_source, g);
       if (el('g3xHdgBug')) {
