@@ -259,6 +259,14 @@ cw_header('Cockpit Recorder Replay');
     forwardOffsetM: 2.0,
   };
   const SYNTHETIC_TEST_HEADING_DEG = 230;
+  const BODY_AXIS_MAPPING = {
+    forwardColumn: 0,
+    rightColumn: 1,
+    upColumn: 2,
+    eyeOffsetXForwardM: 2.0,
+    eyeOffsetYRightM: 0.0,
+    eyeOffsetZUpM: 1.5,
+  };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
@@ -379,6 +387,16 @@ cw_header('Cockpit Recorder Replay');
       return { headingDeg: SYNTHETIC_TEST_HEADING_DEG, pitchDeg: -10, rollDeg: 0 };
     }
     return { headingDeg: SYNTHETIC_TEST_HEADING_DEG, pitchDeg: 10, rollDeg: 30 };
+  }
+
+  function isSyntheticTestMode(mode = cameraMode) {
+    return String(mode || '').startsWith('synthetic_vision_test');
+  }
+
+  function fixedSyntheticTestPosition() {
+    const first = positionKeyframes[0];
+    if (first) return Object.assign({}, first);
+    return { t: 0, lat: 33.6362099, lon: -116.1611667, altitudeM: 0 };
   }
 
   function loadCameraSettings() {
@@ -529,7 +547,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function targetCameraAt(t) {
-    const pos = positionAt(t);
+    const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(t);
     const s = sampleAt(t);
     if (!pos || !s) return null;
     const aircraftHeading = aircraftHeadingFromSample(s);
@@ -542,7 +560,7 @@ cw_header('Cockpit Recorder Replay');
       const eye = offsetLatLon(pos.lat, pos.lon, headingDeg, -SYNTHETIC_VISION_DEFAULTS.forwardOffsetM, 0);
       return {
         mode: cameraMode,
-        cameraMethod: 'lookAtTransform',
+        cameraMethod: 'setView direction/up',
         aircraftLat: pos.lat,
         aircraftLon: pos.lon,
         aircraftAltitudeM,
@@ -612,29 +630,12 @@ cw_header('Cockpit Recorder Replay');
     controller.enableLook = free;
   }
 
-  function resetCesiumCameraTransform() {
-    if (!cesiumViewer || typeof Cesium === 'undefined') return;
-    try {
-      cesiumViewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
-    } catch (err) {
-      // Ignore; the next setView call will still establish a world-frame camera.
-    }
-  }
-
-  function localForwardOffset(headingDeg, forwardMeters, eyeHeightMeters) {
-    const headingRad = degToRad(headingDeg);
-    return new Cesium.Cartesian3(
-      Math.sin(headingRad) * forwardMeters,
-      Math.cos(headingRad) * forwardMeters,
-      eyeHeightMeters
-    );
-  }
-
   function cesiumOrientationFromAviation(headingDeg, pitchDeg, rollDeg) {
     // Current test mapping, to be visually verified in synthetic_vision_test:
-    // aviation heading (true, clockwise from north) -> Cesium heading directly.
+    // aviation heading true -> Cesium heading directly.
     // aviation pitch positive nose-up -> Cesium pitch directly.
     // aviation roll positive right-wing-down -> Cesium roll directly.
+    // Aircraft body frame assumption: +X forward, +Y right, +Z up.
     return {
       headingDeg: normalizeDeg(headingDeg),
       pitchDeg: Number(pitchDeg) || 0,
@@ -645,24 +646,45 @@ cw_header('Cockpit Recorder Replay');
     };
   }
 
+  function cartesianToDebug(value) {
+    if (!value) return '--';
+    return `${value.x.toFixed(2)}, ${value.y.toFixed(2)}, ${value.z.toFixed(2)}`;
+  }
+
+  function quaternionToDebug(value) {
+    if (!value) return '--';
+    return `${value.x.toFixed(5)}, ${value.y.toFixed(5)}, ${value.z.toFixed(5)}, ${value.w.toFixed(5)}`;
+  }
+
   function applySyntheticCameraView(view, sample) {
     const aircraftCartesian = Cesium.Cartesian3.fromDegrees(view.aircraftLon, view.aircraftLat, view.aircraftAltitudeM);
-    const transform = Cesium.Transforms.eastNorthUpToFixedFrame(aircraftCartesian);
-    const localOffset = localForwardOffset(view.heading, SYNTHETIC_VISION_DEFAULTS.forwardOffsetM, SYNTHETIC_VISION_DEFAULTS.eyeHeightM);
     const orientation = cesiumOrientationFromAviation(view.heading, view.pitch, view.roll);
-    cesiumViewer.camera.lookAtTransform(transform, localOffset);
+    const hpr = new Cesium.HeadingPitchRoll(orientation.headingRad, orientation.pitchRad, orientation.rollRad);
+    const aircraftTransform = Cesium.Transforms.headingPitchRollToFixedFrame(aircraftCartesian, hpr);
+    const eyeOffsetBody = new Cesium.Cartesian3(
+      BODY_AXIS_MAPPING.eyeOffsetXForwardM,
+      BODY_AXIS_MAPPING.eyeOffsetYRightM,
+      BODY_AXIS_MAPPING.eyeOffsetZUpM
+    );
+    const cameraWorld = Cesium.Matrix4.multiplyByPoint(aircraftTransform, eyeOffsetBody, new Cesium.Cartesian3());
+    const forwardAxis = Cesium.Matrix4.getColumn(aircraftTransform, BODY_AXIS_MAPPING.forwardColumn, new Cesium.Cartesian4());
+    const upAxis = Cesium.Matrix4.getColumn(aircraftTransform, BODY_AXIS_MAPPING.upColumn, new Cesium.Cartesian4());
+    const direction = Cesium.Cartesian3.normalize(new Cesium.Cartesian3(forwardAxis.x, forwardAxis.y, forwardAxis.z), new Cesium.Cartesian3());
+    const up = Cesium.Cartesian3.normalize(new Cesium.Cartesian3(upAxis.x, upAxis.y, upAxis.z), new Cesium.Cartesian3());
+    const rotation = Cesium.Matrix4.getMatrix3(aircraftTransform, new Cesium.Matrix3());
+    const quaternion = Cesium.Quaternion.fromRotationMatrix(rotation, new Cesium.Quaternion());
+    resetCesiumCameraTransform();
     cesiumViewer.camera.setView({
+      destination: cameraWorld,
       orientation: {
-        heading: orientation.headingRad,
-        pitch: orientation.pitchRad,
-        roll: orientation.rollRad,
+        direction,
+        up,
       },
     });
 
-    const cameraWorld = Cesium.Matrix4.multiplyByPoint(transform, localOffset, new Cesium.Cartesian3());
     const cameraCartographic = Cesium.Cartographic.fromCartesian(cameraWorld);
     currentCameraDebug = {
-      method: 'lookAtTransform',
+      method: 'setView direction/up from aircraft HPR transform',
       cameraMode,
       aircraftLat: view.aircraftLat,
       aircraftLon: view.aircraftLon,
@@ -674,6 +696,12 @@ cw_header('Cockpit Recorder Replay');
       cameraHeightM: cameraCartographic.height,
       cameraHeightAboveAircraftM: cameraCartographic.height - view.aircraftAltitudeM,
       cameraHeightAboveTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraCartographic.height - lastTerrainHeightM : null,
+      aircraftCartesian,
+      cameraCartesian: cameraWorld,
+      cameraDirection: direction,
+      cameraUp: up,
+      orientationQuaternion: quaternion,
+      bodyAxisMapping: '+X forward, +Y right, +Z up',
       headingDegUsed: view.heading,
       pitchDegUsed: view.pitch,
       rollDegUsed: view.roll,
@@ -687,7 +715,6 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function applyWorldCameraView(view, cameraPos, cameraAltitudeM) {
-    resetCesiumCameraTransform();
     cesiumViewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, cameraAltitudeM),
       orientation: {
@@ -954,6 +981,12 @@ cw_header('Cockpit Recorder Replay');
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
       `camera above aircraft_m: ${fmtNum(dbg.cameraHeightAboveAircraftM, 2)}`,
       `camera above terrain_m: ${fmtNum(dbg.cameraHeightAboveTerrainM, 2)}`,
+      `aircraft Cartesian: ${cartesianToDebug(dbg.aircraftCartesian)}`,
+      `camera Cartesian: ${cartesianToDebug(dbg.cameraCartesian)}`,
+      `camera direction: ${cartesianToDebug(dbg.cameraDirection)}`,
+      `camera up: ${cartesianToDebug(dbg.cameraUp)}`,
+      `orientation quaternion: ${quaternionToDebug(dbg.orientationQuaternion)}`,
+      `body axes: ${dbg.bodyAxisMapping || '--'}`,
       `heading used by camera: ${fmtNum(dbg.headingDegUsed, 1)} deg`,
       `pitch used by camera: ${fmtNum(dbg.pitchDegUsed, 1)} deg`,
       `roll used by camera: ${fmtNum(dbg.rollDegUsed, 1)} deg`,
