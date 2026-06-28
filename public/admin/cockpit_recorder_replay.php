@@ -262,7 +262,7 @@ cw_header('Cockpit Recorder Replay');
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
-  const cameraSettings = loadCameraSettings();
+  let cameraSettings = null;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -405,6 +405,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function updateCameraControlLabels() {
+    if (!cameraSettings) return;
     if (cameraRangeValue) cameraRangeValue.textContent = `${Math.round(cameraSettings.rangeM)} m`;
     if (cameraHeightValue) cameraHeightValue.textContent = `+${Math.round(cameraSettings.heightM)} m`;
     if (cameraPitchValue) cameraPitchValue.textContent = `${Math.round(cameraSettings.pitchDeg)} deg`;
@@ -412,6 +413,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function syncCameraControls() {
+    if (!cameraSettings) return;
     if (cameraRangeInput) cameraRangeInput.value = String(cameraSettings.rangeM);
     if (cameraHeightInput) cameraHeightInput.value = String(cameraSettings.heightM);
     if (cameraPitchInput) cameraPitchInput.value = String(cameraSettings.pitchDeg);
@@ -420,6 +422,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function updateCameraSetting(key, value) {
+    if (!cameraSettings) return;
     const next = finiteNumber(value);
     if (next === null) return;
     if (key === 'rangeM') cameraSettings.rangeM = clamp(next, 60, 260);
@@ -1187,6 +1190,7 @@ cw_header('Cockpit Recorder Replay');
     safeRenderCesium(true);
   }
 
+  cameraSettings = loadCameraSettings();
   syncCameraControls();
   loadReplay();
 })();
