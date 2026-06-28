@@ -29,62 +29,69 @@ cw_header('Cockpit Recorder Replay');
 ?>
 <link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
-.replay-page { display: grid; gap: 16px; }
-.replay-card { background: #fff; border: 1px solid rgba(15, 23, 42, .12); border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(15, 23, 42, .07); }
-.replay-muted { color: #64748b; font-size: 13px; }
-.replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
-.replay-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-.replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
-.replay-range { width: 100%; accent-color: #1d4ed8; }
-.replay-audio { width: 100%; margin-top: 10px; }
+.replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; margin: 16px; }
+.replay-immersive {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 88px);
+  min-height: 480px;
+  background: #000;
+  overflow: hidden;
+}
+.replay-immersive .cesium-cockpit { position: absolute; inset: 0; }
+.replay-immersive .cesium-viewer,
+.replay-immersive .cesium-viewer-cesiumWidget,
+.replay-immersive .cesium-widget,
+.replay-immersive .cesium-widget canvas { width: 100% !important; height: 100% !important; }
+.replay-immersive .cesium-viewer-bottom,
+.replay-immersive .cesium-viewer-toolbar,
+.replay-immersive .cesium-viewer-animationContainer,
+.replay-immersive .cesium-viewer-timelineContainer,
+.replay-immersive .cesium-viewer-fullscreenContainer,
+.replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
+.replay-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(6px);
+}
+.replay-dock a { color: #e2e8f0; font-size: 13px; text-decoration: none; white-space: nowrap; }
+.replay-dock a:hover { color: #fff; }
 .replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 8px 14px; cursor: pointer; }
-.cesium-cockpit { position: relative; width: 100%; height: min(72vh, 720px); background: #000; border-radius: 8px; overflow: hidden; }
-.cesium-cockpit .cesium-viewer-bottom,
-.cesium-cockpit .cesium-viewer-toolbar,
-.cesium-cockpit .cesium-viewer-animationContainer,
-.cesium-cockpit .cesium-viewer-timelineContainer,
-.cesium-cockpit .cesium-viewer-fullscreenContainer { display: none !important; }
-.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #0f172a, #1d4ed8); text-align: center; padding: 28px; z-index: 10; }
+.replay-range { width: 100%; accent-color: #60a5fa; margin: 0; }
+.replay-time { color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.replay-load { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; color: #e2e8f0; background: #0f172a; font-size: 14px; }
+.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: #0f172a; text-align: center; padding: 28px; z-index: 10; }
 </style>
 
-<div class="replay-page">
-  <section class="replay-card">
-    <div class="replay-topbar">
-      <div>
-        <h2 style="margin:0">Cockpit Recorder Replay</h2>
-        <?php if ($recording): ?>
-          <div class="replay-muted">
-            <?= h((string)($recording['recording_uid'] ?? '')) ?>
-            <?php if (!empty($recording['aircraft_registration']) || !empty($recording['aircraft_display_name'])): ?>
-              · <?= h((string)($recording['aircraft_display_name'] ?: $recording['aircraft_registration'])) ?>
-            <?php endif; ?>
-          </div>
-        <?php endif; ?>
-      </div>
-      <div>
-        <a href="/admin/cockpit_recorder.php">Back to uploads</a>
-        <?php if ($recording): ?>
-          · <a href="/admin/cockpit_recorder_g3x.php?id=<?= h((string)$id) ?>">G3X CSV</a>
-        <?php endif; ?>
-      </div>
+<?php if ($error !== ''): ?>
+  <div class="replay-error"><?= h($error) ?></div>
+<?php else: ?>
+  <div
+    class="replay-immersive"
+    data-replay-id="<?= h((string)$id) ?>"
+    data-replay-mode="cesium-only"
+    data-cesium-token="<?= h($cesiumIonToken) ?>"
+  >
+    <div id="loadStatus" class="replay-load">Loading replay data…</div>
+    <div id="cesiumReplay" class="cesium-cockpit"></div>
+    <audio id="audio" preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
+    <div class="replay-dock">
+      <a href="/admin/cockpit_recorder.php">← Back</a>
+      <button class="replay-button" type="button" id="playButton">Play</button>
+      <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
+      <span id="timeLabel" class="replay-time">0:00</span>
     </div>
-  </section>
-
-  <?php if ($error !== ''): ?>
-    <div class="replay-error"><?= h($error) ?></div>
-  <?php else: ?>
-    <section class="replay-card" data-replay-id="<?= h((string)$id) ?>" data-cesium-token="<?= h($cesiumIonToken) ?>">
-      <div id="loadStatus" class="replay-muted">Loading replay data…</div>
-      <div id="cesiumReplay" class="cesium-cockpit"></div>
-      <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
-      <div class="replay-controls">
-        <button class="replay-button" type="button" id="playButton">Play</button>
-        <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
-        <span id="timeLabel" class="replay-muted">0:00</span>
-      </div>
-    </section>
-  <?php endif; ?>
-</div>
+  </div>
+<?php endif; ?>
 
 <?php if ($error === ''): ?>
 <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/';</script>
@@ -294,7 +301,16 @@ cw_header('Cockpit Recorder Replay');
       });
 
       cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
-      cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+      const controller = cesiumViewer.scene.screenSpaceCameraController;
+      controller.enableCollisionDetection = false;
+      controller.enableRotate = false;
+      controller.enableTranslate = false;
+      controller.enableZoom = false;
+      controller.enableTilt = false;
+      controller.enableLook = false;
+      if (cesiumViewer.cesiumWidget && cesiumViewer.cesiumWidget.creditContainer) {
+        cesiumViewer.cesiumWidget.creditContainer.style.display = 'none';
+      }
 
       cesiumReady = true;
       renderCesium();
