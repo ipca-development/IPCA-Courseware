@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS ipca_cockpit_reconstruction_jobs (
   recording_id    BIGINT UNSIGNED NOT NULL,
   status          VARCHAR(32) NOT NULL DEFAULT 'pending',
   progress        TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  progress_stage  VARCHAR(64) NULL,
+  progress_message VARCHAR(512) NULL,
   error_message   TEXT NULL,
   started_at      DATETIME NULL,
   completed_at    DATETIME NULL,

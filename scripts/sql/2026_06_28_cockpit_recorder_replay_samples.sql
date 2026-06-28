@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS ipca_cockpit_replay_samples (
   attitude_quality     VARCHAR(16) NOT NULL DEFAULT 'unknown',
   created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_ipca_cockpit_replay_samples_recording_index (recording_id, sample_index),
-  KEY idx_ipca_cockpit_replay_samples_recording_time (recording_id, time_s),
+  UNIQUE KEY uk_ipca_cockpit_replay_samples_recording_time (recording_id, time_s),
   CONSTRAINT fk_ipca_cockpit_replay_samples_recording
     FOREIGN KEY (recording_id) REFERENCES ipca_cockpit_recordings(id)
     ON DELETE CASCADE

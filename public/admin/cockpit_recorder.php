@@ -86,8 +86,10 @@ function cockpit_admin_reconstruction_summary(array $row): array
 
 $error = trim((string)($_GET['error'] ?? ''));
 $notice = '';
+$pollRecordingId = 0;
 if ((string)($_GET['reconstruction'] ?? '') === 'started') {
-    $notice = 'Reconstruction started in the background. Refresh this page in a minute, then open Replay when the status is ready.';
+    $pollRecordingId = (int)($_GET['id'] ?? 0);
+    $notice = 'Reconstruction started in the background. Progress updates automatically below.';
 }
 $recordings = array();
 $service = null;
@@ -112,9 +114,17 @@ cw_header('Cockpit Recorder POC');
 .cockpit-table th { color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .cockpit-badge { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; background: #e2e8f0; color: #334155; }
 .cockpit-badge-ready, .cockpit-badge-uploaded { background: #dcfce7; color: #166534; }
-.cockpit-badge-queued, .cockpit-badge-transcribing { background: #dbeafe; color: #1d4ed8; }
+.cockpit-badge-queued, .cockpit-badge-transcribing, .cockpit-badge-processing { background: #dbeafe; color: #1d4ed8; }
 .cockpit-badge-failed { background: #fee2e2; color: #991b1b; }
 .cockpit-badge-warning { background: #fef3c7; color: #92400e; }
+.cockpit-recon-progress { display: grid; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; }
+.cockpit-recon-progress[hidden] { display: none !important; }
+.cockpit-recon-progress-bar { height: 10px; border-radius: 999px; background: #dbeafe; overflow: hidden; }
+.cockpit-recon-progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, #2563eb, #1d4ed8); transition: width .35s ease; }
+.cockpit-recon-progress-stage { font-size: 12px; color: #1e3a8a; }
+.cockpit-recon-progress-message { font-size: 12px; color: #334155; }
+.cockpit-recon-progress-times { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11px; color: #64748b; }
+.cockpit-recon-stale { margin-top: 2px; }
 .cockpit-transcript { max-width: 520px; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; font-size: 13px; }
 .cockpit-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
 .cockpit-notice { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; border-radius: 10px; padding: 12px; }
@@ -379,9 +389,28 @@ cw_header('Cockpit Recorder POC');
             <td>
               <div class="cockpit-actions">
                 <div>
-                  <span class="cockpit-badge cockpit-badge-<?= h($reconStatus) ?>"><?= h($reconStatus) ?></span>
-                  <div class="cockpit-muted">Timeline: <?= h($timelineStatus) ?></div>
+                  <span class="cockpit-badge cockpit-badge-<?= h($reconStatus) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span>
+                  <div class="cockpit-muted">Timeline: <span data-timeline-badge="<?= $id ?>"><?= h($timelineStatus) ?></span></div>
                   <div class="cockpit-muted">ADS-B: <?= h($adsbDisplayStatus) ?></div>
+                </div>
+                <div
+                  class="cockpit-recon-progress"
+                  id="recon-progress-<?= $id ?>"
+                  data-recording-id="<?= $id ?>"
+                  <?php if ($reconStatus !== 'processing' && $pollRecordingId !== $id): ?>hidden<?php endif; ?>
+                >
+                  <div class="cockpit-recon-progress-bar" aria-hidden="true">
+                    <div class="cockpit-recon-progress-fill" data-recon-fill="<?= $id ?>" style="width:0%"></div>
+                  </div>
+                  <div class="cockpit-recon-progress-meta">
+                    <strong class="cockpit-recon-progress-stage" data-recon-stage="<?= $id ?>">Starting reconstruction…</strong>
+                    <div class="cockpit-recon-progress-message" data-recon-message="<?= $id ?>">Waiting for worker…</div>
+                    <div class="cockpit-recon-progress-times">
+                      <span data-recon-elapsed="<?= $id ?>">Elapsed: --</span>
+                      <span data-recon-updated="<?= $id ?>">Last update: --</span>
+                    </div>
+                    <div class="cockpit-recon-stale cockpit-badge cockpit-badge-warning" data-recon-stale="<?= $id ?>" hidden>No update for 60+ seconds</div>
+                  </div>
                 </div>
                 <div class="cockpit-summary-grid">
                   <strong>ADS-B enrichment</strong>
@@ -497,6 +526,145 @@ cw_header('Cockpit Recorder POC');
     </div>
   </section>
 </div>
+
+<script>
+(function () {
+  const stageLabels = {
+    queued: 'Queued',
+    loading_raw: 'Loading raw GPS/AHRS/G3X/ADS-B',
+    building_canonical_samples: 'Building canonical samples',
+    detecting_phases_events: 'Detecting phases and events',
+    computing_derived_values: 'Computing derived values',
+    building_replay_v2: 'Building replay v2 fixed timeline',
+    inserting_replay_v2_samples: 'Inserting replay v2 samples',
+    finalizing: 'Finalizing',
+    ready: 'Ready',
+    failed: 'Failed'
+  };
+
+  const pollMs = 3000;
+  const timers = new Map();
+
+  function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return '--';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  }
+
+  function stageLabel(stage) {
+    return stageLabels[stage] || (stage ? stage.replace(/_/g, ' ') : 'Processing');
+  }
+
+  function updatePanel(recordingId, payload) {
+    const panel = document.getElementById('recon-progress-' + recordingId);
+    const badge = document.querySelector('[data-recon-badge="' + recordingId + '"]');
+    const timelineBadge = document.querySelector('[data-timeline-badge="' + recordingId + '"]');
+    const fill = document.querySelector('[data-recon-fill="' + recordingId + '"]');
+    const stageEl = document.querySelector('[data-recon-stage="' + recordingId + '"]');
+    const messageEl = document.querySelector('[data-recon-message="' + recordingId + '"]');
+    const elapsedEl = document.querySelector('[data-recon-elapsed="' + recordingId + '"]');
+    const updatedEl = document.querySelector('[data-recon-updated="' + recordingId + '"]');
+    const staleEl = document.querySelector('[data-recon-stale="' + recordingId + '"]');
+    if (!panel) return;
+
+    const job = payload && payload.job ? payload.job : null;
+    const reconstructionStatus = payload ? payload.reconstruction_status : '';
+    const timelineStatus = payload ? payload.timeline_status : '';
+    const active = reconstructionStatus === 'processing' || (job && ['queued', 'processing'].includes(job.status));
+
+    if (!active && reconstructionStatus !== 'processing') {
+      panel.hidden = true;
+      stopPolling(recordingId);
+    } else {
+      panel.hidden = false;
+    }
+
+    if (badge && reconstructionStatus) {
+      badge.textContent = reconstructionStatus;
+      badge.className = 'cockpit-badge cockpit-badge-' + reconstructionStatus;
+    }
+    if (timelineBadge && timelineStatus) {
+      timelineBadge.textContent = timelineStatus;
+    }
+
+    if (!job) {
+      if (stageEl) stageEl.textContent = 'Waiting for reconstruction job…';
+      if (messageEl) messageEl.textContent = 'Worker has not reported progress yet.';
+      return;
+    }
+
+    const percent = Math.max(0, Math.min(100, Number(job.progress_percent) || 0));
+    if (fill) fill.style.width = percent + '%';
+    if (stageEl) stageEl.textContent = stageLabel(job.progress_stage) + ' · ' + percent + '%';
+    if (messageEl) messageEl.textContent = job.progress_message || 'Working…';
+    if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + formatDuration(job.elapsed_seconds);
+    if (updatedEl) updatedEl.textContent = 'Last update: ' + formatTimestamp(job.updated_at);
+    if (staleEl) staleEl.hidden = !job.stale;
+
+    if (job.status === 'ready' || job.status === 'failed' || reconstructionStatus === 'ready' || reconstructionStatus === 'failed') {
+      stopPolling(recordingId);
+      if (job.status === 'ready' || reconstructionStatus === 'ready') {
+        panel.hidden = true;
+      } else if (job.status === 'failed' || reconstructionStatus === 'failed') {
+        if (stageEl) stageEl.textContent = 'Failed';
+        if (messageEl) messageEl.textContent = job.error_message || job.progress_message || 'Reconstruction failed.';
+        if (staleEl) staleEl.hidden = true;
+      }
+    }
+  }
+
+  async function pollRecording(recordingId) {
+    try {
+      const response = await fetch('/admin/api/cockpit_recorder_reconstruction_status.php?id=' + encodeURIComponent(recordingId), {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+      const payload = await response.json();
+      if (!payload || !payload.ok) return;
+      updatePanel(recordingId, payload);
+    } catch (error) {
+      console.warn('Reconstruction status poll failed for recording ' + recordingId, error);
+    }
+  }
+
+  function stopPolling(recordingId) {
+    const timer = timers.get(recordingId);
+    if (timer) {
+      clearInterval(timer);
+      timers.delete(recordingId);
+    }
+  }
+
+  function startPolling(recordingId) {
+    if (!recordingId || timers.has(recordingId)) return;
+    pollRecording(recordingId);
+    timers.set(recordingId, setInterval(function () {
+      pollRecording(recordingId);
+    }, pollMs));
+  }
+
+  document.querySelectorAll('.cockpit-recon-progress[data-recording-id]').forEach(function (panel) {
+    if (panel.hidden) return;
+    const recordingId = panel.getAttribute('data-recording-id');
+    if (!recordingId) return;
+    startPolling(recordingId);
+  });
+
+  <?php if ($pollRecordingId > 0): ?>
+  startPolling(String(<?= $pollRecordingId ?>));
+  <?php endif; ?>
+})();
+</script>
 
 <?php
 cw_footer();

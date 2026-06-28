@@ -56,7 +56,7 @@ cw_header('Cockpit Recorder Replay');
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto auto 1fr auto;
   gap: 10px;
   align-items: center;
   padding: 10px 14px;
@@ -70,6 +70,35 @@ cw_header('Cockpit Recorder Replay');
 .replay-time { color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .replay-load { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; color: #e2e8f0; background: #0f172a; font-size: 14px; }
 .cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: #0f172a; text-align: center; padding: 28px; z-index: 10; }
+.replay-select { border: 1px solid rgba(226, 232, 240, .45); border-radius: 8px; background: rgba(15, 23, 42, .9); color: #e2e8f0; padding: 7px 9px; }
+.replay-debug {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 21;
+  min-width: 260px;
+  max-width: 340px;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, .78);
+  border: 1px solid rgba(148, 163, 184, .35);
+  border-radius: 10px;
+  padding: 10px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+.replay-terrain-warning {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 21;
+  max-width: 340px;
+  color: #92400e;
+  background: rgba(254, 243, 199, .94);
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+}
 </style>
 
 <?php if ($error !== ''): ?>
@@ -83,10 +112,17 @@ cw_header('Cockpit Recorder Replay');
   >
     <div id="loadStatus" class="replay-load">Loading replay data…</div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
+    <div id="replayDebug" class="replay-debug">Replay debug initializing...</div>
+    <div id="terrainWarning" class="replay-terrain-warning" hidden></div>
     <audio id="audio" preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
     <div class="replay-dock">
       <a href="/admin/cockpit_recorder.php">← Back</a>
       <button class="replay-button" type="button" id="playButton">Play</button>
+      <select class="replay-select" id="cameraMode" aria-label="Camera mode">
+        <option value="follow_heading" selected>Follow heading</option>
+        <option value="north_up">North up</option>
+        <option value="free">Free camera</option>
+      </select>
       <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
       <span id="timeLabel" class="replay-time">0:00</span>
     </div>
@@ -106,6 +142,9 @@ cw_header('Cockpit Recorder Replay');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
   const playButton = document.getElementById('playButton');
+  const cameraModeSelect = document.getElementById('cameraMode');
+  const debugOverlay = document.getElementById('replayDebug');
+  const terrainWarning = document.getElementById('terrainWarning');
   let payload = null;
   let activeT = 0;
   let animationFrame = null;
@@ -114,10 +153,22 @@ cw_header('Cockpit Recorder Replay');
   let displayCamera = null;
   let lastRenderMs = null;
   let positionKeyframes = [];
+  let cameraMode = 'follow_heading';
+  let terrainEnabled = false;
+  let terrainStatus = 'not_initialized';
+  let terrainWarningMessage = '';
+  let lastTerrainSampleMs = 0;
+  let lastTerrainHeightM = null;
+  let lastTerrainRequestKey = '';
+  let lastVisualAltitudeM = null;
 
-  const CAMERA_ROT_SMOOTH_RATE = 22;
+  const CAMERA_ROT_SMOOTH_RATE = 7;
+  const CAMERA_ALTITUDE_SMOOTH_RATE = 3;
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
+  const CHASE_RANGE_M = 170;
+  const CHASE_HEIGHT_M = 65;
+  const CHASE_PITCH_DEG = -28;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -149,13 +200,37 @@ cw_header('Cockpit Recorder Replay');
   };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
+    if (Number.isFinite(Number(sample.altitude_ft_msl))) return Number(sample.altitude_ft_msl);
     if (Number.isFinite(Number(sample.altitude_ft))) return Number(sample.altitude_ft);
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
       : (Number.isFinite(Number(sample.estimated_indicated_altitude_ft)) ? Number(sample.estimated_indicated_altitude_ft)
       : (Number.isFinite(Number(sample.field_calibrated_true_altitude_ft)) ? Number(sample.field_calibrated_true_altitude_ft)
       : (Number.isFinite(Number(sample.gps_altitude_ft)) ? Number(sample.gps_altitude_ft) : 0)));
   };
-  const cameraEyeAltitudeM = (sample) => Math.max(0, feetToMeters(bestAltitudeFt(sample))) + PILOT_EYE_HEIGHT_M;
+  const isGroundSample = (sample) => {
+    const speed = Number(sample && (sample.ground_speed_kt ?? sample.groundspeed_kt));
+    const phase = String((sample && sample.phase) || '').toLowerCase();
+    return (Number.isFinite(speed) && speed < 5)
+      || phase.includes('preflight')
+      || phase.includes('taxi')
+      || phase.includes('ground')
+      || phase.includes('block');
+  };
+  const rawAltitudeM = (sample) => feetToMeters(bestAltitudeFt(sample));
+  const visualAltitudeM = (sample) => {
+    const msl = rawAltitudeM(sample);
+    if (Number.isFinite(Number(sample && sample.visual_altitude_ft))) {
+      return feetToMeters(Number(sample.visual_altitude_ft));
+    }
+    if (isGroundSample(sample) && Number.isFinite(lastTerrainHeightM)) {
+      return Math.max(msl, lastTerrainHeightM + 2);
+    }
+    if (Number.isFinite(lastTerrainHeightM)) {
+      return Math.max(msl, lastTerrainHeightM + 2);
+    }
+    return msl;
+  };
+  const cameraEyeAltitudeM = (sample) => visualAltitudeM(sample) + PILOT_EYE_HEIGHT_M;
 
   const lerpAngleDeg = (from, to, alpha) => {
     const start = Number(from);
@@ -252,16 +327,33 @@ cw_header('Cockpit Recorder Replay');
     const pos = positionAt(t);
     const s = sampleAt(t);
     if (!pos || !s) return null;
-    const heading = Number.isFinite(Number(s.camera_heading_deg))
+    const aircraftHeading = Number.isFinite(Number(s.camera_heading_deg))
       ? normalizeDeg(Number(s.camera_heading_deg))
       : trueHeadingFromSample(s);
+    const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
+    const altitudeM = visualAltitudeM(s);
     return {
       lat: pos.lat,
       lon: pos.lon,
-      altitudeM: pos.altitudeM,
+      altitudeM,
+      rawAltitudeM: rawAltitudeM(s),
+      visualAltitudeM: altitudeM,
+      aircraftHeading,
       heading,
-      pitch: Math.max(-30, Math.min(30, Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0)),
-      roll: Math.max(-45, Math.min(45, Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0)),
+      pitch: CHASE_PITCH_DEG,
+      roll: 0,
+    };
+  }
+
+  function offsetLatLon(lat, lon, headingDeg, backMeters, rightMeters) {
+    const headingRad = degToRad(headingDeg);
+    const north = -Math.cos(headingRad) * backMeters + Math.sin(headingRad) * rightMeters;
+    const east = -Math.sin(headingRad) * backMeters - Math.cos(headingRad) * rightMeters;
+    const dLat = north / 6378137;
+    const dLon = east / (6378137 * Math.cos(degToRad(lat)));
+    return {
+      lat: lat + dLat * 180 / Math.PI,
+      lon: lon + dLon * 180 / Math.PI,
     };
   }
 
@@ -270,35 +362,60 @@ cw_header('Cockpit Recorder Replay');
     lastRenderMs = null;
   }
 
+  function applyCameraModeControls() {
+    if (!cesiumViewer) return;
+    const controller = cesiumViewer.scene.screenSpaceCameraController;
+    const free = cameraMode === 'free';
+    controller.enableRotate = free;
+    controller.enableTranslate = free;
+    controller.enableZoom = free;
+    controller.enableTilt = free;
+    controller.enableLook = free;
+  }
+
   function renderCesium(snap = false) {
     if (!cesiumReady || !cesiumViewer) return;
+    if (cameraMode === 'free') {
+      updateTerrainHeight(sampleAt(activeT));
+      updateDebugOverlay(sampleAt(activeT), displayCamera);
+      return;
+    }
     const now = performance.now();
     const dtSec = lastRenderMs === null ? 1 / 60 : Math.min(0.1, Math.max(1 / 120, (now - lastRenderMs) / 1000));
     lastRenderMs = now;
+    const sample = sampleAt(activeT);
+    updateTerrainHeight(sample);
     const target = targetCameraAt(activeT);
     if (!target) return;
 
     let view = target;
     if (!snap && displayCamera) {
       const rotAlpha = smoothFactor(CAMERA_ROT_SMOOTH_RATE, dtSec);
+      const altAlpha = smoothFactor(CAMERA_ALTITUDE_SMOOTH_RATE, dtSec);
       view = {
         lat: target.lat,
         lon: target.lon,
-        altitudeM: target.altitudeM,
+        altitudeM: displayCamera.altitudeM + (target.altitudeM - displayCamera.altitudeM) * altAlpha,
+        rawAltitudeM: target.rawAltitudeM,
+        visualAltitudeM: displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * altAlpha,
+        aircraftHeading: target.aircraftHeading,
         heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
-        pitch: displayCamera.pitch + (target.pitch - displayCamera.pitch) * rotAlpha,
-        roll: displayCamera.roll + (target.roll - displayCamera.roll) * rotAlpha,
+        pitch: CHASE_PITCH_DEG,
+        roll: 0,
       };
     }
     displayCamera = Object.assign({}, view);
+    lastVisualAltitudeM = view.visualAltitudeM;
+    const cameraPos = offsetLatLon(view.lat, view.lon, view.heading, CHASE_RANGE_M, 0);
     cesiumViewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(view.lon, view.lat, view.altitudeM),
+      destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, view.altitudeM + CHASE_HEIGHT_M),
       orientation: {
         heading: degToRad(view.heading),
         pitch: degToRad(view.pitch),
         roll: degToRad(view.roll),
       },
     });
+    updateDebugOverlay(sample, view);
   }
 
   function sampleAt(t) {
@@ -340,6 +457,9 @@ cw_header('Cockpit Recorder Replay');
       t: Number(t),
       lat: lerp(before.lat, after.lat),
       lon: lerp(before.lon, after.lon),
+      altitude_ft: lerp(before.altitude_ft, after.altitude_ft),
+      altitude_ft_msl: lerp(before.altitude_ft_msl, after.altitude_ft_msl),
+      visual_altitude_ft: lerp(before.visual_altitude_ft, after.visual_altitude_ft),
       gps_altitude_ft: lerp(before.gps_altitude_ft, after.gps_altitude_ft),
       baro_altitude_ft: lerp(before.baro_altitude_ft, after.baro_altitude_ft),
       vertical_speed_fpm: lerp(before.vertical_speed_fpm, after.vertical_speed_fpm),
@@ -371,7 +491,54 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
-  function initCesium() {
+  function updateTerrainHeight(sample) {
+    if (!terrainEnabled || !cesiumViewer || !sample || typeof Cesium === 'undefined') return;
+    const lat = Number(sample.lat);
+    const lon = Number(sample.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const now = performance.now();
+    const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    if (now - lastTerrainSampleMs < 2000 && key === lastTerrainRequestKey) return;
+    lastTerrainSampleMs = now;
+    lastTerrainRequestKey = key;
+    const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
+    Cesium.sampleTerrainMostDetailed(cesiumViewer.terrainProvider, [cartographic])
+      .then((updated) => {
+        if (updated && updated[0] && Number.isFinite(updated[0].height)) {
+          lastTerrainHeightM = updated[0].height;
+        }
+      })
+      .catch(() => {
+        terrainStatus = 'height_unavailable';
+      });
+  }
+
+  function updateDebugOverlay(sample, view) {
+    if (!debugOverlay) return;
+    const heading = sample && Number.isFinite(Number(sample.heading_deg)) ? normalizeDeg(Number(sample.heading_deg)) : null;
+    const cameraHeading = view && Number.isFinite(Number(view.heading)) ? normalizeDeg(Number(view.heading)) : null;
+    const pitch = sample && Number.isFinite(Number(sample.pitch_deg)) ? Number(sample.pitch_deg) : null;
+    const roll = sample && Number.isFinite(Number(sample.bank_deg ?? sample.roll_deg)) ? Number(sample.bank_deg ?? sample.roll_deg) : null;
+    const altitudeFt = sample && Number.isFinite(Number(sample.altitude_ft_msl ?? sample.altitude_ft)) ? Number(sample.altitude_ft_msl ?? sample.altitude_ft) : null;
+    const visualFt = Number.isFinite(lastVisualAltitudeM) ? lastVisualAltitudeM / 0.3048 : null;
+    const vs = sample && Number.isFinite(Number(sample.vertical_speed_fpm)) ? Number(sample.vertical_speed_fpm) : null;
+    const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
+    debugOverlay.textContent = [
+      `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,
+      `aircraft heading: ${heading === null ? '--' : heading.toFixed(1)} deg`,
+      `camera heading: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
+      `camera mode: ${cameraMode}`,
+      `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
+      `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
+      `altitude MSL: ${altitudeFt === null ? '--' : altitudeFt.toFixed(1)} ft`,
+      `visual altitude: ${visualFt === null ? '--' : visualFt.toFixed(1)} ft`,
+      `vertical speed: ${vs === null ? '--' : vs.toFixed(1)} fpm`,
+      `terrain enabled: ${terrainEnabled ? 'yes' : 'no'} (${terrainStatus})`,
+      `terrain under aircraft: ${terrain}`,
+    ].join('\n');
+  }
+
+  async function initCesium() {
     try {
       const cesiumReplay = document.getElementById('cesiumReplay');
       if (cesiumReady || !cesiumReplay || !payload) return;
@@ -400,14 +567,29 @@ cw_header('Cockpit Recorder Replay');
         shouldAnimate: false,
       });
 
+      try {
+        if (typeof Cesium.createWorldTerrainAsync === 'function') {
+          cesiumViewer.terrainProvider = await Cesium.createWorldTerrainAsync();
+        } else if (typeof Cesium.createWorldTerrain === 'function') {
+          cesiumViewer.terrainProvider = Cesium.createWorldTerrain();
+        } else {
+          throw new Error('World terrain API is unavailable in this Cesium build.');
+        }
+        terrainEnabled = true;
+        terrainStatus = 'enabled';
+      } catch (terrainErr) {
+        terrainEnabled = false;
+        terrainStatus = 'ellipsoid_fallback';
+        terrainWarningMessage = 'Cesium terrain failed to load. Using ellipsoid.';
+        if (terrainWarning) {
+          terrainWarning.textContent = terrainWarningMessage;
+          terrainWarning.hidden = false;
+        }
+      }
       cesiumViewer.scene.globe.depthTestAgainstTerrain = false;
       const controller = cesiumViewer.scene.screenSpaceCameraController;
       controller.enableCollisionDetection = false;
-      controller.enableRotate = false;
-      controller.enableTranslate = false;
-      controller.enableZoom = false;
-      controller.enableTilt = false;
-      controller.enableLook = false;
+      applyCameraModeControls();
       if (cesiumViewer.cesiumWidget && cesiumViewer.cesiumWidget.creditContainer) {
         cesiumViewer.cesiumWidget.creditContainer.style.display = 'none';
       }
@@ -457,6 +639,12 @@ cw_header('Cockpit Recorder Replay');
     safeRenderCesium(false);
   }
 
+  cameraModeSelect.addEventListener('change', () => {
+    cameraMode = cameraModeSelect.value || 'follow_heading';
+    applyCameraModeControls();
+    resetDisplayCamera();
+    safeRenderCesium(true);
+  });
   timeline.addEventListener('input', () => seek(Number(timeline.value), true, true));
   audio.addEventListener('timeupdate', () => {
     if (audio.paused) {
@@ -534,7 +722,7 @@ cw_header('Cockpit Recorder Replay');
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
     timeline.max = String(maxT);
     try {
-      initCesium();
+      await initCesium();
     } catch (err) {
       showCesiumError(String(err.message || err));
     }

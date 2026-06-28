@@ -10,6 +10,11 @@ $options = array();
 foreach ($argv ?? array() as $arg) {
     if (str_starts_with($arg, '--recording-id=')) {
         $recordingId = trim(substr($arg, strlen('--recording-id=')));
+    } elseif (str_starts_with($arg, '--job-id=')) {
+        $value = trim(substr($arg, strlen('--job-id=')));
+        if (is_numeric($value)) {
+            $options['job_id'] = (int)$value;
+        }
     } elseif (str_starts_with($arg, '--altimeter-setting-inhg=')) {
         $value = trim(substr($arg, strlen('--altimeter-setting-inhg=')));
         if (is_numeric($value)) {
@@ -41,8 +46,20 @@ try {
         exit(1);
     }
 
+    $canonicalCount = (int)($result['sample_count'] ?? 0);
+    $replayCount = (int)($result['replay_sample_count'] ?? 0);
+    $totalDuration = is_numeric($result['total_duration_s'] ?? null) ? (float)$result['total_duration_s'] : null;
+
     echo 'Cockpit recorder reconstruction ' . $recordingId . ' completed with '
-        . (int)($result['sample_count'] ?? 0) . ' samples.' . PHP_EOL;
+        . number_format($canonicalCount) . ' canonical samples.'
+        . ($replayCount > 0 ? ' Replay v2: ' . number_format($replayCount) . ' samples.' : '')
+        . PHP_EOL;
+    if ($totalDuration !== null) {
+        echo 'Total duration: ' . $totalDuration . 's' . PHP_EOL;
+    }
+    if (!empty($result['profiling']) && is_array($result['profiling'])) {
+        echo 'Reconstruction phase timing (seconds): ' . json_encode($result['profiling'], JSON_UNESCAPED_SLASHES) . PHP_EOL;
+    }
     exit(0);
 } catch (Throwable $e) {
     try {

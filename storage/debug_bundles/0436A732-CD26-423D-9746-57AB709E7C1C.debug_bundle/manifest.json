@@ -1,0 +1,30 @@
+{
+    "generated_at_utc": "2026-06-28T02:06:35+00:00",
+    "recording_id": 22,
+    "recording_uid": "0436A732-CD26-423D-9746-57AB709E7C1C",
+    "aircraft": "N397EA",
+    "duration_s": 3029.341,
+    "files": [
+        {
+            "name": "manifest.json",
+            "included": true
+        },
+        {
+            "name": "replay.json",
+            "included": true,
+            "note": "v1 canonical replay (9510 samples)"
+        },
+        {
+            "name": "0436A732-CD26-423D-9746-57AB709E7C1C.gps.json",
+            "included": true
+        },
+        {
+            "name": "0436A732-CD26-423D-9746-57AB709E7C1C.ahrs.json",
+            "included": true
+        },
+        {
+            "name": "0436A732-CD26-423D-9746-57AB709E7C1C.g3x.csv",
+            "included": true
+        }
+    ]
+}

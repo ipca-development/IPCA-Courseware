@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CockpitRecorderService.php';
 require_once __DIR__ . '/CockpitReplayPipeline.php';
+require_once __DIR__ . '/CockpitReconstructionProfiler.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/PfdProfileService.php';
 require_once __DIR__ . '/CockpitAircraftService.php';
@@ -19,10 +20,25 @@ final class CockpitReconstructionService
     private const JOB_TABLE = 'ipca_cockpit_reconstruction_jobs';
     private const SAMPLE_TABLE = 'ipca_cockpit_flight_samples';
     private const REPLAY_SAMPLE_TABLE = 'ipca_cockpit_replay_samples';
+    private const REPLAY_INSERT_BATCH_SIZE = 750;
+    private const REPLAY_INSERT_PROGRESS_INTERVAL = 750;
     private const PHASE_TABLE = 'ipca_cockpit_flight_phases';
     private const EVENT_TABLE = 'ipca_cockpit_timeline_events';
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const ADSB_OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
+
+    public const STAGE_QUEUED = 'queued';
+    public const STAGE_LOADING = 'loading_raw';
+    public const STAGE_CANONICAL = 'building_canonical_samples';
+    public const STAGE_DETECT = 'detecting_phases_events';
+    public const STAGE_DERIVED = 'computing_derived_values';
+    public const STAGE_REPLAY_BUILD = 'building_replay_v2';
+    public const STAGE_REPLAY_INSERT = 'inserting_replay_v2_samples';
+    public const STAGE_FINALIZING = 'finalizing';
+    public const STAGE_READY = 'ready';
+    public const STAGE_FAILED = 'failed';
+
+    private ?PDO $progressPdo = null;
 
     /** @var array<string,mixed> */
     private array $lastAhrsCalibration = array();
@@ -190,7 +206,12 @@ final class CockpitReconstructionService
         }
 
         $recordingId = (int)$recording['id'];
-        $jobId = $this->createJob($recordingId);
+        $runStarted = microtime(true);
+        $jobId = isset($options['job_id']) ? (int)$options['job_id'] : $this->createReconstructionJob($recordingId);
+        if ($jobId <= 0) {
+            throw new RuntimeException('Could not create reconstruction job.');
+        }
+        $this->reportJobProgress($jobId, self::STAGE_LOADING, 5, 'Loading raw GPS, AHRS, G3X, and ADS-B evidence');
         $this->setRecordingStatus($recordingId, 'processing', 'processing', 'not_started', null);
         $inTransaction = false;
 
@@ -202,15 +223,40 @@ final class CockpitReconstructionService
             }
 
             $adsbSamples = $this->loadAdsbOwnship($recordingId);
-            $samples = $this->buildCanonicalSamples($recording, $gpsSamples, $ahrsSamples, $adsbSamples, $options);
+            $gpsForG3X = array_values(array_filter(
+                array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples),
+                fn(array $row): bool => isset($row['seconds'])
+            ));
+            $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X);
+
+            $profiler = new CockpitReconstructionProfiler();
+            $this->reportJobProgress($jobId, self::STAGE_CANONICAL, 12, 'Building canonical merged samples');
+
+            $profiler->start('canonical_build');
+            $samples = $this->buildCanonicalSamples(
+                $recording,
+                $gpsSamples,
+                $ahrsSamples,
+                $adsbSamples,
+                $options,
+                $g3xSamples,
+                function (string $stage, int $percent, string $message) use ($jobId): void {
+                    $this->reportJobProgress($jobId, $stage, $percent, $message);
+                }
+            );
+            $profiler->stop('canonical_build');
+
+            $this->reportJobProgress(
+                $jobId,
+                self::STAGE_DETECT,
+                38,
+                'Detecting flight phases and timeline events (' . number_format(count($samples)) . ' canonical samples)'
+            );
             $timeline = $this->detectTimeline($recording, $samples);
             $replayResult = null;
             if (self::replaySamplesTablePresent($this->pdo)) {
-                $gpsForG3X = array_values(array_filter(
-                    array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples),
-                    fn(array $row): bool => isset($row['seconds'])
-                ));
-                $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X);
+                $this->reportJobProgress($jobId, self::STAGE_REPLAY_BUILD, 48, 'Building replay v2 fixed timeline');
+                $profiler->start('replay_pipeline_build');
                 $replayResult = (new CockpitReplayPipeline())->build(
                     $recording,
                     $gpsSamples,
@@ -218,8 +264,19 @@ final class CockpitReconstructionService
                     $g3xSamples,
                     $timeline['phases']
                 );
+                $profiler->stop('replay_pipeline_build');
+                $profiler->merge($replayResult['profiling']);
+                $replayCount = count($replayResult['samples']);
+                $this->reportJobProgress(
+                    $jobId,
+                    self::STAGE_REPLAY_BUILD,
+                    58,
+                    'Built ' . number_format($replayCount) . ' replay v2 samples'
+                );
             }
             $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
+            $profiling = $profiler->toArray();
+            $summary['reconstruction_profiling'] = $profiling;
             if ($replayResult !== null) {
                 $summary['replay_v2'] = $replayResult['diagnostics'];
             }
@@ -227,27 +284,71 @@ final class CockpitReconstructionService
 
             $this->pdo->beginTransaction();
             $inTransaction = true;
+            $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 60, 'Clearing previous derived reconstruction data');
+            $profiler->start('db_delete_old_replay_samples');
+            $this->deleteReplaySamples($recordingId);
+            $profiler->stop('db_delete_old_replay_samples');
             $this->clearDerivedData($recordingId);
+            $this->reportJobProgress(
+                $jobId,
+                self::STAGE_FINALIZING,
+                62,
+                'Inserting ' . number_format(count($samples)) . ' canonical samples'
+            );
             $this->storeSamples($recordingId, $samples);
             if ($replayResult !== null) {
-                $this->storeReplaySamples($recordingId, $replayResult['samples']);
+                $replayTotal = count($replayResult['samples']);
+                $this->reportJobProgress(
+                    $jobId,
+                    self::STAGE_REPLAY_INSERT,
+                    63,
+                    'Inserted 0 / ' . number_format($replayTotal) . ' replay samples'
+                );
+                $profiler->start('db_insert_new_replay_samples');
+                $this->storeReplaySamples(
+                    $recordingId,
+                    $replayResult['samples'],
+                    function (int $inserted, int $total) use ($jobId): void {
+                        $percent = 63 + (int)floor(($inserted / max(1, $total)) * 24);
+                        $this->reportJobProgress(
+                            $jobId,
+                            self::STAGE_REPLAY_INSERT,
+                            $percent,
+                            'Inserted ' . number_format($inserted) . ' / ' . number_format($total) . ' replay samples'
+                        );
+                    }
+                );
+                $profiler->stop('db_insert_new_replay_samples');
             }
-            $this->updateJob($jobId, 'processing', 45, null);
+            $profiling = $profiler->toArray();
+            $summary['reconstruction_profiling'] = $profiling;
+            $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $profiler->log($recordingId);
+            $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 92, 'Saving phases, events, and summary');
             $this->storePhases($recordingId, $timeline['phases']);
             $this->storeEvents($recordingId, $timeline['events']);
             $this->setRecordingStatus($recordingId, 'ready', 'ready', (string)($recording['adsb_status'] ?? 'not_started'), $json ?: null);
             $this->ensureAdsbScaffold($recording);
-            $this->updateJob($jobId, 'ready', 100, null);
             $this->pdo->commit();
             $inTransaction = false;
+
+            $totalDuration = round(microtime(true) - $runStarted, 3);
+            $readyMessage = 'Reconstruction complete: '
+                . number_format(count($samples)) . ' canonical samples'
+                . ($replayResult !== null ? ', ' . number_format(count($replayResult['samples'])) . ' replay v2 samples' : '')
+                . ' in ' . $totalDuration . 's';
+            $this->reportJobProgress($jobId, self::STAGE_READY, 100, $readyMessage, 'ready');
 
             return array(
                 'ok' => true,
                 'recording_id' => $recordingId,
+                'job_id' => $jobId,
                 'sample_count' => count($samples),
                 'replay_sample_count' => $replayResult !== null ? count($replayResult['samples']) : 0,
                 'phase_count' => count($timeline['phases']),
                 'event_count' => count($timeline['events']),
+                'total_duration_s' => $totalDuration,
+                'profiling' => $profiling,
                 'summary' => $summary,
             );
         } catch (Throwable $e) {
@@ -255,9 +356,90 @@ final class CockpitReconstructionService
                 $this->pdo->rollBack();
             }
             $this->setRecordingStatus($recordingId, 'failed', 'failed', (string)($recording['adsb_status'] ?? 'not_started'), null);
-            $this->updateJob($jobId, 'failed', 0, $e->getMessage());
+            $this->reportJobProgress($jobId, self::STAGE_FAILED, 0, 'Reconstruction failed', 'failed', $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function reconstructionJobStatus(string|int $id): array
+    {
+        $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId((string)$id);
+        if (!$recording) {
+            return array('ok' => false, 'error' => 'Recording not found.');
+        }
+
+        $recordingId = (int)$recording['id'];
+        $job = $this->latestJobForRecording($recordingId);
+        $reconstructionStatus = (string)($recording['reconstruction_status'] ?? 'not_started');
+        if ($job === null) {
+            return array(
+                'ok' => true,
+                'recording_id' => $recordingId,
+                'reconstruction_status' => $reconstructionStatus,
+                'timeline_status' => (string)($recording['timeline_status'] ?? 'not_started'),
+                'job' => null,
+            );
+        }
+
+        $updatedAt = (string)($job['updated_at'] ?? '');
+        $startedAt = (string)($job['started_at'] ?? '');
+        $updatedTs = $updatedAt !== '' ? strtotime($updatedAt) : false;
+        $startedTs = $startedAt !== '' ? strtotime($startedAt) : false;
+        $now = time();
+        $elapsedSeconds = $startedTs !== false ? max(0, $now - $startedTs) : 0;
+        $staleSeconds = $updatedTs !== false ? max(0, $now - $updatedTs) : null;
+
+        return array(
+            'ok' => true,
+            'recording_id' => $recordingId,
+            'reconstruction_status' => $reconstructionStatus,
+            'timeline_status' => (string)($recording['timeline_status'] ?? 'not_started'),
+            'job' => array(
+                'id' => (int)$job['id'],
+                'status' => (string)($job['status'] ?? ''),
+                'progress_percent' => (int)($job['progress'] ?? 0),
+                'progress_stage' => (string)($job['progress_stage'] ?? ''),
+                'progress_message' => (string)($job['progress_message'] ?? ''),
+                'started_at' => $startedAt !== '' ? $startedAt : null,
+                'updated_at' => $updatedAt !== '' ? $updatedAt : null,
+                'completed_at' => !empty($job['completed_at']) ? (string)$job['completed_at'] : null,
+                'error_message' => !empty($job['error_message']) ? (string)$job['error_message'] : null,
+                'elapsed_seconds' => $elapsedSeconds,
+                'stale' => $staleSeconds !== null && $staleSeconds > 60 && in_array((string)($job['status'] ?? ''), array('queued', 'processing'), true),
+                'stale_seconds' => $staleSeconds,
+            ),
+        );
+    }
+
+    public function createReconstructionJob(int $recordingId): int
+    {
+        if ($this->jobProgressColumnsPresent()) {
+            $stmt = $this->pdo->prepare('
+                INSERT INTO ' . self::JOB_TABLE . ' (
+                    recording_id, status, progress, progress_stage, progress_message,
+                    started_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ');
+            $stmt->execute(array(
+                $recordingId,
+                'queued',
+                0,
+                self::STAGE_QUEUED,
+                'Queued for reconstruction',
+            ));
+        } else {
+            $stmt = $this->pdo->prepare('
+                INSERT INTO ' . self::JOB_TABLE . ' (
+                    recording_id, status, progress, started_at, created_at, updated_at
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ');
+            $stmt->execute(array($recordingId, 'queued', 0));
+        }
+
+        return (int)$this->pdo->lastInsertId();
     }
 
     /**
@@ -429,6 +611,7 @@ final class CockpitReconstructionService
             'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
             'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
             'altitude_ft' => $row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null,
+            'altitude_ft_msl' => $row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null,
             'heading_deg' => $row['heading_deg'] !== null ? (float)$row['heading_deg'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'roll_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
@@ -739,15 +922,107 @@ final class CockpitReconstructionService
 
     private function createJob(int $recordingId): int
     {
-        $stmt = $this->pdo->prepare('INSERT INTO ' . self::JOB_TABLE . ' (recording_id, status, progress, started_at, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)');
-        $stmt->execute(array($recordingId, 'processing', 1));
-        return (int)$this->pdo->lastInsertId();
+        return $this->createReconstructionJob($recordingId);
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function latestJobForRecording(int $recordingId): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT *
+            FROM ' . self::JOB_TABLE . '
+            WHERE recording_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        ');
+        $stmt->execute(array($recordingId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    public function reportJobProgress(
+        int $jobId,
+        string $stage,
+        int $percent,
+        string $message,
+        ?string $status = 'processing',
+        ?string $error = null
+    ): void {
+        $percent = max(0, min(100, $percent));
+        $status = $status ?? 'processing';
+        $pdo = $this->progressConnection();
+
+        if ($this->jobProgressColumnsPresent()) {
+            $stmt = $pdo->prepare('
+                UPDATE ' . self::JOB_TABLE . '
+                SET status = ?,
+                    progress = ?,
+                    progress_stage = ?,
+                    progress_message = ?,
+                    error_message = ?,
+                    started_at = IF(started_at IS NULL, CURRENT_TIMESTAMP, started_at),
+                    completed_at = IF(? IN (\'ready\', \'failed\'), CURRENT_TIMESTAMP, completed_at),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ');
+            $stmt->execute(array(
+                $status,
+                $percent,
+                $stage,
+                substr($message, 0, 512),
+                $error,
+                $status,
+                $jobId,
+            ));
+            return;
+        }
+
+        $stmt = $pdo->prepare('
+            UPDATE ' . self::JOB_TABLE . '
+            SET status = ?,
+                progress = ?,
+                error_message = ?,
+                started_at = IF(started_at IS NULL, CURRENT_TIMESTAMP, started_at),
+                completed_at = IF(? IN (\'ready\', \'failed\'), CURRENT_TIMESTAMP, completed_at),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ');
+        $stmt->execute(array($status, $percent, $error, $status, $jobId));
+    }
+
+    private function progressConnection(): PDO
+    {
+        if ($this->progressPdo instanceof PDO) {
+            return $this->progressPdo;
+        }
+
+        require_once __DIR__ . '/db.php';
+        $this->progressPdo = cw_db();
+        return $this->progressPdo;
+    }
+
+    private function jobProgressColumnsPresent(): bool
+    {
+        static $present = null;
+        if ($present !== null) {
+            return $present;
+        }
+        $present = $this->columnPresent(self::JOB_TABLE, 'progress_stage')
+            && $this->columnPresent(self::JOB_TABLE, 'progress_message');
+        return $present;
     }
 
     private function updateJob(int $jobId, string $status, int $progress, ?string $error): void
     {
-        $stmt = $this->pdo->prepare('UPDATE ' . self::JOB_TABLE . ' SET status = ?, progress = ?, error_message = ?, completed_at = IF(? IN (\'ready\', \'failed\'), CURRENT_TIMESTAMP, completed_at), updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-        $stmt->execute(array($status, max(0, min(100, $progress)), $error, $status, $jobId));
+        $stage = $status === 'ready'
+            ? self::STAGE_READY
+            : ($status === 'failed' ? self::STAGE_FAILED : self::STAGE_FINALIZING);
+        $message = $status === 'ready'
+            ? 'Reconstruction complete'
+            : ($status === 'failed' ? ($error ?? 'Reconstruction failed') : 'Finalizing reconstruction');
+        $this->reportJobProgress($jobId, $stage, $progress, $message, $status, $error);
     }
 
     public function markReconstructionFailed(string $id, string $error): void
@@ -757,20 +1032,32 @@ final class CockpitReconstructionService
             return;
         }
 
+        $recordingId = (int)$recording['id'];
         $stmt = $this->pdo->prepare('UPDATE ' . self::RECORDINGS_TABLE . ' SET reconstruction_status = \'failed\', timeline_status = \'failed\', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-        $stmt->execute(array(substr($error, 0, 2000), (int)$recording['id']));
+        $stmt->execute(array(substr($error, 0, 2000), $recordingId));
+
+        $job = $this->latestJobForRecording($recordingId);
+        if ($job !== null && in_array((string)($job['status'] ?? ''), array('queued', 'processing'), true)) {
+            $this->reportJobProgress((int)$job['id'], self::STAGE_FAILED, 0, 'Reconstruction failed', 'failed', substr($error, 0, 2000));
+        }
     }
 
     private function clearDerivedData(int $recordingId): void
     {
         $tables = array(self::SAMPLE_TABLE, self::PHASE_TABLE, self::EVENT_TABLE);
-        if (self::replaySamplesTablePresent($this->pdo)) {
-            $tables[] = self::REPLAY_SAMPLE_TABLE;
-        }
         foreach ($tables as $table) {
             $stmt = $this->pdo->prepare('DELETE FROM ' . $table . ' WHERE recording_id = ?');
             $stmt->execute(array($recordingId));
         }
+    }
+
+    private function deleteReplaySamples(int $recordingId): void
+    {
+        if (!self::replaySamplesTablePresent($this->pdo)) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('DELETE FROM ' . self::REPLAY_SAMPLE_TABLE . ' WHERE recording_id = ?');
+        $stmt->execute(array($recordingId));
     }
 
     private function setRecordingStatus(int $recordingId, string $reconstruction, string $timeline, string $adsb, ?string $summaryJson): void
@@ -1138,10 +1425,19 @@ final class CockpitReconstructionService
      * @param list<array<string,mixed>> $gpsSamples
      * @param list<array<string,mixed>> $ahrsSamples
      * @param list<array<string,mixed>> $adsbSamples
+     * @param list<array{seconds: float, row: array<string,string>}> $g3xSamples
+     * @param callable(string,int,string):void|null $onProgress
      * @return list<array<string,mixed>>
      */
-    private function buildCanonicalSamples(array $recording, array $gpsSamples, array $ahrsSamples, array $adsbSamples, array $options = array()): array
-    {
+    private function buildCanonicalSamples(
+        array $recording,
+        array $gpsSamples,
+        array $ahrsSamples,
+        array $adsbSamples,
+        array $options = array(),
+        array $g3xSamples = array(),
+        ?callable $onProgress = null
+    ): array {
         $gps = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples), fn(array $row): bool => isset($row['seconds'])));
         $ahrs = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAHRS($row), $ahrsSamples), fn(array $row): bool => isset($row['seconds'])));
         $adsb = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAdsbOwnship($row), $adsbSamples), fn(array $row): bool => isset($row['seconds'])));
@@ -1164,6 +1460,10 @@ final class CockpitReconstructionService
         }
         asort($times);
 
+        if ($onProgress !== null) {
+            $onProgress(self::STAGE_CANONICAL, 18, 'Merging GPS, AHRS, and ADS-B into canonical timeline');
+        }
+
         $samples = array();
         $lastGps = null;
         $lastAhrs = null;
@@ -1184,9 +1484,14 @@ final class CockpitReconstructionService
             $samples[] = $sample;
         }
 
+        if ($onProgress !== null) {
+            $onProgress(self::STAGE_DERIVED, 28, 'Computing derived replay values (wind, altitude, vertical speed)');
+        }
         $samples = $this->addDerivedReplayValues($recording, $samples, $options);
-        $g3xSamples = $this->loadG3XNormalized($recording, $gps);
         if ($g3xSamples) {
+            if ($onProgress !== null) {
+                $onProgress(self::STAGE_CANONICAL, 34, 'Applying G3X enrichment to canonical samples');
+            }
             $samples = $this->applyG3XEnrichment($samples, $g3xSamples);
         }
         return $samples;
@@ -2666,36 +2971,56 @@ final class CockpitReconstructionService
 
     /**
      * @param list<array<string,mixed>> $samples
+     * @param callable(int,int):void|null $onProgress inserted,total
      */
-    private function storeReplaySamples(int $recordingId, array $samples): void
+    private function storeReplaySamples(int $recordingId, array $samples, ?callable $onProgress = null): void
     {
-        $stmt = $this->pdo->prepare('
-            INSERT INTO ' . self::REPLAY_SAMPLE_TABLE . ' (
-                recording_id, sample_index, time_s, latitude, longitude, altitude_ft,
-                heading_deg, pitch_deg, roll_deg, ground_speed_kt, vertical_speed_fpm,
-                phase, position_quality, altitude_quality, attitude_quality, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-            )
-        ');
-        foreach ($samples as $sample) {
-            $stmt->execute(array(
-                $recordingId,
-                (int)$sample['sample_index'],
-                (float)$sample['t'],
-                $sample['lat'],
-                $sample['lon'],
-                $sample['altitude_ft'],
-                $sample['heading_deg'],
-                $sample['pitch_deg'],
-                $sample['roll_deg'],
-                $sample['ground_speed_kt'],
-                $sample['vertical_speed_fpm'],
-                (string)($sample['phase'] ?? ''),
-                (string)($sample['position_quality'] ?? 'unknown'),
-                (string)($sample['altitude_quality'] ?? 'unknown'),
-                (string)($sample['attitude_quality'] ?? 'unknown'),
-            ));
+        if ($samples === array()) {
+            return;
+        }
+
+        $columns = '
+            recording_id, sample_index, time_s, latitude, longitude, altitude_ft,
+            heading_deg, pitch_deg, roll_deg, ground_speed_kt, vertical_speed_fpm,
+            phase, position_quality, altitude_quality, attitude_quality, created_at
+        ';
+        $rowPlaceholder = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)';
+        $total = count($samples);
+        $inserted = 0;
+
+        foreach (array_chunk($samples, self::REPLAY_INSERT_BATCH_SIZE) as $chunk) {
+            $placeholders = array();
+            $params = array();
+            foreach ($chunk as $sample) {
+                $placeholders[] = $rowPlaceholder;
+                $params[] = $recordingId;
+                $params[] = (int)$sample['sample_index'];
+                $params[] = (float)$sample['t'];
+                $params[] = $sample['lat'];
+                $params[] = $sample['lon'];
+                $params[] = $sample['altitude_ft'];
+                $params[] = $sample['heading_deg'];
+                $params[] = $sample['pitch_deg'];
+                $params[] = $sample['roll_deg'];
+                $params[] = $sample['ground_speed_kt'];
+                $params[] = $sample['vertical_speed_fpm'];
+                $params[] = (string)($sample['phase'] ?? '');
+                $params[] = (string)($sample['position_quality'] ?? 'unknown');
+                $params[] = (string)($sample['altitude_quality'] ?? 'unknown');
+                $params[] = (string)($sample['attitude_quality'] ?? 'unknown');
+            }
+
+            $sql = 'INSERT INTO ' . self::REPLAY_SAMPLE_TABLE . ' (' . $columns . ') VALUES ' . implode(', ', $placeholders);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $inserted += count($chunk);
+            if ($onProgress !== null && ($inserted >= $total || $inserted % self::REPLAY_INSERT_PROGRESS_INTERVAL === 0)) {
+                $onProgress($inserted, $total);
+            }
+        }
+
+        if ($onProgress !== null && $inserted > 0) {
+            $onProgress($inserted, $total);
         }
     }
 

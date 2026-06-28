@@ -24,7 +24,7 @@ $oatC = trim((string)($_POST['oat_c'] ?? $_GET['oat_c'] ?? ''));
 $mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'async'));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
-function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
+function cockpit_reconstruct_spawn_worker(string $id, array $options, int $jobId): bool
 {
     if (!function_exists('exec')) {
         return false;
@@ -55,6 +55,7 @@ function cockpit_reconstruct_spawn_worker(string $id, array $options): bool
         escapeshellarg($php),
         escapeshellarg($script),
         escapeshellarg('--recording-id=' . $id),
+        escapeshellarg('--job-id=' . (string)$jobId),
     );
     if (isset($options['altimeter_setting_inhg'])) {
         $parts[] = escapeshellarg('--altimeter-setting-inhg=' . (string)$options['altimeter_setting_inhg']);
@@ -147,7 +148,9 @@ try {
             WHERE id = ?
         ")->execute(array((int)$recording['id']));
 
-        if (!cockpit_reconstruct_spawn_worker((string)$recording['id'], $options)) {
+        $jobId = $service->createReconstructionJob((int)$recording['id']);
+        if (!cockpit_reconstruct_spawn_worker((string)$recording['id'], $options, $jobId)) {
+            $service->reportJobProgress($jobId, CockpitReconstructionService::STAGE_FAILED, 0, 'Could not start reconstruction worker', 'failed', 'Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
             $service->markReconstructionFailed((string)$recording['id'], 'Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
             throw new RuntimeException('Could not start reconstruction worker. Check storage/logs permissions and PHP exec availability.');
         }
