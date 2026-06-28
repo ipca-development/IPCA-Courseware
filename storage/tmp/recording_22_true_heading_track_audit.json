@@ -1,0 +1,114 @@
+{
+  "crab_angle_mismatch_count": 0,
+  "diagnostics": {
+    "altitude_baseline_ft": -109,
+    "altitude_source_used": "g3x_or_baro_median_first_60s",
+    "count_altitude_spikes_rejected": 22,
+    "count_attitude_spikes_clamped": 1553,
+    "count_degraded_samples": 1080,
+    "count_empty_phase_samples": 0,
+    "count_ground_altitude_stabilized": 11669,
+    "count_heading_magnetic_to_true_converted": 9502,
+    "count_heading_outliers": 70,
+    "count_heading_track_fallback_samples": 0,
+    "count_low_quality_samples": 29214,
+    "count_original_empty_phase_samples": 18897,
+    "count_position_outliers": 29174,
+    "count_speed_outliers": 209,
+    "count_takeoff_transition_position_corrections": 1,
+    "enu_origin": {
+      "alt_m": -26.240458397126016,
+      "lat": 33.63620990366097,
+      "lon": -116.16116669487434,
+      "time_s": 0.003080010414123535
+    },
+    "first_position_discontinuity_source": "post_interpolation_takeoff_transition",
+    "first_position_discontinuity_time_s": 843.8,
+    "fixed_timestep_s": 0.1,
+    "heading_source_counts": {
+      "ahrs": 7150,
+      "g3x": 2352,
+      "held": 0,
+      "track_fallback": 0
+    },
+    "magnetic_variation_source_counts": {
+      "ahrs_magnetic_variation": 7150,
+      "g3x_magvar": 2352,
+      "ktrm_region_fallback": 0
+    },
+    "max_ground_implied_speed_after_kt": 27.6,
+    "max_ground_implied_speed_before_kt": 1721.9,
+    "max_ground_position_jump_after_m": 15.45,
+    "max_ground_position_jump_before_m": 73.12,
+    "max_ground_vertical_speed_fpm": 0,
+    "max_groundspeed_delta_kt": 0.3,
+    "max_heading_delta_ground_deg": 10,
+    "max_heading_delta_stationary_deg": 0,
+    "max_pitch_delta_state_deg": 3,
+    "max_position_speed_mismatch_kt": 4.7,
+    "max_raw_gps_gap_s": 8.104,
+    "max_replay_dt_s": 0.1,
+    "max_roll_delta_state_deg": 5.5,
+    "max_stationary_altitude_variation_ft": 0,
+    "max_taxi_implied_speed_kt": 20.2,
+    "profiling": {
+      "enu_interpolation_s": 0.3295,
+      "heading_interpolation_s": 0.0147,
+      "stationary_detection_s": 0.0001
+    },
+    "raw_ahrs_count": 7150,
+    "raw_g3x_count": 2352,
+    "raw_gps_count": 2936,
+    "raw_position_outliers_rejected": 24,
+    "replay_duration_s": 3029.341,
+    "replay_sample_count": 30294,
+    "sample_rate_hz": 10,
+    "stationary_segments_count": 3,
+    "track_source_counts": {
+      "g3x_track": 1279,
+      "gps_course": 2428
+    },
+    "warnings": [
+      "Raw GPS has gaps larger than 2 seconds."
+    ]
+  },
+  "field_failure_counts": {},
+  "first_field_failure": null,
+  "first_heading_continuity_failure": {
+    "delta": 9.75,
+    "phase": "Takeoff",
+    "quality": "DEGRADED",
+    "rate": 97.5,
+    "source": "ahrs_to_g3x",
+    "speed": 76.6,
+    "t": 944.2,
+    "track_source": "g3x_track"
+  },
+  "heading_continuity_failures": 509,
+  "heading_reference_counts": {
+    "TRUE": 30294
+  },
+  "heading_source_counts": {
+    "ahrs": 17202,
+    "ahrs_to_g3x": 5563,
+    "g3x": 380,
+    "g3x_to_ahrs": 7149
+  },
+  "magnetic_variation_source_counts": {
+    "ahrs_magnetic_variation": 17202,
+    "ahrs_magnetic_variation_to_g3x_magvar": 5563,
+    "g3x_magvar": 380,
+    "g3x_magvar_to_ahrs_magnetic_variation": 7149
+  },
+  "sample_count": 30294,
+  "status": "FAIL",
+  "track_reference_counts": {
+    "TRUE": 30294
+  },
+  "track_source_counts": {
+    "g3x_track": 12570,
+    "g3x_track_to_gps_course": 80,
+    "gps_course": 17564,
+    "gps_course_to_g3x_track": 80
+  }
+}

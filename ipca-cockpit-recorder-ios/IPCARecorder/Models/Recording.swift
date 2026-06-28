@@ -339,6 +339,10 @@ enum AHRSConnectionState: String {
 struct AHRSSample: Codable, Equatable {
     var timestamp: Date
     var secondsSinceRecordingStart: Double
+    var quaternionW: Double?
+    var quaternionX: Double?
+    var quaternionY: Double?
+    var quaternionZ: Double?
     var roll: Double
     var pitch: Double
     var yaw: Double
@@ -346,6 +350,14 @@ struct AHRSSample: Codable, Equatable {
     var accelerationX: Double?
     var accelerationY: Double?
     var accelerationZ: Double?
+    var linearAccelerationX: Double?
+    var linearAccelerationY: Double?
+    var linearAccelerationZ: Double?
+    var gravityX: Double?
+    var gravityY: Double?
+    var gravityZ: Double?
+    var fusedHeading: Double?
+    var slipSkid: Double?
     var magneticHeading: Double
     var rotationVectorAccuracy: Int?
     var magneticFieldAccuracy: Int?

@@ -122,7 +122,7 @@ struct CockpitSetupView: View {
     }
 
     private func headingIndicator(_ sample: AHRSSample?) -> some View {
-        let heading = sample?.correctedMagneticHeading ?? sample?.magneticHeading ?? 0
+        let heading = sample?.correctedMagneticHeading ?? sample?.fusedHeading ?? sample?.magneticHeading ?? 0
         return ZStack {
             Circle().stroke(Color.white.opacity(0.75), lineWidth: 3)
             ForEach(0..<12) { tick in
@@ -135,7 +135,7 @@ struct CockpitSetupView: View {
             Image(systemName: "airplane")
                 .font(.title2)
                 .foregroundStyle(IPCATheme.brightBlue)
-            Text(String(format: "MAG %.0f°", heading))
+            Text(String(format: "HDG %.0f°", heading))
                 .font(.caption.weight(.bold))
                 .offset(y: 42)
         }
@@ -144,7 +144,7 @@ struct CockpitSetupView: View {
     }
 
     private func slipBall(_ sample: AHRSSample?) -> some View {
-        let slip = max(-0.25, min(0.25, sample?.accelerationY ?? 0))
+        let slip = slipValue(from: sample)
         return VStack(alignment: .leading, spacing: 6) {
             Text(String(format: "Slip/Skid %.3f g", slip))
                 .font(.caption.weight(.semibold))
@@ -154,6 +154,44 @@ struct CockpitSetupView: View {
                 Circle().fill(IPCATheme.navy).frame(width: 20, height: 20).offset(x: slip * 220)
             }
         }
+    }
+
+    private func slipValue(from sample: AHRSSample?) -> Double {
+        guard let sample else { return 0 }
+
+        if let slip = sample.slipSkid {
+            return clampSlip(applySlipDeadband(slip))
+        }
+
+        // Fallback for older packets: fused roll gives a stable body-frame
+        // lateral gravity proxy. Prefer this over the raw GRAVY event because
+        // some BNO085 gravity packets recenter after a static roll.
+        let roll = sample.calibratedRoll ?? sample.aviationRoll ?? sample.roll
+        if abs(roll) > 0.5 {
+            return clampSlip(applySlipDeadband(sin(roll * .pi / 180.0)))
+        }
+
+        if let gravityY = sample.gravityY {
+            let gravityMagnitude = sqrt(
+                pow(sample.gravityX ?? 0, 2) +
+                pow(gravityY, 2) +
+                pow(sample.gravityZ ?? 0, 2)
+            )
+            if gravityMagnitude > 7.0 && gravityMagnitude < 12.0 {
+                return clampSlip(applySlipDeadband(gravityY / gravityMagnitude))
+            }
+        }
+
+        // Last resort for very old firmware packets without SLIP/GRAV*.
+        return clampSlip(applySlipDeadband(sin(roll * .pi / 180.0)))
+    }
+
+    private func applySlipDeadband(_ value: Double) -> Double {
+        abs(value) < 0.015 ? 0 : value
+    }
+
+    private func clampSlip(_ value: Double) -> Double {
+        max(-0.35, min(0.35, value))
     }
 
     private var setupParameters: some View {
@@ -947,12 +985,46 @@ struct RealisticCockpitSetupView: View {
         }
     }
 
+    private func slipValue(from sample: AHRSSample?) -> Double {
+        guard let sample else { return 0 }
+
+        if let slip = sample.slipSkid {
+            return clampSlip(applySlipDeadband(slip))
+        }
+
+        let roll = sample.calibratedRoll ?? sample.aviationRoll ?? sample.roll
+        if abs(roll) > 0.5 {
+            return clampSlip(applySlipDeadband(sin(roll * .pi / 180.0)))
+        }
+
+        if let gravityY = sample.gravityY {
+            let gravityMagnitude = sqrt(
+                pow(sample.gravityX ?? 0, 2) +
+                pow(gravityY, 2) +
+                pow(sample.gravityZ ?? 0, 2)
+            )
+            if gravityMagnitude > 7.0 && gravityMagnitude < 12.0 {
+                return clampSlip(applySlipDeadband(gravityY / gravityMagnitude))
+            }
+        }
+
+        return clampSlip(applySlipDeadband(sin(roll * .pi / 180.0)))
+    }
+
+    private func applySlipDeadband(_ value: Double) -> Double {
+        abs(value) < 0.015 ? 0 : value
+    }
+
+    private func clampSlip(_ value: Double) -> Double {
+        max(-0.35, min(0.35, value))
+    }
+
     private func updateSmoothedInstrumentValues() {
         let sample = ahrsBLE.latestSample
         let gpsSample = gps.latestSample
         let targetPitch = sample?.calibratedPitch ?? sample?.aviationPitch ?? -(sample?.pitch ?? 0)
         let targetRoll = sample?.calibratedRoll ?? sample?.aviationRoll ?? sample?.roll ?? 0
-        let magneticHeading = sample?.correctedMagneticHeading ?? sample?.magneticHeading ?? 0
+        let magneticHeading = sample?.correctedMagneticHeading ?? sample?.fusedHeading ?? sample?.magneticHeading ?? 0
         let trueHeading = sample?.trueHeading ?? SettingsStore.normalizeDegrees(magneticHeading + settings.ahrsCalibration.magneticVariation)
         let gpsAltitudeFt = (gpsSample?.altitude ?? 0) * 3.280839895
         let baroAltitudeFt = calculatedBaroAltitudeFt(gpsAltitudeFt: gpsAltitudeFt)
@@ -965,7 +1037,7 @@ struct RealisticCockpitSetupView: View {
         smoothedSpeed = smooth(smoothedSpeed, gpsSample?.speedKnots ?? 0, factor: 0.14)
         smoothedAltitude = smooth(smoothedAltitude, altitudeMode == .calculatedBaro ? baroAltitudeFt : gpsAltitudeFt, factor: 0.12)
         smoothedVerticalSpeed = smooth(smoothedVerticalSpeed, verticalSpeedMode == .calculatedBaro ? verticalSpeed(useBaro: true) : verticalSpeed(useBaro: false), factor: 0.10)
-        smoothedSlip = smooth(smoothedSlip, sample?.accelerationY ?? 0, factor: 0.18)
+        smoothedSlip = smooth(smoothedSlip, slipValue(from: sample), factor: 0.08)
     }
 
     private func appendAltitudeHistory(baro: Double, gps: Double) {
@@ -1016,7 +1088,7 @@ struct RealisticCockpitSetupView: View {
 
     private func applyCompassReference() {
         guard let sample = ahrsBLE.latestSample, let known = Double(compassReferenceText) else { return }
-        settings.setCompassDeviation(knownMagneticHeading: known, rawCompassHeading: sample.magneticHeading)
+        settings.setCompassDeviation(knownMagneticHeading: known, rawCompassHeading: sample.fusedHeading ?? sample.magneticHeading)
         ahrsBLE.updateCalibration(settings.ahrsCalibration)
     }
 

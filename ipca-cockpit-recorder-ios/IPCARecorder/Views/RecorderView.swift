@@ -364,24 +364,45 @@ struct RecorderView: View {
                         Text("Acceleration")
                         Text(String(format: "%.2f", sample.acceleration)).foregroundStyle(IPCATheme.success)
                     }
-                    if let accX = sample.accelerationX, let accY = sample.accelerationY, let accZ = sample.accelerationZ {
+                    if let qW = sample.quaternionW, let qX = sample.quaternionX, let qY = sample.quaternionY, let qZ = sample.quaternionZ {
                         GridRow {
-                            Text("Accel vector")
-                            Text(String(format: "X %.2f  Y %.2f  Z %.2f", accX, accY, accZ))
+                            Text("Quaternion")
+                            Text(String(format: "w %.3f  x %.3f  y %.3f  z %.3f", qW, qX, qY, qZ))
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
+                    if let linX = sample.linearAccelerationX, let linY = sample.linearAccelerationY, let linZ = sample.linearAccelerationZ {
+                        GridRow {
+                            Text("Linear accel")
+                            Text(String(format: "X %.2f  Y %.2f  Z %.2f", linX, linY, linZ))
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
+                    if let gravX = sample.gravityX, let gravY = sample.gravityY, let gravZ = sample.gravityZ {
+                        GridRow {
+                            Text("Gravity vector")
+                            Text(String(format: "X %.2f  Y %.2f  Z %.2f", gravX, gravY, gravZ))
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
+                    if let slip = sample.slipSkid {
+                        GridRow {
+                            Text("Slip source")
+                            Text(String(format: "%.3f g", slip))
                                 .foregroundStyle(IPCATheme.secondaryText)
                         }
                     }
                     GridRow {
-                        Text("Compass heading")
-                        Text(String(format: "%.0f", sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                        Text("Fused heading")
+                        Text(String(format: "%.0f", sample.fusedHeading ?? sample.yaw)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
                     }
                     GridRow {
-                        Text("Magnetic Heading")
-                        Text(String(format: "%.0f", sample.correctedMagneticHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                        Text("Corrected heading")
+                        Text(String(format: "%.0f", sample.correctedMagneticHeading ?? sample.fusedHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
                     }
                     GridRow {
                         Text("True Heading")
-                        Text(String(format: "%.0f", sample.trueHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
+                        Text(String(format: "%.0f", sample.trueHeading ?? sample.fusedHeading ?? sample.magneticHeading)).foregroundStyle(ahrsDiagnosticColor(sample.headingQuality))
                     }
                     GridRow {
                         Text("Heading quality")
@@ -397,7 +418,7 @@ struct RecorderView: View {
                     }
                     if let magX = sample.magneticX, let magY = sample.magneticY, let magZ = sample.magneticZ {
                         GridRow {
-                            Text("Mag vector")
+                            Text("Raw mag vector")
                             Text(String(format: "X %.1f  Y %.1f  Z %.1f", magX, magY, magZ))
                                 .foregroundStyle(IPCATheme.secondaryText)
                         }
@@ -456,7 +477,7 @@ struct RecorderView: View {
                     .textFieldStyle(.roundedBorder)
                 Button("Set Magnetic Heading") {
                     guard let known = Double(knownMagneticHeadingText) else { return }
-                    settings.setCompassDeviation(knownMagneticHeading: known, rawCompassHeading: sample.magneticHeading)
+                    settings.setCompassDeviation(knownMagneticHeading: known, rawCompassHeading: sample.fusedHeading ?? sample.magneticHeading)
                     ahrsBLE.updateCalibration(settings.ahrsCalibration)
                 }
                 .buttonStyle(.bordered)
@@ -486,7 +507,7 @@ struct RecorderView: View {
                 .buttonStyle(.bordered)
             }
 
-            Text("Formula: Compass heading + deviation d = Magnetic Heading. Magnetic Heading + Variation V = True Heading. East Variation positive, West Variation negative.")
+            Text("Formula: fused quaternion heading + deviation d = Magnetic Heading. Magnetic Heading + Variation V = True Heading. East Variation positive, West Variation negative. Raw magnetometer XYZ is diagnostic only.")
                 .font(.caption)
                 .foregroundStyle(IPCATheme.secondaryText)
         }

@@ -86,6 +86,20 @@ cw_header('Cockpit Recorder Replay');
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   white-space: pre-wrap;
 }
+.replay-debug-quality {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, .28);
+}
+.replay-debug-quality-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+}
+.replay-quality-good { color: #86efac; }
+.replay-quality-degraded { color: #fde68a; }
+.replay-quality-low { color: #fca5a5; }
+.replay-quality-unknown { color: #cbd5e1; }
 .replay-terrain-warning {
   position: absolute;
   top: 12px;
@@ -186,6 +200,32 @@ cw_header('Cockpit Recorder Replay');
     const normalized = normalizeDeg(deg);
     return normalized > 180 ? normalized - 360 : normalized;
   };
+  const finiteNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const firstFinite = (...values) => {
+    for (const value of values) {
+      const n = finiteNumber(value);
+      if (n !== null) return n;
+    }
+    return null;
+  };
+  const qualityClass = (quality) => {
+    const q = String(quality || '').toUpperCase();
+    if (q === 'GOOD') return 'replay-quality-good';
+    if (q === 'DEGRADED') return 'replay-quality-degraded';
+    if (q === 'LOW') return 'replay-quality-low';
+    return 'replay-quality-unknown';
+  };
+  const escapeHtml = (text) => String(text ?? '').replace(/[<>&"]/g, (ch) => ({
+    '<': '&lt;',
+    '>': '&gt;',
+    '&': '&amp;',
+    '"': '&quot;',
+  }[ch]));
+  const qualityValue = (sample, field) => String((sample && sample[field]) || 'unknown').toUpperCase();
+  const sourceValue = (sample, field) => String((sample && sample[field]) || '');
   const magneticToTrueHeadingDeg = (magnetic, variation, trueReference) => {
     const plus = normalizeDeg(magnetic + variation);
     const minus = normalizeDeg(magnetic - variation);
@@ -308,6 +348,8 @@ cw_header('Cockpit Recorder Replay');
 
   function trueHeadingFromSample(sample) {
     if (!sample) return 0;
+    const explicitTrue = firstFinite(sample.heading_deg_true, sample.true_heading_deg);
+    if (explicitTrue !== null) return normalizeDeg(explicitTrue);
     const magnetic = Number(sample.heading_deg);
     const variation = Number.isFinite(Number(sample.magnetic_variation_deg))
       ? Number(sample.magnetic_variation_deg)
@@ -321,8 +363,8 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function aircraftHeadingFromSample(sample) {
-    const heading = Number(sample && sample.heading_deg);
-    if (Number.isFinite(heading)) return normalizeDeg(heading);
+    const explicitTrue = firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg, sample && sample.heading_deg);
+    if (explicitTrue !== null) return normalizeDeg(explicitTrue);
 
     const cameraHeading = Number(sample && sample.camera_heading_deg);
     if (Number.isFinite(cameraHeading)) return normalizeDeg(cameraHeading);
@@ -487,12 +529,22 @@ cw_header('Cockpit Recorder Replay');
       ias_kt: lerp(before.ias_kt, after.ias_kt),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
+      roll_deg: lerp(before.roll_deg, after.roll_deg),
+      visual_pitch_deg: lerp(before.visual_pitch_deg, after.visual_pitch_deg),
+      visual_roll_deg: lerp(before.visual_roll_deg, after.visual_roll_deg),
+      raw_pitch_deg: lerp(before.raw_pitch_deg, after.raw_pitch_deg),
+      raw_roll_deg: lerp(before.raw_roll_deg, after.raw_roll_deg),
       bank_deg: lerp(before.bank_deg, after.bank_deg),
       heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
+      heading_deg_true: lerpAngle(before.heading_deg_true, after.heading_deg_true),
+      heading_deg_magnetic: lerpAngle(before.heading_deg_magnetic, after.heading_deg_magnetic),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       camera_heading_deg: lerpAngle(before.camera_heading_deg, after.camera_heading_deg),
       magnetic_variation_deg: lerp(before.magnetic_variation_deg, after.magnetic_variation_deg),
       track_deg: lerpAngle(before.track_deg, after.track_deg),
+      track_deg_true: lerpAngle(before.track_deg_true, after.track_deg_true),
+      wind_direction_deg_true: lerpAngle(before.wind_direction_deg_true, after.wind_direction_deg_true),
+      crab_angle_deg: lerp(before.crab_angle_deg, after.crab_angle_deg),
     });
   }
 
@@ -520,7 +572,9 @@ cw_header('Cockpit Recorder Replay');
 
   function updateDebugOverlay(sample, view) {
     if (!debugOverlay) return;
-    const heading = sample && Number.isFinite(Number(sample.heading_deg)) ? normalizeDeg(Number(sample.heading_deg)) : null;
+    const heading = sample ? aircraftHeadingFromSample(sample) : null;
+    const track = sample && Number.isFinite(Number(sample.track_deg_true)) ? normalizeDeg(Number(sample.track_deg_true)) : null;
+    const crab = sample && Number.isFinite(Number(sample.crab_angle_deg)) ? normalizeSignedDeg(Number(sample.crab_angle_deg)) : null;
     const cameraHeading = view && Number.isFinite(Number(view.heading)) ? normalizeDeg(Number(view.heading)) : null;
     const cameraPitch = view && Number.isFinite(Number(view.pitch)) ? Number(view.pitch) : null;
     const pitch = sample && Number.isFinite(Number(sample.pitch_deg)) ? Number(sample.pitch_deg) : null;
@@ -531,9 +585,25 @@ cw_header('Cockpit Recorder Replay');
     const visualFt = Number.isFinite(lastVisualAltitudeM) ? lastVisualAltitudeM / 0.3048 : null;
     const vs = sample && Number.isFinite(Number(sample.vertical_speed_fpm)) ? Number(sample.vertical_speed_fpm) : null;
     const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
-    debugOverlay.textContent = [
+    const qualityRows = [
+      ['position', 'position_quality', 'position_source', 'position_quality_reason'],
+      ['altitude', 'altitude_quality', 'altitude_source', 'altitude_quality_reason'],
+      ['attitude', 'attitude_quality', 'raw_attitude_source', 'attitude_quality_reason'],
+      ['heading', 'heading_quality', 'heading_source', 'heading_quality_reason'],
+      ['track', 'track_quality', 'track_source', 'track_quality_reason'],
+      ['speed', 'speed_quality', 'speed_source', 'speed_quality_reason'],
+    ].map(([label, qualityField, sourceField, reasonField]) => {
+      const quality = qualityValue(sample, qualityField);
+      const source = sourceValue(sample, sourceField);
+      const reason = sourceValue(sample, reasonField);
+      const suffix = [source, reason].filter(Boolean).join(' / ');
+      return `<div class="replay-debug-quality-row"><span>${escapeHtml(label)}</span><span class="${qualityClass(quality)}">${escapeHtml(quality)}${suffix ? ` <span class="replay-quality-unknown">(${escapeHtml(suffix)})</span>` : ''}</span></div>`;
+    }).join('');
+    const lines = [
       `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,
-      `aircraft heading: ${heading === null ? '--' : heading.toFixed(1)} deg`,
+      `aircraft heading true: ${heading === null ? '--' : heading.toFixed(1)} deg`,
+      `track true: ${track === null ? '--' : track.toFixed(1)} deg`,
+      `crab angle: ${crab === null ? '--' : crab.toFixed(1)} deg`,
       `camera heading: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
       `camera pitch: ${cameraPitch === null ? '--' : cameraPitch.toFixed(1)} deg`,
       `camera mode: ${cameraMode}`,
@@ -546,7 +616,8 @@ cw_header('Cockpit Recorder Replay');
       `vertical speed: ${vs === null ? '--' : vs.toFixed(1)} fpm`,
       `terrain enabled: ${terrainEnabled ? 'yes' : 'no'} (${terrainStatus})`,
       `terrain under aircraft: ${terrain}`,
-    ].join('\n');
+    ];
+    debugOverlay.innerHTML = `${escapeHtml(lines.join('\n'))}<div class="replay-debug-quality">${qualityRows}</div>`;
   }
 
   async function initCesium() {

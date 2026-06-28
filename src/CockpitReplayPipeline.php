@@ -19,8 +19,20 @@ final class CockpitReplayPipeline
     private const FT_PER_M = 3.280839895;
     private const POSITION_GOOD_MAX_GAP_S = 1.0;
     private const POSITION_DEGRADED_MAX_GAP_S = 3.0;
+    private const POSITION_ABSURD_IMPLIED_SPEED_KT = 250.0;
+    private const POSITION_ABSURD_MISMATCH_KT = 150.0;
     private const ATTITUDE_GOOD_MAX_GAP_S = 0.5;
     private const ATTITUDE_DEGRADED_MAX_GAP_S = 2.0;
+    private const GROUND_PITCH_RATE_LIMIT_DEG_S = 10.0;
+    private const GROUND_ROLL_RATE_LIMIT_DEG_S = 15.0;
+    private const AIRBORNE_PITCH_RATE_LIMIT_DEG_S = 30.0;
+    private const AIRBORNE_ROLL_RATE_LIMIT_DEG_S = 55.0;
+    private const FALLBACK_MAGNETIC_VARIATION_DEG = -10.8;
+    private const FALLBACK_MAGNETIC_VARIATION_SOURCE = 'ktrm_region_fallback';
+    private const HEADING_OWNER_VALID_GAP_S = 1.25;
+    private const HEADING_OWNER_SWITCH_AFTER_LOSS_S = 2.0;
+    private const HEADING_OWNER_RETURN_STABLE_S = 2.0;
+    private const HEADING_OWNER_RETURN_BLEND_S = 4.0;
 
     /** @var array<string,float> */
     private array $profiling = array();
@@ -80,17 +92,42 @@ final class CockpitReplayPipeline
             'stationary_segments_count' => 0,
             'max_stationary_altitude_variation_ft' => 0.0,
             'max_ground_vertical_speed_fpm' => 0.0,
+            'count_ground_altitude_stabilized' => 0,
             'max_heading_delta_stationary_deg' => 0.0,
             'max_heading_delta_ground_deg' => 0.0,
-            'heading_source_counts' => array('g3x' => 0, 'ahrs' => 0, 'gps_course' => 0, 'held' => 0),
+            'heading_source_counts' => array('g3x' => 0, 'ahrs' => 0, 'track_fallback' => 0, 'held' => 0),
+            'track_source_counts' => array('g3x_track' => 0, 'gps_course' => 0),
+            'magnetic_variation_source_counts' => array('g3x_magvar' => 0, 'ahrs_magnetic_variation' => 0, self::FALLBACK_MAGNETIC_VARIATION_SOURCE => 0),
+            'count_heading_magnetic_to_true_converted' => 0,
+            'count_heading_track_fallback_samples' => 0,
+            'heading_owner' => 'unknown',
+            'heading_owner_changes' => array(),
+            'owner_switch_count' => 0,
+            'owner_switch_reason' => array(),
+            'owner_hold_events' => 0,
+            'owner_blend_events' => 0,
+            'owner_blend_duration' => self::HEADING_OWNER_RETURN_BLEND_S,
+            'count_heading_owner_transitions' => 0,
             'max_groundspeed_delta_kt' => 0.0,
             'max_taxi_implied_speed_kt' => 0.0,
             'max_position_speed_mismatch_kt' => 0.0,
             'count_position_outliers' => 0,
+            'count_takeoff_transition_position_corrections' => 0,
+            'first_position_discontinuity_time_s' => null,
+            'first_position_discontinuity_source' => null,
             'count_speed_outliers' => 0,
             'count_heading_outliers' => 0,
+            'count_attitude_spikes_clamped' => 0,
+            'max_pitch_delta_state_deg' => 0.0,
+            'max_roll_delta_state_deg' => 0.0,
             'count_low_quality_samples' => 0,
             'count_degraded_samples' => 0,
+            'quality_counts_by_field' => array(),
+            'quality_source_counts_by_field' => array(),
+            'low_quality_reason_counts' => array(),
+            'degraded_quality_reason_counts' => array(),
+            'count_position_corrections_degraded' => 0,
+            'count_position_corrections_low' => 0,
             'count_empty_phase_samples' => 0,
         );
 
@@ -103,7 +140,23 @@ final class CockpitReplayPipeline
 
         $positionKnotsEnu = $this->positionKnotsToEnu($positionKnots, $origin);
 
-        $headingKnots = $this->buildHeadingKnots($gpsPoints, $ahrsPoints, $g3xPoints);
+        $g3xHeadingKnots = $this->buildG3xHeadingKnots($g3xPoints);
+        $ahrsHeadingKnots = $this->buildAhrsHeadingKnots($ahrsPoints);
+        $headingMagneticKnots = $this->buildHeadingMagneticKnots($ahrsPoints, $g3xPoints);
+        $trackKnots = $this->buildTrackKnots($gpsPoints, $g3xPoints);
+        $trackFallbackHeadingKnots = $this->buildTrackFallbackHeadingKnots($gpsPoints);
+        $this->diagnostics['heading_source_counts'] = array(
+            'g3x' => count($g3xHeadingKnots),
+            'ahrs' => count($ahrsHeadingKnots),
+            'track_fallback' => count($trackFallbackHeadingKnots),
+            'held' => 0,
+        );
+        $this->diagnostics['count_heading_magnetic_to_true_converted'] = count($g3xHeadingKnots) + count($ahrsHeadingKnots);
+        $headingKnots = $g3xHeadingKnots !== array()
+            ? $g3xHeadingKnots
+            : ($ahrsHeadingKnots !== array() ? $ahrsHeadingKnots : $trackFallbackHeadingKnots);
+        $magneticVariationKnots = $this->buildMagneticVariationKnots($ahrsPoints, $g3xPoints);
+        $compassDeviationKnots = $this->buildCompassDeviationKnots($ahrsPoints, $g3xPoints);
         $pitchKnots = $this->buildScalarKnots($ahrsPoints, $g3xPoints, 'pitch_deg', 'pitch_deg');
         $rollKnots = $this->buildScalarKnots($ahrsPoints, $g3xPoints, 'roll_deg', 'roll_deg');
         $speedKnots = $this->buildSpeedKnots($gpsPoints, $g3xPoints);
@@ -127,6 +180,10 @@ final class CockpitReplayPipeline
             $gridTimes,
             $positionKnotsEnu,
             $headingKnots,
+            $headingMagneticKnots,
+            $trackKnots,
+            $magneticVariationKnots,
+            $compassDeviationKnots,
             $pitchKnots,
             $rollKnots,
             $speedKnots,
@@ -135,7 +192,7 @@ final class CockpitReplayPipeline
             $phases,
             $headingElapsed
         );
-        $samples = $this->stabilizeHeadingSamples($samples);
+        $samples = $this->applyHeadingOwnership($samples, $g3xHeadingKnots, $ahrsHeadingKnots, $trackFallbackHeadingKnots);
         $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline);
         $samples = $this->validateReplaySamples($samples);
         $this->profiling['enu_interpolation_s'] = round(microtime(true) - $enuStarted - $headingElapsed, 4);
@@ -175,8 +232,12 @@ final class CockpitReplayPipeline
 
     /**
      * @param list<float> $gridTimes
-     * @param list<array{t:float,e:float,n:float,u:float}> $positionKnotsEnu
-     * @param list<array{t:float,v:float}> $headingKnots
+     * @param list<array{t:float,e:float,n:float,u:float,source?:string}> $positionKnotsEnu
+     * @param list<array{t:float,v:float,source?:string}> $headingKnots
+     * @param list<array{t:float,v:float,source?:string}> $headingMagneticKnots
+     * @param list<array{t:float,v:float,source?:string}> $trackKnots
+     * @param list<array{t:float,v:float,source?:string}> $magneticVariationKnots
+     * @param list<array{t:float,v:float,source?:string}> $compassDeviationKnots
      * @param list<array{t:float,v:float}> $pitchKnots
      * @param list<array{t:float,v:float}> $rollKnots
      * @param list<array{t:float,v:float}> $speedKnots
@@ -190,6 +251,10 @@ final class CockpitReplayPipeline
         array $gridTimes,
         array $positionKnotsEnu,
         array $headingKnots,
+        array $headingMagneticKnots,
+        array $trackKnots,
+        array $magneticVariationKnots,
+        array $compassDeviationKnots,
         array $pitchKnots,
         array $rollKnots,
         array $speedKnots,
@@ -200,6 +265,10 @@ final class CockpitReplayPipeline
     ): array {
         $enuCursor = new ReplaySeriesCursor($positionKnotsEnu);
         $headingCursor = new ReplaySeriesCursor($headingKnots);
+        $headingMagneticCursor = new ReplaySeriesCursor($headingMagneticKnots);
+        $trackCursor = new ReplaySeriesCursor($trackKnots);
+        $magneticVariationCursor = new ReplaySeriesCursor($magneticVariationKnots);
+        $compassDeviationCursor = new ReplaySeriesCursor($compassDeviationKnots);
         $pitchCursor = new ReplaySeriesCursor($pitchKnots);
         $rollCursor = new ReplaySeriesCursor($rollKnots);
         $speedCursor = new ReplaySeriesCursor($speedKnots);
@@ -232,6 +301,8 @@ final class CockpitReplayPipeline
             }
 
             $positionGap = $enuCursor->nearestGap($timeS);
+            $pitchSeg = $pitchCursor->segmentAt($timeS);
+            $rollSeg = $rollCursor->segmentAt($timeS);
             $attitudeGap = min(
                 $headingCursor->nearestGap($timeS),
                 min($pitchCursor->nearestGap($timeS), $rollCursor->nearestGap($timeS))
@@ -250,9 +321,44 @@ final class CockpitReplayPipeline
             }
 
             $headingSeg = $headingCursor->segmentAt($timeS);
+            $trackSeg = $trackCursor->segmentAt($timeS);
+            $speedSeg = $speedCursor->segmentAt($timeS);
             $headingStarted = microtime(true);
             $headingDeg = ReplaySeriesCursor::lerpHeading($headingKnots, $headingSeg);
+            $trackDeg = ReplaySeriesCursor::lerpHeading($trackKnots, $trackSeg);
             $headingElapsed += microtime(true) - $headingStarted;
+            $headingMagnetic = ReplaySeriesCursor::lerpHeading($headingMagneticKnots, $headingMagneticCursor->segmentAt($timeS));
+            $magneticVariation = ReplaySeriesCursor::lerpScalar($magneticVariationKnots, $magneticVariationCursor->segmentAt($timeS));
+            $compassDeviation = ReplaySeriesCursor::lerpScalar($compassDeviationKnots, $compassDeviationCursor->segmentAt($timeS));
+            $headingSource = $this->scalarSourceFromSegment($headingKnots, $headingSeg);
+            $positionSource = $this->seriesSourceFromSegment($positionKnotsEnu, $enuSeg);
+            $trackSource = $this->scalarSourceFromSegment($trackKnots, $trackSeg);
+            $speedSource = $this->scalarSourceFromSegment($speedKnots, $speedSeg);
+            $variationSource = $this->scalarSourceFromSegment($magneticVariationKnots, $magneticVariationCursor->segmentAt($timeS));
+            $deviationSource = $this->scalarSourceFromSegment($compassDeviationKnots, $compassDeviationCursor->segmentAt($timeS));
+            $headingReference = $headingDeg !== null ? 'TRUE' : 'UNKNOWN';
+            if ($headingDeg === null && $trackDeg !== null) {
+                $headingDeg = $trackDeg;
+                $headingSource = 'track_fallback';
+                $headingReference = 'TRUE';
+            }
+            $rawPitch = ReplaySeriesCursor::lerpScalar($pitchKnots, $pitchSeg);
+            $rawRoll = ReplaySeriesCursor::lerpScalar($rollKnots, $rollSeg);
+            $pitchSource = $this->scalarSourceFromSegment($pitchKnots, $pitchSeg);
+            $rollSource = $this->scalarSourceFromSegment($rollKnots, $rollSeg);
+            $rawAttitudeSource = $this->combineAttitudeSources($pitchSource, $rollSource);
+            $rawAttitudeQuality = $this->qualityFromGap($attitudeGap, self::ATTITUDE_GOOD_MAX_GAP_S, self::ATTITUDE_DEGRADED_MAX_GAP_S);
+            $headingQuality = $rawAttitudeQuality;
+            $positionQuality = $this->qualityFromGap($positionGap, self::POSITION_GOOD_MAX_GAP_S, self::POSITION_DEGRADED_MAX_GAP_S);
+            $trackQuality = $this->qualityFromGap($trackCursor->nearestGap($timeS), self::POSITION_GOOD_MAX_GAP_S, self::POSITION_DEGRADED_MAX_GAP_S);
+            $speedQuality = $this->qualityFromGap($speedCursor->nearestGap($timeS), self::POSITION_GOOD_MAX_GAP_S, self::POSITION_DEGRADED_MAX_GAP_S);
+            if ($headingSource === 'track_fallback') {
+                $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                $this->diagnostics['count_heading_track_fallback_samples'] = (int)($this->diagnostics['count_heading_track_fallback_samples'] ?? 0) + 1;
+            }
+            if ($variationSource === self::FALLBACK_MAGNETIC_VARIATION_SOURCE) {
+                $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+            }
 
             $samples[] = array(
                 'sample_index' => $index,
@@ -261,14 +367,42 @@ final class CockpitReplayPipeline
                 'lon' => $geo !== null ? round($geo['lon'], 7) : null,
                 'altitude_ft' => $altitudeFt !== null ? round($altitudeFt, 1) : null,
                 'heading_deg' => $headingDeg,
-                'pitch_deg' => ReplaySeriesCursor::lerpScalar($pitchKnots, $pitchCursor->segmentAt($timeS)),
-                'roll_deg' => ReplaySeriesCursor::lerpScalar($rollKnots, $rollCursor->segmentAt($timeS)),
-                'ground_speed_kt' => ReplaySeriesCursor::lerpScalar($speedKnots, $speedCursor->segmentAt($timeS)),
+                'heading_deg_true' => $headingDeg,
+                'heading_deg_magnetic' => $headingMagnetic,
+                'track_deg_true' => $trackDeg,
+                'wind_direction_deg_true' => null,
+                'magnetic_variation_deg' => $magneticVariation,
+                'magnetic_variation_source' => $variationSource,
+                'compass_deviation_deg' => $compassDeviation,
+                'compass_deviation_source' => $deviationSource,
+                'heading_reference' => $headingReference,
+                'track_reference' => $trackDeg !== null ? 'TRUE' : 'UNKNOWN',
+                'heading_source' => $headingSource,
+                'heading_owner' => $headingSource === 'track_fallback' ? 'track_fallback' : $headingSource,
+                'heading_quality' => $headingQuality,
+                'track_source' => $trackSource,
+                'track_quality' => $trackQuality,
+                'speed_source' => $speedSource,
+                'speed_quality' => $speedQuality,
+                'position_source' => $positionSource,
+                'position_quality_reason' => $this->gapQualityReason('position', $positionQuality),
+                'track_quality_reason' => $this->gapQualityReason('track', $trackQuality),
+                'speed_quality_reason' => $this->gapQualityReason('speed', $speedQuality),
+                'heading_quality_reason' => $this->gapQualityReason('heading', $headingQuality),
+                'attitude_quality_reason' => $this->gapQualityReason('attitude', $rawAttitudeQuality),
+                'crab_angle_deg' => ($headingDeg !== null && $trackDeg !== null) ? round($this->crabAngle($headingDeg, $trackDeg), 2) : null,
+                'pitch_deg' => $rawPitch,
+                'roll_deg' => $rawRoll,
+                'raw_pitch_deg' => $rawPitch,
+                'raw_roll_deg' => $rawRoll,
+                'raw_attitude_source' => $rawAttitudeSource,
+                'raw_attitude_quality' => $rawAttitudeQuality,
+                'ground_speed_kt' => ReplaySeriesCursor::lerpScalar($speedKnots, $speedSeg),
                 'vertical_speed_fpm' => $verticalSpeedFpm !== null ? round($verticalSpeedFpm, 1) : null,
                 'phase' => $phase,
-                'position_quality' => $this->qualityFromGap($positionGap, self::POSITION_GOOD_MAX_GAP_S, self::POSITION_DEGRADED_MAX_GAP_S),
+                'position_quality' => $positionQuality,
                 'altitude_quality' => $this->qualityFromGap($altitudeCursor->nearestGap($timeS), self::POSITION_GOOD_MAX_GAP_S, self::POSITION_DEGRADED_MAX_GAP_S),
-                'attitude_quality' => $this->qualityFromGap($attitudeGap, self::ATTITUDE_GOOD_MAX_GAP_S, self::ATTITUDE_DEGRADED_MAX_GAP_S),
+                'attitude_quality' => $headingQuality,
             );
         }
 
@@ -314,7 +448,7 @@ final class CockpitReplayPipeline
 
     /**
      * @param list<array<string,mixed>> $rawAhrsRows
-     * @return list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null}>
+     * @return list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null,heading_deg_magnetic:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,heading_reference:string}>
      */
     private function normalizeAhrsPoints(array $rawAhrsRows): array
     {
@@ -335,14 +469,28 @@ final class CockpitReplayPipeline
             $roll = isset($row['calibratedRoll']) && is_numeric($row['calibratedRoll'])
                 ? (float)$row['calibratedRoll']
                 : $rawRoll;
-            $heading = isset($row['correctedMagneticHeading']) && is_numeric($row['correctedMagneticHeading'])
+            $headingMagnetic = isset($row['correctedMagneticHeading']) && is_numeric($row['correctedMagneticHeading'])
                 ? (float)$row['correctedMagneticHeading']
                 : (isset($row['magneticHeading']) && is_numeric($row['magneticHeading']) ? (float)$row['magneticHeading'] : null);
+            $trueHeading = isset($row['trueHeading']) && is_numeric($row['trueHeading']) ? (float)$row['trueHeading'] : null;
+            $variation = isset($row['magneticVariation']) && is_numeric($row['magneticVariation']) ? (float)$row['magneticVariation'] : null;
+            $deviation = isset($row['compassDeviation']) && is_numeric($row['compassDeviation']) ? (float)$row['compassDeviation'] : 0.0;
+            $variationSource = $variation !== null ? 'ahrs_magnetic_variation' : self::FALLBACK_MAGNETIC_VARIATION_SOURCE;
+            $variation ??= self::FALLBACK_MAGNETIC_VARIATION_DEG;
+            $headingTrue = $trueHeading !== null
+                ? self::normalizeDegrees($trueHeading)
+                : ($headingMagnetic !== null ? $this->magneticToTrue($headingMagnetic, $variation, $deviation) : null);
             $points[] = array(
                 't' => $t,
                 'pitch_deg' => $pitch,
                 'roll_deg' => $roll,
-                'heading_deg' => $heading !== null ? self::normalizeDegrees($heading) : null,
+                'heading_deg' => $headingTrue,
+                'heading_deg_magnetic' => $headingMagnetic !== null ? self::normalizeDegrees($headingMagnetic) : null,
+                'magnetic_variation_deg' => $variation,
+                'magnetic_variation_source' => $variationSource,
+                'compass_deviation_deg' => $deviation,
+                'compass_deviation_source' => isset($row['compassDeviation']) && is_numeric($row['compassDeviation']) ? 'ahrs' : 'none',
+                'heading_reference' => $headingTrue !== null ? 'TRUE' : 'UNKNOWN',
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
@@ -351,7 +499,7 @@ final class CockpitReplayPipeline
 
     /**
      * @param list<array{seconds: float, row: array<string,string>}> $g3xSamples
-     * @return list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}>
+     * @return list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,heading_deg_magnetic:float|null,track_deg_true:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}>
      */
     private function normalizeG3xPoints(array $g3xSamples): array
     {
@@ -372,13 +520,24 @@ final class CockpitReplayPipeline
                 $altFt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)', 'AltInd');
             }
             $altM = $altFt !== null ? (float)$altFt * 0.3048 : 0.0;
+            $headingMagnetic = G3XFlightStreamParser::numericValue($row, 'Magnetic Heading (deg)', 'HDG');
+            $variation = G3XFlightStreamParser::numericValue($row, 'Magnetic Variation (deg)', 'MagVar');
+            $variationSource = $variation !== null ? 'g3x_magvar' : self::FALLBACK_MAGNETIC_VARIATION_SOURCE;
+            $variation ??= self::FALLBACK_MAGNETIC_VARIATION_DEG;
+            $trackTrue = G3XFlightStreamParser::numericValue($row, 'GPS Ground Track (deg)', 'TRK', 'Track');
             $points[] = array(
                 't' => $t,
                 'lat' => (float)$lat,
                 'lon' => (float)$lon,
                 'alt_m' => $altM,
                 'speed_kt' => (float)(G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)', 'GndSpd') ?? 0.0),
-                'heading_deg' => ($h = G3XFlightStreamParser::numericValue($row, 'Magnetic Heading (deg)', 'HDG')) !== null ? self::normalizeDegrees((float)$h) : null,
+                'heading_deg' => $headingMagnetic !== null ? $this->magneticToTrue((float)$headingMagnetic, (float)$variation, 0.0) : null,
+                'heading_deg_magnetic' => $headingMagnetic !== null ? self::normalizeDegrees((float)$headingMagnetic) : null,
+                'track_deg_true' => $trackTrue !== null ? self::normalizeDegrees((float)$trackTrue) : null,
+                'magnetic_variation_deg' => (float)$variation,
+                'magnetic_variation_source' => $variationSource,
+                'compass_deviation_deg' => 0.0,
+                'compass_deviation_source' => 'none',
                 'pitch_deg' => G3XFlightStreamParser::numericValue($row, 'Pitch (deg)', 'Pitch'),
                 'roll_deg' => G3XFlightStreamParser::numericValue($row, 'Roll (deg)', 'Roll'),
                 'alt_ft' => $altFt,
@@ -437,6 +596,8 @@ final class CockpitReplayPipeline
                 'alt_m' => $point['alt_m'],
                 'speed_kt' => $point['speed_kt'],
                 'source' => 'gps',
+                'hacc' => $point['hacc'],
+                'vacc' => $point['vacc'],
             );
         }
         foreach ($g3xPoints as $point) {
@@ -459,14 +620,48 @@ final class CockpitReplayPipeline
             }
             $last = $merged[count($merged) - 1];
             if (abs($knot['t'] - $last['t']) <= 0.05) {
-                if ($knot['source'] === 'g3x') {
-                    $merged[count($merged) - 1] = $knot;
-                }
+                $merged[count($merged) - 1] = $this->preferredPositionKnot($last, $knot);
                 continue;
             }
             $merged[] = $knot;
         }
         return $merged;
+    }
+
+    /**
+     * @param array<string,mixed> $a
+     * @param array<string,mixed> $b
+     * @return array<string,mixed>
+     */
+    private function preferredPositionKnot(array $a, array $b): array
+    {
+        $aSource = (string)($a['source'] ?? '');
+        $bSource = (string)($b['source'] ?? '');
+        $aSpeed = isset($a['speed_kt']) && is_numeric($a['speed_kt']) ? (float)$a['speed_kt'] : 0.0;
+        $bSpeed = isset($b['speed_kt']) && is_numeric($b['speed_kt']) ? (float)$b['speed_kt'] : 0.0;
+
+        if ($aSource === 'gps' && $bSource === 'g3x' && $this->isGoodMovingGpsKnot($a) && $bSpeed < self::STATIONARY_SPEED_KT) {
+            return $a;
+        }
+        if ($aSource === 'g3x' && $bSource === 'gps' && $this->isGoodMovingGpsKnot($b) && $aSpeed < self::STATIONARY_SPEED_KT) {
+            return $b;
+        }
+
+        return $bSource === 'g3x' ? $b : $a;
+    }
+
+    /**
+     * @param array<string,mixed> $knot
+     */
+    private function isGoodMovingGpsKnot(array $knot): bool
+    {
+        if ((string)($knot['source'] ?? '') !== 'gps') {
+            return false;
+        }
+        $speed = isset($knot['speed_kt']) && is_numeric($knot['speed_kt']) ? (float)$knot['speed_kt'] : 0.0;
+        $hacc = isset($knot['hacc']) && is_numeric($knot['hacc']) ? (float)$knot['hacc'] : null;
+
+        return $speed >= self::GPS_HEADING_MIN_SPEED_KT && ($hacc === null || $hacc <= 30.0);
     }
 
     /**
@@ -645,7 +840,7 @@ final class CockpitReplayPipeline
     /**
      * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,source:string}> $knots
      * @param array{lat:float,lon:float,alt_m:float,t:float} $origin
-     * @return list<array{t:float,e:float,n:float,u:float}>
+     * @return list<array{t:float,e:float,n:float,u:float,source?:string}>
      */
     private function positionKnotsToEnu(array $knots, array $origin): array
     {
@@ -657,6 +852,7 @@ final class CockpitReplayPipeline
                 'e' => $converted['e'],
                 'n' => $converted['n'],
                 'u' => $converted['u'],
+                'source' => (string)($knot['source'] ?? 'unknown'),
             );
         }
         return $enu;
@@ -664,24 +860,132 @@ final class CockpitReplayPipeline
 
     /**
      * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,course:float,hacc:float|null,vacc:float|null,source:string}> $gpsPoints
-     * @param list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null}> $ahrsPoints
-     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}> $g3xPoints
-     * @return list<array{t:float,v:float}>
+     * @param list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null,heading_deg_magnetic:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,heading_reference:string}> $ahrsPoints
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,heading_deg_magnetic:float|null,track_deg_true:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}> $g3xPoints
+     * @return list<array{t:float,v:float,source?:string}>
      */
     private function buildHeadingKnots(array $gpsPoints, array $ahrsPoints, array $g3xPoints): array
     {
         $knots = array();
-        $sourceCounts = array('g3x' => 0, 'ahrs' => 0, 'gps_course' => 0, 'held' => 0);
+        $sourceCounts = array('g3x' => 0, 'ahrs' => 0, 'track_fallback' => 0, 'held' => 0);
+        $converted = 0;
         foreach ($g3xPoints as $point) {
             if ($point['heading_deg'] !== null) {
                 $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg'], 'priority' => 3, 'source' => 'g3x');
                 $sourceCounts['g3x']++;
+                if ($point['heading_deg_magnetic'] !== null) {
+                    $converted++;
+                }
             }
         }
         foreach ($ahrsPoints as $point) {
             if ($point['heading_deg'] !== null) {
                 $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg'], 'priority' => 2, 'source' => 'ahrs');
                 $sourceCounts['ahrs']++;
+                if ($point['heading_deg_magnetic'] !== null) {
+                    $converted++;
+                }
+            }
+        }
+        if ($knots === array()) {
+            foreach ($gpsPoints as $point) {
+                if ($point['speed_kt'] >= self::GPS_HEADING_MIN_SPEED_KT && $point['course'] >= 0.0) {
+                    $knots[] = array('t' => $point['t'], 'v' => self::normalizeDegrees($point['course']), 'priority' => 1, 'source' => 'track_fallback');
+                    $sourceCounts['track_fallback']++;
+                }
+            }
+        }
+        $this->diagnostics['heading_source_counts'] = $sourceCounts;
+        $this->diagnostics['count_heading_magnetic_to_true_converted'] = $converted;
+
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t'] ?: $b['priority'] <=> $a['priority']);
+
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,heading_deg_magnetic:float|null,track_deg_true:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}> $g3xPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildG3xHeadingKnots(array $g3xPoints): array
+    {
+        $knots = array();
+        foreach ($g3xPoints as $point) {
+            if ($point['heading_deg'] !== null) {
+                $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg'], 'priority' => 1, 'source' => 'g3x');
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null,heading_deg_magnetic:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,heading_reference:string}> $ahrsPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildAhrsHeadingKnots(array $ahrsPoints): array
+    {
+        $knots = array();
+        foreach ($ahrsPoints as $point) {
+            if ($point['heading_deg'] !== null) {
+                $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg'], 'priority' => 1, 'source' => 'ahrs');
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,course:float,hacc:float|null,vacc:float|null,source:string}> $gpsPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildTrackFallbackHeadingKnots(array $gpsPoints): array
+    {
+        $knots = array();
+        foreach ($gpsPoints as $point) {
+            if ($point['speed_kt'] >= self::GPS_HEADING_MIN_SPEED_KT && $point['course'] >= 0.0) {
+                $knots[] = array('t' => $point['t'], 'v' => self::normalizeDegrees($point['course']), 'priority' => 1, 'source' => 'track_fallback');
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,pitch_deg:float|null,roll_deg:float|null,heading_deg:float|null,heading_deg_magnetic:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,heading_reference:string}> $ahrsPoints
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,heading_deg_magnetic:float|null,track_deg_true:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}> $g3xPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildHeadingMagneticKnots(array $ahrsPoints, array $g3xPoints): array
+    {
+        $knots = array();
+        foreach ($g3xPoints as $point) {
+            if ($point['heading_deg_magnetic'] !== null) {
+                $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg_magnetic'], 'priority' => 2, 'source' => 'g3x');
+            }
+        }
+        foreach ($ahrsPoints as $point) {
+            if ($point['heading_deg_magnetic'] !== null) {
+                $knots[] = array('t' => $point['t'], 'v' => $point['heading_deg_magnetic'], 'priority' => 1, 'source' => 'ahrs');
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t'] ?: $b['priority'] <=> $a['priority']);
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,course:float,hacc:float|null,vacc:float|null,source:string}> $gpsPoints
+     * @param list<array{t:float,lat:float,lon:float,alt_m:float,speed_kt:float,heading_deg:float|null,heading_deg_magnetic:float|null,track_deg_true:float|null,magnetic_variation_deg:float|null,magnetic_variation_source:string,compass_deviation_deg:float|null,compass_deviation_source:string,pitch_deg:float|null,roll_deg:float|null,alt_ft:float|null,vs_fpm:float|null}> $g3xPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildTrackKnots(array $gpsPoints, array $g3xPoints): array
+    {
+        $knots = array();
+        $sourceCounts = array('g3x_track' => 0, 'gps_course' => 0);
+        foreach ($g3xPoints as $point) {
+            if ($point['track_deg_true'] !== null && $point['speed_kt'] >= self::GPS_HEADING_MIN_SPEED_KT) {
+                $knots[] = array('t' => $point['t'], 'v' => $point['track_deg_true'], 'priority' => 2, 'source' => 'g3x_track');
+                $sourceCounts['g3x_track']++;
             }
         }
         foreach ($gpsPoints as $point) {
@@ -690,23 +994,62 @@ final class CockpitReplayPipeline
                 $sourceCounts['gps_course']++;
             }
         }
-        $this->diagnostics['heading_source_counts'] = $sourceCounts;
-
+        $this->diagnostics['track_source_counts'] = $sourceCounts;
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t'] ?: $b['priority'] <=> $a['priority']);
+        return $this->mergeScalarKnots($knots);
+    }
 
-        $merged = array();
-        foreach ($knots as $knot) {
-            if (!$merged) {
-                $merged[] = array('t' => $knot['t'], 'v' => $knot['v']);
-                continue;
+    /**
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildMagneticVariationKnots(array $ahrsPoints, array $g3xPoints): array
+    {
+        $sourceCounts = array('g3x_magvar' => 0, 'ahrs_magnetic_variation' => 0, self::FALLBACK_MAGNETIC_VARIATION_SOURCE => 0);
+        $g3xValues = array();
+        foreach ($g3xPoints as $point) {
+            if ($point['magnetic_variation_deg'] !== null && (string)$point['magnetic_variation_source'] === 'g3x_magvar') {
+                $g3xValues[] = (float)$point['magnetic_variation_deg'];
             }
-            $last = $merged[count($merged) - 1];
-            if (abs($knot['t'] - $last['t']) <= 0.05) {
-                continue;
-            }
-            $merged[] = array('t' => $knot['t'], 'v' => $knot['v']);
         }
-        return $merged;
+        if ($g3xValues !== array()) {
+            $sourceCounts['g3x_magvar'] = count($g3xValues);
+            $this->diagnostics['magnetic_variation_source_counts'] = $sourceCounts;
+            return array(array('t' => 0.0, 'v' => $this->median($g3xValues), 'source' => 'g3x_magvar'));
+        }
+
+        $ahrsValues = array();
+        foreach ($ahrsPoints as $point) {
+            if ($point['magnetic_variation_deg'] !== null && (string)$point['magnetic_variation_source'] === 'ahrs_magnetic_variation') {
+                $ahrsValues[] = (float)$point['magnetic_variation_deg'];
+            }
+        }
+        if ($ahrsValues !== array()) {
+            $sourceCounts['ahrs_magnetic_variation'] = count($ahrsValues);
+            $this->diagnostics['magnetic_variation_source_counts'] = $sourceCounts;
+            return array(array('t' => 0.0, 'v' => $this->median($ahrsValues), 'source' => 'ahrs_magnetic_variation'));
+        }
+
+        $sourceCounts[self::FALLBACK_MAGNETIC_VARIATION_SOURCE] = 1;
+        $this->diagnostics['magnetic_variation_source_counts'] = $sourceCounts;
+        return array(array('t' => 0.0, 'v' => self::FALLBACK_MAGNETIC_VARIATION_DEG, 'source' => self::FALLBACK_MAGNETIC_VARIATION_SOURCE));
+    }
+
+    /**
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildCompassDeviationKnots(array $ahrsPoints, array $g3xPoints): array
+    {
+        $ahrsValues = array();
+        foreach ($ahrsPoints as $point) {
+            if (($point['compass_deviation_source'] ?? 'none') !== 'none' && isset($point['compass_deviation_deg']) && is_numeric($point['compass_deviation_deg'])) {
+                $ahrsValues[] = (float)$point['compass_deviation_deg'];
+            }
+        }
+        if ($ahrsValues !== array()) {
+            return array(array('t' => 0.0, 'v' => $this->median($ahrsValues), 'source' => 'ahrs'));
+        }
+
+        return array(array('t' => 0.0, 'v' => 0.0, 'source' => 'none'));
     }
 
     /**
@@ -720,17 +1063,78 @@ final class CockpitReplayPipeline
         foreach ($g3xPoints as $point) {
             $value = $point[$g3xKey] ?? null;
             if ($value !== null) {
-                $knots[] = array('t' => $point['t'], 'v' => (float)$value, 'priority' => 2);
+                $knots[] = array('t' => $point['t'], 'v' => (float)$value, 'priority' => 2, 'source' => 'g3x');
             }
         }
         foreach ($ahrsPoints as $point) {
             $value = $point[$ahrsKey] ?? null;
             if ($value !== null) {
-                $knots[] = array('t' => $point['t'], 'v' => (float)$value, 'priority' => 1);
+                $knots[] = array('t' => $point['t'], 'v' => (float)$value, 'priority' => 1, 'source' => 'ahrs');
             }
         }
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t'] ?: $b['priority'] <=> $a['priority']);
         return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array{t:float,v:float,source?:string}> $knots
+     * @param array{before:int,after:int,ratio:float,edge:string}|null $segment
+     */
+    private function scalarSourceFromSegment(array $knots, ?array $segment): string
+    {
+        if ($segment === null || $knots === array()) {
+            return 'unavailable';
+        }
+        if ($segment['edge'] === 'before') {
+            return (string)($knots[0]['source'] ?? 'unknown');
+        }
+        if ($segment['edge'] === 'after') {
+            return (string)($knots[count($knots) - 1]['source'] ?? 'unknown');
+        }
+
+        $before = $knots[$segment['before']];
+        $after = $knots[$segment['after']];
+        $beforeSource = (string)($before['source'] ?? 'unknown');
+        $afterSource = (string)($after['source'] ?? 'unknown');
+        if ($beforeSource === $afterSource) {
+            return $beforeSource;
+        }
+
+        return $beforeSource . '_to_' . $afterSource;
+    }
+
+    /**
+     * @param list<array{t:float,source?:string}> $knots
+     * @param array{before:int,after:int,ratio:float,edge:string}|null $segment
+     */
+    private function seriesSourceFromSegment(array $knots, ?array $segment): string
+    {
+        return $this->scalarSourceFromSegment($knots, $segment);
+    }
+
+    private function gapQualityReason(string $field, string $quality): string
+    {
+        return match (strtoupper($quality)) {
+            'GOOD' => $field . '_reliable_source_or_clean_interpolation',
+            'DEGRADED' => $field . '_interpolated_or_held_but_plausible',
+            'LOW' => $field . '_source_gap_or_unreliable',
+            default => $field . '_unknown_quality',
+        };
+    }
+
+    private function combineAttitudeSources(string $pitchSource, string $rollSource): string
+    {
+        if ($pitchSource === $rollSource) {
+            return $pitchSource;
+        }
+        if ($pitchSource === 'unavailable') {
+            return $rollSource;
+        }
+        if ($rollSource === 'unavailable') {
+            return $pitchSource;
+        }
+
+        return 'pitch_' . $pitchSource . '_roll_' . $rollSource;
     }
 
     /**
@@ -742,10 +1146,10 @@ final class CockpitReplayPipeline
     {
         $knots = array();
         foreach ($g3xPoints as $point) {
-            $knots[] = array('t' => $point['t'], 'v' => $point['speed_kt'], 'priority' => 2);
+            $knots[] = array('t' => $point['t'], 'v' => $point['speed_kt'], 'priority' => 2, 'source' => 'g3x');
         }
         foreach ($gpsPoints as $point) {
-            $knots[] = array('t' => $point['t'], 'v' => $point['speed_kt'], 'priority' => 1);
+            $knots[] = array('t' => $point['t'], 'v' => $point['speed_kt'], 'priority' => 1, 'source' => 'gps');
         }
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t'] ?: $b['priority'] <=> $a['priority']);
         return $this->mergeScalarKnots($knots);
@@ -878,51 +1282,82 @@ final class CockpitReplayPipeline
         $this->diagnostics['stationary_segments_count'] = count($stationarySegments);
 
         $previousAlt = null;
+        $previousVs = 0.0;
+        $groundHoldAlt = null;
+        $countGroundAltitudeStabilized = 0;
         $maxGroundVs = 0.0;
         foreach ($samples as $i => &$sample) {
             $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
             $phase = (string)($sample['phase'] ?? '');
             $rawAlt = isset($sample['altitude_ft']) && is_numeric($sample['altitude_ft']) ? (float)$sample['altitude_ft'] : (float)$baselineFt;
-            $ground = $this->isGroundPhase($phase) || $speed < self::SLOW_TAXI_SPEED_KT;
+            $ground = $this->isGroundPhase($phase) || $speed < self::GROUND_SPEED_MAX_KT;
             $altitudeQuality = ($baseline['source'] !== 'gps_median_first_60s' && $baseline['source'] !== 'unavailable') ? 'GOOD' : 'DEGRADED';
 
-            if (isset($segmentAltitudeByIndex[$i])) {
-                $alt = $segmentAltitudeByIndex[$i];
-                $vs = 0.0;
-            } elseif ($ground || $speed < self::GROUND_SPEED_MAX_KT) {
-                $alt = $previousAlt !== null ? $previousAlt + (((float)$baselineFt - $previousAlt) * 0.08) : (float)$baselineFt;
-                if (abs($alt - (float)$baselineFt) < 0.25) {
-                    $alt = (float)$baselineFt;
+            if ($ground) {
+                if ($groundHoldAlt === null) {
+                    if ($previousAlt !== null) {
+                        $groundHoldAlt = $previousAlt;
+                    } else {
+                        $groundHoldAlt = $segmentAltitudeByIndex[$i] ?? (float)$baselineFt;
+                    }
+                    if ($previousAlt === null && abs($groundHoldAlt - (float)$baselineFt) > 35.0) {
+                        $groundHoldAlt = (float)$baselineFt;
+                    }
                 }
+                $alt = $groundHoldAlt;
                 $vs = 0.0;
+                $altitudeQuality = $this->worseQuality($altitudeQuality, 'DEGRADED');
+                if (abs($rawAlt - $alt) > 2.0) {
+                    $countGroundAltitudeStabilized++;
+                }
             } else {
-                $alt = $previousAlt !== null ? $previousAlt + (($rawAlt - $previousAlt) * 0.35) : $rawAlt;
-                $deltaFt = $previousAlt !== null ? $alt - $previousAlt : 0.0;
-                $vs = self::FIXED_TIMESTEP_S > 0.0 ? ($deltaFt / self::FIXED_TIMESTEP_S) * 60.0 : 0.0;
-                $maxVs = $speed < self::GROUND_SPEED_MAX_KT ? 3000.0 : 6000.0;
+                $groundHoldAlt = null;
+                if ($previousAlt !== null && $previousAlt <= (float)$baselineFt + 50.0 && $rawAlt < $previousAlt) {
+                    $rawAlt = $previousAlt;
+                    $altitudeQuality = $this->worseQuality($altitudeQuality, 'DEGRADED');
+                }
+                $targetAlt = $previousAlt !== null ? $previousAlt + (($rawAlt - $previousAlt) * 0.35) : $rawAlt;
+                $desiredVs = $previousAlt !== null && self::FIXED_TIMESTEP_S > 0.0
+                    ? (($targetAlt - $previousAlt) / self::FIXED_TIMESTEP_S) * 60.0
+                    : 0.0;
+                $maxVs = 2500.0;
+                $maxVsDelta = 200.0;
+                $vs = $previousAlt !== null
+                    ? max($previousVs - $maxVsDelta, min($previousVs + $maxVsDelta, $desiredVs))
+                    : $desiredVs;
                 if (abs($vs) > $maxVs) {
                     $this->diagnostics['count_altitude_spikes_rejected']++;
                     $vs = max(-$maxVs, min($maxVs, $vs));
-                    $alt = ($previousAlt ?? $alt) + (($vs / 60.0) * self::FIXED_TIMESTEP_S);
                     $altitudeQuality = 'DEGRADED';
                 }
+                if ($previousAlt !== null && abs($vs - $desiredVs) > 0.1) {
+                    $this->diagnostics['count_altitude_spikes_rejected']++;
+                    $altitudeQuality = $this->worseQuality($altitudeQuality, 'DEGRADED');
+                }
+                $alt = $previousAlt !== null ? $previousAlt + (($vs / 60.0) * self::FIXED_TIMESTEP_S) : $targetAlt;
             }
 
-            if ($this->isGroundPhase($phase) || $speed < self::SLOW_TAXI_SPEED_KT) {
+            if ($ground) {
                 $vs = 0.0;
             }
-            if ($this->isGroundPhase($phase) || $speed < self::GROUND_SPEED_MAX_KT) {
+            if ($ground) {
                 $maxGroundVs = max($maxGroundVs, abs((float)$vs));
             }
 
             $sample['altitude_ft'] = round($alt, 1);
             $sample['vertical_speed_fpm'] = round($vs, 1);
+            $sample['altitude_source'] = (string)($baseline['source'] ?? 'unknown');
             $sample['altitude_quality'] = $altitudeQuality;
+            $sample['altitude_quality_reason'] = $altitudeQuality === 'GOOD'
+                ? 'altitude_reliable_source_or_clean_interpolation'
+                : 'altitude_stabilized_or_smoothed_plausible';
             $previousAlt = $alt;
+            $previousVs = (float)$vs;
         }
         unset($sample);
 
         $this->diagnostics['max_ground_vertical_speed_fpm'] = round($maxGroundVs, 1);
+        $this->diagnostics['count_ground_altitude_stabilized'] = $countGroundAltitudeStabilized;
         $this->diagnostics['max_stationary_altitude_variation_ft'] = round($this->maxStationaryAltitudeVariation($samples, $stationarySegments), 1);
 
         return $samples;
@@ -938,7 +1373,9 @@ final class CockpitReplayPipeline
         $maxStationaryDelta = 0.0;
         $maxGroundDelta = 0.0;
         foreach ($samples as &$sample) {
-            $raw = isset($sample['heading_deg']) && is_numeric($sample['heading_deg']) ? self::normalizeDegrees((float)$sample['heading_deg']) : null;
+            $raw = isset($sample['heading_deg_true']) && is_numeric($sample['heading_deg_true'])
+                ? self::normalizeDegrees((float)$sample['heading_deg_true'])
+                : (isset($sample['heading_deg']) && is_numeric($sample['heading_deg']) ? self::normalizeDegrees((float)$sample['heading_deg']) : null);
             $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
             $phase = (string)($sample['phase'] ?? '');
             $isStationary = $speed < self::STATIONARY_SPEED_KT;
@@ -948,6 +1385,8 @@ final class CockpitReplayPipeline
                 $heading = $raw ?? 0.0;
             } elseif ($raw === null) {
                 $heading = $previous;
+                $sample['heading_source'] = 'held';
+                $sample['heading_reference'] = 'TRUE';
                 $counts = $this->diagnostics['heading_source_counts'];
                 if (is_array($counts)) {
                     $counts['held'] = (int)($counts['held'] ?? 0) + 1;
@@ -973,8 +1412,18 @@ final class CockpitReplayPipeline
                 }
             }
 
-            $sample['heading_deg'] = round(self::normalizeDegrees($heading), 2);
-            $previous = (float)$sample['heading_deg'];
+            $sample['heading_deg_true'] = round(self::normalizeDegrees($heading), 2);
+            $sample['heading_deg'] = $sample['heading_deg_true'];
+            $stateMagnetic = $this->trueToMagnetic(
+                (float)$sample['heading_deg_true'],
+                isset($sample['magnetic_variation_deg']) && is_numeric($sample['magnetic_variation_deg']) ? (float)$sample['magnetic_variation_deg'] : null,
+                isset($sample['compass_deviation_deg']) && is_numeric($sample['compass_deviation_deg']) ? (float)$sample['compass_deviation_deg'] : 0.0
+            );
+            $sample['heading_deg_magnetic'] = $stateMagnetic !== null ? round($stateMagnetic, 2) : null;
+            $sample['crab_angle_deg'] = isset($sample['track_deg_true']) && is_numeric($sample['track_deg_true'])
+                ? round($this->crabAngle((float)$sample['heading_deg_true'], (float)$sample['track_deg_true']), 2)
+                : null;
+            $previous = (float)$sample['heading_deg_true'];
         }
         unset($sample);
 
@@ -983,9 +1432,284 @@ final class CockpitReplayPipeline
         return $samples;
     }
 
+    /**
+     * Heading ownership is intentionally stateful. G3X owns heading while valid;
+     * AHRS and track fallback only take ownership after sustained loss of better sources.
+     *
+     * @param list<array<string,mixed>> $samples
+     * @param list<array{t:float,v:float,source?:string}> $g3xHeadingKnots
+     * @param list<array{t:float,v:float,source?:string}> $ahrsHeadingKnots
+     * @param list<array{t:float,v:float,source?:string}> $trackFallbackHeadingKnots
+     * @return list<array<string,mixed>>
+     */
+    private function applyHeadingOwnership(array $samples, array $g3xHeadingKnots, array $ahrsHeadingKnots, array $trackFallbackHeadingKnots): array
+    {
+        if ($samples === array()) {
+            return $samples;
+        }
+
+        $g3xCursor = new ReplaySeriesCursor($g3xHeadingKnots);
+        $ahrsCursor = new ReplaySeriesCursor($ahrsHeadingKnots);
+        $trackCursor = new ReplaySeriesCursor($trackFallbackHeadingKnots);
+
+        $owner = 'unknown';
+        $lastHeading = null;
+        $g3xLossStart = null;
+        $g3xStableStart = null;
+        $blendStart = null;
+        $blendFrom = null;
+        $ahrsBlendStart = null;
+        $ahrsBlendFrom = null;
+        $holdingOwner = null;
+        $ownerChanges = array();
+        $ownerSwitchReasons = array();
+        $ownerHoldEvents = 0;
+        $ownerBlendEvents = 0;
+        $maxStationaryDelta = 0.0;
+        $maxGroundDelta = 0.0;
+
+        foreach ($samples as $idx => &$sample) {
+            $timeS = isset($sample['t']) && is_numeric($sample['t']) ? (float)$sample['t'] : 0.0;
+            $g3xHeading = $this->candidateHeading($g3xHeadingKnots, $g3xCursor, $timeS);
+            $ahrsHeading = $this->candidateHeading($ahrsHeadingKnots, $ahrsCursor, $timeS);
+            $trackHeading = $this->candidateHeading($trackFallbackHeadingKnots, $trackCursor, $timeS);
+            $g3xValid = $g3xHeading !== null;
+            $ahrsValid = $ahrsHeading !== null;
+            $trackValid = $trackHeading !== null;
+            $previousHeading = $lastHeading;
+            $headingQuality = (string)($sample['attitude_quality'] ?? 'GOOD');
+            $source = 'held';
+
+            if ($owner === 'unknown') {
+                if ($g3xValid) {
+                    $owner = 'g3x';
+                    $heading = $g3xHeading;
+                    $source = 'g3x';
+                    $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'g3x', 'reason' => 'initial_g3x_available');
+                } elseif ($ahrsValid) {
+                    $owner = 'ahrs';
+                    $heading = $ahrsHeading;
+                    $source = 'ahrs';
+                    $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                    $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'ahrs', 'reason' => 'initial_g3x_unavailable');
+                } elseif ($trackValid) {
+                    $owner = 'track_fallback';
+                    $heading = $trackHeading;
+                    $source = 'track_fallback';
+                    $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                    $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'track_fallback', 'reason' => 'initial_no_heading_source');
+                } else {
+                    $heading = $previousHeading ?? 0.0;
+                    $headingQuality = $this->worseQuality($headingQuality, 'LOW');
+                }
+            } elseif ($owner === 'g3x') {
+                if ($g3xValid) {
+                    $heading = $g3xHeading;
+                    $source = 'g3x';
+                    $g3xLossStart = null;
+                    $holdingOwner = null;
+                } else {
+                    $g3xLossStart ??= $timeS;
+                    $lossDuration = $timeS - $g3xLossStart;
+                    if ($lossDuration >= self::HEADING_OWNER_SWITCH_AFTER_LOSS_S && $ahrsValid) {
+                        $owner = 'ahrs';
+                        $ahrsBlendStart = $timeS;
+                        $ahrsBlendFrom = $previousHeading ?? $ahrsHeading;
+                        $heading = $previousHeading ?? $ahrsHeading;
+                        $source = 'g3x_to_ahrs';
+                        $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                        $reason = 'g3x_unavailable_for_' . number_format($lossDuration, 1, '.', '') . 's';
+                        $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'ahrs', 'reason' => $reason);
+                        $ownerSwitchReasons[] = $reason;
+                        $ownerBlendEvents++;
+                        $g3xStableStart = null;
+                        $blendStart = null;
+                        $blendFrom = null;
+                        $holdingOwner = null;
+                    } else {
+                        $heading = $previousHeading ?? ($ahrsHeading ?? ($trackHeading ?? 0.0));
+                        $source = 'held';
+                        $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                        if ($holdingOwner !== 'g3x') {
+                            $ownerHoldEvents++;
+                            $holdingOwner = 'g3x';
+                        }
+                    }
+                }
+            } elseif ($owner === 'ahrs') {
+                if ($g3xValid) {
+                    $ahrsBlendStart = null;
+                    $ahrsBlendFrom = null;
+                    $g3xStableStart ??= $timeS;
+                    $stableDuration = $timeS - $g3xStableStart;
+                    if ($stableDuration >= self::HEADING_OWNER_RETURN_STABLE_S) {
+                        if ($blendStart === null) {
+                            $blendStart = $timeS;
+                            $blendFrom = $previousHeading ?? ($ahrsHeading ?? $g3xHeading);
+                            $ownerBlendEvents++;
+                        }
+                        $ratio = max(0.0, min(1.0, ($timeS - $blendStart) / self::HEADING_OWNER_RETURN_BLEND_S));
+                        $heading = $this->smoothAngle((float)$blendFrom, $g3xHeading, $ratio);
+                        $source = 'ahrs_to_g3x';
+                        $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                        if ($ratio >= 1.0) {
+                            $owner = 'g3x';
+                            $heading = $g3xHeading;
+                            $source = 'g3x';
+                            $reason = 'g3x_returned_stable_and_blended';
+                            $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'g3x', 'reason' => $reason);
+                            $ownerSwitchReasons[] = $reason;
+                            $g3xLossStart = null;
+                            $g3xStableStart = null;
+                            $blendStart = null;
+                            $blendFrom = null;
+                        }
+                    } else {
+                        $heading = $ahrsValid ? $ahrsHeading : ($previousHeading ?? $g3xHeading);
+                        $source = $ahrsValid ? 'ahrs' : 'held';
+                        $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                    }
+                } else {
+                    $g3xStableStart = null;
+                    $blendStart = null;
+                    $blendFrom = null;
+                    if ($ahrsValid) {
+                        if ($ahrsBlendStart !== null) {
+                            $ratio = max(0.0, min(1.0, ($timeS - $ahrsBlendStart) / self::HEADING_OWNER_RETURN_BLEND_S));
+                            $heading = $this->smoothAngle((float)$ahrsBlendFrom, $ahrsHeading, $ratio);
+                            $source = 'g3x_to_ahrs';
+                            if ($ratio >= 1.0) {
+                                $ahrsBlendStart = null;
+                                $ahrsBlendFrom = null;
+                                $source = 'ahrs';
+                            }
+                        } else {
+                            $heading = $ahrsHeading;
+                            $source = 'ahrs';
+                        }
+                        $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                    } elseif ($trackValid) {
+                        $owner = 'track_fallback';
+                        $heading = $trackHeading;
+                        $source = 'track_fallback';
+                        $headingQuality = $this->worseQuality($headingQuality, 'LOW');
+                        $reason = 'ahrs_unavailable_after_g3x_loss';
+                        $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'track_fallback', 'reason' => $reason);
+                        $ownerSwitchReasons[] = $reason;
+                    } else {
+                        $heading = $previousHeading ?? 0.0;
+                        $source = 'held';
+                        $headingQuality = $this->worseQuality($headingQuality, 'LOW');
+                    }
+                }
+            } else {
+                if ($g3xValid) {
+                    $owner = 'g3x';
+                    $heading = $g3xHeading;
+                    $source = 'g3x';
+                    $reason = 'g3x_available_after_track_fallback';
+                    $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'g3x', 'reason' => $reason);
+                    $ownerSwitchReasons[] = $reason;
+                } elseif ($ahrsValid) {
+                    $owner = 'ahrs';
+                    $heading = $ahrsHeading;
+                    $source = 'ahrs';
+                    $headingQuality = $this->worseQuality($headingQuality, 'DEGRADED');
+                    $reason = 'ahrs_available_after_track_fallback';
+                    $ownerChanges[] = array('t' => round($timeS, 3), 'owner' => 'ahrs', 'reason' => $reason);
+                    $ownerSwitchReasons[] = $reason;
+                } else {
+                    $heading = $trackHeading ?? ($previousHeading ?? 0.0);
+                    $source = $trackValid ? 'track_fallback' : 'held';
+                    $headingQuality = $this->worseQuality($headingQuality, 'LOW');
+                }
+            }
+
+            $heading = self::normalizeDegrees((float)$heading);
+            $sample['heading_deg_true'] = round($heading, 2);
+            $sample['heading_deg'] = $sample['heading_deg_true'];
+            $sample['heading_owner'] = $owner;
+            $sample['heading_source'] = $source;
+            $sample['heading_reference'] = 'TRUE';
+            $sample['heading_quality'] = $headingQuality;
+            $sample['attitude_quality'] = $this->worseQuality((string)($sample['attitude_quality'] ?? 'GOOD'), $headingQuality);
+            $stateMagnetic = $this->trueToMagnetic(
+                (float)$sample['heading_deg_true'],
+                isset($sample['magnetic_variation_deg']) && is_numeric($sample['magnetic_variation_deg']) ? (float)$sample['magnetic_variation_deg'] : null,
+                isset($sample['compass_deviation_deg']) && is_numeric($sample['compass_deviation_deg']) ? (float)$sample['compass_deviation_deg'] : 0.0
+            );
+            $sample['heading_deg_magnetic'] = $stateMagnetic !== null ? round($stateMagnetic, 2) : null;
+            $sample['crab_angle_deg'] = isset($sample['track_deg_true']) && is_numeric($sample['track_deg_true'])
+                ? round($this->crabAngle((float)$sample['heading_deg_true'], (float)$sample['track_deg_true']), 2)
+                : null;
+
+            if ($previousHeading !== null) {
+                $delta = abs(self::angleDelta($previousHeading, (float)$sample['heading_deg_true']));
+                $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
+                $phase = (string)($sample['phase'] ?? '');
+                $isStationary = $speed < self::STATIONARY_SPEED_KT;
+                $isGround = $this->isGroundPhase($phase) || $speed < self::GROUND_SPEED_MAX_KT;
+                if ($isStationary) {
+                    $maxStationaryDelta = max($maxStationaryDelta, $delta);
+                }
+                if ($isGround) {
+                    $maxGroundDelta = max($maxGroundDelta, $delta);
+                }
+            }
+
+            $lastHeading = (float)$sample['heading_deg_true'];
+            $samples[$idx] = $sample;
+        }
+        unset($sample);
+
+        $this->diagnostics['heading_owner'] = $owner;
+        $this->diagnostics['heading_owner_changes'] = $ownerChanges;
+        $this->diagnostics['owner_switch_count'] = max(0, count($ownerChanges) - 1);
+        $this->diagnostics['owner_switch_reason'] = $ownerSwitchReasons;
+        $this->diagnostics['owner_hold_events'] = $ownerHoldEvents;
+        $this->diagnostics['owner_blend_events'] = $ownerBlendEvents;
+        $this->diagnostics['owner_blend_duration'] = self::HEADING_OWNER_RETURN_BLEND_S;
+        $this->diagnostics['count_heading_owner_transitions'] = max(0, count($ownerChanges) - 1);
+        $this->diagnostics['max_heading_delta_stationary_deg'] = round($maxStationaryDelta, 2);
+        $this->diagnostics['max_heading_delta_ground_deg'] = round($maxGroundDelta, 2);
+
+        return $samples;
+    }
+
+    /**
+     * @param list<array{t:float,v:float,source?:string}> $knots
+     */
+    private function candidateHeading(array $knots, ReplaySeriesCursor $cursor, float $timeS): ?float
+    {
+        if ($knots === array() || $cursor->nearestGap($timeS) > self::HEADING_OWNER_VALID_GAP_S) {
+            return null;
+        }
+
+        return ReplaySeriesCursor::lerpHeading($knots, $cursor->segmentAt($timeS));
+    }
+
     private function smoothAngle(float $from, float $to, float $alpha): float
     {
         return self::normalizeDegrees($from + self::angleDelta($from, $to) * max(0.0, min(1.0, $alpha)));
+    }
+
+    private function magneticToTrue(float $magneticDeg, float $magneticVariationDeg, float $compassDeviationDeg = 0.0): float
+    {
+        return self::normalizeDegrees($magneticDeg + $compassDeviationDeg + $magneticVariationDeg);
+    }
+
+    private function trueToMagnetic(float $trueDeg, ?float $magneticVariationDeg, ?float $compassDeviationDeg = 0.0): ?float
+    {
+        if ($magneticVariationDeg === null) {
+            return null;
+        }
+        return self::normalizeDegrees($trueDeg - ($compassDeviationDeg ?? 0.0) - $magneticVariationDeg);
+    }
+
+    private function crabAngle(float $headingDegTrue, float $trackDegTrue): float
+    {
+        $angle = self::angleDelta($trackDegTrue, $headingDegTrue);
+        return $angle >= 179.995 ? -180.0 : $angle;
     }
 
     /**
@@ -1005,15 +1729,21 @@ final class CockpitReplayPipeline
         $maxTaxiImpliedSpeed = 0.0;
         $maxMismatch = 0.0;
         $countPositionOutliers = 0;
+        $countTakeoffTransitionPositionCorrections = 0;
+        $firstPositionDiscontinuityTime = null;
+        $firstPositionDiscontinuitySource = null;
         $countSpeedOutliers = 0;
         $countHeadingOutliers = 0;
+        $countAttitudeSpikesClamped = 0;
         $countOriginalEmptyPhase = 0;
         $maxGroundHeadingDelta = 0.0;
+        $maxPitchDeltaState = 0.0;
+        $maxRollDeltaState = 0.0;
 
         $lastSpeed = null;
         $lastHeading = null;
-        $lastVisualPitch = null;
-        $lastVisualRoll = null;
+        $lastPitch = null;
+        $lastRoll = null;
 
         for ($i = 0; $i < count($samples); $i++) {
             $sample = $samples[$i];
@@ -1033,11 +1763,15 @@ final class CockpitReplayPipeline
             $rawDelta = 0.0;
             if ($lastSpeed !== null) {
                 $rawDelta = $speed - $lastSpeed;
-                if ($groundStep && abs($rawDelta) > 0.3) {
+                $prevPhaseForSpeed = $i > 0 ? (string)($samples[$i - 1]['phase'] ?? '') : '';
+                $takeoffRollSpeedStep = $this->isTakeoffRollSpeedStep($prevPhaseForSpeed, $phase, $lastSpeed, $speed);
+                $maxSpeedDelta = $takeoffRollSpeedStep ? 1.0 : 0.3;
+                if (($groundStep || $takeoffRollSpeedStep) && abs($rawDelta) > $maxSpeedDelta) {
                     $countSpeedOutliers++;
-                    $speed = $lastSpeed + max(-0.3, min(0.3, $rawDelta));
+                    $speed = $lastSpeed + max(-$maxSpeedDelta, min($maxSpeedDelta, $rawDelta));
                     $sample['ground_speed_kt'] = round($speed, 2);
-                    $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                    $sample['speed_quality'] = $this->worseQuality((string)($sample['speed_quality'] ?? 'GOOD'), 'DEGRADED');
+                    $sample['speed_quality_reason'] = 'speed_delta_rate_limited_plausible';
                     $groundStep = $ground || min($lastSpeed, $speed) < self::GROUND_SPEED_MAX_KT;
                 }
                 if ($groundStep) {
@@ -1050,20 +1784,66 @@ final class CockpitReplayPipeline
                 $dt = max(0.001, (float)$sample['t'] - (float)$prev['t']);
                 $impliedSpeed = $this->impliedSpeedKt($prev, $sample, $dt);
                 $mismatch = abs($impliedSpeed - $speed);
+                $prevPhase = (string)($prev['phase'] ?? '');
+                $takeoffTransition = $this->isTakeoffTransition($prevPhase, $phase, $lastSpeed, $speed);
+                $absurdPositionDiscontinuity = $impliedSpeed > self::POSITION_ABSURD_IMPLIED_SPEED_KT
+                    || $mismatch > self::POSITION_ABSURD_MISMATCH_KT;
                 if ($groundStep && ($impliedSpeed > 40.0 || $mismatch > 10.0)) {
                     $countPositionOutliers++;
                     $projected = $this->projectPositionFromSpeed($prev, $sample, $speed, $dt);
+                    $corrected = false;
                     if ($projected !== null) {
                         $sample['lat'] = round($projected['lat'], 7);
                         $sample['lon'] = round($projected['lon'], 7);
                         $impliedSpeed = $this->impliedSpeedKt($prev, $sample, $dt);
                         $mismatch = abs($impliedSpeed - $speed);
+                        $corrected = $impliedSpeed <= 40.0 && $mismatch <= 10.0;
                     }
-                    $sample['position_quality'] = 'LOW';
+                    if ($corrected) {
+                        $sample['position_quality'] = 'DEGRADED';
+                        $sample['position_quality_reason'] = 'position_projected_correction_plausible';
+                        $this->diagnostics['count_position_corrections_degraded']++;
+                    } else {
+                        $sample['position_quality'] = 'LOW';
+                        $sample['position_quality_reason'] = 'position_correction_unreliable_or_impossible';
+                        $this->diagnostics['count_position_corrections_low']++;
+                    }
+                } elseif ($absurdPositionDiscontinuity) {
+                    $countPositionOutliers++;
+                    if ($takeoffTransition) {
+                        $countTakeoffTransitionPositionCorrections++;
+                    }
+                    if ($firstPositionDiscontinuityTime === null) {
+                        $firstPositionDiscontinuityTime = (float)$sample['t'];
+                        $firstPositionDiscontinuitySource = $takeoffTransition
+                            ? 'post_interpolation_takeoff_transition'
+                            : 'post_interpolation_position_discontinuity';
+                    }
+                    $projected = $this->projectPositionFromSpeed($prev, $sample, $speed, $dt);
+                    $corrected = false;
+                    if ($projected !== null) {
+                        $sample['lat'] = round($projected['lat'], 7);
+                        $sample['lon'] = round($projected['lon'], 7);
+                        $impliedSpeed = $this->impliedSpeedKt($prev, $sample, $dt);
+                        $mismatch = abs($impliedSpeed - $speed);
+                        $corrected = $impliedSpeed <= self::POSITION_ABSURD_IMPLIED_SPEED_KT
+                            && $mismatch <= self::POSITION_ABSURD_MISMATCH_KT;
+                    }
+                    if ($corrected) {
+                        $sample['position_quality'] = 'DEGRADED';
+                        $sample['position_quality_reason'] = 'position_absurd_discontinuity_projected_plausible';
+                        $this->diagnostics['count_position_corrections_degraded']++;
+                    } else {
+                        $sample['position_quality'] = 'LOW';
+                        $sample['position_quality_reason'] = 'position_absurd_discontinuity_unreliable';
+                        $this->diagnostics['count_position_corrections_low']++;
+                    }
                 } elseif (!$ground && $mismatch > 15.0) {
                     $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                    $sample['position_quality_reason'] = 'position_speed_mismatch_degraded';
                 } elseif ($mismatch > 5.0) {
                     $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                    $sample['position_quality_reason'] = 'position_minor_speed_mismatch_degraded';
                 }
                 $maxMismatch = max($maxMismatch, $mismatch);
                 if ($groundStep) {
@@ -1071,38 +1851,100 @@ final class CockpitReplayPipeline
                 }
             } else {
                 $sample['position_quality'] = $this->worseQuality((string)$sample['position_quality'], 'DEGRADED');
+                $sample['position_quality_reason'] = 'initial_position_sample_degraded';
             }
 
-            $heading = isset($sample['heading_deg']) && is_numeric($sample['heading_deg'])
-                ? self::normalizeDegrees((float)$sample['heading_deg'])
-                : ($lastHeading ?? 0.0);
+            $heading = isset($sample['heading_deg_true']) && is_numeric($sample['heading_deg_true'])
+                ? self::normalizeDegrees((float)$sample['heading_deg_true'])
+                : (isset($sample['heading_deg']) && is_numeric($sample['heading_deg'])
+                    ? self::normalizeDegrees((float)$sample['heading_deg'])
+                    : ($lastHeading ?? 0.0));
             if ($lastHeading !== null) {
                 $headingDelta = self::angleDelta($lastHeading, $heading);
                 if ($groundStep && abs($headingDelta) > 10.0) {
                     $countHeadingOutliers++;
                     $heading = self::normalizeDegrees($lastHeading + max(-10.0, min(10.0, $headingDelta)));
+                    $sample['heading_quality'] = $this->worseQuality((string)($sample['heading_quality'] ?? 'GOOD'), 'DEGRADED');
+                    $sample['heading_quality_reason'] = 'heading_ground_delta_rate_limited_plausible';
                     $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
                 }
                 if ($groundStep) {
                     $maxGroundHeadingDelta = max($maxGroundHeadingDelta, abs(self::angleDelta($lastHeading, $heading)));
                 }
             }
-            $sample['heading_deg'] = round($heading, 2);
+            $sample['heading_deg_true'] = round($heading, 2);
+            $sample['heading_deg'] = $sample['heading_deg_true'];
+            $stateMagnetic = $this->trueToMagnetic(
+                (float)$sample['heading_deg_true'],
+                isset($sample['magnetic_variation_deg']) && is_numeric($sample['magnetic_variation_deg']) ? (float)$sample['magnetic_variation_deg'] : null,
+                isset($sample['compass_deviation_deg']) && is_numeric($sample['compass_deviation_deg']) ? (float)$sample['compass_deviation_deg'] : 0.0
+            );
+            $sample['heading_deg_magnetic'] = $stateMagnetic !== null ? round($stateMagnetic, 2) : null;
+            $sample['crab_angle_deg'] = isset($sample['track_deg_true']) && is_numeric($sample['track_deg_true'])
+                ? round($this->crabAngle((float)$sample['heading_deg_true'], (float)$sample['track_deg_true']), 2)
+                : null;
 
-            $rawPitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : ($lastVisualPitch ?? 0.0);
-            $rawRoll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : ($lastVisualRoll ?? 0.0);
-            $pitchLimit = $speed < self::GROUND_SPEED_MAX_KT ? 2.0 : 5.0;
-            $rollLimit = $speed < self::GROUND_SPEED_MAX_KT ? 2.0 : 5.0;
-            $visualPitch = $this->rateLimitScalar($lastVisualPitch, $rawPitch, $pitchLimit);
-            $visualRoll = $this->rateLimitScalar($lastVisualRoll, $rawRoll, $rollLimit);
-            if ($lastVisualPitch !== null && abs($rawPitch - $lastVisualPitch) > 5.0 && $speed < self::GROUND_SPEED_MAX_KT) {
-                $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+            $rawPitch = isset($sample['raw_pitch_deg']) && is_numeric($sample['raw_pitch_deg'])
+                ? (float)$sample['raw_pitch_deg']
+                : (isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : ($lastPitch ?? 0.0));
+            $rawRoll = isset($sample['raw_roll_deg']) && is_numeric($sample['raw_roll_deg'])
+                ? (float)$sample['raw_roll_deg']
+                : (isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : ($lastRoll ?? 0.0));
+            $sample['raw_pitch_deg'] = round($rawPitch, 2);
+            $sample['raw_roll_deg'] = round($rawRoll, 2);
+            $sample['raw_attitude_quality'] = (string)($sample['raw_attitude_quality'] ?? $sample['attitude_quality'] ?? 'unknown');
+
+            $dt = 0.1;
+            if ($i > 0 && isset($samples[$i - 1]['t'], $sample['t'])) {
+                $dt = max(0.001, (float)$sample['t'] - (float)$samples[$i - 1]['t']);
             }
-            if ($lastVisualRoll !== null && abs($rawRoll - $lastVisualRoll) > 5.0 && $speed < self::GROUND_SPEED_MAX_KT) {
-                $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+            $pitchLimit = ($groundStep ? self::GROUND_PITCH_RATE_LIMIT_DEG_S : self::AIRBORNE_PITCH_RATE_LIMIT_DEG_S) * $dt;
+            $rollLimit = ($groundStep ? self::GROUND_ROLL_RATE_LIMIT_DEG_S : self::AIRBORNE_ROLL_RATE_LIMIT_DEG_S) * $dt;
+            $statePitch = $this->rateLimitScalar($lastPitch, $rawPitch, $pitchLimit);
+            $stateRoll = $this->rateLimitScalar($lastRoll, $rawRoll, $rollLimit);
+
+            if ($lastPitch !== null) {
+                $rawPitchDelta = $rawPitch - $lastPitch;
+                $statePitchDelta = $statePitch - $lastPitch;
+                $maxPitchDeltaState = max($maxPitchDeltaState, abs($statePitchDelta));
+                if (abs($rawPitchDelta) > $pitchLimit + 0.0001) {
+                    $countAttitudeSpikesClamped++;
+                    $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+                    $sample['attitude_quality_reason'] = 'raw_pitch_clamped_reconstructed_state_plausible';
+                }
             }
-            $sample['visual_pitch_deg'] = round($visualPitch, 2);
-            $sample['visual_roll_deg'] = round($visualRoll, 2);
+            if ($lastRoll !== null) {
+                $rawRollDelta = $rawRoll - $lastRoll;
+                $stateRollDelta = $stateRoll - $lastRoll;
+                $maxRollDeltaState = max($maxRollDeltaState, abs($stateRollDelta));
+                if (abs($rawRollDelta) > $rollLimit + 0.0001) {
+                    $countAttitudeSpikesClamped++;
+                    $sample['attitude_quality'] = $this->worseQuality((string)$sample['attitude_quality'], 'DEGRADED');
+                    $sample['attitude_quality_reason'] = 'raw_roll_clamped_reconstructed_state_plausible';
+                }
+            }
+
+            $sample['pitch_deg'] = round($statePitch, 2);
+            $sample['roll_deg'] = round($stateRoll, 2);
+            $sample['visual_pitch_deg'] = $sample['pitch_deg'];
+            $sample['visual_roll_deg'] = $sample['roll_deg'];
+
+            if ((string)($sample['track_quality'] ?? '') === 'LOW' && $speed < self::GPS_HEADING_MIN_SPEED_KT) {
+                $sample['track_quality'] = 'DEGRADED';
+                $sample['track_quality_reason'] = 'track_unavailable_or_held_below_moving_speed';
+            }
+            if ((string)($sample['speed_quality'] ?? '') === 'LOW' && $speed < self::SLOW_TAXI_SPEED_KT) {
+                $sample['speed_quality'] = 'DEGRADED';
+                $sample['speed_quality_reason'] = 'speed_terminal_or_stationary_hold_plausible';
+            }
+            if ((string)($sample['heading_quality'] ?? '') === 'LOW' && (string)($sample['heading_source'] ?? '') === 'held' && $speed < self::SLOW_TAXI_SPEED_KT) {
+                $sample['heading_quality'] = 'DEGRADED';
+                $sample['heading_quality_reason'] = 'heading_held_while_stationary_plausible';
+                if ((string)($sample['attitude_quality'] ?? '') === 'LOW') {
+                    $sample['attitude_quality'] = 'DEGRADED';
+                    $sample['attitude_quality_reason'] = 'attitude_heading_held_while_stationary_plausible';
+                }
+            }
 
             if ((string)$sample['position_quality'] === 'GOOD' && ($ground || $i === 0)) {
                 $sample['position_quality'] = 'DEGRADED';
@@ -1110,21 +1952,47 @@ final class CockpitReplayPipeline
 
             $samples[$i] = $sample;
             $lastSpeed = $speed;
-            $lastHeading = (float)$sample['heading_deg'];
-            $lastVisualPitch = $visualPitch;
-            $lastVisualRoll = $visualRoll;
+            $lastHeading = (float)$sample['heading_deg_true'];
+            $lastPitch = $statePitch;
+            $lastRoll = $stateRoll;
         }
 
         $low = 0;
         $degraded = 0;
+        $qualityCountsByField = array();
+        $qualitySourceCountsByField = array();
+        $lowReasonCounts = array();
+        $degradedReasonCounts = array();
         $finalMaxGroundspeedDelta = 0.0;
         $finalMaxTaxiImpliedSpeed = 0.0;
         $finalMaxMismatch = 0.0;
         foreach ($samples as $sample) {
+            foreach (array(
+                'position' => array('quality' => 'position_quality', 'source' => 'position_source', 'reason' => 'position_quality_reason'),
+                'altitude' => array('quality' => 'altitude_quality', 'source' => 'altitude_source', 'reason' => 'altitude_quality_reason'),
+                'attitude' => array('quality' => 'attitude_quality', 'source' => 'raw_attitude_source', 'reason' => 'attitude_quality_reason'),
+                'heading' => array('quality' => 'heading_quality', 'source' => 'heading_source', 'reason' => 'heading_quality_reason'),
+                'track' => array('quality' => 'track_quality', 'source' => 'track_source', 'reason' => 'track_quality_reason'),
+                'speed' => array('quality' => 'speed_quality', 'source' => 'speed_source', 'reason' => 'speed_quality_reason'),
+            ) as $field => $meta) {
+                $quality = strtoupper((string)($sample[$meta['quality']] ?? 'UNKNOWN'));
+                $source = (string)($sample[$meta['source']] ?? 'unavailable');
+                $reason = (string)($sample[$meta['reason']] ?? strtolower($field) . '_no_reason_recorded');
+                $qualityCountsByField[$field][$quality] = (int)($qualityCountsByField[$field][$quality] ?? 0) + 1;
+                $qualitySourceCountsByField[$field][$source . '|' . $quality] = (int)($qualitySourceCountsByField[$field][$source . '|' . $quality] ?? 0) + 1;
+                if ($quality === 'LOW') {
+                    $lowReasonCounts[$field . '|' . $reason] = (int)($lowReasonCounts[$field . '|' . $reason] ?? 0) + 1;
+                } elseif ($quality === 'DEGRADED') {
+                    $degradedReasonCounts[$field . '|' . $reason] = (int)($degradedReasonCounts[$field . '|' . $reason] ?? 0) + 1;
+                }
+            }
             $qualities = array(
                 (string)($sample['position_quality'] ?? ''),
                 (string)($sample['altitude_quality'] ?? ''),
                 (string)($sample['attitude_quality'] ?? ''),
+                (string)($sample['heading_quality'] ?? ''),
+                (string)($sample['track_quality'] ?? ''),
+                (string)($sample['speed_quality'] ?? ''),
             );
             if (in_array('LOW', $qualities, true)) {
                 $low++;
@@ -1153,10 +2021,22 @@ final class CockpitReplayPipeline
         $this->diagnostics['max_position_speed_mismatch_kt'] = round($finalMaxMismatch, 1);
         $this->diagnostics['max_heading_delta_ground_deg'] = round($maxGroundHeadingDelta, 2);
         $this->diagnostics['count_position_outliers'] = $countPositionOutliers;
+        $this->diagnostics['count_takeoff_transition_position_corrections'] = $countTakeoffTransitionPositionCorrections;
+        $this->diagnostics['first_position_discontinuity_time_s'] = $firstPositionDiscontinuityTime !== null
+            ? round($firstPositionDiscontinuityTime, 3)
+            : null;
+        $this->diagnostics['first_position_discontinuity_source'] = $firstPositionDiscontinuitySource;
         $this->diagnostics['count_speed_outliers'] = $countSpeedOutliers;
         $this->diagnostics['count_heading_outliers'] = $countHeadingOutliers;
+        $this->diagnostics['count_attitude_spikes_clamped'] = $countAttitudeSpikesClamped;
+        $this->diagnostics['max_pitch_delta_state_deg'] = round($maxPitchDeltaState, 2);
+        $this->diagnostics['max_roll_delta_state_deg'] = round($maxRollDeltaState, 2);
         $this->diagnostics['count_low_quality_samples'] = $low;
         $this->diagnostics['count_degraded_samples'] = $degraded;
+        $this->diagnostics['quality_counts_by_field'] = $qualityCountsByField;
+        $this->diagnostics['quality_source_counts_by_field'] = $qualitySourceCountsByField;
+        $this->diagnostics['low_quality_reason_counts'] = $lowReasonCounts;
+        $this->diagnostics['degraded_quality_reason_counts'] = $degradedReasonCounts;
         $this->diagnostics['count_empty_phase_samples'] = 0;
         $this->diagnostics['count_original_empty_phase_samples'] = $countOriginalEmptyPhase;
 
@@ -1312,23 +2192,50 @@ final class CockpitReplayPipeline
             || str_contains($normalized, 'block');
     }
 
+    private function isTakeoffTransition(string $beforePhase, string $afterPhase, ?float $beforeSpeed, float $afterSpeed): bool
+    {
+        $before = strtolower($beforePhase);
+        $after = strtolower($afterPhase);
+        $fromGround = $this->isGroundPhase($before) || ($beforeSpeed !== null && $beforeSpeed < self::GROUND_SPEED_MAX_KT);
+        $toTakeoff = str_contains($after, 'takeoff');
+
+        return $fromGround && $toTakeoff;
+    }
+
+    private function isTakeoffRollSpeedStep(string $beforePhase, string $afterPhase, float $beforeSpeed, float $afterSpeed): bool
+    {
+        $before = strtolower($beforePhase);
+        $after = strtolower($afterPhase);
+        $takeoffContext = str_contains($before, 'takeoff') || str_contains($after, 'takeoff');
+
+        return $takeoffContext && min($beforeSpeed, $afterSpeed) < 45.0;
+    }
+
     /**
-     * @param list<array{t:float,v:float,priority:int}> $knots
-     * @return list<array{t:float,v:float}>
+     * @param list<array{t:float,v:float,priority:int,source?:string}> $knots
+     * @return list<array{t:float,v:float,source?:string}>
      */
     private function mergeScalarKnots(array $knots): array
     {
         $merged = array();
         foreach ($knots as $knot) {
             if (!$merged) {
-                $merged[] = array('t' => $knot['t'], 'v' => $knot['v']);
+                $merged[] = array(
+                    't' => $knot['t'],
+                    'v' => $knot['v'],
+                    'source' => (string)($knot['source'] ?? 'unknown'),
+                );
                 continue;
             }
             $last = $merged[count($merged) - 1];
             if (abs($knot['t'] - $last['t']) <= 0.05) {
                 continue;
             }
-            $merged[] = array('t' => $knot['t'], 'v' => $knot['v']);
+            $merged[] = array(
+                't' => $knot['t'],
+                'v' => $knot['v'],
+                'source' => (string)($knot['source'] ?? 'unknown'),
+            );
         }
         return $merged;
     }

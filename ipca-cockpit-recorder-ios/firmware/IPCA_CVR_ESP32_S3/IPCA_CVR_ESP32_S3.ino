@@ -74,11 +74,19 @@ bool ahrsFooterDirty = true;
 float rollDeg = 0;
 float pitchDeg = 0;
 float yawDeg = 0;
+float slipG = 0;
+float quatW = 1;
+float quatX = 0;
+float quatY = 0;
+float quatZ = 0;
 
 float accX = 0;
 float accY = 0;
 float accZ = 0;
 float accTotal = 0;
+float gravityX = 0;
+float gravityY = 0;
+float gravityZ = 0;
 
 float magX = 0;
 float magY = 0;
@@ -87,6 +95,10 @@ float magHeadingDeg = 0;
 uint8_t rotationVectorAccuracy = 0;
 uint8_t magneticFieldAccuracy = 0;
 uint8_t lastHeadingQualityCode = 255;
+
+// Mounting/reference offset: with the current board orientation, fused yaw
+// reads 270 when the AHRS box is physically aligned with true north.
+#define HEADING_MOUNT_OFFSET_DEG 90.0f
 
 BLEServer *bleServer = nullptr;
 BLECharacteristic *ahrsCharacteristic = nullptr;
@@ -486,18 +498,30 @@ class IPCAStatusCallbacks : public BLECharacteristicCallbacks {
 };
 
 String buildAHRSLine() {
-  char line[230];
+  char line[448];
   snprintf(
     line,
     sizeof(line),
-    "AHRS,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,ACC=%.2f,ACCX=%.2f,ACCY=%.2f,ACCZ=%.2f,MAGHDG=%.1f,RVACC=%u,MAGACC=%u,MAGX=%.1f,MAGY=%.1f,MAGZ=%.1f,HDGQ=%u",
+    "AHRS,QW=%.5f,QX=%.5f,QY=%.5f,QZ=%.5f,ROLL=%.1f,PITCH=%.1f,YAW=%.1f,FUSEDHDG=%.1f,SLIP=%.3f,ACC=%.2f,ACCX=%.2f,ACCY=%.2f,ACCZ=%.2f,LINX=%.2f,LINY=%.2f,LINZ=%.2f,GRAVX=%.2f,GRAVY=%.2f,GRAVZ=%.2f,MAGHDG=%.1f,RVACC=%u,MAGACC=%u,MAGX=%.1f,MAGY=%.1f,MAGZ=%.1f,HDGQ=%u",
+    quatW,
+    quatX,
+    quatY,
+    quatZ,
     rollDeg,
     pitchDeg,
     yawDeg,
+    yawDeg,
+    slipG,
     accTotal,
     accX,
     accY,
     accZ,
+    accX,
+    accY,
+    accZ,
+    gravityX,
+    gravityY,
+    gravityZ,
     magHeadingDeg,
     rotationVectorAccuracy,
     magneticFieldAccuracy,
@@ -518,9 +542,9 @@ uint8_t headingQualityCode() {
 
 const char *headingQualityLabel() {
   uint8_t quality = headingQualityCode();
-  if (quality >= 2) return "MAG OK";
-  if (quality == 1) return "MAG LOW";
-  return "MAG BAD";
+  if (quality >= 2) return "FUSED OK";
+  if (quality == 1) return "FUSED LOW";
+  return "FUSED BAD";
 }
 
 void notifyAHRSLine(const String &line) {
@@ -531,6 +555,7 @@ void notifyAHRSLine(const String &line) {
 
 void setupBLE() {
   BLEDevice::init(BLE_DEVICE_NAME);
+  BLEDevice::setMTU(517);
 
   bleServer = BLEDevice::createServer();
   bleServer->setCallbacks(new IPCABLEServerCallbacks());
@@ -562,14 +587,27 @@ void setupBLE() {
   Serial.println("BLE IPCA-CVR advertising");
 }
 
+float normalizeDegrees360(float degrees) {
+  while (degrees < 0.0f) degrees += 360.0f;
+  while (degrees >= 360.0f) degrees -= 360.0f;
+  return degrees;
+}
+
 void quatToEuler(float qr, float qi, float qj, float qk) {
-  yawDeg = atan2(2.0f * (qi * qj + qk * qr),
-                 qi * qi - qj * qj - qk * qk + qr * qr) * 180.0f / PI;
+  float mathYawDeg = atan2(2.0f * (qi * qj + qk * qr),
+                           qi * qi - qj * qj - qk * qk + qr * qr) * 180.0f / PI;
+  // BNO quaternion yaw is mathematical-positive; aircraft heading is
+  // clockwise-positive. Yawing left should decrease heading, not increase it.
+  yawDeg = normalizeDegrees360(HEADING_MOUNT_OFFSET_DEG - mathYawDeg);
 
   pitchDeg = asin(-2.0f * (qi * qk - qj * qr)) * 180.0f / PI;
 
   rollDeg = atan2(2.0f * (qj * qk + qi * qr),
                   -qi * qi - qj * qj + qk * qk + qr * qr) * 180.0f / PI;
+
+  // Stable body-frame lateral gravity proxy for the slip/skid ball. This uses
+  // fused roll/quaternion attitude, not magnetometer or transient linear accel.
+  slipG = sin(rollDeg * PI / 180.0f);
 }
 
 void setupAHRS() {
@@ -613,6 +651,7 @@ void setupAHRS() {
   }
 
   bno08x.enableReport(SH2_LINEAR_ACCELERATION, 20000);
+  bno08x.enableReport(SH2_GRAVITY, 20000);
   bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, 20000);
 
   ahrsReady = true;
@@ -626,18 +665,26 @@ void readAHRS() {
   if (bno08x.wasReset()) {
     bno08x.enableReport(SH2_ROTATION_VECTOR, 10000);
     bno08x.enableReport(SH2_LINEAR_ACCELERATION, 20000);
+    bno08x.enableReport(SH2_GRAVITY, 20000);
     bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, 20000);
   }
 
   while (bno08x.getSensorEvent(&sensorValue)) {
     if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
       rotationVectorAccuracy = sensorValue.status;
+      quatW = sensorValue.un.rotationVector.real;
+      quatX = sensorValue.un.rotationVector.i;
+      quatY = sensorValue.un.rotationVector.j;
+      quatZ = sensorValue.un.rotationVector.k;
       quatToEuler(
-        sensorValue.un.rotationVector.real,
-        sensorValue.un.rotationVector.i,
-        sensorValue.un.rotationVector.j,
-        sensorValue.un.rotationVector.k
+        quatW,
+        quatX,
+        quatY,
+        quatZ
       );
+      // Do not derive heading from raw MAGX/MAGY. The rotation vector is
+      // BNO085-fused and tilt-compensated; raw magnetometer is diagnostic only.
+      magHeadingDeg = yawDeg;
     }
 
     if (sensorValue.sensorId == SH2_LINEAR_ACCELERATION) {
@@ -647,14 +694,17 @@ void readAHRS() {
       accTotal = sqrt(accX * accX + accY * accY + accZ * accZ);
     }
 
+    if (sensorValue.sensorId == SH2_GRAVITY) {
+      gravityX = sensorValue.un.gravity.x;
+      gravityY = sensorValue.un.gravity.y;
+      gravityZ = sensorValue.un.gravity.z;
+    }
+
     if (sensorValue.sensorId == SH2_MAGNETIC_FIELD_CALIBRATED) {
       magneticFieldAccuracy = sensorValue.status;
       magX = sensorValue.un.magneticField.x;
       magY = sensorValue.un.magneticField.y;
       magZ = sensorValue.un.magneticField.z;
-
-      magHeadingDeg = atan2(magY, magX) * 180.0f / PI;
-      if (magHeadingDeg < 0) magHeadingDeg += 360.0f;
     }
   }
 
@@ -671,6 +721,18 @@ void readAHRS() {
     Serial.print(pitchDeg, 1);
     Serial.print(",YAW=");
     Serial.print(yawDeg, 1);
+    Serial.print(",QW=");
+    Serial.print(quatW, 5);
+    Serial.print(",QX=");
+    Serial.print(quatX, 5);
+    Serial.print(",QY=");
+    Serial.print(quatY, 5);
+    Serial.print(",QZ=");
+    Serial.print(quatZ, 5);
+    Serial.print(",FUSEDHDG=");
+    Serial.print(yawDeg, 1);
+    Serial.print(",SLIP=");
+    Serial.print(slipG, 3);
     Serial.print(",ACC=");
     Serial.print(accTotal, 2);
     Serial.print(",ACCX=");
@@ -679,6 +741,18 @@ void readAHRS() {
     Serial.print(accY, 2);
     Serial.print(",ACCZ=");
     Serial.print(accZ, 2);
+    Serial.print(",LINX=");
+    Serial.print(accX, 2);
+    Serial.print(",LINY=");
+    Serial.print(accY, 2);
+    Serial.print(",LINZ=");
+    Serial.print(accZ, 2);
+    Serial.print(",GRAVX=");
+    Serial.print(gravityX, 2);
+    Serial.print(",GRAVY=");
+    Serial.print(gravityY, 2);
+    Serial.print(",GRAVZ=");
+    Serial.print(gravityZ, 2);
     Serial.print(",MAGHDG=");
     Serial.print(magHeadingDeg, 1);
     Serial.print(",RVACC=");

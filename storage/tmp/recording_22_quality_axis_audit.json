@@ -1,0 +1,352 @@
+{
+  "degraded_reason_counts": {
+    "altitude": {
+      "altitude_stabilized_or_smoothed_plausible": 12674
+    },
+    "attitude": {
+      "attitude_heading_held_while_stationary_plausible": 12,
+      "attitude_interpolated_or_held_but_plausible": 20,
+      "attitude_reliable_source_or_clean_interpolation": 6916,
+      "raw_pitch_clamped_reconstructed_state_plausible": 836,
+      "raw_roll_clamped_reconstructed_state_plausible": 540
+    },
+    "heading": {
+      "heading_held_while_stationary_plausible": 12,
+      "heading_interpolated_or_held_but_plausible": 20,
+      "heading_reliable_source_or_clean_interpolation": 6922
+    },
+    "position": {
+      "initial_position_sample_degraded": 1,
+      "position_absurd_discontinuity_projected_plausible": 18096,
+      "position_projected_correction_plausible": 11078,
+      "position_reliable_source_or_clean_interpolation": 1119
+    },
+    "speed": {
+      "speed_delta_rate_limited_plausible": 209,
+      "speed_interpolated_or_held_but_plausible": 20,
+      "speed_terminal_or_stationary_hold_plausible": 3
+    },
+    "track": {
+      "track_interpolated_or_held_but_plausible": 470,
+      "track_unavailable_or_held_below_moving_speed": 5362
+    }
+  },
+  "diagnostics": {
+    "altitude_baseline_ft": -109,
+    "altitude_source_used": "g3x_or_baro_median_first_60s",
+    "count_altitude_spikes_rejected": 22,
+    "count_attitude_spikes_clamped": 1553,
+    "count_degraded_samples": 30294,
+    "count_empty_phase_samples": 0,
+    "count_ground_altitude_stabilized": 11669,
+    "count_heading_magnetic_to_true_converted": 9441,
+    "count_heading_outliers": 0,
+    "count_heading_owner_transitions": 9,
+    "count_heading_track_fallback_samples": 0,
+    "count_low_quality_samples": 0,
+    "count_original_empty_phase_samples": 18897,
+    "count_position_corrections_degraded": 29174,
+    "count_position_corrections_low": 0,
+    "count_position_outliers": 29174,
+    "count_speed_outliers": 209,
+    "count_takeoff_transition_position_corrections": 1,
+    "degraded_quality_reason_counts": {
+      "altitude|altitude_stabilized_or_smoothed_plausible": 12674,
+      "attitude|attitude_heading_held_while_stationary_plausible": 12,
+      "attitude|attitude_interpolated_or_held_but_plausible": 20,
+      "attitude|attitude_reliable_source_or_clean_interpolation": 6916,
+      "attitude|raw_pitch_clamped_reconstructed_state_plausible": 836,
+      "attitude|raw_roll_clamped_reconstructed_state_plausible": 540,
+      "heading|heading_held_while_stationary_plausible": 12,
+      "heading|heading_interpolated_or_held_but_plausible": 20,
+      "heading|heading_reliable_source_or_clean_interpolation": 6922,
+      "position|initial_position_sample_degraded": 1,
+      "position|position_absurd_discontinuity_projected_plausible": 18096,
+      "position|position_projected_correction_plausible": 11078,
+      "position|position_reliable_source_or_clean_interpolation": 1119,
+      "speed|speed_delta_rate_limited_plausible": 209,
+      "speed|speed_interpolated_or_held_but_plausible": 20,
+      "speed|speed_terminal_or_stationary_hold_plausible": 3,
+      "track|track_interpolated_or_held_but_plausible": 470,
+      "track|track_unavailable_or_held_below_moving_speed": 5362
+    },
+    "enu_origin": {
+      "alt_m": -26.240458397126016,
+      "lat": 33.63620990366097,
+      "lon": -116.16116669487434,
+      "time_s": 0.003080010414123535
+    },
+    "first_position_discontinuity_source": "post_interpolation_takeoff_transition",
+    "first_position_discontinuity_time_s": 843.8,
+    "fixed_timestep_s": 0.1,
+    "heading_owner": "ahrs",
+    "heading_owner_changes": [
+      {
+        "owner": "g3x",
+        "reason": "initial_g3x_available",
+        "t": 0
+      },
+      {
+        "owner": "ahrs",
+        "reason": "g3x_unavailable_for_2.0s",
+        "t": 1344.4
+      },
+      {
+        "owner": "g3x",
+        "reason": "g3x_returned_stable_and_blended",
+        "t": 1573.9
+      },
+      {
+        "owner": "ahrs",
+        "reason": "g3x_unavailable_for_2.0s",
+        "t": 1971.4
+      },
+      {
+        "owner": "g3x",
+        "reason": "g3x_returned_stable_and_blended",
+        "t": 2147.9
+      },
+      {
+        "owner": "ahrs",
+        "reason": "g3x_unavailable_for_2.0s",
+        "t": 2315.4
+      },
+      {
+        "owner": "g3x",
+        "reason": "g3x_returned_stable_and_blended",
+        "t": 2386.9
+      },
+      {
+        "owner": "ahrs",
+        "reason": "g3x_unavailable_for_2.0s",
+        "t": 2555.4
+      },
+      {
+        "owner": "g3x",
+        "reason": "g3x_returned_stable_and_blended",
+        "t": 2744.9
+      },
+      {
+        "owner": "ahrs",
+        "reason": "g3x_unavailable_for_2.0s",
+        "t": 3011.4
+      }
+    ],
+    "heading_source_counts": {
+      "ahrs": 7089,
+      "g3x": 2352,
+      "held": 0,
+      "track_fallback": 2428
+    },
+    "low_quality_reason_counts": [],
+    "magnetic_variation_source_counts": {
+      "ahrs_magnetic_variation": 0,
+      "g3x_magvar": 2352,
+      "ktrm_region_fallback": 0
+    },
+    "max_ground_implied_speed_after_kt": 27.6,
+    "max_ground_implied_speed_before_kt": 1721.9,
+    "max_ground_position_jump_after_m": 15.45,
+    "max_ground_position_jump_before_m": 73.12,
+    "max_ground_vertical_speed_fpm": 0,
+    "max_groundspeed_delta_kt": 0.3,
+    "max_heading_delta_ground_deg": 5.11,
+    "max_heading_delta_stationary_deg": 1.2,
+    "max_pitch_delta_state_deg": 3,
+    "max_position_speed_mismatch_kt": 4.7,
+    "max_raw_gps_gap_s": 8.104,
+    "max_replay_dt_s": 0.1,
+    "max_roll_delta_state_deg": 5.5,
+    "max_stationary_altitude_variation_ft": 0,
+    "max_taxi_implied_speed_kt": 20.3,
+    "owner_blend_duration": 4,
+    "owner_blend_events": 9,
+    "owner_hold_events": 5,
+    "owner_switch_count": 9,
+    "owner_switch_reason": [
+      "g3x_unavailable_for_2.0s",
+      "g3x_returned_stable_and_blended",
+      "g3x_unavailable_for_2.0s",
+      "g3x_returned_stable_and_blended",
+      "g3x_unavailable_for_2.0s",
+      "g3x_returned_stable_and_blended",
+      "g3x_unavailable_for_2.0s",
+      "g3x_returned_stable_and_blended",
+      "g3x_unavailable_for_2.0s"
+    ],
+    "profiling": {
+      "enu_interpolation_s": 0.4591,
+      "heading_interpolation_s": 0.0151,
+      "stationary_detection_s": 0.0001
+    },
+    "quality_counts_by_field": {
+      "altitude": {
+        "DEGRADED": 12674,
+        "GOOD": 17620
+      },
+      "attitude": {
+        "DEGRADED": 8324,
+        "GOOD": 21970
+      },
+      "heading": {
+        "DEGRADED": 6954,
+        "GOOD": 23340
+      },
+      "position": {
+        "DEGRADED": 30294
+      },
+      "speed": {
+        "DEGRADED": 232,
+        "GOOD": 30062
+      },
+      "track": {
+        "DEGRADED": 5832,
+        "GOOD": 24462
+      }
+    },
+    "quality_source_counts_by_field": {
+      "altitude": {
+        "g3x_or_baro_median_first_60s|DEGRADED": 12674,
+        "g3x_or_baro_median_first_60s|GOOD": 17620
+      },
+      "attitude": {
+        "ahrs_to_g3x|DEGRADED": 297,
+        "ahrs_to_g3x|GOOD": 5266,
+        "ahrs|DEGRADED": 7222,
+        "ahrs|GOOD": 9980,
+        "g3x_to_ahrs|DEGRADED": 785,
+        "g3x_to_ahrs|GOOD": 6364,
+        "g3x|DEGRADED": 20,
+        "g3x|GOOD": 360
+      },
+      "heading": {
+        "ahrs_to_g3x|DEGRADED": 160,
+        "ahrs|DEGRADED": 6478,
+        "g3x_to_ahrs|DEGRADED": 200,
+        "g3x|DEGRADED": 4,
+        "g3x|GOOD": 23340,
+        "held|DEGRADED": 112
+      },
+      "position": {
+        "g3x_to_gps|DEGRADED": 66,
+        "g3x|DEGRADED": 23410,
+        "gps_to_g3x|DEGRADED": 74,
+        "gps|DEGRADED": 6744
+      },
+      "speed": {
+        "g3x_to_gps|DEGRADED": 70,
+        "g3x_to_gps|GOOD": 152,
+        "g3x|DEGRADED": 95,
+        "g3x|GOOD": 22835,
+        "gps_to_g3x|DEGRADED": 16,
+        "gps_to_g3x|GOOD": 150,
+        "gps|DEGRADED": 51,
+        "gps|GOOD": 6925
+      },
+      "track": {
+        "g3x_track_to_gps_course|GOOD": 80,
+        "g3x_track|GOOD": 12570,
+        "gps_course_to_g3x_track|GOOD": 80,
+        "gps_course|DEGRADED": 5832,
+        "gps_course|GOOD": 11732
+      }
+    },
+    "raw_ahrs_count": 7150,
+    "raw_g3x_count": 2352,
+    "raw_gps_count": 2936,
+    "raw_position_outliers_rejected": 24,
+    "replay_duration_s": 3029.341,
+    "replay_sample_count": 30294,
+    "sample_rate_hz": 10,
+    "stationary_segments_count": 3,
+    "track_source_counts": {
+      "g3x_track": 1279,
+      "gps_course": 2428
+    },
+    "warnings": [
+      "Raw GPS has gaps larger than 2 seconds."
+    ]
+  },
+  "first_low_by_axis": {},
+  "low_reason_counts": {
+    "altitude": {},
+    "attitude": {},
+    "heading": {},
+    "position": {},
+    "speed": {},
+    "track": {}
+  },
+  "quality_counts": {
+    "altitude": {
+      "DEGRADED": 12674,
+      "GOOD": 17620
+    },
+    "attitude": {
+      "DEGRADED": 8324,
+      "GOOD": 21970
+    },
+    "heading": {
+      "DEGRADED": 6954,
+      "GOOD": 23340
+    },
+    "position": {
+      "DEGRADED": 30294
+    },
+    "speed": {
+      "DEGRADED": 232,
+      "GOOD": 30062
+    },
+    "track": {
+      "DEGRADED": 5832,
+      "GOOD": 24462
+    }
+  },
+  "sample_count": 30294,
+  "source_quality_counts": {
+    "altitude": {
+      "g3x_or_baro_median_first_60s|DEGRADED": 12674,
+      "g3x_or_baro_median_first_60s|GOOD": 17620
+    },
+    "attitude": {
+      "ahrs_to_g3x|DEGRADED": 297,
+      "ahrs_to_g3x|GOOD": 5266,
+      "ahrs|DEGRADED": 7222,
+      "ahrs|GOOD": 9980,
+      "g3x_to_ahrs|DEGRADED": 785,
+      "g3x_to_ahrs|GOOD": 6364,
+      "g3x|DEGRADED": 20,
+      "g3x|GOOD": 360
+    },
+    "heading": {
+      "ahrs_to_g3x|DEGRADED": 160,
+      "ahrs|DEGRADED": 6478,
+      "g3x_to_ahrs|DEGRADED": 200,
+      "g3x|DEGRADED": 4,
+      "g3x|GOOD": 23340,
+      "held|DEGRADED": 112
+    },
+    "position": {
+      "g3x_to_gps|DEGRADED": 66,
+      "g3x|DEGRADED": 23410,
+      "gps_to_g3x|DEGRADED": 74,
+      "gps|DEGRADED": 6744
+    },
+    "speed": {
+      "g3x_to_gps|DEGRADED": 70,
+      "g3x_to_gps|GOOD": 152,
+      "g3x|DEGRADED": 95,
+      "g3x|GOOD": 22835,
+      "gps_to_g3x|DEGRADED": 16,
+      "gps_to_g3x|GOOD": 150,
+      "gps|DEGRADED": 51,
+      "gps|GOOD": 6925
+    },
+    "track": {
+      "g3x_track_to_gps_course|GOOD": 80,
+      "g3x_track|GOOD": 12570,
+      "gps_course_to_g3x_track|GOOD": 80,
+      "gps_course|DEGRADED": 5832,
+      "gps_course|GOOD": 11732
+    }
+  }
+}

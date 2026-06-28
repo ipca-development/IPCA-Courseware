@@ -157,22 +157,27 @@ final class AHRSBLEManager: NSObject, ObservableObject {
         guard let roll = values["ROLL"],
               let pitch = values["PITCH"],
               let yaw = values["YAW"],
-              let acc = values["ACC"],
-              let magHeading = values["MAGHDG"]
+              let acc = values["ACC"]
         else {
             return nil
         }
 
         let timestamp = Date()
+        let fusedHeading = values["FUSEDHDG"] ?? yaw
+        let magHeading = values["MAGHDG"] ?? fusedHeading
         let aviationPitch = -pitch
         let aviationRoll = roll
         let calibratedPitch = aviationPitch - calibration.pitchLevelOffset
         let calibratedRoll = aviationRoll - calibration.rollLevelOffset
-        let correctedMagneticHeading = Self.normalizeDegrees(magHeading + calibration.compassDeviation)
+        let correctedMagneticHeading = Self.normalizeDegrees(fusedHeading + calibration.compassDeviation)
         let trueHeading = Self.normalizeDegrees(correctedMagneticHeading + calibration.magneticVariation)
         return AHRSSample(
             timestamp: timestamp,
             secondsSinceRecordingStart: recordingStartedAt.map { timestamp.timeIntervalSince($0) } ?? 0,
+            quaternionW: values["QW"],
+            quaternionX: values["QX"],
+            quaternionY: values["QY"],
+            quaternionZ: values["QZ"],
             roll: roll,
             pitch: pitch,
             yaw: yaw,
@@ -180,6 +185,14 @@ final class AHRSBLEManager: NSObject, ObservableObject {
             accelerationX: values["ACCX"],
             accelerationY: values["ACCY"],
             accelerationZ: values["ACCZ"],
+            linearAccelerationX: values["LINX"] ?? values["ACCX"],
+            linearAccelerationY: values["LINY"] ?? values["ACCY"],
+            linearAccelerationZ: values["LINZ"] ?? values["ACCZ"],
+            gravityX: values["GRAVX"],
+            gravityY: values["GRAVY"],
+            gravityZ: values["GRAVZ"],
+            fusedHeading: fusedHeading,
+            slipSkid: values["SLIP"],
             magneticHeading: magHeading,
             rotationVectorAccuracy: values["RVACC"].map(Int.init),
             magneticFieldAccuracy: values["MAGACC"].map(Int.init),

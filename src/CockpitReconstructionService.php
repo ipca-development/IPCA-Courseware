@@ -20,6 +20,7 @@ final class CockpitReconstructionService
     private const JOB_TABLE = 'ipca_cockpit_reconstruction_jobs';
     private const SAMPLE_TABLE = 'ipca_cockpit_flight_samples';
     private const REPLAY_SAMPLE_TABLE = 'ipca_cockpit_replay_samples';
+    private const CANONICAL_INSERT_BATCH_SIZE = 100;
     private const REPLAY_INSERT_BATCH_SIZE = 750;
     private const REPLAY_INSERT_PROGRESS_INTERVAL = 750;
     private const PHASE_TABLE = 'ipca_cockpit_flight_phases';
@@ -274,6 +275,7 @@ final class CockpitReconstructionService
                     'Built ' . number_format($replayCount) . ' replay v2 samples'
                 );
             }
+            $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 59, 'Building reconstruction summary and diagnostics');
             $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
             $profiling = $profiler->toArray();
             $summary['reconstruction_profiling'] = $profiling;
@@ -282,6 +284,7 @@ final class CockpitReconstructionService
             }
             $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
+            $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 60, 'Starting derived data database refresh');
             $this->pdo->beginTransaction();
             $inTransaction = true;
             $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 60, 'Clearing previous derived reconstruction data');
@@ -585,10 +588,60 @@ final class CockpitReconstructionService
      */
     public function replaySampleRows(int $recordingId): array
     {
+        $columns = array(
+            'time_s',
+            'latitude',
+            'longitude',
+            'altitude_ft',
+            'heading_deg',
+            'pitch_deg',
+            'roll_deg',
+            'ground_speed_kt',
+            'vertical_speed_fpm',
+            'phase',
+            'position_quality',
+            'altitude_quality',
+            'attitude_quality',
+        );
+        foreach (array(
+            'heading_deg_true',
+            'heading_deg_magnetic',
+            'track_deg_true',
+            'wind_direction_deg_true',
+            'magnetic_variation_deg',
+            'magnetic_variation_source',
+            'compass_deviation_deg',
+            'compass_deviation_source',
+            'heading_reference',
+            'track_reference',
+            'heading_source',
+            'heading_owner',
+            'heading_quality',
+            'track_source',
+            'track_quality',
+            'speed_source',
+            'speed_quality',
+            'position_source',
+            'altitude_source',
+            'position_quality_reason',
+            'altitude_quality_reason',
+            'attitude_quality_reason',
+            'heading_quality_reason',
+            'track_quality_reason',
+            'speed_quality_reason',
+            'crab_angle_deg',
+            'raw_pitch_deg',
+            'raw_roll_deg',
+            'raw_attitude_source',
+            'raw_attitude_quality',
+        ) as $optionalColumn) {
+            if ($this->columnPresent(self::REPLAY_SAMPLE_TABLE, $optionalColumn)) {
+                $columns[] = $optionalColumn;
+            }
+        }
+
         $stmt = $this->pdo->prepare('
-            SELECT time_s, latitude, longitude, altitude_ft, heading_deg, pitch_deg, roll_deg,
-                   ground_speed_kt, vertical_speed_fpm, phase,
-                   position_quality, altitude_quality, attitude_quality
+            SELECT ' . implode(', ', $columns) . '
             FROM ' . self::REPLAY_SAMPLE_TABLE . '
             WHERE recording_id = ?
             ORDER BY sample_index ASC
@@ -608,7 +661,7 @@ final class CockpitReconstructionService
      */
     private function publicSlimReplaySample(array $row): array
     {
-        return array(
+        $sample = array(
             't' => (float)$row['time_s'],
             'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
             'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
@@ -624,6 +677,50 @@ final class CockpitReconstructionService
             'altitude_quality' => (string)($row['altitude_quality'] ?? 'unknown'),
             'attitude_quality' => (string)($row['attitude_quality'] ?? 'unknown'),
         );
+        if (array_key_exists('raw_pitch_deg', $row)) {
+            $sample['raw_pitch_deg'] = $row['raw_pitch_deg'] !== null ? (float)$row['raw_pitch_deg'] : null;
+        }
+        if (array_key_exists('raw_roll_deg', $row)) {
+            $sample['raw_roll_deg'] = $row['raw_roll_deg'] !== null ? (float)$row['raw_roll_deg'] : null;
+        }
+        if (array_key_exists('raw_attitude_source', $row)) {
+            $sample['raw_attitude_source'] = (string)($row['raw_attitude_source'] ?? '');
+        }
+        if (array_key_exists('raw_attitude_quality', $row)) {
+            $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
+        }
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg') as $field) {
+            if (array_key_exists($field, $row)) {
+                $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
+            }
+        }
+        foreach (array(
+            'magnetic_variation_source',
+            'compass_deviation_source',
+            'heading_reference',
+            'track_reference',
+            'heading_source',
+            'heading_owner',
+            'heading_quality',
+            'track_source',
+            'track_quality',
+            'speed_source',
+            'speed_quality',
+            'position_source',
+            'altitude_source',
+            'position_quality_reason',
+            'altitude_quality_reason',
+            'attitude_quality_reason',
+            'heading_quality_reason',
+            'track_quality_reason',
+            'speed_quality_reason',
+        ) as $field) {
+            if (array_key_exists($field, $row)) {
+                $sample[$field] = (string)($row[$field] ?? '');
+            }
+        }
+
+        return $sample;
     }
 
     /**
@@ -632,21 +729,11 @@ final class CockpitReconstructionService
      */
     private function addVisualAttitudeReplayFields(array $samples): array
     {
-        $lastPitch = null;
-        $lastRoll = null;
         foreach ($samples as &$sample) {
-            $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
-            $maxDelta = $speed < 20.0 ? 2.0 : 5.0;
-            $pitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : ($lastPitch ?? 0.0);
-            $roll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : ($lastRoll ?? 0.0);
-
-            $visualPitch = $lastPitch === null ? $pitch : $lastPitch + max(-$maxDelta, min($maxDelta, $pitch - $lastPitch));
-            $visualRoll = $lastRoll === null ? $roll : $lastRoll + max(-$maxDelta, min($maxDelta, $roll - $lastRoll));
-            $sample['visual_pitch_deg'] = round($visualPitch, 2);
-            $sample['visual_roll_deg'] = round($visualRoll, 2);
-
-            $lastPitch = $visualPitch;
-            $lastRoll = $visualRoll;
+            $pitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : 0.0;
+            $roll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : 0.0;
+            $sample['visual_pitch_deg'] = round($pitch, 2);
+            $sample['visual_roll_deg'] = round($roll, 2);
         }
         unset($sample);
         return $samples;
@@ -1026,8 +1113,26 @@ final class CockpitReconstructionService
             return $this->progressPdo;
         }
 
-        require_once __DIR__ . '/db.php';
-        $this->progressPdo = cw_db();
+        $host = getenv('CW_DB_HOST');
+        $port = getenv('CW_DB_PORT') ?: '25060';
+        $db = getenv('CW_DB_NAME');
+        $user = getenv('CW_DB_USER');
+        $pass = getenv('CW_DB_PASS');
+        if (!$host || !$db || !$user) {
+            require_once __DIR__ . '/db.php';
+            $this->progressPdo = cw_db();
+            return $this->progressPdo;
+        }
+
+        $this->progressPdo = new PDO(
+            "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4",
+            $user,
+            $pass,
+            array(
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            )
+        );
         return $this->progressPdo;
     }
 
@@ -1741,8 +1846,15 @@ final class CockpitReconstructionService
         if (isset($sample['true_heading_deg']) && is_numeric($sample['true_heading_deg'])) {
             return (float)$sample['true_heading_deg'];
         }
-        if (isset($sample['magnetic_heading_deg']) && is_numeric($sample['magnetic_heading_deg'])) {
-            return (float)$sample['magnetic_heading_deg'];
+        if (
+            isset($sample['magnetic_heading_deg'], $sample['magnetic_variation_deg'])
+            && is_numeric($sample['magnetic_heading_deg'])
+            && is_numeric($sample['magnetic_variation_deg'])
+        ) {
+            $deviation = isset($sample['compass_deviation_deg']) && is_numeric($sample['compass_deviation_deg'])
+                ? (float)$sample['compass_deviation_deg']
+                : 0.0;
+            return self::normalizeDegrees((float)$sample['magnetic_heading_deg'] + $deviation + (float)$sample['magnetic_variation_deg']);
         }
         return null;
     }
@@ -2912,8 +3024,7 @@ final class CockpitReconstructionService
      */
     private function storeSamples(int $recordingId, array $samples): void
     {
-        $stmt = $this->pdo->prepare('
-            INSERT INTO ' . self::SAMPLE_TABLE . ' (
+        $columns = '
                 recording_id, sample_index, sample_time_utc, seconds_since_start, source_mask,
                 latitude, longitude, gps_altitude_m, gps_altitude_ft, baro_altitude_ft, vertical_speed_fpm,
                 adsb_baro_altitude_ft, adsb_vertical_speed_fpm, estimated_baro_altitude_ft,
@@ -2930,70 +3041,80 @@ final class CockpitReconstructionService
                 estimated_wind_speed_kt, estimated_wind_direction_deg_true, estimated_wind_quality,
                 estimated_wind_source, estimated_tas_kt, wind_estimation_method,
                 heading_bug_deg, altitude_bug_ft, autopilot_status, g3x_row_json, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-            )
-        ');
-        foreach ($samples as $sample) {
-            $stmt->execute(array(
-                $recordingId,
-                (int)$sample['sample_index'],
-                self::mysqlDateTimeMillis((string)($sample['sample_time_utc'] ?? '')),
-                (float)$sample['seconds_since_start'],
-                (string)$sample['source_mask'],
-                $sample['latitude'],
-                $sample['longitude'],
-                $sample['gps_altitude_m'],
-                $sample['gps_altitude_ft'],
-                $sample['baro_altitude_ft'],
-                $sample['vertical_speed_fpm'],
-                $sample['adsb_baro_altitude_ft'],
-                $sample['adsb_vertical_speed_fpm'],
-                $sample['estimated_baro_altitude_ft'],
-                $sample['estimated_vertical_speed_fpm'],
-                $sample['field_calibrated_altitude_ft'],
-                $sample['altimeter_setting_inhg'],
-                $sample['field_calibrated_true_altitude_ft'],
-                $sample['estimated_indicated_altitude_ft'],
-                $sample['estimated_true_altitude_from_indicated_ft'],
-                $sample['altimeter_setting_source'],
-                $sample['airport_elevation_ft'],
-                $sample['airport_elevation_source'],
-                $sample['field_altitude_offset_ft'],
-                $sample['oat_c'],
-                $sample['oat_source'],
-                $sample['altitude_source'],
-                $sample['altitude_quality'],
-                $sample['vertical_speed_source'],
-                $sample['vertical_speed_quality'],
-                $sample['estimated_slip_skid_g'],
-                $sample['estimated_slip_skid_quality'],
-                $sample['estimated_slip_skid_source'],
-                $sample['ahrs_acceleration_x_g'],
-                $sample['ahrs_acceleration_y_g'],
-                $sample['ahrs_acceleration_z_g'],
-                $sample['groundspeed_kt'],
-                $sample['magnetic_track_deg'],
-                $sample['true_track_deg'],
-                $sample['pitch_deg'],
-                $sample['roll_deg'],
-                $sample['yaw_deg'],
-                $sample['magnetic_heading_deg'],
-                $sample['true_heading_deg'],
-                $sample['acceleration_g'],
-                $sample['wind_direction_deg'],
-                $sample['wind_speed_kt'],
-                $sample['estimated_wind_speed_kt'],
-                $sample['estimated_wind_direction_deg_true'],
-                $sample['estimated_wind_quality'],
-                $sample['estimated_wind_source'],
-                $sample['estimated_tas_kt'],
-                $sample['wind_estimation_method'],
-                $sample['heading_bug_deg'],
-                $sample['altitude_bug_ft'],
-                $sample['autopilot_status'],
-                json_encode($sample['g3x_row'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            ));
+        ';
+        $rowPlaceholder = '(
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+        )';
+
+        foreach (array_chunk($samples, self::CANONICAL_INSERT_BATCH_SIZE) as $chunk) {
+            $placeholders = array();
+            $params = array();
+            foreach ($chunk as $sample) {
+                $placeholders[] = $rowPlaceholder;
+                array_push(
+                    $params,
+                    $recordingId,
+                    (int)$sample['sample_index'],
+                    self::mysqlDateTimeMillis((string)($sample['sample_time_utc'] ?? '')),
+                    (float)$sample['seconds_since_start'],
+                    (string)$sample['source_mask'],
+                    $sample['latitude'],
+                    $sample['longitude'],
+                    $sample['gps_altitude_m'],
+                    $sample['gps_altitude_ft'],
+                    $sample['baro_altitude_ft'],
+                    $sample['vertical_speed_fpm'],
+                    $sample['adsb_baro_altitude_ft'],
+                    $sample['adsb_vertical_speed_fpm'],
+                    $sample['estimated_baro_altitude_ft'],
+                    $sample['estimated_vertical_speed_fpm'],
+                    $sample['field_calibrated_altitude_ft'],
+                    $sample['altimeter_setting_inhg'],
+                    $sample['field_calibrated_true_altitude_ft'],
+                    $sample['estimated_indicated_altitude_ft'],
+                    $sample['estimated_true_altitude_from_indicated_ft'],
+                    $sample['altimeter_setting_source'],
+                    $sample['airport_elevation_ft'],
+                    $sample['airport_elevation_source'],
+                    $sample['field_altitude_offset_ft'],
+                    $sample['oat_c'],
+                    $sample['oat_source'],
+                    $sample['altitude_source'],
+                    $sample['altitude_quality'],
+                    $sample['vertical_speed_source'],
+                    $sample['vertical_speed_quality'],
+                    $sample['estimated_slip_skid_g'],
+                    $sample['estimated_slip_skid_quality'],
+                    $sample['estimated_slip_skid_source'],
+                    $sample['ahrs_acceleration_x_g'],
+                    $sample['ahrs_acceleration_y_g'],
+                    $sample['ahrs_acceleration_z_g'],
+                    $sample['groundspeed_kt'],
+                    $sample['magnetic_track_deg'],
+                    $sample['true_track_deg'],
+                    $sample['pitch_deg'],
+                    $sample['roll_deg'],
+                    $sample['yaw_deg'],
+                    $sample['magnetic_heading_deg'],
+                    $sample['true_heading_deg'],
+                    $sample['acceleration_g'],
+                    $sample['wind_direction_deg'],
+                    $sample['wind_speed_kt'],
+                    $sample['estimated_wind_speed_kt'],
+                    $sample['estimated_wind_direction_deg_true'],
+                    $sample['estimated_wind_quality'],
+                    $sample['estimated_wind_source'],
+                    $sample['estimated_tas_kt'],
+                    $sample['wind_estimation_method'],
+                    $sample['heading_bug_deg'],
+                    $sample['altitude_bug_ft'],
+                    $sample['autopilot_status'],
+                    json_encode($sample['g3x_row'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                );
+            }
+            $sql = 'INSERT INTO ' . self::SAMPLE_TABLE . ' (' . $columns . ') VALUES ' . implode(', ', $placeholders);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
         }
     }
 
@@ -3007,12 +3128,63 @@ final class CockpitReconstructionService
             return;
         }
 
-        $columns = '
-            recording_id, sample_index, time_s, latitude, longitude, altitude_ft,
-            heading_deg, pitch_deg, roll_deg, ground_speed_kt, vertical_speed_fpm,
-            phase, position_quality, altitude_quality, attitude_quality, created_at
-        ';
-        $rowPlaceholder = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)';
+        $columns = array(
+            'recording_id',
+            'sample_index',
+            'time_s',
+            'latitude',
+            'longitude',
+            'altitude_ft',
+            'heading_deg',
+            'pitch_deg',
+            'roll_deg',
+            'ground_speed_kt',
+            'vertical_speed_fpm',
+            'phase',
+            'position_quality',
+            'altitude_quality',
+            'attitude_quality',
+        );
+        $optionalColumns = array();
+        foreach (array(
+            'heading_deg_true',
+            'heading_deg_magnetic',
+            'track_deg_true',
+            'wind_direction_deg_true',
+            'magnetic_variation_deg',
+            'magnetic_variation_source',
+            'compass_deviation_deg',
+            'compass_deviation_source',
+            'heading_reference',
+            'track_reference',
+            'heading_source',
+            'heading_owner',
+            'heading_quality',
+            'track_source',
+            'track_quality',
+            'speed_source',
+            'speed_quality',
+            'position_source',
+            'altitude_source',
+            'position_quality_reason',
+            'altitude_quality_reason',
+            'attitude_quality_reason',
+            'heading_quality_reason',
+            'track_quality_reason',
+            'speed_quality_reason',
+            'crab_angle_deg',
+            'raw_pitch_deg',
+            'raw_roll_deg',
+            'raw_attitude_source',
+            'raw_attitude_quality',
+        ) as $optionalColumn) {
+            if ($this->columnPresent(self::REPLAY_SAMPLE_TABLE, $optionalColumn)) {
+                $columns[] = $optionalColumn;
+                $optionalColumns[] = $optionalColumn;
+            }
+        }
+        $columns[] = 'created_at';
+        $rowPlaceholder = '(' . implode(', ', array_fill(0, count($columns) - 1, '?')) . ', CURRENT_TIMESTAMP)';
         $total = count($samples);
         $inserted = 0;
 
@@ -3036,9 +3208,12 @@ final class CockpitReconstructionService
                 $params[] = (string)($sample['position_quality'] ?? 'unknown');
                 $params[] = (string)($sample['altitude_quality'] ?? 'unknown');
                 $params[] = (string)($sample['attitude_quality'] ?? 'unknown');
+                foreach ($optionalColumns as $optionalColumn) {
+                    $params[] = $sample[$optionalColumn] ?? null;
+                }
             }
 
-            $sql = 'INSERT INTO ' . self::REPLAY_SAMPLE_TABLE . ' (' . $columns . ') VALUES ' . implode(', ', $placeholders);
+            $sql = 'INSERT INTO ' . self::REPLAY_SAMPLE_TABLE . ' (' . implode(', ', $columns) . ') VALUES ' . implode(', ', $placeholders);
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
             $inserted += count($chunk);
