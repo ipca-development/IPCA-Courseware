@@ -2677,6 +2677,7 @@ final class CockpitReconstructionService
             'pitch_deg' => $num($g3x, 'Pitch (deg)', 'Pitch'),
             'roll_deg' => $num($g3x, 'Roll (deg)', 'Roll'),
             'heading_deg' => $num($g3x, 'Magnetic Heading (deg)', 'HDG'),
+            'magnetic_variation_deg' => $num($g3x, 'Magnetic Variation (deg)', 'MagVar'),
             'groundspeed_kt' => $num($g3x, 'GPS Ground Speed (kt)', 'GndSpd'),
             'track_deg' => $num($g3x, 'GPS Ground Track (deg)', 'TRK'),
             'slip_g' => $num($g3x, 'Lateral Acceleration (G)', 'LatAc'),
@@ -2715,6 +2716,20 @@ final class CockpitReconstructionService
             ? 'g3x_magnetic'
             : ($row['magnetic_heading_deg'] !== null ? 'ahrs_magnetic' : ($track !== null ? 'gps_track' : 'none'));
         $headingQuality = $headingSource === 'g3x_magnetic' ? 'GOOD' : ($headingSource === 'ahrs_magnetic' ? 'LOW' : ($headingSource === 'gps_track' ? 'LOW' : 'INVALID'));
+        $magneticVariation = isset($g3x['magnetic_variation_deg']) && $g3x['magnetic_variation_deg'] !== null
+            ? (float)$g3x['magnetic_variation_deg']
+            : null;
+        $rowTrueHeading = $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null;
+        $cameraHeading = null;
+        if ($heading !== null && $magneticVariation !== null) {
+            $cameraHeading = self::normalizeDegrees((float)$heading + $magneticVariation);
+        } elseif ($rowTrueHeading !== null) {
+            $cameraHeading = self::normalizeDegrees($rowTrueHeading);
+        } elseif ($track !== null && $groundspeed !== null && (float)$groundspeed >= 3.0) {
+            $cameraHeading = self::normalizeDegrees((float)$track);
+        } elseif ($heading !== null) {
+            $cameraHeading = self::normalizeDegrees((float)$heading);
+        }
         $ias = $g3x['ias_kt'] ?? null;
         $tas = isset($row['estimated_tas_kt']) && $row['estimated_tas_kt'] !== null
             ? (float)$row['estimated_tas_kt']
@@ -2798,7 +2813,9 @@ final class CockpitReconstructionService
             'bank_source' => $bankSource,
             'heading_deg' => $heading,
             'track_deg' => $track,
-            'true_heading_deg' => $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null,
+            'true_heading_deg' => $rowTrueHeading,
+            'magnetic_variation_deg' => $magneticVariation,
+            'camera_heading_deg' => $cameraHeading,
             'heading_source' => $headingSource,
             'heading_quality' => $headingQuality,
             'heading_bug_deg' => $headingBug,

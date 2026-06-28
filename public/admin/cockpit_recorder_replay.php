@@ -140,6 +140,33 @@ cw_header('Cockpit Recorder Replay');
   };
   const cameraEyeAltitudeM = (sample) => Math.max(0, feetToMeters(bestAltitudeFt(sample))) + PILOT_EYE_HEIGHT_M;
 
+  function cameraHeadingDeg(sample) {
+    if (!sample) return 0;
+    if (Number.isFinite(Number(sample.camera_heading_deg))) {
+      return normalizeDeg(Number(sample.camera_heading_deg));
+    }
+    const magnetic = Number(sample.heading_deg);
+    const variation = Number(sample.magnetic_variation_deg);
+    if (Number.isFinite(magnetic) && Number.isFinite(variation)) {
+      return normalizeDeg(magnetic + variation);
+    }
+    const g3xVar = sample.g3x && Number.isFinite(Number(sample.g3x.magnetic_variation_deg))
+      ? Number(sample.g3x.magnetic_variation_deg)
+      : null;
+    if (Number.isFinite(magnetic) && g3xVar !== null) {
+      return normalizeDeg(magnetic + g3xVar);
+    }
+    if (Number.isFinite(Number(sample.true_heading_deg))) {
+      return normalizeDeg(Number(sample.true_heading_deg));
+    }
+    const track = Number.isFinite(Number(sample.track_deg)) ? Number(sample.track_deg) : null;
+    const gs = Number(sample.groundspeed_kt);
+    if (track !== null && Number.isFinite(gs) && gs >= 3) {
+      return normalizeDeg(track);
+    }
+    return Number.isFinite(magnetic) ? normalizeDeg(magnetic) : 0;
+  }
+
   function sampleAt(t) {
     if (!payload || !payload.samples.length) return null;
     const samples = payload.samples;
@@ -204,6 +231,8 @@ cw_header('Cockpit Recorder Replay');
       bank_deg: lerp(before.bank_deg, after.bank_deg),
       heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
+      camera_heading_deg: lerpAngle(before.camera_heading_deg, after.camera_heading_deg),
+      magnetic_variation_deg: lerp(before.magnetic_variation_deg, after.magnetic_variation_deg),
       track_deg: lerpAngle(before.track_deg, after.track_deg),
     });
   }
@@ -267,6 +296,8 @@ cw_header('Cockpit Recorder Replay');
       bank_deg: weightedNumber('bank_deg'),
       heading_deg: weightedAngle('heading_deg'),
       true_heading_deg: weightedAngle('true_heading_deg'),
+      camera_heading_deg: weightedAngle('camera_heading_deg'),
+      magnetic_variation_deg: weightedNumber('magnetic_variation_deg'),
       track_deg: weightedAngle('track_deg'),
     });
   }
@@ -330,10 +361,7 @@ cw_header('Cockpit Recorder Replay');
     const s = smoothedSampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
     const altitudeM = cameraEyeAltitudeM(s);
-    const track = Number.isFinite(Number(s.track_deg)) ? Number(s.track_deg) : null;
-    const cameraHeading = Number.isFinite(Number(s.heading_deg))
-      ? Number(s.heading_deg)
-      : (track !== null ? track : 0);
+    const cameraHeading = cameraHeadingDeg(s);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0;
     cesiumCameraState = {
