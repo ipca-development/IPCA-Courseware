@@ -168,7 +168,7 @@ cw_header('Cockpit Recorder Replay');
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const CHASE_RANGE_M = 170;
   const CHASE_HEIGHT_M = 65;
-  const CHASE_PITCH_DEG = -28;
+  const CHASE_PITCH_DEG = -18;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -308,9 +308,6 @@ cw_header('Cockpit Recorder Replay');
 
   function trueHeadingFromSample(sample) {
     if (!sample) return 0;
-    if (Number.isFinite(Number(sample.camera_heading_deg))) {
-      return normalizeDeg(Number(sample.camera_heading_deg));
-    }
     const magnetic = Number(sample.heading_deg);
     const variation = Number.isFinite(Number(sample.magnetic_variation_deg))
       ? Number(sample.magnetic_variation_deg)
@@ -323,13 +320,21 @@ cw_header('Cockpit Recorder Replay');
     return Number.isFinite(magnetic) ? normalizeDeg(magnetic) : 0;
   }
 
+  function aircraftHeadingFromSample(sample) {
+    const heading = Number(sample && sample.heading_deg);
+    if (Number.isFinite(heading)) return normalizeDeg(heading);
+
+    const cameraHeading = Number(sample && sample.camera_heading_deg);
+    if (Number.isFinite(cameraHeading)) return normalizeDeg(cameraHeading);
+
+    return trueHeadingFromSample(sample);
+  }
+
   function targetCameraAt(t) {
     const pos = positionAt(t);
     const s = sampleAt(t);
     if (!pos || !s) return null;
-    const aircraftHeading = Number.isFinite(Number(s.camera_heading_deg))
-      ? normalizeDeg(Number(s.camera_heading_deg))
-      : trueHeadingFromSample(s);
+    const aircraftHeading = aircraftHeadingFromSample(s);
     const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     const altitudeM = visualAltitudeM(s);
     return {
@@ -517,6 +522,7 @@ cw_header('Cockpit Recorder Replay');
     if (!debugOverlay) return;
     const heading = sample && Number.isFinite(Number(sample.heading_deg)) ? normalizeDeg(Number(sample.heading_deg)) : null;
     const cameraHeading = view && Number.isFinite(Number(view.heading)) ? normalizeDeg(Number(view.heading)) : null;
+    const cameraPitch = view && Number.isFinite(Number(view.pitch)) ? Number(view.pitch) : null;
     const pitch = sample && Number.isFinite(Number(sample.pitch_deg)) ? Number(sample.pitch_deg) : null;
     const roll = sample && Number.isFinite(Number(sample.bank_deg ?? sample.roll_deg)) ? Number(sample.bank_deg ?? sample.roll_deg) : null;
     const altitudeFt = sample && Number.isFinite(Number(sample.altitude_ft_msl ?? sample.altitude_ft)) ? Number(sample.altitude_ft_msl ?? sample.altitude_ft) : null;
@@ -527,6 +533,7 @@ cw_header('Cockpit Recorder Replay');
       `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,
       `aircraft heading: ${heading === null ? '--' : heading.toFixed(1)} deg`,
       `camera heading: ${cameraHeading === null ? '--' : cameraHeading.toFixed(1)} deg`,
+      `camera pitch: ${cameraPitch === null ? '--' : cameraPitch.toFixed(1)} deg`,
       `camera mode: ${cameraMode}`,
       `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
       `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
@@ -553,6 +560,13 @@ cw_header('Cockpit Recorder Replay');
       }
 
       Cesium.Ion.defaultAccessToken = cesiumToken;
+      let startupTerrain = null;
+      if (Cesium.Terrain && typeof Cesium.Terrain.fromWorldTerrain === 'function') {
+        startupTerrain = Cesium.Terrain.fromWorldTerrain({
+          requestVertexNormals: true,
+          requestWaterMask: true,
+        });
+      }
       cesiumViewer = new Cesium.Viewer(cesiumReplay, {
         animation: false,
         baseLayerPicker: false,
@@ -565,14 +579,21 @@ cw_header('Cockpit Recorder Replay');
         selectionIndicator: false,
         timeline: false,
         shouldAnimate: false,
+        ...(startupTerrain ? { terrain: startupTerrain } : {}),
       });
 
       try {
-        if (typeof Cesium.createWorldTerrainAsync === 'function') {
-          cesiumViewer.terrainProvider = await Cesium.createWorldTerrainAsync();
-        } else if (typeof Cesium.createWorldTerrain === 'function') {
-          cesiumViewer.terrainProvider = Cesium.createWorldTerrain();
-        } else {
+        if (!startupTerrain && typeof Cesium.createWorldTerrainAsync === 'function') {
+          cesiumViewer.terrainProvider = await Cesium.createWorldTerrainAsync({
+            requestVertexNormals: true,
+            requestWaterMask: true,
+          });
+        } else if (!startupTerrain && typeof Cesium.createWorldTerrain === 'function') {
+          cesiumViewer.terrainProvider = Cesium.createWorldTerrain({
+            requestVertexNormals: true,
+            requestWaterMask: true,
+          });
+        } else if (!startupTerrain) {
           throw new Error('World terrain API is unavailable in this Cesium build.');
         }
         terrainEnabled = true;
