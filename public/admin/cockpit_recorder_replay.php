@@ -113,7 +113,12 @@ cw_header('Cockpit Recorder Replay');
   let playbackClockBaseMs = null;
   let cesiumViewer = null;
   let cesiumReady = false;
-  let cesiumCameraState = null;
+  let displayCamera = null;
+  let lastRenderMs = null;
+
+  const CAMERA_POS_SMOOTH_RATE = 14;
+  const CAMERA_ROT_SMOOTH_RATE = 20;
+  const CAMERA_SNAP_SEEK_SEC = 0.75;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -131,24 +136,6 @@ cw_header('Cockpit Recorder Replay');
     const normalized = normalizeDeg(deg);
     return normalized > 180 ? normalized - 360 : normalized;
   };
-  const g3xTrueTrackDeg = (sample) => {
-    const g3x = sample && sample.g3x ? sample.g3x : null;
-    if (!g3x) return null;
-    const velE = Number(g3x.velocity_e_mps);
-    const velN = Number(g3x.velocity_n_mps);
-    if (Number.isFinite(velE) && Number.isFinite(velN)) {
-      const speed = Math.hypot(velE, velN);
-      if (speed >= 0.35) {
-        return normalizeDeg(Math.atan2(velE, velN) * 180 / Math.PI);
-      }
-    }
-    const gs = Number(g3x.groundspeed_kt ?? sample.groundspeed_kt);
-    const track = Number(g3x.track_deg ?? sample.track_deg);
-    if (Number.isFinite(track) && Number.isFinite(gs) && gs >= 1) {
-      return normalizeDeg(track);
-    }
-    return null;
-  };
   const magneticToTrueHeadingDeg = (magnetic, variation, trueReference) => {
     const plus = normalizeDeg(magnetic + variation);
     const minus = normalizeDeg(magnetic - variation);
@@ -161,22 +148,6 @@ cw_header('Cockpit Recorder Replay');
     }
     return minus;
   };
-  const pathHeadingDeg = (t) => {
-    const before = sampleAt(Number(t) - 0.8);
-    const after = sampleAt(Number(t) + 0.8);
-    if (!before || !after) return null;
-    const lat1 = degToRad(Number(before.lat));
-    const lat2 = degToRad(Number(after.lat));
-    const lon1 = degToRad(Number(before.lon));
-    const lon2 = degToRad(Number(after.lon));
-    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
-    const dLat = lat2 - lat1;
-    const dLon = lon2 - lon1;
-    const distanceM = 6371000 * Math.sqrt(dLat * dLat + Math.pow(Math.cos((lat1 + lat2) / 2) * dLon, 2));
-    if (!Number.isFinite(distanceM) || distanceM < 2) return null;
-    return normalizeDeg(Math.atan2(y, x) * 180 / Math.PI);
-  };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -186,37 +157,73 @@ cw_header('Cockpit Recorder Replay');
   };
   const cameraEyeAltitudeM = (sample) => Math.max(0, feetToMeters(bestAltitudeFt(sample))) + PILOT_EYE_HEIGHT_M;
 
-  function cameraHeadingDeg(sample, t = activeT) {
+  const lerpAngleDeg = (from, to, alpha) => {
+    const start = Number(from);
+    const end = Number(to);
+    if (!Number.isFinite(start)) return end;
+    if (!Number.isFinite(end)) return start;
+    let delta = ((end - start + 540) % 360) - 180;
+    return normalizeDeg(start + delta * alpha);
+  };
+
+  const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
+
+  function trueHeadingFromSample(sample) {
     if (!sample) return 0;
-    const g3xTrack = g3xTrueTrackDeg(sample);
-    if (g3xTrack !== null) {
-      return g3xTrack;
-    }
-    const pathHeading = pathHeadingDeg(t);
-    const magnetic = Number(sample.heading_deg);
-    const variation = Number(sample.magnetic_variation_deg);
-    const g3xVar = sample.g3x && Number.isFinite(Number(sample.g3x.magnetic_variation_deg))
-      ? Number(sample.g3x.magnetic_variation_deg)
-      : null;
-    const magVar = Number.isFinite(variation) ? variation : g3xVar;
-    if (Number.isFinite(magnetic) && magVar !== null) {
-      return magneticToTrueHeadingDeg(magnetic, magVar, pathHeading);
-    }
-    if (pathHeading !== null) {
-      return pathHeading;
-    }
     if (Number.isFinite(Number(sample.camera_heading_deg))) {
       return normalizeDeg(Number(sample.camera_heading_deg));
     }
-    if (Number.isFinite(Number(sample.true_heading_deg))) {
-      return normalizeDeg(Number(sample.true_heading_deg));
-    }
-    const track = Number.isFinite(Number(sample.track_deg)) ? Number(sample.track_deg) : null;
-    const gs = Number(sample.groundspeed_kt);
-    if (track !== null && Number.isFinite(gs) && gs >= 3) {
-      return normalizeDeg(track);
+    const magnetic = Number(sample.heading_deg);
+    const variation = Number.isFinite(Number(sample.magnetic_variation_deg))
+      ? Number(sample.magnetic_variation_deg)
+      : (sample.g3x && Number.isFinite(Number(sample.g3x.magnetic_variation_deg))
+        ? Number(sample.g3x.magnetic_variation_deg)
+        : null);
+    if (Number.isFinite(magnetic) && variation !== null) {
+      return magneticToTrueHeadingDeg(magnetic, variation, null);
     }
     return Number.isFinite(magnetic) ? normalizeDeg(magnetic) : 0;
+  }
+
+  function targetCameraAt(t) {
+    const s = sampleAt(t);
+    if (!s || s.lat === null || s.lon === null) return null;
+    return {
+      lat: Number(s.lat),
+      lon: Number(s.lon),
+      altitudeM: cameraEyeAltitudeM(s),
+      heading: trueHeadingFromSample(s),
+      pitch: Math.max(-30, Math.min(30, Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0)),
+      roll: Math.max(-45, Math.min(45, Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0)),
+    };
+  }
+
+  function resetDisplayCamera() {
+    displayCamera = null;
+    lastRenderMs = null;
+  }
+
+  function smoothDisplayCamera(target, dtSec, snap) {
+    if (!target) return null;
+    if (snap || !displayCamera) {
+      displayCamera = Object.assign({}, target);
+      return displayCamera;
+    }
+    const posAlpha = smoothFactor(CAMERA_POS_SMOOTH_RATE, dtSec);
+    const rotAlpha = smoothFactor(CAMERA_ROT_SMOOTH_RATE, dtSec);
+    const currentPos = Cesium.Cartesian3.fromDegrees(displayCamera.lon, displayCamera.lat, displayCamera.altitudeM);
+    const targetPos = Cesium.Cartesian3.fromDegrees(target.lon, target.lat, target.altitudeM);
+    const nextPos = Cesium.Cartesian3.lerp(currentPos, targetPos, posAlpha, new Cesium.Cartesian3());
+    const carto = Cesium.Cartographic.fromCartesian(nextPos);
+    displayCamera = {
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      altitudeM: carto.height,
+      heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
+      pitch: displayCamera.pitch + (target.pitch - displayCamera.pitch) * rotAlpha,
+      roll: displayCamera.roll + (target.roll - displayCamera.roll) * rotAlpha,
+    };
+    return displayCamera;
   }
 
   function sampleAt(t) {
@@ -289,71 +296,6 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
-  function smoothedSampleAt(t) {
-    const base = sampleAt(t);
-    if (!base) return null;
-    const taps = [
-      { offset: -1.2, weight: 1 },
-      { offset: -0.6, weight: 2 },
-      { offset: 0, weight: 4 },
-      { offset: 0.6, weight: 2 },
-      { offset: 1.2, weight: 1 },
-    ];
-    const samples = taps
-      .map((tap) => ({ sample: sampleAt(Number(t) + tap.offset), weight: tap.weight }))
-      .filter((tap) => tap.sample);
-    const weightedNumber = (key) => {
-      let total = 0;
-      let weight = 0;
-      for (const tap of samples) {
-        const value = Number(tap.sample[key]);
-        if (!Number.isFinite(value)) continue;
-        total += value * tap.weight;
-        weight += tap.weight;
-      }
-      return weight > 0 ? total / weight : base[key];
-    };
-    const weightedAngle = (key) => {
-      let x = 0;
-      let y = 0;
-      let weight = 0;
-      for (const tap of samples) {
-        const value = Number(tap.sample[key]);
-        if (!Number.isFinite(value)) continue;
-        const rad = degToRad(value);
-        x += Math.cos(rad) * tap.weight;
-        y += Math.sin(rad) * tap.weight;
-        weight += tap.weight;
-      }
-      return weight > 0 ? normalizeDeg(Math.atan2(y, x) * 180 / Math.PI) : base[key];
-    };
-    return Object.assign({}, base, {
-      t: Number(t),
-      lat: weightedNumber('lat'),
-      lon: weightedNumber('lon'),
-      gps_altitude_ft: weightedNumber('gps_altitude_ft'),
-      baro_altitude_ft: weightedNumber('baro_altitude_ft'),
-      vertical_speed_fpm: weightedNumber('vertical_speed_fpm'),
-      adsb_baro_altitude_ft: weightedNumber('adsb_baro_altitude_ft'),
-      adsb_vertical_speed_fpm: weightedNumber('adsb_vertical_speed_fpm'),
-      estimated_baro_altitude_ft: weightedNumber('estimated_baro_altitude_ft'),
-      estimated_vertical_speed_fpm: weightedNumber('estimated_vertical_speed_fpm'),
-      field_calibrated_altitude_ft: weightedNumber('field_calibrated_altitude_ft'),
-      field_calibrated_true_altitude_ft: weightedNumber('field_calibrated_true_altitude_ft'),
-      estimated_indicated_altitude_ft: weightedNumber('estimated_indicated_altitude_ft'),
-      estimated_true_altitude_from_indicated_ft: weightedNumber('estimated_true_altitude_from_indicated_ft'),
-      estimated_slip_skid_g: weightedNumber('estimated_slip_skid_g'),
-      groundspeed_kt: weightedNumber('groundspeed_kt'),
-      pitch_deg: weightedNumber('pitch_deg'),
-      bank_deg: weightedNumber('bank_deg'),
-      heading_deg: weightedAngle('heading_deg'),
-      true_heading_deg: weightedAngle('true_heading_deg'),
-      camera_heading_deg: weightedAngle('camera_heading_deg'),
-      magnetic_variation_deg: weightedNumber('magnetic_variation_deg'),
-      track_deg: weightedAngle('track_deg'),
-    });
-  }
-
   function initCesium() {
     try {
       const cesiumReplay = document.getElementById('cesiumReplay');
@@ -396,7 +338,7 @@ cw_header('Cockpit Recorder Replay');
       }
 
       cesiumReady = true;
-      renderCesium();
+      renderCesium(true);
     } catch (err) {
       showCesiumError(String(err.message || err));
     }
@@ -408,54 +350,47 @@ cw_header('Cockpit Recorder Replay');
     cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(message).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div></div>`);
   }
 
-  function renderCesium() {
+  function renderCesium(snap = false) {
     if (!cesiumReady || !cesiumViewer) return;
-    const s = smoothedSampleAt(activeT);
-    if (!s || s.lat === null || s.lon === null) return;
-    const altitudeM = cameraEyeAltitudeM(s);
-    const cameraHeading = cameraHeadingDeg(s, activeT);
-    const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
-    const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0;
-    cesiumCameraState = {
-      lat: Number(s.lat),
-      lon: Number(s.lon),
-      altitudeM,
-      heading: normalizeDeg(cameraHeading),
-      pitch: Math.max(-30, Math.min(30, pitch)),
-      roll: Math.max(-45, Math.min(45, bank)),
-    };
-    const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
+    const now = performance.now();
+    const dtSec = lastRenderMs === null ? 1 / 60 : Math.min(0.1, Math.max(1 / 120, (now - lastRenderMs) / 1000));
+    lastRenderMs = now;
+    const target = targetCameraAt(activeT);
+    if (!target) return;
+    const view = smoothDisplayCamera(target, dtSec, snap);
+    if (!view) return;
     cesiumViewer.camera.setView({
-      destination: smoothedPosition,
+      destination: Cesium.Cartesian3.fromDegrees(view.lon, view.lat, view.altitudeM),
       orientation: {
-        heading: degToRad(cesiumCameraState.heading),
-        pitch: degToRad(cesiumCameraState.pitch),
-        roll: degToRad(cesiumCameraState.roll),
+        heading: degToRad(view.heading),
+        pitch: degToRad(view.pitch),
+        roll: degToRad(view.roll),
       },
     });
   }
 
-  function safeRenderCesium() {
+  function safeRenderCesium(snap = false) {
     try {
-      renderCesium();
+      renderCesium(snap);
     } catch (err) {
       showCesiumError(String(err.message || err));
       cesiumReady = false;
     }
   }
 
-  function seek(seconds, syncAudio) {
+  function seek(seconds, syncAudio, forceSnap = false) {
     const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
-    if (Math.abs(activeT - previousT) > 3) {
-      cesiumCameraState = null;
+    const snap = forceSnap || Math.abs(activeT - previousT) > CAMERA_SNAP_SEEK_SEC;
+    if (snap) {
+      resetDisplayCamera();
     }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     if (syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
-    safeRenderCesium();
+    safeRenderCesium(snap);
     resetPlaybackClock();
   }
 
@@ -481,20 +416,16 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function updateCockpitPlayback(seconds) {
-    const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
-    if (Math.abs(activeT - previousT) > 3) {
-      cesiumCameraState = null;
-    }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
-    safeRenderCesium();
+    safeRenderCesium(false);
   }
 
-  timeline.addEventListener('input', () => seek(Number(timeline.value), true));
+  timeline.addEventListener('input', () => seek(Number(timeline.value), true, true));
   audio.addEventListener('timeupdate', () => {
     if (audio.paused) {
-      seek(audio.currentTime, false);
+      seek(audio.currentTime, false, true);
     }
   });
   playButton.addEventListener('click', () => {
@@ -517,6 +448,7 @@ cw_header('Cockpit Recorder Replay');
   audio.addEventListener('play', () => {
     playButton.textContent = 'Pause';
     resetPlaybackClock();
+    lastRenderMs = null;
     if (animationFrame === null) {
       animationFrame = requestAnimationFrame(animatePlayback);
     }
@@ -533,7 +465,7 @@ cw_header('Cockpit Recorder Replay');
 
   window.addEventListener('resize', () => {
     if (!payload) return;
-    safeRenderCesium();
+    safeRenderCesium(true);
   });
 
   async function loadReplay() {
@@ -564,7 +496,7 @@ cw_header('Cockpit Recorder Replay');
     } catch (err) {
       showCesiumError(String(err.message || err));
     }
-    safeRenderCesium();
+    safeRenderCesium(true);
   }
 
   loadReplay();
