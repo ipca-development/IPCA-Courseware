@@ -190,11 +190,7 @@ cw_header('Cockpit Recorder Replay');
       <a href="/admin/cockpit_recorder.php">← Back</a>
       <button class="replay-button" type="button" id="playButton">Play</button>
       <select class="replay-select" id="cameraMode" aria-label="Camera mode">
-        <option value="synthetic_vision_test" selected>SVT test: H230 P+10 R+30</option>
-        <option value="synthetic_vision_test_bank">SVT test: H230 P0 R+30</option>
-        <option value="synthetic_vision_test_pitch_up">SVT test: H230 P+10 R0</option>
-        <option value="synthetic_vision_test_pitch_down">SVT test: H230 P-10 R0</option>
-        <option value="synthetic_vision">Garmin SVT live</option>
+        <option value="synthetic_vision" selected>Garmin SVT</option>
         <option value="chase">Chase</option>
         <option value="north_up">North up</option>
         <option value="free">Orbit / free</option>
@@ -238,7 +234,7 @@ cw_header('Cockpit Recorder Replay');
   let displayCamera = null;
   let lastRenderMs = null;
   let positionKeyframes = [];
-  let cameraMode = 'synthetic_vision_test';
+  let cameraMode = 'synthetic_vision';
   let terrainEnabled = false;
   let terrainStatus = 'not_initialized';
   let terrainWarningMessage = '';
@@ -673,7 +669,6 @@ cw_header('Cockpit Recorder Replay');
     const up = Cesium.Cartesian3.normalize(new Cesium.Cartesian3(upAxis.x, upAxis.y, upAxis.z), new Cesium.Cartesian3());
     const rotation = Cesium.Matrix4.getMatrix3(aircraftTransform, new Cesium.Matrix3());
     const quaternion = Cesium.Quaternion.fromRotationMatrix(rotation, new Cesium.Quaternion());
-    resetCesiumCameraTransform();
     cesiumViewer.camera.setView({
       destination: cameraWorld,
       orientation: {
@@ -1122,7 +1117,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   cameraModeSelect.addEventListener('change', () => {
-    cameraMode = cameraModeSelect.value || 'synthetic_vision_test';
+    cameraMode = cameraModeSelect.value || 'synthetic_vision';
     applyCameraModeControls();
     resetDisplayCamera();
     safeRenderCesium(true);
