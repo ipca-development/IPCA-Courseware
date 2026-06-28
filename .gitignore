@@ -6,3 +6,8 @@
 # Admin-uploaded resource library JSON (per-edition folders under storage/resource_library/)
 /storage/resource_library/
 /storage/easa_erules/
+
+# Runtime-generated files. Uploaded recordings, reconstruction/debug output,
+# PDF font caches, and temp artifacts must not be deployed from Git.
+/storage/cockpit_recorder/
+/storage/tmp/
