@@ -28,9 +28,23 @@ try {
 cw_header('Cockpit Recorder Replay');
 ?>
 <link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
-<link href="/assets/cockpit_pfd.css" rel="stylesheet">
 <style>
-.cesium-cockpit .cesium-viewer-bottom, .cesium-cockpit .cesium-viewer-toolbar, .cesium-cockpit .cesium-viewer-animationContainer, .cesium-cockpit .cesium-viewer-timelineContainer, .cesium-cockpit .cesium-viewer-fullscreenContainer { display: none !important; }
+.replay-page { display: grid; gap: 16px; }
+.replay-card { background: #fff; border: 1px solid rgba(15, 23, 42, .12); border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(15, 23, 42, .07); }
+.replay-muted { color: #64748b; font-size: 13px; }
+.replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
+.replay-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.replay-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 12px; }
+.replay-range { width: 100%; accent-color: #1d4ed8; }
+.replay-audio { width: 100%; margin-top: 10px; }
+.replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 8px 14px; cursor: pointer; }
+.cesium-cockpit { position: relative; width: 100%; height: min(72vh, 720px); background: #000; border-radius: 8px; overflow: hidden; }
+.cesium-cockpit .cesium-viewer-bottom,
+.cesium-cockpit .cesium-viewer-toolbar,
+.cesium-cockpit .cesium-viewer-animationContainer,
+.cesium-cockpit .cesium-viewer-timelineContainer,
+.cesium-cockpit .cesium-viewer-fullscreenContainer { display: none !important; }
+.cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #0f172a, #1d4ed8); text-align: center; padding: 28px; z-index: 10; }
 </style>
 
 <div class="replay-page">
@@ -59,24 +73,15 @@ cw_header('Cockpit Recorder Replay');
   <?php if ($error !== ''): ?>
     <div class="replay-error"><?= h($error) ?></div>
   <?php else: ?>
-    <section class="replay-layout" data-replay-id="<?= h((string)$id) ?>" data-cesium-token="<?= h($cesiumIonToken) ?>">
-      <aside class="replay-card replay-left">
-        <h3 style="margin-top:0">Flight Phases</h3>
-        <div class="phase-list" id="phaseList"><div class="replay-muted">Loading phases...</div></div>
-        <h4 style="margin-bottom:8px">Detected Events</h4>
-        <div class="event-list" id="eventList"></div>
-      </aside>
-
-      <main class="replay-card replay-center">
-        <h3 style="margin-top:0">G3X Primary Flight Display</h3>
-        <div id="pfdMount"></div>
-        <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
-        <div class="replay-controls">
-          <button class="replay-button" type="button" id="playButton">Play</button>
-          <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
-          <span id="timeLabel" class="replay-muted">0:00</span>
-        </div>
-      </main>
+    <section class="replay-card" data-replay-id="<?= h((string)$id) ?>" data-cesium-token="<?= h($cesiumIonToken) ?>">
+      <div id="loadStatus" class="replay-muted">Loading replay data…</div>
+      <div id="cesiumReplay" class="cesium-cockpit"></div>
+      <audio class="replay-audio" id="audio" controls preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
+      <div class="replay-controls">
+        <button class="replay-button" type="button" id="playButton">Play</button>
+        <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
+        <span id="timeLabel" class="replay-muted">0:00</span>
+      </div>
     </section>
   <?php endif; ?>
 </div>
@@ -84,15 +89,12 @@ cw_header('Cockpit Recorder Replay');
 <?php if ($error === ''): ?>
 <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/';</script>
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Cesium.js"></script>
-<script src="/assets/cockpit_pfd.js"></script>
 <script>
 (function() {
   const root = document.querySelector('[data-replay-id]');
   const id = root ? root.getAttribute('data-replay-id') : '';
   const cesiumToken = root ? (root.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '') : '';
-  const phaseList = document.getElementById('phaseList');
-  const eventList = document.getElementById('eventList');
-  const pfdMount = document.getElementById('pfdMount');
+  const loadStatus = document.getElementById('loadStatus');
   const timeline = document.getElementById('timeline');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
@@ -100,7 +102,6 @@ cw_header('Cockpit Recorder Replay');
   let payload = null;
   let activeT = 0;
   let animationFrame = null;
-  let lastPanelRenderMs = 0;
   let playbackClockBaseT = 0;
   let playbackClockBaseMs = null;
   let cesiumViewer = null;
@@ -123,22 +124,6 @@ cw_header('Cockpit Recorder Replay');
     const normalized = normalizeDeg(deg);
     return normalized > 180 ? normalized - 360 : normalized;
   };
-  const bearingBetween = (from, to) => {
-    if (!from || !to || from.lat === null || from.lon === null || to.lat === null || to.lon === null) return null;
-    const lat1 = degToRad(from.lat);
-    const lat2 = degToRad(to.lat);
-    const deltaLon = degToRad(Number(to.lon) - Number(from.lon));
-    const y = Math.sin(deltaLon) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
-    const bearing = Math.atan2(y, x) * 180 / Math.PI;
-    return Number.isFinite(bearing) ? normalizeDeg(bearing) : null;
-  };
-  const bankDatumStorageKey = () => `cockpitReplayBankDatum:${id}`;
-  let bankDatumDeg = 0;
-  function loadBankDatum() {
-    const stored = window.localStorage ? Number(window.localStorage.getItem(bankDatumStorageKey())) : 0;
-    bankDatumDeg = Number.isFinite(stored) ? stored : 0;
-  }
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -279,26 +264,6 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
-  function activePhase(t) {
-    if (!payload) return null;
-    return payload.phases.find((phase) => t >= phase.start && t <= phase.end) || payload.phases[0] || null;
-  }
-
-  function renderEvents() {
-    eventList.innerHTML = (payload.events || []).map((event) => `
-      <div class="event-row"><strong>${event.event_type}</strong><br><span class="replay-muted">${fmtTime(event.start)} · ${event.phase || 'Timeline'} · ${(Number(event.confidence) * 100).toFixed(0)}%</span></div>
-    `).join('') || '<div class="replay-muted">No timeline events detected yet.</div>';
-  }
-
-  function renderPfd(sample) {
-    if (!sample || !window.CockpitPfd) return;
-    const corrected = Object.assign({}, sample);
-    if (corrected.bank_deg !== null && corrected.bank_deg !== undefined) {
-      corrected.bank_deg = normalizeSignedDeg(Number(corrected.bank_deg) - bankDatumDeg);
-    }
-    CockpitPfd.render(corrected);
-  }
-
   function initCesium() {
     try {
       const cesiumReplay = document.getElementById('cesiumReplay');
@@ -332,7 +297,6 @@ cw_header('Cockpit Recorder Replay');
       cesiumViewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
 
       cesiumReady = true;
-      syncCesiumCameraFov();
       renderCesium();
     } catch (err) {
       showCesiumError(String(err.message || err));
@@ -345,36 +309,6 @@ cw_header('Cockpit Recorder Replay');
     cesiumReplay.insertAdjacentHTML('beforeend', `<div class="cesium-unavailable"><div><strong>Cesium could not start.</strong><br>${String(message).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div></div>`);
   }
 
-  function syncCesiumCameraFov() {
-    if (!cesiumViewer || !cesiumViewer.camera || !cesiumViewer.camera.frustum) return;
-    const fovy = cesiumViewer.camera.frustum.fovy;
-    if (!Number.isFinite(Number(fovy)) || !window.CockpitPfd) return;
-    CockpitPfd.setCameraSync({ fovy: Number(fovy), svHeight: 336 });
-  }
-
-  function computeHorizonLineFromCesium() {
-    if (!cesiumViewer || !cesiumViewer.scene) return null;
-    const scene = cesiumViewer.scene;
-    scene.render();
-    const canvas = scene.canvas;
-    const w = canvas.clientWidth || canvas.width;
-    const h = canvas.clientHeight || canvas.height;
-    if (!w || !h) return null;
-
-    function horizonYAt(x) {
-      for (let y = 0; y < h; y += 1) {
-        const ray = cesiumViewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
-        if (!ray) continue;
-        if (scene.globe.pick(ray, scene)) return y;
-      }
-      return h * 0.5;
-    }
-
-    const x1 = w * 0.06;
-    const x2 = w * 0.94;
-    return { x1, y1: horizonYAt(x1), x2, y2: horizonYAt(x2) };
-  }
-
   function renderCesium() {
     if (!cesiumReady || !cesiumViewer) return;
     const s = smoothedSampleAt(activeT);
@@ -385,8 +319,8 @@ cw_header('Cockpit Recorder Replay');
       ? Number(s.heading_deg)
       : (track !== null ? track : 0);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
-    const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg) - bankDatumDeg) : 0;
-    const targetState = {
+    const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0;
+    cesiumCameraState = {
       lat: Number(s.lat),
       lon: Number(s.lon),
       altitudeM,
@@ -394,7 +328,6 @@ cw_header('Cockpit Recorder Replay');
       pitch: Math.max(-30, Math.min(30, pitch)),
       roll: Math.max(-45, Math.min(45, bank)),
     };
-    cesiumCameraState = Object.assign({}, targetState);
     const smoothedPosition = Cesium.Cartesian3.fromDegrees(cesiumCameraState.lon, cesiumCameraState.lat, cesiumCameraState.altitudeM);
     cesiumViewer.camera.setView({
       destination: smoothedPosition,
@@ -404,11 +337,6 @@ cw_header('Cockpit Recorder Replay');
         roll: degToRad(cesiumCameraState.roll),
       },
     });
-    syncCesiumCameraFov();
-    if (window.CockpitPfd) {
-      CockpitPfd.setHorizonLine(computeHorizonLineFromCesium());
-    }
-    renderPfd(s);
   }
 
   function safeRenderCesium() {
@@ -418,38 +346,6 @@ cw_header('Cockpit Recorder Replay');
       showCesiumError(String(err.message || err));
       cesiumReady = false;
     }
-  }
-
-  function safeRender(name, fn) {
-    try {
-      fn();
-    } catch (err) {
-      console.error(`Replay render failed: ${name}`, err);
-    }
-  }
-
-  function renderPhases() {
-    phaseList.innerHTML = '';
-    for (const phase of payload.phases) {
-      const row = document.createElement('div');
-      row.className = 'phase-row';
-      row.dataset.start = String(phase.start);
-      row.innerHTML = `
-        <strong>${phase.phase}</strong>
-        <span class="replay-muted">${fmtTime(phase.start)} · ${fmtTime(phase.duration)} · ${(Number(phase.confidence) * 100).toFixed(0)}%</span>
-        <button type="button">Jump</button>`;
-      row.querySelector('button').addEventListener('click', () => seek(phase.start, true));
-      phaseList.appendChild(row);
-    }
-    updateActivePhase();
-  }
-
-  function updateActivePhase() {
-    const phase = activePhase(activeT);
-    document.querySelectorAll('.phase-row').forEach((row) => {
-      const start = Number(row.dataset.start || 0);
-      row.classList.toggle('is-active', !!phase && Math.abs(start - phase.start) < 0.001);
-    });
   }
 
   function seek(seconds, syncAudio) {
@@ -463,7 +359,6 @@ cw_header('Cockpit Recorder Replay');
     if (syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
-    updateActivePhase();
     safeRenderCesium();
     resetPlaybackClock();
   }
@@ -489,7 +384,7 @@ cw_header('Cockpit Recorder Replay');
     return Math.max(0, Math.min(maxT, predicted));
   }
 
-  function updateCockpitPlayback(seconds, timestamp) {
+  function updateCockpitPlayback(seconds) {
     const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
     if (Math.abs(activeT - previousT) > 3) {
@@ -498,10 +393,6 @@ cw_header('Cockpit Recorder Replay');
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     safeRenderCesium();
-    if (timestamp - lastPanelRenderMs >= 500) {
-      updateActivePhase();
-      lastPanelRenderMs = timestamp;
-    }
   }
 
   timeline.addEventListener('input', () => seek(Number(timeline.value), true));
@@ -529,8 +420,6 @@ cw_header('Cockpit Recorder Replay');
   });
   audio.addEventListener('play', () => {
     playButton.textContent = 'Pause';
-    lastAnimationRenderMs = 0;
-    lastPanelRenderMs = 0;
     resetPlaybackClock();
     if (animationFrame === null) {
       animationFrame = requestAnimationFrame(animatePlayback);
@@ -542,12 +431,12 @@ cw_header('Cockpit Recorder Replay');
       animationFrame = null;
       return;
     }
-    updateCockpitPlayback(playbackClockTime(timestamp), timestamp);
+    updateCockpitPlayback(playbackClockTime(timestamp));
     animationFrame = requestAnimationFrame(animatePlayback);
   }
+
   window.addEventListener('resize', () => {
     if (!payload) return;
-    if (window.CockpitPfd) CockpitPfd.scale();
     safeRenderCesium();
   });
 
@@ -564,21 +453,16 @@ cw_header('Cockpit Recorder Replay');
       if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
       if (!data.ok) throw new Error(data.error || 'Replay data not available.');
     } catch (err) {
-      phaseList.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err)}</div>`;
+      if (loadStatus) {
+        loadStatus.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div>`;
+      }
       return;
     }
 
     payload = data;
-    loadBankDatum();
-    if (window.CockpitPfd && pfdMount) {
-      CockpitPfd.mount(pfdMount);
-      CockpitPfd.setProfile(payload.pfd_profile || {});
-      CockpitPfd.setSamples(payload.samples || []);
-    }
+    if (loadStatus) loadStatus.remove();
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
     timeline.max = String(maxT);
-    safeRender('phases', renderPhases);
-    safeRender('events', renderEvents);
     try {
       initCesium();
     } catch (err) {
