@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/tv_adsb_status.php';
+require_once __DIR__ . '/PfdProfileService.php';
 
 /**
  * Aircraft/device registry shared by scheduling and Cockpit Recorder.
@@ -112,39 +113,130 @@ final class CockpitAircraftService
         $homeAirport = substr($homeAirport, 0, 8);
         $notes = trim((string)($data['notes'] ?? ''));
         $active = !empty($data['active']) ? 1 : 0;
+        $pfdProfileJson = null;
+        if (array_key_exists('pfd_profile_json', $data)) {
+            $pfdProfileJson = PfdProfileService::encode(
+                PfdProfileService::normalize(is_array($data['pfd_profile_json']) ? $data['pfd_profile_json'] : array())
+            );
+        } elseif (array_key_exists('pfd_profile_raw', $data)) {
+            $pfdProfileJson = PfdProfileService::encode(
+                PfdProfileService::fromStored((string)$data['pfd_profile_raw'])
+            );
+        }
+
+        $hasPfdColumn = $this->hasColumn('pfd_profile_json');
 
         if ($id > 0) {
-            $stmt = $this->pdo->prepare("
-                UPDATE " . self::TABLE . "
-                SET registration = ?,
-                    display_name = ?,
-                    aircraft_type = ?,
-                    adsb_hex = ?,
-                    home_airport = ?,
-                    notes = ?,
-                    active = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ");
-            $stmt->execute(array($registration, $displayName, $aircraftType, $adsbHex, $homeAirport, $notes, $active, $id));
+            if ($hasPfdColumn && $pfdProfileJson !== null) {
+                $stmt = $this->pdo->prepare("
+                    UPDATE " . self::TABLE . "
+                    SET registration = ?,
+                        display_name = ?,
+                        aircraft_type = ?,
+                        adsb_hex = ?,
+                        home_airport = ?,
+                        notes = ?,
+                        pfd_profile_json = ?,
+                        active = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ");
+                $stmt->execute(array($registration, $displayName, $aircraftType, $adsbHex, $homeAirport, $notes, $pfdProfileJson, $active, $id));
+            } else {
+                $stmt = $this->pdo->prepare("
+                    UPDATE " . self::TABLE . "
+                    SET registration = ?,
+                        display_name = ?,
+                        aircraft_type = ?,
+                        adsb_hex = ?,
+                        home_airport = ?,
+                        notes = ?,
+                        active = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ");
+                $stmt->execute(array($registration, $displayName, $aircraftType, $adsbHex, $homeAirport, $notes, $active, $id));
+            }
             return $id;
         }
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO " . self::TABLE . " (
-                registration,
-                display_name,
-                aircraft_type,
-                adsb_hex,
-                home_airport,
-                notes,
-                active,
-                created_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ");
-        $stmt->execute(array($registration, $displayName, $aircraftType, $adsbHex, $homeAirport, $notes, $active));
+        if ($hasPfdColumn) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO " . self::TABLE . " (
+                    registration,
+                    display_name,
+                    aircraft_type,
+                    adsb_hex,
+                    home_airport,
+                    notes,
+                    pfd_profile_json,
+                    active,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ");
+            $stmt->execute(array(
+                $registration,
+                $displayName,
+                $aircraftType,
+                $adsbHex,
+                $homeAirport,
+                $notes,
+                $pfdProfileJson ?? PfdProfileService::encode(PfdProfileService::defaults()),
+                $active,
+            ));
+        } else {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO " . self::TABLE . " (
+                    registration,
+                    display_name,
+                    aircraft_type,
+                    adsb_hex,
+                    home_airport,
+                    notes,
+                    active,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ");
+            $stmt->execute(array($registration, $displayName, $aircraftType, $adsbHex, $homeAirport, $notes, $active));
+        }
         return (int)$this->pdo->lastInsertId();
+    }
+
+    public function savePfdProfile(int $id, array $profile): void
+    {
+        $this->requireTables();
+        if ($id <= 0 || !$this->hasColumn('pfd_profile_json')) {
+            throw new RuntimeException('PFD profile storage is unavailable. Apply scripts/sql/2026_06_27_cockpit_recorder_pfd_profile.sql first.');
+        }
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET pfd_profile_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        $stmt->execute(array(PfdProfileService::encode($profile), $id));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function pfdProfileForAircraftId(int $id): array
+    {
+        $row = $this->aircraftById($id);
+        if (!$row) {
+            return PfdProfileService::defaults();
+        }
+        return PfdProfileService::fromStored((string)($row['pfd_profile_json'] ?? ''));
+    }
+
+    private function hasColumn(string $column): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ");
+        $stmt->execute(array(self::TABLE, $column));
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     /**
@@ -161,6 +253,7 @@ final class CockpitAircraftService
             'adsb_hex' => (string)($row['adsb_hex'] ?? ''),
             'home_airport' => (string)($row['home_airport'] ?? ''),
             'active' => (int)($row['active'] ?? 0) === 1,
+            'pfd_profile' => PfdProfileService::fromStored((string)($row['pfd_profile_json'] ?? '')),
         );
     }
 }

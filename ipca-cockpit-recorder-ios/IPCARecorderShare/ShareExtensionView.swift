@@ -3,6 +3,7 @@ import SwiftUI
 struct ShareExtensionView: View {
     let metadata: G3XFlightStreamMetadata
     let candidates: [G3XMatchCandidate]
+    let indexedRecordingCount: Int
     let onAttach: (String) -> Void
     let onCancel: () -> Void
 
@@ -11,14 +12,20 @@ struct ShareExtensionView: View {
     init(
         metadata: G3XFlightStreamMetadata,
         candidates: [G3XMatchCandidate],
+        indexedRecordingCount: Int,
         onAttach: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.metadata = metadata
         self.candidates = candidates
+        self.indexedRecordingCount = indexedRecordingCount
         self.onAttach = onAttach
         self.onCancel = onCancel
         _selectedRecordingID = State(initialValue: candidates.first?.id ?? "")
+    }
+
+    private var showsManualFallback: Bool {
+        candidates.contains(where: \.isManualFallback)
     }
 
     var body: some View {
@@ -42,13 +49,19 @@ struct ShareExtensionView: View {
 
                 if candidates.isEmpty {
                     ContentUnavailableView(
-                        "No Matching Recording",
+                        emptyStateTitle,
                         systemImage: "airplane.circle",
-                        description: Text("Open IPCA Flight Recorder and make sure the matching flight is saved on this iPad, then share the Garmin CSV again.")
+                        description: Text(emptyStateMessage)
                     )
                 } else {
-                    Text("Attach to flight")
-                        .font(.subheadline.weight(.semibold))
+                    if showsManualFallback {
+                        Text("No automatic match. Select the flight this Garmin file belongs to.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Attach to flight")
+                            .font(.subheadline.weight(.semibold))
+                    }
 
                     List {
                         ForEach(candidates) { candidate in
@@ -62,7 +75,7 @@ struct ShareExtensionView: View {
                                         Text(candidate.recording.startedAt.formatted(date: .abbreviated, time: .shortened))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
-                                        Text("Overlap \(Int(candidate.overlapSeconds / 60)) min")
+                                        Text(candidateDetail(for: candidate))
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
@@ -95,5 +108,30 @@ struct ShareExtensionView: View {
             .navigationTitle("IPCA Flight Recorder")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var emptyStateTitle: String {
+        indexedRecordingCount == 0 ? "No Local Flights Found" : "No Matching Recording"
+    }
+
+    private var emptyStateMessage: String {
+        if indexedRecordingCount == 0 {
+            return "Open IPCA Flight Recorder on this iPad first so your saved flights sync here, then share the Garmin CSV again."
+        }
+        return "None of your \(indexedRecordingCount) saved flights overlap this Garmin file. Record or import the matching flight in IPCA Flight Recorder, then try again."
+    }
+
+    private func candidateDetail(for candidate: G3XMatchCandidate) -> String {
+        if candidate.overlapSeconds > 0 {
+            return "Overlap \(Int(candidate.overlapSeconds / 60)) min"
+        }
+        if let g3xStart = metadata.startUtc {
+            let delta = abs(candidate.recording.startedAt.timeIntervalSince(g3xStart))
+            if delta < 3600 {
+                return "Starts \(Int(delta / 60)) min from Garmin"
+            }
+            return "Starts \(Int(delta / 3600)) hr from Garmin"
+        }
+        return candidate.recording.hasG3X ? "Already has G3X data" : "Manual selection"
     }
 }

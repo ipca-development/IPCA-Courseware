@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CockpitRecorderService.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
+require_once __DIR__ . '/PfdProfileService.php';
+require_once __DIR__ . '/CockpitAircraftService.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -266,6 +268,11 @@ final class CockpitReconstructionService
         $recordingId = (int)$recording['id'];
         $sampleCount = $this->countRows(self::SAMPLE_TABLE, $recordingId);
         $samples = $this->sampleRows($recordingId, 30000);
+        $aircraftId = (int)($recording['aircraft_id'] ?? 0);
+        $pfdProfile = PfdProfileService::defaults();
+        if ($aircraftId > 0 && CockpitAircraftService::tablesPresent($this->pdo)) {
+            $pfdProfile = (new CockpitAircraftService($this->pdo))->pfdProfileForAircraftId($aircraftId);
+        }
         return array(
             'ok' => true,
             'recording' => array(
@@ -274,6 +281,7 @@ final class CockpitReconstructionService
                 'duration' => (float)($recording['duration_seconds'] ?? 0),
                 'started_at' => $recording['started_at'] ?? null,
                 'aircraft' => array(
+                    'id' => $aircraftId,
                     'registration' => (string)($recording['aircraft_registration'] ?? ''),
                     'display_name' => (string)($recording['aircraft_display_name'] ?? ''),
                     'type' => (string)($recording['aircraft_type'] ?? ''),
@@ -283,7 +291,9 @@ final class CockpitReconstructionService
                 'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
                 'timeline_status' => (string)($recording['timeline_status'] ?? 'not_started'),
                 'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
+                'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
             ),
+            'pfd_profile' => $pfdProfile,
             'summary' => self::decodeJson((string)($recording['reconstruction_summary_json'] ?? '')),
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
@@ -368,6 +378,10 @@ final class CockpitReconstructionService
             'roll_deg',
             'magnetic_heading_deg',
             'true_heading_deg',
+            'heading_bug_deg',
+            'altitude_bug_ft',
+            'autopilot_status',
+            'g3x_row_json',
         ));
         if ($count > $limit) {
             $stride = max(1, (int)ceil($count / $limit));
@@ -2597,23 +2611,135 @@ final class CockpitReconstructionService
     }
 
     /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function publicG3XFields(array $row): array
+    {
+        $g3x = self::decodeJson((string)($row['g3x_row_json'] ?? ''));
+        $num = static function (array $source, string ...$keys): ?float {
+            foreach ($keys as $key) {
+                $value = trim((string)($source[$key] ?? ''));
+                if ($value !== '' && is_numeric($value)) {
+                    return (float)$value;
+                }
+            }
+            return null;
+        };
+        $txt = static function (array $source, string ...$keys): ?string {
+            foreach ($keys as $key) {
+                $value = trim((string)($source[$key] ?? ''));
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+            return null;
+        };
+
+        return array(
+            'com1_mhz' => $txt($g3x, 'COM Frequency 1 (MHz)'),
+            'com2_mhz' => $txt($g3x, 'COM Frequency 2 (MHz)'),
+            'nav2_mhz' => $txt($g3x, 'NAV Frequency 2 (MHz)'),
+            'xpdr_code' => $txt($g3x, 'Transponder Code'),
+            'xpdr_mode' => $txt($g3x, 'Transponder Mode'),
+            'rpm' => $num($g3x, 'RPM', 'E1 RPM'),
+            'fuel_flow_gph' => $num($g3x, 'Fuel Flow (gal/hour)', 'E1 FFlow'),
+            'oil_psi' => $num($g3x, 'Oil Press (PSI)', 'E1 OilP'),
+            'oil_temp_f' => $num($g3x, 'Oil Temp (deg F)', 'E1 OilT'),
+            'egt1_f' => $num($g3x, 'EGT1 (deg F)', 'E1 EGT1'),
+            'egt2_f' => $num($g3x, 'EGT2 (deg F)', 'E1 EGT2'),
+            'fuel_gal' => $num($g3x, 'Fuel Qty (gal)', 'FQty1'),
+            'fuel_psi' => $num($g3x, 'Fuel Press (PSI)', 'E1 FPres'),
+            'coolant1_f' => $num($g3x, 'Coolant Temp 1 (deg F)'),
+            'coolant2_f' => $num($g3x, 'Coolant Temp 2 (deg F)'),
+            'volts' => $num($g3x, 'Volts', 'Volts1'),
+            'amps' => $num($g3x, 'Amps', 'Amps1'),
+            'ias_kt' => $num($g3x, 'Indicated Airspeed (kt)', 'IAS'),
+            'tas_kt' => $num($g3x, 'True Airspeed (kt)', 'TAS'),
+            'sel_hdg_deg' => $num($g3x, 'Selected Heading (deg)', 'SelHDG'),
+            'sel_alt_ft' => $num($g3x, 'Selected Altitude (ft)', 'SelALT'),
+            'sel_ias_kt' => $num($g3x, 'Selected Airspeed (kt)', 'SelIAS'),
+            'nav_course_deg' => $num($g3x, 'Nav Course (deg)', 'NavCRS'),
+            'nav_bearing_deg' => $num($g3x, 'Nav Bearing (deg)', 'NavBrg'),
+            'nav_xtk_nm' => $num($g3x, 'Nav Cross Track Distance (nm)', 'NavXTK'),
+            'nav_source' => $txt($g3x, 'Active Nav Source', 'NavSrc'),
+            'hcdi' => $num($g3x, 'Horizontal CDI Deflection', 'HCDI'),
+            'vcdi' => $num($g3x, 'Vertical CDI Deflection', 'VCDI'),
+            'ap_state' => $txt($g3x, 'Autopilot State'),
+            'fd_lat_mode' => $txt($g3x, 'FD Lateral Mode'),
+            'fd_vert_mode' => $txt($g3x, 'FD Vertical Mode'),
+            'wind_speed_kt' => $num($g3x, 'Wind Speed (kt)', 'WndSpd'),
+            'wind_dir_deg' => $num($g3x, 'Wind Direction (deg)', 'WndDr'),
+            'oat_c' => $num($g3x, 'Outside Air Temp (deg C)', 'OAT'),
+            'baro_inhg' => $num($g3x, 'Baro Setting (inch Hg)', 'Baro'),
+            'baro_alt_ft' => $num($g3x, 'Baro Altitude (ft)', 'AltInd'),
+            'vs_fpm' => $num($g3x, 'Vertical Speed (ft/min)', 'VSpd'),
+            'pitch_deg' => $num($g3x, 'Pitch (deg)', 'Pitch'),
+            'roll_deg' => $num($g3x, 'Roll (deg)', 'Roll'),
+            'heading_deg' => $num($g3x, 'Magnetic Heading (deg)', 'HDG'),
+            'groundspeed_kt' => $num($g3x, 'GPS Ground Speed (kt)', 'GndSpd'),
+            'track_deg' => $num($g3x, 'GPS Ground Track (deg)', 'TRK'),
+            'slip_g' => $num($g3x, 'Lateral Acceleration (G)', 'LatAc'),
+        );
+    }
+
+    /**
      * @return array<string,mixed>
      */
     private function publicSample(array $row): array
     {
-        $groundspeed = $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null;
-        $track = $row['magnetic_track_deg'] !== null ? (float)$row['magnetic_track_deg'] : null;
-        $heading = $row['magnetic_heading_deg'] !== null ? (float)$row['magnetic_heading_deg'] : null;
+        $g3x = $this->publicG3XFields($row);
+        $groundspeed = $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : ($g3x['groundspeed_kt'] ?? null);
+        $track = $row['magnetic_track_deg'] !== null ? (float)$row['magnetic_track_deg'] : ($g3x['track_deg'] ?? null);
+        $heading = $row['magnetic_heading_deg'] !== null ? (float)$row['magnetic_heading_deg'] : ($g3x['heading_deg'] ?? null);
         $headingSource = $groundspeed !== null && $groundspeed >= 5.0 && $track !== null ? 'gps_track' : ($heading !== null ? 'calibrated_magnetic_heading' : 'none');
         $headingQuality = $headingSource === 'gps_track' ? 'GOOD' : ($headingSource === 'calibrated_magnetic_heading' ? 'LOW' : 'INVALID');
+        $pitch = $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : ($g3x['pitch_deg'] ?? null);
+        $bank = $row['roll_deg'] !== null ? (float)$row['roll_deg'] : ($g3x['roll_deg'] ?? null);
+        $ias = $g3x['ias_kt'] ?? null;
+        $tas = isset($row['estimated_tas_kt']) && $row['estimated_tas_kt'] !== null
+            ? (float)$row['estimated_tas_kt']
+            : ($g3x['tas_kt'] ?? null);
+        $baroAlt = $row['baro_altitude_ft'] !== null ? (float)$row['baro_altitude_ft'] : ($g3x['baro_alt_ft'] ?? null);
+        if ($baroAlt === null && isset($row['estimated_indicated_altitude_ft']) && $row['estimated_indicated_altitude_ft'] !== null) {
+            $baroAlt = (float)$row['estimated_indicated_altitude_ft'];
+        }
+        $vs = $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : ($g3x['vs_fpm'] ?? null);
+        if ($vs === null && isset($row['estimated_vertical_speed_fpm']) && $row['estimated_vertical_speed_fpm'] !== null) {
+            $vs = (float)$row['estimated_vertical_speed_fpm'];
+        }
+        $oat = isset($row['oat_c']) && $row['oat_c'] !== null ? (float)$row['oat_c'] : ($g3x['oat_c'] ?? null);
+        $baro = isset($row['altimeter_setting_inhg']) && $row['altimeter_setting_inhg'] !== null
+            ? (float)$row['altimeter_setting_inhg']
+            : ($g3x['baro_inhg'] ?? null);
+        $windSpeed = isset($row['estimated_wind_speed_kt']) && $row['estimated_wind_speed_kt'] !== null
+            ? (float)$row['estimated_wind_speed_kt']
+            : ($g3x['wind_speed_kt'] ?? null);
+        $windDir = isset($row['estimated_wind_direction_deg_true']) && $row['estimated_wind_direction_deg_true'] !== null
+            ? (float)$row['estimated_wind_direction_deg_true']
+            : ($g3x['wind_dir_deg'] ?? null);
+        $slip = isset($row['estimated_slip_skid_g']) && $row['estimated_slip_skid_g'] !== null
+            ? (float)$row['estimated_slip_skid_g']
+            : ($g3x['slip_g'] ?? null);
+        $headingBug = isset($row['heading_bug_deg']) && is_numeric($row['heading_bug_deg'])
+            ? (float)$row['heading_bug_deg']
+            : ($g3x['sel_hdg_deg'] ?? null);
+        $altitudeBug = isset($row['altitude_bug_ft']) && is_numeric($row['altitude_bug_ft'])
+            ? (float)$row['altitude_bug_ft']
+            : ($g3x['sel_alt_ft'] ?? null);
+        $autopilot = trim((string)($row['autopilot_status'] ?? ''));
+        if ($autopilot === '') {
+            $autopilot = trim((string)($g3x['ap_state'] ?? ''));
+        }
+
         return array(
             't' => (float)$row['seconds_since_start'],
             'time_utc' => $row['sample_time_utc'],
             'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
             'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
             'gps_altitude_ft' => $row['gps_altitude_ft'] !== null ? (float)$row['gps_altitude_ft'] : null,
-            'baro_altitude_ft' => $row['baro_altitude_ft'] !== null ? (float)$row['baro_altitude_ft'] : null,
-            'vertical_speed_fpm' => $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : null,
+            'baro_altitude_ft' => $baroAlt,
+            'vertical_speed_fpm' => $vs,
             'adsb_baro_altitude_ft' => isset($row['adsb_baro_altitude_ft']) && $row['adsb_baro_altitude_ft'] !== null ? (float)$row['adsb_baro_altitude_ft'] : null,
             'adsb_vertical_speed_fpm' => isset($row['adsb_vertical_speed_fpm']) && $row['adsb_vertical_speed_fpm'] !== null ? (float)$row['adsb_vertical_speed_fpm'] : null,
             'estimated_baro_altitude_ft' => isset($row['estimated_baro_altitude_ft']) && $row['estimated_baro_altitude_ft'] !== null ? (float)$row['estimated_baro_altitude_ft'] : null,
@@ -2622,37 +2748,42 @@ final class CockpitReconstructionService
             'field_calibrated_true_altitude_ft' => isset($row['field_calibrated_true_altitude_ft']) && $row['field_calibrated_true_altitude_ft'] !== null ? (float)$row['field_calibrated_true_altitude_ft'] : null,
             'estimated_indicated_altitude_ft' => isset($row['estimated_indicated_altitude_ft']) && $row['estimated_indicated_altitude_ft'] !== null ? (float)$row['estimated_indicated_altitude_ft'] : null,
             'estimated_true_altitude_from_indicated_ft' => isset($row['estimated_true_altitude_from_indicated_ft']) && $row['estimated_true_altitude_from_indicated_ft'] !== null ? (float)$row['estimated_true_altitude_from_indicated_ft'] : null,
-            'altimeter_setting_inhg' => isset($row['altimeter_setting_inhg']) && $row['altimeter_setting_inhg'] !== null ? (float)$row['altimeter_setting_inhg'] : null,
+            'altimeter_setting_inhg' => $baro,
             'altimeter_setting_source' => (string)($row['altimeter_setting_source'] ?? 'unavailable'),
             'airport_elevation_ft' => isset($row['airport_elevation_ft']) && $row['airport_elevation_ft'] !== null ? (float)$row['airport_elevation_ft'] : null,
             'airport_elevation_source' => (string)($row['airport_elevation_source'] ?? 'unavailable'),
             'field_altitude_offset_ft' => isset($row['field_altitude_offset_ft']) && $row['field_altitude_offset_ft'] !== null ? (float)$row['field_altitude_offset_ft'] : null,
-            'oat_c' => isset($row['oat_c']) && $row['oat_c'] !== null ? (float)$row['oat_c'] : null,
+            'oat_c' => $oat,
             'oat_source' => (string)($row['oat_source'] ?? 'unavailable'),
             'altitude_source' => (string)($row['altitude_source'] ?? 'unavailable'),
             'altitude_quality' => (string)($row['altitude_quality'] ?? 'unavailable'),
             'vertical_speed_source' => (string)($row['vertical_speed_source'] ?? 'unavailable'),
             'vertical_speed_quality' => (string)($row['vertical_speed_quality'] ?? 'unavailable'),
-            'estimated_slip_skid_g' => isset($row['estimated_slip_skid_g']) && $row['estimated_slip_skid_g'] !== null ? (float)$row['estimated_slip_skid_g'] : null,
+            'estimated_slip_skid_g' => $slip,
             'estimated_slip_skid_quality' => (string)($row['estimated_slip_skid_quality'] ?? 'unavailable'),
             'estimated_slip_skid_source' => (string)($row['estimated_slip_skid_source'] ?? 'unavailable'),
             'ahrs_acceleration_x_g' => isset($row['ahrs_acceleration_x_g']) && $row['ahrs_acceleration_x_g'] !== null ? (float)$row['ahrs_acceleration_x_g'] : null,
             'ahrs_acceleration_y_g' => isset($row['ahrs_acceleration_y_g']) && $row['ahrs_acceleration_y_g'] !== null ? (float)$row['ahrs_acceleration_y_g'] : null,
             'ahrs_acceleration_z_g' => isset($row['ahrs_acceleration_z_g']) && $row['ahrs_acceleration_z_g'] !== null ? (float)$row['ahrs_acceleration_z_g'] : null,
-            'estimated_wind_speed_kt' => isset($row['estimated_wind_speed_kt']) && $row['estimated_wind_speed_kt'] !== null ? (float)$row['estimated_wind_speed_kt'] : null,
-            'estimated_wind_direction_deg_true' => isset($row['estimated_wind_direction_deg_true']) && $row['estimated_wind_direction_deg_true'] !== null ? (float)$row['estimated_wind_direction_deg_true'] : null,
+            'estimated_wind_speed_kt' => $windSpeed,
+            'estimated_wind_direction_deg_true' => $windDir,
             'estimated_wind_quality' => (string)($row['estimated_wind_quality'] ?? 'unavailable'),
             'estimated_wind_source' => (string)($row['estimated_wind_source'] ?? 'unavailable'),
-            'estimated_tas_kt' => isset($row['estimated_tas_kt']) && $row['estimated_tas_kt'] !== null ? (float)$row['estimated_tas_kt'] : null,
+            'estimated_tas_kt' => $tas,
+            'ias_kt' => $ias,
             'wind_estimation_method' => (string)($row['wind_estimation_method'] ?? 'unavailable'),
-            'groundspeed_kt' => $row['groundspeed_kt'] !== null ? (float)$row['groundspeed_kt'] : null,
-            'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
-            'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
+            'groundspeed_kt' => $groundspeed !== null ? (float)$groundspeed : null,
+            'pitch_deg' => $pitch,
+            'bank_deg' => $bank,
             'heading_deg' => $heading,
             'track_deg' => $track,
             'true_heading_deg' => $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null,
             'heading_source' => $headingSource,
             'heading_quality' => $headingQuality,
+            'heading_bug_deg' => $headingBug,
+            'altitude_bug_ft' => $altitudeBug,
+            'autopilot_status' => $autopilot !== '' ? $autopilot : null,
+            'g3x' => $g3x,
         );
     }
 

@@ -122,6 +122,9 @@ cw_header('Cockpit Recorder Aircraft');
         <label><input type="checkbox" name="active" value="1" <?= ((int)($form['active'] ?? 1) === 1) ? 'checked' : '' ?>> Active</label>
         <button class="cockpit-btn" type="submit">Save Aircraft</button>
         <a class="cockpit-btn cockpit-btn-secondary" href="/admin/cockpit_recorder_aircraft.php">New</a>
+        <?php if ((int)($form['id'] ?? 0) > 0): ?>
+          <a class="cockpit-btn cockpit-btn-secondary" href="/admin/cockpit_recorder_aircraft_pfd.php?id=<?= (int)$form['id'] ?>">PFD Profile</a>
+        <?php endif; ?>
       </div>
     </form>
   </section>
@@ -159,7 +162,7 @@ cw_header('Cockpit Recorder Aircraft');
                 <span class="cockpit-badge">Inactive</span>
               <?php endif; ?>
             </td>
-            <td><a href="/admin/cockpit_recorder_aircraft.php?edit=<?= (int)($row['id'] ?? 0) ?>">Edit</a></td>
+            <td><a href="/admin/cockpit_recorder_aircraft.php?edit=<?= (int)($row['id'] ?? 0) ?>">Edit</a> · <a href="/admin/cockpit_recorder_aircraft_pfd.php?id=<?= (int)($row['id'] ?? 0) ?>">PFD</a></td>
           </tr>
         <?php endforeach; ?>
         </tbody>

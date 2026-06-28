@@ -20,7 +20,10 @@ final class RecordingStore: ObservableObject {
     func load() async {
         do {
             let url = try storeURL()
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                syncSharedRecordingIndex()
+                return
+            }
             let data = try Data(contentsOf: url)
             recordings = try decoder.decode([Recording].self, from: data)
             var changed = repairStaleFilePaths()

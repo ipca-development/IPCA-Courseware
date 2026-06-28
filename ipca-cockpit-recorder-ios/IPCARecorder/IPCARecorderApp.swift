@@ -48,6 +48,7 @@ struct IPCARecorderApp: App {
 
     @MainActor
     private func handlePendingG3XWorkflow() {
+        recordingStore.syncSharedRecordingIndex()
         recordingStore.processPendingG3XImports()
         uploadManager.syncPendingG3XUploads(store: recordingStore, settings: settings)
         guard settings.isServerURLConfigured else { return }

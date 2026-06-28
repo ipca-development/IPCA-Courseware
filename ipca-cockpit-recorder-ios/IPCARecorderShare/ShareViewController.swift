@@ -65,11 +65,17 @@ final class ShareViewController: UIViewController {
             do {
                 let fileURL = try self.resolveFileURL(from: item)
                 let parsed = try G3XFlightStreamParser.parse(fileURL: fileURL)
-                let candidates = G3XRecordingMatcher.rankedCandidates(
+                let index = SharedRecordingIndexStore.readIndex()
+                let candidates = G3XRecordingMatcher.displayCandidates(
                     metadata: parsed.metadata,
-                    recordings: SharedRecordingIndexStore.readIndex()
+                    recordings: index
                 )
-                self.presentUI(metadata: parsed.metadata, sourceURL: fileURL, candidates: candidates)
+                self.presentUI(
+                    metadata: parsed.metadata,
+                    sourceURL: fileURL,
+                    candidates: candidates,
+                    indexedRecordingCount: index.count
+                )
             } catch {
                 self.fail(error.localizedDescription)
             }
@@ -98,7 +104,8 @@ final class ShareViewController: UIViewController {
     private func presentUI(
         metadata: G3XFlightStreamMetadata,
         sourceURL: URL,
-        candidates: [G3XMatchCandidate]
+        candidates: [G3XMatchCandidate],
+        indexedRecordingCount: Int
     ) {
         hostingController?.willMove(toParent: nil)
         hostingController?.view.removeFromSuperview()
@@ -107,6 +114,7 @@ final class ShareViewController: UIViewController {
         let view = ShareExtensionView(
             metadata: metadata,
             candidates: candidates,
+            indexedRecordingCount: indexedRecordingCount,
             onAttach: { recordingID in
                 self.attach(sourceURL: sourceURL, metadata: metadata, recordingID: recordingID)
             },
