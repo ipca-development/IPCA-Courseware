@@ -131,6 +131,52 @@ cw_header('Cockpit Recorder Replay');
     const normalized = normalizeDeg(deg);
     return normalized > 180 ? normalized - 360 : normalized;
   };
+  const g3xTrueTrackDeg = (sample) => {
+    const g3x = sample && sample.g3x ? sample.g3x : null;
+    if (!g3x) return null;
+    const velE = Number(g3x.velocity_e_mps);
+    const velN = Number(g3x.velocity_n_mps);
+    if (Number.isFinite(velE) && Number.isFinite(velN)) {
+      const speed = Math.hypot(velE, velN);
+      if (speed >= 0.35) {
+        return normalizeDeg(Math.atan2(velE, velN) * 180 / Math.PI);
+      }
+    }
+    const gs = Number(g3x.groundspeed_kt ?? sample.groundspeed_kt);
+    const track = Number(g3x.track_deg ?? sample.track_deg);
+    if (Number.isFinite(track) && Number.isFinite(gs) && gs >= 1) {
+      return normalizeDeg(track);
+    }
+    return null;
+  };
+  const magneticToTrueHeadingDeg = (magnetic, variation, trueReference) => {
+    const plus = normalizeDeg(magnetic + variation);
+    const minus = normalizeDeg(magnetic - variation);
+    if (Number.isFinite(trueReference)) {
+      const delta = (a, b) => {
+        let d = ((b - a + 540) % 360) - 180;
+        return Math.abs(d);
+      };
+      return delta(plus, trueReference) <= delta(minus, trueReference) ? plus : minus;
+    }
+    return minus;
+  };
+  const pathHeadingDeg = (t) => {
+    const before = sampleAt(Number(t) - 0.8);
+    const after = sampleAt(Number(t) + 0.8);
+    if (!before || !after) return null;
+    const lat1 = degToRad(Number(before.lat));
+    const lat2 = degToRad(Number(after.lat));
+    const lon1 = degToRad(Number(before.lon));
+    const lon2 = degToRad(Number(after.lon));
+    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+    const dLat = lat2 - lat1;
+    const dLon = lon2 - lon1;
+    const distanceM = 6371000 * Math.sqrt(dLat * dLat + Math.pow(Math.cos((lat1 + lat2) / 2) * dLon, 2));
+    if (!Number.isFinite(distanceM) || distanceM < 2) return null;
+    return normalizeDeg(Math.atan2(y, x) * 180 / Math.PI);
+  };
   const bestAltitudeFt = (sample) => {
     if (!sample) return 0;
     return Number.isFinite(Number(sample.estimated_true_altitude_from_indicated_ft)) ? Number(sample.estimated_true_altitude_from_indicated_ft)
@@ -140,21 +186,27 @@ cw_header('Cockpit Recorder Replay');
   };
   const cameraEyeAltitudeM = (sample) => Math.max(0, feetToMeters(bestAltitudeFt(sample))) + PILOT_EYE_HEIGHT_M;
 
-  function cameraHeadingDeg(sample) {
+  function cameraHeadingDeg(sample, t = activeT) {
     if (!sample) return 0;
-    if (Number.isFinite(Number(sample.camera_heading_deg))) {
-      return normalizeDeg(Number(sample.camera_heading_deg));
+    const g3xTrack = g3xTrueTrackDeg(sample);
+    if (g3xTrack !== null) {
+      return g3xTrack;
     }
+    const pathHeading = pathHeadingDeg(t);
     const magnetic = Number(sample.heading_deg);
     const variation = Number(sample.magnetic_variation_deg);
-    if (Number.isFinite(magnetic) && Number.isFinite(variation)) {
-      return normalizeDeg(magnetic + variation);
-    }
     const g3xVar = sample.g3x && Number.isFinite(Number(sample.g3x.magnetic_variation_deg))
       ? Number(sample.g3x.magnetic_variation_deg)
       : null;
-    if (Number.isFinite(magnetic) && g3xVar !== null) {
-      return normalizeDeg(magnetic + g3xVar);
+    const magVar = Number.isFinite(variation) ? variation : g3xVar;
+    if (Number.isFinite(magnetic) && magVar !== null) {
+      return magneticToTrueHeadingDeg(magnetic, magVar, pathHeading);
+    }
+    if (pathHeading !== null) {
+      return pathHeading;
+    }
+    if (Number.isFinite(Number(sample.camera_heading_deg))) {
+      return normalizeDeg(Number(sample.camera_heading_deg));
     }
     if (Number.isFinite(Number(sample.true_heading_deg))) {
       return normalizeDeg(Number(sample.true_heading_deg));
@@ -361,7 +413,7 @@ cw_header('Cockpit Recorder Replay');
     const s = smoothedSampleAt(activeT);
     if (!s || s.lat === null || s.lon === null) return;
     const altitudeM = cameraEyeAltitudeM(s);
-    const cameraHeading = cameraHeadingDeg(s);
+    const cameraHeading = cameraHeadingDeg(s, activeT);
     const pitch = Number.isFinite(Number(s.pitch_deg)) ? Number(s.pitch_deg) : 0;
     const bank = Number.isFinite(Number(s.bank_deg)) ? normalizeSignedDeg(Number(s.bank_deg)) : 0;
     cesiumCameraState = {

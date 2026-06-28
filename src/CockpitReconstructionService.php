@@ -2556,6 +2556,40 @@ final class CockpitReconstructionService
     }
 
     /**
+     * G3X GPS ground track and velocity vectors are true-north referenced.
+     *
+     * @param array<string,mixed> $g3x
+     */
+    private static function g3xTrueTrackDeg(array $g3x, ?float $groundspeedKt): ?float
+    {
+        $velE = isset($g3x['velocity_e_mps']) && $g3x['velocity_e_mps'] !== null ? (float)$g3x['velocity_e_mps'] : null;
+        $velN = isset($g3x['velocity_n_mps']) && $g3x['velocity_n_mps'] !== null ? (float)$g3x['velocity_n_mps'] : null;
+        if ($velE !== null && $velN !== null) {
+            $speed = hypot($velE, $velN);
+            if ($speed >= 0.35) {
+                return self::normalizeDegrees(rad2deg(atan2($velE, $velN)));
+            }
+        }
+        $track = isset($g3x['track_deg']) && $g3x['track_deg'] !== null ? (float)$g3x['track_deg'] : null;
+        if ($track !== null && $groundspeedKt !== null && $groundspeedKt >= 1.0) {
+            return self::normalizeDegrees($track);
+        }
+        return null;
+    }
+
+    private static function magneticToTrueHeadingDeg(float $magnetic, float $variation, ?float $trueReference): float
+    {
+        $plus = self::normalizeDegrees($magnetic + $variation);
+        $minus = self::normalizeDegrees($magnetic - $variation);
+        if ($trueReference !== null) {
+            return abs(self::angleDelta($plus, $trueReference)) <= abs(self::angleDelta($minus, $trueReference))
+                ? $plus
+                : $minus;
+        }
+        return $minus;
+    }
+
+    /**
      * @param list<float> $angles
      */
     private static function circularMean(array $angles): float
@@ -2678,6 +2712,8 @@ final class CockpitReconstructionService
             'roll_deg' => $num($g3x, 'Roll (deg)', 'Roll'),
             'heading_deg' => $num($g3x, 'Magnetic Heading (deg)', 'HDG'),
             'magnetic_variation_deg' => $num($g3x, 'Magnetic Variation (deg)', 'MagVar'),
+            'velocity_e_mps' => $num($g3x, 'GPS Velocity E (m/sec)', 'GPSVelE'),
+            'velocity_n_mps' => $num($g3x, 'GPS Velocity N (m/sec)', 'GPSVelN'),
             'groundspeed_kt' => $num($g3x, 'GPS Ground Speed (kt)', 'GndSpd'),
             'track_deg' => $num($g3x, 'GPS Ground Track (deg)', 'TRK'),
             'slip_g' => $num($g3x, 'Lateral Acceleration (G)', 'LatAc'),
@@ -2720,12 +2756,16 @@ final class CockpitReconstructionService
             ? (float)$g3x['magnetic_variation_deg']
             : null;
         $rowTrueHeading = $row['true_heading_deg'] !== null ? (float)$row['true_heading_deg'] : null;
+        $groundspeedFloat = $groundspeed !== null ? (float)$groundspeed : null;
+        $g3xTrueTrack = self::g3xTrueTrackDeg($g3x, $groundspeedFloat);
         $cameraHeading = null;
-        if ($heading !== null && $magneticVariation !== null) {
-            $cameraHeading = self::normalizeDegrees((float)$heading + $magneticVariation);
+        if ($g3xTrueTrack !== null) {
+            $cameraHeading = $g3xTrueTrack;
+        } elseif ($heading !== null && $magneticVariation !== null) {
+            $cameraHeading = self::magneticToTrueHeadingDeg((float)$heading, $magneticVariation, $g3xTrueTrack);
         } elseif ($rowTrueHeading !== null) {
             $cameraHeading = self::normalizeDegrees($rowTrueHeading);
-        } elseif ($track !== null && $groundspeed !== null && (float)$groundspeed >= 3.0) {
+        } elseif ($track !== null && $groundspeedFloat !== null && $groundspeedFloat >= 3.0) {
             $cameraHeading = self::normalizeDegrees((float)$track);
         } elseif ($heading !== null) {
             $cameraHeading = self::normalizeDegrees((float)$heading);
