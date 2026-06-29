@@ -46,6 +46,7 @@ final class CockpitReplayPipeline
      * @param list<array<string,mixed>> $rawAhrsRows
      * @param list<array{seconds: float, row: array<string,string>}> $g3xSamples
      * @param list<array<string,mixed>> $phases
+     * @param array<string,mixed> $options
      * @return array{samples:list<array<string,mixed>>,diagnostics:array<string,mixed>,profiling:array<string,float>}
      */
     public function build(
@@ -53,12 +54,24 @@ final class CockpitReplayPipeline
         array $rawGpsRows,
         array $rawAhrsRows,
         array $g3xSamples,
-        array $phases
+        array $phases,
+        array $options = array()
     ): array {
         $warnings = array();
+        $sourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
+        if ($sourceMode !== 'g3x_only') {
+            $sourceMode = 'multi_source';
+        }
         $gpsPoints = $this->normalizeGpsPoints($rawGpsRows);
         $ahrsPoints = $this->normalizeAhrsPoints($rawAhrsRows);
         $g3xPoints = $this->normalizeG3xPoints($g3xSamples);
+        $availableGpsCount = count($gpsPoints);
+        $availableAhrsCount = count($ahrsPoints);
+
+        if ($sourceMode === 'g3x_only') {
+            $gpsPoints = array();
+            $ahrsPoints = array();
+        }
 
         $rawGpsCount = count($gpsPoints);
         $rawAhrsCount = count($ahrsPoints);
@@ -67,14 +80,20 @@ final class CockpitReplayPipeline
         }
 
         $maxRawGpsGap = $this->maxTimeGap($gpsPoints);
-        if ($maxRawGpsGap > 2.0) {
+        $maxRawG3xGap = $this->maxTimeGap($g3xPoints);
+        if ($sourceMode !== 'g3x_only' && $maxRawGpsGap > 2.0) {
             $warnings[] = 'Raw GPS has gaps larger than 2 seconds.';
         }
-        if ($rawAhrsCount === 0) {
+        if ($sourceMode === 'g3x_only' && $maxRawG3xGap > 2.0) {
+            $warnings[] = 'G3X-only replay has G3X gaps larger than 2 seconds.';
+        }
+        if ($sourceMode !== 'g3x_only' && $rawAhrsCount === 0) {
             $warnings[] = 'AHRS samples missing; attitude replay quality may be low.';
         }
         if (!$g3xPoints) {
             $warnings[] = 'G3X not attached; replay uses phone GPS and AHRS only.';
+        } elseif ($sourceMode === 'g3x_only') {
+            $warnings[] = 'Replay v2 built in G3X-only diagnostic mode; GPS/AHRS evidence intentionally ignored.';
         }
 
         $origin = $this->firstGoodGpsOrigin($gpsPoints, $g3xPoints);
@@ -83,6 +102,12 @@ final class CockpitReplayPipeline
         }
 
         $this->diagnostics = array(
+            'replay_source_mode' => $sourceMode,
+            'raw_gps_available_count' => $availableGpsCount,
+            'raw_ahrs_available_count' => $availableAhrsCount,
+            'raw_gps_used_count' => $rawGpsCount,
+            'raw_ahrs_used_count' => $rawAhrsCount,
+            'raw_g3x_used_count' => count($g3xPoints),
             'raw_position_outliers_rejected' => 0,
             'max_ground_position_jump_before_m' => 0.0,
             'max_ground_position_jump_after_m' => 0.0,
@@ -214,6 +239,9 @@ final class CockpitReplayPipeline
                 'raw_gps_count' => $rawGpsCount,
                 'raw_ahrs_count' => $rawAhrsCount,
                 'raw_g3x_count' => count($g3xPoints),
+                'g3x_only_available_gps_count' => $availableGpsCount,
+                'g3x_only_available_ahrs_count' => $availableAhrsCount,
+                'max_raw_g3x_gap_s' => round($maxRawG3xGap, 3),
                 'replay_sample_count' => count($samples),
                 'replay_duration_s' => round($duration, 3),
                 'max_raw_gps_gap_s' => round($maxRawGpsGap, 3),

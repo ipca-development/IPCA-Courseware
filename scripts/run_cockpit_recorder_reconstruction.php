@@ -30,6 +30,11 @@ foreach ($argv ?? array() as $arg) {
         if (is_numeric($value)) {
             $options['oat_c'] = (float)$value;
         }
+    } elseif (str_starts_with($arg, '--replay-source-mode=')) {
+        $value = trim(substr($arg, strlen('--replay-source-mode=')));
+        if ($value === 'g3x_only') {
+            $options['replay_source_mode'] = 'g3x_only';
+        }
     }
 }
 
@@ -50,9 +55,12 @@ try {
     $replayCount = (int)($result['replay_sample_count'] ?? 0);
     $totalDuration = is_numeric($result['total_duration_s'] ?? null) ? (float)$result['total_duration_s'] : null;
 
+    $replaySourceMode = (string)($result['replay_source_mode'] ?? 'multi_source');
+
     echo 'Cockpit recorder reconstruction ' . $recordingId . ' completed with '
         . number_format($canonicalCount) . ' canonical samples.'
         . ($replayCount > 0 ? ' Replay v2: ' . number_format($replayCount) . ' samples.' : '')
+        . ($replaySourceMode !== 'multi_source' ? ' Replay source mode: ' . $replaySourceMode . '.' : '')
         . PHP_EOL;
     if ($totalDuration !== null) {
         echo 'Total duration: ' . $totalDuration . 's' . PHP_EOL;

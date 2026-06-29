@@ -207,6 +207,10 @@ final class CockpitReconstructionService
         }
 
         $recordingId = (int)$recording['id'];
+        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
+        if ($replaySourceMode !== 'g3x_only') {
+            $replaySourceMode = 'multi_source';
+        }
         $runStarted = microtime(true);
         $jobId = isset($options['job_id']) ? (int)$options['job_id'] : $this->createReconstructionJob($recordingId);
         if ($jobId <= 0) {
@@ -219,9 +223,6 @@ final class CockpitReconstructionService
         try {
             $gpsSamples = $this->loadGPS($recording);
             $ahrsSamples = $this->loadAHRS($recording);
-            if (!$gpsSamples && !$ahrsSamples) {
-                throw new RuntimeException('No GPS or AHRS samples available for reconstruction.');
-            }
 
             $adsbSamples = $this->loadAdsbOwnship($recordingId);
             $gpsForG3X = array_values(array_filter(
@@ -229,6 +230,9 @@ final class CockpitReconstructionService
                 fn(array $row): bool => isset($row['seconds'])
             ));
             $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X);
+            if (!$gpsSamples && !$ahrsSamples && !$g3xSamples) {
+                throw new RuntimeException('No GPS, AHRS, or G3X samples available for reconstruction.');
+            }
 
             $profiler = new CockpitReconstructionProfiler();
             $this->reportJobProgress($jobId, self::STAGE_CANONICAL, 12, 'Building canonical merged samples');
@@ -263,7 +267,8 @@ final class CockpitReconstructionService
                     $gpsSamples,
                     $ahrsSamples,
                     $g3xSamples,
-                    $timeline['phases']
+                    $timeline['phases'],
+                    array('replay_source_mode' => $replaySourceMode)
                 );
                 $profiler->stop('replay_pipeline_build');
                 $profiler->merge($replayResult['profiling']);
@@ -277,6 +282,7 @@ final class CockpitReconstructionService
             }
             $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 59, 'Building reconstruction summary and diagnostics');
             $summary = $this->buildSummary($recording, $samples, $timeline['phases'], $timeline['events']);
+            $summary['replay_source_mode'] = $replaySourceMode;
             $profiling = $profiler->toArray();
             $summary['reconstruction_profiling'] = $profiling;
             if ($replayResult !== null) {
@@ -348,6 +354,7 @@ final class CockpitReconstructionService
                 'job_id' => $jobId,
                 'sample_count' => count($samples),
                 'replay_sample_count' => $replayResult !== null ? count($replayResult['samples']) : 0,
+                'replay_source_mode' => $replaySourceMode,
                 'phase_count' => count($timeline['phases']),
                 'event_count' => count($timeline['events']),
                 'total_duration_s' => $totalDuration,
