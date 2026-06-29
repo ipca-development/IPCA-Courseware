@@ -558,8 +558,8 @@ cw_header('Cockpit Recorder Replay');
     const s = sampleAt(t);
     if (!pos || !s) return null;
     const aircraftHeading = aircraftHeadingFromSample(s);
-    const aircraftAltitudeM = visualAltitudeM(s);
     if (isSyntheticCameraMode()) {
+      const aircraftAltitudeM = rawAltitudeM(s);
       const testAttitude = cameraMode === 'synthetic_vision' ? null : syntheticTestAttitudeForMode(cameraMode);
       const headingDeg = testAttitude ? testAttitude.headingDeg : aircraftHeading;
       const pitchDeg = testAttitude ? testAttitude.pitchDeg : aircraftPitchFromSample(s);
@@ -585,6 +585,7 @@ cw_header('Cockpit Recorder Replay');
         testAttitude,
       };
     }
+    const aircraftAltitudeM = visualAltitudeM(s);
     const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     return {
       mode: cameraMode === 'north_up' ? 'north_up' : 'chase',
