@@ -76,25 +76,28 @@ cw_header('Cockpit Recorder Replay');
   top: 12px;
   left: 12px;
   z-index: 21;
-  min-width: 260px;
-  max-width: 340px;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  max-height: min(42vh, 360px);
+  overflow: auto;
+  pointer-events: none;
   color: #dbeafe;
-  background: rgba(15, 23, 42, .78);
+  background: rgba(15, 23, 42, .66);
   border: 1px solid rgba(148, 163, 184, .35);
   border-radius: 10px;
-  padding: 10px;
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  padding: 8px;
+  font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   white-space: pre-wrap;
 }
 .replay-debug-quality {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid rgba(148, 163, 184, .28);
 }
 .replay-debug-quality-row {
   display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 8px;
+  grid-template-columns: 58px 1fr;
+  gap: 6px;
 }
 .replay-quality-good { color: #86efac; }
 .replay-quality-degraded { color: #fde68a; }
@@ -928,11 +931,10 @@ cw_header('Cockpit Recorder Replay');
       ['heading', 'heading_quality', 'heading_source', 'heading_quality_reason'],
       ['track', 'track_quality', 'track_source', 'track_quality_reason'],
       ['speed', 'speed_quality', 'speed_source', 'speed_quality_reason'],
-    ].map(([label, qualityField, sourceField, reasonField]) => {
+    ].map(([label, qualityField, sourceField]) => {
       const quality = qualityValue(sample, qualityField);
       const source = sourceValue(sample, sourceField);
-      const reason = sourceValue(sample, reasonField);
-      const suffix = [source, reason].filter(Boolean).join(' / ');
+      const suffix = source;
       return `<div class="replay-debug-quality-row"><span>${escapeHtml(label)}</span><span class="${qualityClass(quality)}">${escapeHtml(quality)}${suffix ? ` <span class="replay-quality-unknown">(${escapeHtml(suffix)})</span>` : ''}</span></div>`;
     }).join('');
     const dbg = currentCameraDebug || {};
