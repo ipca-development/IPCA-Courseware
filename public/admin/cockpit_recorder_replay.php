@@ -360,7 +360,7 @@ cw_header('Cockpit Recorder Replay');
       return feetToMeters(Number(sample.visual_altitude_ft));
     }
     if (isGroundSample(sample) && Number.isFinite(lastTerrainHeightM)) {
-      return Math.max(msl, lastTerrainHeightM + 2);
+      return lastTerrainHeightM;
     }
     if (Number.isFinite(lastTerrainHeightM)) {
       return Math.max(msl, lastTerrainHeightM + 2);
@@ -557,6 +557,12 @@ cw_header('Cockpit Recorder Replay');
     return trueHeadingFromSample(sample);
   }
 
+  function syntheticVisionHeadingFromSample(sample) {
+    const magnetic = firstFinite(sample && sample.heading_deg_magnetic);
+    if (magnetic !== null) return normalizeDeg(magnetic);
+    return aircraftHeadingFromSample(sample);
+  }
+
   function aircraftPitchFromSample(sample) {
     return clamp(firstFinite(sample && sample.pitch_deg, sample && sample.visual_pitch_deg, 0) || 0, -45, 45);
   }
@@ -569,9 +575,9 @@ cw_header('Cockpit Recorder Replay');
     const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(t);
     const s = sampleAt(t);
     if (!pos || !s) return null;
-    const aircraftHeading = aircraftHeadingFromSample(s);
+    const aircraftHeading = isSyntheticCameraMode() ? syntheticVisionHeadingFromSample(s) : aircraftHeadingFromSample(s);
     if (isSyntheticCameraMode()) {
-      const aircraftAltitudeM = rawAltitudeM(s);
+      const aircraftAltitudeM = visualAltitudeM(s);
       const testAttitude = cameraMode === 'synthetic_vision' ? null : syntheticTestAttitudeForMode(cameraMode);
       const headingDeg = testAttitude ? testAttitude.headingDeg : aircraftHeading;
       const pitchDeg = testAttitude ? testAttitude.pitchDeg : aircraftPitchFromSample(s);
