@@ -388,7 +388,7 @@ cw_header('Cockpit Recorder Replay');
     eyeOffsetZUpM: 1.5,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
-  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v2';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v3';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -467,30 +467,26 @@ cw_header('Cockpit Recorder Replay');
       || phase.includes('block');
   };
   const rawAltitudeM = (sample) => feetToMeters(bestAltitudeFt(sample));
-  const groundRenderAltitudeM = (sample) => {
+  const groundReferenceAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
-    if (!isGroundSample(sample)) {
-      return Number.isFinite(lastTerrainHeightM) ? Math.max(msl, lastTerrainHeightM + 2) : msl;
-    }
-    if (!Number.isFinite(lastTerrainHeightM)) {
+    if (isGroundSample(sample) && Number.isFinite(msl)) {
       return msl;
     }
-    if (
-      Number.isFinite(msl)
-      && msl < -5
-      && lastTerrainHeightM > 5
-      && Math.abs(Math.abs(lastTerrainHeightM) - Math.abs(msl)) <= 25
-    ) {
-      return msl;
-    }
-    return lastTerrainHeightM;
+    return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : msl;
   };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
+    const groundReferenceM = groundReferenceAltitudeM(sample);
+    if (isGroundSample(sample)) {
+      return groundReferenceM;
+    }
     if (Number.isFinite(Number(sample && sample.visual_altitude_ft))) {
       return feetToMeters(Number(sample.visual_altitude_ft));
     }
-    return groundRenderAltitudeM(sample);
+    if (Number.isFinite(lastTerrainHeightM)) {
+      return Math.max(msl, lastTerrainHeightM + 2);
+    }
+    return msl;
   };
   const cameraEyeAltitudeM = (sample) => visualAltitudeM(sample) + PILOT_EYE_HEIGHT_M;
 
@@ -763,6 +759,7 @@ cw_header('Cockpit Recorder Replay');
     const aircraftHeading = isSyntheticCameraMode() ? syntheticVisionHeadingFromSample(s) : aircraftHeadingFromSample(s);
     if (isSyntheticCameraMode()) {
       const aircraftAltitudeM = visualAltitudeM(s);
+      const groundReferenceM = groundReferenceAltitudeM(s);
       const testAttitude = cameraMode === 'synthetic_vision' ? null : syntheticTestAttitudeForMode(cameraMode);
       const headingDeg = testAttitude ? testAttitude.headingDeg : aircraftHeading;
       const pitchDeg = testAttitude ? testAttitude.pitchDeg : aircraftPitchFromSample(s);
@@ -778,6 +775,7 @@ cw_header('Cockpit Recorder Replay');
         altitudeM: aircraftAltitudeM + SYNTHETIC_VISION_DEFAULTS.eyeHeightM,
         rawAltitudeM: rawAltitudeM(s),
         visualAltitudeM: aircraftAltitudeM,
+        groundReferenceAltitudeM: groundReferenceM,
         aircraftHeading,
         heading: headingDeg,
         pitch: pitchDeg,
@@ -789,6 +787,7 @@ cw_header('Cockpit Recorder Replay');
       };
     }
     const aircraftAltitudeM = visualAltitudeM(s);
+    const groundReferenceM = groundReferenceAltitudeM(s);
     const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     return {
       mode: cameraMode === 'north_up' ? 'north_up' : 'chase',
@@ -801,6 +800,7 @@ cw_header('Cockpit Recorder Replay');
       altitudeM: aircraftAltitudeM,
       rawAltitudeM: rawAltitudeM(s),
       visualAltitudeM: aircraftAltitudeM,
+      groundReferenceAltitudeM: groundReferenceM,
       aircraftHeading,
       heading,
       pitch: cameraSettings.pitchDeg,
@@ -955,6 +955,7 @@ cw_header('Cockpit Recorder Replay');
     const cameraCartographic = Cesium.Cartographic.fromCartesian(cameraWorld);
     const cameraLat = cameraCartographic.latitude * 180 / Math.PI;
     const cameraLon = cameraCartographic.longitude * 180 / Math.PI;
+    const groundReferenceM = Number.isFinite(Number(view.groundReferenceAltitudeM)) ? Number(view.groundReferenceAltitudeM) : view.aircraftAltitudeM;
     const movementDebug = previousSyntheticFrameDebug ? {
       aircraftMoveM: haversineM(previousSyntheticFrameDebug.aircraftLat, previousSyntheticFrameDebug.aircraftLon, view.aircraftLat, view.aircraftLon),
       aircraftMoveBearingDeg: bearingDeg(previousSyntheticFrameDebug.aircraftLat, previousSyntheticFrameDebug.aircraftLon, view.aircraftLat, view.aircraftLon),
@@ -975,11 +976,13 @@ cw_header('Cockpit Recorder Replay');
       aircraftAltitudeFt: sample && Number.isFinite(Number(sample.altitude_ft)) ? Number(sample.altitude_ft) : null,
       aircraftAltitudeM: view.aircraftAltitudeM,
       terrainHeightM: Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : null,
+      groundReferenceAltitudeM: groundReferenceM,
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
       cameraHeightAboveAircraftM: cameraCartographic.height - view.aircraftAltitudeM,
-      cameraHeightAboveTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraCartographic.height - lastTerrainHeightM : null,
+      cameraHeightAboveTerrainM: cameraCartographic.height - groundReferenceM,
+      cameraHeightAboveCesiumTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraCartographic.height - lastTerrainHeightM : null,
       aircraftCartesian,
       cameraCartesian: cameraWorld,
       cameraDirection: direction,
@@ -1005,6 +1008,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function applyWorldCameraView(view, cameraPos, cameraAltitudeM) {
+    const groundReferenceM = Number.isFinite(Number(view.groundReferenceAltitudeM)) ? Number(view.groundReferenceAltitudeM) : view.aircraftAltitudeM;
     cesiumViewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, cameraAltitudeM),
       orientation: {
@@ -1021,11 +1025,13 @@ cw_header('Cockpit Recorder Replay');
       aircraftAltitudeFt: null,
       aircraftAltitudeM: view.aircraftAltitudeM,
       terrainHeightM: Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : null,
+      groundReferenceAltitudeM: groundReferenceM,
       cameraLat: cameraPos.lat,
       cameraLon: cameraPos.lon,
       cameraHeightM: cameraAltitudeM,
       cameraHeightAboveAircraftM: cameraAltitudeM - view.aircraftAltitudeM,
-      cameraHeightAboveTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraAltitudeM - lastTerrainHeightM : null,
+      cameraHeightAboveTerrainM: cameraAltitudeM - groundReferenceM,
+      cameraHeightAboveCesiumTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraAltitudeM - lastTerrainHeightM : null,
       headingDegUsed: view.heading,
       pitchDegUsed: view.pitch,
       rollDegUsed: view.roll,
@@ -1064,6 +1070,7 @@ cw_header('Cockpit Recorder Replay');
         altitudeM: displayCamera.altitudeM + (target.altitudeM - displayCamera.altitudeM) * altAlpha,
         rawAltitudeM: target.rawAltitudeM,
         visualAltitudeM: displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * altAlpha,
+        groundReferenceAltitudeM: target.groundReferenceAltitudeM,
         aircraftHeading: target.aircraftHeading,
         heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
         pitch: target.pitch,
@@ -1267,10 +1274,12 @@ cw_header('Cockpit Recorder Replay');
       `aircraft altitude_ft: ${fmtNum(firstFinite(sample && sample.altitude_ft, dbg.aircraftAltitudeFt), 1)}`,
       `aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
       `terrain height_m: ${fmtNum(dbg.terrainHeightM, 2)}`,
+      `ground reference_m: ${fmtNum(dbg.groundReferenceAltitudeM, 2)}`,
       `camera lat/lon: ${fmtNum(dbg.cameraLat, 7)}, ${fmtNum(dbg.cameraLon, 7)}`,
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
       `camera above aircraft_m: ${fmtNum(dbg.cameraHeightAboveAircraftM, 2)}`,
-      `camera above terrain_m: ${fmtNum(dbg.cameraHeightAboveTerrainM, 2)}`,
+      `camera AGL corrected_m: ${fmtNum(dbg.cameraHeightAboveTerrainM, 2)}`,
+      `camera AGL Cesium terrain_m: ${fmtNum(dbg.cameraHeightAboveCesiumTerrainM, 2)}`,
       `aircraft move: ${fmtNum(movement.aircraftMoveM, 2)} m @ ${fmtNum(movement.aircraftMoveBearingDeg, 1)} deg`,
       `camera move: ${fmtNum(movement.cameraMoveM, 2)} m @ ${fmtNum(movement.cameraMoveBearingDeg, 1)} deg`,
       `aircraft Cartesian: ${cartesianToDebug(dbg.aircraftCartesian)}`,
