@@ -153,6 +153,65 @@ cw_header('Cockpit Recorder Replay');
   padding: 10px;
   font-size: 12px;
 }
+.replay-calibration-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 64px;
+  z-index: 22;
+  width: min(280px, calc(100vw - 24px));
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, .48);
+  border: 1px solid rgba(226, 232, 240, .28);
+  border-radius: 12px;
+  padding: 10px;
+  backdrop-filter: blur(5px);
+  font: 12px/1.3 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.replay-calibration-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: 800;
+  color: #bfdbfe;
+}
+.replay-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.replay-calibration-button {
+  border: 1px solid rgba(226, 232, 240, .25);
+  border-radius: 8px;
+  background: rgba(30, 64, 175, .66);
+  color: #fff;
+  font-weight: 800;
+  padding: 7px 8px;
+  cursor: pointer;
+}
+.replay-calibration-button:hover { background: rgba(37, 99, 235, .82); }
+.replay-calibration-button.is-muted { background: rgba(51, 65, 85, .68); }
+.replay-calibration-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.replay-calibration-select {
+  border: 1px solid rgba(226, 232, 240, .25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .86);
+  color: #e2e8f0;
+  padding: 5px 7px;
+}
+.replay-calibration-values {
+  margin-top: 8px;
+  color: #dbeafe;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
 </style>
 
 <?php if ($error !== ''): ?>
@@ -192,6 +251,29 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div id="terrainWarning" class="replay-terrain-warning" hidden></div>
+    <div id="calibrationPanel" class="replay-calibration-panel" aria-label="Camera position calibration">
+      <div class="replay-calibration-title">
+        <span>Camera Calibration</span>
+        <button class="replay-calibration-button is-muted" type="button" id="calibrationReset">Reset</button>
+      </div>
+      <div class="replay-calibration-grid">
+        <button class="replay-calibration-button" type="button" data-cal-axis="forward" data-cal-sign="1">Forward</button>
+        <button class="replay-calibration-button" type="button" data-cal-axis="up" data-cal-sign="1">Up</button>
+        <button class="replay-calibration-button" type="button" data-cal-axis="right" data-cal-sign="-1">Left</button>
+        <button class="replay-calibration-button" type="button" data-cal-axis="forward" data-cal-sign="-1">Back</button>
+        <button class="replay-calibration-button" type="button" data-cal-axis="up" data-cal-sign="-1">Down</button>
+        <button class="replay-calibration-button" type="button" data-cal-axis="right" data-cal-sign="1">Right</button>
+      </div>
+      <div class="replay-calibration-row">
+        <label for="calibrationStep">Step</label>
+        <select id="calibrationStep" class="replay-calibration-select">
+          <option value="0.5">0.5 m</option>
+          <option value="1" selected>1 m</option>
+          <option value="5">5 m</option>
+        </select>
+      </div>
+      <div id="calibrationValues" class="replay-calibration-values">F +0.0m | R +0.0m | U +0.0m</div>
+    </div>
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock">
       <a href="/admin/cockpit_recorder.php">← Back</a>
@@ -238,6 +320,10 @@ cw_header('Cockpit Recorder Replay');
   const cameraPitchValue = document.getElementById('cameraPitchValue');
   const cameraSmoothingValue = document.getElementById('cameraSmoothingValue');
   const terrainWarning = document.getElementById('terrainWarning');
+  const calibrationPanel = document.getElementById('calibrationPanel');
+  const calibrationStepSelect = document.getElementById('calibrationStep');
+  const calibrationReset = document.getElementById('calibrationReset');
+  const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
   let activeT = 0;
   let animationFrame = null;
@@ -277,9 +363,11 @@ cw_header('Cockpit Recorder Replay');
     eyeOffsetZUpM: 1.5,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v1';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
+  let cameraCalibration = null;
 
   const fmtTime = (seconds) => {
     seconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -429,6 +517,57 @@ cw_header('Cockpit Recorder Replay');
     } catch (err) {
       // Camera tuning is optional; replay should keep working if storage is unavailable.
     }
+  }
+
+  function loadCameraCalibration() {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
+    } catch (err) {
+      saved = {};
+    }
+    return {
+      forwardM: clamp(firstFinite(saved.forwardM, 0), -200, 200),
+      rightM: clamp(firstFinite(saved.rightM, 0), -200, 200),
+      upM: clamp(firstFinite(saved.upM, 0), -200, 200),
+      stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
+    };
+  }
+
+  function saveCameraCalibration() {
+    try {
+      localStorage.setItem(CAMERA_CALIBRATION_STORAGE_KEY, JSON.stringify(cameraCalibration));
+    } catch (err) {
+      // Calibration is a local visual aid; replay should continue if storage is unavailable.
+    }
+  }
+
+  function updateCalibrationPanel() {
+    if (!cameraCalibration) return;
+    if (calibrationStepSelect) {
+      calibrationStepSelect.value = String(cameraCalibration.stepM);
+    }
+    if (!calibrationValues) return;
+    const agl = currentCameraDebug && Number.isFinite(Number(currentCameraDebug.cameraHeightAboveTerrainM))
+      ? `${Number(currentCameraDebug.cameraHeightAboveTerrainM).toFixed(1)}m AGL`
+      : 'AGL --';
+    calibrationValues.textContent = [
+      `F ${cameraCalibration.forwardM >= 0 ? '+' : ''}${cameraCalibration.forwardM.toFixed(1)}m`,
+      `R ${cameraCalibration.rightM >= 0 ? '+' : ''}${cameraCalibration.rightM.toFixed(1)}m`,
+      `U ${cameraCalibration.upM >= 0 ? '+' : ''}${cameraCalibration.upM.toFixed(1)}m`,
+      agl,
+    ].join(' | ');
+  }
+
+  function adjustCameraCalibration(axis, sign) {
+    if (!cameraCalibration) return;
+    const delta = (Number(sign) || 0) * cameraCalibration.stepM;
+    if (axis === 'forward') cameraCalibration.forwardM = clamp(cameraCalibration.forwardM + delta, -200, 200);
+    if (axis === 'right') cameraCalibration.rightM = clamp(cameraCalibration.rightM + delta, -200, 200);
+    if (axis === 'up') cameraCalibration.upM = clamp(cameraCalibration.upM + delta, -200, 200);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    safeRenderCesium(true);
   }
 
   function updateCameraControlLabels() {
@@ -730,7 +869,7 @@ cw_header('Cockpit Recorder Replay');
       ),
       scaleCartesian(basis.up, BODY_AXIS_MAPPING.eyeOffsetZUpM)
     );
-    const cameraWorld = Cesium.Matrix4.multiplyByPoint(enuTransform, eyeOffsetEnu, new Cesium.Cartesian3());
+    let cameraWorld = Cesium.Matrix4.multiplyByPoint(enuTransform, eyeOffsetEnu, new Cesium.Cartesian3());
     const direction = Cesium.Cartesian3.normalize(
       Cesium.Matrix4.multiplyByPointAsVector(enuTransform, basis.forward, new Cesium.Cartesian3()),
       new Cesium.Cartesian3()
@@ -740,6 +879,16 @@ cw_header('Cockpit Recorder Replay');
       new Cesium.Cartesian3()
     );
     const rightWorld = Cesium.Cartesian3.normalize(crossCartesian(direction, up), new Cesium.Cartesian3());
+    if (cameraCalibration) {
+      const calibrationOffsetWorld = addCartesian(
+        addCartesian(
+          scaleCartesian(direction, cameraCalibration.forwardM),
+          scaleCartesian(rightWorld, cameraCalibration.rightM)
+        ),
+        scaleCartesian(up, cameraCalibration.upM)
+      );
+      cameraWorld = Cesium.Cartesian3.add(cameraWorld, calibrationOffsetWorld, new Cesium.Cartesian3());
+    }
     const rotation = new Cesium.Matrix3(
       direction.x, rightWorld.x, up.x,
       direction.y, rightWorld.y, up.y,
@@ -787,6 +936,7 @@ cw_header('Cockpit Recorder Replay');
       cameraDirection: direction,
       cameraUp: up,
       orientationQuaternion: quaternion,
+      calibration: cameraCalibration ? { ...cameraCalibration } : null,
       bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, roll -> up vector',
       movementDebug,
       headingDegUsed: view.heading,
@@ -799,6 +949,7 @@ cw_header('Cockpit Recorder Replay');
       cesiumPitchRad: orientation.pitchRad,
       cesiumRollRad: orientation.rollRad,
     };
+    updateCalibrationPanel();
   }
 
   function applyWorldCameraView(view, cameraPos, cameraAltitudeM) {
@@ -1272,6 +1423,32 @@ cw_header('Cockpit Recorder Replay');
   if (cameraSmoothingInput) {
     cameraSmoothingInput.addEventListener('input', () => updateCameraSetting('smoothing', cameraSmoothingInput.value));
   }
+  if (calibrationStepSelect) {
+    calibrationStepSelect.addEventListener('change', () => {
+      if (!cameraCalibration) return;
+      cameraCalibration.stepM = clamp(firstFinite(calibrationStepSelect.value, 1), 0.1, 25);
+      saveCameraCalibration();
+      updateCalibrationPanel();
+    });
+  }
+  if (calibrationPanel) {
+    calibrationPanel.querySelectorAll('[data-cal-axis]').forEach((button) => {
+      button.addEventListener('click', () => {
+        adjustCameraCalibration(button.getAttribute('data-cal-axis') || '', Number(button.getAttribute('data-cal-sign') || 0));
+      });
+    });
+  }
+  if (calibrationReset) {
+    calibrationReset.addEventListener('click', () => {
+      if (!cameraCalibration) return;
+      cameraCalibration.forwardM = 0;
+      cameraCalibration.rightM = 0;
+      cameraCalibration.upM = 0;
+      saveCameraCalibration();
+      updateCalibrationPanel();
+      safeRenderCesium(true);
+    });
+  }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
     if (!standaloneReplay && audio.paused) {
@@ -1282,7 +1459,7 @@ cw_header('Cockpit Recorder Replay');
   rewindButton.addEventListener('click', () => skipBy(-10));
   forwardButton.addEventListener('click', () => skipBy(10));
   root.addEventListener('click', (event) => {
-    if (event.target.closest('.replay-dock, .replay-camera-panel, .cesium-viewer-toolbar')) {
+    if (event.target.closest('.replay-dock, .replay-camera-panel, .replay-calibration-panel, .cesium-viewer-toolbar')) {
       return;
     }
     togglePlayback();
@@ -1359,6 +1536,8 @@ cw_header('Cockpit Recorder Replay');
     safeRenderCesium(true);
   }
 
+  cameraCalibration = loadCameraCalibration();
+  updateCalibrationPanel();
   cameraSettings = loadCameraSettings();
   syncCameraControls();
   loadReplay();
