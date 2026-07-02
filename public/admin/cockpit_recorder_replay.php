@@ -388,7 +388,7 @@ cw_header('Cockpit Recorder Replay');
     eyeOffsetZUpM: 1.5,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
-  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v1';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v2';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -467,18 +467,30 @@ cw_header('Cockpit Recorder Replay');
       || phase.includes('block');
   };
   const rawAltitudeM = (sample) => feetToMeters(bestAltitudeFt(sample));
+  const groundRenderAltitudeM = (sample) => {
+    const msl = rawAltitudeM(sample);
+    if (!isGroundSample(sample)) {
+      return Number.isFinite(lastTerrainHeightM) ? Math.max(msl, lastTerrainHeightM + 2) : msl;
+    }
+    if (!Number.isFinite(lastTerrainHeightM)) {
+      return msl;
+    }
+    if (
+      Number.isFinite(msl)
+      && msl < -5
+      && lastTerrainHeightM > 5
+      && Math.abs(Math.abs(lastTerrainHeightM) - Math.abs(msl)) <= 25
+    ) {
+      return msl;
+    }
+    return lastTerrainHeightM;
+  };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
     if (Number.isFinite(Number(sample && sample.visual_altitude_ft))) {
       return feetToMeters(Number(sample.visual_altitude_ft));
     }
-    if (isGroundSample(sample) && Number.isFinite(lastTerrainHeightM)) {
-      return lastTerrainHeightM;
-    }
-    if (Number.isFinite(lastTerrainHeightM)) {
-      return Math.max(msl, lastTerrainHeightM + 2);
-    }
-    return msl;
+    return groundRenderAltitudeM(sample);
   };
   const cameraEyeAltitudeM = (sample) => visualAltitudeM(sample) + PILOT_EYE_HEIGHT_M;
 
