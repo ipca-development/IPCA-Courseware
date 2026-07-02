@@ -8,18 +8,21 @@ require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 cw_require_admin();
 
 $id = trim((string)($_GET['id'] ?? ''));
+$standaloneReplay = trim((string)($_GET['standalone'] ?? ''));
 $error = '';
 $recording = null;
 $cesiumIonToken = trim((string)(getenv('CW_CESIUM_ION_TOKEN') ?: getenv('CESIUM_ION_TOKEN') ?: ''));
 $cesiumIonToken = trim($cesiumIonToken, " \t\n\r\0\x0B\"'");
 
 try {
-    if ($id === '') {
+    if ($id === '' && $standaloneReplay === '') {
         throw new RuntimeException('Recording id is required.');
     }
-    $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);
-    if (!$recording) {
-        throw new RuntimeException('Recording not found.');
+    if ($id !== '') {
+        $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);
+        if (!$recording) {
+            throw new RuntimeException('Recording not found.');
+        }
     }
 } catch (Throwable $e) {
     $error = $e->getMessage();
@@ -56,7 +59,7 @@ cw_header('Cockpit Recorder Replay');
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto auto auto 1fr auto;
+  grid-template-columns: auto auto auto auto auto 1fr auto;
   gap: 10px;
   align-items: center;
   padding: 10px 14px;
@@ -158,6 +161,7 @@ cw_header('Cockpit Recorder Replay');
   <div
     class="replay-immersive"
     data-replay-id="<?= h((string)$id) ?>"
+    data-standalone-replay="<?= h($standaloneReplay) ?>"
     data-replay-mode="cesium-only"
     data-cesium-token="<?= h($cesiumIonToken) ?>"
   >
@@ -188,10 +192,12 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div id="terrainWarning" class="replay-terrain-warning" hidden></div>
-    <audio id="audio" preload="metadata" src="/admin/cockpit_recorder_audio.php?id=<?= h((string)$id) ?>"></audio>
+    <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock">
       <a href="/admin/cockpit_recorder.php">← Back</a>
+      <button class="replay-button" type="button" id="rewindButton">−10s</button>
       <button class="replay-button" type="button" id="playButton">Play</button>
+      <button class="replay-button" type="button" id="forwardButton">+10s</button>
       <select class="replay-select" id="cameraMode" aria-label="Camera mode">
         <option value="synthetic_vision" selected>Garmin SVT</option>
         <option value="chase">Chase</option>
@@ -211,12 +217,15 @@ cw_header('Cockpit Recorder Replay');
 (function() {
   const root = document.querySelector('[data-replay-id]');
   const id = root ? root.getAttribute('data-replay-id') : '';
+  const standaloneReplay = root ? (root.getAttribute('data-standalone-replay') || '') : '';
   const cesiumToken = root ? (root.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '') : '';
   const loadStatus = document.getElementById('loadStatus');
   const timeline = document.getElementById('timeline');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
   const playButton = document.getElementById('playButton');
+  const rewindButton = document.getElementById('rewindButton');
+  const forwardButton = document.getElementById('forwardButton');
   const cameraModeSelect = document.getElementById('cameraMode');
   const debugOverlay = document.getElementById('replayDebug');
   const cameraPanel = document.getElementById('cameraPanel');
@@ -247,6 +256,9 @@ cw_header('Cockpit Recorder Replay');
   let lastVisualAltitudeM = null;
   let currentCameraDebug = null;
   let previousSyntheticFrameDebug = null;
+  let standalonePlaying = false;
+  let standaloneStartedMs = 0;
+  let standaloneStartedT = 0;
 
   const CAMERA_DEFAULTS = {
     rangeM: 125,
@@ -1172,13 +1184,17 @@ cw_header('Cockpit Recorder Replay');
   function seek(seconds, syncAudio, forceSnap = false) {
     const previousT = activeT;
     activeT = Math.max(0, Number(seconds) || 0);
+    if (standaloneReplay && standalonePlaying) {
+      standaloneStartedMs = performance.now();
+      standaloneStartedT = activeT;
+    }
     const snap = forceSnap || Math.abs(activeT - previousT) > CAMERA_SNAP_SEEK_SEC;
     if (snap) {
       resetDisplayCamera();
     }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
-    if (syncAudio && Number.isFinite(audio.duration)) {
+    if (!standaloneReplay && syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
     safeRenderCesium(snap);
@@ -1186,10 +1202,50 @@ cw_header('Cockpit Recorder Replay');
 
   function updateCockpitPlayback() {
     const maxT = Number(timeline.max) || 0;
-    activeT = Math.max(0, Math.min(maxT, Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT));
+    if (standaloneReplay) {
+      const elapsed = Math.max(0, (performance.now() - standaloneStartedMs) / 1000);
+      activeT = Math.max(0, Math.min(maxT, standaloneStartedT + elapsed));
+      if (activeT >= maxT) {
+        standalonePlaying = false;
+        playButton.textContent = 'Play';
+      }
+    } else {
+      activeT = Math.max(0, Math.min(maxT, Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT));
+    }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     safeRenderCesium(false);
+  }
+
+  function togglePlayback() {
+    if (standaloneReplay) {
+      standalonePlaying = !standalonePlaying;
+      playButton.textContent = standalonePlaying ? 'Pause' : 'Play';
+      if (standalonePlaying) {
+        standaloneStartedMs = performance.now();
+        standaloneStartedT = activeT;
+        lastRenderMs = null;
+        if (animationFrame === null) {
+          animationFrame = requestAnimationFrame(animatePlayback);
+        }
+      } else if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      return;
+    }
+    if (audio.paused) {
+      audio.play();
+      playButton.textContent = 'Pause';
+    } else {
+      audio.pause();
+      playButton.textContent = 'Play';
+    }
+  }
+
+  function skipBy(deltaSeconds) {
+    const maxT = Number(timeline.max) || 0;
+    seek(Math.max(0, Math.min(maxT, activeT + deltaSeconds)), !standaloneReplay, true);
   }
 
   cameraModeSelect.addEventListener('change', () => {
@@ -1210,20 +1266,20 @@ cw_header('Cockpit Recorder Replay');
   if (cameraSmoothingInput) {
     cameraSmoothingInput.addEventListener('input', () => updateCameraSetting('smoothing', cameraSmoothingInput.value));
   }
-  timeline.addEventListener('input', () => seek(Number(timeline.value), true, true));
+  timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
-    if (audio.paused) {
+    if (!standaloneReplay && audio.paused) {
       seek(audio.currentTime, false, true);
     }
   });
-  playButton.addEventListener('click', () => {
-    if (audio.paused) {
-      audio.play();
-      playButton.textContent = 'Pause';
-    } else {
-      audio.pause();
-      playButton.textContent = 'Play';
+  playButton.addEventListener('click', togglePlayback);
+  rewindButton.addEventListener('click', () => skipBy(-10));
+  forwardButton.addEventListener('click', () => skipBy(10));
+  root.addEventListener('click', (event) => {
+    if (event.target.closest('.replay-dock, .replay-camera-panel, .cesium-viewer-toolbar')) {
+      return;
     }
+    togglePlayback();
   });
   audio.addEventListener('pause', () => {
     playButton.textContent = 'Play';
@@ -1241,7 +1297,7 @@ cw_header('Cockpit Recorder Replay');
   });
 
   function animatePlayback() {
-    if (audio.paused || !payload) {
+    if (!payload || (standaloneReplay ? !standalonePlaying : audio.paused)) {
       animationFrame = null;
       return;
     }
@@ -1257,7 +1313,10 @@ cw_header('Cockpit Recorder Replay');
   async function loadReplay() {
     let data = null;
     try {
-      const response = await fetch(`/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2`);
+      const replayUrl = standaloneReplay
+        ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
+        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2`;
+      const response = await fetch(replayUrl);
       const text = await response.text();
       try {
         data = JSON.parse(text);

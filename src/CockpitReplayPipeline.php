@@ -1836,7 +1836,7 @@ final class CockpitReplayPipeline
                         $sample['position_quality_reason'] = 'position_correction_unreliable_or_impossible';
                         $this->diagnostics['count_position_corrections_low']++;
                     }
-                } elseif ($absurdPositionDiscontinuity) {
+                } elseif ($absurdPositionDiscontinuity && ($groundStep || $takeoffTransition)) {
                     $countPositionOutliers++;
                     if ($takeoffTransition) {
                         $countTakeoffTransitionPositionCorrections++;

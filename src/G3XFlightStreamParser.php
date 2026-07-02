@@ -38,9 +38,15 @@ final class G3XFlightStreamParser
         }
 
         try {
-            $metaLine = fgets($handle);
-            if ($metaLine === false) {
-                throw new RuntimeException('G3X CSV file is empty.');
+            $metaLine = null;
+            while (($line = fgets($handle)) !== false) {
+                if (stripos($line, '#airframe_info') !== false) {
+                    $metaLine = $line;
+                    break;
+                }
+            }
+            if ($metaLine === null) {
+                throw new RuntimeException('Unrecognized G3X CSV format (missing #airframe_info).');
             }
             $meta = self::parseMetaLine($metaLine);
 
@@ -161,16 +167,33 @@ final class G3XFlightStreamParser
      */
     private static function parseMetaLine(string $line): array
     {
+        $fields = self::parseCsvLine($line);
+        $values = array();
+        foreach ($fields as $field) {
+            $field = trim((string)$field);
+            if ($field === '' || $field === '#airframe_info' || !str_contains($field, '=')) {
+                continue;
+            }
+            [$key, $value] = explode('=', $field, 2);
+            $key = trim($key);
+            $value = trim($value);
+            $value = trim($value, "\" \t\n\r\0\x0B");
+            if ($key !== '') {
+                $values[$key] = $value;
+            }
+        }
+
         $aircraft = '';
-        if (preg_match('/aircraft_ident="([^"]*)"/', $line, $matches)) {
+        if (isset($values['aircraft_ident'])) {
+            $aircraft = trim((string)$values['aircraft_ident']);
+        } elseif (preg_match('/aircraft_ident="{1,2}([^"]*)"{1,2}/', $line, $matches)) {
             $aircraft = trim((string)$matches[1]);
         }
         $product = '';
-        if (preg_match('/product="([^"]*)"/', $line, $matches)) {
+        if (isset($values['product'])) {
+            $product = trim((string)$values['product']);
+        } elseif (preg_match('/product="{1,2}([^"]*)"{1,2}/', $line, $matches)) {
             $product = trim((string)$matches[1]);
-        }
-        if ($aircraft === '' && stripos($line, '#airframe_info') === false) {
-            throw new RuntimeException('Unrecognized G3X CSV format (missing #airframe_info).');
         }
         return array(
             'aircraft_ident' => $aircraft,

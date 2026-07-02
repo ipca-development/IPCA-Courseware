@@ -229,7 +229,7 @@ final class CockpitReconstructionService
                 array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples),
                 fn(array $row): bool => isset($row['seconds'])
             ));
-            $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X);
+            $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X, $options);
             if (!$gpsSamples && !$ahrsSamples && !$g3xSamples) {
                 throw new RuntimeException('No GPS, AHRS, or G3X samples available for reconstruction.');
             }
@@ -1231,12 +1231,9 @@ final class CockpitReconstructionService
      * @param list<array<string,mixed>> $gps
      * @return list<array{seconds: float, row: array<string,string>}>
      */
-    private function loadG3XNormalized(array $recording, array $gps): array
+    private function loadG3XNormalized(array $recording, array $gps, array $options = array()): array
     {
-        if (!$this->columnPresent(self::RECORDINGS_TABLE, 'g3x_storage_path')) {
-            return array();
-        }
-        $path = $this->safeStoredPath((string)($recording['g3x_storage_path'] ?? ''), CockpitRecorderService::g3xRoot());
+        $path = $this->g3xCsvPathForReconstruction($recording, $options);
         if ($path === null) {
             return array();
         }
@@ -1258,6 +1255,8 @@ final class CockpitReconstructionService
             'row_count' => (int)$parsed['row_count'],
             'aircraft_ident' => (string)$parsed['aircraft_ident'],
             'offset_seconds' => $offsetSeconds,
+            'source' => isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload',
+            'path' => $path,
         );
 
         $normalized = array();
@@ -1274,6 +1273,27 @@ final class CockpitReconstructionService
         }
         usort($normalized, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         return $normalized;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $options
+     */
+    private function g3xCsvPathForReconstruction(array $recording, array $options): ?string
+    {
+        $override = trim((string)($options['g3x_csv_path'] ?? ''));
+        if ($override !== '') {
+            $real = realpath($override);
+            if ($real === false || !is_file($real)) {
+                throw new RuntimeException('G3X CSV override file not found.');
+            }
+            return $real;
+        }
+
+        if (!$this->columnPresent(self::RECORDINGS_TABLE, 'g3x_storage_path')) {
+            return null;
+        }
+        return $this->safeStoredPath((string)($recording['g3x_storage_path'] ?? ''), CockpitRecorderService::g3xRoot());
     }
 
     /**
@@ -2986,6 +3006,7 @@ final class CockpitReconstructionService
             'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
             'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
             'source_alignment' => $this->lastSourceAlignment,
+            'g3x_alignment' => $this->lastG3XAlignment,
             'ahrs_calibration' => $this->lastAhrsCalibration,
             'derived_replay_values' => array(
                 'gps_altitude_primary' => true,

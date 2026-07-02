@@ -35,6 +35,11 @@ foreach ($argv ?? array() as $arg) {
         if ($value === 'g3x_only') {
             $options['replay_source_mode'] = 'g3x_only';
         }
+    } elseif (str_starts_with($arg, '--g3x-csv-path=')) {
+        $value = trim(substr($arg, strlen('--g3x-csv-path=')));
+        if ($value !== '') {
+            $options['g3x_csv_path'] = $value;
+        }
     }
 }
 
