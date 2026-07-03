@@ -44,13 +44,62 @@ try {
         $filename = (string)($recording['recording_uid'] ?? 'recording') . '.' . (string)($recording['file_extension'] ?? 'm4a');
     }
 
-    header('Content-Type: ' . $mime);
-    header('Content-Length: ' . (string)filesize($realPath));
-    header('Accept-Ranges: bytes');
     if ((string)($_GET['download'] ?? '') === '1') {
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . (string)filesize($realPath));
+        header('Accept-Ranges: bytes');
         header('Content-Disposition: attachment; filename="' . addcslashes(basename($filename), '"\\') . '"');
+        readfile($realPath);
+        exit;
     }
-    readfile($realPath);
+
+    $size = filesize($realPath);
+    $start = 0;
+    $end = $size > 0 ? $size - 1 : 0;
+    $range = trim((string)($_SERVER['HTTP_RANGE'] ?? ''));
+    if ($range !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $range, $matches)) {
+        if ($matches[1] === '' && $matches[2] !== '') {
+            $suffixLength = max(0, (int)$matches[2]);
+            $start = max(0, $size - $suffixLength);
+        } elseif ($matches[1] !== '') {
+            $start = max(0, (int)$matches[1]);
+        }
+        if ($matches[2] !== '' && $matches[1] !== '') {
+            $end = min($end, (int)$matches[2]);
+        }
+        if ($start > $end || $start >= $size) {
+            http_response_code(416);
+            header('Content-Range: bytes */' . (string)$size);
+            exit;
+        }
+        http_response_code(206);
+        header('Content-Range: bytes ' . $start . '-' . $end . '/' . (string)$size);
+    }
+
+    $length = $end - $start + 1;
+    header('Content-Type: ' . $mime);
+    header('Accept-Ranges: bytes');
+    header('Content-Length: ' . (string)$length);
+
+    $handle = fopen($realPath, 'rb');
+    if ($handle === false) {
+        throw new RuntimeException('Could not open audio file.');
+    }
+    fseek($handle, $start);
+    $remaining = $length;
+    while ($remaining > 0 && !feof($handle)) {
+        $chunkSize = min(8192, $remaining);
+        $buffer = fread($handle, $chunkSize);
+        if ($buffer === false || $buffer === '') {
+            break;
+        }
+        echo $buffer;
+        $remaining -= strlen($buffer);
+        if (connection_aborted()) {
+            break;
+        }
+    }
+    fclose($handle);
     exit;
 } catch (Throwable $e) {
     http_response_code(500);

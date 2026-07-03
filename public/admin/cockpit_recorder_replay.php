@@ -1891,7 +1891,7 @@ cw_header('Cockpit Recorder Replay');
       arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius).toFixed(1)}`);
     }
     const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
-      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 34 : 22;
+      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 20 : 13;
       const innerX = Math.sin(degToRad(bank)) * arcRadius;
       const innerY = -Math.cos(degToRad(bank)) * arcRadius;
       const outerX = Math.sin(degToRad(bank)) * (arcRadius + tickLen);
@@ -1899,9 +1899,13 @@ cw_header('Cockpit Recorder Replay');
       return `<line class="attitude-white" x1="${outerX.toFixed(1)}" y1="${outerY.toFixed(1)}" x2="${innerX.toFixed(1)}" y2="${innerY.toFixed(1)}"></line>`;
     }).join('');
     const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
-    const slipX = slip / 0.35 * 46;
+    const slipX = slip / 0.35 * 54;
     const staticPointerY = tapeTopY + 6;
-    const slipBarY = staticPointerY + 38;
+    const pointerHalfWidth = 11;
+    const pointerHeight = 22;
+    const slipTopHalfWidth = pointerHalfWidth;
+    const slipBottomHalfWidth = 16;
+    const slipHeight = 8;
     const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
     const signature = [
       Math.round(width),
@@ -1929,11 +1933,11 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 2).toFixed(1)} -18,${(-arcRadius - 36).toFixed(1)} 18,${(-arcRadius - 36).toFixed(1)}"></polygon>
+        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 1).toFixed(1)} -11,${(-arcRadius - 22).toFixed(1)} 11,${(-arcRadius - 22).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
-        <polygon class="attitude-slip" points="0,0 -18,36 18,36"></polygon>
-        <polygon class="attitude-slip" points="${(slipX - 26).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 26).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 34).toFixed(1)},${slipBarY - staticPointerY + 13} ${(slipX - 34).toFixed(1)},${slipBarY - staticPointerY + 13}"></polygon>
+        <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
+        <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)})">
         <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
@@ -2684,6 +2688,7 @@ cw_header('Cockpit Recorder Replay');
     const track = trackDegTrue !== null ? normalizeDeg(trackDegTrue) : null;
     const interpolatedTrack = view && Number.isFinite(Number(view.interpolatedTrack)) ? normalizeDeg(Number(view.interpolatedTrack)) : track;
     const crab = sample && Number.isFinite(Number(sample.crab_angle_deg)) ? normalizeSignedDeg(Number(sample.crab_angle_deg)) : null;
+    const slipSkid = sample && Number.isFinite(Number(sample.estimated_slip_skid_g ?? sample.slip_skid_g)) ? Number(sample.estimated_slip_skid_g ?? sample.slip_skid_g) : null;
     const cameraHeading = view && Number.isFinite(Number(view.heading)) ? normalizeDeg(Number(view.heading)) : null;
     const legacyCameraHeading = sample && Number.isFinite(Number(sample.camera_heading_deg)) ? normalizeDeg(Number(sample.camera_heading_deg)) : null;
     const modelYaw = view && Number.isFinite(Number(view.modelYaw)) ? normalizeDeg(Number(view.modelYaw)) : null;
@@ -2846,6 +2851,8 @@ cw_header('Cockpit Recorder Replay');
       `raw Garmin roll_deg: ${fmtNum(dbg.rawGarminRollDeg, 1)} deg`,
       `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
       `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
+      `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
+      `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
     ];
     const replayStateLines = [
       `t: ${sample ? Number(sample.t || 0).toFixed(1) : '--'} s`,

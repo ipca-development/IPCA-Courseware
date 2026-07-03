@@ -697,6 +697,8 @@ final class CockpitReconstructionService
             'oat_c',
             'isa_deviation_c',
             'estimated_slip_skid_g',
+            'estimated_slip_skid_source',
+            'estimated_slip_skid_quality',
             'slip_skid_g',
             'position_quality',
             'altitude_quality',
