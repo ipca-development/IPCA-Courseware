@@ -52,6 +52,19 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-timelineContainer,
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
+.replay-horizon-line {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 18;
+  width: 160vw;
+  height: 2px;
+  pointer-events: none;
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 0 8px rgba(15, 23, 42, .32);
+  transform-origin: 50% 50%;
+  opacity: .86;
+}
 .replay-dock {
   position: absolute;
   left: 0;
@@ -310,6 +323,7 @@ cw_header('Cockpit Recorder Replay');
   >
     <div id="loadStatus" class="replay-load">Loading replay data…</div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
+    <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <div class="replay-menu" aria-label="Replay overlay menu">
       <button class="replay-menu-button" type="button" id="calibrationToggle">Camera</button>
       <button class="replay-menu-button" type="button" id="debugToggle">Debug</button>
@@ -460,6 +474,7 @@ cw_header('Cockpit Recorder Replay');
   const forwardButton = document.getElementById('forwardButton');
   const cameraModeSelect = document.getElementById('cameraMode');
   const debugOverlay = document.getElementById('replayDebug');
+  const horizonLine = document.getElementById('horizonLine');
   const calibrationToggle = document.getElementById('calibrationToggle');
   const debugToggle = document.getElementById('debugToggle');
   const cameraPanel = document.getElementById('cameraPanel');
@@ -793,7 +808,7 @@ cw_header('Cockpit Recorder Replay');
     const savedInstruments = saved.instruments && typeof saved.instruments === 'object' ? saved.instruments : {};
     const instruments = {};
     INSTRUMENT_TOGGLE_IDS.forEach((key) => {
-      instruments[key] = savedInstruments[key] === true;
+      instruments[key] = savedInstruments[key] === true || (savedInstruments[key] === undefined && key === 'horizon_bar');
     });
     return {
       forwardM: clamp(firstFinite(saved.forwardM, 0), -200, 200),
@@ -892,6 +907,37 @@ cw_header('Cockpit Recorder Replay');
     cameraCalibration.instruments[key] = enabled === true;
     saveCameraCalibration();
     updateCalibrationPanel();
+    updateHorizonLine(displayCamera);
+  }
+
+  function instrumentEnabled(key) {
+    if (!cameraCalibration || !cameraCalibration.instruments) return key === 'horizon_bar';
+    return cameraCalibration.instruments[key] === true;
+  }
+
+  function updateHorizonLine(view) {
+    if (!horizonLine) return;
+    if (!view || !isSyntheticCameraMode(view.mode) || !instrumentEnabled('horizon_bar')) {
+      horizonLine.hidden = true;
+      return;
+    }
+    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
+    const width = Number(container && container.clientWidth);
+    const height = Number(container && container.clientHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      horizonLine.hidden = true;
+      return;
+    }
+    const dbg = currentCameraDebug || {};
+    const pitchDeg = firstFinite(dbg.pitchDegUsed, view.pitch, 0) || 0;
+    const rollDeg = firstFinite(dbg.rollDegUsed, view.roll, 0) || 0;
+    const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
+    const halfHeight = height / 2;
+    const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
+    const y = clamp(halfHeight + pitchOffsetPx, -height, height * 2);
+    horizonLine.hidden = false;
+    horizonLine.style.top = `${y}px`;
+    horizonLine.style.transform = `translate(-50%, -50%) rotate(${-rollDeg}deg)`;
   }
 
   function setModalOpen(panel, button, open) {
@@ -1432,6 +1478,7 @@ cw_header('Cockpit Recorder Replay');
   function renderCesium(snap = false) {
     if (!cesiumReady || !cesiumViewer) return;
     if (cameraMode === 'free') {
+      updateHorizonLine(null);
       updateTerrainHeight(sampleAt(activeT));
       updateDebugOverlay(sampleAt(activeT), displayCamera);
       return;
@@ -1495,6 +1542,7 @@ cw_header('Cockpit Recorder Replay');
     } else {
       applyWorldCameraView(view, cameraPos, cameraAltitudeM);
     }
+    updateHorizonLine(view);
     updateDebugOverlay(sample, view);
   }
 
