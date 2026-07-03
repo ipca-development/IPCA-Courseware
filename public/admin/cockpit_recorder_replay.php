@@ -145,6 +145,9 @@ cw_header('Cockpit Recorder Replay');
 .attitude-overlay .attitude-slip {
   fill: rgba(255, 255, 255, .88);
 }
+.attitude-overlay .attitude-bank-pointer {
+  fill: #fff;
+}
 .airspeed-tape {
   position: absolute;
   left: clamp(112px, 18.5vw, 220px);
@@ -890,6 +893,11 @@ cw_header('Cockpit Recorder Replay');
           <input id="attitudeReferenceOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
           <output id="attitudeReferenceOffsetValue" for="attitudeReferenceOffset">0 px</output>
         </div>
+        <div class="replay-calibration-row">
+          <label for="yellowPitchReferenceOffset">Yellow pitch reference vertical offset</label>
+          <input id="yellowPitchReferenceOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
+          <output id="yellowPitchReferenceOffsetValue" for="yellowPitchReferenceOffset">0 px</output>
+        </div>
       </div>
       <div class="replay-calibration-section">
         <div class="replay-calibration-section-title">Instruments</div>
@@ -1018,6 +1026,8 @@ cw_header('Cockpit Recorder Replay');
   const horizonBarOffsetValue = document.getElementById('horizonBarOffsetValue');
   const attitudeReferenceOffset = document.getElementById('attitudeReferenceOffset');
   const attitudeReferenceOffsetValue = document.getElementById('attitudeReferenceOffsetValue');
+  const yellowPitchReferenceOffset = document.getElementById('yellowPitchReferenceOffset');
+  const yellowPitchReferenceOffsetValue = document.getElementById('yellowPitchReferenceOffsetValue');
   const instrumentToggles = Array.from(document.querySelectorAll('[data-instrument-toggle]'));
   const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
@@ -1366,6 +1376,7 @@ cw_header('Cockpit Recorder Replay');
       smoothness: clamp(firstFinite(saved.smoothness, SYNTHETIC_VISION_DEFAULTS.positionSmoothing), 0, 20),
       horizonBarOffsetPx: clamp(firstFinite(saved.horizonBarOffsetPx, 0), -240, 240),
       attitudeReferenceOffsetPx: clamp(firstFinite(saved.attitudeReferenceOffsetPx, 0), -240, 240),
+      yellowPitchReferenceOffsetPx: clamp(firstFinite(saved.yellowPitchReferenceOffsetPx, 0), -240, 240),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
@@ -1424,6 +1435,12 @@ cw_header('Cockpit Recorder Replay');
     if (attitudeReferenceOffsetValue) {
       attitudeReferenceOffsetValue.textContent = `${Math.round(cameraCalibration.attitudeReferenceOffsetPx)} px`;
     }
+    if (yellowPitchReferenceOffset) {
+      yellowPitchReferenceOffset.value = String(cameraCalibration.yellowPitchReferenceOffsetPx);
+    }
+    if (yellowPitchReferenceOffsetValue) {
+      yellowPitchReferenceOffsetValue.textContent = `${Math.round(cameraCalibration.yellowPitchReferenceOffsetPx)} px`;
+    }
     instrumentToggles.forEach((toggle) => {
       const key = toggle.getAttribute('data-instrument-toggle') || '';
       toggle.checked = cameraCalibration.instruments && cameraCalibration.instruments[key] === true;
@@ -1443,6 +1460,7 @@ cw_header('Cockpit Recorder Replay');
       `Smooth ${cameraCalibration.smoothness.toFixed(1)}`,
       `Horizon ${cameraCalibration.horizonBarOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.horizonBarOffsetPx)}px`,
       `AttRef ${cameraCalibration.attitudeReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.attitudeReferenceOffsetPx)}px`,
+      `Yellow ${cameraCalibration.yellowPitchReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.yellowPitchReferenceOffsetPx)}px`,
       agl,
     ].join(' | ');
   }
@@ -1491,6 +1509,14 @@ cw_header('Cockpit Recorder Replay');
   function setAttitudeReferenceOffset(value) {
     if (!cameraCalibration) return;
     cameraCalibration.attitudeReferenceOffsetPx = clamp(firstFinite(value, 0), -240, 240);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
+  }
+
+  function setYellowPitchReferenceOffset(value) {
+    if (!cameraCalibration) return;
+    cameraCalibration.yellowPitchReferenceOffsetPx = clamp(firstFinite(value, 0), -240, 240);
     saveCameraCalibration();
     updateCalibrationPanel();
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
@@ -1826,13 +1852,12 @@ cw_header('Cockpit Recorder Replay');
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
-      const half = major ? 62 : 34;
-      const gap = major ? 36 : 26;
+      const half = major ? 76 : 45;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
         ? `<text x="${-(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text><text x="${(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text>`
         : '';
-      return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${-gap}" y2="${y.toFixed(1)}"></line><line class="attitude-white" x1="${gap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
+      return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, airspeedRect.top - rootRect.top) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -1853,13 +1878,13 @@ cw_header('Cockpit Recorder Replay');
     const slipX = slip / 0.35 * 46;
     const staticPointerY = tapeTopY + 6;
     const slipBarY = staticPointerY + 38;
-    const fixedLeftX = clamp(centerX - 0.40 * width, 42, centerX - 130);
-    const fixedRightX = clamp(centerX + 0.40 * width, centerX + 130, width - 42);
+    const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
     const signature = [
       Math.round(width),
       Math.round(height),
       Math.round(horizonY),
       Math.round(referenceY),
+      Math.round(yellowReferenceY),
       Math.round(arcCenterY),
       Math.round(arcRadius),
       Math.round(rollDeg * 10),
@@ -1879,21 +1904,19 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-slip" points="0,${(-arcRadius + 2).toFixed(1)} -18,${(-arcRadius - 36).toFixed(1)} 18,${(-arcRadius - 36).toFixed(1)}"></polygon>
+        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 2).toFixed(1)} -18,${(-arcRadius - 36).toFixed(1)} 18,${(-arcRadius - 36).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
         <polygon class="attitude-slip" points="0,0 -18,36 18,36"></polygon>
-        <polygon class="attitude-slip" points="${(slipX - 34).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 34).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 26).toFixed(1)},${slipBarY - staticPointerY + 13} ${(slipX - 26).toFixed(1)},${slipBarY - staticPointerY + 13}"></polygon>
+        <polygon class="attitude-slip" points="${(slipX - 26).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 26).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 34).toFixed(1)},${slipBarY - staticPointerY + 13} ${(slipX - 34).toFixed(1)},${slipBarY - staticPointerY + 13}"></polygon>
       </g>
-      <g transform="translate(${centerX.toFixed(1)} ${referenceY.toFixed(1)})">
+      <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)})">
         <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
         <polygon class="attitude-yellow" points="128,0 210,0 210,14 128,14"></polygon>
         <polygon class="attitude-yellow" points="-126,50 -24,8 0,0 -98,58"></polygon>
         <polygon class="attitude-yellow" points="126,50 24,8 0,0 98,58"></polygon>
         <line class="attitude-white" x1="-30" y1="74" x2="30" y2="74"></line>
       </g>
-      <rect class="attitude-yellow" x="${fixedLeftX.toFixed(1)}" y="${(referenceY - 8).toFixed(1)}" width="72" height="14" rx="7"></rect>
-      <rect class="attitude-yellow" x="${(fixedRightX - 72).toFixed(1)}" y="${(referenceY - 8).toFixed(1)}" width="72" height="14" rx="7"></rect>
     `;
     attitudeOverlay.hidden = false;
   }
@@ -3087,6 +3110,9 @@ cw_header('Cockpit Recorder Replay');
   }
   if (attitudeReferenceOffset) {
     attitudeReferenceOffset.addEventListener('input', () => setAttitudeReferenceOffset(attitudeReferenceOffset.value));
+  }
+  if (yellowPitchReferenceOffset) {
+    yellowPitchReferenceOffset.addEventListener('input', () => setYellowPitchReferenceOffset(yellowPitchReferenceOffset.value));
   }
   instrumentToggles.forEach((toggle) => {
     toggle.addEventListener('change', () => {
