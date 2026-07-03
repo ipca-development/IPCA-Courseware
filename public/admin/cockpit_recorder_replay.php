@@ -898,6 +898,11 @@ cw_header('Cockpit Recorder Replay');
           <input id="yellowPitchReferenceOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
           <output id="yellowPitchReferenceOffsetValue" for="yellowPitchReferenceOffset">0 px</output>
         </div>
+        <div class="replay-calibration-row">
+          <label for="pitchLadderScale">Pitch ladder spacing</label>
+          <input id="pitchLadderScale" class="replay-calibration-range" type="range" min="0.6" max="1.6" step="0.01" value="1">
+          <output id="pitchLadderScaleValue" for="pitchLadderScale">1.00x</output>
+        </div>
       </div>
       <div class="replay-calibration-section">
         <div class="replay-calibration-section-title">Instruments</div>
@@ -1028,6 +1033,8 @@ cw_header('Cockpit Recorder Replay');
   const attitudeReferenceOffsetValue = document.getElementById('attitudeReferenceOffsetValue');
   const yellowPitchReferenceOffset = document.getElementById('yellowPitchReferenceOffset');
   const yellowPitchReferenceOffsetValue = document.getElementById('yellowPitchReferenceOffsetValue');
+  const pitchLadderScale = document.getElementById('pitchLadderScale');
+  const pitchLadderScaleValue = document.getElementById('pitchLadderScaleValue');
   const instrumentToggles = Array.from(document.querySelectorAll('[data-instrument-toggle]'));
   const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
@@ -1377,6 +1384,7 @@ cw_header('Cockpit Recorder Replay');
       horizonBarOffsetPx: clamp(firstFinite(saved.horizonBarOffsetPx, 0), -240, 240),
       attitudeReferenceOffsetPx: clamp(firstFinite(saved.attitudeReferenceOffsetPx, 0), -240, 240),
       yellowPitchReferenceOffsetPx: clamp(firstFinite(saved.yellowPitchReferenceOffsetPx, 0), -240, 240),
+      pitchLadderScale: clamp(firstFinite(saved.pitchLadderScale, 1), 0.6, 1.6),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
@@ -1441,6 +1449,12 @@ cw_header('Cockpit Recorder Replay');
     if (yellowPitchReferenceOffsetValue) {
       yellowPitchReferenceOffsetValue.textContent = `${Math.round(cameraCalibration.yellowPitchReferenceOffsetPx)} px`;
     }
+    if (pitchLadderScale) {
+      pitchLadderScale.value = String(cameraCalibration.pitchLadderScale);
+    }
+    if (pitchLadderScaleValue) {
+      pitchLadderScaleValue.textContent = `${Number(cameraCalibration.pitchLadderScale).toFixed(2)}x`;
+    }
     instrumentToggles.forEach((toggle) => {
       const key = toggle.getAttribute('data-instrument-toggle') || '';
       toggle.checked = cameraCalibration.instruments && cameraCalibration.instruments[key] === true;
@@ -1461,6 +1475,7 @@ cw_header('Cockpit Recorder Replay');
       `Horizon ${cameraCalibration.horizonBarOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.horizonBarOffsetPx)}px`,
       `AttRef ${cameraCalibration.attitudeReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.attitudeReferenceOffsetPx)}px`,
       `Yellow ${cameraCalibration.yellowPitchReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.yellowPitchReferenceOffsetPx)}px`,
+      `Ladder ${cameraCalibration.pitchLadderScale.toFixed(2)}x`,
       agl,
     ].join(' | ');
   }
@@ -1517,6 +1532,14 @@ cw_header('Cockpit Recorder Replay');
   function setYellowPitchReferenceOffset(value) {
     if (!cameraCalibration) return;
     cameraCalibration.yellowPitchReferenceOffsetPx = clamp(firstFinite(value, 0), -240, 240);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
+  }
+
+  function setPitchLadderScale(value) {
+    if (!cameraCalibration) return;
+    cameraCalibration.pitchLadderScale = clamp(firstFinite(value, 1), 0.6, 1.6);
     saveCameraCalibration();
     updateCalibrationPanel();
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
@@ -1848,7 +1871,8 @@ cw_header('Cockpit Recorder Replay');
     const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
       ? (arcLeft + arcRight) / 2
       : width / 2;
-    const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
+    const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
+    const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight * pitchLadderScaleFactor;
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
@@ -1889,6 +1913,7 @@ cw_header('Cockpit Recorder Replay');
       Math.round(arcRadius),
       Math.round(rollDeg * 10),
       Math.round(verticalFovDeg),
+      Math.round(pitchLadderScaleFactor * 100),
       Math.round(slipX),
     ].join('|');
     if (signature === attitudeOverlaySignature) {
@@ -3113,6 +3138,9 @@ cw_header('Cockpit Recorder Replay');
   }
   if (yellowPitchReferenceOffset) {
     yellowPitchReferenceOffset.addEventListener('input', () => setYellowPitchReferenceOffset(yellowPitchReferenceOffset.value));
+  }
+  if (pitchLadderScale) {
+    pitchLadderScale.addEventListener('input', () => setPitchLadderScale(pitchLadderScale.value));
   }
   instrumentToggles.forEach((toggle) => {
     toggle.addEventListener('change', () => {
