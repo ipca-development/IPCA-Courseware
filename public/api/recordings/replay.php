@@ -62,9 +62,21 @@ if ($id === '') {
 
 try {
     $service = new CockpitReconstructionService($pdo);
-    $payload = $version === '2'
-        ? $service->replayPayloadV2($id)
-        : $service->replayPayload($id);
+    if ($version === '2') {
+        $metadata = $service->replayPayloadV2Metadata($id);
+        if (empty($metadata['ok'])) {
+            replay_api_json_response($metadata, 404);
+        }
+        http_response_code(200);
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        $replayApiJsonStarted = true;
+        $service->streamReplayPayloadV2Json($id);
+        exit;
+    }
+
+    $payload = $service->replayPayload($id);
     replay_api_json_response($payload, empty($payload['ok']) ? 404 : 200);
 } catch (Throwable $e) {
     replay_api_json_response(array(

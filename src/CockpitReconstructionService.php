@@ -532,6 +532,22 @@ final class CockpitReconstructionService
      */
     public function replayPayloadV2(string $id): array
     {
+        $payload = $this->replayPayloadV2Metadata($id);
+        if (empty($payload['ok'])) {
+            return $payload;
+        }
+
+        $recordingId = (int)($payload['recording']['id'] ?? 0);
+        $startedAt = (string)($payload['recording']['started_at'] ?? '');
+        $payload['samples'] = $this->replaySampleRows($recordingId, $startedAt);
+        return $payload;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function replayPayloadV2Metadata(string $id): array
+    {
         if (!self::replaySamplesTablePresent($this->pdo)) {
             return array(
                 'ok' => false,
@@ -553,7 +569,6 @@ final class CockpitReconstructionService
             );
         }
 
-        $samples = $this->replaySampleRows($recordingId, (string)($recording['started_at'] ?? ''));
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
@@ -586,14 +601,57 @@ final class CockpitReconstructionService
             'warnings' => $warnings,
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
-            'samples' => $samples,
         );
+    }
+
+    public function streamReplayPayloadV2Json(string $id): void
+    {
+        $payload = $this->replayPayloadV2Metadata($id);
+        if (empty($payload['ok'])) {
+            echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            return;
+        }
+
+        $recordingId = (int)($payload['recording']['id'] ?? 0);
+        $startedAt = (string)($payload['recording']['started_at'] ?? '');
+        echo '{';
+        $first = true;
+        foreach ($payload as $key => $value) {
+            if (!$first) {
+                echo ',';
+            }
+            $first = false;
+            echo json_encode((string)$key, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            echo ':';
+            echo json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        }
+        if (!$first) {
+            echo ',';
+        }
+        echo '"samples":[';
+        $sampleFirst = true;
+        foreach ($this->replaySampleRowsIterator($recordingId, $startedAt) as $sample) {
+            if (!$sampleFirst) {
+                echo ',';
+            }
+            $sampleFirst = false;
+            echo json_encode($sample, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        }
+        echo ']}';
     }
 
     /**
      * @return list<array<string,mixed>>
      */
     public function replaySampleRows(int $recordingId, string $recordingStartedAt = ''): array
+    {
+        return iterator_to_array($this->replaySampleRowsIterator($recordingId, $recordingStartedAt), false);
+    }
+
+    /**
+     * @return Generator<int,array<string,mixed>>
+     */
+    public function replaySampleRowsIterator(int $recordingId, string $recordingStartedAt = ''): Generator
     {
         $columns = array(
             'time_s',
@@ -678,13 +736,9 @@ final class CockpitReconstructionService
             ORDER BY sample_index ASC
         ');
         $stmt->execute(array($recordingId));
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($rows)) {
-            return array();
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            yield $this->publicSlimReplaySample($row, $recordingStartedAt);
         }
-
-        $samples = array_map(fn(array $row): array => $this->publicSlimReplaySample($row, $recordingStartedAt), $rows);
-        return $this->addVisualAttitudeReplayFields($samples);
     }
 
     /**
@@ -731,6 +785,10 @@ final class CockpitReconstructionService
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
         }
+        $pitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : 0.0;
+        $roll = isset($sample['roll_deg']) && is_numeric($sample['roll_deg']) ? (float)$sample['roll_deg'] : 0.0;
+        $sample['visual_pitch_deg'] = round($pitch, 2);
+        $sample['visual_roll_deg'] = round($roll, 2);
         foreach (array(
             'magnetic_variation_source',
             'compass_deviation_source',
