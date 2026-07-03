@@ -297,7 +297,7 @@ cw_header('Cockpit Recorder Replay');
         </div>
         <div class="replay-calibration-row">
           <label for="calibrationFovInput">Horizontal FOV</label>
-          <input id="calibrationFovInput" class="replay-calibration-select" type="number" min="35" max="100" step="1" value="60">
+          <input id="calibrationFovInput" class="replay-calibration-select" type="number" min="35" max="100" step="1" value="80">
         </div>
       </div>
       <div class="replay-calibration-row">
@@ -399,8 +399,9 @@ cw_header('Cockpit Recorder Replay');
     eyeHeightM: 1.4,
     forwardOffsetM: 1.8,
     rightOffsetM: 0.0,
-    horizontalFovDeg: 60,
+    horizontalFovDeg: 80,
     verticalFovFallbackDeg: 38,
+    positionSmoothing: 10,
     yawBiasDeg: 0,
     rollBiasDeg: 0,
   };
@@ -1259,7 +1260,22 @@ cw_header('Cockpit Recorder Replay');
     if (!target) return;
 
     let view = target;
-    if (!snap && displayCamera && !isSyntheticCameraMode(target.mode)) {
+    if (!snap && displayCamera && isSyntheticCameraMode(target.mode)) {
+      const posAlpha = smoothFactor(SYNTHETIC_VISION_DEFAULTS.positionSmoothing, dtSec);
+      const smoothLat = displayCamera.aircraftLat + (target.aircraftLat - displayCamera.aircraftLat) * posAlpha;
+      const smoothLon = displayCamera.aircraftLon + (target.aircraftLon - displayCamera.aircraftLon) * posAlpha;
+      const smoothAircraftAlt = displayCamera.aircraftAltitudeM + (target.aircraftAltitudeM - displayCamera.aircraftAltitudeM) * posAlpha;
+      const smoothVisualAlt = displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * posAlpha;
+      view = Object.assign({}, target, {
+        lat: smoothLat,
+        lon: smoothLon,
+        aircraftLat: smoothLat,
+        aircraftLon: smoothLon,
+        aircraftAltitudeM: smoothAircraftAlt,
+        visualAltitudeM: smoothVisualAlt,
+        altitudeM: smoothAircraftAlt + SYNTHETIC_VISION_DEFAULTS.eyeHeightM,
+      });
+    } else if (!snap && displayCamera && !isSyntheticCameraMode(target.mode)) {
       const rotAlpha = smoothFactor(cameraSettings.smoothing, dtSec);
       const altAlpha = smoothFactor(Math.max(1, cameraSettings.smoothing * 0.55), dtSec);
       view = {
@@ -1446,7 +1462,7 @@ cw_header('Cockpit Recorder Replay');
         `synthetic forward: ${SYNTHETIC_VISION_DEFAULTS.forwardOffsetM.toFixed(1)} m`,
         `synthetic right: ${SYNTHETIC_VISION_DEFAULTS.rightOffsetM.toFixed(1)} m`,
         `camera attached: ${cameraMode === 'synthetic_vision' ? 'aircraft state' : 'forced test attitude'}`,
-        `camera smoothing: none`,
+        `camera smoothing: visual position only (${SYNTHETIC_VISION_DEFAULTS.positionSmoothing.toFixed(0)})`,
         `SVT FOV: ${fmtNum(dbg.horizontalFovDeg, 0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
         `SVT aspect: ${fmtNum(dbg.viewportAspectRatio, 2)}`,
         `SVT Cesium set FOV: ${fmtNum(dbg.cesiumFovDegToSet, 1)} deg ${dbg.cesiumFovAxis || '--'}`,
