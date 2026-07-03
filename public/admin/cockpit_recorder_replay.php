@@ -288,6 +288,18 @@ cw_header('Cockpit Recorder Replay');
           <button class="replay-calibration-button is-muted" type="button" data-cal-axis="roll" data-cal-sign="1">Roll +</button>
         </div>
       </div>
+      <div class="replay-calibration-section">
+        <div class="replay-calibration-section-title">Garmin SVT FOV</div>
+        <div class="replay-calibration-grid">
+          <button class="replay-calibration-button" type="button" id="calibrationFovDecrease">FOV −</button>
+          <button class="replay-calibration-button is-muted" type="button" id="calibrationFovReset">Reset FOV</button>
+          <button class="replay-calibration-button" type="button" id="calibrationFovIncrease">FOV +</button>
+        </div>
+        <div class="replay-calibration-row">
+          <label for="calibrationFovInput">Horizontal FOV</label>
+          <input id="calibrationFovInput" class="replay-calibration-select" type="number" min="35" max="100" step="1" value="60">
+        </div>
+      </div>
       <div class="replay-calibration-row">
         <label for="calibrationStep">Step</label>
         <select id="calibrationStep" class="replay-calibration-select">
@@ -348,6 +360,10 @@ cw_header('Cockpit Recorder Replay');
   const calibrationStepSelect = document.getElementById('calibrationStep');
   const calibrationReset = document.getElementById('calibrationReset');
   const calibrationDirectionReset = document.getElementById('calibrationDirectionReset');
+  const calibrationFovDecrease = document.getElementById('calibrationFovDecrease');
+  const calibrationFovIncrease = document.getElementById('calibrationFovIncrease');
+  const calibrationFovReset = document.getElementById('calibrationFovReset');
+  const calibrationFovInput = document.getElementById('calibrationFovInput');
   const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
   let activeT = 0;
@@ -395,7 +411,7 @@ cw_header('Cockpit Recorder Replay');
     eyeOffsetZUpM: SYNTHETIC_VISION_DEFAULTS.eyeHeightM,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
-  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v5';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v6';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -545,16 +561,30 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const syntheticVisionVerticalFovDeg = () => {
+  const syntheticVisionHorizontalFovDeg = () => clamp(
+    firstFinite(cameraCalibration && cameraCalibration.fovDeg, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg),
+    35,
+    100
+  );
+  const syntheticVisionFovState = () => {
     const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
     const width = Number(container && container.clientWidth);
     const height = Number(container && container.clientHeight);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-      return SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg;
+      return {
+        horizontalFovDeg: syntheticVisionHorizontalFovDeg(),
+        verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg,
+        viewportAspectRatio: 16 / 9,
+      };
     }
     const aspect = width / height;
-    const hRad = degToRad(SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg);
-    return 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI;
+    const horizontalFovDeg = syntheticVisionHorizontalFovDeg();
+    const hRad = degToRad(horizontalFovDeg);
+    return {
+      horizontalFovDeg,
+      verticalFovDeg: 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI,
+      viewportAspectRatio: aspect,
+    };
   };
 
   function isSyntheticCameraMode(mode = cameraMode) {
@@ -621,6 +651,7 @@ cw_header('Cockpit Recorder Replay');
       yawDeg: clamp(firstFinite(saved.yawDeg, 0), -90, 90),
       pitchDeg: clamp(firstFinite(saved.pitchDeg, 0), -45, 45),
       rollDeg: clamp(firstFinite(saved.rollDeg, 0), -45, 45),
+      fovDeg: clamp(firstFinite(saved.fovDeg, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg), 35, 100),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
     };
   }
@@ -638,6 +669,9 @@ cw_header('Cockpit Recorder Replay');
     if (calibrationStepSelect) {
       calibrationStepSelect.value = String(cameraCalibration.stepM);
     }
+    if (calibrationFovInput) {
+      calibrationFovInput.value = String(Math.round(cameraCalibration.fovDeg));
+    }
     if (!calibrationValues) return;
     const agl = currentCameraDebug && Number.isFinite(Number(currentCameraDebug.cameraHeightAboveTerrainM))
       ? `${Number(currentCameraDebug.cameraHeightAboveTerrainM).toFixed(1)}m AGL`
@@ -649,6 +683,7 @@ cw_header('Cockpit Recorder Replay');
       `Yaw ${cameraCalibration.yawDeg >= 0 ? '+' : ''}${cameraCalibration.yawDeg.toFixed(1)}deg`,
       `Pitch ${cameraCalibration.pitchDeg >= 0 ? '+' : ''}${cameraCalibration.pitchDeg.toFixed(1)}deg`,
       `Roll ${cameraCalibration.rollDeg >= 0 ? '+' : ''}${cameraCalibration.rollDeg.toFixed(1)}deg`,
+      `FOV ${cameraCalibration.fovDeg.toFixed(0)}deg H`,
       agl,
     ].join(' | ');
   }
@@ -662,6 +697,15 @@ cw_header('Cockpit Recorder Replay');
     if (axis === 'yaw') cameraCalibration.yawDeg = clamp(cameraCalibration.yawDeg + delta, -90, 90);
     if (axis === 'pitch') cameraCalibration.pitchDeg = clamp(cameraCalibration.pitchDeg + delta, -45, 45);
     if (axis === 'roll') cameraCalibration.rollDeg = clamp(cameraCalibration.rollDeg + delta, -45, 45);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    safeRenderCesium(true);
+  }
+
+  function setSyntheticVisionFov(value) {
+    if (!cameraCalibration) return;
+    const next = firstFinite(value, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg);
+    cameraCalibration.fovDeg = clamp(Math.round(next), 35, 100);
     saveCameraCalibration();
     updateCalibrationPanel();
     safeRenderCesium(true);
@@ -969,7 +1013,8 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function applySyntheticCameraView(view, sample) {
-    const verticalFovDeg = syntheticVisionVerticalFovDeg();
+    const fovState = syntheticVisionFovState();
+    const verticalFovDeg = fovState.verticalFovDeg;
     if (cesiumViewer.camera && cesiumViewer.camera.frustum) {
       cesiumViewer.camera.frustum.fov = degToRad(verticalFovDeg);
       cesiumViewer.camera.frustum.near = 0.05;
@@ -1085,8 +1130,9 @@ cw_header('Cockpit Recorder Replay');
       orientationQuaternion: quaternion,
       calibration: cameraCalibration ? { ...cameraCalibration } : null,
       bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, Garmin roll direct for camera horizon convention',
-      horizontalFovDeg: SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg,
+      horizontalFovDeg: fovState.horizontalFovDeg,
       verticalFovDeg,
+      viewportAspectRatio: fovState.viewportAspectRatio,
       yawBiasDeg: SYNTHETIC_VISION_DEFAULTS.yawBiasDeg,
       rollBiasDeg: SYNTHETIC_VISION_DEFAULTS.rollBiasDeg,
       movementDebug,
@@ -1352,7 +1398,8 @@ cw_header('Cockpit Recorder Replay');
         `synthetic right: ${SYNTHETIC_VISION_DEFAULTS.rightOffsetM.toFixed(1)} m`,
         `camera attached: ${cameraMode === 'synthetic_vision' ? 'aircraft state' : 'forced test attitude'}`,
         `camera smoothing: none`,
-        `SVT FOV: ${SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg.toFixed(0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
+        `SVT FOV: ${fmtNum(dbg.horizontalFovDeg, 0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
+        `SVT aspect: ${fmtNum(dbg.viewportAspectRatio, 2)}`,
         `SVT yaw bias: ${SYNTHETIC_VISION_DEFAULTS.yawBiasDeg.toFixed(1)} deg`,
         `SVT roll bias: ${SYNTHETIC_VISION_DEFAULTS.rollBiasDeg.toFixed(1)} deg`,
       ]
@@ -1647,6 +1694,18 @@ cw_header('Cockpit Recorder Replay');
       updateCalibrationPanel();
       safeRenderCesium(true);
     });
+  }
+  if (calibrationFovDecrease) {
+    calibrationFovDecrease.addEventListener('click', () => setSyntheticVisionFov(syntheticVisionHorizontalFovDeg() - 1));
+  }
+  if (calibrationFovIncrease) {
+    calibrationFovIncrease.addEventListener('click', () => setSyntheticVisionFov(syntheticVisionHorizontalFovDeg() + 1));
+  }
+  if (calibrationFovReset) {
+    calibrationFovReset.addEventListener('click', () => setSyntheticVisionFov(SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg));
+  }
+  if (calibrationFovInput) {
+    calibrationFovInput.addEventListener('change', () => setSyntheticVisionFov(calibrationFovInput.value));
   }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
