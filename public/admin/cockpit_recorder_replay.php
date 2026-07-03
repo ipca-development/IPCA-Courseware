@@ -122,6 +122,8 @@ cw_header('Cockpit Recorder Replay');
   width: 118px;
   height: min(68vh, 560px);
   min-height: 340px;
+  display: flex;
+  flex-direction: column;
   color: #fff;
   pointer-events: none;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -137,6 +139,9 @@ cw_header('Cockpit Recorder Replay');
   background: rgba(0, 0, 0, .88);
   font-weight: 900;
   letter-spacing: .02em;
+  flex: 0 0 42px;
+  position: relative;
+  z-index: 2;
 }
 .airspeed-tape-header { border-radius: 14px 14px 0 0; }
 .airspeed-tape-footer { border-radius: 0 0 14px 14px; }
@@ -146,11 +151,9 @@ cw_header('Cockpit Recorder Replay');
 .airspeed-tape-gs-value { font-size: 18px; }
 .airspeed-tape-unit { font-size: 14px; margin-left: 3px; }
 .airspeed-tape-body {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 42px;
-  bottom: 42px;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   background: rgba(40, 40, 40, .56);
   border-left: 1px solid rgba(255, 255, 255, .24);
@@ -181,8 +184,8 @@ cw_header('Cockpit Recorder Replay');
 }
 .airspeed-tape-color-band {
   position: absolute;
-  right: 9px;
-  width: 9px;
+  right: 10px;
+  width: 8px;
   min-height: 2px;
 }
 .airspeed-tape-color-band.is-white { background: #fff; }
@@ -200,14 +203,14 @@ cw_header('Cockpit Recorder Replay');
   position: absolute;
   left: 0;
   top: 50%;
-  width: 84px;
-  height: 58px;
+  width: 78px;
+  height: 52px;
   transform: translateY(-50%);
   display: grid;
   place-items: center;
   background: #050505;
   border-radius: 8px 6px 6px 8px;
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 900;
 }
 .airspeed-tape-pointer::after {
@@ -216,8 +219,8 @@ cw_header('Cockpit Recorder Replay');
   right: -17px;
   top: 50%;
   transform: translateY(-50%);
-  border-top: 13px solid transparent;
-  border-bottom: 13px solid transparent;
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
   border-left: 17px solid #050505;
 }
 .airspeed-tape-bug {
@@ -726,6 +729,7 @@ cw_header('Cockpit Recorder Replay');
   let lastVisualAltitudeM = null;
   let currentCameraDebug = null;
   let previousSyntheticFrameDebug = null;
+  let displayAirspeedKt = null;
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
   let standalonePlaying = false;
@@ -749,6 +753,7 @@ cw_header('Cockpit Recorder Replay');
     rollBiasDeg: 0,
   };
   const SYNTHETIC_TEST_HEADING_DEG = 230;
+  const AIRSPEED_TAPE_SMOOTHING_RATE = 18;
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
     eyeOffsetYRightM: SYNTHETIC_VISION_DEFAULTS.rightOffsetM,
@@ -1123,7 +1128,7 @@ cw_header('Cockpit Recorder Replay');
     saveCameraCalibration();
     updateCalibrationPanel();
     updateHorizonLine(displayCamera);
-    updateAirspeedTape(sampleAt(activeT));
+    updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
   }
 
   function setInstrumentPlaceholder(key, enabled) {
@@ -1135,6 +1140,7 @@ cw_header('Cockpit Recorder Replay');
     saveCameraCalibration();
     updateCalibrationPanel();
     updateHorizonLine(displayCamera);
+    updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
   }
 
   function instrumentEnabled(key) {
@@ -1151,43 +1157,54 @@ cw_header('Cockpit Recorder Replay');
     return Number.isFinite(n) ? n : fallback;
   }
 
-  function airspeedSpeedToY(speedKt, minKt, maxKt, heightPx) {
-    const span = Math.max(1, maxKt - minKt);
-    return (maxKt - speedKt) / span * heightPx;
+  function airspeedSpeedToY(speedKt, currentIasKt, centerY, pxPerKt) {
+    return centerY + (currentIasKt - speedKt) * pxPerKt;
   }
 
-  function airspeedHtmlBand(className, fromKt, toKt, minKt, maxKt, heightPx) {
-    const from = clamp(Number(fromKt), minKt, maxKt);
-    const to = clamp(Number(toKt), minKt, maxKt);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= minKt || from >= maxKt || to <= from) return '';
-    const yTop = airspeedSpeedToY(to, minKt, maxKt, heightPx);
-    const yBottom = airspeedSpeedToY(from, minKt, maxKt, heightPx);
+  function airspeedHtmlBand(className, fromKt, toKt, currentIasKt, centerY, pxPerKt, heightPx) {
+    const from = Number(fromKt);
+    const to = Number(toKt);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return '';
+    const yTopRaw = airspeedSpeedToY(to, currentIasKt, centerY, pxPerKt);
+    const yBottomRaw = airspeedSpeedToY(from, currentIasKt, centerY, pxPerKt);
+    const yTop = clamp(yTopRaw, -heightPx, heightPx * 2);
+    const yBottom = clamp(yBottomRaw, -heightPx, heightPx * 2);
+    if (yBottom < 0 || yTop > heightPx) return '';
     return `<div class="airspeed-tape-color-band ${className}" style="top:${yTop.toFixed(1)}px;height:${Math.max(2, yBottom - yTop).toFixed(1)}px"></div>`;
   }
 
-  function updateAirspeedTape(sample) {
+  function updateAirspeedTape(sample, dtSec = 1 / 60, snap = false) {
     if (!airspeedTape) return;
     if (!sample || !instrumentEnabled('airspeed_indicator')) {
       airspeedTape.hidden = true;
+      displayAirspeedKt = null;
       return;
     }
     const ias = firstFinite(sample.ias_kt, sample.indicated_airspeed_kt, sample.airspeed_kt);
     if (ias === null) {
       airspeedTape.hidden = true;
+      displayAirspeedKt = null;
       return;
+    }
+    if (snap || displayAirspeedKt === null || !Number.isFinite(displayAirspeedKt) || Math.abs(displayAirspeedKt - ias) > 25) {
+      displayAirspeedKt = ias;
+    } else {
+      const alpha = smoothFactor(AIRSPEED_TAPE_SMOOTHING_RATE, dtSec);
+      displayAirspeedKt += (ias - displayAirspeedKt) * alpha;
     }
     const tas = firstFinite(sample.tas_kt, sample.estimated_tas_kt);
     const gs = firstFinite(sample.ground_speed_kt, sample.groundspeed_kt);
+    const bodyHeight = Number(airspeedTapeBody && airspeedTapeBody.clientHeight) || 420;
+    const centerY = bodyHeight / 2;
+    const pxPerKt = 8;
     const tapeMin = airspeedProfileNumber(['tape_min_kt'], 0);
     const tapeMax = airspeedProfileNumber(['tape_max_kt'], 160);
-    const windowSpan = 60;
-    const windowMin = clamp(Math.floor((ias - windowSpan / 2) / 10) * 10, tapeMin, Math.max(tapeMin, tapeMax - windowSpan));
-    const windowMax = Math.min(tapeMax, windowMin + windowSpan);
-    const bodyHeight = Number(airspeedTapeBody && airspeedTapeBody.clientHeight) || 420;
-    const tickMin = Math.ceil(windowMin / 5) * 5;
+    const visibleMin = Math.max(tapeMin, Math.floor((displayAirspeedKt - (centerY / pxPerKt) - 10) / 5) * 5);
+    const visibleMax = Math.min(tapeMax, Math.ceil((displayAirspeedKt + (centerY / pxPerKt) + 10) / 5) * 5);
+    const tickMin = Math.ceil(visibleMin / 5) * 5;
     let scaleHtml = '';
-    for (let speed = tickMin; speed <= windowMax; speed += 5) {
-      const y = airspeedSpeedToY(speed, windowMin, windowMax, bodyHeight);
+    for (let speed = tickMin; speed <= visibleMax; speed += 5) {
+      const y = airspeedSpeedToY(speed, displayAirspeedKt, centerY, pxPerKt);
       const major = speed % 10 === 0;
       scaleHtml += `<div class="airspeed-tape-tick ${major ? 'is-major' : 'is-minor'}" style="top:${y.toFixed(1)}px"></div>`;
       if (major) {
@@ -1195,26 +1212,28 @@ cw_header('Cockpit Recorder Replay');
       }
     }
     const colorsHtml = [
-      airspeedHtmlBand('is-white', airspeedProfileNumber(['white_arc', 'from_kt'], 42), airspeedProfileNumber(['white_arc', 'to_kt'], 70), windowMin, windowMax, bodyHeight),
-      airspeedHtmlBand('is-green', airspeedProfileNumber(['green_arc', 'from_kt'], 49), airspeedProfileNumber(['green_arc', 'to_kt'], 104), windowMin, windowMax, bodyHeight),
-      airspeedHtmlBand('is-yellow', airspeedProfileNumber(['yellow_arc', 'from_kt'], 104), airspeedProfileNumber(['yellow_arc', 'to_kt'], 130), windowMin, windowMax, bodyHeight),
+      airspeedHtmlBand('is-white', airspeedProfileNumber(['white_arc', 'from_kt'], 42), airspeedProfileNumber(['white_arc', 'to_kt'], 70), displayAirspeedKt, centerY, pxPerKt, bodyHeight),
+      airspeedHtmlBand('is-green', airspeedProfileNumber(['green_arc', 'from_kt'], 49), airspeedProfileNumber(['green_arc', 'to_kt'], 104), displayAirspeedKt, centerY, pxPerKt, bodyHeight),
+      airspeedHtmlBand('is-yellow', airspeedProfileNumber(['yellow_arc', 'from_kt'], 104), airspeedProfileNumber(['yellow_arc', 'to_kt'], 130), displayAirspeedKt, centerY, pxPerKt, bodyHeight),
     ].join('');
     const redLineKt = airspeedProfileNumber(['red_line_kt'], 130);
-    const redHtml = redLineKt >= windowMin && redLineKt <= windowMax
-      ? `<div class="airspeed-tape-redline" style="top:${airspeedSpeedToY(redLineKt, windowMin, windowMax, bodyHeight).toFixed(1)}px"></div>`
+    const redLineY = airspeedSpeedToY(redLineKt, displayAirspeedKt, centerY, pxPerKt);
+    const redHtml = redLineY >= 0 && redLineY <= bodyHeight
+      ? `<div class="airspeed-tape-redline" style="top:${redLineY.toFixed(1)}px"></div>`
       : '';
     const bugs = Array.isArray(AIRSPEED_PROFILE.bugs) ? AIRSPEED_PROFILE.bugs : [];
     const bugHtml = bugs.map((bug) => {
       const speed = Number(bug && bug.speed_kt);
       const label = String((bug && bug.label) || '').slice(0, 2);
-      if (!Number.isFinite(speed) || speed < windowMin || speed > windowMax || label === '') return '';
-      return `<div class="airspeed-tape-bug" style="top:${airspeedSpeedToY(speed, windowMin, windowMax, bodyHeight).toFixed(1)}px">${escapeHtml(label)}</div>`;
+      const y = airspeedSpeedToY(speed, displayAirspeedKt, centerY, pxPerKt);
+      if (!Number.isFinite(speed) || y < -20 || y > bodyHeight + 20 || label === '') return '';
+      return `<div class="airspeed-tape-bug" style="top:${y.toFixed(1)}px">${escapeHtml(label)}</div>`;
     }).join('');
     airspeedTape.hidden = false;
     if (airspeedTapeScale) airspeedTapeScale.innerHTML = scaleHtml;
     if (airspeedTapeColors) airspeedTapeColors.innerHTML = colorsHtml + redHtml;
     if (airspeedTapeBugs) airspeedTapeBugs.innerHTML = bugHtml;
-    if (airspeedTapePointer) airspeedTapePointer.textContent = String(Math.round(ias));
+    if (airspeedTapePointer) airspeedTapePointer.textContent = String(Math.round(displayAirspeedKt));
     if (airspeedTasValue) airspeedTasValue.textContent = tas === null ? '--' : String(Math.round(tas));
     if (airspeedGsValue) airspeedGsValue.textContent = gs === null ? '--' : String(Math.round(gs));
   }
@@ -1488,6 +1507,7 @@ cw_header('Cockpit Recorder Replay');
     displayCamera = null;
     lastRenderMs = null;
     previousSyntheticFrameDebug = null;
+    displayAirspeedKt = null;
   }
 
   function applyCameraModeControls() {
@@ -1784,7 +1804,7 @@ cw_header('Cockpit Recorder Replay');
     if (!cesiumReady || !cesiumViewer) return;
     if (cameraMode === 'free') {
       updateHorizonLine(null);
-      updateAirspeedTape(sampleAt(activeT));
+      updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
       updateTerrainHeight(sampleAt(activeT));
       updateDebugOverlay(sampleAt(activeT), displayCamera);
       return;
@@ -1849,7 +1869,7 @@ cw_header('Cockpit Recorder Replay');
       applyWorldCameraView(view, cameraPos, cameraAltitudeM);
     }
     updateHorizonLine(view);
-    updateAirspeedTape(sample);
+    updateAirspeedTape(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
   }
 
