@@ -208,7 +208,7 @@ final class CockpitReconstructionService
 
         $recordingId = (int)$recording['id'];
         $replaySourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
-        if ($replaySourceMode !== 'g3x_only') {
+        if (!in_array($replaySourceMode, array('g3x_first', 'g3x_only'), true)) {
             $replaySourceMode = 'multi_source';
         }
         $runStarted = microtime(true);
@@ -553,7 +553,7 @@ final class CockpitReconstructionService
             );
         }
 
-        $samples = $this->replaySampleRows($recordingId);
+        $samples = $this->replaySampleRows($recordingId, (string)($recording['started_at'] ?? ''));
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
@@ -593,7 +593,7 @@ final class CockpitReconstructionService
     /**
      * @return list<array<string,mixed>>
      */
-    public function replaySampleRows(int $recordingId): array
+    public function replaySampleRows(int $recordingId, string $recordingStartedAt = ''): array
     {
         $columns = array(
             'time_s',
@@ -637,6 +637,21 @@ final class CockpitReconstructionService
             'track_quality_reason',
             'speed_quality_reason',
             'crab_angle_deg',
+            'gps_altitude_ft',
+            'baro_altitude_ft',
+            'ias_kt',
+            'tas_kt',
+            'rpm',
+            'manifold_pressure_inhg',
+            'fuel_flow_gph',
+            'oil_pressure_psi',
+            'oil_temp_f',
+            'fuel_pressure_psi',
+            'fuel_qty_gal',
+            'volts',
+            'amps',
+            'egt1_f',
+            'egt2_f',
             'raw_pitch_deg',
             'raw_roll_deg',
             'raw_attitude_source',
@@ -659,24 +674,30 @@ final class CockpitReconstructionService
             return array();
         }
 
-        $samples = array_map(fn(array $row): array => $this->publicSlimReplaySample($row), $rows);
+        $samples = array_map(fn(array $row): array => $this->publicSlimReplaySample($row, $recordingStartedAt), $rows);
         return $this->addVisualAttitudeReplayFields($samples);
     }
 
     /**
      * @return array<string,mixed>
      */
-    private function publicSlimReplaySample(array $row): array
+    private function publicSlimReplaySample(array $row, string $recordingStartedAt = ''): array
     {
+        $timeS = (float)$row['time_s'];
         $sample = array(
-            't' => (float)$row['time_s'],
+            't' => $timeS,
+            'replay_time_s' => $timeS,
+            'time_utc' => $this->replaySampleUtc($recordingStartedAt, $timeS),
             'lat' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
             'lon' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
             'altitude_ft' => $row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null,
             'altitude_ft_msl' => $row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null,
+            'gps_altitude_ft' => array_key_exists('gps_altitude_ft', $row) && $row['gps_altitude_ft'] !== null ? (float)$row['gps_altitude_ft'] : ($row['altitude_ft'] !== null ? (float)$row['altitude_ft'] : null),
+            'baro_altitude_ft' => array_key_exists('baro_altitude_ft', $row) && $row['baro_altitude_ft'] !== null ? (float)$row['baro_altitude_ft'] : null,
             'heading_deg' => $row['heading_deg'] !== null ? (float)$row['heading_deg'] : null,
             'pitch_deg' => $row['pitch_deg'] !== null ? (float)$row['pitch_deg'] : null,
             'roll_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
+            'bank_deg' => $row['roll_deg'] !== null ? (float)$row['roll_deg'] : null,
             'ground_speed_kt' => $row['ground_speed_kt'] !== null ? (float)$row['ground_speed_kt'] : null,
             'vertical_speed_fpm' => $row['vertical_speed_fpm'] !== null ? (float)$row['vertical_speed_fpm'] : null,
             'phase' => (string)($row['phase'] ?? ''),
@@ -696,7 +717,7 @@ final class CockpitReconstructionService
         if (array_key_exists('raw_attitude_quality', $row)) {
             $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
         }
-        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg') as $field) {
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
@@ -728,6 +749,31 @@ final class CockpitReconstructionService
         }
 
         return $sample;
+    }
+
+    private function replaySampleUtc(string $recordingStartedAt, float $timeS): ?string
+    {
+        $startedAt = trim($recordingStartedAt);
+        if ($startedAt === '') {
+            return null;
+        }
+        try {
+            $base = new DateTimeImmutable($startedAt, new DateTimeZone('UTC'));
+        } catch (Throwable) {
+            return null;
+        }
+        $millis = (int)round($timeS * 1000.0);
+        $seconds = intdiv($millis, 1000);
+        $milliseconds = $millis % 1000;
+        if ($milliseconds < 0) {
+            $seconds -= 1;
+            $milliseconds += 1000;
+        }
+        $timestamp = $base->modify(($seconds >= 0 ? '+' : '') . $seconds . ' seconds');
+        if ($timestamp === false) {
+            return null;
+        }
+        return $timestamp->format('Y-m-d H:i:s') . '.' . str_pad((string)$milliseconds, 3, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -1663,8 +1709,13 @@ final class CockpitReconstructionService
      */
     private function addDerivedReplayValues(array $recording, array $samples, array $options = array()): array
     {
+        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
+        $disableGlobalFieldCalibration = in_array($replaySourceMode, array('g3x_first', 'g3x_only'), true);
         $altimeter = $this->selectAltimeterSetting($recording, $samples, $options);
-        $fieldCalibration = $this->buildFieldAltitudeCalibration($recording, $samples, $options);
+        // G3X-first replay must preserve Garmin altitude as recorded. A single airport
+        // elevation offset is only valid for legacy multi-source estimates and must
+        // never be applied across an F70-to-KTRM style flight.
+        $fieldCalibration = $disableGlobalFieldCalibration ? null : $this->buildFieldAltitudeCalibration($recording, $samples, $options);
         $oat = $this->selectOat($recording, $options);
         foreach ($samples as $index => $sample) {
             $gpsAltFt = isset($sample['gps_altitude_ft']) ? (float)$sample['gps_altitude_ft'] : null;
@@ -1697,7 +1748,7 @@ final class CockpitReconstructionService
                 $samples[$index]['estimated_indicated_altitude_ft'] = null;
                 $samples[$index]['estimated_true_altitude_from_indicated_ft'] = null;
                 $samples[$index]['estimated_baro_altitude_ft'] = null;
-                $samples[$index]['baro_altitude_ft'] = null;
+                $samples[$index]['baro_altitude_ft'] = $disableGlobalFieldCalibration && isset($sample['baro_altitude_ft']) ? $sample['baro_altitude_ft'] : null;
                 $samples[$index]['airport_elevation_ft'] = $fieldCalibration !== null ? (float)$fieldCalibration['airport_elevation_ft'] : null;
                 $samples[$index]['airport_elevation_source'] = $fieldCalibration !== null ? (string)$fieldCalibration['source'] : 'unavailable';
                 $samples[$index]['field_altitude_offset_ft'] = null;
@@ -1705,9 +1756,9 @@ final class CockpitReconstructionService
                 $samples[$index]['altimeter_setting_source'] = $altimeter !== null ? (string)$altimeter['source'] : 'unavailable';
                 $samples[$index]['oat_c'] = $oat !== null ? (float)$oat['oat_c'] : null;
                 $samples[$index]['oat_source'] = $oat !== null ? (string)$oat['source'] : 'unavailable';
-                $samples[$index]['altitude_quality'] = $gpsAltFt !== null ? 'low' : 'unavailable';
+                $samples[$index]['altitude_quality'] = $gpsAltFt !== null ? ($disableGlobalFieldCalibration ? 'good' : 'low') : 'unavailable';
             }
-            $samples[$index]['altitude_source'] = $samples[$index]['estimated_indicated_altitude_ft'] !== null ? 'estimated_indicated' : ($gpsAltFt !== null ? 'gps' : 'unavailable');
+            $samples[$index]['altitude_source'] = $samples[$index]['estimated_indicated_altitude_ft'] !== null ? 'estimated_indicated' : ($gpsAltFt !== null ? ($disableGlobalFieldCalibration ? 'g3x_gps' : 'gps') : 'unavailable');
             $samples[$index]['vertical_speed_fpm'] = null;
             $samples[$index]['estimated_vertical_speed_fpm'] = null;
             $samples[$index]['vertical_speed_source'] = 'unavailable';
@@ -3201,6 +3252,21 @@ final class CockpitReconstructionService
             'track_quality_reason',
             'speed_quality_reason',
             'crab_angle_deg',
+            'gps_altitude_ft',
+            'baro_altitude_ft',
+            'ias_kt',
+            'tas_kt',
+            'rpm',
+            'manifold_pressure_inhg',
+            'fuel_flow_gph',
+            'oil_pressure_psi',
+            'oil_temp_f',
+            'fuel_pressure_psi',
+            'fuel_qty_gal',
+            'volts',
+            'amps',
+            'egt1_f',
+            'egt2_f',
             'raw_pitch_deg',
             'raw_roll_deg',
             'raw_attitude_source',

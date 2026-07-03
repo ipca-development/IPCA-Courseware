@@ -59,7 +59,7 @@ final class CockpitReplayPipeline
     ): array {
         $warnings = array();
         $sourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
-        if ($sourceMode !== 'g3x_only') {
+        if (!in_array($sourceMode, array('g3x_first', 'g3x_only'), true)) {
             $sourceMode = 'multi_source';
         }
         $gpsPoints = $this->normalizeGpsPoints($rawGpsRows);
@@ -68,7 +68,7 @@ final class CockpitReplayPipeline
         $availableGpsCount = count($gpsPoints);
         $availableAhrsCount = count($ahrsPoints);
 
-        if ($sourceMode === 'g3x_only') {
+        if ($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') {
             $gpsPoints = array();
             $ahrsPoints = array();
         }
@@ -81,19 +81,19 @@ final class CockpitReplayPipeline
 
         $maxRawGpsGap = $this->maxTimeGap($gpsPoints);
         $maxRawG3xGap = $this->maxTimeGap($g3xPoints);
-        if ($sourceMode !== 'g3x_only' && $maxRawGpsGap > 2.0) {
+        if ($sourceMode === 'multi_source' && $maxRawGpsGap > 2.0) {
             $warnings[] = 'Raw GPS has gaps larger than 2 seconds.';
         }
-        if ($sourceMode === 'g3x_only' && $maxRawG3xGap > 2.0) {
-            $warnings[] = 'G3X-only replay has G3X gaps larger than 2 seconds.';
+        if (($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') && $maxRawG3xGap > 2.0) {
+            $warnings[] = 'G3X-first replay has G3X gaps larger than 2 seconds.';
         }
-        if ($sourceMode !== 'g3x_only' && $rawAhrsCount === 0) {
+        if ($sourceMode === 'multi_source' && $rawAhrsCount === 0) {
             $warnings[] = 'AHRS samples missing; attitude replay quality may be low.';
         }
         if (!$g3xPoints) {
             $warnings[] = 'G3X not attached; replay uses phone GPS and AHRS only.';
-        } elseif ($sourceMode === 'g3x_only') {
-            $warnings[] = 'Replay v2 built in G3X-only diagnostic mode; GPS/AHRS evidence intentionally ignored.';
+        } elseif ($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') {
+            $warnings[] = 'Replay v2 built in G3X-first mode; phone GPS/AHRS evidence intentionally ignored for primary replay state.';
         }
 
         $origin = $this->firstGoodGpsOrigin($gpsPoints, $g3xPoints);
@@ -185,7 +185,23 @@ final class CockpitReplayPipeline
         $pitchKnots = $this->buildScalarKnots($ahrsPoints, $g3xPoints, 'pitch_deg', 'pitch_deg');
         $rollKnots = $this->buildScalarKnots($ahrsPoints, $g3xPoints, 'roll_deg', 'roll_deg');
         $speedKnots = $this->buildSpeedKnots($gpsPoints, $g3xPoints);
+        $iasKnots = $this->buildG3xScalarKnots($g3xPoints, 'ias_kt');
+        $tasKnots = $this->buildG3xScalarKnots($g3xPoints, 'tas_kt');
+        $engineKnots = array(
+            'rpm' => $this->buildG3xScalarKnots($g3xPoints, 'rpm'),
+            'manifold_pressure_inhg' => $this->buildG3xScalarKnots($g3xPoints, 'manifold_pressure_inhg'),
+            'fuel_flow_gph' => $this->buildG3xScalarKnots($g3xPoints, 'fuel_flow_gph'),
+            'oil_pressure_psi' => $this->buildG3xScalarKnots($g3xPoints, 'oil_pressure_psi'),
+            'oil_temp_f' => $this->buildG3xScalarKnots($g3xPoints, 'oil_temp_f'),
+            'fuel_pressure_psi' => $this->buildG3xScalarKnots($g3xPoints, 'fuel_pressure_psi'),
+            'fuel_qty_gal' => $this->buildG3xScalarKnots($g3xPoints, 'fuel_qty_gal'),
+            'volts' => $this->buildG3xScalarKnots($g3xPoints, 'volts'),
+            'amps' => $this->buildG3xScalarKnots($g3xPoints, 'amps'),
+            'egt1_f' => $this->buildG3xScalarKnots($g3xPoints, 'egt1_f'),
+            'egt2_f' => $this->buildG3xScalarKnots($g3xPoints, 'egt2_f'),
+        );
         $altitudeKnots = $this->buildAltitudeKnots($gpsPoints, $g3xPoints);
+        $baroAltitudeKnots = $this->buildG3xScalarKnots($g3xPoints, 'baro_alt_ft');
         $altitudeBaseline = $this->computeAltitudeBaseline($gpsPoints, $g3xPoints);
 
         $duration = max(
@@ -212,13 +228,17 @@ final class CockpitReplayPipeline
             $pitchKnots,
             $rollKnots,
             $speedKnots,
+            $iasKnots,
+            $tasKnots,
+            $engineKnots,
             $altitudeKnots,
+            $baroAltitudeKnots,
             $origin,
             $phases,
             $headingElapsed
         );
         $samples = $this->applyHeadingOwnership($samples, $g3xHeadingKnots, $ahrsHeadingKnots, $trackFallbackHeadingKnots);
-        $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline);
+        $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline, $sourceMode === 'g3x_first' || $sourceMode === 'g3x_only');
         $samples = $this->validateReplaySamples($samples);
         $this->profiling['enu_interpolation_s'] = round(microtime(true) - $enuStarted - $headingElapsed, 4);
         $this->profiling['heading_interpolation_s'] = round($headingElapsed, 4);
@@ -269,7 +289,11 @@ final class CockpitReplayPipeline
      * @param list<array{t:float,v:float}> $pitchKnots
      * @param list<array{t:float,v:float}> $rollKnots
      * @param list<array{t:float,v:float}> $speedKnots
+     * @param list<array{t:float,v:float}> $iasKnots
+     * @param list<array{t:float,v:float}> $tasKnots
+     * @param array<string,list<array{t:float,v:float}>> $engineKnots
      * @param list<array{t:float,v:float}> $altitudeKnots
+     * @param list<array{t:float,v:float}> $baroAltitudeKnots
      * @param array{lat:float,lon:float,alt_m:float,t:float} $origin
      * @param list<array<string,mixed>> $phases
      * @param float $headingElapsed set by reference
@@ -286,7 +310,11 @@ final class CockpitReplayPipeline
         array $pitchKnots,
         array $rollKnots,
         array $speedKnots,
+        array $iasKnots,
+        array $tasKnots,
+        array $engineKnots,
         array $altitudeKnots,
+        array $baroAltitudeKnots,
         array $origin,
         array $phases,
         float &$headingElapsed = 0.0
@@ -300,7 +328,14 @@ final class CockpitReplayPipeline
         $pitchCursor = new ReplaySeriesCursor($pitchKnots);
         $rollCursor = new ReplaySeriesCursor($rollKnots);
         $speedCursor = new ReplaySeriesCursor($speedKnots);
+        $iasCursor = new ReplaySeriesCursor($iasKnots);
+        $tasCursor = new ReplaySeriesCursor($tasKnots);
+        $engineCursors = array();
+        foreach ($engineKnots as $field => $knots) {
+            $engineCursors[$field] = new ReplaySeriesCursor($knots);
+        }
         $altitudeCursor = new ReplaySeriesCursor($altitudeKnots);
+        $baroAltitudeCursor = new ReplaySeriesCursor($baroAltitudeKnots);
 
         $samples = array();
         $previousAltFt = null;
@@ -351,6 +386,9 @@ final class CockpitReplayPipeline
             $headingSeg = $headingCursor->segmentAt($timeS);
             $trackSeg = $trackCursor->segmentAt($timeS);
             $speedSeg = $speedCursor->segmentAt($timeS);
+            $iasSeg = $iasCursor->segmentAt($timeS);
+            $tasSeg = $tasCursor->segmentAt($timeS);
+            $baroAltitudeSeg = $baroAltitudeCursor->segmentAt($timeS);
             $headingStarted = microtime(true);
             $headingDeg = ReplaySeriesCursor::lerpHeading($headingKnots, $headingSeg);
             $trackDeg = ReplaySeriesCursor::lerpHeading($trackKnots, $trackSeg);
@@ -372,6 +410,11 @@ final class CockpitReplayPipeline
             }
             $rawPitch = ReplaySeriesCursor::lerpScalar($pitchKnots, $pitchSeg);
             $rawRoll = ReplaySeriesCursor::lerpScalar($rollKnots, $rollSeg);
+            $baroAltitudeFt = ReplaySeriesCursor::lerpScalar($baroAltitudeKnots, $baroAltitudeSeg);
+            $engineValues = array();
+            foreach ($engineKnots as $field => $knots) {
+                $engineValues[$field] = ReplaySeriesCursor::lerpScalar($knots, $engineCursors[$field]->segmentAt($timeS));
+            }
             $pitchSource = $this->scalarSourceFromSegment($pitchKnots, $pitchSeg);
             $rollSource = $this->scalarSourceFromSegment($rollKnots, $rollSeg);
             $rawAttitudeSource = $this->combineAttitudeSources($pitchSource, $rollSource);
@@ -391,9 +434,13 @@ final class CockpitReplayPipeline
             $samples[] = array(
                 'sample_index' => $index,
                 't' => round($timeS, 3),
+                'replay_time_s' => round($timeS, 3),
                 'lat' => $geo !== null ? round($geo['lat'], 7) : null,
                 'lon' => $geo !== null ? round($geo['lon'], 7) : null,
+                'gps_altitude_ft' => $altitudeFt !== null ? round($altitudeFt, 1) : null,
+                'baro_altitude_ft' => $baroAltitudeFt !== null ? round($baroAltitudeFt, 1) : null,
                 'altitude_ft' => $altitudeFt !== null ? round($altitudeFt, 1) : null,
+                'altitude_ft_msl' => $altitudeFt !== null ? round($altitudeFt, 1) : null,
                 'heading_deg' => $headingDeg,
                 'heading_deg_true' => $headingDeg,
                 'heading_deg_magnetic' => $headingMagnetic,
@@ -421,11 +468,25 @@ final class CockpitReplayPipeline
                 'crab_angle_deg' => ($headingDeg !== null && $trackDeg !== null) ? round($this->crabAngle($headingDeg, $trackDeg), 2) : null,
                 'pitch_deg' => $rawPitch,
                 'roll_deg' => $rawRoll,
+                'bank_deg' => $rawRoll,
                 'raw_pitch_deg' => $rawPitch,
                 'raw_roll_deg' => $rawRoll,
                 'raw_attitude_source' => $rawAttitudeSource,
                 'raw_attitude_quality' => $rawAttitudeQuality,
                 'ground_speed_kt' => ReplaySeriesCursor::lerpScalar($speedKnots, $speedSeg),
+                'ias_kt' => ReplaySeriesCursor::lerpScalar($iasKnots, $iasSeg),
+                'tas_kt' => ReplaySeriesCursor::lerpScalar($tasKnots, $tasSeg),
+                'rpm' => $engineValues['rpm'] ?? null,
+                'manifold_pressure_inhg' => $engineValues['manifold_pressure_inhg'] ?? null,
+                'fuel_flow_gph' => $engineValues['fuel_flow_gph'] ?? null,
+                'oil_pressure_psi' => $engineValues['oil_pressure_psi'] ?? null,
+                'oil_temp_f' => $engineValues['oil_temp_f'] ?? null,
+                'fuel_pressure_psi' => $engineValues['fuel_pressure_psi'] ?? null,
+                'fuel_qty_gal' => $engineValues['fuel_qty_gal'] ?? null,
+                'volts' => $engineValues['volts'] ?? null,
+                'amps' => $engineValues['amps'] ?? null,
+                'egt1_f' => $engineValues['egt1_f'] ?? null,
+                'egt2_f' => $engineValues['egt2_f'] ?? null,
                 'vertical_speed_fpm' => $verticalSpeedFpm !== null ? round($verticalSpeedFpm, 1) : null,
                 'phase' => $phase,
                 'position_quality' => $positionQuality,
@@ -544,8 +605,9 @@ final class CockpitReplayPipeline
                 continue;
             }
             $altFt = G3XFlightStreamParser::numericValue($row, 'GPS Altitude (ft)', 'AltGPS');
+            $baroAltFt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)', 'AltInd');
             if ($altFt === null) {
-                $altFt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)', 'AltInd');
+                $altFt = $baroAltFt;
             }
             $altM = $altFt !== null ? (float)$altFt * 0.3048 : 0.0;
             $headingMagnetic = G3XFlightStreamParser::numericValue($row, 'Magnetic Heading (deg)', 'HDG');
@@ -569,7 +631,21 @@ final class CockpitReplayPipeline
                 'pitch_deg' => G3XFlightStreamParser::numericValue($row, 'Pitch (deg)', 'Pitch'),
                 'roll_deg' => G3XFlightStreamParser::numericValue($row, 'Roll (deg)', 'Roll'),
                 'alt_ft' => $altFt,
+                'baro_alt_ft' => $baroAltFt,
                 'vs_fpm' => G3XFlightStreamParser::numericValue($row, 'Vertical Speed (ft/min)', 'VSpd'),
+                'ias_kt' => G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)', 'IAS'),
+                'tas_kt' => G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)', 'TAS'),
+                'rpm' => G3XFlightStreamParser::numericValue($row, 'RPM', 'E1 RPM'),
+                'manifold_pressure_inhg' => G3XFlightStreamParser::numericValue($row, 'Manifold Press (inch Hg)', 'E1 MAP'),
+                'fuel_flow_gph' => G3XFlightStreamParser::numericValue($row, 'Fuel Flow (gal/hour)', 'E1 FFlow'),
+                'oil_pressure_psi' => G3XFlightStreamParser::numericValue($row, 'Oil Press (PSI)', 'E1 OilP'),
+                'oil_temp_f' => G3XFlightStreamParser::numericValue($row, 'Oil Temp (deg F)', 'E1 OilT'),
+                'fuel_pressure_psi' => G3XFlightStreamParser::numericValue($row, 'Fuel Press (PSI)', 'E1 FPres'),
+                'fuel_qty_gal' => G3XFlightStreamParser::numericValue($row, 'Fuel Qty (gal)', 'FQty1'),
+                'volts' => G3XFlightStreamParser::numericValue($row, 'Volts', 'Volts1'),
+                'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1'),
+                'egt1_f' => G3XFlightStreamParser::numericValue($row, 'EGT1 (deg F)', 'E1 EGT1'),
+                'egt2_f' => G3XFlightStreamParser::numericValue($row, 'EGT2 (deg F)', 'E1 EGT2'),
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
@@ -1105,6 +1181,23 @@ final class CockpitReplayPipeline
     }
 
     /**
+     * @param list<array<string,mixed>> $g3xPoints
+     * @return list<array{t:float,v:float,source?:string}>
+     */
+    private function buildG3xScalarKnots(array $g3xPoints, string $field): array
+    {
+        $knots = array();
+        foreach ($g3xPoints as $point) {
+            $value = $point[$field] ?? null;
+            if ($value !== null) {
+                $knots[] = array('t' => (float)$point['t'], 'v' => (float)$value, 'source' => 'g3x');
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
+        return $this->mergeScalarKnots($knots);
+    }
+
+    /**
      * @param list<array{t:float,v:float,source?:string}> $knots
      * @param array{before:int,after:int,ratio:float,edge:string}|null $segment
      */
@@ -1275,7 +1368,7 @@ final class CockpitReplayPipeline
      * @param array{altitude_ft:float|null,source:string} $baseline
      * @return list<array<string,mixed>>
      */
-    private function stabilizeAltitudes(array $samples, array $baseline): array
+    private function stabilizeAltitudes(array $samples, array $baseline, bool $preserveRawAltitude = false): array
     {
         if (!$samples) {
             return $samples;
@@ -1300,7 +1393,7 @@ final class CockpitReplayPipeline
                 }
             }
             $segmentAlt = $alts ? $this->median($this->rejectAltitudeOutliers($alts)) : (float)$baselineFt;
-            if (abs($segmentAlt - (float)$baselineFt) > 35.0) {
+            if (!$preserveRawAltitude && abs($segmentAlt - (float)$baselineFt) > 35.0) {
                 $segmentAlt = (float)$baselineFt;
             }
             for ($i = $from; $i <= $to; $i++) {
@@ -1308,6 +1401,43 @@ final class CockpitReplayPipeline
             }
         }
         $this->diagnostics['stationary_segments_count'] = count($stationarySegments);
+
+        if ($preserveRawAltitude) {
+            $previousAlt = null;
+            $countGroundAltitudeStabilized = 0;
+            $maxGroundVs = 0.0;
+            foreach ($samples as $i => &$sample) {
+                $speed = isset($sample['ground_speed_kt']) && is_numeric($sample['ground_speed_kt']) ? (float)$sample['ground_speed_kt'] : 0.0;
+                $rawAlt = isset($sample['altitude_ft']) && is_numeric($sample['altitude_ft']) ? (float)$sample['altitude_ft'] : (float)$baselineFt;
+                $alt = $segmentAltitudeByIndex[$i] ?? $rawAlt;
+                $vs = $previousAlt !== null && self::FIXED_TIMESTEP_S > 0.0
+                    ? (($alt - $previousAlt) / self::FIXED_TIMESTEP_S) * 60.0
+                    : 0.0;
+                if (isset($segmentAltitudeByIndex[$i]) || $speed < self::STATIONARY_SPEED_KT) {
+                    $vs = 0.0;
+                    if (abs($rawAlt - $alt) > 2.0) {
+                        $countGroundAltitudeStabilized++;
+                    }
+                }
+                if ($speed < self::GROUND_SPEED_MAX_KT) {
+                    $maxGroundVs = max($maxGroundVs, abs((float)$vs));
+                }
+                $sample['altitude_ft'] = round($alt, 1);
+                $sample['gps_altitude_ft'] = round($alt, 1);
+                $sample['vertical_speed_fpm'] = round($vs, 1);
+                $sample['altitude_source'] = 'g3x_altitude_as_recorded';
+                $sample['altitude_quality'] = isset($segmentAltitudeByIndex[$i]) ? 'DEGRADED' : 'GOOD';
+                $sample['altitude_quality_reason'] = isset($segmentAltitudeByIndex[$i])
+                    ? 'altitude_local_ground_segment_stabilized'
+                    : 'altitude_g3x_as_recorded';
+                $previousAlt = $alt;
+            }
+            unset($sample);
+            $this->diagnostics['max_ground_vertical_speed_fpm'] = round($maxGroundVs, 1);
+            $this->diagnostics['count_ground_altitude_stabilized'] = $countGroundAltitudeStabilized;
+            $this->diagnostics['max_stationary_altitude_variation_ft'] = round($this->maxStationaryAltitudeVariation($samples, $stationarySegments), 1);
+            return $samples;
+        }
 
         $previousAlt = null;
         $previousVs = 0.0;

@@ -67,8 +67,8 @@ function cockpit_reconstruct_spawn_worker(string $id, array $options, int $jobId
     if (isset($options['oat_c'])) {
         $parts[] = escapeshellarg('--oat-c=' . (string)$options['oat_c']);
     }
-    if (($options['replay_source_mode'] ?? '') === 'g3x_only') {
-        $parts[] = escapeshellarg('--replay-source-mode=g3x_only');
+    if (($options['replay_source_mode'] ?? '') === 'g3x_first' || ($options['replay_source_mode'] ?? '') === 'g3x_only') {
+        $parts[] = escapeshellarg('--replay-source-mode=' . (string)$options['replay_source_mode']);
     }
 
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
@@ -139,10 +139,10 @@ try {
         $options['oat_c'] = (float)$oatC;
     }
     if ($replaySourceMode !== '') {
-        if ($replaySourceMode !== 'g3x_only') {
+        if ($replaySourceMode !== 'g3x_first' && $replaySourceMode !== 'g3x_only') {
             throw new RuntimeException('Unsupported replay source mode.');
         }
-        $options['replay_source_mode'] = 'g3x_only';
+        $options['replay_source_mode'] = $replaySourceMode;
     }
     if ($mode !== 'sync' && !$wantsJson) {
         $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);

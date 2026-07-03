@@ -43,11 +43,11 @@ final class StandaloneG3XReplayBuilder
             array(),
             $g3xSamples,
             array(),
-            array('replay_source_mode' => 'g3x_only')
+            array('replay_source_mode' => 'g3x_first')
         );
 
         $diagnostics = $replay['diagnostics'];
-        $samples = $this->publicSamples($replay['samples']);
+        $samples = $this->publicSamples($replay['samples'], $startedAt);
         unset($replay['samples']);
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings'])
             ? $diagnostics['warnings']
@@ -72,7 +72,7 @@ final class StandaloneG3XReplayBuilder
                 'g3x_available' => true,
             ),
             'source' => array(
-                'mode' => 'g3x_only',
+                'mode' => 'g3x_first',
                 'csv_path' => $realCsvPath,
                 'csv_sha1' => sha1_file($realCsvPath),
                 'aircraft_ident' => (string)$parsed['aircraft_ident'],
@@ -134,10 +134,10 @@ final class StandaloneG3XReplayBuilder
      * @param list<array<string,mixed>> $samples
      * @return list<array<string,mixed>>
      */
-    private function publicSamples(array $samples): array
+    private function publicSamples(array $samples, ?DateTimeInterface $startedAt): array
     {
         $public = array();
-        $numericFields = array('t', 'lat', 'lon', 'altitude_ft', 'heading_deg', 'pitch_deg', 'roll_deg', 'ground_speed_kt', 'vertical_speed_fpm', 'heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'raw_pitch_deg', 'raw_roll_deg');
+        $numericFields = array('t', 'replay_time_s', 'lat', 'lon', 'altitude_ft', 'altitude_ft_msl', 'gps_altitude_ft', 'baro_altitude_ft', 'heading_deg', 'pitch_deg', 'roll_deg', 'bank_deg', 'ground_speed_kt', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'vertical_speed_fpm', 'heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'raw_pitch_deg', 'raw_roll_deg');
         $stringFields = array('phase', 'position_quality', 'altitude_quality', 'attitude_quality', 'magnetic_variation_source', 'compass_deviation_source', 'heading_reference', 'track_reference', 'heading_source', 'heading_owner', 'heading_quality', 'track_source', 'track_quality', 'speed_source', 'speed_quality', 'position_source', 'altitude_source', 'position_quality_reason', 'altitude_quality_reason', 'attitude_quality_reason', 'heading_quality_reason', 'track_quality_reason', 'speed_quality_reason', 'raw_attitude_source', 'raw_attitude_quality');
 
         foreach ($samples as $sample) {
@@ -152,6 +152,7 @@ final class StandaloneG3XReplayBuilder
                     $row[$field] = (string)($sample[$field] ?? '');
                 }
             }
+            $row['time_utc'] = $this->sampleUtcString($startedAt, isset($row['replay_time_s']) && is_numeric($row['replay_time_s']) ? (float)$row['replay_time_s'] : (float)($row['t'] ?? 0.0));
             $row['altitude_ft_msl'] = $row['altitude_ft'] ?? null;
             $row['visual_pitch_deg'] = isset($row['pitch_deg']) && is_numeric($row['pitch_deg']) ? round((float)$row['pitch_deg'], 2) : 0.0;
             $row['visual_roll_deg'] = isset($row['roll_deg']) && is_numeric($row['roll_deg']) ? round((float)$row['roll_deg'], 2) : 0.0;
@@ -159,6 +160,26 @@ final class StandaloneG3XReplayBuilder
         }
 
         return $public;
+    }
+
+    private function sampleUtcString(?DateTimeInterface $startedAt, float $timeS): ?string
+    {
+        if ($startedAt === null) {
+            return null;
+        }
+        $base = DateTimeImmutable::createFromInterface($startedAt)->setTimezone(new DateTimeZone('UTC'));
+        $millis = (int)round($timeS * 1000.0);
+        $seconds = intdiv($millis, 1000);
+        $milliseconds = $millis % 1000;
+        if ($milliseconds < 0) {
+            $seconds -= 1;
+            $milliseconds += 1000;
+        }
+        $timestamp = $base->modify(($seconds >= 0 ? '+' : '') . $seconds . ' seconds');
+        if ($timestamp === false) {
+            return null;
+        }
+        return $timestamp->format('Y-m-d H:i:s') . '.' . str_pad((string)$milliseconds, 3, '0', STR_PAD_LEFT);
     }
 
     /**
