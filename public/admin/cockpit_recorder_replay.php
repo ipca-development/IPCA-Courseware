@@ -494,6 +494,38 @@ cw_header('Cockpit Recorder Replay');
 .replay-range { width: 100%; accent-color: #60a5fa; margin: 0; }
 .replay-time { color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .replay-load { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; color: #e2e8f0; background: #0f172a; font-size: 14px; }
+.replay-load-card {
+  width: min(460px, 78vw);
+  padding: 22px 24px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, .72);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .32);
+  text-align: center;
+}
+.replay-load-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.replay-load-bar {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .25);
+}
+.replay-load-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22d3ee, #60a5fa);
+  transition: width .18s ease;
+}
+.replay-load-meta {
+  margin-top: 10px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
 .cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: #0f172a; text-align: center; padding: 28px; z-index: 10; }
 .replay-select { border: 1px solid rgba(226, 232, 240, .45); border-radius: 8px; background: rgba(15, 23, 42, .9); color: #e2e8f0; padding: 7px 9px; }
 .replay-menu {
@@ -730,7 +762,13 @@ cw_header('Cockpit Recorder Replay');
     data-replay-mode="cesium-only"
     data-cesium-token="<?= h($cesiumIonToken) ?>"
   >
-    <div id="loadStatus" class="replay-load">Loading replay data…</div>
+    <div id="loadStatus" class="replay-load">
+      <div class="replay-load-card">
+        <div class="replay-load-title">Your Flight Replay is loading...</div>
+        <div class="replay-load-bar"><div id="replayLoadFill" class="replay-load-fill"></div></div>
+        <div id="replayLoadMeta" class="replay-load-meta">0% - requesting replay data</div>
+      </div>
+    </div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
@@ -922,6 +960,8 @@ cw_header('Cockpit Recorder Replay');
   const standaloneReplay = root ? (root.getAttribute('data-standalone-replay') || '') : '';
   const cesiumToken = root ? (root.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '') : '';
   const loadStatus = document.getElementById('loadStatus');
+  const replayLoadFill = document.getElementById('replayLoadFill');
+  const replayLoadMeta = document.getElementById('replayLoadMeta');
   const timeline = document.getElementById('timeline');
   const timeLabel = document.getElementById('timeLabel');
   const audio = document.getElementById('audio');
@@ -1771,7 +1811,17 @@ cw_header('Cockpit Recorder Replay');
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
     const horizonY = clamp(halfHeight + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
     const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, height - 90);
-    const centerX = width / 2;
+    const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+    const airspeedRect = airspeedTape && !airspeedTape.hidden ? airspeedTape.getBoundingClientRect() : null;
+    const altimeterRect = altimeterStack && !altimeterStack.hidden ? altimeterStack.getBoundingClientRect() : null;
+    const airspeedWidth = airspeedRect ? airspeedRect.width : 118;
+    const tapeMargin = airspeedWidth * 0.8;
+    const arcLeft = airspeedRect ? airspeedRect.right - rootRect.left + tapeMargin : width * 0.23;
+    const arcRight = altimeterRect ? altimeterRect.left - rootRect.left - tapeMargin : width * 0.77;
+    const arcSpan = Math.max(220, arcRight - arcLeft);
+    const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
+      ? (arcLeft + arcRight) / 2
+      : width / 2;
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
@@ -1784,27 +1834,25 @@ cw_header('Cockpit Recorder Replay');
         : '';
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${-gap}" y2="${y.toFixed(1)}"></line><line class="attitude-white" x1="${gap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
-    const tapeTopY = 72;
-    const arcRadius = clamp(Math.min(width * 0.42, height * 0.55), 300, 520);
+    const tapeTopY = airspeedRect ? Math.max(8, airspeedRect.top - rootRect.top) : 72;
+    const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
     const arcCenterY = tapeTopY + arcRadius;
     const arcPoints = [];
     for (let bank = -60; bank <= 60; bank += 4) {
       arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius).toFixed(1)}`);
     }
     const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
-      const outerX = Math.sin(degToRad(bank)) * arcRadius;
-      const outerY = -Math.cos(degToRad(bank)) * arcRadius;
       const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 34 : 22;
-      const innerX = Math.sin(degToRad(bank)) * (arcRadius - tickLen);
-      const innerY = -Math.cos(degToRad(bank)) * (arcRadius - tickLen);
+      const innerX = Math.sin(degToRad(bank)) * arcRadius;
+      const innerY = -Math.cos(degToRad(bank)) * arcRadius;
+      const outerX = Math.sin(degToRad(bank)) * (arcRadius + tickLen);
+      const outerY = -Math.cos(degToRad(bank)) * (arcRadius + tickLen);
       return `<line class="attitude-white" x1="${outerX.toFixed(1)}" y1="${outerY.toFixed(1)}" x2="${innerX.toFixed(1)}" y2="${innerY.toFixed(1)}"></line>`;
     }).join('');
     const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
     const slipX = slip / 0.35 * 46;
-    const pointerRadius = arcRadius - 11;
-    const pointerX = 0;
-    const pointerY = -pointerRadius;
-    const slipBarY = pointerY + 42;
+    const staticPointerY = tapeTopY + 6;
+    const slipBarY = staticPointerY + 38;
     const fixedLeftX = clamp(centerX - 0.40 * width, 42, centerX - 130);
     const fixedRightX = clamp(centerX + 0.40 * width, centerX + 130, width - 42);
     const signature = [
@@ -1814,7 +1862,7 @@ cw_header('Cockpit Recorder Replay');
       Math.round(referenceY),
       Math.round(arcCenterY),
       Math.round(arcRadius),
-      Math.round(rollDeg * 2),
+      Math.round(rollDeg * 10),
       Math.round(verticalFovDeg),
       Math.round(slipX),
     ].join('|');
@@ -1832,10 +1880,10 @@ cw_header('Cockpit Recorder Replay');
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
         <polygon class="attitude-slip" points="0,${(-arcRadius + 2).toFixed(1)} -18,${(-arcRadius - 36).toFixed(1)} 18,${(-arcRadius - 36).toFixed(1)}"></polygon>
-        <g transform="translate(${pointerX.toFixed(1)} ${pointerY.toFixed(1)})">
-          <polygon class="attitude-slip" points="0,-2 -18,34 18,34"></polygon>
-        </g>
-        <polygon class="attitude-slip" points="${(pointerX + slipX - 34).toFixed(1)},${slipBarY.toFixed(1)} ${(pointerX + slipX + 34).toFixed(1)},${slipBarY.toFixed(1)} ${(pointerX + slipX + 26).toFixed(1)},${(slipBarY + 13).toFixed(1)} ${(pointerX + slipX - 26).toFixed(1)},${(slipBarY + 13).toFixed(1)}"></polygon>
+      </g>
+      <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
+        <polygon class="attitude-slip" points="0,0 -18,36 18,36"></polygon>
+        <polygon class="attitude-slip" points="${(slipX - 34).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 34).toFixed(1)},${slipBarY - staticPointerY} ${(slipX + 26).toFixed(1)},${slipBarY - staticPointerY + 13} ${(slipX - 26).toFixed(1)},${slipBarY - staticPointerY + 13}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${referenceY.toFixed(1)})">
         <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
@@ -3139,14 +3187,49 @@ cw_header('Cockpit Recorder Replay');
     safeRenderCesium(true);
   });
 
+  function setReplayLoadProgress(percent, message) {
+    const pct = clamp(Math.round(Number(percent) || 0), 0, 100);
+    if (replayLoadFill) replayLoadFill.style.width = `${pct}%`;
+    if (replayLoadMeta) replayLoadMeta.textContent = `${pct}% - ${message}`;
+  }
+
+  async function fetchReplayJsonWithProgress(url) {
+    setReplayLoadProgress(2, 'requesting replay data');
+    const response = await fetch(url);
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      const text = await response.text();
+      setReplayLoadProgress(88, 'parsing replay data');
+      return { response, text };
+    }
+    const totalBytes = Number(response.headers.get('content-length')) || 0;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let receivedBytes = 0;
+    let chunks = '';
+    let chunkCount = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      chunkCount++;
+      chunks += decoder.decode(value, { stream: true });
+      const networkPct = totalBytes > 0
+        ? 5 + Math.min(78, (receivedBytes / totalBytes) * 78)
+        : Math.min(84, 5 + chunkCount * 2);
+      setReplayLoadProgress(networkPct, totalBytes > 0 ? 'downloading replay data' : 'streaming replay data');
+    }
+    chunks += decoder.decode();
+    setReplayLoadProgress(88, 'parsing replay data');
+    return { response, text: chunks };
+  }
+
   async function loadReplay() {
     let data = null;
     try {
       const replayUrl = standaloneReplay
         ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
         : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1&sample_stride=3`;
-      const response = await fetch(replayUrl);
-      const text = await response.text();
+      const { response, text } = await fetchReplayJsonWithProgress(replayUrl);
       try {
         data = JSON.parse(text);
       } catch (jsonErr) {
@@ -3161,6 +3244,7 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
 
+    setReplayLoadProgress(93, 'preparing replay timeline');
     const samples = (data.samples || []).map((sample) => ({
       ...sample,
       bank_deg: sample.roll_deg ?? sample.bank_deg ?? null,
@@ -3171,15 +3255,17 @@ cw_header('Cockpit Recorder Replay');
 
     payload = { ...data, samples };
     positionKeyframes = buildPositionKeyframes(payload.samples || []);
-    if (loadStatus) loadStatus.remove();
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
     timeline.max = String(maxT);
+    setReplayLoadProgress(97, 'starting visual engine');
     try {
       await initCesium();
     } catch (err) {
       showCesiumError(String(err.message || err));
     }
     safeRenderCesium(true);
+    setReplayLoadProgress(100, 'ready');
+    if (loadStatus) loadStatus.remove();
   }
 
   cameraCalibration = loadCameraCalibration();
