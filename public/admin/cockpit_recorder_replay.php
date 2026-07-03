@@ -1547,11 +1547,13 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function isaDeviationC(sample, altitudeFt, oatC) {
+    if (oatC !== null && Number.isFinite(Number(altitudeFt))) {
+      const isaC = 15 - 1.98 * (Number(altitudeFt) / 1000);
+      return oatC - isaC;
+    }
     const provided = firstFinite(sample && sample.isa_deviation_c, sample && sample.isa_dev_c);
     if (provided !== null) return provided;
-    if (oatC === null || !Number.isFinite(Number(altitudeFt))) return null;
-    const isaC = 15 - 1.98 * (Number(altitudeFt) / 1000);
-    return oatC - isaC;
+    return null;
   }
 
   function decisionAltitudeFt(sample) {
