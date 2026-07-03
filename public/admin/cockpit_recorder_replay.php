@@ -114,6 +114,37 @@ cw_header('Cockpit Recorder Replay');
   transform-origin: 50% 50%;
   opacity: .86;
 }
+.attitude-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .36));
+}
+.attitude-overlay text {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 900;
+  fill: rgba(255, 255, 255, .88);
+}
+.attitude-overlay .attitude-white {
+  stroke: rgba(255, 255, 255, .88);
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.attitude-overlay .attitude-yellow {
+  fill: #f5e91b;
+  stroke: rgba(0, 0, 0, .76);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.attitude-overlay .attitude-slip {
+  fill: rgba(255, 255, 255, .88);
+}
 .airspeed-tape {
   position: absolute;
   left: clamp(112px, 18.5vw, 220px);
@@ -702,6 +733,7 @@ cw_header('Cockpit Recorder Replay');
     <div id="loadStatus" class="replay-load">Loading replay data…</div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
+    <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -815,6 +847,11 @@ cw_header('Cockpit Recorder Replay');
           <input id="horizonBarOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
           <output id="horizonBarOffsetValue" for="horizonBarOffset">0 px</output>
         </div>
+        <div class="replay-calibration-row">
+          <label for="attitudeReferenceOffset">Attitude reference vertical offset</label>
+          <input id="attitudeReferenceOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
+          <output id="attitudeReferenceOffsetValue" for="attitudeReferenceOffset">0 px</output>
+        </div>
       </div>
       <div class="replay-calibration-section">
         <div class="replay-calibration-section-title">Instruments</div>
@@ -894,6 +931,7 @@ cw_header('Cockpit Recorder Replay');
   const cameraModeSelect = document.getElementById('cameraMode');
   const debugOverlay = document.getElementById('replayDebug');
   const horizonLine = document.getElementById('horizonLine');
+  const attitudeOverlay = document.getElementById('attitudeOverlay');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
   const airspeedTapeScale = document.getElementById('airspeedTapeScale');
@@ -938,6 +976,8 @@ cw_header('Cockpit Recorder Replay');
   const calibrationSmoothnessValue = document.getElementById('calibrationSmoothnessValue');
   const horizonBarOffset = document.getElementById('horizonBarOffset');
   const horizonBarOffsetValue = document.getElementById('horizonBarOffsetValue');
+  const attitudeReferenceOffset = document.getElementById('attitudeReferenceOffset');
+  const attitudeReferenceOffsetValue = document.getElementById('attitudeReferenceOffsetValue');
   const instrumentToggles = Array.from(document.querySelectorAll('[data-instrument-toggle]'));
   const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
@@ -1015,7 +1055,7 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -1281,6 +1321,7 @@ cw_header('Cockpit Recorder Replay');
       fovDeg: clamp(firstFinite(saved.fovDeg, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg), 35, 100),
       smoothness: clamp(firstFinite(saved.smoothness, SYNTHETIC_VISION_DEFAULTS.positionSmoothing), 0, 20),
       horizonBarOffsetPx: clamp(firstFinite(saved.horizonBarOffsetPx, 0), -240, 240),
+      attitudeReferenceOffsetPx: clamp(firstFinite(saved.attitudeReferenceOffsetPx, 0), -240, 240),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
@@ -1333,6 +1374,12 @@ cw_header('Cockpit Recorder Replay');
     if (horizonBarOffsetValue) {
       horizonBarOffsetValue.textContent = `${Math.round(cameraCalibration.horizonBarOffsetPx)} px`;
     }
+    if (attitudeReferenceOffset) {
+      attitudeReferenceOffset.value = String(cameraCalibration.attitudeReferenceOffsetPx);
+    }
+    if (attitudeReferenceOffsetValue) {
+      attitudeReferenceOffsetValue.textContent = `${Math.round(cameraCalibration.attitudeReferenceOffsetPx)} px`;
+    }
     instrumentToggles.forEach((toggle) => {
       const key = toggle.getAttribute('data-instrument-toggle') || '';
       toggle.checked = cameraCalibration.instruments && cameraCalibration.instruments[key] === true;
@@ -1351,6 +1398,7 @@ cw_header('Cockpit Recorder Replay');
       `FOV ${cameraCalibration.fovDeg.toFixed(0)}deg H`,
       `Smooth ${cameraCalibration.smoothness.toFixed(1)}`,
       `Horizon ${cameraCalibration.horizonBarOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.horizonBarOffsetPx)}px`,
+      `AttRef ${cameraCalibration.attitudeReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.attitudeReferenceOffsetPx)}px`,
       agl,
     ].join(' | ');
   }
@@ -1391,8 +1439,17 @@ cw_header('Cockpit Recorder Replay');
     saveCameraCalibration();
     updateCalibrationPanel();
     updateHorizonLine(displayCamera);
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+  }
+
+  function setAttitudeReferenceOffset(value) {
+    if (!cameraCalibration) return;
+    cameraCalibration.attitudeReferenceOffsetPx = clamp(firstFinite(value, 0), -240, 240);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
   }
 
   function setInstrumentPlaceholder(key, enabled) {
@@ -1404,6 +1461,7 @@ cw_header('Cockpit Recorder Replay');
     saveCameraCalibration();
     updateCalibrationPanel();
     updateHorizonLine(displayCamera);
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
   }
 
@@ -1621,7 +1679,7 @@ cw_header('Cockpit Recorder Replay');
     altimeterStack.hidden = false;
     if (altimeterScale) altimeterScale.innerHTML = scaleHtml;
     if (altimeterBugs) altimeterBugs.innerHTML = bugHtml;
-    if (altimeterPointer) altimeterPointer.textContent = String(Math.round(displayAltitudeFt));
+    if (altimeterPointer) altimeterPointer.textContent = String(Math.round(displayAltitudeFt / 20) * 20);
     if (altimeterBugValue) altimeterBugValue.textContent = bugFt === null ? '----' : `${Math.round(bugFt)}FT`;
     if (altimeterSettingValue) altimeterSettingValue.textContent = formatAltimeterSetting(sample);
     if (temperatureBox) {
@@ -1683,6 +1741,83 @@ cw_header('Cockpit Recorder Replay');
     horizonLine.hidden = false;
     horizonLine.style.top = `${y}px`;
     horizonLine.style.transform = `translate(-50%, -50%) rotate(${-rollDeg}deg)`;
+  }
+
+  function updateAttitudeIndicator(view, sample) {
+    if (!attitudeOverlay) return;
+    if (!view || !isSyntheticCameraMode(view.mode) || !instrumentEnabled('attitude_indicator')) {
+      attitudeOverlay.hidden = true;
+      attitudeOverlay.innerHTML = '';
+      return;
+    }
+    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
+    const width = Number(container && container.clientWidth);
+    const height = Number(container && container.clientHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      attitudeOverlay.hidden = true;
+      attitudeOverlay.innerHTML = '';
+      return;
+    }
+    const dbg = currentCameraDebug || {};
+    const pitchDeg = firstFinite(dbg.pitchDegUsed, view.pitch, 0) || 0;
+    const rollDeg = firstFinite(dbg.rollDegUsed, view.roll, 0) || 0;
+    const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
+    const halfHeight = height / 2;
+    const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
+    const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
+    const horizonY = clamp(halfHeight + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
+    const referenceY = clamp(height * 0.72 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 80, height - 60);
+    const centerX = width / 2;
+    const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
+    const pitchMarks = [-20, -15, -10, -5, 5, 10, 15, 20].map((deg) => {
+      const y = pitchPx(deg);
+      const major = Math.abs(deg) % 10 === 0;
+      const half = major ? 76 : 43;
+      const gap = major ? 42 : 32;
+      const label = Math.abs(deg);
+      const text = major || Math.abs(deg) === 5
+        ? `<text x="${-(half + 24)}" y="${(y + 9).toFixed(1)}" font-size="${major ? 28 : 24}" text-anchor="middle">${label}</text><text x="${(half + 24)}" y="${(y + 9).toFixed(1)}" font-size="${major ? 28 : 24}" text-anchor="middle">${label}</text>`
+        : '';
+      return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${-gap}" y2="${y.toFixed(1)}"></line><line class="attitude-white" x1="${gap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
+    }).join('');
+    const arcRadius = clamp(Math.min(width * 0.27, height * 0.24), 145, 260);
+    const arcPoints = [];
+    for (let bank = -60; bank <= 60; bank += 4) {
+      arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius - 8).toFixed(1)}`);
+    }
+    const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
+      const outerX = Math.sin(degToRad(bank)) * arcRadius;
+      const outerY = -Math.cos(degToRad(bank)) * arcRadius - 8;
+      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 31 : 20;
+      const innerX = Math.sin(degToRad(bank)) * (arcRadius - tickLen);
+      const innerY = -Math.cos(degToRad(bank)) * (arcRadius - tickLen) - 8;
+      return `<line class="attitude-white" x1="${outerX.toFixed(1)}" y1="${outerY.toFixed(1)}" x2="${innerX.toFixed(1)}" y2="${innerY.toFixed(1)}"></line>`;
+    }).join('');
+    const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
+    const slipX = slip / 0.35 * 38;
+    const fixedLeftX = clamp(centerX - 0.46 * width, 46, centerX - 150);
+    const fixedRightX = clamp(centerX + 0.46 * width, centerX + 150, width - 46);
+    attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
+    attitudeOverlay.innerHTML = `
+      <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
+        ${pitchMarks}
+        <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
+        ${bankTicks}
+        <polygon class="attitude-slip" points="0,${(-arcRadius - 36).toFixed(1)} -15,${(-arcRadius - 76).toFixed(1)} 15,${(-arcRadius - 76).toFixed(1)}"></polygon>
+      </g>
+      <g transform="translate(${centerX.toFixed(1)} ${referenceY.toFixed(1)})">
+        <polygon class="attitude-slip" points="0,-${Math.round(arcRadius * 0.72)} -16,-${Math.round(arcRadius * 0.72) + 34} 16,-${Math.round(arcRadius * 0.72) + 34}"></polygon>
+        <polygon class="attitude-slip" points="${(slipX - 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2} ${(slipX - 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2}"></polygon>
+        <polygon class="attitude-yellow" points="-250,0 -146,0 -146,16 -250,16"></polygon>
+        <polygon class="attitude-yellow" points="146,0 250,0 250,16 146,16"></polygon>
+        <polygon class="attitude-yellow" points="-150,70 -26,10 0,0 -116,78"></polygon>
+        <polygon class="attitude-yellow" points="150,70 26,10 0,0 116,78"></polygon>
+        <line class="attitude-white" x1="-34" y1="94" x2="34" y2="94"></line>
+      </g>
+      <rect class="attitude-yellow" x="${fixedLeftX.toFixed(1)}" y="${(referenceY - 10).toFixed(1)}" width="88" height="16" rx="7"></rect>
+      <rect class="attitude-yellow" x="${(fixedRightX - 88).toFixed(1)}" y="${(referenceY - 10).toFixed(1)}" width="88" height="16" rx="7"></rect>
+    `;
+    attitudeOverlay.hidden = false;
   }
 
   function setModalOpen(panel, button, open) {
@@ -2227,6 +2362,7 @@ cw_header('Cockpit Recorder Replay');
     if (!cesiumReady || !cesiumViewer) return;
     if (cameraMode === 'free') {
       updateHorizonLine(null);
+      updateAttitudeIndicator(null, null);
       updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
       updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
       updateTerrainHeight(sampleAt(activeT));
@@ -2293,6 +2429,7 @@ cw_header('Cockpit Recorder Replay');
       applyWorldCameraView(view, cameraPos, cameraAltitudeM);
     }
     updateHorizonLine(view);
+    updateAttitudeIndicator(view, sample);
     updateAirspeedTape(sample, dtSec, snap);
     updateAltimeterTape(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
@@ -2819,6 +2956,9 @@ cw_header('Cockpit Recorder Replay');
   }
   if (horizonBarOffset) {
     horizonBarOffset.addEventListener('input', () => setHorizonBarOffset(horizonBarOffset.value));
+  }
+  if (attitudeReferenceOffset) {
+    attitudeReferenceOffset.addEventListener('input', () => setAttitudeReferenceOffset(attitudeReferenceOffset.value));
   }
   instrumentToggles.forEach((toggle) => {
     toggle.addEventListener('change', () => {
