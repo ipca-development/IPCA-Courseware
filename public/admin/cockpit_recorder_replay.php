@@ -389,7 +389,7 @@ cw_header('Cockpit Recorder Replay');
     eyeOffsetZUpM: 1.5,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
-  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v3';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v4';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -479,7 +479,7 @@ cw_header('Cockpit Recorder Replay');
     if (!isGroundSample(sample)) {
       return msl;
     }
-    if (terrainLooksCredibleForGround(msl)) {
+    if (Number.isFinite(lastTerrainHeightM)) {
       return lastTerrainHeightM;
     }
     if (Number.isFinite(msl)) {
@@ -492,7 +492,7 @@ cw_header('Cockpit Recorder Replay');
     if (!isGroundSample(sample)) {
       return Number.isFinite(msl) ? 'replay_airborne_altitude' : 'unavailable';
     }
-    return terrainLooksCredibleForGround(msl) ? 'cesium_rendered_terrain' : 'replay_ground_altitude';
+    return Number.isFinite(lastTerrainHeightM) ? 'cesium_rendered_terrain_ground' : 'replay_ground_altitude';
   };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
@@ -905,7 +905,7 @@ cw_header('Cockpit Recorder Replay');
     const upNoRoll = Cesium.Cartesian3.normalize(crossCartesian(rightLevel, forward), new Cesium.Cartesian3());
     const up = Cesium.Cartesian3.normalize(addCartesian(
       scaleCartesian(upNoRoll, Math.cos(r)),
-      scaleCartesian(rightLevel, -Math.sin(r))
+      scaleCartesian(rightLevel, Math.sin(r))
     ), new Cesium.Cartesian3());
 
     return { forward, right: rightLevel, up };
@@ -930,9 +930,11 @@ cw_header('Cockpit Recorder Replay');
     const calibratedHeading = normalizeDeg(Number(view.heading || 0) + (cameraCalibration ? cameraCalibration.yawDeg : 0));
     const calibratedPitch = clamp(Number(view.pitch || 0) + (cameraCalibration ? cameraCalibration.pitchDeg : 0), -89, 89);
     const calibratedRoll = clamp(Number(view.roll || 0) + (cameraCalibration ? cameraCalibration.rollDeg : 0), -89, 89);
-    const orientation = cesiumOrientationFromAviation(calibratedHeading, calibratedPitch, calibratedRoll);
+    const visualCameraRoll = calibratedRoll;
+    const rollConvention = 'garmin_roll_direct';
+    const orientation = cesiumOrientationFromAviation(calibratedHeading, calibratedPitch, visualCameraRoll);
     const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(aircraftCartesian);
-    const basis = aviationBasisEnu(calibratedHeading, calibratedPitch, calibratedRoll);
+    const basis = aviationBasisEnu(calibratedHeading, calibratedPitch, visualCameraRoll);
     const eyeOffsetEnu = addCartesian(
       addCartesian(
         scaleCartesian(basis.forward, BODY_AXIS_MAPPING.eyeOffsetXForwardM),
@@ -978,6 +980,16 @@ cw_header('Cockpit Recorder Replay');
     const cameraLat = cameraCartographic.latitude * 180 / Math.PI;
     const cameraLon = cameraCartographic.longitude * 180 / Math.PI;
     const groundReferenceM = Number.isFinite(Number(view.groundReferenceAltitudeM)) ? Number(view.groundReferenceAltitudeM) : view.aircraftAltitudeM;
+    const calibrationUpM = cameraCalibration ? Number(cameraCalibration.upM || 0) : 0;
+    const syntheticEyeUpM = BODY_AXIS_MAPPING.eyeOffsetZUpM;
+    const cameraMinusAircraftM = cameraCartographic.height - view.aircraftAltitudeM;
+    const rawGarminAltitudeFt = sample && Number.isFinite(Number(sample.altitude_ft_msl ?? sample.altitude_ft))
+      ? Number(sample.altitude_ft_msl ?? sample.altitude_ft)
+      : null;
+    const rawGarminAltitudeM = rawGarminAltitudeFt !== null ? feetToMeters(rawGarminAltitudeFt) : null;
+    const rawGarminRollDeg = sample && Number.isFinite(Number(sample.roll_deg ?? sample.bank_deg))
+      ? Number(sample.roll_deg ?? sample.bank_deg)
+      : null;
     const movementDebug = previousSyntheticFrameDebug ? {
       aircraftMoveM: haversineM(previousSyntheticFrameDebug.aircraftLat, previousSyntheticFrameDebug.aircraftLon, view.aircraftLat, view.aircraftLon),
       aircraftMoveBearingDeg: bearingDeg(previousSyntheticFrameDebug.aircraftLat, previousSyntheticFrameDebug.aircraftLon, view.aircraftLat, view.aircraftLon),
@@ -997,27 +1009,39 @@ cw_header('Cockpit Recorder Replay');
       aircraftLon: view.aircraftLon,
       aircraftAltitudeFt: sample && Number.isFinite(Number(sample.altitude_ft)) ? Number(sample.altitude_ft) : null,
       aircraftAltitudeM: view.aircraftAltitudeM,
+      rawGarminAltitudeFt,
+      rawGarminAltitudeM,
+      isGroundSample: isGroundSample(sample),
+      altitudeSource: sourceValue(sample, 'altitude_source') || '',
       terrainHeightM: Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : null,
       groundReferenceAltitudeM: groundReferenceM,
       groundReferenceSource: view.groundReferenceSource || null,
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
-      cameraHeightAboveAircraftM: cameraCartographic.height - view.aircraftAltitudeM,
+      finalCameraAltitudeM: cameraCartographic.height,
+      cameraHeightAboveAircraftM: cameraMinusAircraftM,
       cameraHeightAboveTerrainM: cameraCartographic.height - groundReferenceM,
       cameraHeightAboveCesiumTerrainM: Number.isFinite(lastTerrainHeightM) ? cameraCartographic.height - lastTerrainHeightM : null,
+      calibrationUpM,
+      syntheticEyeUpM,
+      totalVerticalOffsetM: cameraMinusAircraftM,
       aircraftCartesian,
       cameraCartesian: cameraWorld,
       cameraDirection: direction,
       cameraUp: up,
       orientationQuaternion: quaternion,
       calibration: cameraCalibration ? { ...cameraCalibration } : null,
-      bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, camera roll uses inverted Garmin roll for horizon convention',
+      bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, Garmin roll direct for camera horizon convention',
       verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovDeg,
       movementDebug,
       headingDegUsed: calibratedHeading,
       pitchDegUsed: calibratedPitch,
-      rollDegUsed: calibratedRoll,
+      rollDegUsed: visualCameraRoll,
+      rawGarminRollDeg,
+      visualCameraRollDeg: visualCameraRoll,
+      visualRollInverted: false,
+      rollConvention,
       uncalibratedHeadingDeg: view.heading,
       uncalibratedPitchDeg: view.pitch,
       uncalibratedRollDeg: view.roll,
@@ -1299,13 +1323,22 @@ cw_header('Cockpit Recorder Replay');
       ...cameraConfigLines,
       `aircraft lat/lon: ${fmtNum(dbg.aircraftLat, 7)}, ${fmtNum(dbg.aircraftLon, 7)}`,
       `aircraft altitude_ft: ${fmtNum(firstFinite(sample && sample.altitude_ft, dbg.aircraftAltitudeFt), 1)}`,
+      `raw Garmin altitude_ft: ${fmtNum(dbg.rawGarminAltitudeFt, 1)}`,
+      `raw Garmin altitude_m: ${fmtNum(dbg.rawGarminAltitudeM, 2)}`,
+      `is ground sample: ${dbg.isGroundSample === true ? 'yes' : (dbg.isGroundSample === false ? 'no' : '--')}`,
+      `altitude source: ${dbg.altitudeSource || '--'}`,
       `aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
       `terrain height_m: ${fmtNum(dbg.terrainHeightM, 2)}`,
       `ground reference_m: ${fmtNum(dbg.groundReferenceAltitudeM, 2)}`,
       `ground reference source: ${dbg.groundReferenceSource || '--'}`,
       `camera lat/lon: ${fmtNum(dbg.cameraLat, 7)}, ${fmtNum(dbg.cameraLon, 7)}`,
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
+      `final aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
+      `final camera altitude_m: ${fmtNum(dbg.finalCameraAltitudeM, 2)}`,
       `camera above aircraft_m: ${fmtNum(dbg.cameraHeightAboveAircraftM, 2)}`,
+      `calibration up_m: ${fmtNum(dbg.calibrationUpM, 2)}`,
+      `synthetic eye up_m: ${fmtNum(dbg.syntheticEyeUpM, 2)}`,
+      `total vertical offset_m: ${fmtNum(dbg.totalVerticalOffsetM, 2)}`,
       `camera AGL corrected_m: ${fmtNum(dbg.cameraHeightAboveTerrainM, 2)}`,
       `camera AGL Cesium terrain_m: ${fmtNum(dbg.cameraHeightAboveCesiumTerrainM, 2)}`,
       `aircraft move: ${fmtNum(movement.aircraftMoveM, 2)} m @ ${fmtNum(movement.aircraftMoveBearingDeg, 1)} deg`,
@@ -1319,6 +1352,10 @@ cw_header('Cockpit Recorder Replay');
       `heading used by camera: ${fmtNum(dbg.headingDegUsed, 1)} deg`,
       `pitch used by camera: ${fmtNum(dbg.pitchDegUsed, 1)} deg`,
       `roll used by camera: ${fmtNum(dbg.rollDegUsed, 1)} deg`,
+      `raw Garmin roll_deg: ${fmtNum(dbg.rawGarminRollDeg, 1)} deg`,
+      `visual camera roll_deg: ${fmtNum(dbg.visualCameraRollDeg, 1)} deg`,
+      `visual roll inverted: ${dbg.visualRollInverted === true ? 'yes' : (dbg.visualRollInverted === false ? 'no' : '--')}`,
+      `roll convention: ${dbg.rollConvention || '--'}`,
       `Cesium heading: ${fmtNum(dbg.cesiumHeadingDeg, 1)} deg / ${fmtNum(dbg.cesiumHeadingRad, 4)} rad`,
       `Cesium pitch: ${fmtNum(dbg.cesiumPitchDeg, 1)} deg / ${fmtNum(dbg.cesiumPitchRad, 4)} rad`,
       `Cesium roll: ${fmtNum(dbg.cesiumRollDeg, 1)} deg / ${fmtNum(dbg.cesiumRollRad, 4)} rad`,
