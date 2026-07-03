@@ -429,17 +429,19 @@ cw_header('Cockpit Recorder Replay');
 }
 .temperature-box {
   position: absolute;
-  right: 0;
+  left: 0;
   top: calc(100% + 8px);
   min-width: 118px;
+  box-sizing: border-box;
   padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(40, 40, 40, .70);
+  border-radius: 7px;
+  background: rgba(40, 40, 40, .50);
+  border: 1px solid rgba(255, 255, 255, .20);
   color: #fff;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.25;
-  text-align: right;
+  text-align: left;
 }
 .replay-dock {
   position: absolute;
@@ -2939,8 +2941,8 @@ cw_header('Cockpit Recorder Replay');
     const samples = (data.samples || []).map((sample) => ({
       ...sample,
       bank_deg: sample.roll_deg ?? sample.bank_deg ?? null,
-      gps_altitude_ft: sample.altitude_ft ?? sample.gps_altitude_ft ?? null,
-      estimated_indicated_altitude_ft: sample.altitude_ft ?? sample.estimated_indicated_altitude_ft ?? null,
+      gps_altitude_ft: sample.gps_altitude_ft ?? sample.altitude_ft ?? null,
+      estimated_indicated_altitude_ft: sample.estimated_indicated_altitude_ft ?? sample.baro_altitude_ft ?? sample.altitude_ft ?? null,
       groundspeed_kt: sample.ground_speed_kt ?? sample.groundspeed_kt ?? null,
     }));
 
