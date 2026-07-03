@@ -477,7 +477,7 @@ cw_header('Cockpit Recorder Replay');
   const groundReferenceAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
     if (!isGroundSample(sample)) {
-      return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : msl;
+      return msl;
     }
     if (terrainLooksCredibleForGround(msl)) {
       return lastTerrainHeightM;
@@ -490,7 +490,7 @@ cw_header('Cockpit Recorder Replay');
   const groundReferenceSource = (sample) => {
     const msl = rawAltitudeM(sample);
     if (!isGroundSample(sample)) {
-      return Number.isFinite(lastTerrainHeightM) ? 'cesium_terrain_airborne_floor' : 'replay_altitude';
+      return Number.isFinite(msl) ? 'replay_airborne_altitude' : 'unavailable';
     }
     return terrainLooksCredibleForGround(msl) ? 'cesium_rendered_terrain' : 'replay_ground_altitude';
   };
@@ -499,12 +499,6 @@ cw_header('Cockpit Recorder Replay');
     const groundReferenceM = groundReferenceAltitudeM(sample);
     if (isGroundSample(sample)) {
       return groundReferenceM;
-    }
-    if (Number.isFinite(Number(sample && sample.visual_altitude_ft))) {
-      return feetToMeters(Number(sample.visual_altitude_ft));
-    }
-    if (Number.isFinite(lastTerrainHeightM)) {
-      return Math.max(msl, lastTerrainHeightM + 2);
     }
     return msl;
   };
@@ -911,7 +905,7 @@ cw_header('Cockpit Recorder Replay');
     const upNoRoll = Cesium.Cartesian3.normalize(crossCartesian(rightLevel, forward), new Cesium.Cartesian3());
     const up = Cesium.Cartesian3.normalize(addCartesian(
       scaleCartesian(upNoRoll, Math.cos(r)),
-      scaleCartesian(rightLevel, Math.sin(r))
+      scaleCartesian(rightLevel, -Math.sin(r))
     ), new Cesium.Cartesian3());
 
     return { forward, right: rightLevel, up };
@@ -1018,7 +1012,7 @@ cw_header('Cockpit Recorder Replay');
       cameraUp: up,
       orientationQuaternion: quaternion,
       calibration: cameraCalibration ? { ...cameraCalibration } : null,
-      bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, roll -> up vector',
+      bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, camera roll uses inverted Garmin roll for horizon convention',
       verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovDeg,
       movementDebug,
       headingDegUsed: calibratedHeading,
