@@ -397,6 +397,11 @@ cw_header('Cockpit Recorder Replay');
           <input id="calibrationSmoothness" class="replay-calibration-range" type="range" min="0" max="20" step="0.5" value="10">
           <output id="calibrationSmoothnessValue" for="calibrationSmoothness">10.0</output>
         </div>
+        <div class="replay-calibration-row">
+          <label for="horizonBarOffset">Horizon bar vertical offset</label>
+          <input id="horizonBarOffset" class="replay-calibration-range" type="range" min="-240" max="240" step="2" value="0">
+          <output id="horizonBarOffsetValue" for="horizonBarOffset">0 px</output>
+        </div>
       </div>
       <div class="replay-calibration-section">
         <div class="replay-calibration-section-title">Instrument Placeholders</div>
@@ -497,6 +502,8 @@ cw_header('Cockpit Recorder Replay');
   const calibrationFovInput = document.getElementById('calibrationFovInput');
   const calibrationSmoothness = document.getElementById('calibrationSmoothness');
   const calibrationSmoothnessValue = document.getElementById('calibrationSmoothnessValue');
+  const horizonBarOffset = document.getElementById('horizonBarOffset');
+  const horizonBarOffsetValue = document.getElementById('horizonBarOffsetValue');
   const instrumentToggles = Array.from(document.querySelectorAll('[data-instrument-toggle]'));
   const calibrationValues = document.getElementById('calibrationValues');
   let payload = null;
@@ -819,6 +826,7 @@ cw_header('Cockpit Recorder Replay');
       rollDeg: clamp(firstFinite(saved.rollDeg, 0), -45, 45),
       fovDeg: clamp(firstFinite(saved.fovDeg, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg), 35, 100),
       smoothness: clamp(firstFinite(saved.smoothness, SYNTHETIC_VISION_DEFAULTS.positionSmoothing), 0, 20),
+      horizonBarOffsetPx: clamp(firstFinite(saved.horizonBarOffsetPx, 0), -240, 240),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
@@ -848,6 +856,12 @@ cw_header('Cockpit Recorder Replay');
     if (calibrationSmoothnessValue) {
       calibrationSmoothnessValue.textContent = Number(cameraCalibration.smoothness).toFixed(1);
     }
+    if (horizonBarOffset) {
+      horizonBarOffset.value = String(cameraCalibration.horizonBarOffsetPx);
+    }
+    if (horizonBarOffsetValue) {
+      horizonBarOffsetValue.textContent = `${Math.round(cameraCalibration.horizonBarOffsetPx)} px`;
+    }
     instrumentToggles.forEach((toggle) => {
       const key = toggle.getAttribute('data-instrument-toggle') || '';
       toggle.checked = cameraCalibration.instruments && cameraCalibration.instruments[key] === true;
@@ -865,6 +879,7 @@ cw_header('Cockpit Recorder Replay');
       `Roll ${cameraCalibration.rollDeg >= 0 ? '+' : ''}${cameraCalibration.rollDeg.toFixed(1)}deg`,
       `FOV ${cameraCalibration.fovDeg.toFixed(0)}deg H`,
       `Smooth ${cameraCalibration.smoothness.toFixed(1)}`,
+      `Horizon ${cameraCalibration.horizonBarOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.horizonBarOffsetPx)}px`,
       agl,
     ].join(' | ');
   }
@@ -897,6 +912,14 @@ cw_header('Cockpit Recorder Replay');
     cameraCalibration.smoothness = clamp(firstFinite(value, SYNTHETIC_VISION_DEFAULTS.positionSmoothing), 0, 20);
     saveCameraCalibration();
     updateCalibrationPanel();
+  }
+
+  function setHorizonBarOffset(value) {
+    if (!cameraCalibration) return;
+    cameraCalibration.horizonBarOffsetPx = clamp(firstFinite(value, 0), -240, 240);
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    updateHorizonLine(displayCamera);
   }
 
   function setInstrumentPlaceholder(key, enabled) {
@@ -934,7 +957,8 @@ cw_header('Cockpit Recorder Replay');
     const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = height / 2;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
-    const y = clamp(halfHeight + pitchOffsetPx, -height, height * 2);
+    const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
+    const y = clamp(halfHeight + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
     horizonLine.hidden = false;
     horizonLine.style.top = `${y}px`;
     horizonLine.style.transform = `translate(-50%, -50%) rotate(${-rollDeg}deg)`;
@@ -2057,6 +2081,9 @@ cw_header('Cockpit Recorder Replay');
   }
   if (calibrationSmoothness) {
     calibrationSmoothness.addEventListener('input', () => setSyntheticVisionSmoothness(calibrationSmoothness.value));
+  }
+  if (horizonBarOffset) {
+    horizonBarOffset.addEventListener('input', () => setHorizonBarOffset(horizonBarOffset.value));
   }
   instrumentToggles.forEach((toggle) => {
     toggle.addEventListener('change', () => {
