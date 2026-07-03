@@ -56,6 +56,7 @@ function replay_api_json_response(array $payload, int $statusCode = 200): void
 
 $id = trim((string)($_GET['id'] ?? ''));
 $version = trim((string)($_GET['version'] ?? ''));
+$compact = in_array(strtolower(trim((string)($_GET['compact'] ?? ''))), array('1', 'true', 'yes'), true);
 if ($id === '') {
     replay_api_json_response(array('ok' => false, 'error' => 'Recording id is required.'), 400);
 }
@@ -72,7 +73,7 @@ try {
             @ob_end_clean();
         }
         $replayApiJsonStarted = true;
-        $service->streamReplayPayloadV2Json($id);
+        $service->streamReplayPayloadV2Json($id, $compact);
         exit;
     }
 

@@ -1002,8 +1002,12 @@ cw_header('Cockpit Recorder Replay');
   let displayAltitudeFt = null;
   let displayVsiFpm = null;
   let altimeterSettingUnit = 'hpa';
+  let attitudeOverlaySignature = '';
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
+  let visualFallbackPlaying = false;
+  let visualFallbackStartedMs = 0;
+  let visualFallbackStartedT = 0;
   let standalonePlaying = false;
   let standaloneStartedMs = 0;
   let standaloneStartedT = 0;
@@ -1766,21 +1770,21 @@ cw_header('Cockpit Recorder Replay');
     const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
     const horizonY = clamp(halfHeight + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
-    const referenceY = clamp(height * 0.72 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 80, height - 60);
+    const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, height - 90);
     const centerX = width / 2;
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
-    const pitchMarks = [-20, -15, -10, -5, 5, 10, 15, 20].map((deg) => {
+    const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
-      const half = major ? 76 : 43;
-      const gap = major ? 42 : 32;
+      const half = major ? 62 : 34;
+      const gap = major ? 36 : 26;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
-        ? `<text x="${-(half + 24)}" y="${(y + 9).toFixed(1)}" font-size="${major ? 28 : 24}" text-anchor="middle">${label}</text><text x="${(half + 24)}" y="${(y + 9).toFixed(1)}" font-size="${major ? 28 : 24}" text-anchor="middle">${label}</text>`
+        ? `<text x="${-(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text><text x="${(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text>`
         : '';
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${-gap}" y2="${y.toFixed(1)}"></line><line class="attitude-white" x1="${gap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
-    const arcRadius = clamp(Math.min(width * 0.27, height * 0.24), 145, 260);
+    const arcRadius = clamp(Math.min(width * 0.19, height * 0.18), 120, 205);
     const arcPoints = [];
     for (let bank = -60; bank <= 60; bank += 4) {
       arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius - 8).toFixed(1)}`);
@@ -1795,8 +1799,22 @@ cw_header('Cockpit Recorder Replay');
     }).join('');
     const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
     const slipX = slip / 0.35 * 38;
-    const fixedLeftX = clamp(centerX - 0.46 * width, 46, centerX - 150);
-    const fixedRightX = clamp(centerX + 0.46 * width, centerX + 150, width - 46);
+    const fixedLeftX = clamp(centerX - 0.40 * width, 42, centerX - 130);
+    const fixedRightX = clamp(centerX + 0.40 * width, centerX + 130, width - 42);
+    const signature = [
+      Math.round(width),
+      Math.round(height),
+      Math.round(horizonY),
+      Math.round(referenceY),
+      Math.round(rollDeg * 2),
+      Math.round(verticalFovDeg),
+      Math.round(slipX),
+    ].join('|');
+    if (signature === attitudeOverlaySignature) {
+      attitudeOverlay.hidden = false;
+      return;
+    }
+    attitudeOverlaySignature = signature;
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.innerHTML = `
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
@@ -1808,14 +1826,14 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${referenceY.toFixed(1)})">
         <polygon class="attitude-slip" points="0,-${Math.round(arcRadius * 0.72)} -16,-${Math.round(arcRadius * 0.72) + 34} 16,-${Math.round(arcRadius * 0.72) + 34}"></polygon>
         <polygon class="attitude-slip" points="${(slipX - 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2} ${(slipX - 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2}"></polygon>
-        <polygon class="attitude-yellow" points="-250,0 -146,0 -146,16 -250,16"></polygon>
-        <polygon class="attitude-yellow" points="146,0 250,0 250,16 146,16"></polygon>
-        <polygon class="attitude-yellow" points="-150,70 -26,10 0,0 -116,78"></polygon>
-        <polygon class="attitude-yellow" points="150,70 26,10 0,0 116,78"></polygon>
-        <line class="attitude-white" x1="-34" y1="94" x2="34" y2="94"></line>
+        <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
+        <polygon class="attitude-yellow" points="128,0 210,0 210,14 128,14"></polygon>
+        <polygon class="attitude-yellow" points="-126,50 -24,8 0,0 -98,58"></polygon>
+        <polygon class="attitude-yellow" points="126,50 24,8 0,0 98,58"></polygon>
+        <line class="attitude-white" x1="-30" y1="74" x2="30" y2="74"></line>
       </g>
-      <rect class="attitude-yellow" x="${fixedLeftX.toFixed(1)}" y="${(referenceY - 10).toFixed(1)}" width="88" height="16" rx="7"></rect>
-      <rect class="attitude-yellow" x="${(fixedRightX - 88).toFixed(1)}" y="${(referenceY - 10).toFixed(1)}" width="88" height="16" rx="7"></rect>
+      <rect class="attitude-yellow" x="${fixedLeftX.toFixed(1)}" y="${(referenceY - 8).toFixed(1)}" width="72" height="14" rx="7"></rect>
+      <rect class="attitude-yellow" x="${(fixedRightX - 72).toFixed(1)}" y="${(referenceY - 8).toFixed(1)}" width="72" height="14" rx="7"></rect>
     `;
     attitudeOverlay.hidden = false;
   }
@@ -2066,6 +2084,7 @@ cw_header('Cockpit Recorder Replay');
     displayAirspeedKt = null;
     displayAltitudeFt = null;
     displayVsiFpm = null;
+    attitudeOverlaySignature = '';
   }
 
   function applyCameraModeControls() {
@@ -2858,6 +2877,9 @@ cw_header('Cockpit Recorder Replay');
     if (standaloneReplay && standalonePlaying) {
       standaloneStartedMs = performance.now();
       standaloneStartedT = activeT;
+    } else if (visualFallbackPlaying) {
+      visualFallbackStartedMs = performance.now();
+      visualFallbackStartedT = activeT;
     }
     const snap = forceSnap || Math.abs(activeT - previousT) > CAMERA_SNAP_SEEK_SEC;
     if (snap) {
@@ -2880,12 +2902,30 @@ cw_header('Cockpit Recorder Replay');
         standalonePlaying = false;
         playButton.textContent = 'Play';
       }
+    } else if (visualFallbackPlaying) {
+      const elapsed = Math.max(0, (performance.now() - visualFallbackStartedMs) / 1000);
+      activeT = Math.max(0, Math.min(maxT, visualFallbackStartedT + elapsed));
+      if (activeT >= maxT) {
+        visualFallbackPlaying = false;
+        playButton.textContent = 'Play';
+      }
     } else {
       activeT = Math.max(0, Math.min(maxT, Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT));
     }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     safeRenderCesium(false);
+  }
+
+  function startVisualFallbackPlayback() {
+    visualFallbackPlaying = true;
+    visualFallbackStartedMs = performance.now();
+    visualFallbackStartedT = activeT;
+    playButton.textContent = 'Pause';
+    lastRenderMs = null;
+    if (animationFrame === null) {
+      animationFrame = requestAnimationFrame(animatePlayback);
+    }
   }
 
   function togglePlayback() {
@@ -2905,11 +2945,39 @@ cw_header('Cockpit Recorder Replay');
       }
       return;
     }
+    if (visualFallbackPlaying) {
+      visualFallbackPlaying = false;
+      if (animationFrame !== null && audio.paused) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      playButton.textContent = 'Play';
+      return;
+    }
     if (audio.paused) {
-      audio.play();
+      let playPromise = null;
+      try {
+        playPromise = audio.play();
+      } catch (err) {
+        startVisualFallbackPlayback();
+        return;
+      }
       playButton.textContent = 'Pause';
+      if (animationFrame === null) {
+        animationFrame = requestAnimationFrame(animatePlayback);
+      }
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {
+          startVisualFallbackPlayback();
+        });
+      } else {
+        window.setTimeout(() => {
+          if (audio.paused && !visualFallbackPlaying) startVisualFallbackPlayback();
+        }, 150);
+      }
     } else {
       audio.pause();
+      visualFallbackPlaying = false;
       playButton.textContent = 'Play';
     }
   }
@@ -3030,6 +3098,7 @@ cw_header('Cockpit Recorder Replay');
     togglePlayback();
   });
   audio.addEventListener('pause', () => {
+    if (visualFallbackPlaying) return;
     playButton.textContent = 'Play';
     if (animationFrame !== null) {
       cancelAnimationFrame(animationFrame);
@@ -3045,7 +3114,7 @@ cw_header('Cockpit Recorder Replay');
   });
 
   function animatePlayback() {
-    if (!payload || (standaloneReplay ? !standalonePlaying : audio.paused)) {
+    if (!payload || (standaloneReplay ? !standalonePlaying : (audio.paused && !visualFallbackPlaying))) {
       animationFrame = null;
       return;
     }
@@ -3063,7 +3132,7 @@ cw_header('Cockpit Recorder Replay');
     try {
       const replayUrl = standaloneReplay
         ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
-        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2`;
+        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1`;
       const response = await fetch(replayUrl);
       const text = await response.text();
       try {

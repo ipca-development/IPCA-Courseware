@@ -604,7 +604,7 @@ final class CockpitReconstructionService
         );
     }
 
-    public function streamReplayPayloadV2Json(string $id): void
+    public function streamReplayPayloadV2Json(string $id, bool $compact = false): void
     {
         $payload = $this->replayPayloadV2Metadata($id);
         if (empty($payload['ok'])) {
@@ -635,9 +635,81 @@ final class CockpitReconstructionService
                 echo ',';
             }
             $sampleFirst = false;
+            if ($compact) {
+                $sample = $this->compactReplaySample($sample);
+            }
             echo json_encode($sample, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         }
         echo ']}';
+    }
+
+    /**
+     * @param array<string,mixed> $sample
+     * @return array<string,mixed>
+     */
+    private function compactReplaySample(array $sample): array
+    {
+        $fields = array(
+            't',
+            'lat',
+            'lon',
+            'altitude_ft',
+            'altitude_ft_msl',
+            'visual_altitude_ft',
+            'gps_altitude_ft',
+            'baro_altitude_ft',
+            'estimated_indicated_altitude_ft',
+            'estimated_true_altitude_from_indicated_ft',
+            'field_calibrated_true_altitude_ft',
+            'visual_pitch_deg',
+            'visual_roll_deg',
+            'raw_pitch_deg',
+            'raw_roll_deg',
+            'pitch_deg',
+            'roll_deg',
+            'bank_deg',
+            'heading_deg',
+            'heading_deg_true',
+            'heading_deg_magnetic',
+            'true_heading_deg',
+            'camera_heading_deg',
+            'magnetic_variation_deg',
+            'heading_reference',
+            'heading_source',
+            'heading_owner',
+            'track_deg_true',
+            'track_source',
+            'crab_angle_deg',
+            'ground_speed_kt',
+            'groundspeed_kt',
+            'ias_kt',
+            'tas_kt',
+            'vertical_speed_fpm',
+            'estimated_vertical_speed_fpm',
+            'altimeter_setting_inhg',
+            'altimeter_setting_hpa',
+            'altitude_bug_ft',
+            'oat_c',
+            'isa_deviation_c',
+            'estimated_slip_skid_g',
+            'slip_skid_g',
+            'position_quality',
+            'altitude_quality',
+            'attitude_quality',
+            'heading_quality',
+            'track_quality',
+            'speed_quality',
+            'position_source',
+            'altitude_source',
+            'phase',
+        );
+        $compact = array();
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $sample)) {
+                $compact[$field] = $sample[$field];
+            }
+        }
+        return $compact;
     }
 
     /**
