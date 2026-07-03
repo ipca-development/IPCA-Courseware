@@ -149,6 +149,8 @@ cw_header('Cockpit Recorder Replay');
 .airspeed-tape-footer-label { font-size: 21px; }
 .airspeed-tape-tas-value,
 .airspeed-tape-gs-value { font-size: 18px; }
+.airspeed-tape-gs-value,
+.airspeed-tape-gs-unit { color: #ff67ff; }
 .airspeed-tape-unit { font-size: 14px; margin-left: 3px; }
 .airspeed-tape-body {
   position: relative;
@@ -244,6 +246,199 @@ cw_header('Cockpit Recorder Replay');
   border-top: 8px solid transparent;
   border-bottom: 8px solid transparent;
   border-right: 10px solid #050505;
+}
+.altimeter-stack {
+  position: absolute;
+  right: clamp(108px, 17vw, 210px);
+  top: 72px;
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+}
+.altimeter-tape {
+  width: 128px;
+  height: min(70vh, 590px);
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.altimeter-header,
+.altimeter-footer {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  background: rgba(0, 0, 0, .88);
+  font-weight: 900;
+  letter-spacing: .02em;
+  flex: 0 0 42px;
+  position: relative;
+  z-index: 2;
+}
+.altimeter-header { border-radius: 10px 10px 0 0; color: #5fffff; font-size: 24px; }
+.altimeter-footer { border-radius: 0 0 10px 10px; color: #5fffff; font-size: 21px; }
+.altimeter-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(40, 40, 40, .56);
+  border-left: 1px solid rgba(255, 255, 255, .24);
+  border-right: 1px solid rgba(255, 255, 255, .24);
+}
+.altimeter-scale,
+.altimeter-bugs {
+  position: absolute;
+  inset: 0;
+}
+.altimeter-tick {
+  position: absolute;
+  left: 6px;
+  height: 2px;
+  background: rgba(255, 255, 255, .92);
+  transform: translateY(-1px);
+}
+.altimeter-tick.is-major { width: 27px; height: 3px; }
+.altimeter-tick.is-minor { width: 13px; opacity: .9; }
+.altimeter-number {
+  position: absolute;
+  right: 18px;
+  transform: translateY(-50%);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+.altimeter-pointer {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 90px;
+  height: 56px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  background: #050505;
+  border-radius: 7px 8px 8px 7px;
+  font-size: 30px;
+  font-weight: 900;
+}
+.altimeter-pointer::before {
+  content: "";
+  position: absolute;
+  left: -15px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-right: 15px solid #050505;
+}
+.altimeter-bug {
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 28px;
+  transform: translateY(-50%);
+  background: #20e4e4;
+  border-radius: 2px;
+}
+.altimeter-bug::after {
+  content: "";
+  position: absolute;
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 10px solid #20e4e4;
+}
+.altimeter-da {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  height: 34px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: rgba(0, 0, 0, .88);
+  font-size: 14px;
+  font-weight: 900;
+}
+.vsi-stack {
+  position: relative;
+  width: 62px;
+  height: min(54vh, 430px);
+  min-height: 280px;
+  border-radius: 7px;
+  background: rgba(40, 40, 40, .50);
+  border: 1px solid rgba(255, 255, 255, .20);
+  overflow: visible;
+}
+.vsi-scale,
+.vsi-pointer-layer {
+  position: absolute;
+  inset: 0;
+}
+.vsi-tick {
+  position: absolute;
+  left: 0;
+  width: 14px;
+  height: 2px;
+  background: rgba(255, 255, 255, .92);
+  transform: translateY(-1px);
+}
+.vsi-tick.is-major { width: 22px; height: 3px; }
+.vsi-number {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 22px;
+  font-weight: 800;
+}
+.vsi-pointer {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 45px;
+  height: 34px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  background: #111;
+  border-radius: 7px;
+  font-size: 20px;
+  font-weight: 900;
+}
+.vsi-pointer::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-right: 14px solid #111;
+}
+.temperature-box {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 88px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(40, 40, 40, .70);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: right;
 }
 .replay-dock {
   position: absolute;
@@ -517,7 +712,26 @@ cw_header('Cockpit Recorder Replay');
       </div>
       <div class="airspeed-tape-footer">
         <span class="airspeed-tape-footer-label">GS</span>
-        <span><span id="airspeedGsValue" class="airspeed-tape-gs-value">--</span><span class="airspeed-tape-unit">KT</span></span>
+        <span><span id="airspeedGsValue" class="airspeed-tape-gs-value">--</span><span class="airspeed-tape-unit airspeed-tape-gs-unit">KT</span></span>
+      </div>
+    </div>
+    <div id="altimeterStack" class="altimeter-stack" aria-label="Altimeter and vertical speed indicator" hidden>
+      <div class="altimeter-tape">
+        <div id="altimeterBugValue" class="altimeter-header">----</div>
+        <div id="altimeterBody" class="altimeter-body">
+          <div id="altimeterScale" class="altimeter-scale"></div>
+          <div id="altimeterBugs" class="altimeter-bugs"></div>
+          <div id="altimeterPointer" class="altimeter-pointer">----</div>
+          <div id="altimeterDa" class="altimeter-da">DA <span id="altimeterDaValue">----</span>FT</div>
+        </div>
+        <div id="altimeterSettingValue" class="altimeter-footer">---- HPA</div>
+      </div>
+      <div class="vsi-stack">
+        <div id="vsiScale" class="vsi-scale"></div>
+        <div class="vsi-pointer-layer">
+          <div id="vsiPointer" class="vsi-pointer">0</div>
+        </div>
+        <div id="temperatureBox" class="temperature-box">OAT --°C<br>ISA --°C</div>
       </div>
     </div>
     <div class="replay-menu" aria-label="Replay overlay menu">
@@ -685,6 +899,18 @@ cw_header('Cockpit Recorder Replay');
   const airspeedTapePointer = document.getElementById('airspeedTapePointer');
   const airspeedTasValue = document.getElementById('airspeedTasValue');
   const airspeedGsValue = document.getElementById('airspeedGsValue');
+  const altimeterStack = document.getElementById('altimeterStack');
+  const altimeterBody = document.getElementById('altimeterBody');
+  const altimeterScale = document.getElementById('altimeterScale');
+  const altimeterBugs = document.getElementById('altimeterBugs');
+  const altimeterPointer = document.getElementById('altimeterPointer');
+  const altimeterBugValue = document.getElementById('altimeterBugValue');
+  const altimeterSettingValue = document.getElementById('altimeterSettingValue');
+  const altimeterDa = document.getElementById('altimeterDa');
+  const altimeterDaValue = document.getElementById('altimeterDaValue');
+  const vsiScale = document.getElementById('vsiScale');
+  const vsiPointer = document.getElementById('vsiPointer');
+  const temperatureBox = document.getElementById('temperatureBox');
   const calibrationToggle = document.getElementById('calibrationToggle');
   const debugToggle = document.getElementById('debugToggle');
   const cameraPanel = document.getElementById('cameraPanel');
@@ -730,6 +956,8 @@ cw_header('Cockpit Recorder Replay');
   let currentCameraDebug = null;
   let previousSyntheticFrameDebug = null;
   let displayAirspeedKt = null;
+  let displayAltitudeFt = null;
+  let displayVsiFpm = null;
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
   let standalonePlaying = false;
@@ -754,6 +982,8 @@ cw_header('Cockpit Recorder Replay');
   };
   const SYNTHETIC_TEST_HEADING_DEG = 230;
   const AIRSPEED_TAPE_SMOOTHING_RATE = 18;
+  const ALTIMETER_TAPE_SMOOTHING_RATE = 18;
+  const VSI_SMOOTHING_RATE = ALTIMETER_TAPE_SMOOTHING_RATE;
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
     eyeOffsetYRightM: SYNTHETIC_VISION_DEFAULTS.rightOffsetM,
@@ -780,7 +1010,7 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'horizon_bar']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -1129,6 +1359,7 @@ cw_header('Cockpit Recorder Replay');
     updateCalibrationPanel();
     updateHorizonLine(displayCamera);
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
   }
 
   function setInstrumentPlaceholder(key, enabled) {
@@ -1236,6 +1467,145 @@ cw_header('Cockpit Recorder Replay');
     if (airspeedTapePointer) airspeedTapePointer.textContent = String(Math.round(displayAirspeedKt));
     if (airspeedTasValue) airspeedTasValue.textContent = tas === null ? '--' : String(Math.round(tas));
     if (airspeedGsValue) airspeedGsValue.textContent = gs === null ? '--' : String(Math.round(gs));
+  }
+
+  function altitudeSpeedToY(altitudeFt, currentAltitudeFt, centerY, pxPerFt) {
+    return centerY + (currentAltitudeFt - altitudeFt) * pxPerFt;
+  }
+
+  function selectedAltitudeBugFt(sample) {
+    return firstFinite(
+      sample && sample.altitude_bug_ft,
+      sample && sample.selected_altitude_ft,
+      sample && sample.sel_alt_ft
+    );
+  }
+
+  function indicatedAltitudeFt(sample) {
+    return firstFinite(
+      sample && sample.estimated_indicated_altitude_ft,
+      sample && sample.baro_altitude_ft,
+      sample && sample.altitude_ft_msl,
+      sample && sample.altitude_ft
+    );
+  }
+
+  function altimeterHpa(sample) {
+    const hpa = firstFinite(sample && sample.altimeter_setting_hpa);
+    if (hpa !== null) return hpa;
+    const inhg = firstFinite(sample && sample.altimeter_setting_inhg);
+    return inhg === null ? null : inhg * 33.8638866667;
+  }
+
+  function isaDeviationC(sample, altitudeFt, oatC) {
+    const provided = firstFinite(sample && sample.isa_deviation_c, sample && sample.isa_dev_c);
+    if (provided !== null) return provided;
+    if (oatC === null || !Number.isFinite(Number(altitudeFt))) return null;
+    const isaC = 15 - 1.98 * (Number(altitudeFt) / 1000);
+    return oatC - isaC;
+  }
+
+  function decisionAltitudeFt(sample) {
+    return firstFinite(
+      sample && sample.decision_altitude_ft,
+      sample && sample.da_ft,
+      sample && sample.minimums_ft,
+      sample && sample.minimum_altitude_ft
+    );
+  }
+
+  function updateAltimeterTape(sample, dtSec = 1 / 60, snap = false) {
+    if (!altimeterStack) return;
+    if (!sample || !instrumentEnabled('altimeter')) {
+      altimeterStack.hidden = true;
+      displayAltitudeFt = null;
+      displayVsiFpm = null;
+      return;
+    }
+    const altitudeFt = indicatedAltitudeFt(sample);
+    if (altitudeFt === null) {
+      altimeterStack.hidden = true;
+      displayAltitudeFt = null;
+      displayVsiFpm = null;
+      return;
+    }
+    if (snap || displayAltitudeFt === null || !Number.isFinite(displayAltitudeFt) || Math.abs(displayAltitudeFt - altitudeFt) > 1000) {
+      displayAltitudeFt = altitudeFt;
+    } else {
+      const alpha = smoothFactor(ALTIMETER_TAPE_SMOOTHING_RATE, dtSec);
+      displayAltitudeFt += (altitudeFt - displayAltitudeFt) * alpha;
+    }
+    const vsiFpm = firstFinite(sample.vertical_speed_fpm, sample.estimated_vertical_speed_fpm, 0) || 0;
+    if (snap || displayVsiFpm === null || !Number.isFinite(displayVsiFpm) || Math.abs(displayVsiFpm - vsiFpm) > 2500) {
+      displayVsiFpm = vsiFpm;
+    } else {
+      const alpha = smoothFactor(VSI_SMOOTHING_RATE, dtSec);
+      displayVsiFpm += (vsiFpm - displayVsiFpm) * alpha;
+    }
+
+    const bodyHeight = Number(altimeterBody && altimeterBody.clientHeight) || 440;
+    const centerY = bodyHeight / 2;
+    const pxPerFt = 0.34;
+    const visibleMin = Math.floor((displayAltitudeFt - (centerY / pxPerFt) - 100) / 20) * 20;
+    const visibleMax = Math.ceil((displayAltitudeFt + (centerY / pxPerFt) + 100) / 20) * 20;
+    let scaleHtml = '';
+    for (let alt = visibleMin; alt <= visibleMax; alt += 20) {
+      const y = altitudeSpeedToY(alt, displayAltitudeFt, centerY, pxPerFt);
+      const major = alt % 100 === 0;
+      scaleHtml += `<div class="altimeter-tick ${major ? 'is-major' : 'is-minor'}" style="top:${y.toFixed(1)}px"></div>`;
+      if (major) {
+        scaleHtml += `<div class="altimeter-number" style="top:${y.toFixed(1)}px">${Math.round(alt)}</div>`;
+      }
+    }
+
+    const bugFt = selectedAltitudeBugFt(sample);
+    const bugY = bugFt === null ? null : altitudeSpeedToY(bugFt, displayAltitudeFt, centerY, pxPerFt);
+    const bugHtml = bugY !== null && bugY >= -20 && bugY <= bodyHeight + 20
+      ? `<div class="altimeter-bug" style="top:${bugY.toFixed(1)}px"></div>`
+      : '';
+    const settingHpa = altimeterHpa(sample);
+    const oatC = firstFinite(sample.oat_c);
+    const isaDevC = isaDeviationC(sample, altitudeFt, oatC);
+    const daFt = decisionAltitudeFt(sample);
+
+    altimeterStack.hidden = false;
+    if (altimeterScale) altimeterScale.innerHTML = scaleHtml;
+    if (altimeterBugs) altimeterBugs.innerHTML = bugHtml;
+    if (altimeterPointer) altimeterPointer.textContent = String(Math.round(displayAltitudeFt));
+    if (altimeterBugValue) altimeterBugValue.textContent = bugFt === null ? '----' : `${Math.round(bugFt)}FT`;
+    if (altimeterSettingValue) altimeterSettingValue.textContent = settingHpa === null ? '---- hPa' : `${Math.round(settingHpa)} hPa`;
+    if (temperatureBox) {
+      const oatText = oatC === null ? '--' : `${Math.round(oatC)}°C`;
+      const isaText = isaDevC === null ? '--' : `${isaDevC >= 0 ? '+' : ''}${Math.round(isaDevC)}°C`;
+      temperatureBox.innerHTML = `OAT ${escapeHtml(oatText)}<br>ISA ${escapeHtml(isaText)}`;
+    }
+    if (altimeterDa && altimeterDaValue) {
+      if (daFt === null) {
+        altimeterDa.style.display = 'none';
+      } else {
+        altimeterDa.style.display = 'flex';
+        altimeterDaValue.textContent = String(Math.round(daFt));
+      }
+    }
+    updateVsiTape(displayVsiFpm);
+  }
+
+  function updateVsiTape(vsiFpm) {
+    if (!vsiScale || !vsiPointer) return;
+    const height = Number(vsiScale.parentElement && vsiScale.parentElement.clientHeight) || 360;
+    const centerY = height / 2;
+    const maxFpm = 2000;
+    const yForVsi = (value) => centerY - clamp(value, -maxFpm, maxFpm) / maxFpm * (height * 0.44);
+    const marks = [-2000, -1000, -500, 0, 500, 1000, 2000];
+    vsiScale.innerHTML = marks.map((value) => {
+      const major = value === -2000 || value === -1000 || value === 0 || value === 1000 || value === 2000;
+      const label = Math.abs(value) >= 1000 ? String(Math.abs(value) / 1000) : (value === 0 ? '0' : '.5');
+      const y = yForVsi(value);
+      return `<div class="vsi-tick ${major ? 'is-major' : 'is-minor'}" style="top:${y.toFixed(1)}px"></div>${major || value === 500 || value === -500 ? `<div class="vsi-number" style="top:${y.toFixed(1)}px">${escapeHtml(label)}</div>` : ''}`;
+    }).join('');
+    const pointerY = yForVsi(vsiFpm);
+    vsiPointer.style.top = `${pointerY.toFixed(1)}px`;
+    vsiPointer.textContent = String(Math.round(vsiFpm / 100) / 10).replace(/^-0$/, '0');
   }
 
   function updateHorizonLine(view) {
@@ -1508,6 +1878,8 @@ cw_header('Cockpit Recorder Replay');
     lastRenderMs = null;
     previousSyntheticFrameDebug = null;
     displayAirspeedKt = null;
+    displayAltitudeFt = null;
+    displayVsiFpm = null;
   }
 
   function applyCameraModeControls() {
@@ -1805,6 +2177,7 @@ cw_header('Cockpit Recorder Replay');
     if (cameraMode === 'free') {
       updateHorizonLine(null);
       updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+      updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
       updateTerrainHeight(sampleAt(activeT));
       updateDebugOverlay(sampleAt(activeT), displayCamera);
       return;
@@ -1870,6 +2243,7 @@ cw_header('Cockpit Recorder Replay');
     }
     updateHorizonLine(view);
     updateAirspeedTape(sample, dtSec, snap);
+    updateAltimeterTape(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
   }
 
@@ -1927,14 +2301,21 @@ cw_header('Cockpit Recorder Replay');
       estimated_indicated_altitude_ft: lerp(before.estimated_indicated_altitude_ft, after.estimated_indicated_altitude_ft),
       estimated_true_altitude_from_indicated_ft: lerp(before.estimated_true_altitude_from_indicated_ft, after.estimated_true_altitude_from_indicated_ft),
       altimeter_setting_inhg: lerp(before.altimeter_setting_inhg, after.altimeter_setting_inhg),
+      altimeter_setting_hpa: lerp(before.altimeter_setting_hpa, after.altimeter_setting_hpa),
+      altitude_bug_ft: lerp(before.altitude_bug_ft, after.altitude_bug_ft),
+      decision_altitude_ft: lerp(before.decision_altitude_ft, after.decision_altitude_ft),
+      da_ft: lerp(before.da_ft, after.da_ft),
+      minimums_ft: lerp(before.minimums_ft, after.minimums_ft),
       airport_elevation_ft: lerp(before.airport_elevation_ft, after.airport_elevation_ft),
       field_altitude_offset_ft: lerp(before.field_altitude_offset_ft, after.field_altitude_offset_ft),
       oat_c: lerp(before.oat_c, after.oat_c),
+      isa_deviation_c: lerp(before.isa_deviation_c, after.isa_deviation_c),
       estimated_slip_skid_g: lerp(before.estimated_slip_skid_g, after.estimated_slip_skid_g),
       estimated_wind_speed_kt: lerp(before.estimated_wind_speed_kt, after.estimated_wind_speed_kt),
       estimated_wind_direction_deg_true: lerpAngle(before.estimated_wind_direction_deg_true, after.estimated_wind_direction_deg_true),
       estimated_tas_kt: lerp(before.estimated_tas_kt, after.estimated_tas_kt),
       ias_kt: lerp(before.ias_kt, after.ias_kt),
+      tas_kt: lerp(before.tas_kt, after.tas_kt),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       roll_deg: lerp(before.roll_deg, after.roll_deg),
