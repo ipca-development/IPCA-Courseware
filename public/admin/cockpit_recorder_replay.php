@@ -2869,7 +2869,7 @@ cw_header('Cockpit Recorder Replay');
       event.stopPropagation();
       altimeterSettingUnit = altimeterSettingUnit === 'inhg' ? 'hpa' : 'inhg';
       saveAltimeterSettingUnit();
-      updateAltimeterTape(sampleAt(currentTime), 1 / 60, true);
+      updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
     });
   }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
