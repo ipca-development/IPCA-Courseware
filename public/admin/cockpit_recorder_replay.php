@@ -380,6 +380,7 @@ cw_header('Cockpit Recorder Replay');
   const SYNTHETIC_VISION_DEFAULTS = {
     eyeHeightM: 1.5,
     forwardOffsetM: 2.0,
+    verticalFovDeg: 45,
   };
   const SYNTHETIC_TEST_HEADING_DEG = 230;
   const BODY_AXIS_MAPPING = {
@@ -467,12 +468,31 @@ cw_header('Cockpit Recorder Replay');
       || phase.includes('block');
   };
   const rawAltitudeM = (sample) => feetToMeters(bestAltitudeFt(sample));
+  const terrainLooksCredibleForGround = (msl) => {
+    if (!Number.isFinite(msl) || !Number.isFinite(lastTerrainHeightM)) return false;
+    if (Math.abs(lastTerrainHeightM - msl) <= 8) return true;
+    if (Math.abs(msl) <= 5 && Math.abs(lastTerrainHeightM) <= 8) return true;
+    return Math.sign(msl) === Math.sign(lastTerrainHeightM) && Math.abs(lastTerrainHeightM - msl) <= 20;
+  };
   const groundReferenceAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
-    if (isGroundSample(sample) && Number.isFinite(msl)) {
+    if (!isGroundSample(sample)) {
+      return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : msl;
+    }
+    if (terrainLooksCredibleForGround(msl)) {
+      return lastTerrainHeightM;
+    }
+    if (Number.isFinite(msl)) {
       return msl;
     }
-    return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : msl;
+    return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : 0;
+  };
+  const groundReferenceSource = (sample) => {
+    const msl = rawAltitudeM(sample);
+    if (!isGroundSample(sample)) {
+      return Number.isFinite(lastTerrainHeightM) ? 'cesium_terrain_airborne_floor' : 'replay_altitude';
+    }
+    return terrainLooksCredibleForGround(msl) ? 'cesium_rendered_terrain' : 'replay_ground_altitude';
   };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
@@ -760,6 +780,7 @@ cw_header('Cockpit Recorder Replay');
     if (isSyntheticCameraMode()) {
       const aircraftAltitudeM = visualAltitudeM(s);
       const groundReferenceM = groundReferenceAltitudeM(s);
+      const groundSource = groundReferenceSource(s);
       const testAttitude = cameraMode === 'synthetic_vision' ? null : syntheticTestAttitudeForMode(cameraMode);
       const headingDeg = testAttitude ? testAttitude.headingDeg : aircraftHeading;
       const pitchDeg = testAttitude ? testAttitude.pitchDeg : aircraftPitchFromSample(s);
@@ -776,6 +797,7 @@ cw_header('Cockpit Recorder Replay');
         rawAltitudeM: rawAltitudeM(s),
         visualAltitudeM: aircraftAltitudeM,
         groundReferenceAltitudeM: groundReferenceM,
+        groundReferenceSource: groundSource,
         aircraftHeading,
         heading: headingDeg,
         pitch: pitchDeg,
@@ -788,6 +810,7 @@ cw_header('Cockpit Recorder Replay');
     }
     const aircraftAltitudeM = visualAltitudeM(s);
     const groundReferenceM = groundReferenceAltitudeM(s);
+    const groundSource = groundReferenceSource(s);
     const heading = cameraMode === 'north_up' ? 0 : aircraftHeading;
     return {
       mode: cameraMode === 'north_up' ? 'north_up' : 'chase',
@@ -801,6 +824,7 @@ cw_header('Cockpit Recorder Replay');
       rawAltitudeM: rawAltitudeM(s),
       visualAltitudeM: aircraftAltitudeM,
       groundReferenceAltitudeM: groundReferenceM,
+      groundReferenceSource: groundSource,
       aircraftHeading,
       heading,
       pitch: cameraSettings.pitchDeg,
@@ -904,6 +928,10 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function applySyntheticCameraView(view, sample) {
+    if (cesiumViewer.camera && cesiumViewer.camera.frustum) {
+      cesiumViewer.camera.frustum.fov = degToRad(SYNTHETIC_VISION_DEFAULTS.verticalFovDeg);
+      cesiumViewer.camera.frustum.near = 0.05;
+    }
     const aircraftCartesian = Cesium.Cartesian3.fromDegrees(view.aircraftLon, view.aircraftLat, view.aircraftAltitudeM);
     const calibratedHeading = normalizeDeg(Number(view.heading || 0) + (cameraCalibration ? cameraCalibration.yawDeg : 0));
     const calibratedPitch = clamp(Number(view.pitch || 0) + (cameraCalibration ? cameraCalibration.pitchDeg : 0), -89, 89);
@@ -977,6 +1005,7 @@ cw_header('Cockpit Recorder Replay');
       aircraftAltitudeM: view.aircraftAltitudeM,
       terrainHeightM: Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : null,
       groundReferenceAltitudeM: groundReferenceM,
+      groundReferenceSource: view.groundReferenceSource || null,
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
@@ -990,6 +1019,7 @@ cw_header('Cockpit Recorder Replay');
       orientationQuaternion: quaternion,
       calibration: cameraCalibration ? { ...cameraCalibration } : null,
       bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, roll -> up vector',
+      verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovDeg,
       movementDebug,
       headingDegUsed: calibratedHeading,
       pitchDegUsed: calibratedPitch,
@@ -1026,6 +1056,7 @@ cw_header('Cockpit Recorder Replay');
       aircraftAltitudeM: view.aircraftAltitudeM,
       terrainHeightM: Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : null,
       groundReferenceAltitudeM: groundReferenceM,
+      groundReferenceSource: view.groundReferenceSource || null,
       cameraLat: cameraPos.lat,
       cameraLon: cameraPos.lon,
       cameraHeightM: cameraAltitudeM,
@@ -1071,6 +1102,7 @@ cw_header('Cockpit Recorder Replay');
         rawAltitudeM: target.rawAltitudeM,
         visualAltitudeM: displayCamera.visualAltitudeM + (target.visualAltitudeM - displayCamera.visualAltitudeM) * altAlpha,
         groundReferenceAltitudeM: target.groundReferenceAltitudeM,
+        groundReferenceSource: target.groundReferenceSource,
         aircraftHeading: target.aircraftHeading,
         heading: lerpAngleDeg(displayCamera.heading, target.heading, rotAlpha),
         pitch: target.pitch,
@@ -1246,6 +1278,7 @@ cw_header('Cockpit Recorder Replay');
         `synthetic forward: ${SYNTHETIC_VISION_DEFAULTS.forwardOffsetM.toFixed(1)} m`,
         `camera attached: ${cameraMode === 'synthetic_vision' ? 'aircraft state' : 'forced test attitude'}`,
         `camera smoothing: none`,
+        `SVT FOV: ${SYNTHETIC_VISION_DEFAULTS.verticalFovDeg.toFixed(0)} deg`,
       ]
       : [
         `camera method: ${dbg.method || '--'}`,
@@ -1275,6 +1308,7 @@ cw_header('Cockpit Recorder Replay');
       `aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
       `terrain height_m: ${fmtNum(dbg.terrainHeightM, 2)}`,
       `ground reference_m: ${fmtNum(dbg.groundReferenceAltitudeM, 2)}`,
+      `ground reference source: ${dbg.groundReferenceSource || '--'}`,
       `camera lat/lon: ${fmtNum(dbg.cameraLat, 7)}, ${fmtNum(dbg.cameraLon, 7)}`,
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
       `camera above aircraft_m: ${fmtNum(dbg.cameraHeightAboveAircraftM, 2)}`,
