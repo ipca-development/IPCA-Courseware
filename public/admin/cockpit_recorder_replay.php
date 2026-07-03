@@ -367,8 +367,8 @@ cw_header('Cockpit Recorder Replay');
   let lastVisualAltitudeM = null;
   let currentCameraDebug = null;
   let previousSyntheticFrameDebug = null;
-  let altitudeTransition = null;
-  let lastAltitudeResolve = null;
+  let localVisualAltitudeOffsetM = null;
+  let localVisualAltitudeOffsetSource = 'not_initialized';
   let standalonePlaying = false;
   let standaloneStartedMs = 0;
   let standaloneStartedT = 0;
@@ -394,8 +394,6 @@ cw_header('Cockpit Recorder Replay');
   const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v4';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
-  const LIFTOFF_ALTITUDE_BLEND_S = 4.0;
-  const LIFTOFF_ALTITUDE_CLIMB_BLEND_M = 22.0;
   let cameraSettings = null;
   let cameraCalibration = null;
 
@@ -506,69 +504,28 @@ cw_header('Cockpit Recorder Replay');
     }
     return msl;
   };
-  const smoothstep01 = (value) => {
-    const x = clamp(value, 0, 1);
-    return x * x * (3 - 2 * x);
-  };
   const visualAltitudeState = (sample, timeS) => {
     const garminAltitudeM = rawAltitudeM(sample);
     const ground = isGroundSample(sample);
     const groundReferenceM = groundReferenceAltitudeM(sample);
-    let altitudeM = ground ? groundReferenceM : garminAltitudeM;
-    let transitionActive = false;
-    let transitionBlendPct = 1;
-
-    if (ground) {
-      altitudeTransition = null;
-    } else {
-      const previousWasGround = lastAltitudeResolve
-        && lastAltitudeResolve.isGround
-        && Number.isFinite(lastAltitudeResolve.visualAltitudeM)
-        && Number.isFinite(lastAltitudeResolve.t)
-        && timeS >= lastAltitudeResolve.t
-        && timeS - lastAltitudeResolve.t <= 2.0;
-      if (previousWasGround) {
-        altitudeTransition = {
-          liftoffTimeS: timeS,
-          groundVisualAltitudeM: lastAltitudeResolve.visualAltitudeM,
-          garminAltitudeM,
-        };
-      }
-
-      if (altitudeTransition && Number.isFinite(garminAltitudeM)) {
-        const elapsed = Math.max(0, timeS - altitudeTransition.liftoffTimeS);
-        const timeBlend = smoothstep01(elapsed / LIFTOFF_ALTITUDE_BLEND_S);
-        const climbBlend = smoothstep01(Math.max(0, garminAltitudeM - altitudeTransition.garminAltitudeM) / LIFTOFF_ALTITUDE_CLIMB_BLEND_M);
-        transitionBlendPct = Math.max(timeBlend, climbBlend);
-        if (transitionBlendPct < 1) {
-          altitudeM = altitudeTransition.groundVisualAltitudeM
-            + ((garminAltitudeM - altitudeTransition.groundVisualAltitudeM) * transitionBlendPct);
-          transitionActive = true;
-        } else {
-          altitudeTransition = null;
-          altitudeM = garminAltitudeM;
-        }
-      }
+    if (ground && Number.isFinite(groundReferenceM) && Number.isFinite(garminAltitudeM)) {
+      localVisualAltitudeOffsetM = groundReferenceM - garminAltitudeM;
+      localVisualAltitudeOffsetSource = Number.isFinite(lastTerrainHeightM)
+        ? 'ground_cesium_minus_garmin'
+        : 'ground_replay_minus_garmin';
     }
 
-    lastAltitudeResolve = {
-      t: timeS,
-      isGround: ground,
-      visualAltitudeM: altitudeM,
-      garminAltitudeM,
-      groundReferenceM,
-    };
+    const offsetM = Number.isFinite(localVisualAltitudeOffsetM) ? localVisualAltitudeOffsetM : 0;
+    const altitudeM = Number.isFinite(garminAltitudeM) ? garminAltitudeM + offsetM : groundReferenceM;
 
     return {
       altitudeM,
       garminAltitudeM,
       groundReferenceM,
       isGround: ground,
-      altitudeTransitionActive: transitionActive,
-      transitionBlendPct,
-      transitionLiftoffTimeS: altitudeTransition ? altitudeTransition.liftoffTimeS : null,
-      transitionGroundVisualAltitudeM: altitudeTransition ? altitudeTransition.groundVisualAltitudeM : null,
-      transitionGarminAltitudeM: altitudeTransition ? altitudeTransition.garminAltitudeM : null,
+      localVisualAltitudeOffsetM: offsetM,
+      localVisualAltitudeOffsetSource,
+      altitudeCurvePreserved: true,
     };
   };
   const cameraEyeAltitudeM = (sample) => visualAltitudeM(sample) + PILOT_EYE_HEIGHT_M;
@@ -864,11 +821,9 @@ cw_header('Cockpit Recorder Replay');
         groundReferenceSource: groundSource,
         garminAltitudeM: altitudeState.garminAltitudeM,
         isGroundSample: altitudeState.isGround,
-        altitudeTransitionActive: altitudeState.altitudeTransitionActive,
-        transitionBlendPct: altitudeState.transitionBlendPct,
-        transitionLiftoffTimeS: altitudeState.transitionLiftoffTimeS,
-        transitionGroundVisualAltitudeM: altitudeState.transitionGroundVisualAltitudeM,
-        transitionGarminAltitudeM: altitudeState.transitionGarminAltitudeM,
+        localVisualAltitudeOffsetM: altitudeState.localVisualAltitudeOffsetM,
+        localVisualAltitudeOffsetSource: altitudeState.localVisualAltitudeOffsetSource,
+        altitudeCurvePreserved: altitudeState.altitudeCurvePreserved,
         aircraftHeading,
         heading: headingDeg,
         pitch: pitchDeg,
@@ -922,8 +877,6 @@ cw_header('Cockpit Recorder Replay');
     displayCamera = null;
     lastRenderMs = null;
     previousSyntheticFrameDebug = null;
-    altitudeTransition = null;
-    lastAltitudeResolve = null;
   }
 
   function applyCameraModeControls() {
@@ -1096,11 +1049,9 @@ cw_header('Cockpit Recorder Replay');
       groundReferenceAltitudeM: groundReferenceM,
       groundReferenceSource: view.groundReferenceSource || null,
       garminAltitudeM: Number.isFinite(Number(view.garminAltitudeM)) ? Number(view.garminAltitudeM) : null,
-      altitudeTransitionActive: view.altitudeTransitionActive === true,
-      transitionBlendPct: Number.isFinite(Number(view.transitionBlendPct)) ? Number(view.transitionBlendPct) : null,
-      transitionLiftoffTimeS: Number.isFinite(Number(view.transitionLiftoffTimeS)) ? Number(view.transitionLiftoffTimeS) : null,
-      transitionGroundVisualAltitudeM: Number.isFinite(Number(view.transitionGroundVisualAltitudeM)) ? Number(view.transitionGroundVisualAltitudeM) : null,
-      transitionGarminAltitudeM: Number.isFinite(Number(view.transitionGarminAltitudeM)) ? Number(view.transitionGarminAltitudeM) : null,
+      localVisualAltitudeOffsetM: Number.isFinite(Number(view.localVisualAltitudeOffsetM)) ? Number(view.localVisualAltitudeOffsetM) : null,
+      localVisualAltitudeOffsetSource: view.localVisualAltitudeOffsetSource || null,
+      altitudeCurvePreserved: view.altitudeCurvePreserved === true,
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
@@ -1417,11 +1368,9 @@ cw_header('Cockpit Recorder Replay');
       `ground reference_m: ${fmtNum(dbg.groundReferenceAltitudeM, 2)}`,
       `ground reference source: ${dbg.groundReferenceSource || '--'}`,
       `Garmin altitude_m target: ${fmtNum(dbg.garminAltitudeM, 2)}`,
-      `altitude transition active: ${dbg.altitudeTransitionActive === true ? 'yes' : (dbg.altitudeTransitionActive === false ? 'no' : '--')}`,
-      `transition blend pct: ${fmtNum(Number.isFinite(Number(dbg.transitionBlendPct)) ? Number(dbg.transitionBlendPct) * 100 : null, 1)}%`,
-      `transition liftoff_t: ${fmtNum(dbg.transitionLiftoffTimeS, 1)} s`,
-      `transition ground visual_m: ${fmtNum(dbg.transitionGroundVisualAltitudeM, 2)}`,
-      `transition Garmin start_m: ${fmtNum(dbg.transitionGarminAltitudeM, 2)}`,
+      `local visual offset_m: ${fmtNum(dbg.localVisualAltitudeOffsetM, 2)}`,
+      `local visual offset source: ${dbg.localVisualAltitudeOffsetSource || '--'}`,
+      `altitude curve preserved: ${dbg.altitudeCurvePreserved === true ? 'yes' : (dbg.altitudeCurvePreserved === false ? 'no' : '--')}`,
       `camera lat/lon: ${fmtNum(dbg.cameraLat, 7)}, ${fmtNum(dbg.cameraLon, 7)}`,
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
       `final aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
