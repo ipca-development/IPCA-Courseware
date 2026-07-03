@@ -571,19 +571,26 @@ cw_header('Cockpit Recorder Replay');
     const width = Number(container && container.clientWidth);
     const height = Number(container && container.clientHeight);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      const fallbackHorizontalFovDeg = syntheticVisionHorizontalFovDeg();
       return {
-        horizontalFovDeg: syntheticVisionHorizontalFovDeg(),
+        horizontalFovDeg: fallbackHorizontalFovDeg,
         verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg,
         viewportAspectRatio: 16 / 9,
+        cesiumFovAxis: 'horizontal',
+        cesiumFovDegToSet: fallbackHorizontalFovDeg,
       };
     }
     const aspect = width / height;
     const horizontalFovDeg = syntheticVisionHorizontalFovDeg();
     const hRad = degToRad(horizontalFovDeg);
+    const verticalFovDeg = 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI;
+    const cesiumFovAxis = aspect >= 1 ? 'horizontal' : 'vertical';
     return {
       horizontalFovDeg,
-      verticalFovDeg: 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI,
+      verticalFovDeg,
       viewportAspectRatio: aspect,
+      cesiumFovAxis,
+      cesiumFovDegToSet: cesiumFovAxis === 'horizontal' ? horizontalFovDeg : verticalFovDeg,
     };
   };
 
@@ -843,6 +850,13 @@ cw_header('Cockpit Recorder Replay');
     return aircraftHeadingFromSample(sample);
   }
 
+  function syntheticVisionHeadingSource(sample) {
+    if (firstFinite(sample && sample.heading_deg_magnetic) !== null) return 'heading_deg_magnetic';
+    if (firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg) !== null) return 'heading_deg_true';
+    if (firstFinite(sample && sample.heading_deg) !== null) return 'heading_deg_legacy';
+    return 'fallback';
+  }
+
   function aircraftPitchFromSample(sample) {
     return clamp(firstFinite(sample && sample.pitch_deg, sample && sample.visual_pitch_deg, 0) || 0, -45, 45);
   }
@@ -884,6 +898,7 @@ cw_header('Cockpit Recorder Replay');
         localVisualAltitudeOffsetSource: altitudeState.localVisualAltitudeOffsetSource,
         altitudeCurvePreserved: altitudeState.altitudeCurvePreserved,
         aircraftHeading,
+        headingSourceForCamera: syntheticVisionHeadingSource(s),
         heading: headingDeg,
         pitch: pitchDeg,
         roll: rollDeg,
@@ -1016,7 +1031,7 @@ cw_header('Cockpit Recorder Replay');
     const fovState = syntheticVisionFovState();
     const verticalFovDeg = fovState.verticalFovDeg;
     if (cesiumViewer.camera && cesiumViewer.camera.frustum) {
-      cesiumViewer.camera.frustum.fov = degToRad(verticalFovDeg);
+      cesiumViewer.camera.frustum.fov = degToRad(fovState.cesiumFovDegToSet);
       cesiumViewer.camera.frustum.near = 0.05;
     }
     const aircraftCartesian = Cesium.Cartesian3.fromDegrees(view.aircraftLon, view.aircraftLat, view.aircraftAltitudeM);
@@ -1068,6 +1083,23 @@ cw_header('Cockpit Recorder Replay');
         up,
       },
     });
+    const activeFrustum = cesiumViewer.camera && cesiumViewer.camera.frustum ? cesiumViewer.camera.frustum : null;
+    const activeCesiumFovRad = activeFrustum && Number.isFinite(Number(activeFrustum.fov)) ? Number(activeFrustum.fov) : null;
+    const activeCesiumFovDeg = activeCesiumFovRad !== null ? activeCesiumFovRad * 180 / Math.PI : null;
+    const activeCesiumAspectRatio = activeFrustum && Number.isFinite(Number(activeFrustum.aspectRatio))
+      ? Number(activeFrustum.aspectRatio)
+      : fovState.viewportAspectRatio;
+    const activeCesiumFovAxis = activeCesiumAspectRatio >= 1 ? 'horizontal' : 'vertical';
+    const activeHorizontalFovDeg = activeCesiumFovDeg === null
+      ? null
+      : (activeCesiumFovAxis === 'horizontal'
+        ? activeCesiumFovDeg
+        : 2 * Math.atan(Math.tan(degToRad(activeCesiumFovDeg) / 2) * activeCesiumAspectRatio) * 180 / Math.PI);
+    const activeVerticalFovDeg = activeCesiumFovDeg === null
+      ? null
+      : (activeCesiumFovAxis === 'vertical'
+        ? activeCesiumFovDeg
+        : 2 * Math.atan(Math.tan(degToRad(activeCesiumFovDeg) / 2) / activeCesiumAspectRatio) * 180 / Math.PI);
 
     const cameraCartographic = Cesium.Cartographic.fromCartesian(cameraWorld);
     const cameraLat = cameraCartographic.latitude * 180 / Math.PI;
@@ -1133,10 +1165,27 @@ cw_header('Cockpit Recorder Replay');
       horizontalFovDeg: fovState.horizontalFovDeg,
       verticalFovDeg,
       viewportAspectRatio: fovState.viewportAspectRatio,
+      cesiumFovDegToSet: fovState.cesiumFovDegToSet,
+      cesiumFovAxis: fovState.cesiumFovAxis,
+      activeCesiumFovDeg,
+      activeCesiumFovRad,
+      activeCesiumFovAxis,
+      activeCesiumAspectRatio,
+      activeHorizontalFovDeg,
+      activeVerticalFovDeg,
       yawBiasDeg: SYNTHETIC_VISION_DEFAULTS.yawBiasDeg,
       rollBiasDeg: SYNTHETIC_VISION_DEFAULTS.rollBiasDeg,
       movementDebug,
       headingDegUsed: calibratedHeading,
+      headingDegBeforeCalibration: view.heading,
+      headingSourceForCamera: view.headingSourceForCamera || null,
+      headingDegTrue: firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg),
+      headingDegMagnetic: firstFinite(sample && sample.heading_deg_magnetic),
+      headingDegLegacy: firstFinite(sample && sample.heading_deg),
+      magneticVariationDeg: firstFinite(sample && sample.magnetic_variation_deg),
+      headingReference: sourceValue(sample, 'heading_reference') || '',
+      yawCalibrationDeg: cameraCalibration ? Number(cameraCalibration.yawDeg || 0) : 0,
+      totalYawOffsetDeg: normalizeSignedDeg(calibratedHeading - Number(view.heading || 0)),
       pitchDegUsed: calibratedPitch,
       rollDegUsed: visualCameraRoll,
       rawGarminRollDeg,
@@ -1400,6 +1449,10 @@ cw_header('Cockpit Recorder Replay');
         `camera smoothing: none`,
         `SVT FOV: ${fmtNum(dbg.horizontalFovDeg, 0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
         `SVT aspect: ${fmtNum(dbg.viewportAspectRatio, 2)}`,
+        `SVT Cesium set FOV: ${fmtNum(dbg.cesiumFovDegToSet, 1)} deg ${dbg.cesiumFovAxis || '--'}`,
+        `SVT active frustum: ${fmtNum(dbg.activeCesiumFovDeg, 1)} deg ${dbg.activeCesiumFovAxis || '--'}`,
+        `SVT active H/V: ${fmtNum(dbg.activeHorizontalFovDeg, 1)} deg H / ${fmtNum(dbg.activeVerticalFovDeg, 1)} deg V`,
+        `SVT active aspect: ${fmtNum(dbg.activeCesiumAspectRatio, 2)}`,
         `SVT yaw bias: ${SYNTHETIC_VISION_DEFAULTS.yawBiasDeg.toFixed(1)} deg`,
         `SVT roll bias: ${SYNTHETIC_VISION_DEFAULTS.rollBiasDeg.toFixed(1)} deg`,
       ]
@@ -1458,6 +1511,13 @@ cw_header('Cockpit Recorder Replay');
       `camera up: ${cartesianToDebug(dbg.cameraUp)}`,
       `orientation quaternion: ${quaternionToDebug(dbg.orientationQuaternion)}`,
       `body axes: ${dbg.bodyAxisMapping || '--'}`,
+      `heading source for camera: ${dbg.headingSourceForCamera || '--'}`,
+      `heading before calibration: ${fmtNum(dbg.headingDegBeforeCalibration, 1)} deg`,
+      `heading true/magnetic/legacy: ${fmtNum(dbg.headingDegTrue, 1)} / ${fmtNum(dbg.headingDegMagnetic, 1)} / ${fmtNum(dbg.headingDegLegacy, 1)} deg`,
+      `heading reference: ${dbg.headingReference || '--'}`,
+      `mag variation: ${fmtNum(dbg.magneticVariationDeg, 1)} deg`,
+      `yaw calibration: ${fmtNum(dbg.yawCalibrationDeg, 1)} deg`,
+      `total yaw offset applied: ${fmtNum(dbg.totalYawOffsetDeg, 1)} deg`,
       `heading used by camera: ${fmtNum(dbg.headingDegUsed, 1)} deg`,
       `pitch used by camera: ${fmtNum(dbg.pitchDegUsed, 1)} deg`,
       `roll used by camera: ${fmtNum(dbg.rollDegUsed, 1)} deg`,
