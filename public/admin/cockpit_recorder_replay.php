@@ -380,18 +380,22 @@ cw_header('Cockpit Recorder Replay');
     smoothing: 6,
   };
   const SYNTHETIC_VISION_DEFAULTS = {
-    eyeHeightM: 1.5,
-    forwardOffsetM: 2.0,
-    verticalFovDeg: 45,
+    eyeHeightM: 1.4,
+    forwardOffsetM: 1.8,
+    rightOffsetM: 0.0,
+    horizontalFovDeg: 60,
+    verticalFovFallbackDeg: 38,
+    yawBiasDeg: 0,
+    rollBiasDeg: 0,
   };
   const SYNTHETIC_TEST_HEADING_DEG = 230;
   const BODY_AXIS_MAPPING = {
-    eyeOffsetXForwardM: 2.0,
-    eyeOffsetYRightM: 0.0,
-    eyeOffsetZUpM: 1.5,
+    eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
+    eyeOffsetYRightM: SYNTHETIC_VISION_DEFAULTS.rightOffsetM,
+    eyeOffsetZUpM: SYNTHETIC_VISION_DEFAULTS.eyeHeightM,
   };
   const CAMERA_STORAGE_KEY = 'ipca.cockpitReplay.camera.v1';
-  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v4';
+  const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v5';
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
@@ -541,6 +545,17 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const syntheticVisionVerticalFovDeg = () => {
+    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
+    const width = Number(container && container.clientWidth);
+    const height = Number(container && container.clientHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg;
+    }
+    const aspect = width / height;
+    const hRad = degToRad(SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg);
+    return 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI;
+  };
 
   function isSyntheticCameraMode(mode = cameraMode) {
     return String(mode || '').startsWith('synthetic_vision');
@@ -954,14 +969,15 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function applySyntheticCameraView(view, sample) {
+    const verticalFovDeg = syntheticVisionVerticalFovDeg();
     if (cesiumViewer.camera && cesiumViewer.camera.frustum) {
-      cesiumViewer.camera.frustum.fov = degToRad(SYNTHETIC_VISION_DEFAULTS.verticalFovDeg);
+      cesiumViewer.camera.frustum.fov = degToRad(verticalFovDeg);
       cesiumViewer.camera.frustum.near = 0.05;
     }
     const aircraftCartesian = Cesium.Cartesian3.fromDegrees(view.aircraftLon, view.aircraftLat, view.aircraftAltitudeM);
-    const calibratedHeading = normalizeDeg(Number(view.heading || 0) + (cameraCalibration ? cameraCalibration.yawDeg : 0));
+    const calibratedHeading = normalizeDeg(Number(view.heading || 0) + SYNTHETIC_VISION_DEFAULTS.yawBiasDeg + (cameraCalibration ? cameraCalibration.yawDeg : 0));
     const calibratedPitch = clamp(Number(view.pitch || 0) + (cameraCalibration ? cameraCalibration.pitchDeg : 0), -89, 89);
-    const calibratedRoll = clamp(Number(view.roll || 0) + (cameraCalibration ? cameraCalibration.rollDeg : 0), -89, 89);
+    const calibratedRoll = clamp(Number(view.roll || 0) + SYNTHETIC_VISION_DEFAULTS.rollBiasDeg + (cameraCalibration ? cameraCalibration.rollDeg : 0), -89, 89);
     const visualCameraRoll = calibratedRoll;
     const rollConvention = 'garmin_roll_direct';
     const orientation = cesiumOrientationFromAviation(calibratedHeading, calibratedPitch, visualCameraRoll);
@@ -1069,7 +1085,10 @@ cw_header('Cockpit Recorder Replay');
       orientationQuaternion: quaternion,
       calibration: cameraCalibration ? { ...cameraCalibration } : null,
       bodyAxisMapping: 'ENU explicit: heading -> forward, pitch -> forward.z, Garmin roll direct for camera horizon convention',
-      verticalFovDeg: SYNTHETIC_VISION_DEFAULTS.verticalFovDeg,
+      horizontalFovDeg: SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg,
+      verticalFovDeg,
+      yawBiasDeg: SYNTHETIC_VISION_DEFAULTS.yawBiasDeg,
+      rollBiasDeg: SYNTHETIC_VISION_DEFAULTS.rollBiasDeg,
       movementDebug,
       headingDegUsed: calibratedHeading,
       pitchDegUsed: calibratedPitch,
@@ -1330,9 +1349,12 @@ cw_header('Cockpit Recorder Replay');
         `camera method: ${dbg.method || '--'}`,
         `synthetic eye: +${SYNTHETIC_VISION_DEFAULTS.eyeHeightM.toFixed(1)} m`,
         `synthetic forward: ${SYNTHETIC_VISION_DEFAULTS.forwardOffsetM.toFixed(1)} m`,
+        `synthetic right: ${SYNTHETIC_VISION_DEFAULTS.rightOffsetM.toFixed(1)} m`,
         `camera attached: ${cameraMode === 'synthetic_vision' ? 'aircraft state' : 'forced test attitude'}`,
         `camera smoothing: none`,
-        `SVT FOV: ${SYNTHETIC_VISION_DEFAULTS.verticalFovDeg.toFixed(0)} deg`,
+        `SVT FOV: ${SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg.toFixed(0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
+        `SVT yaw bias: ${SYNTHETIC_VISION_DEFAULTS.yawBiasDeg.toFixed(1)} deg`,
+        `SVT roll bias: ${SYNTHETIC_VISION_DEFAULTS.rollBiasDeg.toFixed(1)} deg`,
       ]
       : [
         `camera method: ${dbg.method || '--'}`,
