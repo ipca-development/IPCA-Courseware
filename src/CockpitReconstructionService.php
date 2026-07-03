@@ -604,7 +604,7 @@ final class CockpitReconstructionService
         );
     }
 
-    public function streamReplayPayloadV2Json(string $id, bool $compact = false): void
+    public function streamReplayPayloadV2Json(string $id, bool $compact = false, int $sampleStride = 1): void
     {
         $payload = $this->replayPayloadV2Metadata($id);
         if (empty($payload['ok'])) {
@@ -630,7 +630,12 @@ final class CockpitReconstructionService
         }
         echo '"samples":[';
         $sampleFirst = true;
+        $sampleIndex = 0;
+        $sampleStride = max(1, min(10, $sampleStride));
         foreach ($this->replaySampleRowsIterator($recordingId, $startedAt) as $sample) {
+            if ($sampleStride > 1 && ($sampleIndex++ % $sampleStride) !== 0) {
+                continue;
+            }
             if (!$sampleFirst) {
                 echo ',';
             }

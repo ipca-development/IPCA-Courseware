@@ -132,7 +132,7 @@ cw_header('Cockpit Recorder Replay');
 .attitude-overlay .attitude-white {
   stroke: rgba(255, 255, 255, .88);
   fill: none;
-  stroke-width: 3;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -1784,21 +1784,27 @@ cw_header('Cockpit Recorder Replay');
         : '';
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${-gap}" y2="${y.toFixed(1)}"></line><line class="attitude-white" x1="${gap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
-    const arcRadius = clamp(Math.min(width * 0.19, height * 0.18), 120, 205);
+    const tapeTopY = 72;
+    const arcRadius = clamp(Math.min(width * 0.42, height * 0.55), 300, 520);
+    const arcCenterY = tapeTopY + arcRadius;
     const arcPoints = [];
     for (let bank = -60; bank <= 60; bank += 4) {
-      arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius - 8).toFixed(1)}`);
+      arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius).toFixed(1)}`);
     }
     const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
       const outerX = Math.sin(degToRad(bank)) * arcRadius;
-      const outerY = -Math.cos(degToRad(bank)) * arcRadius - 8;
-      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 31 : 20;
+      const outerY = -Math.cos(degToRad(bank)) * arcRadius;
+      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 34 : 22;
       const innerX = Math.sin(degToRad(bank)) * (arcRadius - tickLen);
-      const innerY = -Math.cos(degToRad(bank)) * (arcRadius - tickLen) - 8;
+      const innerY = -Math.cos(degToRad(bank)) * (arcRadius - tickLen);
       return `<line class="attitude-white" x1="${outerX.toFixed(1)}" y1="${outerY.toFixed(1)}" x2="${innerX.toFixed(1)}" y2="${innerY.toFixed(1)}"></line>`;
     }).join('');
     const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
-    const slipX = slip / 0.35 * 38;
+    const slipX = slip / 0.35 * 46;
+    const pointerRadius = arcRadius - 11;
+    const pointerX = 0;
+    const pointerY = -pointerRadius;
+    const slipBarY = pointerY + 42;
     const fixedLeftX = clamp(centerX - 0.40 * width, 42, centerX - 130);
     const fixedRightX = clamp(centerX + 0.40 * width, centerX + 130, width - 42);
     const signature = [
@@ -1806,6 +1812,8 @@ cw_header('Cockpit Recorder Replay');
       Math.round(height),
       Math.round(horizonY),
       Math.round(referenceY),
+      Math.round(arcCenterY),
+      Math.round(arcRadius),
       Math.round(rollDeg * 2),
       Math.round(verticalFovDeg),
       Math.round(slipX),
@@ -1819,13 +1827,17 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.innerHTML = `
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
+      </g>
+      <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-slip" points="0,${(-arcRadius - 36).toFixed(1)} -15,${(-arcRadius - 76).toFixed(1)} 15,${(-arcRadius - 76).toFixed(1)}"></polygon>
+        <polygon class="attitude-slip" points="0,${(-arcRadius + 2).toFixed(1)} -18,${(-arcRadius - 36).toFixed(1)} 18,${(-arcRadius - 36).toFixed(1)}"></polygon>
+        <g transform="translate(${pointerX.toFixed(1)} ${pointerY.toFixed(1)})">
+          <polygon class="attitude-slip" points="0,-2 -18,34 18,34"></polygon>
+        </g>
+        <polygon class="attitude-slip" points="${(pointerX + slipX - 34).toFixed(1)},${slipBarY.toFixed(1)} ${(pointerX + slipX + 34).toFixed(1)},${slipBarY.toFixed(1)} ${(pointerX + slipX + 26).toFixed(1)},${(slipBarY + 13).toFixed(1)} ${(pointerX + slipX - 26).toFixed(1)},${(slipBarY + 13).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${referenceY.toFixed(1)})">
-        <polygon class="attitude-slip" points="0,-${Math.round(arcRadius * 0.72)} -16,-${Math.round(arcRadius * 0.72) + 34} 16,-${Math.round(arcRadius * 0.72) + 34}"></polygon>
-        <polygon class="attitude-slip" points="${(slipX - 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 30).toFixed(1)},-${Math.round(arcRadius * 0.72) - 14} ${(slipX + 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2} ${(slipX - 22).toFixed(1)},-${Math.round(arcRadius * 0.72) - 2}"></polygon>
         <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
         <polygon class="attitude-yellow" points="128,0 210,0 210,14 128,14"></polygon>
         <polygon class="attitude-yellow" points="-126,50 -24,8 0,0 -98,58"></polygon>
@@ -3132,7 +3144,7 @@ cw_header('Cockpit Recorder Replay');
     try {
       const replayUrl = standaloneReplay
         ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
-        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1`;
+        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1&sample_stride=3`;
       const response = await fetch(replayUrl);
       const text = await response.text();
       try {
