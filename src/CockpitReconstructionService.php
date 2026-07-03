@@ -639,6 +639,15 @@ final class CockpitReconstructionService
             'crab_angle_deg',
             'gps_altitude_ft',
             'baro_altitude_ft',
+            'estimated_indicated_altitude_ft',
+            'estimated_vertical_speed_fpm',
+            'altimeter_setting_inhg',
+            'altitude_bug_ft',
+            'oat_c',
+            'isa_deviation_c',
+            'decision_altitude_ft',
+            'da_ft',
+            'minimums_ft',
             'ias_kt',
             'tas_kt',
             'rpm',
@@ -717,7 +726,7 @@ final class CockpitReconstructionService
         if (array_key_exists('raw_attitude_quality', $row)) {
             $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
         }
-        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f') as $field) {
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
@@ -3254,6 +3263,15 @@ final class CockpitReconstructionService
             'crab_angle_deg',
             'gps_altitude_ft',
             'baro_altitude_ft',
+            'estimated_indicated_altitude_ft',
+            'estimated_vertical_speed_fpm',
+            'altimeter_setting_inhg',
+            'altitude_bug_ft',
+            'oat_c',
+            'isa_deviation_c',
+            'decision_altitude_ft',
+            'da_ft',
+            'minimums_ft',
             'ias_kt',
             'tas_kt',
             'rpm',

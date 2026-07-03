@@ -262,8 +262,8 @@ cw_header('Cockpit Recorder Replay');
 }
 .altimeter-tape {
   width: 128px;
-  height: min(70vh, 590px);
-  min-height: 360px;
+  height: min(68vh, 560px);
+  min-height: 340px;
   display: flex;
   flex-direction: column;
 }
@@ -283,6 +283,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .altimeter-header { border-radius: 10px 10px 0 0; color: #5fffff; font-size: 24px; }
 .altimeter-footer { border-radius: 0 0 10px 10px; color: #5fffff; font-size: 21px; }
+.altimeter-footer { pointer-events: auto; cursor: pointer; }
 .altimeter-body {
   position: relative;
   flex: 1 1 auto;
@@ -310,7 +311,7 @@ cw_header('Cockpit Recorder Replay');
   position: absolute;
   right: 18px;
   transform: translateY(-50%);
-  font-size: 26px;
+  font-size: 21px;
   font-weight: 800;
   line-height: 1;
 }
@@ -325,7 +326,7 @@ cw_header('Cockpit Recorder Replay');
   place-items: center;
   background: #050505;
   border-radius: 7px 8px 8px 7px;
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 900;
 }
 .altimeter-pointer::before {
@@ -373,9 +374,9 @@ cw_header('Cockpit Recorder Replay');
 }
 .vsi-stack {
   position: relative;
-  width: 62px;
-  height: min(54vh, 430px);
-  min-height: 280px;
+  width: 72px;
+  height: calc(min(68vh, 560px) - 84px);
+  min-height: 256px;
   border-radius: 7px;
   background: rgba(40, 40, 40, .50);
   border: 1px solid rgba(255, 255, 255, .20);
@@ -406,14 +407,14 @@ cw_header('Cockpit Recorder Replay');
   position: absolute;
   right: 0;
   top: 50%;
-  width: 45px;
+  width: 70px;
   height: 34px;
   transform: translateY(-50%);
   display: grid;
   place-items: center;
   background: #111;
   border-radius: 7px;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
 }
 .vsi-pointer::before {
@@ -430,7 +431,7 @@ cw_header('Cockpit Recorder Replay');
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 88px;
+  min-width: 118px;
   padding: 6px 8px;
   border-radius: 6px;
   background: rgba(40, 40, 40, .70);
@@ -958,6 +959,7 @@ cw_header('Cockpit Recorder Replay');
   let displayAirspeedKt = null;
   let displayAltitudeFt = null;
   let displayVsiFpm = null;
+  let altimeterSettingUnit = 'hpa';
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
   let standalonePlaying = false;
@@ -983,7 +985,8 @@ cw_header('Cockpit Recorder Replay');
   const SYNTHETIC_TEST_HEADING_DEG = 230;
   const AIRSPEED_TAPE_SMOOTHING_RATE = 18;
   const ALTIMETER_TAPE_SMOOTHING_RATE = 18;
-  const VSI_SMOOTHING_RATE = ALTIMETER_TAPE_SMOOTHING_RATE;
+  const VSI_SMOOTHING_RATE = 5;
+  const ALTIMETER_SETTING_UNIT_STORAGE_KEY = 'ipca.cockpitReplay.altimeterSettingUnit.v1';
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
     eyeOffsetYRightM: SYNTHETIC_VISION_DEFAULTS.rightOffsetM,
@@ -1036,9 +1039,20 @@ cw_header('Cockpit Recorder Replay');
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   };
+  const positiveFinite = (value) => {
+    const n = finiteNumber(value);
+    return n !== null && n > 0 ? n : null;
+  };
   const firstFinite = (...values) => {
     for (const value of values) {
       const n = finiteNumber(value);
+      if (n !== null) return n;
+    }
+    return null;
+  };
+  const firstPositiveFinite = (...values) => {
+    for (const value of values) {
+      const n = positiveFinite(value);
       if (n !== null) return n;
     }
     return null;
@@ -1280,6 +1294,23 @@ cw_header('Cockpit Recorder Replay');
     }
   }
 
+  function loadAltimeterSettingUnit() {
+    try {
+      const saved = String(localStorage.getItem(ALTIMETER_SETTING_UNIT_STORAGE_KEY) || '').toLowerCase();
+      return saved === 'inhg' ? 'inhg' : 'hpa';
+    } catch (err) {
+      return 'hpa';
+    }
+  }
+
+  function saveAltimeterSettingUnit() {
+    try {
+      localStorage.setItem(ALTIMETER_SETTING_UNIT_STORAGE_KEY, altimeterSettingUnit);
+    } catch (err) {
+      // Unit selection is cosmetic; ignore storage failures.
+    }
+  }
+
   function updateCalibrationPanel() {
     if (!cameraCalibration) return;
     if (calibrationStepSelect) {
@@ -1474,7 +1505,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function selectedAltitudeBugFt(sample) {
-    return firstFinite(
+    return firstPositiveFinite(
       sample && sample.altitude_bug_ft,
       sample && sample.selected_altitude_ft,
       sample && sample.sel_alt_ft
@@ -1491,10 +1522,26 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function altimeterHpa(sample) {
-    const hpa = firstFinite(sample && sample.altimeter_setting_hpa);
+    const hpa = firstPositiveFinite(sample && sample.altimeter_setting_hpa);
     if (hpa !== null) return hpa;
-    const inhg = firstFinite(sample && sample.altimeter_setting_inhg);
+    const inhg = firstPositiveFinite(sample && sample.altimeter_setting_inhg);
     return inhg === null ? null : inhg * 33.8638866667;
+  }
+
+  function altimeterInhg(sample) {
+    const inhg = firstPositiveFinite(sample && sample.altimeter_setting_inhg);
+    if (inhg !== null) return inhg;
+    const hpa = firstPositiveFinite(sample && sample.altimeter_setting_hpa);
+    return hpa === null ? null : hpa / 33.8638866667;
+  }
+
+  function formatAltimeterSetting(sample) {
+    if (altimeterSettingUnit === 'inhg') {
+      const inhg = altimeterInhg(sample);
+      return inhg === null ? '---- IN' : `${inhg.toFixed(2)} IN`;
+    }
+    const hpa = altimeterHpa(sample);
+    return hpa === null ? '---- HPA' : `${Math.round(hpa)} HPA`;
   }
 
   function isaDeviationC(sample, altitudeFt, oatC) {
@@ -1506,7 +1553,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function decisionAltitudeFt(sample) {
-    return firstFinite(
+    return firstPositiveFinite(
       sample && sample.decision_altitude_ft,
       sample && sample.da_ft,
       sample && sample.minimums_ft,
@@ -1545,7 +1592,7 @@ cw_header('Cockpit Recorder Replay');
 
     const bodyHeight = Number(altimeterBody && altimeterBody.clientHeight) || 440;
     const centerY = bodyHeight / 2;
-    const pxPerFt = 0.34;
+    const pxPerFt = 0.68;
     const visibleMin = Math.floor((displayAltitudeFt - (centerY / pxPerFt) - 100) / 20) * 20;
     const visibleMax = Math.ceil((displayAltitudeFt + (centerY / pxPerFt) + 100) / 20) * 20;
     let scaleHtml = '';
@@ -1563,7 +1610,6 @@ cw_header('Cockpit Recorder Replay');
     const bugHtml = bugY !== null && bugY >= -20 && bugY <= bodyHeight + 20
       ? `<div class="altimeter-bug" style="top:${bugY.toFixed(1)}px"></div>`
       : '';
-    const settingHpa = altimeterHpa(sample);
     const oatC = firstFinite(sample.oat_c);
     const isaDevC = isaDeviationC(sample, altitudeFt, oatC);
     const daFt = decisionAltitudeFt(sample);
@@ -1573,10 +1619,10 @@ cw_header('Cockpit Recorder Replay');
     if (altimeterBugs) altimeterBugs.innerHTML = bugHtml;
     if (altimeterPointer) altimeterPointer.textContent = String(Math.round(displayAltitudeFt));
     if (altimeterBugValue) altimeterBugValue.textContent = bugFt === null ? '----' : `${Math.round(bugFt)}FT`;
-    if (altimeterSettingValue) altimeterSettingValue.textContent = settingHpa === null ? '---- hPa' : `${Math.round(settingHpa)} hPa`;
+    if (altimeterSettingValue) altimeterSettingValue.textContent = formatAltimeterSetting(sample);
     if (temperatureBox) {
-      const oatText = oatC === null ? '--' : `${Math.round(oatC)}°C`;
-      const isaText = isaDevC === null ? '--' : `${isaDevC >= 0 ? '+' : ''}${Math.round(isaDevC)}°C`;
+      const oatText = oatC === null ? '----' : `${Math.round(oatC)}°C`;
+      const isaText = isaDevC === null ? '----' : `${isaDevC >= 0 ? '+' : ''}${Math.round(isaDevC)}°C`;
       temperatureBox.innerHTML = `OAT ${escapeHtml(oatText)}<br>ISA ${escapeHtml(isaText)}`;
     }
     if (altimeterDa && altimeterDaValue) {
@@ -1605,7 +1651,8 @@ cw_header('Cockpit Recorder Replay');
     }).join('');
     const pointerY = yForVsi(vsiFpm);
     vsiPointer.style.top = `${pointerY.toFixed(1)}px`;
-    vsiPointer.textContent = String(Math.round(vsiFpm / 100) / 10).replace(/^-0$/, '0');
+    const roundedFpm = Math.round(vsiFpm / 100) * 100;
+    vsiPointer.textContent = roundedFpm > 0 ? `+${roundedFpm}` : String(roundedFpm).replace(/^-0$/, '0');
   }
 
   function updateHorizonLine(view) {
@@ -2815,6 +2862,14 @@ cw_header('Cockpit Recorder Replay');
   if (calibrationFovInput) {
     calibrationFovInput.addEventListener('change', () => setSyntheticVisionFov(calibrationFovInput.value));
   }
+  if (altimeterSettingValue) {
+    altimeterSettingValue.addEventListener('click', (event) => {
+      event.stopPropagation();
+      altimeterSettingUnit = altimeterSettingUnit === 'inhg' ? 'hpa' : 'inhg';
+      saveAltimeterSettingUnit();
+      updateAltimeterTape(sampleAt(currentTime), 1 / 60, true);
+    });
+  }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
     if (!standaloneReplay && audio.paused) {
@@ -2825,7 +2880,7 @@ cw_header('Cockpit Recorder Replay');
   rewindButton.addEventListener('click', () => skipBy(-10));
   forwardButton.addEventListener('click', () => skipBy(10));
   root.addEventListener('click', (event) => {
-    if (event.target.closest('.replay-dock, .replay-menu, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar')) {
+    if (event.target.closest('.replay-dock, .replay-menu, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer')) {
       return;
     }
     togglePlayback();
@@ -2903,6 +2958,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   cameraCalibration = loadCameraCalibration();
+  altimeterSettingUnit = loadAltimeterSettingUnit();
   updateCalibrationPanel();
   cameraSettings = loadCameraSettings();
   syncCameraControls();
