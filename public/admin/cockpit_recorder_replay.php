@@ -454,7 +454,7 @@ cw_header('Cockpit Recorder Replay');
   border-bottom: 12px solid #f8fafc;
 }
 .engine-pointer.is-probe-number {
-  top: -3px;
+  top: -10px;
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
@@ -470,7 +470,7 @@ cw_header('Cockpit Recorder Replay');
 .engine-pointer-label {
   position: absolute;
   left: -6px;
-  top: -1px;
+  top: -3px;
   width: 12px;
   text-align: center;
   line-height: 10px;
@@ -478,12 +478,12 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-pointer.is-probe-number.is-bottom {
   top: auto;
-  bottom: -3px;
+  bottom: -10px;
   border-top: 0;
   border-bottom: 12px solid #f8fafc;
 }
 .engine-pointer.is-probe-number.is-bottom .engine-pointer-label {
-  top: -9px;
+  top: -6px;
 }
 .engine-probe {
   position: absolute;
