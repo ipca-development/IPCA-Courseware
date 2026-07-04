@@ -85,7 +85,7 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive {
   position: relative;
   width: 100%;
-  height: calc(100vh - 88px);
+  height: calc(100vh - 38px);
   min-height: 480px;
   background: #000;
   overflow: hidden;
