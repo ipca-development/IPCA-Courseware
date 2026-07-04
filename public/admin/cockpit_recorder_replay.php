@@ -294,6 +294,11 @@ cw_header('Cockpit Recorder Replay');
   stroke: rgba(255, 255, 255, .66);
   stroke-width: .8;
 }
+.hsi-overlay .hsi-top-pointer {
+  fill: rgba(255, 255, 255, .96);
+  stroke: rgba(255, 255, 255, .72);
+  stroke-width: .7;
+}
 .hsi-overlay .hsi-nav {
   stroke: #10d510;
   stroke-width: 7;
@@ -2904,13 +2909,13 @@ cw_header('Cockpit Recorder Replay');
       }
     }
     const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
-      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 11).toFixed(1)})">
-        <path class="hsi-heading-bug" d="M -26 -12 H 26 V 12 H 8 L 0 20 L -8 12 H -26 Z"></path>
+      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 25).toFixed(1)})">
+        <path class="hsi-heading-bug" d="M -18 -8 H -6 L 0 -2 L 6 -8 H 18 V 9 H -18 Z"></path>
       </g>`;
     })();
     const trackHtml = trackMag === null ? '' : (() => {
-      return `<g transform="rotate(${trackMag.toFixed(2)}) translate(0 ${(-r + 10).toFixed(1)})">
-        <polygon class="hsi-track-diamond" points="0,-22 12,0 0,22 -12,0"></polygon>
+      return `<g transform="rotate(${trackMag.toFixed(2)}) translate(0 ${(-r + 16).toFixed(1)})">
+        <polygon class="hsi-track-diamond" points="0,-16 9,0 0,16 -9,0"></polygon>
       </g>`;
     })();
     const courseRotation = courseDeg === null ? 0 : normalizeSignedDeg(courseDeg - displayHsiHeadingDeg);
@@ -2951,6 +2956,7 @@ cw_header('Cockpit Recorder Replay');
           ${bugHtml}
           ${trackHtml}
         </g>
+        <polygon class="hsi-top-pointer" points="0,${(-r - 1).toFixed(1)} -9,${(-r - 20).toFixed(1)} 9,${(-r - 20).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
         ${courseHtml}
         <circle class="hsi-aircraft" cx="0" cy="0" r="7"></circle>
