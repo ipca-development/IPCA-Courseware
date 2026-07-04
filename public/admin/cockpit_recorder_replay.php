@@ -1027,16 +1027,16 @@ cw_header('Cockpit Recorder Replay');
           <button class="replay-calibration-button" type="button" id="calibrationFovIncrease">FOV +</button>
         </div>
         <div class="replay-calibration-grid replay-calibration-grid-secondary">
-          <button class="replay-calibration-button" type="button" id="verticalFovDecrease">Vertical −</button>
+          <button class="replay-calibration-button" type="button" id="verticalFovDecrease">View Up</button>
           <button class="replay-calibration-button is-muted" type="button" id="verticalFovReset">Reset V</button>
-          <button class="replay-calibration-button" type="button" id="verticalFovIncrease">Vertical +</button>
+          <button class="replay-calibration-button" type="button" id="verticalFovIncrease">View Down</button>
         </div>
         <div class="replay-calibration-row">
           <label for="calibrationFovInput">Horizontal FOV</label>
           <input id="calibrationFovInput" class="replay-calibration-select" type="number" min="35" max="100" step="1" value="80">
         </div>
         <div class="replay-calibration-row">
-          <label for="verticalFovBoost">Vertical FOV increase</label>
+          <label for="verticalFovBoost">Ground view down-shift</label>
           <input id="verticalFovBoost" class="replay-calibration-range" type="range" min="0" max="25" step="1" value="0">
           <output id="verticalFovBoostValue" for="verticalFovBoost">+0°</output>
         </div>
@@ -1480,23 +1480,18 @@ cw_header('Cockpit Recorder Replay');
     const aspect = width / height;
     const horizontalFovDeg = syntheticVisionHorizontalFovDeg();
     const hRad = degToRad(horizontalFovDeg);
-    const nativeVerticalFovDeg = 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI;
+    const verticalFovDeg = 2 * Math.atan(Math.tan(hRad / 2) / aspect) * 180 / Math.PI;
     const verticalFovBoostDeg = clamp(firstFinite(cameraCalibration && cameraCalibration.verticalFovBoostDeg, 0), 0, 25);
-    const verticalFovDeg = clamp(nativeVerticalFovDeg + verticalFovBoostDeg, nativeVerticalFovDeg, 89);
-    const boostedHorizontalFovDeg = Math.max(
-      horizontalFovDeg,
-      2 * Math.atan(Math.tan(degToRad(verticalFovDeg) / 2) * aspect) * 180 / Math.PI
-    );
     const cesiumFovAxis = aspect >= 1 ? 'horizontal' : 'vertical';
     return {
-      horizontalFovDeg: boostedHorizontalFovDeg,
+      horizontalFovDeg,
       configuredHorizontalFovDeg: horizontalFovDeg,
       verticalFovDeg,
-      nativeVerticalFovDeg,
+      nativeVerticalFovDeg: verticalFovDeg,
       verticalFovBoostDeg,
       viewportAspectRatio: aspect,
       cesiumFovAxis,
-      cesiumFovDegToSet: cesiumFovAxis === 'horizontal' ? boostedHorizontalFovDeg : verticalFovDeg,
+      cesiumFovDegToSet: cesiumFovAxis === 'horizontal' ? horizontalFovDeg : verticalFovDeg,
     };
   };
 
@@ -2518,8 +2513,12 @@ cw_header('Cockpit Recorder Replay');
     const fovState = syntheticVisionFovState();
     const verticalFovDeg = fovState.verticalFovDeg;
     if (cesiumViewer.camera && cesiumViewer.camera.frustum) {
-      cesiumViewer.camera.frustum.fov = degToRad(fovState.cesiumFovDegToSet);
-      cesiumViewer.camera.frustum.near = 0.05;
+      const frustum = cesiumViewer.camera.frustum;
+      frustum.fov = degToRad(fovState.cesiumFovDegToSet);
+      frustum.near = 0.05;
+      if ('yOffset' in frustum) {
+        frustum.yOffset = -frustum.near * Math.tan(degToRad(fovState.verticalFovBoostDeg)) * 0.5;
+      }
     }
     const aircraftCartesian = Cesium.Cartesian3.fromDegrees(view.aircraftLon, view.aircraftLat, view.aircraftAltitudeM);
     const calibratedHeading = normalizeDeg(Number(view.heading || 0) + SYNTHETIC_VISION_DEFAULTS.yawBiasDeg + (cameraCalibration ? cameraCalibration.yawDeg : 0));
@@ -2654,6 +2653,7 @@ cw_header('Cockpit Recorder Replay');
       verticalFovDeg,
       nativeVerticalFovDeg: fovState.nativeVerticalFovDeg,
       verticalFovBoostDeg: fovState.verticalFovBoostDeg,
+      frustumYOffset: activeFrustum && Number.isFinite(Number(activeFrustum.yOffset)) ? Number(activeFrustum.yOffset) : null,
       viewportAspectRatio: fovState.viewportAspectRatio,
       cesiumFovDegToSet: fovState.cesiumFovDegToSet,
       cesiumFovAxis: fovState.cesiumFovAxis,
@@ -2697,6 +2697,9 @@ cw_header('Cockpit Recorder Replay');
 
   function applyWorldCameraView(view, cameraPos, cameraAltitudeM) {
     const groundReferenceM = Number.isFinite(Number(view.groundReferenceAltitudeM)) ? Number(view.groundReferenceAltitudeM) : view.aircraftAltitudeM;
+    if (cesiumViewer.camera && cesiumViewer.camera.frustum && 'yOffset' in cesiumViewer.camera.frustum) {
+      cesiumViewer.camera.frustum.yOffset = 0;
+    }
     cesiumViewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(cameraPos.lon, cameraPos.lat, cameraAltitudeM),
       orientation: {
@@ -2970,7 +2973,7 @@ cw_header('Cockpit Recorder Replay');
         `camera attached: ${cameraMode === 'synthetic_vision' ? 'aircraft state' : 'forced test attitude'}`,
         `camera smoothing: visual position only (${fmtNum(cameraCalibration && cameraCalibration.smoothness, 1)})`,
         `SVT FOV: ${fmtNum(dbg.horizontalFovDeg, 0)} deg H / ${fmtNum(dbg.verticalFovDeg, 1)} deg V`,
-        `SVT FOV configured: ${fmtNum(dbg.configuredHorizontalFovDeg, 0)} deg H / native ${fmtNum(dbg.nativeVerticalFovDeg, 1)} deg V / boost +${fmtNum(dbg.verticalFovBoostDeg, 0)} deg`,
+        `SVT view down-shift: +${fmtNum(dbg.verticalFovBoostDeg, 0)} deg / yOffset ${fmtNum(dbg.frustumYOffset, 4)}`,
         `SVT aspect: ${fmtNum(dbg.viewportAspectRatio, 2)}`,
         `SVT Cesium set FOV: ${fmtNum(dbg.cesiumFovDegToSet, 1)} deg ${dbg.cesiumFovAxis || '--'}`,
         `SVT active frustum: ${fmtNum(dbg.activeCesiumFovDeg, 1)} deg ${dbg.activeCesiumFovAxis || '--'}`,
