@@ -469,11 +469,11 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-pointer-label {
   position: absolute;
-  left: 0;
+  left: -6px;
   top: 0;
   width: 12px;
   text-align: center;
-  transform: translateX(-50%);
+  line-height: 10px;
   z-index: 2;
 }
 .engine-pointer.is-probe-number.is-bottom {
@@ -507,8 +507,8 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm {
   height: 116px;
-  width: 148px;
-  margin: 0 auto 20px;
+  width: 100%;
+  margin: 0 1px 20px;
 }
 .engine-arc-svg {
   width: 100%;
@@ -529,7 +529,7 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value {
-  right: 1px;
+  right: 0;
   top: 69px;
   bottom: auto;
   min-width: 44px;
@@ -2452,6 +2452,10 @@ cw_header('Cockpit Recorder Replay');
     return clamp((Number(value) - lo) / (hi - lo) * 100, 0, 100);
   }
 
+  function enginePointerPercent(value, min, max) {
+    return clamp(engineRangePercent(value, min, max), 3, 97);
+  }
+
   function engineFormatValue(value, decimals) {
     if (!Number.isFinite(Number(value))) return '--';
     const places = Math.max(0, Math.min(2, Math.round(Number(decimals) || 0)));
@@ -2530,7 +2534,7 @@ cw_header('Cockpit Recorder Replay');
     const value = engineValue(sample, instrument);
     const label = String((instrument && instrument.label) || '').trim();
     const decimals = Number(instrument && instrument.decimals) || 0;
-    const pointer = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
+    const pointer = value === null ? 3 : enginePointerPercent(value, instrument.min, instrument.max);
     const probe = String((instrument && instrument.probe_label) || '').trim();
     const alertClass = engineLabelAlertClass(instrument, value);
     const ammeter = instrument && String(instrument.kind || '').toLowerCase() === 'ammeter';
@@ -2555,8 +2559,8 @@ cw_header('Cockpit Recorder Replay');
       value1,
       value2
     );
-    const pointer1 = value1 === null ? null : engineRangePercent(value1, instrument.min, instrument.max);
-    const pointer2 = value2 === null ? null : engineRangePercent(value2, instrument.min, instrument.max);
+    const pointer1 = value1 === null ? null : enginePointerPercent(value1, instrument.min, instrument.max);
+    const pointer2 = value2 === null ? null : enginePointerPercent(value2, instrument.min, instrument.max);
     const probe1 = String((instrument && instrument.probe_label) || '1').trim() || '1';
     return `<div class="engine-gauge">
       ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(displayValue, decimals))}</strong></div>` : ''}
@@ -2614,6 +2618,7 @@ cw_header('Cockpit Recorder Replay');
     const pivotX = cx;
     const pivotY = cy + 8;
     const valueAlertClass = Number.isFinite(Number(value)) && Number(value) > 5500 ? ' is-alert-yellow' : '';
+    const displayValue = Number.isFinite(Number(value)) ? String(Math.round(Number(value) / 10) * 10) : '--';
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
@@ -2661,7 +2666,7 @@ cw_header('Cockpit Recorder Replay');
           <path d="M -6 2 Q -5 8 0 10 Q 5 8 6 2 L 1.4 -48 Q 0 -54 -1.4 -48 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
         </g>
       </svg>
-      <div class="engine-arc-value${valueAlertClass}"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
+      <div class="engine-arc-value${valueAlertClass}"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(displayValue)}</strong></div>
     </div>`;
   }
 
