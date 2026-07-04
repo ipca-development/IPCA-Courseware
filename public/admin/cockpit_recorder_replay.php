@@ -1673,6 +1673,7 @@ cw_header('Cockpit Recorder Replay');
   let displayHsiHeadingDeg = null;
   let displayHsiHeadingBugDeg = null;
   let displayRpm = null;
+  const displayEngineValues = new Map();
   let altimeterSettingUnit = 'hpa';
   let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
@@ -1706,6 +1707,7 @@ cw_header('Cockpit Recorder Replay');
   const ALTIMETER_TAPE_SMOOTHING_RATE = 18;
   const VSI_SMOOTHING_RATE = 5;
   const RPM_NEEDLE_SMOOTHING_RATE = 4.5;
+  const ENGINE_GAUGE_SMOOTHING_RATE = 4.5;
   const ALTIMETER_SETTING_UNIT_STORAGE_KEY = 'ipca.cockpitReplay.altimeterSettingUnit.v1';
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
@@ -2478,6 +2480,27 @@ cw_header('Cockpit Recorder Replay');
     return clamp(engineRangePercent(value, min, max), 3, 97);
   }
 
+  function engineSmoothedValue(field, value, dtSec, snap = false) {
+    const key = String(field || '');
+    if (value === null || value === undefined || value === '') {
+      if (key !== '') displayEngineValues.delete(key);
+      return null;
+    }
+    const numeric = Number(value);
+    if (key === '' || !Number.isFinite(numeric)) {
+      if (key !== '') displayEngineValues.delete(key);
+      return numeric;
+    }
+    const previous = displayEngineValues.get(key);
+    if (snap || !Number.isFinite(previous)) {
+      displayEngineValues.set(key, numeric);
+      return numeric;
+    }
+    const smoothed = previous + (numeric - previous) * smoothFactor(ENGINE_GAUGE_SMOOTHING_RATE, dtSec);
+    displayEngineValues.set(key, smoothed);
+    return smoothed;
+  }
+
   function engineFormatValue(value, decimals) {
     if (!Number.isFinite(Number(value))) return '--';
     const places = Math.max(0, Math.min(2, Math.round(Number(decimals) || 0)));
@@ -2559,18 +2582,19 @@ cw_header('Cockpit Recorder Replay');
     return engineAlertClassForRangeColor(color);
   }
 
-  function engineBarHtml(sample, instrument) {
+  function engineBarHtml(sample, instrument, dtSec = 1 / 60, snap = false) {
     const key = String(instrument && instrument.key || '').toLowerCase();
     if (key === 'egt1_f') {
-      return engineProbePairHtml(sample, instrument, 'egt2_f', '2');
+      return engineProbePairHtml(sample, instrument, 'egt2_f', '2', dtSec, snap);
     }
     if (key === 'coolant1_f') {
-      return engineProbePairHtml(sample, instrument, 'coolant2_f', '2');
+      return engineProbePairHtml(sample, instrument, 'coolant2_f', '2', dtSec, snap);
     }
     const value = engineValue(sample, instrument);
+    const smoothedValue = engineSmoothedValue(instrument && (instrument.value_field || instrument.key), value, dtSec, snap);
     const label = String((instrument && instrument.label) || '').trim();
     const decimals = Number(instrument && instrument.decimals) || 0;
-    const pointer = value === null ? 3 : enginePointerPercent(value, instrument.min, instrument.max);
+    const pointer = value === null ? 3 : enginePointerPercent(smoothedValue, instrument.min, instrument.max);
     const probe = String((instrument && instrument.probe_label) || '').trim();
     const alertClass = engineLabelAlertClass(instrument, value);
     const ammeter = instrument && String(instrument.kind || '').toLowerCase() === 'ammeter';
@@ -2585,9 +2609,11 @@ cw_header('Cockpit Recorder Replay');
     </div>`;
   }
 
-  function engineProbePairHtml(sample, instrument, secondField, secondProbeLabel) {
+  function engineProbePairHtml(sample, instrument, secondField, secondProbeLabel, dtSec = 1 / 60, snap = false) {
     const value1 = engineValue(sample, instrument);
     const value2 = firstFinite(sample && sample[secondField]);
+    const smoothedValue1 = engineSmoothedValue(instrument && (instrument.value_field || instrument.key), value1, dtSec, snap);
+    const smoothedValue2 = engineSmoothedValue(secondField, value2, dtSec, snap);
     const label = String((instrument && instrument.label) || '').trim();
     const decimals = Number(instrument && instrument.decimals) || 0;
     const displayValue = firstFinite(
@@ -2595,8 +2621,8 @@ cw_header('Cockpit Recorder Replay');
       value1,
       value2
     );
-    const pointer1 = value1 === null ? null : enginePointerPercent(value1, instrument.min, instrument.max);
-    const pointer2 = value2 === null ? null : enginePointerPercent(value2, instrument.min, instrument.max);
+    const pointer1 = value1 === null ? null : enginePointerPercent(smoothedValue1, instrument.min, instrument.max);
+    const pointer2 = value2 === null ? null : enginePointerPercent(smoothedValue2, instrument.min, instrument.max);
     const probe1 = String((instrument && instrument.probe_label) || '1').trim() || '1';
     const alertColor = engineMoreSevereRangeColor(
       engineRangeColorForValue(instrument, value1),
@@ -2737,13 +2763,14 @@ cw_header('Cockpit Recorder Replay');
     if (!sample || instruments.length === 0) {
       enginePanel.innerHTML = '';
       displayRpm = null;
+      displayEngineValues.clear();
       return;
     }
     enginePanel.innerHTML = instruments.filter((instrument) => {
       const key = String(instrument && instrument.key || '').toLowerCase();
       return key !== 'coolant2_f' && key !== 'egt2_f';
     }).map((instrument) => {
-      return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument, dtSec, snap) : engineBarHtml(sample, instrument);
+      return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument, dtSec, snap) : engineBarHtml(sample, instrument, dtSec, snap);
     }).join('');
   }
 
@@ -3329,6 +3356,7 @@ cw_header('Cockpit Recorder Replay');
     displayHsiHeadingDeg = null;
     displayHsiHeadingBugDeg = null;
     displayRpm = null;
+    displayEngineValues.clear();
     hsiOverlaySignature = '';
     attitudeOverlaySignature = '';
   }
