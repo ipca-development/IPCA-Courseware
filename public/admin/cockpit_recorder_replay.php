@@ -192,7 +192,7 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
 .replay-immersive.is-panel-layout {
-  --panel-engine-width: clamp(138px, 16vw, 174px);
+  --panel-engine-width: clamp(118px, 13.5vw, 150px);
   --panel-bottom-band: calc(clamp(104px, 17vh, 152px) + 50px);
   --panel-playback-height: 38px;
 }
@@ -323,50 +323,70 @@ cw_header('Cockpit Recorder Replay');
   letter-spacing: 0;
 }
 .engine-panel {
-  width: calc(100% - 14px);
+  width: calc(100% - 10px);
   color: #f8fafc;
   text-transform: none;
   letter-spacing: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .engine-gauge {
-  margin: 0 4px 7px;
+  margin: 0 2px 10px;
 }
 .engine-row-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 5px;
   font-weight: 900;
-  font-size: 12px;
+  font-size: 10.5px;
   line-height: 1;
-  margin: 0 2px 3px;
+  margin: 0 1px 4px;
+  color: rgba(248, 250, 252, .98);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .70);
 }
 .engine-row-head.is-alert-yellow {
   color: #111;
-  background: #ffe91a;
-  padding: 3px 4px;
+  background: linear-gradient(165deg, #fff42a 0%, #ffe500 58%, #d8c800 100%);
+  padding: 2px 4px;
+  text-shadow: none;
 }
 .engine-value {
-  font-size: 16px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .engine-bar {
   position: relative;
-  height: 11px;
+  height: 10px;
   border: 1px solid rgba(255, 255, 255, .78);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .95), 0 1px 2px rgba(0, 0, 0, .52);
   background: #050505;
   overflow: visible;
 }
 .engine-bar-fill {
   position: absolute;
-  top: 1px;
-  bottom: 1px;
+  top: 2px;
+  bottom: 2px;
 }
-.engine-bar-fill.is-white { background: #f8fafc; }
-.engine-bar-fill.is-green { background: #23f01f; }
-.engine-bar-fill.is-yellow { background: #ffe91a; }
-.engine-bar-fill.is-red { background: #ff1f2a; }
+.engine-bar-fill.is-white {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.24) 0 1px, rgba(255,255,255,0) 1px 3px),
+    linear-gradient(180deg, #ffffff 0%, #f7f7f7 54%, #cfd3d7 100%);
+}
+.engine-bar-fill.is-green {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.20) 0 1px, rgba(255,255,255,0) 1px 3px),
+    linear-gradient(180deg, #4cff44 0%, #13f018 55%, #06b813 100%);
+}
+.engine-bar-fill.is-yellow {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 1px, rgba(255,255,255,0) 1px 3px),
+    linear-gradient(180deg, #fff238 0%, #ffe600 54%, #d1c500 100%);
+}
+.engine-bar-fill.is-red {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.14) 0 1px, rgba(255,255,255,0) 1px 3px),
+    linear-gradient(180deg, #ff3434 0%, #ff1212 54%, #c90000 100%);
+}
 .engine-bar-fill.is-black { background: #050505; }
 .engine-bar-fill.is-green-line {
   top: 4px;
@@ -375,28 +395,29 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-pointer {
   position: absolute;
-  top: -9px;
+  top: -8px;
   width: 0;
   height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 14px solid #f8fafc;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 12px solid #f8fafc;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
   transform: translateX(-50%);
 }
 .engine-probe {
   position: absolute;
-  left: -2px;
-  top: -8px;
-  width: 18px;
-  height: 14px;
+  left: -3px;
+  top: -7px;
+  width: 16px;
+  height: 13px;
   color: #111;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #fff, #d8dde2);
   clip-path: polygon(0 0, 100% 0, 70% 100%, 0 100%);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
-  line-height: 14px;
+  line-height: 13px;
   padding-left: 2px;
+  z-index: 2;
 }
 .engine-arc-gauge {
   position: relative;
@@ -404,8 +425,8 @@ cw_header('Cockpit Recorder Replay');
   margin: 0 2px 6px;
 }
 .engine-arc-gauge.is-rpm {
-  height: 126px;
-  margin: 0 0 2px;
+  height: 96px;
+  margin: 0 0 8px;
 }
 .engine-arc-svg {
   width: 100%;
@@ -413,7 +434,7 @@ cw_header('Cockpit Recorder Replay');
   overflow: visible;
 }
 .engine-arc-svg.is-rpm {
-  height: 110px;
+  height: 90px;
   display: block;
 }
 .engine-arc-value {
@@ -424,10 +445,10 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value {
-  right: 0;
-  top: 50px;
+  right: 2px;
+  top: 41px;
   bottom: auto;
-  min-width: 58px;
+  min-width: 42px;
   color: #f8fafc;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
 }
@@ -436,7 +457,7 @@ cw_header('Cockpit Recorder Replay');
   font-size: 12px;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value span {
-  font-size: 23px;
+  font-size: 14px;
   line-height: 1;
   letter-spacing: -.02em;
 }
@@ -445,35 +466,16 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm .engine-arc-value strong {
   display: block;
-  margin-top: 5px;
-  font-size: 33px;
+  margin-top: 2px;
+  font-size: 22px;
   line-height: .95;
   letter-spacing: -.04em;
   font-variant-numeric: tabular-nums;
 }
-.engine-rpm-secondary {
-  position: absolute;
-  left: 0;
-  bottom: 2px;
-  display: flex;
-  align-items: baseline;
-  gap: 58px;
-  color: #f8fafc;
-  font-weight: 900;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
-}
-.engine-rpm-secondary span {
-  font-size: 23px;
-  line-height: 1;
-}
-.engine-rpm-secondary strong {
-  font-size: 29px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
 .engine-amps-cross {
   position: absolute;
-  inset: 1px 4px;
+  inset: 1px 5px;
+  pointer-events: none;
 }
 .engine-amps-cross::before,
 .engine-amps-cross::after {
@@ -482,11 +484,11 @@ cw_header('Cockpit Recorder Replay');
   left: 0;
   right: 0;
   top: 50%;
-  height: 3px;
+  height: 2px;
   background: rgba(255, 31, 42, .92);
 }
-.engine-amps-cross::before { transform: rotate(9deg); }
-.engine-amps-cross::after { transform: rotate(-9deg); }
+.engine-amps-cross::before { transform: rotate(8deg); }
+.engine-amps-cross::after { transform: rotate(-8deg); }
 .replay-engine-arc {
   height: 82px;
   border-radius: 82px 82px 0 0;
@@ -2434,9 +2436,9 @@ cw_header('Cockpit Recorder Replay');
     const endAngle = 450;
     const needleAngle = startAngle + pct / 100 * (endAngle - startAngle);
     const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
-    const cx = 78;
-    const cy = 75;
-    const r = 55;
+    const cx = 58;
+    const cy = 61;
+    const r = 42;
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
@@ -2444,11 +2446,10 @@ cw_header('Cockpit Recorder Replay');
       const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
       const fromAngle = startAngle + fromPct / 100 * (endAngle - startAngle);
       const toAngle = startAngle + toPct / 100 * (endAngle - startAngle);
-      return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="13.5" fill="none" stroke-linecap="butt"></path>`;
+      return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="9.5" fill="none" stroke-linecap="butt"></path>`;
     }).join('');
-    const fuelFlow = engineValue(sample, { value_field: 'fuel_flow_gph', key: 'fuel_flow_gph' });
     return `<div class="engine-arc-gauge is-rpm">
-      <svg class="engine-arc-svg is-rpm" viewBox="0 0 160 118" aria-hidden="true">
+      <svg class="engine-arc-svg is-rpm" viewBox="0 0 126 92" aria-hidden="true">
         <defs>
           <linearGradient id="rpm-white-gradient" x1="0%" y1="20%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#ffffff"></stop>
@@ -2473,17 +2474,19 @@ cw_header('Cockpit Recorder Replay');
             <stop offset="52%" stop-color="#f7f7f7"></stop>
             <stop offset="100%" stop-color="#c6c6c6"></stop>
           </linearGradient>
+          <filter id="rpm-subtle-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="1" stdDeviation=".7" flood-color="#000000" flood-opacity=".35"></feDropShadow>
+          </filter>
         </defs>
-        <circle cx="${cx}" cy="${cy}" r="77" fill="none" stroke="rgba(255,255,255,.06)" stroke-width=".8"></circle>
-        <circle cx="${cx}" cy="${cy}" r="43" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".6"></circle>
-        <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="16.5" fill="none" stroke-linecap="butt"></path>
+        <circle cx="${cx}" cy="${cy}" r="57" fill="none" stroke="rgba(255,255,255,.06)" stroke-width=".7"></circle>
+        <circle cx="${cx}" cy="${cy}" r="31" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".55"></circle>
+        <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="12" fill="none" stroke-linecap="butt" filter="url(#rpm-subtle-shadow)"></path>
         ${rangeArcs}
         <g transform="translate(${cx} ${cy}) rotate(${(needleAngle - 270).toFixed(1)})">
-          <path d="M -4 6 L 4 6 L 9 -47 Q 7 -60 -2 -61 Q -10 -59 -11 -47 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
+          <path d="M -2.8 4.5 L 2.8 4.5 L 6 -38 Q 4.7 -47 -1.6 -48 Q -7.1 -46.8 -7.5 -38 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".3"></path>
         </g>
       </svg>
       <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
-      <div class="engine-rpm-secondary"><span>GPH</span><strong>${escapeHtml(engineFormatValue(fuelFlow, 1))}</strong></div>
     </div>`;
   }
 
@@ -2505,10 +2508,7 @@ cw_header('Cockpit Recorder Replay');
       enginePanel.innerHTML = '';
       return;
     }
-    const rpmEmbedsFuelFlow = instruments.some((instrument) => instrument && String(instrument.key || '').toLowerCase() === 'rpm' && String(instrument.kind || '').toLowerCase() === 'arc');
-    enginePanel.innerHTML = instruments.filter((instrument) => {
-      return !(rpmEmbedsFuelFlow && instrument && String(instrument.key || '').toLowerCase() === 'fuel_flow_gph');
-    }).map((instrument) => {
+    enginePanel.innerHTML = instruments.map((instrument) => {
       return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument) : engineBarHtml(sample, instrument);
     }).join('');
   }
