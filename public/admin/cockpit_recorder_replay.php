@@ -2680,8 +2680,10 @@ cw_header('Cockpit Recorder Replay');
     } else {
       displayRpm += (targetRpm - displayRpm) * smoothFactor(RPM_NEEDLE_SMOOTHING_RATE, dtSec);
     }
-    const needleValue = Number.isFinite(displayRpm) ? displayRpm : targetRpm;
-    const pct = Number.isFinite(needleValue) ? engineRangePercent(needleValue, min, max) : 0;
+    const displayRoundedRpm = Number.isFinite(displayRpm)
+      ? Math.round(displayRpm / 10) * 10
+      : (Number.isFinite(targetRpm) ? Math.round(targetRpm / 10) * 10 : null);
+    const pct = Number.isFinite(displayRoundedRpm) ? engineRangePercent(displayRoundedRpm, min, max) : 0;
     const startTopAngle = 225;
     const sweepTopAngle = 225;
     const startAngle = startTopAngle - 90;
@@ -2693,8 +2695,8 @@ cw_header('Cockpit Recorder Replay');
     const r = 50;
     const pivotX = cx;
     const pivotY = cy;
-    const valueAlertClass = engineAlertClassForRangeColor(engineRangeColorForValue(instrument, value));
-    const displayValue = Number.isFinite(Number(value)) ? String(Math.round(Number(value) / 10) * 10) : '--';
+    const valueAlertClass = engineAlertClassForRangeColor(engineRangeColorForValue(instrument, displayRoundedRpm));
+    const displayValue = Number.isFinite(displayRoundedRpm) ? String(displayRoundedRpm) : '--';
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
