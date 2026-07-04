@@ -201,6 +201,8 @@ final class CockpitReplayPipeline
             'amps' => $this->buildG3xScalarKnots($g3xPoints, 'amps'),
             'egt1_f' => $this->buildG3xScalarKnots($g3xPoints, 'egt1_f'),
             'egt2_f' => $this->buildG3xScalarKnots($g3xPoints, 'egt2_f'),
+            'coolant1_f' => $this->buildG3xScalarKnots($g3xPoints, 'coolant1_f'),
+            'coolant2_f' => $this->buildG3xScalarKnots($g3xPoints, 'coolant2_f'),
         );
         $altitudeKnots = $this->buildAltitudeKnots($gpsPoints, $g3xPoints);
         $baroAltitudeKnots = $this->buildG3xScalarKnots($g3xPoints, 'baro_alt_ft');
@@ -515,6 +517,8 @@ final class CockpitReplayPipeline
                 'amps' => $engineValues['amps'] ?? null,
                 'egt1_f' => $engineValues['egt1_f'] ?? null,
                 'egt2_f' => $engineValues['egt2_f'] ?? null,
+                'coolant1_f' => $engineValues['coolant1_f'] ?? null,
+                'coolant2_f' => $engineValues['coolant2_f'] ?? null,
                 'vertical_speed_fpm' => $g3xVerticalSpeedFpm !== null ? round($g3xVerticalSpeedFpm, 1) : ($verticalSpeedFpm !== null ? round($verticalSpeedFpm, 1) : null),
                 'estimated_vertical_speed_fpm' => $verticalSpeedFpm !== null ? round($verticalSpeedFpm, 1) : null,
                 'phase' => $phase,
@@ -683,6 +687,8 @@ final class CockpitReplayPipeline
                 'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1'),
                 'egt1_f' => G3XFlightStreamParser::numericValue($row, 'EGT1 (deg F)', 'E1 EGT1'),
                 'egt2_f' => G3XFlightStreamParser::numericValue($row, 'EGT2 (deg F)', 'E1 EGT2'),
+                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 1 (deg F)'),
+                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 2 (deg F)'),
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);

@@ -380,7 +380,7 @@ cw_header('Cockpit Recorder Replay');
 .engine-bar-fill.is-red {
   background: #ff1212;
 }
-.engine-bar-fill.is-black { background: #050505; }
+.engine-bar-fill.is-black { background: #f8fafc; }
 .engine-bar-fill.is-green-line {
   top: 4px;
   bottom: 4px;
@@ -397,6 +397,12 @@ cw_header('Cockpit Recorder Replay');
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
   transform: translateX(-50%);
 }
+.engine-pointer.is-bottom {
+  top: auto;
+  bottom: -3px;
+  border-top: 0;
+  border-bottom: 12px solid #f8fafc;
+}
 .engine-probe {
   position: absolute;
   left: -3px;
@@ -411,6 +417,22 @@ cw_header('Cockpit Recorder Replay');
   line-height: 13px;
   padding-left: 2px;
   z-index: 2;
+}
+.engine-bar.is-probe-pair {
+  margin-left: 15px;
+}
+.engine-probe.is-pair-top,
+.engine-probe.is-pair-bottom {
+  left: -17px;
+}
+.engine-probe.is-pair-top {
+  top: -7px;
+}
+.engine-probe.is-pair-bottom {
+  top: auto;
+  bottom: -7px;
+  clip-path: polygon(0 100%, 100% 100%, 70% 0, 0 0);
+  line-height: 13px;
 }
 .engine-arc-gauge {
   position: relative;
@@ -2374,6 +2396,13 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function engineBarHtml(sample, instrument) {
+    const key = String(instrument && instrument.key || '').toLowerCase();
+    if (key === 'egt1_f') {
+      return engineProbePairHtml(sample, instrument, 'egt2_f', '2');
+    }
+    if (key === 'coolant1_f') {
+      return engineProbePairHtml(sample, instrument, 'coolant2_f', '2');
+    }
     const value = engineValue(sample, instrument);
     const label = String((instrument && instrument.label) || '').trim();
     const decimals = Number(instrument && instrument.decimals) || 0;
@@ -2387,6 +2416,26 @@ cw_header('Cockpit Recorder Replay');
         ${probe !== '' ? `<span class="engine-probe">${escapeHtml(probe)}</span>` : ''}
         <span class="engine-pointer" style="left:${pointer.toFixed(2)}%"></span>
         ${instrument && instrument.kind === 'ammeter' ? '<span class="engine-amps-cross"></span>' : ''}
+      </div>
+    </div>`;
+  }
+
+  function engineProbePairHtml(sample, instrument, secondField, secondProbeLabel) {
+    const value1 = engineValue(sample, instrument);
+    const value2 = firstFinite(sample && sample[secondField]);
+    const label = String((instrument && instrument.label) || '').trim();
+    const decimals = Number(instrument && instrument.decimals) || 0;
+    const pointer1 = value1 === null ? null : engineRangePercent(value1, instrument.min, instrument.max);
+    const pointer2 = value2 === null ? null : engineRangePercent(value2, instrument.min, instrument.max);
+    const probe1 = String((instrument && instrument.probe_label) || '1').trim() || '1';
+    return `<div class="engine-gauge">
+      ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(value1, decimals))}</strong></div>` : ''}
+      <div class="engine-bar is-probe-pair">
+        ${engineRangeHtml(instrument)}
+        <span class="engine-probe is-pair-top">${escapeHtml(probe1)}</span>
+        <span class="engine-probe is-pair-bottom">${escapeHtml(String(secondProbeLabel || '2'))}</span>
+        ${pointer1 === null ? '' : `<span class="engine-pointer" style="left:${pointer1.toFixed(2)}%"></span>`}
+        ${pointer2 === null ? '' : `<span class="engine-pointer is-bottom" style="left:${pointer2.toFixed(2)}%"></span>`}
       </div>
     </div>`;
   }
@@ -2425,10 +2474,11 @@ cw_header('Cockpit Recorder Replay');
     const min = Number(instrument && instrument.min);
     const max = Number(instrument && instrument.max);
     const pct = value === null ? 0 : engineRangePercent(value, min, max);
-    const startAngle = 135;
-    const endAngle = 450;
-    const needleArcAngle = startAngle + pct / 100 * (endAngle - startAngle);
-    const needleRotation = needleArcAngle - 270;
+    const startTopAngle = 225;
+    const sweepTopAngle = 225;
+    const startAngle = startTopAngle - 90;
+    const endAngle = startAngle + sweepTopAngle;
+    const needleTopAngle = startTopAngle + pct / 100 * sweepTopAngle;
     const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
     const cx = 62;
     const cy = 62;
@@ -2440,8 +2490,8 @@ cw_header('Cockpit Recorder Replay');
       const toPct = engineRangePercent(Number(range && range.to), min, max);
       if (toPct <= fromPct) return '';
       const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
-      const fromAngle = startAngle + fromPct / 100 * (endAngle - startAngle);
-      const toAngle = startAngle + toPct / 100 * (endAngle - startAngle);
+      const fromAngle = startAngle + fromPct / 100 * sweepTopAngle;
+      const toAngle = startAngle + toPct / 100 * sweepTopAngle;
       return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="11" fill="none" stroke-linecap="butt"></path>`;
     }).join('');
     return `<div class="engine-arc-gauge is-rpm">
@@ -2478,7 +2528,7 @@ cw_header('Cockpit Recorder Replay');
         <circle cx="${cx}" cy="${cy}" r="36" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".55"></circle>
         <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="14" fill="none" stroke-linecap="butt" filter="url(#rpm-subtle-shadow)"></path>
         ${rangeArcs}
-        <g transform="translate(${pivotX.toFixed(1)} ${pivotY.toFixed(1)}) rotate(${needleRotation.toFixed(1)})">
+        <g transform="translate(${pivotX.toFixed(1)} ${pivotY.toFixed(1)}) rotate(${needleTopAngle.toFixed(1)})">
           <path d="M -6 2 Q -5 8 0 10 Q 5 8 6 2 L 1.4 -48 Q 0 -54 -1.4 -48 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
         </g>
       </svg>
@@ -2504,7 +2554,10 @@ cw_header('Cockpit Recorder Replay');
       enginePanel.innerHTML = '';
       return;
     }
-    enginePanel.innerHTML = instruments.map((instrument) => {
+    enginePanel.innerHTML = instruments.filter((instrument) => {
+      const key = String(instrument && instrument.key || '').toLowerCase();
+      return key !== 'coolant2_f' && key !== 'egt2_f';
+    }).map((instrument) => {
       return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument) : engineBarHtml(sample, instrument);
     }).join('');
   }
