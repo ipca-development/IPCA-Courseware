@@ -773,13 +773,23 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-camera-control {
   display: grid;
-  grid-template-columns: 118px 1fr 58px;
+  grid-template-columns: 118px 1fr 72px 58px;
   gap: 8px;
   align-items: center;
   margin-top: 6px;
 }
 .replay-camera-control label { color: #cbd5e1; }
 .replay-camera-control input { width: 100%; accent-color: #60a5fa; }
+.replay-camera-exact {
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, .25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .86);
+  color: #e2e8f0;
+  padding: 5px 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
 .replay-camera-control output {
   color: #dbeafe;
   font-variant-numeric: tabular-nums;
@@ -975,22 +985,26 @@ cw_header('Cockpit Recorder Replay');
       <div class="replay-camera-panel-title">Chase / north-up tuning</div>
       <div class="replay-camera-control">
         <label for="cameraRange">Range</label>
-        <input id="cameraRange" type="range" min="60" max="260" step="5">
+        <input id="cameraRange" type="range" min="60" max="260" step="1">
+        <input id="cameraRangeExact" class="replay-camera-exact" type="number" min="60" max="260" step="1" aria-label="Exact camera range">
         <output id="cameraRangeValue" for="cameraRange"></output>
       </div>
       <div class="replay-camera-control">
         <label for="cameraHeight">Height offset</label>
-        <input id="cameraHeight" type="range" min="8" max="90" step="2">
+        <input id="cameraHeight" type="range" min="8" max="90" step="0.5">
+        <input id="cameraHeightExact" class="replay-camera-exact" type="number" min="8" max="90" step="0.5" aria-label="Exact camera height offset">
         <output id="cameraHeightValue" for="cameraHeight"></output>
       </div>
       <div class="replay-camera-control">
         <label for="cameraPitch">Camera pitch</label>
-        <input id="cameraPitch" type="range" min="-30" max="-4" step="1">
+        <input id="cameraPitch" type="range" min="-30" max="-4" step="0.1">
+        <input id="cameraPitchExact" class="replay-camera-exact" type="number" min="-30" max="-4" step="0.1" aria-label="Exact camera pitch">
         <output id="cameraPitchValue" for="cameraPitch"></output>
       </div>
       <div class="replay-camera-control">
         <label for="cameraSmoothing">Smoothing</label>
-        <input id="cameraSmoothing" type="range" min="1" max="12" step="0.5">
+        <input id="cameraSmoothing" type="range" min="1" max="12" step="0.1">
+        <input id="cameraSmoothingExact" class="replay-camera-exact" type="number" min="1" max="12" step="0.1" aria-label="Exact camera smoothing">
         <output id="cameraSmoothingValue" for="cameraSmoothing"></output>
       </div>
     </div>
@@ -1175,6 +1189,10 @@ cw_header('Cockpit Recorder Replay');
   const cameraHeightInput = document.getElementById('cameraHeight');
   const cameraPitchInput = document.getElementById('cameraPitch');
   const cameraSmoothingInput = document.getElementById('cameraSmoothing');
+  const cameraRangeExact = document.getElementById('cameraRangeExact');
+  const cameraHeightExact = document.getElementById('cameraHeightExact');
+  const cameraPitchExact = document.getElementById('cameraPitchExact');
+  const cameraSmoothingExact = document.getElementById('cameraSmoothingExact');
   const cameraRangeValue = document.getElementById('cameraRangeValue');
   const cameraHeightValue = document.getElementById('cameraHeightValue');
   const cameraPitchValue = document.getElementById('cameraPitchValue');
@@ -2059,7 +2077,7 @@ cw_header('Cockpit Recorder Replay');
     const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
       ? (arcLeft + arcRight) / 2
       : width / 2;
-    const attitudeRollArcScale = 0.5;
+    const attitudeRollArcScale = 0.6;
     const attitudePitchMarkScale = 0.5;
     const attitudeYellowReferenceScale = 0.5;
     const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
@@ -2136,11 +2154,10 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
-        <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
-        <polygon class="attitude-yellow" points="128,0 210,0 210,14 128,14"></polygon>
-        <polygon class="attitude-yellow" points="-126,50 -24,8 0,0 -98,58"></polygon>
-        <polygon class="attitude-yellow" points="126,50 24,8 0,0 98,58"></polygon>
-        <line class="attitude-white" x1="-30" y1="74" x2="30" y2="74"></line>
+        <rect class="attitude-yellow" x="-246" y="0" width="84" height="14" rx="5" ry="5"></rect>
+        <rect class="attitude-yellow" x="162" y="0" width="84" height="14" rx="5" ry="5"></rect>
+        <polygon class="attitude-yellow" points="-142,52 -46,11 -20,4 -112,60"></polygon>
+        <polygon class="attitude-yellow" points="142,52 46,11 20,4 112,60"></polygon>
       </g>
     `;
     attitudeOverlay.hidden = false;
@@ -2159,8 +2176,8 @@ cw_header('Cockpit Recorder Replay');
   function updateCameraControlLabels() {
     if (!cameraSettings) return;
     if (cameraRangeValue) cameraRangeValue.textContent = `${Math.round(cameraSettings.rangeM)} m`;
-    if (cameraHeightValue) cameraHeightValue.textContent = `+${Math.round(cameraSettings.heightM)} m`;
-    if (cameraPitchValue) cameraPitchValue.textContent = `${Math.round(cameraSettings.pitchDeg)} deg`;
+    if (cameraHeightValue) cameraHeightValue.textContent = `+${Number(cameraSettings.heightM).toFixed(1)} m`;
+    if (cameraPitchValue) cameraPitchValue.textContent = `${Number(cameraSettings.pitchDeg).toFixed(1)} deg`;
     if (cameraSmoothingValue) cameraSmoothingValue.textContent = cameraSettings.smoothing.toFixed(1);
   }
 
@@ -2170,6 +2187,10 @@ cw_header('Cockpit Recorder Replay');
     if (cameraHeightInput) cameraHeightInput.value = String(cameraSettings.heightM);
     if (cameraPitchInput) cameraPitchInput.value = String(cameraSettings.pitchDeg);
     if (cameraSmoothingInput) cameraSmoothingInput.value = String(cameraSettings.smoothing);
+    if (cameraRangeExact) cameraRangeExact.value = String(Math.round(cameraSettings.rangeM));
+    if (cameraHeightExact) cameraHeightExact.value = Number(cameraSettings.heightM).toFixed(1);
+    if (cameraPitchExact) cameraPitchExact.value = Number(cameraSettings.pitchDeg).toFixed(1);
+    if (cameraSmoothingExact) cameraSmoothingExact.value = Number(cameraSettings.smoothing).toFixed(1);
     updateCameraControlLabels();
   }
 
@@ -2181,6 +2202,7 @@ cw_header('Cockpit Recorder Replay');
     if (key === 'heightM') cameraSettings.heightM = clamp(next, 8, 90);
     if (key === 'pitchDeg') cameraSettings.pitchDeg = clamp(next, -30, -4);
     if (key === 'smoothing') cameraSettings.smoothing = clamp(next, 1, 12);
+    syncCameraControls();
     updateCameraControlLabels();
     saveCameraSettings();
     safeRenderCesium(false);
@@ -3313,14 +3335,38 @@ cw_header('Cockpit Recorder Replay');
   if (cameraRangeInput) {
     cameraRangeInput.addEventListener('input', () => updateCameraSetting('rangeM', cameraRangeInput.value));
   }
+  if (cameraRangeExact) {
+    cameraRangeExact.addEventListener('change', () => updateCameraSetting('rangeM', cameraRangeExact.value));
+    cameraRangeExact.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') cameraRangeExact.blur();
+    });
+  }
   if (cameraHeightInput) {
     cameraHeightInput.addEventListener('input', () => updateCameraSetting('heightM', cameraHeightInput.value));
+  }
+  if (cameraHeightExact) {
+    cameraHeightExact.addEventListener('change', () => updateCameraSetting('heightM', cameraHeightExact.value));
+    cameraHeightExact.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') cameraHeightExact.blur();
+    });
   }
   if (cameraPitchInput) {
     cameraPitchInput.addEventListener('input', () => updateCameraSetting('pitchDeg', cameraPitchInput.value));
   }
+  if (cameraPitchExact) {
+    cameraPitchExact.addEventListener('change', () => updateCameraSetting('pitchDeg', cameraPitchExact.value));
+    cameraPitchExact.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') cameraPitchExact.blur();
+    });
+  }
   if (cameraSmoothingInput) {
     cameraSmoothingInput.addEventListener('input', () => updateCameraSetting('smoothing', cameraSmoothingInput.value));
+  }
+  if (cameraSmoothingExact) {
+    cameraSmoothingExact.addEventListener('change', () => updateCameraSetting('smoothing', cameraSmoothingExact.value));
+    cameraSmoothingExact.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') cameraSmoothingExact.blur();
+    });
   }
   if (calibrationStepSelect) {
     calibrationStepSelect.addEventListener('change', () => {
