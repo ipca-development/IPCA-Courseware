@@ -2061,6 +2061,7 @@ cw_header('Cockpit Recorder Replay');
       : width / 2;
     const attitudeRollArcScale = 0.5;
     const attitudePitchMarkScale = 0.5;
+    const attitudeYellowReferenceScale = 0.5;
     const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight * pitchLadderScaleFactor;
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
@@ -2076,14 +2077,14 @@ cw_header('Cockpit Recorder Replay');
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, airspeedRect.top - rootRect.top) : 72;
-    const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360) * attitudeRollArcScale;
-    const arcCenterY = tapeTopY + arcRadius;
+    const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
+    const arcCenterY = tapeTopY + (arcRadius * attitudeRollArcScale);
     const arcPoints = [];
     for (let bank = -60; bank <= 60; bank += 4) {
       arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius).toFixed(1)}`);
     }
     const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
-      const tickLen = (Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 20 : 13) * attitudeRollArcScale;
+      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 20 : 13;
       const innerX = Math.sin(degToRad(bank)) * arcRadius;
       const innerY = -Math.cos(degToRad(bank)) * arcRadius;
       const outerX = Math.sin(degToRad(bank)) * (arcRadius + tickLen);
@@ -2110,6 +2111,9 @@ cw_header('Cockpit Recorder Replay');
       Math.round(rollDeg * 10),
       Math.round(verticalFovDeg),
       Math.round(pitchLadderScaleFactor * 100),
+      Math.round(attitudeRollArcScale * 100),
+      Math.round(attitudePitchMarkScale * 100),
+      Math.round(attitudeYellowReferenceScale * 100),
       Math.round(slipX),
     ].join('|');
     if (signature === attitudeOverlaySignature) {
@@ -2122,16 +2126,16 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
-      <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
+      <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)}) scale(${attitudeRollArcScale})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + attitudeRollArcScale).toFixed(1)} ${(-11 * attitudeRollArcScale).toFixed(1)},${(-arcRadius - 22 * attitudeRollArcScale).toFixed(1)} ${(11 * attitudeRollArcScale).toFixed(1)},${(-arcRadius - 22 * attitudeRollArcScale).toFixed(1)}"></polygon>
+        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 1).toFixed(1)} -11,${(-arcRadius - 22).toFixed(1)} 11,${(-arcRadius - 22).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
         <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight}"></polygon>
       </g>
-      <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)})">
+      <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
         <polygon class="attitude-yellow" points="-210,0 -128,0 -128,14 -210,14"></polygon>
         <polygon class="attitude-yellow" points="128,0 210,0 210,14 128,14"></polygon>
         <polygon class="attitude-yellow" points="-126,50 -24,8 0,0 -98,58"></polygon>
