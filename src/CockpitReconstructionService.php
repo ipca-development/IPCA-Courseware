@@ -1793,6 +1793,50 @@ final class CockpitReconstructionService
         array $g3xSamples = array(),
         ?callable $onProgress = null
     ): array {
+        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'g3x_only');
+        if ($replaySourceMode === '' || $replaySourceMode === 'g3x_first') {
+            $replaySourceMode = 'g3x_only';
+        }
+        if ($replaySourceMode === 'g3x_only') {
+            if ($onProgress !== null) {
+                $onProgress(self::STAGE_CANONICAL, 18, 'Building G3X-only canonical timeline');
+            }
+
+            $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+            $g3xRowsForSamples = array();
+            $samples = array();
+            foreach ($g3xSamples as $g3xSample) {
+                $seconds = (float)($g3xSample['seconds'] ?? -1);
+                if ($seconds < 0 || ($duration > 0 && $seconds > $duration)) {
+                    continue;
+                }
+
+                $sample = $this->mergeSample($recording, $seconds, null, null, null, array());
+                $sample['sample_index'] = count($samples);
+                $samples[] = $sample;
+                $g3xRowsForSamples[] = $g3xSample['row'];
+            }
+            if ($samples === array()) {
+                throw new RuntimeException('G3X CSV has no samples inside the recording time window.');
+            }
+
+            if ($onProgress !== null) {
+                $onProgress(self::STAGE_DERIVED, 28, 'Computing derived replay values for G3X-only timeline');
+            }
+            $samples = $this->addDerivedReplayValues($recording, $samples, $options);
+
+            if ($onProgress !== null) {
+                $onProgress(self::STAGE_CANONICAL, 34, 'Applying G3X data to canonical samples');
+            }
+            foreach ($samples as $index => $sample) {
+                if (isset($g3xRowsForSamples[$index])) {
+                    $samples[$index] = $this->mergeG3XIntoSample($sample, $g3xRowsForSamples[$index]);
+                }
+            }
+
+            return $samples;
+        }
+
         $gps = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeGPS($row), $gpsSamples), fn(array $row): bool => isset($row['seconds'])));
         $ahrs = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAHRS($row), $ahrsSamples), fn(array $row): bool => isset($row['seconds'])));
         $adsb = array_values(array_filter(array_map(fn(array $row): array => $this->normalizeAdsbOwnship($row), $adsbSamples), fn(array $row): bool => isset($row['seconds'])));
