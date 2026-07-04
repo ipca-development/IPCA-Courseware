@@ -222,10 +222,10 @@ cw_header('Cockpit Recorder Replay');
   margin-top: 8px;
 }
 .replay-immersive.is-panel-layout .airspeed-tape {
-  left: calc(var(--panel-engine-width) + clamp(30px, 4vw, 72px) + 30px);
+  left: calc(var(--panel-engine-width) + clamp(30px, 4vw, 72px) + 60px);
 }
 .replay-immersive.is-panel-layout .altimeter-stack {
-  right: calc(clamp(60px, 8vw, 122px) + 30px);
+  right: calc(clamp(60px, 8vw, 122px) + 60px);
 }
 .replay-immersive.is-panel-layout .replay-dock {
   left: 0;
@@ -284,7 +284,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .airspeed-tape {
   position: absolute;
-  left: calc(clamp(112px, 18.5vw, 220px) + 30px);
+  left: calc(clamp(112px, 18.5vw, 220px) + 60px);
   top: 72px;
   z-index: 19;
   width: 118px;
@@ -419,7 +419,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .altimeter-stack {
   position: absolute;
-  right: calc(clamp(108px, 17vw, 210px) + 30px);
+  right: calc(clamp(108px, 17vw, 210px) + 60px);
   top: 72px;
   z-index: 19;
   display: flex;
