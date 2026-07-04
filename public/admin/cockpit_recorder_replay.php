@@ -454,55 +454,33 @@ cw_header('Cockpit Recorder Replay');
   border-bottom: 12px solid #f8fafc;
 }
 .engine-pointer.is-probe-number {
-  top: -9px;
-  width: 16px;
-  height: 14px;
-  border: 0;
+  top: -3px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 12px solid #f8fafc;
   color: #111;
-  background: transparent;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   font-size: 9px;
   font-weight: 900;
   line-height: 10px;
-  padding-top: 1px;
-  filter: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
   z-index: 3;
 }
-.engine-pointer.is-probe-number::before,
-.engine-pointer.is-probe-number::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
-  pointer-events: none;
-}
-.engine-pointer.is-probe-number::before {
-  background: rgba(0, 0, 0, .70);
-  transform: translate(2px, 2px);
-  filter: blur(.35px);
-  z-index: 0;
-}
-.engine-pointer.is-probe-number::after {
-  background: #f8fafc;
-  z-index: 1;
-}
 .engine-pointer-label {
-  position: relative;
+  position: absolute;
+  left: -3px;
+  top: -1px;
   z-index: 2;
 }
 .engine-pointer.is-probe-number.is-bottom {
   top: auto;
-  bottom: -9px;
-  border: 0;
-  align-items: flex-end;
-  padding-top: 0;
-  padding-bottom: 1px;
+  bottom: -3px;
+  border-top: 0;
+  border-bottom: 12px solid #f8fafc;
 }
-.engine-pointer.is-probe-number.is-bottom::before,
-.engine-pointer.is-probe-number.is-bottom::after {
-  clip-path: polygon(50% 0, 0 100%, 100% 100%);
+.engine-pointer.is-probe-number.is-bottom .engine-pointer-label {
+  top: -10px;
 }
 .engine-probe {
   position: absolute;
