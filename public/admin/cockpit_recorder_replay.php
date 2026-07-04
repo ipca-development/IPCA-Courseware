@@ -109,10 +109,6 @@ cw_header('Cockpit Recorder Replay');
   --panel-bottom-band: clamp(96px, 16vh, 150px);
   --panel-playback-height: 38px;
 }
-.replay-immersive.is-panel-layout .cesium-cockpit {
-  left: var(--panel-engine-width);
-  bottom: calc(var(--panel-bottom-band) + var(--panel-playback-height));
-}
 .replay-engine-pane,
 .replay-bottom-instrument-pane {
   display: none;
@@ -134,9 +130,8 @@ cw_header('Cockpit Recorder Replay');
   justify-content: center;
   padding-top: 64px;
   box-sizing: border-box;
-  background: linear-gradient(90deg, rgba(15, 23, 42, .56), rgba(15, 23, 42, .18));
-  border-right: 1px solid rgba(226, 232, 240, .12);
-  backdrop-filter: blur(3px);
+  background: linear-gradient(90deg, rgba(15, 23, 42, .28), rgba(15, 23, 42, .04));
+  border-right: 1px solid rgba(226, 232, 240, .08);
 }
 .replay-immersive.is-panel-layout .replay-bottom-instrument-pane {
   display: flex;
@@ -146,15 +141,14 @@ cw_header('Cockpit Recorder Replay');
   height: var(--panel-bottom-band);
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, rgba(15, 23, 42, .02), rgba(15, 23, 42, .36));
-  border-top: 1px solid rgba(226, 232, 240, .10);
-  backdrop-filter: blur(2px);
+  background: linear-gradient(180deg, rgba(15, 23, 42, .00), rgba(15, 23, 42, .14));
+  border-top: 1px solid rgba(226, 232, 240, .06);
 }
 .replay-pane-label {
-  border: 1px dashed rgba(226, 232, 240, .30);
+  border: 1px dashed rgba(226, 232, 240, .22);
   border-radius: 999px;
   padding: 6px 10px;
-  background: rgba(15, 23, 42, .34);
+  background: rgba(15, 23, 42, .18);
 }
 .replay-immersive.is-panel-layout .airspeed-tape {
   left: calc(var(--panel-engine-width) + clamp(58px, 7.5vw, 116px));
@@ -1492,9 +1486,6 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
-    if (cesiumViewer && cesiumViewer.resize) {
-      try { cesiumViewer.resize(); } catch (err) {}
-    }
     safeRenderCesium(true);
   }
 
