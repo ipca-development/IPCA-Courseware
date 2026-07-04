@@ -2504,7 +2504,7 @@ cw_header('Cockpit Recorder Replay');
   function engineFormatValue(value, decimals) {
     if (!Number.isFinite(Number(value))) return '--';
     const places = Math.max(0, Math.min(2, Math.round(Number(decimals) || 0)));
-    return Number(value).toFixed(places).replace(/\.0$/, '');
+    return Number(value).toFixed(places);
   }
 
   function engineDisplayValue(sample, instrument, value, decimals) {
@@ -2692,7 +2692,7 @@ cw_header('Cockpit Recorder Replay');
     const cy = 62;
     const r = 50;
     const pivotX = cx;
-    const pivotY = cy + 8;
+    const pivotY = cy;
     const valueAlertClass = engineAlertClassForRangeColor(engineRangeColorForValue(instrument, value));
     const displayValue = Number.isFinite(Number(value)) ? String(Math.round(Number(value) / 10) * 10) : '--';
     const rangeArcs = ranges.map((range) => {
