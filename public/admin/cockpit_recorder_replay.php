@@ -3299,7 +3299,7 @@ cw_header('Cockpit Recorder Replay');
         scaleCartesian(basis.forward, BODY_AXIS_MAPPING.eyeOffsetXForwardM),
         scaleCartesian(basis.right, BODY_AXIS_MAPPING.eyeOffsetYRightM)
       ),
-      scaleCartesian(basis.up, BODY_AXIS_MAPPING.eyeOffsetZUpM)
+      new Cesium.Cartesian3(0, 0, BODY_AXIS_MAPPING.eyeOffsetZUpM)
     );
     let cameraWorld = Cesium.Matrix4.multiplyByPoint(enuTransform, eyeOffsetEnu, new Cesium.Cartesian3());
     const direction = Cesium.Cartesian3.normalize(
@@ -3311,15 +3311,30 @@ cw_header('Cockpit Recorder Replay');
       new Cesium.Cartesian3()
     );
     const rightWorld = Cesium.Cartesian3.normalize(crossCartesian(direction, up), new Cesium.Cartesian3());
+    const localUpWorld = Cesium.Cartesian3.normalize(
+      Cesium.Matrix4.multiplyByPointAsVector(enuTransform, new Cesium.Cartesian3(0, 0, 1), new Cesium.Cartesian3()),
+      new Cesium.Cartesian3()
+    );
     if (cameraCalibration) {
       const calibrationOffsetWorld = addCartesian(
         addCartesian(
           scaleCartesian(direction, cameraCalibration.forwardM),
           scaleCartesian(rightWorld, cameraCalibration.rightM)
         ),
-        scaleCartesian(up, cameraCalibration.upM)
+        scaleCartesian(localUpWorld, cameraCalibration.upM)
       );
       cameraWorld = Cesium.Cartesian3.add(cameraWorld, calibrationOffsetWorld, new Cesium.Cartesian3());
+    }
+    const minimumCameraAltitudeM = view.aircraftAltitudeM + BODY_AXIS_MAPPING.eyeOffsetZUpM + (cameraCalibration ? Number(cameraCalibration.upM || 0) : 0);
+    const cameraCartographicBeforeClamp = Cesium.Cartographic.fromCartesian(cameraWorld);
+    const cameraAltitudeBeforeClampM = cameraCartographicBeforeClamp.height;
+    if (Number.isFinite(minimumCameraAltitudeM) && cameraCartographicBeforeClamp.height < minimumCameraAltitudeM) {
+      cameraCartographicBeforeClamp.height = minimumCameraAltitudeM;
+      cameraWorld = Cesium.Cartesian3.fromRadians(
+        cameraCartographicBeforeClamp.longitude,
+        cameraCartographicBeforeClamp.latitude,
+        cameraCartographicBeforeClamp.height
+      );
     }
     const rotation = new Cesium.Matrix3(
       direction.x, rightWorld.x, up.x,
@@ -3399,6 +3414,7 @@ cw_header('Cockpit Recorder Replay');
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
+      cameraHeightBeforeClampM: cameraAltitudeBeforeClampM,
       finalCameraAltitudeM: cameraCartographic.height,
       cameraHeightAboveAircraftM: cameraMinusAircraftM,
       cameraHeightAboveTerrainM: cameraCartographic.height - groundReferenceM,
