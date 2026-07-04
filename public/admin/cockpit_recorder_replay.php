@@ -358,15 +358,15 @@ cw_header('Cockpit Recorder Replay');
 .engine-bar {
   position: relative;
   height: 10px;
-  border: 1px solid rgba(255, 255, 255, .78);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .95), 0 1px 2px rgba(0, 0, 0, .52);
-  background: #050505;
+  border: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .34);
+  background: transparent;
   overflow: visible;
 }
 .engine-bar-fill {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
 }
 .engine-bar-fill.is-white {
   background:
@@ -376,7 +376,7 @@ cw_header('Cockpit Recorder Replay');
 .engine-bar-fill.is-green {
   background:
     repeating-linear-gradient(90deg, rgba(255,255,255,.20) 0 1px, rgba(255,255,255,0) 1px 3px),
-    linear-gradient(180deg, #4cff44 0%, #13f018 55%, #06b813 100%);
+    linear-gradient(90deg, #05b813 0%, #22f327 50%, #05b813 100%);
 }
 .engine-bar-fill.is-yellow {
   background:
