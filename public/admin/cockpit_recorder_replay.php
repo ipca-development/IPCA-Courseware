@@ -343,19 +343,20 @@ cw_header('Cockpit Recorder Replay');
   font-size: 10.5px;
   line-height: 1;
   margin: 0 1px 8px;
+  padding: 2px 4px;
+  background: transparent;
+  box-sizing: border-box;
   color: rgba(248, 250, 252, .98);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .70);
 }
 .engine-row-head.is-alert-yellow {
   color: #111;
   background: linear-gradient(165deg, #fff42a 0%, #ffe500 58%, #d8c800 100%);
-  padding: 2px 4px;
   text-shadow: none;
 }
 .engine-row-head.is-alert-red {
   color: #fff;
   background: linear-gradient(165deg, #ff2a2a 0%, #df0000 58%, #8f0000 100%);
-  padding: 2px 4px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .80);
   animation: engineAlertFlash .85s steps(2, start) infinite;
 }
