@@ -89,6 +89,9 @@ cw_header('Cockpit Recorder Replay');
   min-height: 480px;
   background: #000;
   overflow: hidden;
+  --panel-engine-width: clamp(0px, 0vw, 0px);
+  --panel-bottom-band: 0px;
+  --panel-playback-height: 44px;
 }
 .replay-immersive .cesium-cockpit { position: absolute; inset: 0; }
 .replay-immersive .cesium-viewer,
@@ -101,6 +104,76 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-timelineContainer,
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
+.replay-immersive.is-panel-layout {
+  --panel-engine-width: clamp(72px, 10vw, 132px);
+  --panel-bottom-band: clamp(96px, 16vh, 150px);
+  --panel-playback-height: 38px;
+}
+.replay-immersive.is-panel-layout .cesium-cockpit {
+  left: var(--panel-engine-width);
+  bottom: calc(var(--panel-bottom-band) + var(--panel-playback-height));
+}
+.replay-engine-pane,
+.replay-bottom-instrument-pane {
+  display: none;
+  position: absolute;
+  z-index: 17;
+  pointer-events: none;
+  color: rgba(226, 232, 240, .78);
+  font: 700 11px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.replay-immersive.is-panel-layout .replay-engine-pane {
+  display: flex;
+  left: 0;
+  top: 0;
+  bottom: var(--panel-playback-height);
+  width: var(--panel-engine-width);
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 64px;
+  box-sizing: border-box;
+  background: linear-gradient(90deg, rgba(15, 23, 42, .56), rgba(15, 23, 42, .18));
+  border-right: 1px solid rgba(226, 232, 240, .12);
+  backdrop-filter: blur(3px);
+}
+.replay-immersive.is-panel-layout .replay-bottom-instrument-pane {
+  display: flex;
+  left: var(--panel-engine-width);
+  right: 0;
+  bottom: var(--panel-playback-height);
+  height: var(--panel-bottom-band);
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(15, 23, 42, .02), rgba(15, 23, 42, .36));
+  border-top: 1px solid rgba(226, 232, 240, .10);
+  backdrop-filter: blur(2px);
+}
+.replay-pane-label {
+  border: 1px dashed rgba(226, 232, 240, .30);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, .34);
+}
+.replay-immersive.is-panel-layout .airspeed-tape {
+  left: calc(var(--panel-engine-width) + clamp(58px, 7.5vw, 116px));
+  height: clamp(300px, calc(100% - var(--panel-bottom-band) - var(--panel-playback-height) - 104px), 520px);
+}
+.replay-immersive.is-panel-layout .altimeter-stack {
+  right: clamp(60px, 8vw, 122px);
+}
+.replay-immersive.is-panel-layout .altimeter-tape {
+  height: clamp(300px, calc(100% - var(--panel-bottom-band) - var(--panel-playback-height) - 104px), 520px);
+}
+.replay-immersive.is-panel-layout .replay-dock {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: var(--panel-playback-height);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 .replay-horizon-line {
   position: absolute;
   left: 50%;
@@ -772,6 +845,8 @@ cw_header('Cockpit Recorder Replay');
         <div id="replayLoadMeta" class="replay-load-meta">0% - requesting replay data</div>
       </div>
     </div>
+    <div class="replay-engine-pane" aria-hidden="true"><span class="replay-pane-label">Engine</span></div>
+    <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
@@ -878,6 +953,13 @@ cw_header('Cockpit Recorder Replay');
       </div>
       <div class="replay-calibration-section">
         <div class="replay-calibration-section-title">Smoothness</div>
+        <div class="replay-calibration-row">
+          <label for="replayLayoutMode">Replay layout</label>
+          <select id="replayLayoutMode" class="replay-calibration-select">
+            <option value="legacy">Legacy full-window</option>
+            <option value="panel">Panel layout: engine + compass space</option>
+          </select>
+        </div>
         <div class="replay-calibration-row">
           <label for="calibrationSmoothness">Visual position smoothing</label>
           <input id="calibrationSmoothness" class="replay-calibration-range" type="range" min="0" max="20" step="0.5" value="10">
@@ -1025,6 +1107,7 @@ cw_header('Cockpit Recorder Replay');
   const calibrationFovIncrease = document.getElementById('calibrationFovIncrease');
   const calibrationFovReset = document.getElementById('calibrationFovReset');
   const calibrationFovInput = document.getElementById('calibrationFovInput');
+  const replayLayoutMode = document.getElementById('replayLayoutMode');
   const calibrationSmoothness = document.getElementById('calibrationSmoothness');
   const calibrationSmoothnessValue = document.getElementById('calibrationSmoothnessValue');
   const horizonBarOffset = document.getElementById('horizonBarOffset');
@@ -1385,6 +1468,7 @@ cw_header('Cockpit Recorder Replay');
       attitudeReferenceOffsetPx: clamp(firstFinite(saved.attitudeReferenceOffsetPx, 0), -240, 240),
       yellowPitchReferenceOffsetPx: clamp(firstFinite(saved.yellowPitchReferenceOffsetPx, 0), -240, 240),
       pitchLadderScale: clamp(firstFinite(saved.pitchLadderScale, 1), 0.6, 1.6),
+      layoutMode: saved.layoutMode === 'panel' ? 'panel' : 'legacy',
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
@@ -1398,6 +1482,20 @@ cw_header('Cockpit Recorder Replay');
     } catch (err) {
       // Calibration is a local visual aid; replay should continue if storage is unavailable.
     }
+  }
+
+  function applyReplayLayoutMode() {
+    if (!root || !cameraCalibration) return;
+    root.classList.toggle('is-panel-layout', cameraCalibration.layoutMode === 'panel');
+    attitudeOverlaySignature = '';
+    updateHorizonLine(displayCamera);
+    updateAttitudeIndicator(displayCamera, sampleAt(activeT));
+    updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    if (cesiumViewer && cesiumViewer.resize) {
+      try { cesiumViewer.resize(); } catch (err) {}
+    }
+    safeRenderCesium(true);
   }
 
   function loadAltimeterSettingUnit() {
@@ -1424,6 +1522,9 @@ cw_header('Cockpit Recorder Replay');
     }
     if (calibrationFovInput) {
       calibrationFovInput.value = String(Math.round(cameraCalibration.fovDeg));
+    }
+    if (replayLayoutMode) {
+      replayLayoutMode.value = cameraCalibration.layoutMode === 'panel' ? 'panel' : 'legacy';
     }
     if (calibrationSmoothness) {
       calibrationSmoothness.value = String(cameraCalibration.smoothness);
@@ -1471,6 +1572,7 @@ cw_header('Cockpit Recorder Replay');
       `Pitch ${cameraCalibration.pitchDeg >= 0 ? '+' : ''}${cameraCalibration.pitchDeg.toFixed(1)}deg`,
       `Roll ${cameraCalibration.rollDeg >= 0 ? '+' : ''}${cameraCalibration.rollDeg.toFixed(1)}deg`,
       `FOV ${cameraCalibration.fovDeg.toFixed(0)}deg H`,
+      `Layout ${cameraCalibration.layoutMode === 'panel' ? 'panel' : 'legacy'}`,
       `Smooth ${cameraCalibration.smoothness.toFixed(1)}`,
       `Horizon ${cameraCalibration.horizonBarOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.horizonBarOffsetPx)}px`,
       `AttRef ${cameraCalibration.attitudeReferenceOffsetPx >= 0 ? '+' : ''}${Math.round(cameraCalibration.attitudeReferenceOffsetPx)}px`,
@@ -1508,6 +1610,14 @@ cw_header('Cockpit Recorder Replay');
     cameraCalibration.smoothness = clamp(firstFinite(value, SYNTHETIC_VISION_DEFAULTS.positionSmoothing), 0, 20);
     saveCameraCalibration();
     updateCalibrationPanel();
+  }
+
+  function setReplayLayoutMode(value) {
+    if (!cameraCalibration) return;
+    cameraCalibration.layoutMode = value === 'panel' ? 'panel' : 'legacy';
+    saveCameraCalibration();
+    updateCalibrationPanel();
+    applyReplayLayoutMode();
   }
 
   function setHorizonBarOffset(value) {
@@ -3137,6 +3247,9 @@ cw_header('Cockpit Recorder Replay');
   if (calibrationSmoothness) {
     calibrationSmoothness.addEventListener('input', () => setSyntheticVisionSmoothness(calibrationSmoothness.value));
   }
+  if (replayLayoutMode) {
+    replayLayoutMode.addEventListener('change', () => setReplayLayoutMode(replayLayoutMode.value));
+  }
   if (horizonBarOffset) {
     horizonBarOffset.addEventListener('input', () => setHorizonBarOffset(horizonBarOffset.value));
   }
@@ -3334,6 +3447,7 @@ cw_header('Cockpit Recorder Replay');
   updateCalibrationPanel();
   cameraSettings = loadCameraSettings();
   syncCameraControls();
+  applyReplayLayoutMode();
   loadReplay();
 })();
 </script>
