@@ -176,6 +176,7 @@ cw_header('Cockpit Recorder Replay');
   min-height: 480px;
   background: #000;
   overflow: hidden;
+  --attitude-center-x: 50%;
   --panel-engine-width: clamp(0px, 0vw, 0px);
   --panel-bottom-band: 0px;
   --panel-playback-height: 44px;
@@ -242,7 +243,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay {
   position: absolute;
-  left: 50%;
+  left: var(--attitude-center-x, 50%);
   bottom: calc(var(--panel-playback-height) + 34px);
   z-index: 19;
   width: clamp(300px, 34vw, 390px);
@@ -2751,6 +2752,9 @@ cw_header('Cockpit Recorder Replay');
     const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
       ? (arcLeft + arcRight) / 2
       : width / 2;
+    if (root) {
+      root.style.setProperty('--attitude-center-x', `${centerX.toFixed(1)}px`);
+    }
     const attitudeRollArcScale = 0.6;
     const attitudePitchMarkScale = 0.5;
     const attitudeYellowReferenceScale = 0.5;
