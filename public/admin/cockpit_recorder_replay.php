@@ -1791,7 +1791,7 @@ cw_header('Cockpit Recorder Replay');
       return lastTerrainHeightM;
     }
     if (Number.isFinite(msl)) {
-      return Math.max(msl, 0);
+      return msl;
     }
     return Number.isFinite(lastTerrainHeightM) ? lastTerrainHeightM : 0;
   };
@@ -1800,7 +1800,7 @@ cw_header('Cockpit Recorder Replay');
     if (!isGroundSample(sample)) {
       return Number.isFinite(msl) ? 'replay_airborne_altitude' : 'unavailable';
     }
-    return Number.isFinite(lastTerrainHeightM) ? 'cesium_rendered_terrain_ground' : 'ellipsoid_ground_fallback';
+    return Number.isFinite(lastTerrainHeightM) ? 'cesium_rendered_terrain_ground' : 'replay_ground_altitude';
   };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
@@ -3299,7 +3299,7 @@ cw_header('Cockpit Recorder Replay');
         scaleCartesian(basis.forward, BODY_AXIS_MAPPING.eyeOffsetXForwardM),
         scaleCartesian(basis.right, BODY_AXIS_MAPPING.eyeOffsetYRightM)
       ),
-      new Cesium.Cartesian3(0, 0, BODY_AXIS_MAPPING.eyeOffsetZUpM)
+      scaleCartesian(basis.up, BODY_AXIS_MAPPING.eyeOffsetZUpM)
     );
     let cameraWorld = Cesium.Matrix4.multiplyByPoint(enuTransform, eyeOffsetEnu, new Cesium.Cartesian3());
     const direction = Cesium.Cartesian3.normalize(
@@ -3311,37 +3311,16 @@ cw_header('Cockpit Recorder Replay');
       new Cesium.Cartesian3()
     );
     const rightWorld = Cesium.Cartesian3.normalize(crossCartesian(direction, up), new Cesium.Cartesian3());
-    const localUpWorld = Cesium.Cartesian3.normalize(
-      Cesium.Matrix4.multiplyByPointAsVector(enuTransform, new Cesium.Cartesian3(0, 0, 1), new Cesium.Cartesian3()),
-      new Cesium.Cartesian3()
-    );
     if (cameraCalibration) {
       const calibrationOffsetWorld = addCartesian(
         addCartesian(
           scaleCartesian(direction, cameraCalibration.forwardM),
           scaleCartesian(rightWorld, cameraCalibration.rightM)
         ),
-        scaleCartesian(localUpWorld, cameraCalibration.upM)
+        scaleCartesian(up, cameraCalibration.upM)
       );
       cameraWorld = Cesium.Cartesian3.add(cameraWorld, calibrationOffsetWorld, new Cesium.Cartesian3());
     }
-    const minimumCameraAltitudeM = Math.max(
-      view.aircraftAltitudeM + BODY_AXIS_MAPPING.eyeOffsetZUpM + (cameraCalibration ? Number(cameraCalibration.upM || 0) : 0),
-      (Number.isFinite(Number(view.groundReferenceAltitudeM)) ? Number(view.groundReferenceAltitudeM) : 0) + BODY_AXIS_MAPPING.eyeOffsetZUpM
-    );
-    const cameraCartographicBeforeClamp = Cesium.Cartographic.fromCartesian(cameraWorld);
-    const cameraAltitudeBeforeClampM = cameraCartographicBeforeClamp.height;
-    const finalCameraAltitudeTargetM = Number.isFinite(minimumCameraAltitudeM)
-      ? Math.max(cameraAltitudeBeforeClampM, minimumCameraAltitudeM)
-      : cameraAltitudeBeforeClampM;
-    const cameraClampApplied = Number.isFinite(finalCameraAltitudeTargetM)
-      && Number.isFinite(cameraAltitudeBeforeClampM)
-      && Math.abs(finalCameraAltitudeTargetM - cameraAltitudeBeforeClampM) > 0.01;
-    cameraWorld = Cesium.Cartesian3.fromRadians(
-      cameraCartographicBeforeClamp.longitude,
-      cameraCartographicBeforeClamp.latitude,
-      finalCameraAltitudeTargetM
-    );
     const rotation = new Cesium.Matrix3(
       direction.x, rightWorld.x, up.x,
       direction.y, rightWorld.y, up.y,
@@ -3420,9 +3399,6 @@ cw_header('Cockpit Recorder Replay');
       cameraLat,
       cameraLon,
       cameraHeightM: cameraCartographic.height,
-      cameraHeightBeforeClampM: cameraAltitudeBeforeClampM,
-      cameraMinimumAltitudeM: minimumCameraAltitudeM,
-      cameraClampApplied,
       finalCameraAltitudeM: cameraCartographic.height,
       cameraHeightAboveAircraftM: cameraMinusAircraftM,
       cameraHeightAboveTerrainM: cameraCartographic.height - groundReferenceM,
@@ -3842,9 +3818,6 @@ cw_header('Cockpit Recorder Replay');
       `altitude curve preserved: ${dbg.altitudeCurvePreserved === true ? 'yes' : (dbg.altitudeCurvePreserved === false ? 'no' : '--')}`,
       `camera lat/lon: ${fmtNum(dbg.cameraLat, 7)}, ${fmtNum(dbg.cameraLon, 7)}`,
       `camera height_m: ${fmtNum(dbg.cameraHeightM, 2)}`,
-      `camera height before clamp_m: ${fmtNum(dbg.cameraHeightBeforeClampM, 2)}`,
-      `camera minimum altitude_m: ${fmtNum(dbg.cameraMinimumAltitudeM, 2)}`,
-      `camera altitude clamp: ${dbg.cameraClampApplied === true ? 'yes' : (dbg.cameraClampApplied === false ? 'no' : '--')}`,
       `final aircraft altitude_m: ${fmtNum(dbg.aircraftAltitudeM, 2)}`,
       `final camera altitude_m: ${fmtNum(dbg.finalCameraAltitudeM, 2)}`,
       `camera above aircraft_m: ${fmtNum(dbg.cameraHeightAboveAircraftM, 2)}`,
