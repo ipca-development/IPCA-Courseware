@@ -2823,11 +2823,20 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function hsiTrackMagneticFromSample(sample) {
+    const explicitMagnetic = firstFinite(
+      sample && sample.track_deg_magnetic,
+      sample && sample.magnetic_track_deg,
+      sample && sample.g3x && sample.g3x.track_deg_magnetic,
+      sample && sample.g3x && sample.g3x.magnetic_track_deg
+    );
+    if (explicitMagnetic !== null) return normalizeDeg(explicitMagnetic);
+
     const trackTrue = firstFinite(
       sample && sample.track_deg_true,
-      sample && sample.track_deg,
       sample && sample.gps_track_deg,
-      sample && sample.g3x && sample.g3x.track_deg_true
+      sample && sample.g3x && sample.g3x.track_deg_true,
+      sample && sample.g3x && sample.g3x.gps_track_deg,
+      sample && sample.track_deg
     );
     if (trackTrue === null) return null;
     const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
@@ -2895,16 +2904,14 @@ cw_header('Cockpit Recorder Replay');
       }
     }
     const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
-      const rad = degToRad(displayHsiHeadingBugDeg);
-      const x = Math.sin(rad) * (r - 10);
-      const y = -Math.cos(rad) * (r - 10);
-      return `<polygon class="hsi-heading-bug" points="${x.toFixed(1)},${(y - 15).toFixed(1)} ${(x + 10).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y + 15).toFixed(1)} ${(x - 10).toFixed(1)},${y.toFixed(1)}"></polygon>`;
+      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 11).toFixed(1)})">
+        <path class="hsi-heading-bug" d="M -26 -12 H 26 V 12 H 8 L 0 20 L -8 12 H -26 Z"></path>
+      </g>`;
     })();
     const trackHtml = trackMag === null ? '' : (() => {
-      const rad = degToRad(trackMag);
-      const x = Math.sin(rad) * (r - 10);
-      const y = -Math.cos(rad) * (r - 10);
-      return `<polygon class="hsi-track-diamond" points="${x.toFixed(1)},${(y - 13).toFixed(1)} ${(x + 13).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y + 13).toFixed(1)} ${(x - 13).toFixed(1)},${y.toFixed(1)}"></polygon>`;
+      return `<g transform="rotate(${trackMag.toFixed(2)}) translate(0 ${(-r + 10).toFixed(1)})">
+        <polygon class="hsi-track-diamond" points="0,-22 12,0 0,22 -12,0"></polygon>
+      </g>`;
     })();
     const courseRotation = courseDeg === null ? 0 : normalizeSignedDeg(courseDeg - displayHsiHeadingDeg);
     const courseHtml = courseDeg === null ? '' : `
