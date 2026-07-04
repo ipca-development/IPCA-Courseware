@@ -2059,27 +2059,31 @@ cw_header('Cockpit Recorder Replay');
     const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
       ? (arcLeft + arcRight) / 2
       : width / 2;
+    const attitudeRollArcScale = 0.5;
+    const attitudePitchMarkScale = 0.5;
     const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight * pitchLadderScaleFactor;
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
-      const half = major ? 76 : 45;
+      const half = (major ? 76 : 45) * attitudePitchMarkScale;
+      const labelOffset = 22 * attitudePitchMarkScale;
+      const fontSize = (major ? 23 : 20) * attitudePitchMarkScale;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
-        ? `<text x="${-(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text><text x="${(half + 22)}" y="${(y + 8).toFixed(1)}" font-size="${major ? 23 : 20}" text-anchor="middle">${label}</text>`
+        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text>`
         : '';
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, airspeedRect.top - rootRect.top) : 72;
-    const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
+    const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360) * attitudeRollArcScale;
     const arcCenterY = tapeTopY + arcRadius;
     const arcPoints = [];
     for (let bank = -60; bank <= 60; bank += 4) {
       arcPoints.push(`${(Math.sin(degToRad(bank)) * arcRadius).toFixed(1)},${(-Math.cos(degToRad(bank)) * arcRadius).toFixed(1)}`);
     }
     const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map((bank) => {
-      const tickLen = Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 20 : 13;
+      const tickLen = (Math.abs(bank) === 30 || Math.abs(bank) === 60 ? 20 : 13) * attitudeRollArcScale;
       const innerX = Math.sin(degToRad(bank)) * arcRadius;
       const innerY = -Math.cos(degToRad(bank)) * arcRadius;
       const outerX = Math.sin(degToRad(bank)) * (arcRadius + tickLen);
@@ -2121,7 +2125,7 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 1).toFixed(1)} -11,${(-arcRadius - 22).toFixed(1)} 11,${(-arcRadius - 22).toFixed(1)}"></polygon>
+        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + attitudeRollArcScale).toFixed(1)} ${(-11 * attitudeRollArcScale).toFixed(1)},${(-arcRadius - 22 * attitudeRollArcScale).toFixed(1)} ${(11 * attitudeRollArcScale).toFixed(1)},${(-arcRadius - 22 * attitudeRollArcScale).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
         <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
