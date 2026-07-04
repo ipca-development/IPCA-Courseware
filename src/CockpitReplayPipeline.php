@@ -181,6 +181,7 @@ final class CockpitReplayPipeline
         $verticalSpeedKnots = $this->buildG3xScalarKnots($g3xPoints, 'vs_fpm');
         $instrumentKnots = array(
             'altimeter_setting_inhg' => $this->buildG3xScalarKnots($g3xPoints, 'altimeter_setting_inhg'),
+            'heading_bug_deg' => $this->buildG3xScalarKnots($g3xPoints, 'heading_bug_deg'),
             'altitude_bug_ft' => $this->buildG3xScalarKnots($g3xPoints, 'altitude_bug_ft'),
             'oat_c' => $this->buildG3xScalarKnots($g3xPoints, 'oat_c'),
         );
@@ -492,6 +493,7 @@ final class CockpitReplayPipeline
                 'ias_kt' => ReplaySeriesCursor::lerpScalar($iasKnots, $iasSeg),
                 'tas_kt' => ReplaySeriesCursor::lerpScalar($tasKnots, $tasSeg),
                 'altimeter_setting_inhg' => $instrumentValues['altimeter_setting_inhg'] ?? null,
+                'heading_bug_deg' => $instrumentValues['heading_bug_deg'] ?? null,
                 'altitude_bug_ft' => $instrumentValues['altitude_bug_ft'] ?? null,
                 'oat_c' => $instrumentValues['oat_c'] ?? null,
                 'rpm' => $engineValues['rpm'] ?? null,
@@ -655,6 +657,7 @@ final class CockpitReplayPipeline
                 'ias_kt' => G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)', 'IAS'),
                 'tas_kt' => G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)', 'TAS'),
                 'altimeter_setting_inhg' => G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)', 'Baro'),
+                'heading_bug_deg' => G3XFlightStreamParser::numericValue($row, 'Selected Heading (deg)', 'SelHDG'),
                 'altitude_bug_ft' => G3XFlightStreamParser::numericValue($row, 'Selected Altitude (ft)', 'SelALT'),
                 'oat_c' => G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'OAT'),
                 'rpm' => G3XFlightStreamParser::numericValue($row, 'RPM', 'E1 RPM'),

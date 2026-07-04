@@ -42,10 +42,22 @@ SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_replay_samples'
+    AND COLUMN_NAME = 'heading_bug_deg'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN heading_bug_deg DECIMAL(7,2) NULL AFTER altimeter_setting_inhg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_replay_samples'
     AND COLUMN_NAME = 'altitude_bug_ft'
 );
 SET @sql := IF(@col_exists = 0,
-  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN altitude_bug_ft DECIMAL(10,1) NULL AFTER altimeter_setting_inhg',
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN altitude_bug_ft DECIMAL(10,1) NULL AFTER heading_bug_deg',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

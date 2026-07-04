@@ -33,11 +33,87 @@ $defaultAirspeedProfile = array(
     ),
 );
 $airspeedProfile = $defaultAirspeedProfile;
+$defaultEngineProfile = array(
+    'aircraft_model_code' => 'PIAT',
+    'aircraft_model_name' => 'Alpha Trainer Pro',
+    'source' => 'PIAT fallback engine markings',
+    'instruments' => array(
+        array('key' => 'rpm', 'label' => 'RPM', 'unit' => '', 'min' => 0, 'max' => 6000, 'kind' => 'arc', 'value_field' => 'rpm', 'decimals' => 0, 'ranges' => array(
+            array('color' => 'white', 'from' => 0, 'to' => 1750),
+            array('color' => 'green', 'from' => 1750, 'to' => 5500),
+            array('color' => 'yellow', 'from' => 5500, 'to' => 5800),
+            array('color' => 'red', 'from' => 5800, 'to' => 6000),
+        )),
+        array('key' => 'fuel_flow_gph', 'label' => 'GPH', 'unit' => '', 'min' => 0, 'max' => 7.9, 'value_field' => 'fuel_flow_gph', 'decimals' => 1, 'ranges' => array(
+            array('color' => 'white', 'from' => 0, 'to' => 1.3),
+            array('color' => 'green', 'from' => 1.3, 'to' => 6.6),
+            array('color' => 'white', 'from' => 6.6, 'to' => 7.9),
+        )),
+        array('key' => 'oil_pressure_psi', 'label' => 'OIL PSI', 'unit' => '', 'min' => 0, 'max' => 113, 'value_field' => 'oil_pressure_psi', 'decimals' => 0, 'ranges' => array(
+            array('color' => 'red', 'from' => 0, 'to' => 12),
+            array('color' => 'white', 'from' => 12, 'to' => 29),
+            array('color' => 'green', 'from' => 29, 'to' => 73),
+            array('color' => 'yellow', 'from' => 73, 'to' => 102),
+            array('color' => 'red', 'from' => 102, 'to' => 113),
+        )),
+        array('key' => 'oil_temp_f', 'label' => 'OIL °F', 'unit' => '', 'min' => 104, 'max' => 300, 'value_field' => 'oil_temp_f', 'decimals' => 0, 'ranges' => array(
+            array('color' => 'black', 'from' => 104, 'to' => 122),
+            array('color' => 'white', 'from' => 122, 'to' => 194),
+            array('color' => 'green', 'from' => 194, 'to' => 230),
+            array('color' => 'white', 'from' => 230, 'to' => 248),
+            array('color' => 'yellow', 'from' => 248, 'to' => 284),
+            array('color' => 'red', 'from' => 284, 'to' => 300),
+        )),
+        array('key' => 'egt1_f', 'label' => 'EGT °F', 'unit' => '', 'min' => 752, 'max' => 1706, 'value_field' => 'egt1_f', 'decimals' => 0, 'probe_label' => '1', 'ranges' => array(
+            array('color' => 'white', 'from' => 752, 'to' => 1022),
+            array('color' => 'green', 'from' => 1022, 'to' => 1589),
+            array('color' => 'yellow', 'from' => 1589, 'to' => 1616),
+            array('color' => 'red', 'from' => 1616, 'to' => 1706),
+        )),
+        array('key' => 'fuel_qty_gal', 'label' => 'FUEL GAL', 'unit' => '', 'min' => 0, 'max' => 16, 'value_field' => 'fuel_qty_gal', 'decimals' => 0, 'ranges' => array(
+            array('color' => 'yellow', 'from' => 0, 'to' => 2),
+            array('color' => 'green', 'from' => 2, 'to' => 16),
+        )),
+        array('key' => 'fuel_pressure_psi', 'label' => 'FUEL PSI', 'unit' => '', 'min' => 0, 'max' => 7.3, 'value_field' => 'fuel_pressure_psi', 'decimals' => 1, 'ranges' => array(
+            array('color' => 'white', 'from' => 0, 'to' => 2.2),
+            array('color' => 'green', 'from' => 2.2, 'to' => 5.8),
+            array('color' => 'white', 'from' => 5.8, 'to' => 7.3),
+        )),
+        array('key' => 'coolant1_f', 'label' => 'COOLANT °F', 'unit' => '', 'min' => 86, 'max' => 266, 'value_field' => 'coolant1_f', 'decimals' => 0, 'probe_label' => '1', 'ranges' => array(
+            array('color' => 'white', 'from' => 86, 'to' => 248),
+            array('color' => 'yellow', 'from' => null, 'to' => null),
+            array('color' => 'red', 'from' => 248, 'to' => 266),
+        )),
+        array('key' => 'coolant2_f', 'label' => '', 'unit' => '', 'min' => 86, 'max' => 266, 'value_field' => 'coolant2_f', 'decimals' => 0, 'probe_label' => '2', 'ranges' => array(
+            array('color' => 'white', 'from' => 86, 'to' => 248),
+            array('color' => 'yellow', 'from' => null, 'to' => null),
+            array('color' => 'red', 'from' => 248, 'to' => 266),
+        )),
+        array('key' => 'volts', 'label' => 'VOLTS', 'unit' => '', 'min' => 11.5, 'max' => 16, 'value_field' => 'volts', 'decimals' => 1, 'alert_style' => 'yellow_label', 'ranges' => array(
+            array('color' => 'red', 'from' => 11.5, 'to' => 12.8),
+            array('color' => 'white', 'from' => 12.8, 'to' => 13.2),
+            array('color' => 'green', 'from' => 13.2, 'to' => 14.6),
+            array('color' => 'yellow', 'from' => 14.6, 'to' => 15.5),
+            array('color' => 'red', 'from' => 15.5, 'to' => 16),
+        )),
+        array('key' => 'amps', 'label' => 'AMPS', 'unit' => '', 'min' => -40, 'max' => 40, 'value_field' => 'amps', 'decimals' => 0, 'kind' => 'ammeter', 'ranges' => array(
+            array('color' => 'green_line', 'from' => 0, 'to' => 20),
+        )),
+    ),
+);
+$engineProfile = $defaultEngineProfile;
 
 function replay_table_exists(PDO $pdo, string $tableName): bool
 {
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
     $stmt->execute(array($tableName));
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function replay_column_exists(PDO $pdo, string $tableName, string $columnName): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(array($tableName, $columnName));
     return (int)$stmt->fetchColumn() > 0;
 }
 
@@ -62,14 +138,25 @@ try {
     }
     if (replay_table_exists($pdo, 'ipca_aircraft_instrument_profiles')) {
         $modelCode = replay_aircraft_model_code(is_array($recording) ? $recording : null);
-        $stmt = $pdo->prepare('SELECT airspeed_config_json FROM ipca_aircraft_instrument_profiles WHERE aircraft_model_code = ? AND profile_code = ? AND active = 1 LIMIT 1');
+        $hasEngineConfig = replay_column_exists($pdo, 'ipca_aircraft_instrument_profiles', 'engine_config_json');
+        $selectColumns = $hasEngineConfig ? 'airspeed_config_json, engine_config_json' : 'airspeed_config_json';
+        $stmt = $pdo->prepare('SELECT ' . $selectColumns . ' FROM ipca_aircraft_instrument_profiles WHERE aircraft_model_code = ? AND profile_code = ? AND active = 1 LIMIT 1');
         $stmt->execute(array($modelCode, 'default'));
-        $json = $stmt->fetchColumn();
+        $profileRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        $json = is_array($profileRow) ? (string)($profileRow['airspeed_config_json'] ?? '') : '';
         if (is_string($json) && $json !== '') {
             $decoded = json_decode($json, true);
             if (is_array($decoded)) {
                 $airspeedProfile = array_replace_recursive($defaultAirspeedProfile, $decoded);
                 $airspeedProfile['source'] = (string)($airspeedProfile['source'] ?? 'database');
+            }
+        }
+        $engineJson = is_array($profileRow) ? (string)($profileRow['engine_config_json'] ?? '') : '';
+        if ($engineJson !== '') {
+            $decoded = json_decode($engineJson, true);
+            if (is_array($decoded)) {
+                $engineProfile = array_replace_recursive($defaultEngineProfile, $decoded);
+                $engineProfile['source'] = (string)($engineProfile['source'] ?? 'database');
             }
         }
     }
@@ -150,12 +237,179 @@ cw_header('Cockpit Recorder Replay');
   padding: 6px 10px;
   background: rgba(15, 23, 42, .18);
 }
+.hsi-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--panel-playback-height) + 34px);
+  z-index: 19;
+  width: clamp(300px, 34vw, 390px);
+  height: clamp(230px, 28vw, 300px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
+}
+.hsi-overlay text {
+  fill: rgba(255, 255, 255, .94);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 850;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, .42);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+.hsi-overlay .hsi-label-box {
+  fill: rgba(15, 23, 42, .58);
+  stroke: rgba(255, 255, 255, .20);
+  stroke-width: 1;
+}
+.hsi-overlay .hsi-rose-line,
+.hsi-overlay .hsi-tick,
+.hsi-overlay .hsi-aircraft,
+.hsi-overlay .hsi-course-line {
+  stroke: rgba(255, 255, 255, .88);
+  stroke-width: 2;
+  fill: none;
+}
+.hsi-overlay .hsi-minor-tick {
+  stroke: rgba(255, 255, 255, .70);
+  stroke-width: 1.4;
+}
+.hsi-overlay .hsi-card-fill {
+  fill: rgba(15, 23, 42, .20);
+  stroke: rgba(255, 255, 255, .28);
+  stroke-width: 1.5;
+}
+.hsi-overlay .hsi-heading-bug {
+  fill: rgba(218, 63, 255, .90);
+  stroke: rgba(255, 255, 255, .66);
+  stroke-width: 1;
+}
+.hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 23px; }
+.hsi-overlay .hsi-heading-value { fill: #ffffff; font-size: 34px; }
+.hsi-overlay .hsi-cyan { fill: #9ffcff; }
+.hsi-overlay .hsi-green { fill: #18d918; }
 .replay-engine-placeholder {
   width: calc(100% - 16px);
   color: #f8fafc;
   text-transform: none;
   letter-spacing: 0;
 }
+.engine-panel {
+  width: calc(100% - 14px);
+  color: #f8fafc;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.engine-gauge {
+  margin: 0 4px 7px;
+}
+.engine-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 1;
+  margin: 0 2px 3px;
+}
+.engine-row-head.is-alert-yellow {
+  color: #111;
+  background: #ffe91a;
+  padding: 3px 4px;
+}
+.engine-value {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.engine-bar {
+  position: relative;
+  height: 11px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  background: #050505;
+  overflow: visible;
+}
+.engine-bar-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+}
+.engine-bar-fill.is-white { background: #f8fafc; }
+.engine-bar-fill.is-green { background: #23f01f; }
+.engine-bar-fill.is-yellow { background: #ffe91a; }
+.engine-bar-fill.is-red { background: #ff1f2a; }
+.engine-bar-fill.is-black { background: #050505; }
+.engine-bar-fill.is-green-line {
+  top: 4px;
+  bottom: 4px;
+  background: #23f01f;
+}
+.engine-pointer {
+  position: absolute;
+  top: -9px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 14px solid #f8fafc;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
+  transform: translateX(-50%);
+}
+.engine-probe {
+  position: absolute;
+  left: -2px;
+  top: -8px;
+  width: 18px;
+  height: 14px;
+  color: #111;
+  background: #f8fafc;
+  clip-path: polygon(0 0, 100% 0, 70% 100%, 0 100%);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 14px;
+  padding-left: 2px;
+}
+.engine-arc-gauge {
+  position: relative;
+  height: 88px;
+  margin: 0 2px 6px;
+}
+.engine-arc-svg {
+  width: 100%;
+  height: 78px;
+  overflow: visible;
+}
+.engine-arc-value {
+  position: absolute;
+  right: 2px;
+  bottom: 3px;
+  text-align: right;
+  font-weight: 900;
+}
+.engine-arc-value span {
+  display: block;
+  font-size: 12px;
+}
+.engine-arc-value strong {
+  font-size: 18px;
+}
+.engine-amps-cross {
+  position: absolute;
+  inset: 1px 4px;
+}
+.engine-amps-cross::before,
+.engine-amps-cross::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  background: rgba(255, 31, 42, .92);
+}
+.engine-amps-cross::before { transform: rotate(9deg); }
+.engine-amps-cross::after { transform: rotate(-9deg); }
 .replay-engine-arc {
   height: 82px;
   border-radius: 82px 82px 0 0;
@@ -921,26 +1175,13 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div class="replay-engine-pane" aria-hidden="true">
-      <div class="replay-engine-placeholder">
-        <div class="replay-engine-arc"></div>
-        <div class="replay-engine-large"><span>RPM</span>2800</div>
-        <div class="replay-engine-row"><span>MAP "Hg</span><strong>11.2</strong></div>
-        <div class="replay-engine-row"><span>FFlow GPH</span><strong>2.4</strong></div>
-        <div class="replay-engine-bar"></div>
-        <div class="replay-engine-row"><span>Fuel PSI</span><strong>5</strong></div>
-        <div class="replay-engine-bar"></div>
-        <div class="replay-engine-row"><span>OIL °F</span><strong>173</strong></div>
-        <div class="replay-engine-bar"></div>
-        <div class="replay-engine-row"><span>OIL PSI</span><strong>31</strong></div>
-        <div class="replay-engine-bar"></div>
-        <div class="replay-engine-row"><span>BUS 1</span><strong>13.2V</strong></div>
-        <div class="replay-engine-muted">Engine instruments reserved</div>
-      </div>
+      <div id="enginePanel" class="engine-panel" aria-label="Engine instruments"></div>
     </div>
     <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
+    <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 300" hidden></svg>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -1145,6 +1386,7 @@ cw_header('Cockpit Recorder Replay');
 <script>
 (function() {
   const AIRSPEED_PROFILE = <?= json_encode($airspeedProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  const ENGINE_PROFILE = <?= json_encode($engineProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const root = document.querySelector('[data-replay-id]');
   const id = root ? root.getAttribute('data-replay-id') : '';
   const standaloneReplay = root ? (root.getAttribute('data-standalone-replay') || '') : '';
@@ -1162,6 +1404,8 @@ cw_header('Cockpit Recorder Replay');
   const debugOverlay = document.getElementById('replayDebug');
   const horizonLine = document.getElementById('horizonLine');
   const attitudeOverlay = document.getElementById('attitudeOverlay');
+  const hsiOverlay = document.getElementById('hsiOverlay');
+  const enginePanel = document.getElementById('enginePanel');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
   const airspeedTapeScale = document.getElementById('airspeedTapeScale');
@@ -1240,7 +1484,10 @@ cw_header('Cockpit Recorder Replay');
   let displayAirspeedKt = null;
   let displayAltitudeFt = null;
   let displayVsiFpm = null;
+  let displayHsiHeadingDeg = null;
+  let displayHsiHeadingBugDeg = null;
   let altimeterSettingUnit = 'hpa';
+  let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
@@ -2016,6 +2263,216 @@ cw_header('Cockpit Recorder Replay');
     vsiPointer.textContent = roundedFpm > 0 ? `+${roundedFpm}` : String(roundedFpm).replace(/^-0$/, '0');
   }
 
+  function engineProfileInstruments() {
+    return Array.isArray(ENGINE_PROFILE && ENGINE_PROFILE.instruments) ? ENGINE_PROFILE.instruments : [];
+  }
+
+  function engineValue(sample, instrument) {
+    if (!sample || !instrument) return null;
+    const field = String(instrument.value_field || instrument.key || '');
+    return firstFinite(sample[field]);
+  }
+
+  function engineRangePercent(value, min, max) {
+    const lo = Number(min);
+    const hi = Number(max);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return 0;
+    return clamp((Number(value) - lo) / (hi - lo) * 100, 0, 100);
+  }
+
+  function engineFormatValue(value, decimals) {
+    if (!Number.isFinite(Number(value))) return '--';
+    const places = Math.max(0, Math.min(2, Math.round(Number(decimals) || 0)));
+    return Number(value).toFixed(places).replace(/\.0$/, '');
+  }
+
+  function engineRangeHtml(instrument) {
+    const min = Number(instrument && instrument.min);
+    const max = Number(instrument && instrument.max);
+    const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
+    return ranges.map((range) => {
+      const from = Number(range && range.from);
+      const to = Number(range && range.to);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(min) || !Number.isFinite(max) || max <= min) return '';
+      const left = engineRangePercent(from, min, max);
+      const width = Math.max(0, engineRangePercent(to, min, max) - left);
+      const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
+      return `<span class="engine-bar-fill is-${escapeHtml(color)}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></span>`;
+    }).join('');
+  }
+
+  function engineBarHtml(sample, instrument) {
+    const value = engineValue(sample, instrument);
+    const label = String((instrument && instrument.label) || '').trim();
+    const decimals = Number(instrument && instrument.decimals) || 0;
+    const pointer = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
+    const probe = String((instrument && instrument.probe_label) || '').trim();
+    const alertClass = instrument && instrument.alert_style === 'yellow_label' ? ' is-alert-yellow' : '';
+    return `<div class="engine-gauge">
+      ${label !== '' ? `<div class="engine-row-head${alertClass}"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(value, decimals))}</strong></div>` : ''}
+      <div class="engine-bar">
+        ${engineRangeHtml(instrument)}
+        ${probe !== '' ? `<span class="engine-probe">${escapeHtml(probe)}</span>` : ''}
+        <span class="engine-pointer" style="left:${pointer.toFixed(2)}%"></span>
+        ${instrument && instrument.kind === 'ammeter' ? '<span class="engine-amps-cross"></span>' : ''}
+      </div>
+    </div>`;
+  }
+
+  function engineArcHtml(sample, instrument) {
+    const value = engineValue(sample, instrument);
+    const decimals = Number(instrument && instrument.decimals) || 0;
+    const pct = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
+    const angle = -135 + pct / 100 * 270;
+    const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
+    const rangeArcs = ranges.map((range) => {
+      const fromPct = engineRangePercent(Number(range && range.from), instrument.min, instrument.max);
+      const toPct = engineRangePercent(Number(range && range.to), instrument.min, instrument.max);
+      if (toPct <= fromPct) return '';
+      const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
+      return `<path d="${engineArcPath(55, 70, 47, -135 + fromPct / 100 * 270, -135 + toPct / 100 * 270)}" stroke="var(--engine-${escapeHtml(color)}, #fff)" stroke-width="8" fill="none" stroke-linecap="butt"></path>`;
+    }).join('');
+    const needleRad = degToRad(angle);
+    const needleX = 55 + Math.cos(needleRad) * 42;
+    const needleY = 70 + Math.sin(needleRad) * 42;
+    return `<div class="engine-arc-gauge">
+      <svg class="engine-arc-svg" viewBox="0 0 110 88" style="--engine-white:#f8fafc;--engine-green:#23f01f;--engine-yellow:#ffe91a;--engine-red:#ff1f2a;--engine-black:#050505">
+        ${rangeArcs}
+        <line x1="55" y1="70" x2="${needleX.toFixed(1)}" y2="${needleY.toFixed(1)}" stroke="#f8fafc" stroke-width="7" stroke-linecap="round"></line>
+      </svg>
+      <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
+    </div>`;
+  }
+
+  function engineArcPath(cx, cy, r, startDeg, endDeg) {
+    const start = degToRad(startDeg);
+    const end = degToRad(endDeg);
+    const x1 = cx + Math.cos(start) * r;
+    const y1 = cy + Math.sin(start) * r;
+    const x2 = cx + Math.cos(end) * r;
+    const y2 = cy + Math.sin(end) * r;
+    const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
+    return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  }
+
+  function updateEnginePanel(sample) {
+    if (!enginePanel) return;
+    const instruments = engineProfileInstruments();
+    if (!sample || instruments.length === 0) {
+      enginePanel.innerHTML = '';
+      return;
+    }
+    enginePanel.innerHTML = instruments.map((instrument) => {
+      return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument) : engineBarHtml(sample, instrument);
+    }).join('');
+  }
+
+  function hsiHeadingFromSample(sample) {
+    return firstFinite(
+      sample && sample.heading_deg_magnetic,
+      sample && sample.magnetic_heading_deg,
+      sample && sample.heading_deg,
+      sample && sample.heading_deg_true,
+      sample && sample.true_heading_deg
+    );
+  }
+
+  function hsiHeadingBugFromSample(sample) {
+    return firstFinite(
+      sample && sample.heading_bug_deg,
+      sample && sample.selected_heading_deg,
+      sample && sample.sel_hdg_deg
+    );
+  }
+
+  function hsiLabelForDegrees(deg) {
+    const normalized = ((Math.round(deg / 30) * 30) % 360 + 360) % 360;
+    if (normalized === 0) return 'N';
+    if (normalized === 90) return 'E';
+    if (normalized === 180) return 'S';
+    if (normalized === 270) return 'W';
+    return String(normalized / 10);
+  }
+
+  function updateHsiOverlay(sample, dtSec = 1 / 60, snap = false) {
+    if (!hsiOverlay) return;
+    const heading = hsiHeadingFromSample(sample);
+    if (heading === null) {
+      hsiOverlay.hidden = true;
+      hsiOverlaySignature = '';
+      displayHsiHeadingDeg = null;
+      displayHsiHeadingBugDeg = null;
+      return;
+    }
+    const headingDeg = normalizeDeg(heading);
+    const bug = hsiHeadingBugFromSample(sample);
+    const bugDeg = bug === null ? null : normalizeDeg(bug);
+    const alpha = snap ? 1 : smoothFactor(16, dtSec);
+    displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
+      ? headingDeg
+      : lerpAngleDeg(displayHsiHeadingDeg, headingDeg, alpha);
+    displayHsiHeadingBugDeg = bugDeg === null
+      ? null
+      : ((snap || displayHsiHeadingBugDeg === null || !Number.isFinite(displayHsiHeadingBugDeg))
+        ? bugDeg
+        : lerpAngleDeg(displayHsiHeadingBugDeg, bugDeg, alpha));
+
+    const cx = 195;
+    const cy = 176;
+    const r = 126;
+    const innerR = 72;
+    const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
+    const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
+    const ticks = [];
+    for (let deg = 0; deg < 360; deg += 5) {
+      const rad = degToRad(deg);
+      const major = deg % 30 === 0;
+      const ten = deg % 10 === 0;
+      const inner = major ? r - 17 : (ten ? r - 12 : r - 7);
+      ticks.push(`<line class="${major || ten ? 'hsi-tick' : 'hsi-minor-tick'}" x1="${(Math.sin(rad) * inner).toFixed(1)}" y1="${(-Math.cos(rad) * inner).toFixed(1)}" x2="${(Math.sin(rad) * r).toFixed(1)}" y2="${(-Math.cos(rad) * r).toFixed(1)}"></line>`);
+      if (major) {
+        const labelR = r - 33;
+        const label = hsiLabelForDegrees(deg);
+        ticks.push(`<text x="${(Math.sin(rad) * labelR).toFixed(1)}" y="${(-Math.cos(rad) * labelR + 8).toFixed(1)}" font-size="${label.length === 1 ? 31 : 24}" text-anchor="middle">${label}</text>`);
+      }
+    }
+    const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
+      const rad = degToRad(displayHsiHeadingBugDeg);
+      const x = Math.sin(rad) * (r - 10);
+      const y = -Math.cos(rad) * (r - 10);
+      return `<polygon class="hsi-heading-bug" points="${x.toFixed(1)},${(y - 15).toFixed(1)} ${(x + 10).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y + 15).toFixed(1)} ${(x - 10).toFixed(1)},${y.toFixed(1)}"></polygon>`;
+    })();
+    const signature = [
+      Math.round(displayHsiHeadingDeg * 10),
+      displayHsiHeadingBugDeg === null ? 'x' : Math.round(displayHsiHeadingBugDeg * 10),
+      headingText,
+      hdgBugText,
+    ].join('|');
+    if (signature === hsiOverlaySignature) {
+      hsiOverlay.hidden = false;
+      return;
+    }
+    hsiOverlaySignature = signature;
+    hsiOverlay.innerHTML = `
+      <rect class="hsi-label-box" x="154" y="2" width="82" height="44" rx="8"></rect>
+      <text class="hsi-heading-value" x="195" y="34" text-anchor="middle">${headingText}</text>
+      <rect class="hsi-label-box" x="18" y="50" width="96" height="34" rx="7"></rect>
+      <text class="hsi-heading-text" x="31" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      <g transform="translate(${cx} ${cy})">
+        <circle class="hsi-card-fill" cx="0" cy="0" r="${r}"></circle>
+        <circle class="hsi-rose-line" cx="0" cy="0" r="${innerR}"></circle>
+        <g transform="rotate(${(-displayHsiHeadingDeg).toFixed(2)})">
+          ${ticks.join('')}
+          ${bugHtml}
+        </g>
+        <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
+        <circle class="hsi-aircraft" cx="0" cy="0" r="7"></circle>
+        <path class="hsi-aircraft" d="M 0 -31 L 8 -5 L 31 7 L 31 15 L 8 11 L 5 32 L -5 32 L -8 11 L -31 15 L -31 7 L -8 -5 Z" fill="rgba(255,255,255,.88)"></path>
+      </g>
+    `;
+    hsiOverlay.hidden = false;
+  }
+
   function updateHorizonLine(view) {
     if (!horizonLine) return;
     if (!view || !isSyntheticCameraMode(view.mode) || !instrumentEnabled('horizon_bar')) {
@@ -2414,6 +2871,9 @@ cw_header('Cockpit Recorder Replay');
     displayAirspeedKt = null;
     displayAltitudeFt = null;
     displayVsiFpm = null;
+    displayHsiHeadingDeg = null;
+    displayHsiHeadingBugDeg = null;
+    hsiOverlaySignature = '';
     attitudeOverlaySignature = '';
   }
 
@@ -2712,10 +3172,13 @@ cw_header('Cockpit Recorder Replay');
     if (cameraMode === 'free') {
       updateHorizonLine(null);
       updateAttitudeIndicator(null, null);
-      updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
-      updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
-      updateTerrainHeight(sampleAt(activeT));
-      updateDebugOverlay(sampleAt(activeT), displayCamera);
+      const freeSample = sampleAt(activeT);
+      updateAirspeedTape(freeSample, 1 / 60, true);
+      updateAltimeterTape(freeSample, 1 / 60, true);
+      updateHsiOverlay(freeSample, 1 / 60, true);
+      updateEnginePanel(freeSample);
+      updateTerrainHeight(freeSample);
+      updateDebugOverlay(freeSample, displayCamera);
       return;
     }
     const now = performance.now();
@@ -2781,6 +3244,8 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(view, sample);
     updateAirspeedTape(sample, dtSec, snap);
     updateAltimeterTape(sample, dtSec, snap);
+    updateHsiOverlay(sample, dtSec, snap);
+    updateEnginePanel(sample);
     updateDebugOverlay(sample, view);
   }
 
@@ -2864,6 +3329,7 @@ cw_header('Cockpit Recorder Replay');
       heading_deg: lerpAngle(before.heading_deg, after.heading_deg),
       heading_deg_true: lerpAngle(before.heading_deg_true, after.heading_deg_true),
       heading_deg_magnetic: lerpAngle(before.heading_deg_magnetic, after.heading_deg_magnetic),
+      heading_bug_deg: lerpAngle(before.heading_bug_deg, after.heading_bug_deg),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       camera_heading_deg: lerpAngle(before.camera_heading_deg, after.camera_heading_deg),
       magnetic_variation_deg: lerp(before.magnetic_variation_deg, after.magnetic_variation_deg),
