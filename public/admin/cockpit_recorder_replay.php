@@ -2893,6 +2893,9 @@ cw_header('Cockpit Recorder Replay');
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
+    const bugWidth = 2 * (r - 12) * Math.sin(degToRad(5));
+    const bugHalf = bugWidth / 2;
+    const bugNotchHalf = Math.min(4.5, bugHalf * .34);
     const ticks = [];
     for (let deg = 0; deg < 360; deg += 5) {
       const rad = degToRad(deg);
@@ -2909,13 +2912,13 @@ cw_header('Cockpit Recorder Replay');
       }
     }
     const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
-      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 25).toFixed(1)})">
-        <path class="hsi-heading-bug" d="M -18 -8 H -6 L 0 -2 L 6 -8 H 18 V 9 H -18 Z"></path>
+      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 13).toFixed(1)})">
+        <path class="hsi-heading-bug" d="M ${(-bugHalf).toFixed(1)} -6 H ${(-bugNotchHalf).toFixed(1)} L 0 -1.5 L ${bugNotchHalf.toFixed(1)} -6 H ${bugHalf.toFixed(1)} V 7 H ${(-bugHalf).toFixed(1)} Z"></path>
       </g>`;
     })();
     const trackHtml = trackMag === null ? '' : (() => {
-      return `<g transform="rotate(${trackMag.toFixed(2)}) translate(0 ${(-r + 16).toFixed(1)})">
-        <polygon class="hsi-track-diamond" points="0,-16 9,0 0,16 -9,0"></polygon>
+      return `<g transform="rotate(${trackMag.toFixed(2)}) translate(0 ${(-r + 8).toFixed(1)})">
+        <polygon class="hsi-track-diamond" points="0,-8 4.5,0 0,8 -4.5,0"></polygon>
       </g>`;
     })();
     const courseRotation = courseDeg === null ? 0 : normalizeSignedDeg(courseDeg - displayHsiHeadingDeg);
@@ -2942,8 +2945,8 @@ cw_header('Cockpit Recorder Replay');
     }
     hsiOverlaySignature = signature;
     hsiOverlay.innerHTML = `
-      <rect class="hsi-label-box" x="166" y="12" width="58" height="31" rx="7"></rect>
-      <text class="hsi-heading-value" x="195" y="34" text-anchor="middle">${headingText}</text>
+      <rect class="hsi-label-box" x="166" y="7" width="58" height="31" rx="7"></rect>
+      <text class="hsi-heading-value" x="195" y="29" text-anchor="middle">${headingText}</text>
       <rect class="hsi-label-box" x="-2" y="50" width="96" height="34" rx="7"></rect>
       <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
       <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
@@ -2956,7 +2959,7 @@ cw_header('Cockpit Recorder Replay');
           ${bugHtml}
           ${trackHtml}
         </g>
-        <polygon class="hsi-top-pointer" points="0,${(-r - 1).toFixed(1)} -9,${(-r - 20).toFixed(1)} 9,${(-r - 20).toFixed(1)}"></polygon>
+        <polygon class="hsi-top-pointer" points="0,${(-r).toFixed(1)} -7.2,${(-r - 15.2).toFixed(1)} 7.2,${(-r - 15.2).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
         ${courseHtml}
         <circle class="hsi-aircraft" cx="0" cy="0" r="7"></circle>
