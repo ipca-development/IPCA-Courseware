@@ -2154,10 +2154,10 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
-        <rect class="attitude-yellow" x="-246" y="0" width="84" height="14" rx="5" ry="5"></rect>
-        <rect class="attitude-yellow" x="162" y="0" width="84" height="14" rx="5" ry="5"></rect>
-        <polygon class="attitude-yellow" points="-142,52 -46,11 -20,4 -112,60"></polygon>
-        <polygon class="attitude-yellow" points="142,52 46,11 20,4 112,60"></polygon>
+        <rect class="attitude-yellow" x="-508" y="-18" width="132" height="36" rx="12" ry="12"></rect>
+        <rect class="attitude-yellow" x="376" y="-18" width="132" height="36" rx="12" ry="12"></rect>
+        <polygon class="attitude-yellow" points="-272,76 0,-12 -176,76"></polygon>
+        <polygon class="attitude-yellow" points="272,76 0,-12 176,76"></polygon>
       </g>
     `;
     attitudeOverlay.hidden = false;
