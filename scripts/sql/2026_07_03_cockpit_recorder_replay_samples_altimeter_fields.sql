@@ -54,10 +54,58 @@ SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'ipca_cockpit_replay_samples'
+    AND COLUMN_NAME = 'nav_course_deg'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN nav_course_deg DECIMAL(7,2) NULL AFTER heading_bug_deg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_replay_samples'
+    AND COLUMN_NAME = 'nav_bearing_deg'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN nav_bearing_deg DECIMAL(7,2) NULL AFTER nav_course_deg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_replay_samples'
+    AND COLUMN_NAME = 'nav_xtk_nm'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN nav_xtk_nm DECIMAL(8,3) NULL AFTER nav_bearing_deg',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_replay_samples'
+    AND COLUMN_NAME = 'hcdi'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN hcdi DECIMAL(8,3) NULL AFTER nav_xtk_nm',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_cockpit_replay_samples'
     AND COLUMN_NAME = 'altitude_bug_ft'
 );
 SET @sql := IF(@col_exists = 0,
-  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN altitude_bug_ft DECIMAL(10,1) NULL AFTER heading_bug_deg',
+  'ALTER TABLE ipca_cockpit_replay_samples ADD COLUMN altitude_bug_ft DECIMAL(10,1) NULL AFTER hcdi',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

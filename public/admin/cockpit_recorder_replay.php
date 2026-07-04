@@ -231,6 +231,9 @@ cw_header('Cockpit Recorder Replay');
   background: linear-gradient(180deg, rgba(15, 23, 42, .00), rgba(15, 23, 42, .14));
   border-top: 1px solid rgba(226, 232, 240, .06);
 }
+.replay-immersive.is-panel-layout .replay-bottom-instrument-pane .replay-pane-label {
+  display: none;
+}
 .replay-pane-label {
   border: 1px dashed rgba(226, 232, 240, .22);
   border-radius: 999px;
@@ -251,14 +254,14 @@ cw_header('Cockpit Recorder Replay');
 .hsi-overlay text {
   fill: rgba(255, 255, 255, .94);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-weight: 850;
+  font-weight: 650;
   paint-order: stroke;
-  stroke: rgba(15, 23, 42, .42);
-  stroke-width: 2px;
+  stroke: rgba(15, 23, 42, .30);
+  stroke-width: 1px;
   stroke-linejoin: round;
 }
 .hsi-overlay .hsi-label-box {
-  fill: rgba(15, 23, 42, .58);
+  fill: rgba(15, 23, 42, .68);
   stroke: rgba(255, 255, 255, .20);
   stroke-width: 1;
 }
@@ -267,27 +270,52 @@ cw_header('Cockpit Recorder Replay');
 .hsi-overlay .hsi-aircraft,
 .hsi-overlay .hsi-course-line {
   stroke: rgba(255, 255, 255, .88);
-  stroke-width: 2;
+  stroke-width: 1.4;
   fill: none;
 }
 .hsi-overlay .hsi-minor-tick {
   stroke: rgba(255, 255, 255, .70);
-  stroke-width: 1.4;
+  stroke-width: .9;
 }
 .hsi-overlay .hsi-card-fill {
-  fill: rgba(15, 23, 42, .20);
+  fill: rgba(40, 40, 40, .46);
   stroke: rgba(255, 255, 255, .28);
-  stroke-width: 1.5;
+  stroke-width: 1.2;
 }
 .hsi-overlay .hsi-heading-bug {
+  fill: rgba(127, 237, 255, .92);
+  stroke: rgba(255, 255, 255, .66);
+  stroke-width: .8;
+}
+.hsi-overlay .hsi-track-diamond {
   fill: rgba(218, 63, 255, .90);
   stroke: rgba(255, 255, 255, .66);
+  stroke-width: .8;
+}
+.hsi-overlay .hsi-nav {
+  stroke: #10d510;
+  stroke-width: 7;
+  fill: none;
+}
+.hsi-overlay .hsi-nav-arrow {
+  fill: #10d510;
+  stroke: #10d510;
   stroke-width: 1;
 }
-.hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 23px; }
-.hsi-overlay .hsi-heading-value { fill: #ffffff; font-size: 34px; }
+.hsi-overlay .hsi-nav-text {
+  fill: #10d510;
+  stroke: rgba(15, 23, 42, .20);
+  stroke-width: .8px;
+}
+.hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 11.5px; }
+.hsi-overlay .hsi-heading-value { fill: #ffffff; font-size: 17px; }
+.hsi-overlay .hsi-crs-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-cyan { fill: #9ffcff; }
 .hsi-overlay .hsi-green { fill: #18d918; }
+.hsi-overlay .hsi-rose-label {
+  font-size: 8px;
+  font-weight: 650;
+}
 .replay-engine-placeholder {
   width: calc(100% - 16px);
   color: #f8fafc;
@@ -2381,8 +2409,48 @@ cw_header('Cockpit Recorder Replay');
     return firstFinite(
       sample && sample.heading_bug_deg,
       sample && sample.selected_heading_deg,
-      sample && sample.sel_hdg_deg
+      sample && sample.sel_hdg_deg,
+      sample && sample.g3x && sample.g3x.sel_hdg_deg
     );
+  }
+
+  function hsiCourseFromSample(sample) {
+    return firstFinite(
+      sample && sample.nav_course_deg,
+      sample && sample.nav_crs_deg,
+      sample && sample.selected_course_deg,
+      sample && sample.g3x && sample.g3x.nav_course_deg
+    );
+  }
+
+  function hsiNavSourceFromSample(sample) {
+    const value = String(
+      (sample && (sample.nav_source || sample.nav_identifier || sample.nav_ident)) ||
+      (sample && sample.g3x && (sample.g3x.nav_source || sample.g3x.nav_identifier || sample.g3x.nav_ident)) ||
+      'NAV2'
+    ).trim();
+    return value === '' ? 'NAV2' : value.slice(0, 8);
+  }
+
+  function hsiCdiFromSample(sample) {
+    return firstFinite(
+      sample && sample.horizontal_cdi_deflection,
+      sample && sample.hcdi,
+      sample && sample.nav_cdi,
+      sample && sample.g3x && sample.g3x.hcdi
+    );
+  }
+
+  function hsiTrackMagneticFromSample(sample) {
+    const trackTrue = firstFinite(
+      sample && sample.track_deg_true,
+      sample && sample.track_deg,
+      sample && sample.gps_track_deg,
+      sample && sample.g3x && sample.g3x.track_deg_true
+    );
+    if (trackTrue === null) return null;
+    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
+    return normalizeDeg(Number(trackTrue) - (variation === null ? 0 : Number(variation)));
   }
 
   function hsiLabelForDegrees(deg) {
@@ -2407,6 +2475,12 @@ cw_header('Cockpit Recorder Replay');
     const headingDeg = normalizeDeg(heading);
     const bug = hsiHeadingBugFromSample(sample);
     const bugDeg = bug === null ? null : normalizeDeg(bug);
+    const course = hsiCourseFromSample(sample);
+    const courseDeg = course === null ? null : normalizeDeg(course);
+    const trackMag = hsiTrackMagneticFromSample(sample);
+    const cdi = hsiCdiFromSample(sample);
+    const cdiOffset = cdi === null ? 0 : clamp(Number(cdi), -1, 1) * 32;
+    const navLabel = hsiNavSourceFromSample(sample);
     const alpha = snap ? 1 : smoothFactor(16, dtSec);
     displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
       ? headingDeg
@@ -2423,6 +2497,7 @@ cw_header('Cockpit Recorder Replay');
     const innerR = 72;
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
+    const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
     const ticks = [];
     for (let deg = 0; deg < 360; deg += 5) {
       const rad = degToRad(deg);
@@ -2433,7 +2508,9 @@ cw_header('Cockpit Recorder Replay');
       if (major) {
         const labelR = r - 33;
         const label = hsiLabelForDegrees(deg);
-        ticks.push(`<text x="${(Math.sin(rad) * labelR).toFixed(1)}" y="${(-Math.cos(rad) * labelR + 8).toFixed(1)}" font-size="${label.length === 1 ? 31 : 24}" text-anchor="middle">${label}</text>`);
+        const x = Math.sin(rad) * labelR;
+        const y = -Math.cos(rad) * labelR;
+        ticks.push(`<text class="hsi-rose-label" x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="middle" transform="rotate(${deg} ${x.toFixed(1)} ${y.toFixed(1)})">${label}</text>`);
       }
     }
     const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
@@ -2442,11 +2519,29 @@ cw_header('Cockpit Recorder Replay');
       const y = -Math.cos(rad) * (r - 10);
       return `<polygon class="hsi-heading-bug" points="${x.toFixed(1)},${(y - 15).toFixed(1)} ${(x + 10).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y + 15).toFixed(1)} ${(x - 10).toFixed(1)},${y.toFixed(1)}"></polygon>`;
     })();
+    const trackHtml = trackMag === null ? '' : (() => {
+      const rad = degToRad(trackMag);
+      const x = Math.sin(rad) * (r - 10);
+      const y = -Math.cos(rad) * (r - 10);
+      return `<polygon class="hsi-track-diamond" points="${x.toFixed(1)},${(y - 13).toFixed(1)} ${(x + 13).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${(y + 13).toFixed(1)} ${(x - 13).toFixed(1)},${y.toFixed(1)}"></polygon>`;
+    })();
+    const courseRotation = courseDeg === null ? 0 : normalizeSignedDeg(courseDeg - displayHsiHeadingDeg);
+    const courseHtml = courseDeg === null ? '' : `
+        <g transform="rotate(${courseRotation.toFixed(2)}) translate(${cdiOffset.toFixed(1)} 0)">
+          <line class="hsi-nav" x1="0" y1="${(r - 10).toFixed(1)}" x2="0" y2="${(-r + 10).toFixed(1)}"></line>
+          <polygon class="hsi-nav-arrow" points="0,${(-r - 9).toFixed(1)} -8,${(-r + 10).toFixed(1)} 8,${(-r + 10).toFixed(1)}"></polygon>
+        </g>
+        <text class="hsi-nav-text" x="-76" y="-28" font-size="17">${escapeHtml(navLabel)}</text>`;
     const signature = [
       Math.round(displayHsiHeadingDeg * 10),
       displayHsiHeadingBugDeg === null ? 'x' : Math.round(displayHsiHeadingBugDeg * 10),
+      trackMag === null ? 't' : Math.round(trackMag * 10),
+      courseDeg === null ? 'c' : Math.round(courseDeg * 10),
+      Math.round(cdiOffset),
+      navLabel,
       headingText,
       hdgBugText,
+      crsText,
     ].join('|');
     if (signature === hsiOverlaySignature) {
       hsiOverlay.hidden = false;
@@ -2454,18 +2549,22 @@ cw_header('Cockpit Recorder Replay');
     }
     hsiOverlaySignature = signature;
     hsiOverlay.innerHTML = `
-      <rect class="hsi-label-box" x="154" y="2" width="82" height="44" rx="8"></rect>
+      <rect class="hsi-label-box" x="166" y="12" width="58" height="31" rx="7"></rect>
       <text class="hsi-heading-value" x="195" y="34" text-anchor="middle">${headingText}</text>
-      <rect class="hsi-label-box" x="18" y="50" width="96" height="34" rx="7"></rect>
-      <text class="hsi-heading-text" x="31" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      <rect class="hsi-label-box" x="-2" y="50" width="96" height="34" rx="7"></rect>
+      <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
+      <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="hsi-green">${crsText}</tspan></text>
       <g transform="translate(${cx} ${cy})">
         <circle class="hsi-card-fill" cx="0" cy="0" r="${r}"></circle>
         <circle class="hsi-rose-line" cx="0" cy="0" r="${innerR}"></circle>
         <g transform="rotate(${(-displayHsiHeadingDeg).toFixed(2)})">
           ${ticks.join('')}
           ${bugHtml}
+          ${trackHtml}
         </g>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
+        ${courseHtml}
         <circle class="hsi-aircraft" cx="0" cy="0" r="7"></circle>
         <path class="hsi-aircraft" d="M 0 -31 L 8 -5 L 31 7 L 31 15 L 8 11 L 5 32 L -5 32 L -8 11 L -31 15 L -31 7 L -8 -5 Z" fill="rgba(255,255,255,.88)"></path>
       </g>
@@ -3330,6 +3429,10 @@ cw_header('Cockpit Recorder Replay');
       heading_deg_true: lerpAngle(before.heading_deg_true, after.heading_deg_true),
       heading_deg_magnetic: lerpAngle(before.heading_deg_magnetic, after.heading_deg_magnetic),
       heading_bug_deg: lerpAngle(before.heading_bug_deg, after.heading_bug_deg),
+      nav_course_deg: lerpAngle(before.nav_course_deg, after.nav_course_deg),
+      nav_bearing_deg: lerpAngle(before.nav_bearing_deg, after.nav_bearing_deg),
+      nav_xtk_nm: lerp(before.nav_xtk_nm, after.nav_xtk_nm),
+      hcdi: lerp(before.hcdi, after.hcdi),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       camera_heading_deg: lerpAngle(before.camera_heading_deg, after.camera_heading_deg),
       magnetic_variation_deg: lerp(before.magnetic_variation_deg, after.magnetic_variation_deg),
