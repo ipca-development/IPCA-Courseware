@@ -1672,6 +1672,7 @@ cw_header('Cockpit Recorder Replay');
   let displayVsiFpm = null;
   let displayHsiHeadingDeg = null;
   let displayHsiHeadingBugDeg = null;
+  let displayRpm = null;
   let altimeterSettingUnit = 'hpa';
   let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
@@ -1704,6 +1705,7 @@ cw_header('Cockpit Recorder Replay');
   const AIRSPEED_TAPE_SMOOTHING_RATE = 18;
   const ALTIMETER_TAPE_SMOOTHING_RATE = 18;
   const VSI_SMOOTHING_RATE = 5;
+  const RPM_NEEDLE_SMOOTHING_RATE = 4.5;
   const ALTIMETER_SETTING_UNIT_STORAGE_KEY = 'ipca.cockpitReplay.altimeterSettingUnit.v1';
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
@@ -2611,9 +2613,9 @@ cw_header('Cockpit Recorder Replay');
     </div>`;
   }
 
-  function engineArcHtml(sample, instrument) {
+  function engineArcHtml(sample, instrument, dtSec = 1 / 60, snap = false) {
     if (instrument && String(instrument.key || '').toLowerCase() === 'rpm') {
-      return engineRpmArcHtml(sample, instrument);
+      return engineRpmArcHtml(sample, instrument, dtSec, snap);
     }
     const value = engineValue(sample, instrument);
     const decimals = Number(instrument && instrument.decimals) || 0;
@@ -2639,12 +2641,21 @@ cw_header('Cockpit Recorder Replay');
     </div>`;
   }
 
-  function engineRpmArcHtml(sample, instrument) {
+  function engineRpmArcHtml(sample, instrument, dtSec = 1 / 60, snap = false) {
     const value = engineValue(sample, instrument);
     const decimals = Number(instrument && instrument.decimals) || 0;
     const min = Number(instrument && instrument.min);
     const max = Number(instrument && instrument.max);
-    const pct = value === null ? 0 : engineRangePercent(value, min, max);
+    const targetRpm = Number(value);
+    if (!Number.isFinite(targetRpm)) {
+      displayRpm = null;
+    } else if (snap || displayRpm === null || !Number.isFinite(displayRpm)) {
+      displayRpm = targetRpm;
+    } else {
+      displayRpm += (targetRpm - displayRpm) * smoothFactor(RPM_NEEDLE_SMOOTHING_RATE, dtSec);
+    }
+    const needleValue = Number.isFinite(displayRpm) ? displayRpm : targetRpm;
+    const pct = Number.isFinite(needleValue) ? engineRangePercent(needleValue, min, max) : 0;
     const startTopAngle = 225;
     const sweepTopAngle = 225;
     const startAngle = startTopAngle - 90;
@@ -2720,18 +2731,19 @@ cw_header('Cockpit Recorder Replay');
     return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
   }
 
-  function updateEnginePanel(sample) {
+  function updateEnginePanel(sample, dtSec = 1 / 60, snap = false) {
     if (!enginePanel) return;
     const instruments = engineProfileInstruments();
     if (!sample || instruments.length === 0) {
       enginePanel.innerHTML = '';
+      displayRpm = null;
       return;
     }
     enginePanel.innerHTML = instruments.filter((instrument) => {
       const key = String(instrument && instrument.key || '').toLowerCase();
       return key !== 'coolant2_f' && key !== 'egt2_f';
     }).map((instrument) => {
-      return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument) : engineBarHtml(sample, instrument);
+      return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument, dtSec, snap) : engineBarHtml(sample, instrument);
     }).join('');
   }
 
@@ -3316,6 +3328,7 @@ cw_header('Cockpit Recorder Replay');
     displayVsiFpm = null;
     displayHsiHeadingDeg = null;
     displayHsiHeadingBugDeg = null;
+    displayRpm = null;
     hsiOverlaySignature = '';
     attitudeOverlaySignature = '';
   }
@@ -3619,7 +3632,7 @@ cw_header('Cockpit Recorder Replay');
       updateAirspeedTape(freeSample, 1 / 60, true);
       updateAltimeterTape(freeSample, 1 / 60, true);
       updateHsiOverlay(freeSample, 1 / 60, true);
-      updateEnginePanel(freeSample);
+      updateEnginePanel(freeSample, 1 / 60, true);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
       return;
@@ -3688,7 +3701,7 @@ cw_header('Cockpit Recorder Replay');
     updateAirspeedTape(sample, dtSec, snap);
     updateAltimeterTape(sample, dtSec, snap);
     updateHsiOverlay(sample, dtSec, snap);
-    updateEnginePanel(sample);
+    updateEnginePanel(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
   }
 
