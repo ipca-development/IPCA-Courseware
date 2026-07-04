@@ -108,6 +108,17 @@ final class G3XFlightStreamParser
     public static function rowUtcTimestamp(array $row): ?DateTimeImmutable
     {
         $date = trim((string)($row['Date (yyyy-mm-dd)'] ?? ''));
+        $localTime = trim((string)($row['Time (hh:mm:ss)'] ?? ''));
+        $utcOffset = trim((string)($row['UTC Offset (hh:mm)'] ?? ''));
+        if ($date !== '' && $localTime !== '' && preg_match('/^[+-]\d{2}:\d{2}$/', $utcOffset) === 1) {
+            try {
+                return (new DateTimeImmutable($date . ' ' . $localTime . ' ' . $utcOffset))
+                    ->setTimezone(new DateTimeZone('UTC'));
+            } catch (Throwable) {
+                // Fall through to the legacy UTC-time parser below.
+            }
+        }
+
         $utcTime = trim((string)($row['UTC Time (hh:mm:ss)'] ?? ''));
         if ($date === '' || $utcTime === '') {
             return null;

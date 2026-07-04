@@ -219,7 +219,7 @@ final class CockpitReconstructionService
         if ($jobId <= 0) {
             throw new RuntimeException('Could not create reconstruction job.');
         }
-        $this->reportJobProgress($jobId, self::STAGE_LOADING, 5, 'Loading raw GPS, AHRS, G3X, and ADS-B evidence');
+        $this->reportJobProgress($jobId, self::STAGE_LOADING, 5, 'Loading Garmin G3X source for replay reconstruction');
         $this->setRecordingStatus($recordingId, 'processing', 'processing', 'not_started', null);
         $inTransaction = false;
 

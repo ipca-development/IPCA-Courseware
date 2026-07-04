@@ -125,6 +125,7 @@ cw_header('Cockpit Recorder POC');
 .cockpit-recon-progress-message { font-size: 12px; color: #334155; }
 .cockpit-recon-progress-times { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11px; color: #64748b; }
 .cockpit-recon-stale { margin-top: 2px; }
+.cockpit-recon-stale.cockpit-badge-info { background:#dbeafe;color:#1e40af; }
 .cockpit-transcript { max-width: 520px; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; font-size: 13px; }
 .cockpit-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; }
 .cockpit-notice { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; border-radius: 10px; padding: 12px; }
@@ -409,7 +410,7 @@ cw_header('Cockpit Recorder POC');
                       <span data-recon-elapsed="<?= $id ?>">Elapsed: --</span>
                       <span data-recon-updated="<?= $id ?>">Last update: --</span>
                     </div>
-                    <div class="cockpit-recon-stale cockpit-badge cockpit-badge-warning" data-recon-stale="<?= $id ?>" hidden>No update for 60+ seconds</div>
+                    <div class="cockpit-recon-stale cockpit-badge cockpit-badge-info" data-recon-stale="<?= $id ?>" hidden>Still processing this stage</div>
                   </div>
                 </div>
                 <div class="cockpit-summary-grid">
@@ -533,7 +534,7 @@ cw_header('Cockpit Recorder POC');
 (function () {
   const stageLabels = {
     queued: 'Queued',
-    loading_raw: 'Loading raw GPS/AHRS/G3X/ADS-B',
+    loading_raw: 'Loading Garmin G3X source',
     building_canonical_samples: 'Building canonical samples',
     detecting_phases_events: 'Detecting phases and events',
     computing_derived_values: 'Computing derived values',
@@ -611,7 +612,12 @@ cw_header('Cockpit Recorder POC');
     if (messageEl) messageEl.textContent = job.progress_message || 'Working…';
     if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + formatDuration(job.elapsed_seconds);
     if (updatedEl) updatedEl.textContent = 'Last update: ' + formatTimestamp(job.updated_at);
-    if (staleEl) staleEl.hidden = !job.stale;
+    if (staleEl) {
+      staleEl.hidden = !job.stale || job.status === 'failed';
+      if (job.stale && job.status !== 'failed') {
+        staleEl.textContent = 'Still processing this stage; progress updates when the worker reaches the next checkpoint.';
+      }
+    }
 
     if (job.status === 'ready' || job.status === 'failed' || reconstructionStatus === 'ready' || reconstructionStatus === 'failed') {
       stopPolling(recordingId);
