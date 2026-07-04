@@ -1787,7 +1787,7 @@ cw_header('Cockpit Recorder Replay');
     if (!isGroundSample(sample)) {
       return msl;
     }
-    if (Number.isFinite(lastTerrainHeightM)) {
+    if (Number.isFinite(lastTerrainHeightM) && terrainLooksCredibleForGround(msl)) {
       return lastTerrainHeightM;
     }
     if (Number.isFinite(msl)) {
@@ -1800,7 +1800,13 @@ cw_header('Cockpit Recorder Replay');
     if (!isGroundSample(sample)) {
       return Number.isFinite(msl) ? 'replay_airborne_altitude' : 'unavailable';
     }
-    return Number.isFinite(lastTerrainHeightM) ? 'cesium_rendered_terrain_ground' : 'replay_ground_altitude';
+    if (Number.isFinite(lastTerrainHeightM) && terrainLooksCredibleForGround(msl)) {
+      return 'cesium_rendered_terrain_ground';
+    }
+    if (Number.isFinite(lastTerrainHeightM) && Number.isFinite(msl)) {
+      return 'replay_ground_altitude_terrain_rejected';
+    }
+    return 'replay_ground_altitude';
   };
   const visualAltitudeM = (sample) => {
     const msl = rawAltitudeM(sample);
