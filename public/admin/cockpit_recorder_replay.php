@@ -403,10 +403,18 @@ cw_header('Cockpit Recorder Replay');
   height: 88px;
   margin: 0 2px 6px;
 }
+.engine-arc-gauge.is-rpm {
+  height: 126px;
+  margin: 0 0 2px;
+}
 .engine-arc-svg {
   width: 100%;
   height: 78px;
   overflow: visible;
+}
+.engine-arc-svg.is-rpm {
+  height: 110px;
+  display: block;
 }
 .engine-arc-value {
   position: absolute;
@@ -415,12 +423,53 @@ cw_header('Cockpit Recorder Replay');
   text-align: right;
   font-weight: 900;
 }
+.engine-arc-gauge.is-rpm .engine-arc-value {
+  right: 0;
+  top: 50px;
+  bottom: auto;
+  min-width: 58px;
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
+}
 .engine-arc-value span {
   display: block;
   font-size: 12px;
 }
+.engine-arc-gauge.is-rpm .engine-arc-value span {
+  font-size: 23px;
+  line-height: 1;
+  letter-spacing: -.02em;
+}
 .engine-arc-value strong {
   font-size: 18px;
+}
+.engine-arc-gauge.is-rpm .engine-arc-value strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 33px;
+  line-height: .95;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+}
+.engine-rpm-secondary {
+  position: absolute;
+  left: 0;
+  bottom: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 58px;
+  color: #f8fafc;
+  font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
+}
+.engine-rpm-secondary span {
+  font-size: 23px;
+  line-height: 1;
+}
+.engine-rpm-secondary strong {
+  font-size: 29px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .engine-amps-cross {
   position: absolute;
@@ -2348,6 +2397,9 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function engineArcHtml(sample, instrument) {
+    if (instrument && String(instrument.key || '').toLowerCase() === 'rpm') {
+      return engineRpmArcHtml(sample, instrument);
+    }
     const value = engineValue(sample, instrument);
     const decimals = Number(instrument && instrument.decimals) || 0;
     const pct = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
@@ -2372,6 +2424,69 @@ cw_header('Cockpit Recorder Replay');
     </div>`;
   }
 
+  function engineRpmArcHtml(sample, instrument) {
+    const value = engineValue(sample, instrument);
+    const decimals = Number(instrument && instrument.decimals) || 0;
+    const min = Number(instrument && instrument.min);
+    const max = Number(instrument && instrument.max);
+    const pct = value === null ? 0 : engineRangePercent(value, min, max);
+    const startAngle = 135;
+    const endAngle = 450;
+    const needleAngle = startAngle + pct / 100 * (endAngle - startAngle);
+    const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
+    const cx = 78;
+    const cy = 75;
+    const r = 55;
+    const rangeArcs = ranges.map((range) => {
+      const fromPct = engineRangePercent(Number(range && range.from), min, max);
+      const toPct = engineRangePercent(Number(range && range.to), min, max);
+      if (toPct <= fromPct) return '';
+      const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
+      const fromAngle = startAngle + fromPct / 100 * (endAngle - startAngle);
+      const toAngle = startAngle + toPct / 100 * (endAngle - startAngle);
+      return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="13.5" fill="none" stroke-linecap="butt"></path>`;
+    }).join('');
+    const fuelFlow = engineValue(sample, { value_field: 'fuel_flow_gph', key: 'fuel_flow_gph' });
+    return `<div class="engine-arc-gauge is-rpm">
+      <svg class="engine-arc-svg is-rpm" viewBox="0 0 160 118" aria-hidden="true">
+        <defs>
+          <linearGradient id="rpm-white-gradient" x1="0%" y1="20%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffffff"></stop>
+            <stop offset="54%" stop-color="#f8fafc"></stop>
+            <stop offset="100%" stop-color="#bfc4c8"></stop>
+          </linearGradient>
+          <linearGradient id="rpm-green-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#6cff55"></stop>
+            <stop offset="40%" stop-color="#10f018"></stop>
+            <stop offset="100%" stop-color="#03b914"></stop>
+          </linearGradient>
+          <linearGradient id="rpm-yellow-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#fff33b"></stop>
+            <stop offset="100%" stop-color="#cfc500"></stop>
+          </linearGradient>
+          <linearGradient id="rpm-red-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ff3b2f"></stop>
+            <stop offset="100%" stop-color="#e00000"></stop>
+          </linearGradient>
+          <linearGradient id="rpm-needle-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffffff"></stop>
+            <stop offset="52%" stop-color="#f7f7f7"></stop>
+            <stop offset="100%" stop-color="#c6c6c6"></stop>
+          </linearGradient>
+        </defs>
+        <circle cx="${cx}" cy="${cy}" r="77" fill="none" stroke="rgba(255,255,255,.06)" stroke-width=".8"></circle>
+        <circle cx="${cx}" cy="${cy}" r="43" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".6"></circle>
+        <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="16.5" fill="none" stroke-linecap="butt"></path>
+        ${rangeArcs}
+        <g transform="translate(${cx} ${cy}) rotate(${(needleAngle - 270).toFixed(1)})">
+          <path d="M -4 6 L 4 6 L 9 -47 Q 7 -60 -2 -61 Q -10 -59 -11 -47 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
+        </g>
+      </svg>
+      <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
+      <div class="engine-rpm-secondary"><span>GPH</span><strong>${escapeHtml(engineFormatValue(fuelFlow, 1))}</strong></div>
+    </div>`;
+  }
+
   function engineArcPath(cx, cy, r, startDeg, endDeg) {
     const start = degToRad(startDeg);
     const end = degToRad(endDeg);
@@ -2390,7 +2505,10 @@ cw_header('Cockpit Recorder Replay');
       enginePanel.innerHTML = '';
       return;
     }
-    enginePanel.innerHTML = instruments.map((instrument) => {
+    const rpmEmbedsFuelFlow = instruments.some((instrument) => instrument && String(instrument.key || '').toLowerCase() === 'rpm' && String(instrument.kind || '').toLowerCase() === 'arc');
+    enginePanel.innerHTML = instruments.filter((instrument) => {
+      return !(rpmEmbedsFuelFlow && instrument && String(instrument.key || '').toLowerCase() === 'fuel_flow_gph');
+    }).map((instrument) => {
       return instrument && instrument.kind === 'arc' ? engineArcHtml(sample, instrument) : engineBarHtml(sample, instrument);
     }).join('');
   }
