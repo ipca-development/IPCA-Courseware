@@ -187,7 +187,46 @@ final class CockpitReplayPipeline
             'nav_bearing_deg' => $this->buildG3xScalarKnots($g3xPoints, 'nav_bearing_deg'),
             'nav_xtk_nm' => $this->buildG3xScalarKnots($g3xPoints, 'nav_xtk_nm'),
             'hcdi' => $this->buildG3xScalarKnots($g3xPoints, 'hcdi'),
+            'hcdi_full_scale_ft' => $this->buildG3xScalarKnots($g3xPoints, 'hcdi_full_scale_ft'),
+            'hcdi_scale' => $this->buildG3xScalarKnots($g3xPoints, 'hcdi_scale'),
+            'vcdi' => $this->buildG3xScalarKnots($g3xPoints, 'vcdi'),
+            'vcdi_full_scale_ft' => $this->buildG3xScalarKnots($g3xPoints, 'vcdi_full_scale_ft'),
+            'vnav_cdi' => $this->buildG3xScalarKnots($g3xPoints, 'vnav_cdi'),
+            'vnav_altitude_ft' => $this->buildG3xScalarKnots($g3xPoints, 'vnav_altitude_ft'),
+            'nav_distance_nm' => $this->buildG3xScalarKnots($g3xPoints, 'nav_distance_nm'),
+            'sel_vspeed_fpm' => $this->buildG3xScalarKnots($g3xPoints, 'sel_vspeed_fpm'),
+            'sel_ias_kt' => $this->buildG3xScalarKnots($g3xPoints, 'sel_ias_kt'),
+            'density_altitude_ft' => $this->buildG3xScalarKnots($g3xPoints, 'density_altitude_ft'),
+            'height_agl_ft' => $this->buildG3xScalarKnots($g3xPoints, 'height_agl_ft'),
+            'wind_speed_kt' => $this->buildG3xScalarKnots($g3xPoints, 'wind_speed_kt'),
+            'wind_direction_deg' => $this->buildG3xScalarKnots($g3xPoints, 'wind_direction_deg'),
+            'elevator_trim_pct' => $this->buildG3xScalarKnots($g3xPoints, 'elevator_trim_pct'),
+            'fd_roll_command_deg' => $this->buildG3xScalarKnots($g3xPoints, 'fd_roll_command_deg'),
+            'fd_pitch_command_deg' => $this->buildG3xScalarKnots($g3xPoints, 'fd_pitch_command_deg'),
+            'fd_altitude_ft' => $this->buildG3xScalarKnots($g3xPoints, 'fd_altitude_ft'),
+            'ap_roll_command_deg' => $this->buildG3xScalarKnots($g3xPoints, 'ap_roll_command_deg'),
+            'ap_pitch_command_deg' => $this->buildG3xScalarKnots($g3xPoints, 'ap_pitch_command_deg'),
+            'ap_vs_command_fpm' => $this->buildG3xScalarKnots($g3xPoints, 'ap_vs_command_fpm'),
+            'ap_altitude_command_ft' => $this->buildG3xScalarKnots($g3xPoints, 'ap_altitude_command_ft'),
+            'ap_roll_torque_pct' => $this->buildG3xScalarKnots($g3xPoints, 'ap_roll_torque_pct'),
+            'ap_pitch_torque_pct' => $this->buildG3xScalarKnots($g3xPoints, 'ap_pitch_torque_pct'),
+            'com1_mhz' => $this->buildG3xScalarKnots($g3xPoints, 'com1_mhz'),
+            'com2_mhz' => $this->buildG3xScalarKnots($g3xPoints, 'com2_mhz'),
+            'nav2_mhz' => $this->buildG3xScalarKnots($g3xPoints, 'nav2_mhz'),
+            'lateral_acceleration_g' => $this->buildG3xScalarKnots($g3xPoints, 'lateral_acceleration_g'),
+            'normal_acceleration_g' => $this->buildG3xScalarKnots($g3xPoints, 'normal_acceleration_g'),
             'oat_c' => $this->buildG3xScalarKnots($g3xPoints, 'oat_c'),
+        );
+        $textKnots = array(
+            'cas_alert' => $this->buildG3xTextKnots($g3xPoints, 'cas_alert'),
+            'terrain_alert' => $this->buildG3xTextKnots($g3xPoints, 'terrain_alert'),
+            'transponder_code' => $this->buildG3xTextKnots($g3xPoints, 'transponder_code'),
+            'transponder_mode' => $this->buildG3xTextKnots($g3xPoints, 'transponder_mode'),
+            'nav_source' => $this->buildG3xTextKnots($g3xPoints, 'nav_source'),
+            'nav_annunciation' => $this->buildG3xTextKnots($g3xPoints, 'nav_annunciation'),
+            'nav_identifier' => $this->buildG3xTextKnots($g3xPoints, 'nav_identifier'),
+            'autopilot_state' => $this->buildG3xTextKnots($g3xPoints, 'autopilot_state'),
+            'fd_vertical_mode' => $this->buildG3xTextKnots($g3xPoints, 'fd_vertical_mode'),
         );
         $engineKnots = array(
             'rpm' => $this->buildG3xScalarKnots($g3xPoints, 'rpm'),
@@ -236,6 +275,7 @@ final class CockpitReplayPipeline
             $tasKnots,
             $verticalSpeedKnots,
             $instrumentKnots,
+            $textKnots,
             $engineKnots,
             $altitudeKnots,
             $baroAltitudeKnots,
@@ -299,6 +339,7 @@ final class CockpitReplayPipeline
      * @param list<array{t:float,v:float}> $tasKnots
      * @param list<array{t:float,v:float}> $verticalSpeedKnots
      * @param array<string,list<array{t:float,v:float}>> $instrumentKnots
+     * @param array<string,list<array{t:float,v:string}>> $textKnots
      * @param array<string,list<array{t:float,v:float}>> $engineKnots
      * @param list<array{t:float,v:float}> $altitudeKnots
      * @param list<array{t:float,v:float}> $baroAltitudeKnots
@@ -322,6 +363,7 @@ final class CockpitReplayPipeline
         array $tasKnots,
         array $verticalSpeedKnots,
         array $instrumentKnots,
+        array $textKnots,
         array $engineKnots,
         array $altitudeKnots,
         array $baroAltitudeKnots,
@@ -344,6 +386,10 @@ final class CockpitReplayPipeline
         $instrumentCursors = array();
         foreach ($instrumentKnots as $field => $knots) {
             $instrumentCursors[$field] = new ReplaySeriesCursor($knots);
+        }
+        $textCursors = array();
+        foreach ($textKnots as $field => $knots) {
+            $textCursors[$field] = new ReplaySeriesCursor($knots);
         }
         $engineCursors = array();
         foreach ($engineKnots as $field => $knots) {
@@ -432,6 +478,10 @@ final class CockpitReplayPipeline
             foreach ($instrumentKnots as $field => $knots) {
                 $instrumentValues[$field] = ReplaySeriesCursor::lerpScalar($knots, $instrumentCursors[$field]->segmentAt($timeS));
             }
+            $textValues = array();
+            foreach ($textKnots as $field => $knots) {
+                $textValues[$field] = $this->textValueAt($knots, $textCursors[$field], $timeS);
+            }
             $engineValues = array();
             foreach ($engineKnots as $field => $knots) {
                 $engineValues[$field] = ReplaySeriesCursor::lerpScalar($knots, $engineCursors[$field]->segmentAt($timeS));
@@ -505,6 +555,47 @@ final class CockpitReplayPipeline
                 'nav_bearing_deg' => $instrumentValues['nav_bearing_deg'] ?? null,
                 'nav_xtk_nm' => $instrumentValues['nav_xtk_nm'] ?? null,
                 'hcdi' => $instrumentValues['hcdi'] ?? null,
+                'hcdi_full_scale_ft' => $instrumentValues['hcdi_full_scale_ft'] ?? null,
+                'hcdi_scale' => $instrumentValues['hcdi_scale'] ?? null,
+                'vcdi' => $instrumentValues['vcdi'] ?? null,
+                'vcdi_full_scale_ft' => $instrumentValues['vcdi_full_scale_ft'] ?? null,
+                'vnav_cdi' => $instrumentValues['vnav_cdi'] ?? null,
+                'vnav_altitude_ft' => $instrumentValues['vnav_altitude_ft'] ?? null,
+                'nav_distance_nm' => $instrumentValues['nav_distance_nm'] ?? null,
+                'sel_vspeed_fpm' => $instrumentValues['sel_vspeed_fpm'] ?? null,
+                'sel_ias_kt' => $instrumentValues['sel_ias_kt'] ?? null,
+                'density_altitude_ft' => $instrumentValues['density_altitude_ft'] ?? null,
+                'height_agl_ft' => $instrumentValues['height_agl_ft'] ?? null,
+                'wind_speed_kt' => $instrumentValues['wind_speed_kt'] ?? null,
+                'wind_direction_deg' => $instrumentValues['wind_direction_deg'] ?? null,
+                'wind_direction_deg_true' => $instrumentValues['wind_direction_deg'] ?? null,
+                'elevator_trim_pct' => $instrumentValues['elevator_trim_pct'] ?? null,
+                'fd_roll_command_deg' => $instrumentValues['fd_roll_command_deg'] ?? null,
+                'fd_pitch_command_deg' => $instrumentValues['fd_pitch_command_deg'] ?? null,
+                'fd_altitude_ft' => $instrumentValues['fd_altitude_ft'] ?? null,
+                'ap_roll_command_deg' => $instrumentValues['ap_roll_command_deg'] ?? null,
+                'ap_pitch_command_deg' => $instrumentValues['ap_pitch_command_deg'] ?? null,
+                'ap_vs_command_fpm' => $instrumentValues['ap_vs_command_fpm'] ?? null,
+                'ap_altitude_command_ft' => $instrumentValues['ap_altitude_command_ft'] ?? null,
+                'ap_roll_torque_pct' => $instrumentValues['ap_roll_torque_pct'] ?? null,
+                'ap_pitch_torque_pct' => $instrumentValues['ap_pitch_torque_pct'] ?? null,
+                'com1_mhz' => $instrumentValues['com1_mhz'] ?? null,
+                'com2_mhz' => $instrumentValues['com2_mhz'] ?? null,
+                'nav2_mhz' => $instrumentValues['nav2_mhz'] ?? null,
+                'lateral_acceleration_g' => $instrumentValues['lateral_acceleration_g'] ?? null,
+                'normal_acceleration_g' => $instrumentValues['normal_acceleration_g'] ?? null,
+                'estimated_slip_skid_g' => $instrumentValues['lateral_acceleration_g'] ?? null,
+                'slip_skid_g' => $instrumentValues['lateral_acceleration_g'] ?? null,
+                'acceleration_g' => $instrumentValues['normal_acceleration_g'] ?? null,
+                'cas_alert' => $textValues['cas_alert'] ?? null,
+                'terrain_alert' => $textValues['terrain_alert'] ?? null,
+                'transponder_code' => $textValues['transponder_code'] ?? null,
+                'transponder_mode' => $textValues['transponder_mode'] ?? null,
+                'nav_source' => $textValues['nav_source'] ?? null,
+                'nav_annunciation' => $textValues['nav_annunciation'] ?? null,
+                'nav_identifier' => $textValues['nav_identifier'] ?? null,
+                'autopilot_state' => $textValues['autopilot_state'] ?? null,
+                'fd_vertical_mode' => $textValues['fd_vertical_mode'] ?? null,
                 'oat_c' => $instrumentValues['oat_c'] ?? null,
                 'rpm' => $engineValues['rpm'] ?? null,
                 'manifold_pressure_inhg' => $engineValues['manifold_pressure_inhg'] ?? null,
@@ -671,10 +762,47 @@ final class CockpitReplayPipeline
                 'altimeter_setting_inhg' => G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)', 'Baro'),
                 'heading_bug_deg' => G3XFlightStreamParser::numericValue($row, 'Selected Heading (deg)', 'SelHDG'),
                 'altitude_bug_ft' => G3XFlightStreamParser::numericValue($row, 'Selected Altitude (ft)', 'SelALT'),
+                'sel_vspeed_fpm' => G3XFlightStreamParser::numericValue($row, 'Selected Vertical Speed (ft/min)', 'SelVSpd'),
+                'sel_ias_kt' => G3XFlightStreamParser::numericValue($row, 'Selected Airspeed (kt)', 'SelIAS'),
+                'com1_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Frequency 1 (MHz)', 'COM1'),
+                'com2_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Frequency 2 (MHz)', 'COM2'),
+                'nav2_mhz' => G3XFlightStreamParser::numericValue($row, 'NAV Frequency 2 (MHz)', 'NAV2'),
+                'nav_distance_nm' => G3XFlightStreamParser::numericValue($row, 'Nav Distance (nm)', 'NavDist'),
                 'nav_course_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Course (deg)', 'NavCRS'),
                 'nav_bearing_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Bearing (deg)', 'NavBrg'),
                 'nav_xtk_nm' => G3XFlightStreamParser::numericValue($row, 'Nav Cross Track Distance (nm)', 'NavXTK'),
                 'hcdi' => G3XFlightStreamParser::numericValue($row, 'Horizontal CDI Deflection', 'HCDI'),
+                'hcdi_full_scale_ft' => G3XFlightStreamParser::numericValue($row, 'Horizontal CDI Full Scale (ft)'),
+                'hcdi_scale' => G3XFlightStreamParser::numericValue($row, 'Horizontal CDI Scale'),
+                'vcdi' => G3XFlightStreamParser::numericValue($row, 'Vertical CDI Deflection', 'VCDI'),
+                'vcdi_full_scale_ft' => G3XFlightStreamParser::numericValue($row, 'Vertical CDI Full Scale (ft)'),
+                'vnav_cdi' => G3XFlightStreamParser::numericValue($row, 'VNAV CDI Deflection', 'VNAV CDI'),
+                'vnav_altitude_ft' => G3XFlightStreamParser::numericValue($row, 'VNAV Altitude (ft)', 'VNAVAlt'),
+                'density_altitude_ft' => G3XFlightStreamParser::numericValue($row, 'Density Altitude (ft)', 'AltD'),
+                'height_agl_ft' => G3XFlightStreamParser::numericValue($row, 'Height Above Ground (ft)', 'AGL'),
+                'wind_speed_kt' => G3XFlightStreamParser::numericValue($row, 'Wind Speed (kt)', 'WndSpd'),
+                'wind_direction_deg' => G3XFlightStreamParser::numericValue($row, 'Wind Direction (deg)', 'WndDr'),
+                'elevator_trim_pct' => G3XFlightStreamParser::numericValue($row, 'Elevator Trim', 'PTrim'),
+                'fd_roll_command_deg' => G3XFlightStreamParser::numericValue($row, 'FD Roll Command (deg)'),
+                'fd_pitch_command_deg' => G3XFlightStreamParser::numericValue($row, 'FD Pitch Command (deg)'),
+                'fd_altitude_ft' => G3XFlightStreamParser::numericValue($row, 'FD Altitude (ft)'),
+                'ap_roll_command_deg' => G3XFlightStreamParser::numericValue($row, 'AP Roll Command (deg)'),
+                'ap_pitch_command_deg' => G3XFlightStreamParser::numericValue($row, 'AP Pitch Command (deg)'),
+                'ap_vs_command_fpm' => G3XFlightStreamParser::numericValue($row, 'AP VS Command (ft/min)'),
+                'ap_altitude_command_ft' => G3XFlightStreamParser::numericValue($row, 'AP Altitude Command (ft)'),
+                'ap_roll_torque_pct' => G3XFlightStreamParser::numericValue($row, 'AP Roll Torque (%)'),
+                'ap_pitch_torque_pct' => G3XFlightStreamParser::numericValue($row, 'AP Pitch Torque (%)'),
+                'lateral_acceleration_g' => G3XFlightStreamParser::numericValue($row, 'Lateral Acceleration (G)', 'LatAc'),
+                'normal_acceleration_g' => G3XFlightStreamParser::numericValue($row, 'Normal Acceleration (G)', 'NormAc'),
+                'cas_alert' => trim((string)($row['CAS Alert'] ?? '')),
+                'terrain_alert' => trim((string)($row['Terrain Alert'] ?? '')),
+                'transponder_code' => trim((string)($row['Transponder Code'] ?? '')),
+                'transponder_mode' => trim((string)($row['Transponder Mode'] ?? '')),
+                'nav_source' => trim((string)($row['Active Nav Source'] ?? ($row['NavSrc'] ?? ''))),
+                'nav_annunciation' => trim((string)($row['Nav Annunciation'] ?? '')),
+                'nav_identifier' => trim((string)($row['Nav Identifier'] ?? ($row['NavIdent'] ?? ''))),
+                'autopilot_state' => trim((string)($row['Autopilot State'] ?? '')),
+                'fd_vertical_mode' => trim((string)($row['FD Vertical Mode'] ?? '')),
                 'oat_c' => G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'OAT'),
                 'rpm' => G3XFlightStreamParser::numericValue($row, 'RPM', 'E1 RPM'),
                 'manifold_pressure_inhg' => G3XFlightStreamParser::numericValue($row, 'Manifold Press (inch Hg)', 'E1 MAP'),
@@ -687,8 +815,8 @@ final class CockpitReplayPipeline
                 'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1'),
                 'egt1_f' => G3XFlightStreamParser::numericValue($row, 'EGT1 (deg F)', 'E1 EGT1'),
                 'egt2_f' => G3XFlightStreamParser::numericValue($row, 'EGT2 (deg F)', 'E1 EGT2'),
-                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'CHT1 (deg F)', 'Cylinder Head Temp 1 (deg F)', 'Coolant Temp 1 (deg F)'),
-                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'CHT2 (deg F)', 'Cylinder Head Temp 2 (deg F)', 'Coolant Temp 2 (deg F)'),
+                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 1 (deg F)', 'Coolant Temp1 (deg F)', 'CHT1 (deg F)', 'Cylinder Head Temp 1 (deg F)'),
+                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 2 (deg F)', 'Coolant Temp2 (deg F)', 'CHT2 (deg F)', 'Cylinder Head Temp 2 (deg F)'),
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
@@ -1238,6 +1366,41 @@ final class CockpitReplayPipeline
         }
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
         return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $g3xPoints
+     * @return list<array{t:float,v:string}>
+     */
+    private function buildG3xTextKnots(array $g3xPoints, string $field): array
+    {
+        $knots = array();
+        foreach ($g3xPoints as $point) {
+            $value = trim((string)($point[$field] ?? ''));
+            if ($value !== '') {
+                $knots[] = array('t' => (float)$point['t'], 'v' => $value);
+            }
+        }
+        usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
+        return $knots;
+    }
+
+    /**
+     * @param list<array{t:float,v:string}> $knots
+     */
+    private function textValueAt(array $knots, ReplaySeriesCursor $cursor, float $timeS): ?string
+    {
+        $segment = $cursor->segmentAt($timeS);
+        if ($segment === null || $knots === array()) {
+            return null;
+        }
+        if ($segment['edge'] === 'before') {
+            return $knots[0]['v'];
+        }
+        if ($segment['edge'] === 'after') {
+            return $knots[count($knots) - 1]['v'];
+        }
+        return $segment['ratio'] < 0.5 ? $knots[$segment['before']]['v'] : $knots[$segment['after']]['v'];
     }
 
     /**

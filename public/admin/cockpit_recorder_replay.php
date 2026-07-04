@@ -384,7 +384,16 @@ cw_header('Cockpit Recorder Replay');
   bottom: -8px;
   border-left: 2px solid #f8fafc;
   border-right: 2px solid #f8fafc;
-  border-bottom: 2px solid #f8fafc;
+  pointer-events: none;
+}
+.engine-bar.is-probe-pair::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: #f8fafc;
   pointer-events: none;
 }
 .engine-bar-fill {
@@ -3631,9 +3640,15 @@ cw_header('Cockpit Recorder Replay');
       oat_c: lerp(before.oat_c, after.oat_c),
       isa_deviation_c: lerp(before.isa_deviation_c, after.isa_deviation_c),
       estimated_slip_skid_g: lerp(before.estimated_slip_skid_g, after.estimated_slip_skid_g),
+      slip_skid_g: lerp(before.slip_skid_g, after.slip_skid_g),
+      lateral_acceleration_g: lerp(before.lateral_acceleration_g, after.lateral_acceleration_g),
+      normal_acceleration_g: lerp(before.normal_acceleration_g, after.normal_acceleration_g),
+      acceleration_g: lerp(before.acceleration_g, after.acceleration_g),
       estimated_wind_speed_kt: lerp(before.estimated_wind_speed_kt, after.estimated_wind_speed_kt),
       estimated_wind_direction_deg_true: lerpAngle(before.estimated_wind_direction_deg_true, after.estimated_wind_direction_deg_true),
       estimated_tas_kt: lerp(before.estimated_tas_kt, after.estimated_tas_kt),
+      sel_ias_kt: lerp(before.sel_ias_kt, after.sel_ias_kt),
+      sel_vspeed_fpm: lerp(before.sel_vspeed_fpm, after.sel_vspeed_fpm),
       ias_kt: lerp(before.ias_kt, after.ias_kt),
       tas_kt: lerp(before.tas_kt, after.tas_kt),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
@@ -3651,7 +3666,31 @@ cw_header('Cockpit Recorder Replay');
       nav_course_deg: lerpAngle(before.nav_course_deg, after.nav_course_deg),
       nav_bearing_deg: lerpAngle(before.nav_bearing_deg, after.nav_bearing_deg),
       nav_xtk_nm: lerp(before.nav_xtk_nm, after.nav_xtk_nm),
+      nav_distance_nm: lerp(before.nav_distance_nm, after.nav_distance_nm),
       hcdi: lerp(before.hcdi, after.hcdi),
+      hcdi_full_scale_ft: lerp(before.hcdi_full_scale_ft, after.hcdi_full_scale_ft),
+      hcdi_scale: lerp(before.hcdi_scale, after.hcdi_scale),
+      vcdi: lerp(before.vcdi, after.vcdi),
+      vcdi_full_scale_ft: lerp(before.vcdi_full_scale_ft, after.vcdi_full_scale_ft),
+      vnav_cdi: lerp(before.vnav_cdi, after.vnav_cdi),
+      vnav_altitude_ft: lerp(before.vnav_altitude_ft, after.vnav_altitude_ft),
+      density_altitude_ft: lerp(before.density_altitude_ft, after.density_altitude_ft),
+      height_agl_ft: lerp(before.height_agl_ft, after.height_agl_ft),
+      wind_speed_kt: lerp(before.wind_speed_kt, after.wind_speed_kt),
+      wind_direction_deg: lerpAngle(before.wind_direction_deg, after.wind_direction_deg),
+      elevator_trim_pct: lerp(before.elevator_trim_pct, after.elevator_trim_pct),
+      fd_roll_command_deg: lerp(before.fd_roll_command_deg, after.fd_roll_command_deg),
+      fd_pitch_command_deg: lerp(before.fd_pitch_command_deg, after.fd_pitch_command_deg),
+      fd_altitude_ft: lerp(before.fd_altitude_ft, after.fd_altitude_ft),
+      ap_roll_command_deg: lerp(before.ap_roll_command_deg, after.ap_roll_command_deg),
+      ap_pitch_command_deg: lerp(before.ap_pitch_command_deg, after.ap_pitch_command_deg),
+      ap_vs_command_fpm: lerp(before.ap_vs_command_fpm, after.ap_vs_command_fpm),
+      ap_altitude_command_ft: lerp(before.ap_altitude_command_ft, after.ap_altitude_command_ft),
+      ap_roll_torque_pct: lerp(before.ap_roll_torque_pct, after.ap_roll_torque_pct),
+      ap_pitch_torque_pct: lerp(before.ap_pitch_torque_pct, after.ap_pitch_torque_pct),
+      com1_mhz: lerp(before.com1_mhz, after.com1_mhz),
+      com2_mhz: lerp(before.com2_mhz, after.com2_mhz),
+      nav2_mhz: lerp(before.nav2_mhz, after.nav2_mhz),
       true_heading_deg: lerpAngle(before.true_heading_deg, after.true_heading_deg),
       camera_heading_deg: lerpAngle(before.camera_heading_deg, after.camera_heading_deg),
       magnetic_variation_deg: lerp(before.magnetic_variation_deg, after.magnetic_variation_deg),
