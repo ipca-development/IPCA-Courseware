@@ -89,9 +89,9 @@ $defaultEngineProfile = array(
             array('color' => 'yellow', 'from' => null, 'to' => null),
             array('color' => 'red', 'from' => 248, 'to' => 266),
         )),
-        array('key' => 'volts', 'label' => 'VOLTS', 'unit' => '', 'min' => 11.5, 'max' => 16, 'value_field' => 'volts', 'decimals' => 1, 'alert_style' => 'yellow_label', 'ranges' => array(
+        array('key' => 'volts', 'label' => 'VOLTS', 'unit' => '', 'min' => 11.5, 'max' => 16, 'value_field' => 'volts', 'decimals' => 1, 'alert_style' => 'range_label', 'ranges' => array(
             array('color' => 'red', 'from' => 11.5, 'to' => 12.8),
-            array('color' => 'white', 'from' => 12.8, 'to' => 13.2),
+            array('color' => 'yellow', 'from' => 12.8, 'to' => 13.2),
             array('color' => 'green', 'from' => 13.2, 'to' => 14.6),
             array('color' => 'yellow', 'from' => 14.6, 'to' => 15.5),
             array('color' => 'red', 'from' => 15.5, 'to' => 16),
@@ -352,6 +352,17 @@ cw_header('Cockpit Recorder Replay');
   padding: 2px 4px;
   text-shadow: none;
 }
+.engine-row-head.is-alert-red {
+  color: #fff;
+  background: linear-gradient(165deg, #ff2a2a 0%, #df0000 58%, #8f0000 100%);
+  padding: 2px 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .80);
+  animation: engineAlertFlash .85s steps(2, start) infinite;
+}
+@keyframes engineAlertFlash {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: .28; }
+}
 .engine-value {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
@@ -457,6 +468,7 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
   line-height: 10px;
   padding-top: 1px;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, .88)) drop-shadow(0 2px 2px rgba(0, 0, 0, .56));
 }
 .engine-pointer.is-probe-number.is-bottom {
   top: auto;
@@ -489,7 +501,8 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm {
   height: 116px;
-  margin: 0 0 20px;
+  width: 148px;
+  margin: 0 auto 20px;
 }
 .engine-arc-svg {
   width: 100%;
@@ -497,8 +510,10 @@ cw_header('Cockpit Recorder Replay');
   overflow: visible;
 }
 .engine-arc-svg.is-rpm {
+  width: 148px;
   height: 110px;
   display: block;
+  margin: 0 auto;
 }
 .engine-arc-value {
   position: absolute;
@@ -509,11 +524,14 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm .engine-arc-value {
   right: 1px;
-  top: 54px;
+  top: 69px;
   bottom: auto;
   min-width: 44px;
   color: #f8fafc;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
+}
+.engine-arc-gauge.is-rpm .engine-arc-value.is-alert-yellow {
+  color: #ffe600;
 }
 .engine-arc-value span {
   display: block;
@@ -530,7 +548,7 @@ cw_header('Cockpit Recorder Replay');
 .engine-arc-gauge.is-rpm .engine-arc-value strong {
   display: block;
   margin-top: 3px;
-  font-size: 27px;
+  font-size: 22px;
   line-height: .95;
   letter-spacing: -.04em;
   font-variant-numeric: tabular-nums;
@@ -2441,10 +2459,23 @@ cw_header('Cockpit Recorder Replay');
     return numeric > 0 ? `+${text}` : text;
   }
 
+  function engineRangesForInstrument(instrument) {
+    if (String(instrument && instrument.key || '').toLowerCase() === 'volts') {
+      return [
+        { color: 'red', from: 11.5, to: 12.8 },
+        { color: 'yellow', from: 12.8, to: 13.2 },
+        { color: 'green', from: 13.2, to: 14.6 },
+        { color: 'yellow', from: 14.6, to: 15.5 },
+        { color: 'red', from: 15.5, to: 16 },
+      ];
+    }
+    return Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
+  }
+
   function engineRangeHtml(instrument) {
     const min = Number(instrument && instrument.min);
     const max = Number(instrument && instrument.max);
-    const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
+    const ranges = engineRangesForInstrument(instrument);
     return ranges.map((range) => {
       const from = Number(range && range.from);
       const to = Number(range && range.to);
@@ -2454,6 +2485,32 @@ cw_header('Cockpit Recorder Replay');
       const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
       return `<span class="engine-bar-fill is-${escapeHtml(color)}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></span>`;
     }).join('');
+  }
+
+  function engineRangeColorForValue(instrument, value) {
+    const numeric = Number(value);
+    const ranges = engineRangesForInstrument(instrument);
+    if (!Number.isFinite(numeric) || ranges.length === 0) return '';
+    for (let i = 0; i < ranges.length; i += 1) {
+      const range = ranges[i];
+      const from = Number(range && range.from);
+      const to = Number(range && range.to);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+      const isLastRange = i === ranges.length - 1;
+      if (numeric >= from && (numeric < to || (isLastRange && numeric <= to))) {
+        return String((range && range.color) || '').toLowerCase();
+      }
+    }
+    return '';
+  }
+
+  function engineLabelAlertClass(instrument, value) {
+    const style = String(instrument && instrument.alert_style || '').toLowerCase();
+    if (style !== 'range_label' && style !== 'yellow_label') return '';
+    const color = engineRangeColorForValue(instrument, value);
+    if (color === 'red') return ' is-alert-red';
+    if (color === 'yellow' || color === 'amber') return ' is-alert-yellow';
+    return '';
   }
 
   function engineBarHtml(sample, instrument) {
@@ -2469,7 +2526,7 @@ cw_header('Cockpit Recorder Replay');
     const decimals = Number(instrument && instrument.decimals) || 0;
     const pointer = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
     const probe = String((instrument && instrument.probe_label) || '').trim();
-    const alertClass = instrument && instrument.alert_style === 'yellow_label' ? ' is-alert-yellow' : '';
+    const alertClass = engineLabelAlertClass(instrument, value);
     const ammeter = instrument && String(instrument.kind || '').toLowerCase() === 'ammeter';
     const baseFill = ammeter ? '<span class="engine-bar-fill is-white" style="left:0;width:100%"></span>' : '';
     return `<div class="engine-gauge">
@@ -2550,6 +2607,7 @@ cw_header('Cockpit Recorder Replay');
     const r = 50;
     const pivotX = cx;
     const pivotY = cy + 8;
+    const valueAlertClass = Number.isFinite(Number(value)) && Number(value) > 5500 ? ' is-alert-yellow' : '';
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
@@ -2597,7 +2655,7 @@ cw_header('Cockpit Recorder Replay');
           <path d="M -6 2 Q -5 8 0 10 Q 5 8 6 2 L 1.4 -48 Q 0 -54 -1.4 -48 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
         </g>
       </svg>
-      <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
+      <div class="engine-arc-value${valueAlertClass}"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
     </div>`;
   }
 

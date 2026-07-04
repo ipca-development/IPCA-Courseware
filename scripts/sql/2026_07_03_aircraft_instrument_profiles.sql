@@ -78,7 +78,7 @@ INSERT INTO ipca_aircraft_instrument_profiles (
       {"key":"fuel_pressure_psi","label":"FUEL PSI","min":0,"max":7.3,"value_field":"fuel_pressure_psi","decimals":1,"ranges":[{"color":"white","from":0,"to":2.2},{"color":"green","from":2.2,"to":5.8},{"color":"white","from":5.8,"to":7.3}]},
       {"key":"coolant1_f","label":"COOLANT °F","min":86,"max":266,"value_field":"coolant1_f","decimals":0,"probe_label":"1","ranges":[{"color":"white","from":86,"to":248},{"color":"yellow","from":null,"to":null},{"color":"red","from":248,"to":266}]},
       {"key":"coolant2_f","label":"","min":86,"max":266,"value_field":"coolant2_f","decimals":0,"probe_label":"2","ranges":[{"color":"white","from":86,"to":248},{"color":"yellow","from":null,"to":null},{"color":"red","from":248,"to":266}]},
-      {"key":"volts","label":"VOLTS","min":11.5,"max":16,"value_field":"volts","decimals":1,"alert_style":"yellow_label","ranges":[{"color":"red","from":11.5,"to":12.8},{"color":"white","from":12.8,"to":13.2},{"color":"green","from":13.2,"to":14.6},{"color":"yellow","from":14.6,"to":15.5},{"color":"red","from":15.5,"to":16}]},
+      {"key":"volts","label":"VOLTS","min":11.5,"max":16,"value_field":"volts","decimals":1,"alert_style":"range_label","ranges":[{"color":"red","from":11.5,"to":12.8},{"color":"yellow","from":12.8,"to":13.2},{"color":"green","from":13.2,"to":14.6},{"color":"yellow","from":14.6,"to":15.5},{"color":"red","from":15.5,"to":16}]},
       {"key":"amps","label":"AMPS","min":-40,"max":40,"value_field":"amps","decimals":0,"kind":"ammeter","ranges":[{"color":"green_line","from":0,"to":20}]}
     ]
   }',
