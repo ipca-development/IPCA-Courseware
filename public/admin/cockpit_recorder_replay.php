@@ -459,8 +459,7 @@ cw_header('Cockpit Recorder Replay');
   height: 14px;
   border: 0;
   color: #111;
-  background: #f8fafc;
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  background: transparent;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -468,16 +467,42 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
   line-height: 10px;
   padding-top: 1px;
-  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, .88)) drop-shadow(0 2px 2px rgba(0, 0, 0, .56));
+  filter: none;
+  z-index: 3;
+}
+.engine-pointer.is-probe-number::before,
+.engine-pointer.is-probe-number::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  pointer-events: none;
+}
+.engine-pointer.is-probe-number::before {
+  background: rgba(0, 0, 0, .70);
+  transform: translate(2px, 2px);
+  filter: blur(.35px);
+  z-index: 0;
+}
+.engine-pointer.is-probe-number::after {
+  background: #f8fafc;
+  z-index: 1;
+}
+.engine-pointer-label {
+  position: relative;
+  z-index: 2;
 }
 .engine-pointer.is-probe-number.is-bottom {
   top: auto;
   bottom: -9px;
   border: 0;
-  clip-path: polygon(50% 0, 0 100%, 100% 100%);
   align-items: flex-end;
   padding-top: 0;
   padding-bottom: 1px;
+}
+.engine-pointer.is-probe-number.is-bottom::before,
+.engine-pointer.is-probe-number.is-bottom::after {
+  clip-path: polygon(50% 0, 0 100%, 100% 100%);
 }
 .engine-probe {
   position: absolute;
@@ -2556,8 +2581,8 @@ cw_header('Cockpit Recorder Replay');
       ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(displayValue, decimals))}</strong></div>` : ''}
       <div class="engine-bar is-probe-pair">
         ${engineRangeHtml(instrument)}
-        ${pointer1 === null ? '' : `<span class="engine-pointer is-probe-number" style="left:${pointer1.toFixed(2)}%">${escapeHtml(probe1)}</span>`}
-        ${pointer2 === null ? '' : `<span class="engine-pointer is-probe-number is-bottom" style="left:${pointer2.toFixed(2)}%">${escapeHtml(String(secondProbeLabel || '2'))}</span>`}
+        ${pointer1 === null ? '' : `<span class="engine-pointer is-probe-number" style="left:${pointer1.toFixed(2)}%"><span class="engine-pointer-label">${escapeHtml(probe1)}</span></span>`}
+        ${pointer2 === null ? '' : `<span class="engine-pointer is-probe-number is-bottom" style="left:${pointer2.toFixed(2)}%"><span class="engine-pointer-label">${escapeHtml(String(secondProbeLabel || '2'))}</span></span>`}
       </div>
     </div>`;
   }
