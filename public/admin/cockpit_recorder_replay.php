@@ -247,10 +247,11 @@ cw_header('Cockpit Recorder Replay');
   bottom: calc(var(--panel-playback-height) + 34px);
   z-index: 19;
   width: clamp(300px, 34vw, 390px);
-  height: clamp(230px, 28vw, 300px);
+  height: clamp(255px, 30vw, 330px);
   transform: translateX(-50%);
   pointer-events: none;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
+  overflow: visible;
 }
 .hsi-overlay text {
   fill: rgba(255, 255, 255, .94);
@@ -308,7 +309,7 @@ cw_header('Cockpit Recorder Replay');
   stroke: rgba(15, 23, 42, .20);
   stroke-width: .8px;
 }
-.hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 11.5px; }
+.hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-heading-value { fill: #ffffff; font-size: 17px; }
 .hsi-overlay .hsi-crs-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-cyan { fill: #9ffcff; }
@@ -1322,7 +1323,7 @@ cw_header('Cockpit Recorder Replay');
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
-    <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 300" hidden></svg>
+    <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -2782,8 +2783,8 @@ cw_header('Cockpit Recorder Replay');
     hsiOverlay.innerHTML = `
       <rect class="hsi-label-box" x="166" y="12" width="58" height="31" rx="7"></rect>
       <text class="hsi-heading-value" x="195" y="34" text-anchor="middle">${headingText}</text>
-      <rect class="hsi-label-box" x="-2" y="50" width="96" height="34" rx="7"></rect>
-      <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      <rect class="hsi-label-box" x="-20" y="50" width="114" height="34" rx="7"></rect>
+      <text class="hsi-heading-text" x="-7" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
       <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
       <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="hsi-green">${crsText}</tspan></text>
       <g transform="translate(${cx} ${cy})">
@@ -2906,6 +2907,7 @@ cw_header('Cockpit Recorder Replay');
     const pointerHeight = 22;
     const slipTopHalfWidth = pointerHalfWidth;
     const slipBottomHalfWidth = 16;
+    const slipGap = 2;
     const slipHeight = 8;
     const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
     const signature = [
@@ -2937,11 +2939,11 @@ cw_header('Cockpit Recorder Replay');
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)}) scale(${attitudeRollArcScale})">
         <polyline class="attitude-white" points="${arcPoints.join(' ')}"></polyline>
         ${bankTicks}
-        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 1).toFixed(1)} -11,${(-arcRadius - 22).toFixed(1)} 11,${(-arcRadius - 22).toFixed(1)}"></polygon>
+        <polygon class="attitude-bank-pointer" points="0,${(-arcRadius + 1).toFixed(1)} -16.5,${(-arcRadius - 33).toFixed(1)} 16.5,${(-arcRadius - 33).toFixed(1)}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${staticPointerY.toFixed(1)})">
         <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
-        <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipHeight}"></polygon>
+        <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight}"></polygon>
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
         <rect class="attitude-yellow" x="-508" y="-6" width="132" height="12" rx="4" ry="4"></rect>
