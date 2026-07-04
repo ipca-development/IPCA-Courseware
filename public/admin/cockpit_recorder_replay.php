@@ -470,7 +470,7 @@ cw_header('Cockpit Recorder Replay');
 .engine-pointer-label {
   position: absolute;
   left: -6px;
-  top: 0;
+  top: -1px;
   width: 12px;
   text-align: center;
   line-height: 10px;
@@ -483,7 +483,7 @@ cw_header('Cockpit Recorder Replay');
   border-bottom: 12px solid #f8fafc;
 }
 .engine-pointer.is-probe-number.is-bottom .engine-pointer-label {
-  top: 2px;
+  top: -9px;
 }
 .engine-probe {
   position: absolute;
@@ -2852,8 +2852,8 @@ cw_header('Cockpit Recorder Replay');
     hsiOverlay.innerHTML = `
       <rect class="hsi-label-box" x="166" y="12" width="58" height="31" rx="7"></rect>
       <text class="hsi-heading-value" x="195" y="34" text-anchor="middle">${headingText}</text>
-      <rect class="hsi-label-box" x="-20" y="50" width="114" height="34" rx="7"></rect>
-      <text class="hsi-heading-text" x="-7" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      <rect class="hsi-label-box" x="-2" y="50" width="96" height="34" rx="7"></rect>
+      <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
       <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
       <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="hsi-green">${crsText}</tspan></text>
       <g transform="translate(${cx} ${cy})">
