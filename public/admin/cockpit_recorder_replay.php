@@ -363,6 +363,18 @@ cw_header('Cockpit Recorder Replay');
   background: transparent;
   overflow: visible;
 }
+.engine-bar:not(.is-probe-pair)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: -2px;
+  border-left: 2px solid #f8fafc;
+  border-right: 2px solid #f8fafc;
+  border-bottom: 2px solid #f8fafc;
+  pointer-events: none;
+}
 .engine-bar-fill {
   position: absolute;
   top: 0;
@@ -386,6 +398,11 @@ cw_header('Cockpit Recorder Replay');
   bottom: 4px;
   background: #23f01f;
 }
+.engine-bar.is-ammeter .engine-bar-fill.is-green-line {
+  top: 0;
+  bottom: 0;
+  background: #13f018;
+}
 .engine-pointer {
   position: absolute;
   top: -3px;
@@ -403,6 +420,31 @@ cw_header('Cockpit Recorder Replay');
   border-top: 0;
   border-bottom: 12px solid #f8fafc;
 }
+.engine-pointer.is-probe-number {
+  top: -9px;
+  width: 16px;
+  height: 14px;
+  border: 0;
+  color: #111;
+  background: #f8fafc;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 10px;
+  padding-top: 1px;
+}
+.engine-pointer.is-probe-number.is-bottom {
+  top: auto;
+  bottom: -9px;
+  border: 0;
+  clip-path: polygon(50% 0, 0 100%, 100% 100%);
+  align-items: flex-end;
+  padding-top: 0;
+  padding-bottom: 1px;
+}
 .engine-probe {
   position: absolute;
   left: -3px;
@@ -417,22 +459,6 @@ cw_header('Cockpit Recorder Replay');
   line-height: 13px;
   padding-left: 2px;
   z-index: 2;
-}
-.engine-bar.is-probe-pair {
-  margin-left: 15px;
-}
-.engine-probe.is-pair-top,
-.engine-probe.is-pair-bottom {
-  left: -17px;
-}
-.engine-probe.is-pair-top {
-  top: -7px;
-}
-.engine-probe.is-pair-bottom {
-  top: auto;
-  bottom: -7px;
-  clip-path: polygon(0 100%, 100% 100%, 70% 0, 0 0);
-  line-height: 13px;
 }
 .engine-arc-gauge {
   position: relative;
@@ -2380,6 +2406,13 @@ cw_header('Cockpit Recorder Replay');
     return Number(value).toFixed(places).replace(/\.0$/, '');
   }
 
+  function engineDisplayValue(sample, instrument, value, decimals) {
+    const text = engineFormatValue(value, decimals);
+    if (text === '--' || !instrument || String(instrument.kind || '').toLowerCase() !== 'ammeter') return text;
+    const numeric = Number(value);
+    return numeric > 0 ? `+${text}` : text;
+  }
+
   function engineRangeHtml(instrument) {
     const min = Number(instrument && instrument.min);
     const max = Number(instrument && instrument.max);
@@ -2409,13 +2442,14 @@ cw_header('Cockpit Recorder Replay');
     const pointer = value === null ? 0 : engineRangePercent(value, instrument.min, instrument.max);
     const probe = String((instrument && instrument.probe_label) || '').trim();
     const alertClass = instrument && instrument.alert_style === 'yellow_label' ? ' is-alert-yellow' : '';
+    const ammeter = instrument && String(instrument.kind || '').toLowerCase() === 'ammeter';
+    const baseFill = ammeter ? '<span class="engine-bar-fill is-white" style="left:0;width:100%"></span>' : '';
     return `<div class="engine-gauge">
-      ${label !== '' ? `<div class="engine-row-head${alertClass}"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(value, decimals))}</strong></div>` : ''}
-      <div class="engine-bar">
-        ${engineRangeHtml(instrument)}
+      ${label !== '' ? `<div class="engine-row-head${alertClass}"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineDisplayValue(sample, instrument, value, decimals))}</strong></div>` : ''}
+      <div class="engine-bar${ammeter ? ' is-ammeter' : ''}">
+        ${baseFill}${engineRangeHtml(instrument)}
         ${probe !== '' ? `<span class="engine-probe">${escapeHtml(probe)}</span>` : ''}
         <span class="engine-pointer" style="left:${pointer.toFixed(2)}%"></span>
-        ${instrument && instrument.kind === 'ammeter' ? '<span class="engine-amps-cross"></span>' : ''}
       </div>
     </div>`;
   }
@@ -2425,17 +2459,20 @@ cw_header('Cockpit Recorder Replay');
     const value2 = firstFinite(sample && sample[secondField]);
     const label = String((instrument && instrument.label) || '').trim();
     const decimals = Number(instrument && instrument.decimals) || 0;
+    const displayValue = firstFinite(
+      value1 !== null && value2 !== null ? Math.max(value1, value2) : null,
+      value1,
+      value2
+    );
     const pointer1 = value1 === null ? null : engineRangePercent(value1, instrument.min, instrument.max);
     const pointer2 = value2 === null ? null : engineRangePercent(value2, instrument.min, instrument.max);
     const probe1 = String((instrument && instrument.probe_label) || '1').trim() || '1';
     return `<div class="engine-gauge">
-      ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(value1, decimals))}</strong></div>` : ''}
+      ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(displayValue, decimals))}</strong></div>` : ''}
       <div class="engine-bar is-probe-pair">
         ${engineRangeHtml(instrument)}
-        <span class="engine-probe is-pair-top">${escapeHtml(probe1)}</span>
-        <span class="engine-probe is-pair-bottom">${escapeHtml(String(secondProbeLabel || '2'))}</span>
-        ${pointer1 === null ? '' : `<span class="engine-pointer" style="left:${pointer1.toFixed(2)}%"></span>`}
-        ${pointer2 === null ? '' : `<span class="engine-pointer is-bottom" style="left:${pointer2.toFixed(2)}%"></span>`}
+        ${pointer1 === null ? '' : `<span class="engine-pointer is-probe-number" style="left:${pointer1.toFixed(2)}%">${escapeHtml(probe1)}</span>`}
+        ${pointer2 === null ? '' : `<span class="engine-pointer is-probe-number is-bottom" style="left:${pointer2.toFixed(2)}%">${escapeHtml(String(secondProbeLabel || '2'))}</span>`}
       </div>
     </div>`;
   }

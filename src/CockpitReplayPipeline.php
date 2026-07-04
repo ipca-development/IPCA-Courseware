@@ -687,8 +687,8 @@ final class CockpitReplayPipeline
                 'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1'),
                 'egt1_f' => G3XFlightStreamParser::numericValue($row, 'EGT1 (deg F)', 'E1 EGT1'),
                 'egt2_f' => G3XFlightStreamParser::numericValue($row, 'EGT2 (deg F)', 'E1 EGT2'),
-                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 1 (deg F)'),
-                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 2 (deg F)'),
+                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'CHT1 (deg F)', 'Cylinder Head Temp 1 (deg F)', 'Coolant Temp 1 (deg F)'),
+                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'CHT2 (deg F)', 'Cylinder Head Temp 2 (deg F)', 'Coolant Temp 2 (deg F)'),
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
