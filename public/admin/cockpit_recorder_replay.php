@@ -368,8 +368,20 @@ cw_header('Cockpit Recorder Replay');
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
+  top: -4px;
   bottom: -2px;
+  border-left: 2px solid #f8fafc;
+  border-right: 2px solid #f8fafc;
+  border-bottom: 2px solid #f8fafc;
+  pointer-events: none;
+}
+.engine-bar.is-probe-pair::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  bottom: -8px;
   border-left: 2px solid #f8fafc;
   border-right: 2px solid #f8fafc;
   border-bottom: 2px solid #f8fafc;
