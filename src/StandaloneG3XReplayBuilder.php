@@ -43,7 +43,7 @@ final class StandaloneG3XReplayBuilder
             array(),
             $g3xSamples,
             array(),
-            array('replay_source_mode' => 'g3x_first')
+            array('replay_source_mode' => 'g3x_only')
         );
 
         $diagnostics = $replay['diagnostics'];
@@ -72,7 +72,7 @@ final class StandaloneG3XReplayBuilder
                 'g3x_available' => true,
             ),
             'source' => array(
-                'mode' => 'g3x_first',
+                'mode' => 'g3x_only',
                 'csv_path' => $realCsvPath,
                 'csv_sha1' => sha1_file($realCsvPath),
                 'aircraft_ident' => (string)$parsed['aircraft_ident'],

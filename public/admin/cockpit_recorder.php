@@ -479,6 +479,8 @@ cw_header('Cockpit Recorder POC');
                 <?php endif; ?>
                 <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php?id=<?= $id ?>">
                   <input type="hidden" name="id" value="<?= $id ?>">
+                  <input type="hidden" name="replay_source_mode" value="g3x_only">
+                  <div class="cockpit-muted" style="margin-top:6px">G3X-only reconstruction. Garmin CSV must be attached; AHRS/GPS are stored but ignored for replay state.</div>
                   <label class="cockpit-muted" style="display:block;margin-top:6px">
                     Altimeter setting / QNH (optional, inHg)
                     <input type="number" name="altimeter_setting_inhg" min="25" max="33.5" step="0.01" placeholder="29.92" style="display:block;width:140px;margin-top:4px">

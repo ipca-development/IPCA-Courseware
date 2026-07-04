@@ -51,6 +51,7 @@ struct IPCARecorderApp: App {
         recordingStore.syncSharedRecordingIndex()
         recordingStore.processPendingG3XImports()
         uploadManager.syncPendingG3XUploads(store: recordingStore, settings: settings)
+        uploadManager.syncPendingServerG3XImports(store: recordingStore, settings: settings)
         guard settings.isServerURLConfigured else { return }
         for recording in recordingStore.recordings where recording.hasG3XData && recording.needsUploadRetry {
             uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
@@ -64,7 +65,8 @@ struct IPCARecorderApp: App {
         if url.host?.lowercased() == "import-g3x" {
             handlePendingG3XWorkflow()
             if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-               let recordingID = components.queryItems?.first(where: { $0.name == "recording" })?.value {
+               let recordingID = components.queryItems?.first(where: { $0.name == "recording" })?.value,
+               recordingStore.recording(id: recordingID) != nil {
                 pendingNavigationRecordingID = recordingID
             }
             return

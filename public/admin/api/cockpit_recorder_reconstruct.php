@@ -21,7 +21,7 @@ $id = trim((string)(
 $altimeterSetting = trim((string)($_POST['altimeter_setting_inhg'] ?? $_GET['altimeter_setting_inhg'] ?? ''));
 $airportElevation = trim((string)($_POST['airport_elevation_ft'] ?? $_GET['airport_elevation_ft'] ?? ''));
 $oatC = trim((string)($_POST['oat_c'] ?? $_GET['oat_c'] ?? ''));
-$replaySourceMode = trim((string)($_POST['replay_source_mode'] ?? $_GET['replay_source_mode'] ?? ''));
+$replaySourceMode = trim((string)($_POST['replay_source_mode'] ?? $_GET['replay_source_mode'] ?? 'g3x_only'));
 $mode = trim((string)($_POST['mode'] ?? $_GET['mode'] ?? 'async'));
 $wantsJson = str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 
@@ -138,12 +138,13 @@ try {
         }
         $options['oat_c'] = (float)$oatC;
     }
-    if ($replaySourceMode !== '') {
-        if ($replaySourceMode !== 'g3x_first' && $replaySourceMode !== 'g3x_only') {
-            throw new RuntimeException('Unsupported replay source mode.');
-        }
-        $options['replay_source_mode'] = $replaySourceMode;
+    if ($replaySourceMode === '' || $replaySourceMode === 'g3x_first') {
+        $replaySourceMode = 'g3x_only';
     }
+    if ($replaySourceMode !== 'g3x_only') {
+        throw new RuntimeException('G3X-only reconstruction is required. Multi-source reconstruction is disabled.');
+    }
+    $options['replay_source_mode'] = 'g3x_only';
     if ($mode !== 'sync' && !$wantsJson) {
         $recording = (new CockpitRecorderService($pdo))->recordingByAnyId($id);
         if (!$recording) {

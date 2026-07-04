@@ -130,12 +130,34 @@ struct APIClient {
         originalFilename: String,
         mimeType: String
     ) -> URLRequest {
+        chunkUploadRequest(
+            recordingID: recording.id,
+            fileType: fileType,
+            chunkIndex: chunkIndex,
+            totalChunks: totalChunks,
+            totalSize: totalSize,
+            chunkSize: chunkSize,
+            originalFilename: originalFilename,
+            mimeType: mimeType
+        )
+    }
+
+    func chunkUploadRequest(
+        recordingID: String,
+        fileType: String,
+        chunkIndex: Int,
+        totalChunks: Int,
+        totalSize: Int64,
+        chunkSize: Int,
+        originalFilename: String,
+        mimeType: String
+    ) -> URLRequest {
         let url = serverURL.appending(path: "api/recordings/upload_chunk.php")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.setValue(recording.id, forHTTPHeaderField: "X-IPCA-Recording-ID")
+        request.setValue(recordingID, forHTTPHeaderField: "X-IPCA-Recording-ID")
         request.setValue(fileType, forHTTPHeaderField: "X-IPCA-File-Type")
         request.setValue(String(chunkIndex), forHTTPHeaderField: "X-IPCA-Chunk-Index")
         request.setValue(String(totalChunks), forHTTPHeaderField: "X-IPCA-Total-Chunks")

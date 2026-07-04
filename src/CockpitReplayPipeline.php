@@ -58,9 +58,12 @@ final class CockpitReplayPipeline
         array $options = array()
     ): array {
         $warnings = array();
-        $sourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
-        if (!in_array($sourceMode, array('g3x_first', 'g3x_only'), true)) {
-            $sourceMode = 'multi_source';
+        $sourceMode = (string)($options['replay_source_mode'] ?? 'g3x_only');
+        if ($sourceMode === '' || $sourceMode === 'g3x_first') {
+            $sourceMode = 'g3x_only';
+        }
+        if ($sourceMode !== 'g3x_only') {
+            throw new RuntimeException('G3X-only replay reconstruction is required. Multi-source reconstruction is disabled.');
         }
         $gpsPoints = $this->normalizeGpsPoints($rawGpsRows);
         $ahrsPoints = $this->normalizeAhrsPoints($rawAhrsRows);
@@ -68,33 +71,21 @@ final class CockpitReplayPipeline
         $availableGpsCount = count($gpsPoints);
         $availableAhrsCount = count($ahrsPoints);
 
-        if ($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') {
-            $gpsPoints = array();
-            $ahrsPoints = array();
-        }
+        $gpsPoints = array();
+        $ahrsPoints = array();
 
         $rawGpsCount = count($gpsPoints);
         $rawAhrsCount = count($ahrsPoints);
-        if ($rawGpsCount === 0 && count($g3xPoints) === 0) {
-            throw new RuntimeException('No GPS or G3X position samples available for replay reconstruction.');
+        if (count($g3xPoints) === 0) {
+            throw new RuntimeException('G3X CSV required before replay reconstruction.');
         }
 
         $maxRawGpsGap = $this->maxTimeGap($gpsPoints);
         $maxRawG3xGap = $this->maxTimeGap($g3xPoints);
-        if ($sourceMode === 'multi_source' && $maxRawGpsGap > 2.0) {
-            $warnings[] = 'Raw GPS has gaps larger than 2 seconds.';
+        if ($maxRawG3xGap > 2.0) {
+            $warnings[] = 'G3X-only replay has G3X gaps larger than 2 seconds.';
         }
-        if (($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') && $maxRawG3xGap > 2.0) {
-            $warnings[] = 'G3X-first replay has G3X gaps larger than 2 seconds.';
-        }
-        if ($sourceMode === 'multi_source' && $rawAhrsCount === 0) {
-            $warnings[] = 'AHRS samples missing; attitude replay quality may be low.';
-        }
-        if (!$g3xPoints) {
-            $warnings[] = 'G3X not attached; replay uses phone GPS and AHRS only.';
-        } elseif ($sourceMode === 'g3x_first' || $sourceMode === 'g3x_only') {
-            $warnings[] = 'Replay v2 built in G3X-first mode; phone GPS/AHRS evidence intentionally ignored for primary replay state.';
-        }
+        $warnings[] = 'Replay v2 built in G3X-only mode; phone GPS/AHRS evidence intentionally ignored for primary replay state.';
 
         $origin = $this->firstGoodGpsOrigin($gpsPoints, $g3xPoints);
         if ($origin === null) {
@@ -246,7 +237,7 @@ final class CockpitReplayPipeline
             $headingElapsed
         );
         $samples = $this->applyHeadingOwnership($samples, $g3xHeadingKnots, $ahrsHeadingKnots, $trackFallbackHeadingKnots);
-        $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline, $sourceMode === 'g3x_first' || $sourceMode === 'g3x_only');
+        $samples = $this->stabilizeAltitudes($samples, $altitudeBaseline, true);
         $samples = $this->validateReplaySamples($samples);
         $this->profiling['enu_interpolation_s'] = round(microtime(true) - $enuStarted - $headingElapsed, 4);
         $this->profiling['heading_interpolation_s'] = round($headingElapsed, 4);

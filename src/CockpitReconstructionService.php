@@ -207,9 +207,12 @@ final class CockpitReconstructionService
         }
 
         $recordingId = (int)$recording['id'];
-        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
-        if (!in_array($replaySourceMode, array('g3x_first', 'g3x_only'), true)) {
-            $replaySourceMode = 'multi_source';
+        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'g3x_only');
+        if ($replaySourceMode === '' || $replaySourceMode === 'g3x_first') {
+            $replaySourceMode = 'g3x_only';
+        }
+        if ($replaySourceMode !== 'g3x_only') {
+            throw new RuntimeException('G3X-only reconstruction is required. Multi-source reconstruction is disabled.');
         }
         $runStarted = microtime(true);
         $jobId = isset($options['job_id']) ? (int)$options['job_id'] : $this->createReconstructionJob($recordingId);
@@ -230,8 +233,8 @@ final class CockpitReconstructionService
                 fn(array $row): bool => isset($row['seconds'])
             ));
             $g3xSamples = $this->loadG3XNormalized($recording, $gpsForG3X, $options);
-            if (!$gpsSamples && !$ahrsSamples && !$g3xSamples) {
-                throw new RuntimeException('No GPS, AHRS, or G3X samples available for reconstruction.');
+            if (!$g3xSamples) {
+                throw new RuntimeException('G3X CSV required before reconstruction.');
             }
 
             $profiler = new CockpitReconstructionProfiler();
@@ -1855,10 +1858,9 @@ final class CockpitReconstructionService
      */
     private function addDerivedReplayValues(array $recording, array $samples, array $options = array()): array
     {
-        $replaySourceMode = (string)($options['replay_source_mode'] ?? 'multi_source');
-        $disableGlobalFieldCalibration = in_array($replaySourceMode, array('g3x_first', 'g3x_only'), true);
+        $disableGlobalFieldCalibration = true;
         $altimeter = $this->selectAltimeterSetting($recording, $samples, $options);
-        // G3X-first replay must preserve Garmin altitude as recorded. A single airport
+        // G3X-only replay must preserve Garmin altitude as recorded. A single airport
         // elevation offset is only valid for legacy multi-source estimates and must
         // never be applied across an F70-to-KTRM style flight.
         $fieldCalibration = $disableGlobalFieldCalibration ? null : $this->buildFieldAltitudeCalibration($recording, $samples, $options);

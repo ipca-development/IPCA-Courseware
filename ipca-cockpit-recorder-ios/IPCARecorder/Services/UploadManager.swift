@@ -401,6 +401,48 @@ final class UploadManager: ObservableObject {
         }
     }
 
+    func syncPendingServerG3XImports(store: RecordingStore, settings: SettingsStore) {
+        guard settings.isServerURLConfigured,
+              let baseURL = settings.normalizedServerURL,
+              let importsDir = AppGroupStorage.importsDirectoryURL else {
+            return
+        }
+
+        for item in SharedRecordingIndexStore.readPendingImports() {
+            guard let recordingID = item.suggestedRecordingID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !recordingID.isEmpty,
+                  store.recording(id: recordingID) == nil,
+                  !activeUploads.contains(recordingID) else {
+                continue
+            }
+
+            let csvURL = importsDir.appendingPathComponent(item.csvRelativePath)
+            guard FileManager.default.fileExists(atPath: csvURL.path) else {
+                SharedRecordingIndexStore.removePendingImport(id: item.id)
+                continue
+            }
+
+            activeUploads.insert(recordingID)
+            Task {
+                defer {
+                    Task { @MainActor in
+                        self.activeUploads.remove(recordingID)
+                    }
+                }
+
+                do {
+                    try await performServerG3XUpload(recordingID: recordingID, csvURL: csvURL, baseURL: baseURL)
+                    await MainActor.run {
+                        SharedRecordingIndexStore.removePendingImport(id: item.id)
+                        try? FileManager.default.removeItem(at: csvURL)
+                    }
+                } catch {
+                    print("Server G3X import failed for \(recordingID): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func performG3XSupplementUpload(recordingID: String, store: RecordingStore, settings: SettingsStore) async throws {
         guard let baseURL = settings.normalizedServerURL else {
             throw APIClientError.invalidServerURL
@@ -445,6 +487,112 @@ final class UploadManager: ObservableObject {
                 $0.lastError = "G3X panel data synced to server."
             }
         }
+    }
+
+    private func performServerG3XUpload(recordingID: String, csvURL: URL, baseURL: URL) async throws {
+        let client = APIClient(serverURL: baseURL)
+        let fileSize = try fileSize(csvURL)
+        guard fileSize > 0 else { return }
+
+        _ = try await uploadFileChunks(
+            recordingID: recordingID,
+            client: client,
+            fileType: "g3x",
+            fileURL: csvURL,
+            originalFilename: csvURL.lastPathComponent,
+            mimeType: "text/csv",
+            fileSize: fileSize,
+            uploadedBytes: 0,
+            totalBytes: fileSize
+        )
+
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recordingID)
+        let (data, response) = try await data(for: finalizeRequest)
+        let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
+        if !uploadResponse.ok {
+            throw APIClientError.badResponse(uploadResponse.error ?? "G3X upload failed.")
+        }
+    }
+
+    private func uploadFileChunks(
+        recordingID: String,
+        client: APIClient,
+        fileType: String,
+        fileURL: URL,
+        originalFilename: String,
+        mimeType: String,
+        fileSize: Int64,
+        uploadedBytes: Int64,
+        totalBytes: Int64
+    ) async throws -> Int64 {
+        let totalChunks = Int(ceil(Double(fileSize) / Double(chunkSize)))
+        var completedBytes = uploadedBytes
+        var receivedChunks = Set<Int>()
+
+        do {
+            let status = try await client.chunkUploadStatus(recordingID: recordingID, fileType: fileType)
+            if status.ok, let chunks = status.receivedChunks {
+                receivedChunks = Set(chunks)
+            }
+        } catch {
+            // Resume is optional; continue from the beginning if status is unavailable.
+        }
+
+        let startIndex = firstMissingChunkIndex(received: receivedChunks, totalChunks: totalChunks)
+        if startIndex >= totalChunks {
+            return uploadedBytes + fileSize
+        }
+
+        if startIndex > 0 {
+            completedBytes = uploadedBytes + Int64(min(Int64(startIndex) * Int64(chunkSize), fileSize))
+        }
+
+        for chunkIndex in startIndex..<totalChunks {
+            let offset = Int64(chunkIndex * chunkSize)
+            let count = min(chunkSize, Int(fileSize - offset))
+            let chunkData = try readChunk(fileURL: fileURL, offset: offset, count: count, fileType: fileType, chunkIndex: chunkIndex)
+
+            let request = client.chunkUploadRequest(
+                recordingID: recordingID,
+                fileType: fileType,
+                chunkIndex: chunkIndex,
+                totalChunks: totalChunks,
+                totalSize: fileSize,
+                chunkSize: count,
+                originalFilename: originalFilename,
+                mimeType: mimeType
+            )
+
+            var lastError: Error?
+            for attempt in 1...maxChunkAttempts {
+                do {
+                    let (data, response) = try await send(request: request, body: chunkData)
+                    let chunkResponse = try client.decodeChunkUploadResponse(data: data, response: response)
+                    if !chunkResponse.ok {
+                        throw APIClientError.badResponse(chunkResponse.error ?? "Chunk upload failed.")
+                    }
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    if attempt < maxChunkAttempts {
+                        let delayNs = UInt64(min(30, attempt * attempt * 2)) * 1_000_000_000
+                        try await Task.sleep(nanoseconds: delayNs)
+                    }
+                }
+            }
+
+            if let lastError {
+                throw APIClientError.badResponse(
+                    "Failed \(fileType) chunk \(chunkIndex + 1)/\(totalChunks): \(lastError.localizedDescription)"
+                )
+            }
+
+            completedBytes += Int64(count)
+            _ = totalBytes
+        }
+
+        return completedBytes
     }
 
     private func pollTranscript(recordingID: String, serverRecordingID: String, store: RecordingStore, client: APIClient) async throws {

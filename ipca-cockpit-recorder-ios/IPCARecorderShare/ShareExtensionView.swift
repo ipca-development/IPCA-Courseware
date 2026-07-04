@@ -8,6 +8,7 @@ struct ShareExtensionView: View {
     let onCancel: () -> Void
 
     @State private var selectedRecordingID: String
+    @State private var manualServerRecordingID: String = ""
 
     init(
         metadata: G3XFlightStreamMetadata,
@@ -53,6 +54,7 @@ struct ShareExtensionView: View {
                         systemImage: "airplane.circle",
                         description: Text(emptyStateMessage)
                     )
+                    manualServerRecordingField
                 } else {
                     if showsManualFallback {
                         Text("No automatic match. Select the flight this Garmin file belongs to.")
@@ -90,6 +92,7 @@ struct ShareExtensionView: View {
                         }
                     }
                     .listStyle(.insetGrouped)
+                    manualServerRecordingField
                 }
 
                 Spacer()
@@ -98,15 +101,35 @@ struct ShareExtensionView: View {
                     Button("Cancel", action: onCancel)
                     Spacer()
                     Button("Attach to Flight") {
-                        onAttach(selectedRecordingID)
+                        onAttach(attachmentRecordingID)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedRecordingID.isEmpty)
+                    .disabled(attachmentRecordingID.isEmpty)
                 }
             }
             .padding()
             .navigationTitle("IPCA Flight Recorder")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var attachmentRecordingID: String {
+        let manual = manualServerRecordingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return manual.isEmpty ? selectedRecordingID : manual
+    }
+
+    private var manualServerRecordingField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Server Recording ID")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField("Paste recording UID", text: $manualServerRecordingID)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            Text("Use this when the flight exists online but is not stored locally on this iPad.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -116,9 +139,9 @@ struct ShareExtensionView: View {
 
     private var emptyStateMessage: String {
         if indexedRecordingCount == 0 {
-            return "Open IPCA Flight Recorder on this iPad first so your saved flights sync here, then share the Garmin CSV again."
+            return "No local flights are indexed on this iPad. Paste the server recording ID below to attach this Garmin CSV to an online recording."
         }
-        return "None of your \(indexedRecordingCount) saved flights overlap this Garmin file. Record or import the matching flight in IPCA Flight Recorder, then try again."
+        return "None of your \(indexedRecordingCount) saved flights overlap this Garmin file. Select a local flight or paste the server recording ID below."
     }
 
     private func candidateDetail(for candidate: G3XMatchCandidate) -> String {
