@@ -331,7 +331,7 @@ cw_header('Cockpit Recorder Replay');
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .engine-gauge {
-  margin: 0 2px 10px;
+  margin: 0 2px 20px;
 }
 .engine-row-head {
   display: flex;
@@ -341,7 +341,7 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
   font-size: 10.5px;
   line-height: 1;
-  margin: 0 1px 4px;
+  margin: 0 1px 8px;
   color: rgba(248, 250, 252, .98);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .70);
 }
@@ -369,24 +369,16 @@ cw_header('Cockpit Recorder Replay');
   bottom: 0;
 }
 .engine-bar-fill.is-white {
-  background:
-    repeating-linear-gradient(90deg, rgba(255,255,255,.24) 0 1px, rgba(255,255,255,0) 1px 3px),
-    linear-gradient(180deg, #ffffff 0%, #f7f7f7 54%, #cfd3d7 100%);
+  background: #f8fafc;
 }
 .engine-bar-fill.is-green {
-  background:
-    repeating-linear-gradient(90deg, rgba(255,255,255,.20) 0 1px, rgba(255,255,255,0) 1px 3px),
-    linear-gradient(90deg, #05b813 0%, #22f327 50%, #05b813 100%);
+  background: #13f018;
 }
 .engine-bar-fill.is-yellow {
-  background:
-    repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 1px, rgba(255,255,255,0) 1px 3px),
-    linear-gradient(180deg, #fff238 0%, #ffe600 54%, #d1c500 100%);
+  background: #ffe600;
 }
 .engine-bar-fill.is-red {
-  background:
-    repeating-linear-gradient(90deg, rgba(255,255,255,.14) 0 1px, rgba(255,255,255,0) 1px 3px),
-    linear-gradient(180deg, #ff3434 0%, #ff1212 54%, #c90000 100%);
+  background: #ff1212;
 }
 .engine-bar-fill.is-black { background: #050505; }
 .engine-bar-fill.is-green-line {
@@ -396,7 +388,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-pointer {
   position: absolute;
-  top: -8px;
+  top: -3px;
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
@@ -426,8 +418,8 @@ cw_header('Cockpit Recorder Replay');
   margin: 0 2px 6px;
 }
 .engine-arc-gauge.is-rpm {
-  height: 96px;
-  margin: 0 0 8px;
+  height: 116px;
+  margin: 0 0 20px;
 }
 .engine-arc-svg {
   width: 100%;
@@ -435,7 +427,7 @@ cw_header('Cockpit Recorder Replay');
   overflow: visible;
 }
 .engine-arc-svg.is-rpm {
-  height: 90px;
+  height: 110px;
   display: block;
 }
 .engine-arc-value {
@@ -446,10 +438,10 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value {
-  right: 2px;
-  top: 41px;
+  right: 1px;
+  top: 54px;
   bottom: auto;
-  min-width: 42px;
+  min-width: 44px;
   color: #f8fafc;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .72);
 }
@@ -458,7 +450,7 @@ cw_header('Cockpit Recorder Replay');
   font-size: 12px;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value span {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   letter-spacing: -.02em;
 }
@@ -467,8 +459,8 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm .engine-arc-value strong {
   display: block;
-  margin-top: 2px;
-  font-size: 22px;
+  margin-top: 3px;
+  font-size: 27px;
   line-height: .95;
   letter-spacing: -.04em;
   font-variant-numeric: tabular-nums;
@@ -2435,11 +2427,13 @@ cw_header('Cockpit Recorder Replay');
     const pct = value === null ? 0 : engineRangePercent(value, min, max);
     const startAngle = 135;
     const endAngle = 450;
-    const needleAngle = startAngle + pct / 100 * (endAngle - startAngle);
+    const needleAngle = -54 + pct / 100 * 124;
     const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
-    const cx = 58;
-    const cy = 61;
-    const r = 42;
+    const cx = 62;
+    const cy = 62;
+    const r = 50;
+    const pivotX = cx + Math.cos(degToRad(startAngle)) * (r - 2);
+    const pivotY = cy + Math.sin(degToRad(startAngle)) * (r - 2);
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
@@ -2447,10 +2441,10 @@ cw_header('Cockpit Recorder Replay');
       const color = String((range && range.color) || 'white').replace(/[^a-z_-]/gi, '').toLowerCase().replace(/_/g, '-');
       const fromAngle = startAngle + fromPct / 100 * (endAngle - startAngle);
       const toAngle = startAngle + toPct / 100 * (endAngle - startAngle);
-      return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="9.5" fill="none" stroke-linecap="butt"></path>`;
+      return `<path d="${engineArcPath(cx, cy, r, fromAngle, toAngle)}" stroke="url(#rpm-${escapeHtml(color)}-gradient)" stroke-width="11" fill="none" stroke-linecap="butt"></path>`;
     }).join('');
     return `<div class="engine-arc-gauge is-rpm">
-      <svg class="engine-arc-svg is-rpm" viewBox="0 0 126 92" aria-hidden="true">
+      <svg class="engine-arc-svg is-rpm" viewBox="0 0 148 118" aria-hidden="true">
         <defs>
           <linearGradient id="rpm-white-gradient" x1="0%" y1="20%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#ffffff"></stop>
@@ -2479,12 +2473,12 @@ cw_header('Cockpit Recorder Replay');
             <feDropShadow dx="0" dy="1" stdDeviation=".7" flood-color="#000000" flood-opacity=".35"></feDropShadow>
           </filter>
         </defs>
-        <circle cx="${cx}" cy="${cy}" r="57" fill="none" stroke="rgba(255,255,255,.06)" stroke-width=".7"></circle>
-        <circle cx="${cx}" cy="${cy}" r="31" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".55"></circle>
-        <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="12" fill="none" stroke-linecap="butt" filter="url(#rpm-subtle-shadow)"></path>
+        <circle cx="${cx}" cy="${cy}" r="60" fill="none" stroke="rgba(255,255,255,.06)" stroke-width=".7"></circle>
+        <circle cx="${cx}" cy="${cy}" r="36" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".55"></circle>
+        <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="14" fill="none" stroke-linecap="butt" filter="url(#rpm-subtle-shadow)"></path>
         ${rangeArcs}
-        <g transform="translate(${cx} ${cy}) rotate(${(needleAngle - 270).toFixed(1)})">
-          <path d="M -2.8 4.5 L 2.8 4.5 L 6 -38 Q 4.7 -47 -1.6 -48 Q -7.1 -46.8 -7.5 -38 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".3"></path>
+        <g transform="translate(${pivotX.toFixed(1)} ${pivotY.toFixed(1)}) rotate(${needleAngle.toFixed(1)})">
+          <path d="M 0 -2 L 52 -6.5 Q 63 -2.8 62 4.6 Q 61 10.8 51 9.5 L 0 2.2 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
         </g>
       </svg>
       <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
