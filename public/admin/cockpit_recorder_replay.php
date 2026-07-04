@@ -2427,13 +2427,14 @@ cw_header('Cockpit Recorder Replay');
     const pct = value === null ? 0 : engineRangePercent(value, min, max);
     const startAngle = 135;
     const endAngle = 450;
-    const needleAngle = -54 + pct / 100 * 124;
+    const needleArcAngle = startAngle + pct / 100 * (endAngle - startAngle);
+    const needleRotation = needleArcAngle - 270;
     const ranges = Array.isArray(instrument && instrument.ranges) ? instrument.ranges : [];
     const cx = 62;
     const cy = 62;
     const r = 50;
-    const pivotX = cx + Math.cos(degToRad(startAngle)) * (r - 2);
-    const pivotY = cy + Math.sin(degToRad(startAngle)) * (r - 2);
+    const pivotX = cx;
+    const pivotY = cy + 8;
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
       const toPct = engineRangePercent(Number(range && range.to), min, max);
@@ -2477,8 +2478,8 @@ cw_header('Cockpit Recorder Replay');
         <circle cx="${cx}" cy="${cy}" r="36" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".55"></circle>
         <path d="${engineArcPath(cx, cy, r, startAngle, endAngle)}" stroke="#f8fafc" stroke-width="14" fill="none" stroke-linecap="butt" filter="url(#rpm-subtle-shadow)"></path>
         ${rangeArcs}
-        <g transform="translate(${pivotX.toFixed(1)} ${pivotY.toFixed(1)}) rotate(${needleAngle.toFixed(1)})">
-          <path d="M 0 -2 L 52 -6.5 Q 63 -2.8 62 4.6 Q 61 10.8 51 9.5 L 0 2.2 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
+        <g transform="translate(${pivotX.toFixed(1)} ${pivotY.toFixed(1)}) rotate(${needleRotation.toFixed(1)})">
+          <path d="M -6 2 Q -5 8 0 10 Q 5 8 6 2 L 1.4 -48 Q 0 -54 -1.4 -48 Z" fill="url(#rpm-needle-gradient)" stroke="rgba(255,255,255,.92)" stroke-width=".35"></path>
         </g>
       </svg>
       <div class="engine-arc-value"><span>${escapeHtml(String(instrument.label || ''))}</span><strong>${escapeHtml(engineFormatValue(value, decimals))}</strong></div>
