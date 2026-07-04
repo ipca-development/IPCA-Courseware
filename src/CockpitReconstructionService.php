@@ -14,6 +14,10 @@ require_once __DIR__ . '/tv_adsb_status.php';
  *
  * Phase 1 intentionally uses GPS + AHRS only. No grading, ACS analysis, or coaching.
  */
+final class CockpitReconstructionCancelled extends RuntimeException
+{
+}
+
 final class CockpitReconstructionService
 {
     private const RECORDINGS_TABLE = 'ipca_cockpit_recordings';
@@ -38,6 +42,7 @@ final class CockpitReconstructionService
     public const STAGE_FINALIZING = 'finalizing';
     public const STAGE_READY = 'ready';
     public const STAGE_FAILED = 'failed';
+    public const STAGE_CANCELLED = 'cancelled';
 
     private ?PDO $progressPdo = null;
 
@@ -337,8 +342,10 @@ final class CockpitReconstructionService
             $json = json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $profiler->log($recordingId);
             $this->reportJobProgress($jobId, self::STAGE_FINALIZING, 92, 'Saving phases, events, and summary');
+            $this->assertJobNotCancelled($jobId);
             $this->storePhases($recordingId, $timeline['phases']);
             $this->storeEvents($recordingId, $timeline['events']);
+            $this->assertJobNotCancelled($jobId);
             $this->setRecordingStatus($recordingId, 'ready', 'ready', (string)($recording['adsb_status'] ?? 'not_started'), $json ?: null);
             $this->ensureAdsbScaffold($recording);
             $this->pdo->commit();
@@ -363,6 +370,18 @@ final class CockpitReconstructionService
                 'total_duration_s' => $totalDuration,
                 'profiling' => $profiling,
                 'summary' => $summary,
+            );
+        } catch (CockpitReconstructionCancelled $e) {
+            if ($inTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            $this->setRecordingStatus($recordingId, 'not_started', 'not_started', (string)($recording['adsb_status'] ?? 'not_started'), null);
+            return array(
+                'ok' => false,
+                'cancelled' => true,
+                'recording_id' => $recordingId,
+                'job_id' => $jobId,
+                'error' => $e->getMessage(),
             );
         } catch (Throwable $e) {
             if ($inTransaction && $this->pdo->inTransaction()) {
@@ -453,6 +472,64 @@ final class CockpitReconstructionService
         }
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    public function cancelReconstruction(string|int $id): array
+    {
+        $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId((string)$id);
+        if (!$recording) {
+            return array('ok' => false, 'error' => 'Recording not found.');
+        }
+
+        $recordingId = (int)$recording['id'];
+        $job = $this->latestJobForRecording($recordingId);
+        if ($job === null || !in_array((string)($job['status'] ?? ''), array('queued', 'processing'), true)) {
+            return array('ok' => false, 'error' => 'No active reconstruction job to cancel.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare('
+                UPDATE ' . self::RECORDINGS_TABLE . '
+                SET reconstruction_status = \'not_started\',
+                    timeline_status = \'not_started\',
+                    error_message = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ')->execute(array($recordingId));
+
+            if ($this->jobProgressColumnsPresent()) {
+                $this->pdo->prepare('
+                    UPDATE ' . self::JOB_TABLE . '
+                    SET status = \'cancelled\',
+                        progress_stage = ?,
+                        progress_message = ?,
+                        completed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ')->execute(array(self::STAGE_CANCELLED, 'Reconstruction cancelled by admin.', (int)$job['id']));
+            } else {
+                $this->pdo->prepare('
+                    UPDATE ' . self::JOB_TABLE . '
+                    SET status = \'cancelled\',
+                        completed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ')->execute(array((int)$job['id']));
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+
+        return array(
+            'ok' => true,
+            'recording_id' => $recordingId,
+            'job_id' => (int)$job['id'],
+            'status' => 'cancelled',
+        );
     }
 
     /**
@@ -1270,6 +1347,9 @@ final class CockpitReconstructionService
         $percent = max(0, min(100, $percent));
         $status = $status ?? 'processing';
         $pdo = $this->progressConnection();
+        if ($status === 'processing') {
+            $this->assertJobNotCancelled($jobId, $pdo);
+        }
 
         if ($this->jobProgressColumnsPresent()) {
             $stmt = $pdo->prepare('
@@ -1307,6 +1387,17 @@ final class CockpitReconstructionService
             WHERE id = ?
         ');
         $stmt->execute(array($status, $percent, $error, $status, $jobId));
+    }
+
+    private function assertJobNotCancelled(int $jobId, ?PDO $pdo = null): void
+    {
+        $pdo = $pdo ?? $this->progressConnection();
+        $stmt = $pdo->prepare('SELECT status FROM ' . self::JOB_TABLE . ' WHERE id = ? LIMIT 1');
+        $stmt->execute(array($jobId));
+        $status = (string)($stmt->fetchColumn() ?: '');
+        if ($status === 'cancelled') {
+            throw new CockpitReconstructionCancelled('Reconstruction cancelled by admin.');
+        }
     }
 
     private function progressConnection(): PDO

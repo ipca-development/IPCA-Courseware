@@ -410,6 +410,7 @@ cw_header('Cockpit Recorder POC');
                       <span data-recon-elapsed="<?= $id ?>">Elapsed: --</span>
                       <span data-recon-updated="<?= $id ?>">Last update: --</span>
                     </div>
+                    <button class="cockpit-button cockpit-recon-cancel" type="button" data-recon-cancel="<?= $id ?>">Cancel Reconstruction</button>
                     <div class="cockpit-recon-stale cockpit-badge cockpit-badge-info" data-recon-stale="<?= $id ?>" hidden>Still processing this stage</div>
                   </div>
                 </div>
@@ -542,7 +543,8 @@ cw_header('Cockpit Recorder POC');
     inserting_replay_v2_samples: 'Inserting replay v2 samples',
     finalizing: 'Finalizing',
     ready: 'Ready',
-    failed: 'Failed'
+    failed: 'Failed',
+    cancelled: 'Cancelled'
   };
 
   const pollMs = 3000;
@@ -578,14 +580,16 @@ cw_header('Cockpit Recorder POC');
     const elapsedEl = document.querySelector('[data-recon-elapsed="' + recordingId + '"]');
     const updatedEl = document.querySelector('[data-recon-updated="' + recordingId + '"]');
     const staleEl = document.querySelector('[data-recon-stale="' + recordingId + '"]');
+    const cancelBtn = document.querySelector('[data-recon-cancel="' + recordingId + '"]');
     if (!panel) return;
 
     const job = payload && payload.job ? payload.job : null;
     const reconstructionStatus = payload ? payload.reconstruction_status : '';
     const timelineStatus = payload ? payload.timeline_status : '';
     const active = reconstructionStatus === 'processing' || (job && ['queued', 'processing'].includes(job.status));
+    const terminalVisible = job && ['failed', 'cancelled'].includes(job.status);
 
-    if (!active && reconstructionStatus !== 'processing') {
+    if (!active && !terminalVisible && reconstructionStatus !== 'processing') {
       panel.hidden = true;
       stopPolling(recordingId);
     } else {
@@ -598,6 +602,10 @@ cw_header('Cockpit Recorder POC');
     }
     if (timelineBadge && timelineStatus) {
       timelineBadge.textContent = timelineStatus;
+    }
+    if (cancelBtn) {
+      cancelBtn.hidden = !active;
+      cancelBtn.disabled = false;
     }
 
     if (!job) {
@@ -619,15 +627,50 @@ cw_header('Cockpit Recorder POC');
       }
     }
 
-    if (job.status === 'ready' || job.status === 'failed' || reconstructionStatus === 'ready' || reconstructionStatus === 'failed') {
+    if (job.status === 'ready' || job.status === 'failed' || job.status === 'cancelled' || reconstructionStatus === 'ready' || reconstructionStatus === 'failed') {
       stopPolling(recordingId);
       if (job.status === 'ready' || reconstructionStatus === 'ready') {
         panel.hidden = true;
+      } else if (job.status === 'cancelled') {
+        if (stageEl) stageEl.textContent = 'Cancelled';
+        if (messageEl) messageEl.textContent = job.progress_message || 'Reconstruction cancelled.';
+        if (staleEl) staleEl.hidden = true;
+        if (cancelBtn) cancelBtn.hidden = true;
       } else if (job.status === 'failed' || reconstructionStatus === 'failed') {
         if (stageEl) stageEl.textContent = 'Failed';
         if (messageEl) messageEl.textContent = job.error_message || job.progress_message || 'Reconstruction failed.';
         if (staleEl) staleEl.hidden = true;
+        if (cancelBtn) cancelBtn.hidden = true;
       }
+    }
+  }
+
+  async function cancelReconstruction(recordingId, button) {
+    if (!recordingId || !window.confirm('Cancel reconstruction for this recording?')) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Cancelling...';
+    }
+    try {
+      const body = new URLSearchParams();
+      body.set('id', recordingId);
+      const response = await fetch('/admin/api/cockpit_recorder_cancel_reconstruction.php', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        cache: 'no-store'
+      });
+      const payload = await response.json();
+      if (!payload || !payload.ok) {
+        throw new Error((payload && payload.error) || 'Could not cancel reconstruction.');
+      }
+      pollRecording(recordingId);
+    } catch (error) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Cancel Reconstruction';
+      }
+      window.alert(error.message || 'Could not cancel reconstruction.');
     }
   }
 
@@ -666,6 +709,12 @@ cw_header('Cockpit Recorder POC');
     const recordingId = panel.getAttribute('data-recording-id');
     if (!recordingId) return;
     startPolling(recordingId);
+  });
+
+  document.querySelectorAll('[data-recon-cancel]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      cancelReconstruction(button.getAttribute('data-recon-cancel'), button);
+    });
   });
 
   <?php if ($pollRecordingId > 0): ?>

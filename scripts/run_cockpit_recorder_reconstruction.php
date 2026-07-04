@@ -51,6 +51,10 @@ if ($recordingId === '') {
 try {
     $service = new CockpitReconstructionService($pdo);
     $result = $service->reconstruct($recordingId, $options);
+    if (!empty($result['cancelled'])) {
+        echo 'Cockpit recorder reconstruction ' . $recordingId . ' cancelled.' . PHP_EOL;
+        exit(0);
+    }
     if (!($result['ok'] ?? false)) {
         fwrite(STDERR, "Cockpit recorder reconstruction failed.\n");
         exit(1);
@@ -73,6 +77,9 @@ try {
     if (!empty($result['profiling']) && is_array($result['profiling'])) {
         echo 'Reconstruction phase timing (seconds): ' . json_encode($result['profiling'], JSON_UNESCAPED_SLASHES) . PHP_EOL;
     }
+    exit(0);
+} catch (CockpitReconstructionCancelled $e) {
+    echo 'Cockpit recorder reconstruction ' . $recordingId . ' cancelled.' . PHP_EOL;
     exit(0);
 } catch (Throwable $e) {
     try {
