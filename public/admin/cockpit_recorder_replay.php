@@ -457,20 +457,30 @@ cw_header('Cockpit Recorder Replay');
   top: -10px;
   width: 0;
   height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 12px solid #f8fafc;
+  border: 0;
   color: #111;
   font-size: 9px;
   font-weight: 900;
   line-height: 10px;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
   z-index: 3;
+}
+.engine-pointer.is-probe-number::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 12px solid #f8fafc;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7));
+  pointer-events: none;
 }
 .engine-pointer-label {
   position: absolute;
   left: -6px;
-  top: -3px;
+  top: -5px;
   width: 12px;
   text-align: center;
   line-height: 10px;
@@ -479,11 +489,15 @@ cw_header('Cockpit Recorder Replay');
 .engine-pointer.is-probe-number.is-bottom {
   top: auto;
   bottom: -10px;
+}
+.engine-pointer.is-probe-number.is-bottom::before {
+  top: auto;
+  bottom: 0;
   border-top: 0;
   border-bottom: 12px solid #f8fafc;
 }
 .engine-pointer.is-probe-number.is-bottom .engine-pointer-label {
-  top: -6px;
+  top: -4px;
 }
 .engine-probe {
   position: absolute;
