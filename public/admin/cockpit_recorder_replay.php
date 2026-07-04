@@ -105,8 +105,8 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
 .replay-immersive.is-panel-layout {
-  --panel-engine-width: clamp(72px, 10vw, 132px);
-  --panel-bottom-band: clamp(96px, 16vh, 150px);
+  --panel-engine-width: clamp(138px, 16vw, 174px);
+  --panel-bottom-band: clamp(104px, 17vh, 152px);
   --panel-playback-height: 38px;
 }
 .replay-engine-pane,
@@ -128,10 +128,10 @@ cw_header('Cockpit Recorder Replay');
   width: var(--panel-engine-width);
   align-items: flex-start;
   justify-content: center;
-  padding-top: 64px;
+  padding-top: 58px;
   box-sizing: border-box;
-  background: linear-gradient(90deg, rgba(15, 23, 42, .28), rgba(15, 23, 42, .04));
-  border-right: 1px solid rgba(226, 232, 240, .08);
+  background: linear-gradient(90deg, rgba(15, 23, 42, .68), rgba(15, 23, 42, .50));
+  border-right: 1px solid rgba(226, 232, 240, .16);
 }
 .replay-immersive.is-panel-layout .replay-bottom-instrument-pane {
   display: flex;
@@ -150,15 +150,82 @@ cw_header('Cockpit Recorder Replay');
   padding: 6px 10px;
   background: rgba(15, 23, 42, .18);
 }
+.replay-engine-placeholder {
+  width: calc(100% - 16px);
+  color: #f8fafc;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.replay-engine-arc {
+  height: 82px;
+  border-radius: 82px 82px 0 0;
+  border-top: 5px solid #3bef3b;
+  border-left: 5px solid #3bef3b;
+  border-right: 5px solid #3bef3b;
+  margin: 0 8px 8px;
+  position: relative;
+}
+.replay-engine-arc::after {
+  content: "";
+  position: absolute;
+  left: 44%;
+  bottom: 4px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 12px solid #fff;
+  transform: rotate(-22deg);
+}
+.replay-engine-large {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 900;
+}
+.replay-engine-large span {
+  font-size: 14px;
+  font-weight: 700;
+  margin-right: 6px;
+}
+.replay-engine-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-top: 1px solid rgba(226, 232, 240, .22);
+  font-size: 13px;
+}
+.replay-engine-row strong {
+  font-size: 17px;
+}
+.replay-engine-bar {
+  height: 7px;
+  margin: 2px 8px 6px;
+  background: linear-gradient(90deg, #18d918 0 80%, rgba(255, 255, 255, .2) 80% 100%);
+  position: relative;
+}
+.replay-engine-bar::after {
+  content: "";
+  position: absolute;
+  left: 72%;
+  top: -8px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 13px solid #fff;
+}
+.replay-engine-muted {
+  color: rgba(226, 232, 240, .66);
+  font-size: 11px;
+  text-align: center;
+  margin-top: 8px;
+}
 .replay-immersive.is-panel-layout .airspeed-tape {
-  left: calc(var(--panel-engine-width) + clamp(58px, 7.5vw, 116px));
-  height: clamp(300px, calc(100% - var(--panel-bottom-band) - var(--panel-playback-height) - 104px), 520px);
+  left: calc(var(--panel-engine-width) + clamp(30px, 4vw, 72px));
 }
 .replay-immersive.is-panel-layout .altimeter-stack {
   right: clamp(60px, 8vw, 122px);
-}
-.replay-immersive.is-panel-layout .altimeter-tape {
-  height: clamp(300px, calc(100% - var(--panel-bottom-band) - var(--panel-playback-height) - 104px), 520px);
 }
 .replay-immersive.is-panel-layout .replay-dock {
   left: 0;
@@ -839,7 +906,23 @@ cw_header('Cockpit Recorder Replay');
         <div id="replayLoadMeta" class="replay-load-meta">0% - requesting replay data</div>
       </div>
     </div>
-    <div class="replay-engine-pane" aria-hidden="true"><span class="replay-pane-label">Engine</span></div>
+    <div class="replay-engine-pane" aria-hidden="true">
+      <div class="replay-engine-placeholder">
+        <div class="replay-engine-arc"></div>
+        <div class="replay-engine-large"><span>RPM</span>2800</div>
+        <div class="replay-engine-row"><span>MAP "Hg</span><strong>11.2</strong></div>
+        <div class="replay-engine-row"><span>FFlow GPH</span><strong>2.4</strong></div>
+        <div class="replay-engine-bar"></div>
+        <div class="replay-engine-row"><span>Fuel PSI</span><strong>5</strong></div>
+        <div class="replay-engine-bar"></div>
+        <div class="replay-engine-row"><span>OIL °F</span><strong>173</strong></div>
+        <div class="replay-engine-bar"></div>
+        <div class="replay-engine-row"><span>OIL PSI</span><strong>31</strong></div>
+        <div class="replay-engine-bar"></div>
+        <div class="replay-engine-row"><span>BUS 1</span><strong>13.2V</strong></div>
+        <div class="replay-engine-muted">Engine instruments reserved</div>
+      </div>
+    </div>
     <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
