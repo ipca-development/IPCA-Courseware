@@ -2844,7 +2844,7 @@ cw_header('Cockpit Recorder Replay');
     );
     if (trackTrue !== null) {
       const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
-      return normalizeDeg(Number(trackTrue) - (variation === null ? 0 : Number(variation)));
+      return normalizeDeg(Number(trackTrue) + (variation === null ? 0 : Number(variation)));
     }
 
     const legacyTrack = firstFinite(sample && sample.track_deg, sample && sample.g3x && sample.g3x.track_deg);
