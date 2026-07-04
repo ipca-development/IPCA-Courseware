@@ -2840,12 +2840,15 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.track_deg_true,
       sample && sample.gps_track_deg,
       sample && sample.g3x && sample.g3x.track_deg_true,
-      sample && sample.g3x && sample.g3x.gps_track_deg,
-      sample && sample.track_deg
+      sample && sample.g3x && sample.g3x.gps_track_deg
     );
-    if (trackTrue === null) return null;
-    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
-    return normalizeDeg(Number(trackTrue) - (variation === null ? 0 : Number(variation)));
+    if (trackTrue !== null) {
+      const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
+      return normalizeDeg(Number(trackTrue) - (variation === null ? 0 : Number(variation)));
+    }
+
+    const legacyTrack = firstFinite(sample && sample.track_deg, sample && sample.g3x && sample.g3x.track_deg);
+    return legacyTrack === null ? null : normalizeDeg(legacyTrack);
   }
 
   function hsiLabelForDegrees(deg) {
@@ -2912,7 +2915,7 @@ cw_header('Cockpit Recorder Replay');
       }
     }
     const bugHtml = displayHsiHeadingBugDeg === null ? '' : (() => {
-      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 13).toFixed(1)})">
+      return `<g transform="rotate(${displayHsiHeadingBugDeg.toFixed(2)}) translate(0 ${(-r + 7).toFixed(1)})">
         <path class="hsi-heading-bug" d="M ${(-bugHalf).toFixed(1)} -6 H ${(-bugNotchHalf).toFixed(1)} L 0 -1.5 L ${bugNotchHalf.toFixed(1)} -6 H ${bugHalf.toFixed(1)} V 7 H ${(-bugHalf).toFixed(1)} Z"></path>
       </g>`;
     })();
@@ -2959,7 +2962,7 @@ cw_header('Cockpit Recorder Replay');
           ${bugHtml}
           ${trackHtml}
         </g>
-        <polygon class="hsi-top-pointer" points="0,${(-r).toFixed(1)} -7.2,${(-r - 15.2).toFixed(1)} 7.2,${(-r - 15.2).toFixed(1)}"></polygon>
+        <polygon class="hsi-top-pointer" points="0,${(-r + 4).toFixed(1)} -5.8,${(-r - 8.2).toFixed(1)} 5.8,${(-r - 8.2).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
         ${courseHtml}
         <circle class="hsi-aircraft" cx="0" cy="0" r="7"></circle>
