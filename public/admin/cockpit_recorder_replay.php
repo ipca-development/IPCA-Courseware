@@ -545,7 +545,7 @@ cw_header('Cockpit Recorder Replay');
   font-weight: 900;
 }
 .engine-arc-gauge.is-rpm .engine-arc-value {
-  right: 0;
+  right: 2px;
   top: 69px;
   bottom: auto;
   min-width: 44px;
@@ -554,6 +554,9 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-arc-gauge.is-rpm .engine-arc-value.is-alert-yellow {
   color: #ffe600;
+}
+.engine-arc-gauge.is-rpm .engine-arc-value.is-alert-red {
+  color: #ff1f2a;
 }
 .engine-arc-value span {
   display: block;
@@ -2517,26 +2520,40 @@ cw_header('Cockpit Recorder Replay');
     const numeric = Number(value);
     const ranges = engineRangesForInstrument(instrument);
     if (!Number.isFinite(numeric) || ranges.length === 0) return '';
+    let matchedColor = '';
+    let matchedSeverity = -1;
     for (let i = 0; i < ranges.length; i += 1) {
       const range = ranges[i];
       const from = Number(range && range.from);
       const to = Number(range && range.to);
       if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
-      const isLastRange = i === ranges.length - 1;
-      if (numeric >= from && (numeric < to || (isLastRange && numeric <= to))) {
-        return String((range && range.color) || '').toLowerCase();
+      if (numeric >= from && numeric <= to) {
+        const color = String((range && range.color) || '').toLowerCase();
+        const severity = color === 'red' ? 3 : (color === 'yellow' || color === 'amber' ? 2 : (color === 'green' ? 1 : 0));
+        if (severity > matchedSeverity) {
+          matchedSeverity = severity;
+          matchedColor = color;
+        }
       }
     }
-    return '';
+    return matchedColor;
   }
 
-  function engineLabelAlertClass(instrument, value) {
-    const style = String(instrument && instrument.alert_style || '').toLowerCase();
-    if (style !== 'range_label' && style !== 'yellow_label') return '';
-    const color = engineRangeColorForValue(instrument, value);
+  function engineAlertClassForRangeColor(color) {
     if (color === 'red') return ' is-alert-red';
     if (color === 'yellow' || color === 'amber') return ' is-alert-yellow';
     return '';
+  }
+
+  function engineMoreSevereRangeColor(colorA, colorB) {
+    const severity = (color) => color === 'red' ? 3 : (color === 'yellow' || color === 'amber' ? 2 : (color === 'green' ? 1 : 0));
+    return severity(colorB) > severity(colorA) ? colorB : colorA;
+  }
+
+  function engineLabelAlertClass(instrument, value) {
+    if (String(instrument && instrument.key || '').toLowerCase() === 'rpm') return '';
+    const color = engineRangeColorForValue(instrument, value);
+    return engineAlertClassForRangeColor(color);
   }
 
   function engineBarHtml(sample, instrument) {
@@ -2578,8 +2595,13 @@ cw_header('Cockpit Recorder Replay');
     const pointer1 = value1 === null ? null : enginePointerPercent(value1, instrument.min, instrument.max);
     const pointer2 = value2 === null ? null : enginePointerPercent(value2, instrument.min, instrument.max);
     const probe1 = String((instrument && instrument.probe_label) || '1').trim() || '1';
+    const alertColor = engineMoreSevereRangeColor(
+      engineRangeColorForValue(instrument, value1),
+      engineRangeColorForValue(instrument, value2)
+    );
+    const alertClass = engineAlertClassForRangeColor(alertColor);
     return `<div class="engine-gauge">
-      ${label !== '' ? `<div class="engine-row-head"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(displayValue, decimals))}</strong></div>` : ''}
+      ${label !== '' ? `<div class="engine-row-head${alertClass}"><span>${escapeHtml(label)}</span><strong class="engine-value">${escapeHtml(engineFormatValue(displayValue, decimals))}</strong></div>` : ''}
       <div class="engine-bar is-probe-pair">
         ${engineRangeHtml(instrument)}
         ${pointer1 === null ? '' : `<span class="engine-pointer is-probe-number" style="left:${pointer1.toFixed(2)}%"><span class="engine-pointer-label">${escapeHtml(probe1)}</span></span>`}
@@ -2633,7 +2655,7 @@ cw_header('Cockpit Recorder Replay');
     const r = 50;
     const pivotX = cx;
     const pivotY = cy + 8;
-    const valueAlertClass = Number.isFinite(Number(value)) && Number(value) > 5500 ? ' is-alert-yellow' : '';
+    const valueAlertClass = engineAlertClassForRangeColor(engineRangeColorForValue(instrument, value));
     const displayValue = Number.isFinite(Number(value)) ? String(Math.round(Number(value) / 10) * 10) : '--';
     const rangeArcs = ranges.map((range) => {
       const fromPct = engineRangePercent(Number(range && range.from), min, max);
