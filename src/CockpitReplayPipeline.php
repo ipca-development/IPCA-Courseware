@@ -475,8 +475,12 @@ final class CockpitReplayPipeline
             $baroAltitudeFt = ReplaySeriesCursor::lerpScalar($baroAltitudeKnots, $baroAltitudeSeg);
             $g3xVerticalSpeedFpm = ReplaySeriesCursor::lerpScalar($verticalSpeedKnots, $verticalSpeedSeg);
             $instrumentValues = array();
+            $angleInstrumentFields = array('heading_bug_deg', 'nav_course_deg', 'nav_bearing_deg', 'wind_direction_deg');
             foreach ($instrumentKnots as $field => $knots) {
-                $instrumentValues[$field] = ReplaySeriesCursor::lerpScalar($knots, $instrumentCursors[$field]->segmentAt($timeS));
+                $segment = $instrumentCursors[$field]->segmentAt($timeS);
+                $instrumentValues[$field] = in_array($field, $angleInstrumentFields, true)
+                    ? ReplaySeriesCursor::lerpHeading($knots, $segment)
+                    : ReplaySeriesCursor::lerpScalar($knots, $segment);
             }
             $textValues = array();
             foreach ($textKnots as $field => $knots) {

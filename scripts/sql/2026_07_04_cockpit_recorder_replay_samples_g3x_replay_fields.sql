@@ -25,6 +25,7 @@ BEGIN
 END//
 DELIMITER ;
 
+CALL ipca_add_replay_column_if_missing('heading_bug_deg', 'DECIMAL(7,2) NULL');
 CALL ipca_add_replay_column_if_missing('hcdi_full_scale_ft', 'DECIMAL(10,2) NULL');
 CALL ipca_add_replay_column_if_missing('hcdi_scale', 'DECIMAL(10,3) NULL');
 CALL ipca_add_replay_column_if_missing('vcdi', 'DECIMAL(10,3) NULL');
