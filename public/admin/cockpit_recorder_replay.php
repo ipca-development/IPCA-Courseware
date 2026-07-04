@@ -85,7 +85,7 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive {
   position: relative;
   width: 100%;
-  height: calc(100vh - 38px);
+  height: calc(100vh - 88px);
   min-height: 480px;
   background: #000;
   overflow: hidden;
@@ -106,7 +106,7 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
 .replay-immersive.is-panel-layout {
   --panel-engine-width: clamp(138px, 16vw, 174px);
-  --panel-bottom-band: clamp(104px, 17vh, 152px);
+  --panel-bottom-band: calc(clamp(104px, 17vh, 152px) + 50px);
   --panel-playback-height: 38px;
 }
 .replay-engine-pane,
@@ -296,6 +296,8 @@ cw_header('Cockpit Recorder Replay');
   pointer-events: none;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+  transform: scale(.7);
+  transform-origin: top left;
 }
 .airspeed-tape-header,
 .airspeed-tape-footer {
@@ -427,6 +429,8 @@ cw_header('Cockpit Recorder Replay');
   pointer-events: none;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+  transform: scale(.7);
+  transform-origin: top right;
 }
 .altimeter-tape {
   width: 128px;
