@@ -2911,9 +2911,9 @@ cw_header('Cockpit Recorder Replay');
     }
     const direction = windDirectionMagneticFromSample(sample);
     if (direction === null) return '';
-    const roundedDirection = Math.round(direction) % 360;
-    const directionText = String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0');
-    const arrowRotation = normalizeSignedDeg(direction - headingDeg);
+    const roundedDirection = ((Math.round(direction / 10) * 10) % 360 + 360) % 360;
+    const directionText = `${String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0')}°`;
+    const arrowRotation = normalizeSignedDeg(direction - headingDeg + 180);
     const speedText = `${Math.round(Number(speed))} KT`;
     return `
       <rect class="hsi-label-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="7"></rect>
