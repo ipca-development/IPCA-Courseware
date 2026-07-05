@@ -323,6 +323,50 @@ cw_header('Cockpit Recorder Replay');
   font-size: 8px;
   font-weight: 650;
 }
+.wind-indicator {
+  position: absolute;
+  left: calc(var(--attitude-center-x, 50%) - clamp(188px, 17vw, 252px));
+  top: clamp(140px, 22vh, 230px);
+  z-index: 20;
+  min-width: 82px;
+  padding: 9px 10px 10px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, .20);
+  background: rgba(15, 23, 42, .68);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .26);
+  color: rgba(255, 255, 255, .96);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+}
+.wind-arrow {
+  display: block;
+  width: 34px;
+  height: 28px;
+  margin: 0 auto 4px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
+}
+.wind-arrow svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wind-direction {
+  font-size: 18px;
+  line-height: 1.05;
+}
+.wind-speed {
+  margin-top: 2px;
+  font-size: 17px;
+  line-height: 1.05;
+}
+.wind-calm {
+  font-size: 18px;
+  line-height: 1.2;
+}
 .replay-engine-placeholder {
   width: calc(100% - 16px);
   color: #f8fafc;
@@ -1373,6 +1417,7 @@ cw_header('Cockpit Recorder Replay');
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
+    <div id="windIndicator" class="wind-indicator" aria-label="Wind indicator" hidden></div>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -1596,6 +1641,7 @@ cw_header('Cockpit Recorder Replay');
   const horizonLine = document.getElementById('horizonLine');
   const attitudeOverlay = document.getElementById('attitudeOverlay');
   const hsiOverlay = document.getElementById('hsiOverlay');
+  const windIndicator = document.getElementById('windIndicator');
   const enginePanel = document.getElementById('enginePanel');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
@@ -1740,7 +1786,7 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   let cameraSettings = null;
