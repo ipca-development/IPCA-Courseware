@@ -2257,6 +2257,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateWindIndicator(sampleAt(activeT));
   }
 
   function instrumentEnabled(key) {
@@ -2932,7 +2933,11 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
     const speed = windSpeedFromSample(sample);
-    if (speed === null || Number(speed) < 3) {
+    if (speed === null) {
+      windIndicator.hidden = true;
+      return;
+    }
+    if (Number(speed) < 3) {
       windIndicator.hidden = false;
       windIndicator.innerHTML = '<div class="wind-calm">Calm</div>';
       return;
