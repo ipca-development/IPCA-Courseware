@@ -2871,28 +2871,17 @@ cw_header('Cockpit Recorder Replay');
   function windSpeedFromSample(sample) {
     return firstFinite(
       sample && sample.wind_speed_kt,
-      sample && sample.estimated_wind_speed_kt,
       sample && sample.g3x && sample.g3x.wind_speed_kt
     );
   }
 
-  function windDirectionMagneticFromSample(sample) {
-    const explicitMagnetic = firstFinite(
-      sample && sample.wind_direction_deg_magnetic,
-      sample && sample.g3x && sample.g3x.wind_direction_deg_magnetic
-    );
-    if (explicitMagnetic !== null) return normalizeDeg(explicitMagnetic);
-
-    const trueDirection = firstFinite(
-      sample && sample.wind_direction_deg_true,
-      sample && sample.estimated_wind_direction_deg_true,
+  function windDirectionFromGarminSample(sample) {
+    const direction = firstFinite(
       sample && sample.wind_direction_deg,
-      sample && sample.g3x && sample.g3x.wind_direction_deg_true,
+      sample && sample.g3x && sample.g3x.wind_dir_deg,
       sample && sample.g3x && sample.g3x.wind_direction_deg
     );
-    if (trueDirection === null) return null;
-    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
-    return normalizeDeg(Number(trueDirection) + (variation === null ? 0 : Number(variation)));
+    return direction === null ? null : normalizeDeg(direction);
   }
 
   function hsiWindIndicatorHtml(sample, headingDeg) {
@@ -2909,7 +2898,7 @@ cw_header('Cockpit Recorder Replay');
       <rect class="hsi-label-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="7"></rect>
       <text class="hsi-wind-calm" x="${centerX}" y="${y + 22}" text-anchor="middle">Calm</text>`;
     }
-    const direction = windDirectionMagneticFromSample(sample);
+    const direction = windDirectionFromGarminSample(sample);
     if (direction === null) return '';
     const roundedDirection = ((Math.round(direction / 10) * 10) % 360 + 360) % 360;
     const directionText = `${String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0')}°`;
