@@ -2085,6 +2085,7 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    updateWindIndicator(sampleAt(activeT));
     safeRenderCesium(true);
   }
 
@@ -2895,6 +2896,64 @@ cw_header('Cockpit Recorder Replay');
 
     const legacyTrack = firstFinite(sample && sample.track_deg, sample && sample.g3x && sample.g3x.track_deg);
     return legacyTrack === null ? null : normalizeDeg(legacyTrack);
+  }
+
+  function windSpeedFromSample(sample) {
+    return firstFinite(
+      sample && sample.wind_speed_kt,
+      sample && sample.estimated_wind_speed_kt,
+      sample && sample.g3x && sample.g3x.wind_speed_kt
+    );
+  }
+
+  function windDirectionMagneticFromSample(sample) {
+    const explicitMagnetic = firstFinite(
+      sample && sample.wind_direction_deg_magnetic,
+      sample && sample.g3x && sample.g3x.wind_direction_deg_magnetic
+    );
+    if (explicitMagnetic !== null) return normalizeDeg(explicitMagnetic);
+
+    const trueDirection = firstFinite(
+      sample && sample.wind_direction_deg_true,
+      sample && sample.estimated_wind_direction_deg_true,
+      sample && sample.wind_direction_deg,
+      sample && sample.g3x && sample.g3x.wind_direction_deg_true,
+      sample && sample.g3x && sample.g3x.wind_direction_deg
+    );
+    if (trueDirection === null) return null;
+    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
+    return normalizeDeg(Number(trueDirection) + (variation === null ? 0 : Number(variation)));
+  }
+
+  function updateWindIndicator(sample) {
+    if (!windIndicator) return;
+    if (!instrumentEnabled('wind_indicator')) {
+      windIndicator.hidden = true;
+      return;
+    }
+    const speed = windSpeedFromSample(sample);
+    if (speed === null || Number(speed) < 3) {
+      windIndicator.hidden = false;
+      windIndicator.innerHTML = '<div class="wind-calm">Calm</div>';
+      return;
+    }
+    const direction = windDirectionMagneticFromSample(sample);
+    if (direction === null) {
+      windIndicator.hidden = true;
+      return;
+    }
+    const roundedDirection = ((Math.round(direction / 10) * 10) % 360 + 360) % 360;
+    const directionText = String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0');
+    const speedText = `${Math.round(Number(speed))} KT`;
+    windIndicator.hidden = false;
+    windIndicator.innerHTML = `
+      <span class="wind-arrow" style="transform: rotate(${direction.toFixed(1)}deg)">
+        <svg viewBox="-18 -18 36 36" aria-hidden="true">
+          <path d="M 0 -15 L 6 -2 L 2 -2 L 2 14 L -2 14 L -2 -2 L -6 -2 Z" fill="rgba(255,255,255,.96)"></path>
+        </svg>
+      </span>
+      <div class="wind-direction">${directionText}</div>
+      <div class="wind-speed">${escapeHtml(speedText)}</div>`;
   }
 
   function hsiLabelForDegrees(deg) {
@@ -3727,6 +3786,7 @@ cw_header('Cockpit Recorder Replay');
       updateAirspeedTape(freeSample, 1 / 60, true);
       updateAltimeterTape(freeSample, 1 / 60, true);
       updateHsiOverlay(freeSample, 1 / 60, true);
+      updateWindIndicator(freeSample);
       updateEnginePanel(freeSample, 1 / 60, true);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
@@ -3796,6 +3856,7 @@ cw_header('Cockpit Recorder Replay');
     updateAirspeedTape(sample, dtSec, snap);
     updateAltimeterTape(sample, dtSec, snap);
     updateHsiOverlay(sample, dtSec, snap);
+    updateWindIndicator(sample);
     updateEnginePanel(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
   }
