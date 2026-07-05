@@ -2895,11 +2895,11 @@ cw_header('Cockpit Recorder Replay');
     return normalizeDeg(Number(trueDirection) + (variation === null ? 0 : Number(variation)));
   }
 
-  function hsiWindIndicatorHtml(sample) {
+  function hsiWindIndicatorHtml(sample, headingDeg) {
     if (!instrumentEnabled('wind_indicator')) return '';
     const speed = windSpeedFromSample(sample);
     if (speed === null) return '';
-    const x = 14;
+    const x = -2;
     const y = 91;
     const width = 64;
     const height = Number(speed) < 3 ? 34 : 66;
@@ -2911,12 +2911,13 @@ cw_header('Cockpit Recorder Replay');
     }
     const direction = windDirectionMagneticFromSample(sample);
     if (direction === null) return '';
-    const roundedDirection = ((Math.round(direction / 10) * 10) % 360 + 360) % 360;
+    const roundedDirection = Math.round(direction) % 360;
     const directionText = String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0');
+    const arrowRotation = normalizeSignedDeg(direction - headingDeg);
     const speedText = `${Math.round(Number(speed))} KT`;
     return `
       <rect class="hsi-label-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="7"></rect>
-      <g transform="translate(${centerX} ${y + 17}) rotate(${direction.toFixed(1)})">
+      <g transform="translate(${centerX} ${y + 17}) rotate(${arrowRotation.toFixed(1)})">
         <path class="hsi-wind-arrow" d="M 0 -11 L 4.3 -1 L 1.4 -1 L 1.4 10 L -1.4 10 L -1.4 -1 L -4.3 -1 Z"></path>
       </g>
       <text class="hsi-wind-text" x="${centerX}" y="${y + 42}" text-anchor="middle">${directionText}</text>
@@ -2951,7 +2952,6 @@ cw_header('Cockpit Recorder Replay');
     const cdi = hsiCdiFromSample(sample);
     const cdiOffset = cdi === null ? 0 : clamp(Number(cdi), -1, 1) * 32;
     const navLabel = hsiNavSourceFromSample(sample);
-    const windHtml = hsiWindIndicatorHtml(sample);
     const alpha = snap ? 1 : smoothFactor(16, dtSec);
     displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
       ? headingDeg
@@ -2969,6 +2969,7 @@ cw_header('Cockpit Recorder Replay');
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
+    const windHtml = hsiWindIndicatorHtml(sample, displayHsiHeadingDeg);
     const bugWidth = 2 * (r - 12) * Math.sin(degToRad(5));
     const bugHalf = bugWidth / 2;
     const bugNotchHalf = Math.min(4.5, bugHalf * .34);
