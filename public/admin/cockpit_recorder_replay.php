@@ -319,53 +319,25 @@ cw_header('Cockpit Recorder Replay');
 .hsi-overlay .hsi-crs-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-cyan { fill: #9ffcff; }
 .hsi-overlay .hsi-green { fill: #18d918; }
+.hsi-overlay .hsi-wind-text {
+  fill: rgba(255, 255, 255, .96);
+  font-size: 13px;
+  font-weight: 760;
+}
+.hsi-overlay .hsi-wind-calm {
+  fill: rgba(255, 255, 255, .96);
+  font-size: 14px;
+  font-weight: 760;
+}
+.hsi-overlay .hsi-wind-arrow {
+  fill: rgba(255, 255, 255, .96);
+  stroke: rgba(255, 255, 255, .72);
+  stroke-width: .45;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .42));
+}
 .hsi-overlay .hsi-rose-label {
   font-size: 8px;
   font-weight: 650;
-}
-.wind-indicator {
-  position: absolute;
-  left: calc(var(--attitude-center-x, 50%) - clamp(188px, 17vw, 252px));
-  top: clamp(140px, 22vh, 230px);
-  z-index: 20;
-  min-width: 82px;
-  padding: 9px 10px 10px;
-  border-radius: 11px;
-  border: 1px solid rgba(255, 255, 255, .20);
-  background: rgba(15, 23, 42, .68);
-  box-shadow: 0 2px 5px rgba(0, 0, 0, .26);
-  color: rgba(255, 255, 255, .96);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-weight: 800;
-  text-align: center;
-  pointer-events: none;
-}
-.wind-arrow {
-  display: block;
-  width: 34px;
-  height: 28px;
-  margin: 0 auto 4px;
-  overflow: visible;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
-}
-.wind-arrow svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.wind-direction {
-  font-size: 18px;
-  line-height: 1.05;
-}
-.wind-speed {
-  margin-top: 2px;
-  font-size: 17px;
-  line-height: 1.05;
-}
-.wind-calm {
-  font-size: 18px;
-  line-height: 1.2;
 }
 .replay-engine-placeholder {
   width: calc(100% - 16px);
@@ -1417,7 +1389,6 @@ cw_header('Cockpit Recorder Replay');
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
-    <div id="windIndicator" class="wind-indicator" aria-label="Wind indicator" hidden></div>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -1641,7 +1612,6 @@ cw_header('Cockpit Recorder Replay');
   const horizonLine = document.getElementById('horizonLine');
   const attitudeOverlay = document.getElementById('attitudeOverlay');
   const hsiOverlay = document.getElementById('hsiOverlay');
-  const windIndicator = document.getElementById('windIndicator');
   const enginePanel = document.getElementById('enginePanel');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
@@ -2085,7 +2055,6 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
-    updateWindIndicator(sampleAt(activeT));
     safeRenderCesium(true);
   }
 
@@ -2257,7 +2226,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
-    updateWindIndicator(sampleAt(activeT));
+    updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
   }
 
   function instrumentEnabled(key) {
@@ -2926,39 +2895,32 @@ cw_header('Cockpit Recorder Replay');
     return normalizeDeg(Number(trueDirection) + (variation === null ? 0 : Number(variation)));
   }
 
-  function updateWindIndicator(sample) {
-    if (!windIndicator) return;
-    if (!instrumentEnabled('wind_indicator')) {
-      windIndicator.hidden = true;
-      return;
-    }
+  function hsiWindIndicatorHtml(sample) {
+    if (!instrumentEnabled('wind_indicator')) return '';
     const speed = windSpeedFromSample(sample);
-    if (speed === null) {
-      windIndicator.hidden = true;
-      return;
-    }
+    if (speed === null) return '';
+    const x = 14;
+    const y = 91;
+    const width = 64;
+    const height = Number(speed) < 3 ? 34 : 66;
+    const centerX = x + width / 2;
     if (Number(speed) < 3) {
-      windIndicator.hidden = false;
-      windIndicator.innerHTML = '<div class="wind-calm">Calm</div>';
-      return;
+      return `
+      <rect class="hsi-label-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="7"></rect>
+      <text class="hsi-wind-calm" x="${centerX}" y="${y + 22}" text-anchor="middle">Calm</text>`;
     }
     const direction = windDirectionMagneticFromSample(sample);
-    if (direction === null) {
-      windIndicator.hidden = true;
-      return;
-    }
+    if (direction === null) return '';
     const roundedDirection = ((Math.round(direction / 10) * 10) % 360 + 360) % 360;
     const directionText = String(roundedDirection === 0 ? 360 : roundedDirection).padStart(3, '0');
     const speedText = `${Math.round(Number(speed))} KT`;
-    windIndicator.hidden = false;
-    windIndicator.innerHTML = `
-      <span class="wind-arrow" style="transform: rotate(${direction.toFixed(1)}deg)">
-        <svg viewBox="-18 -18 36 36" aria-hidden="true">
-          <path d="M 0 -15 L 6 -2 L 2 -2 L 2 14 L -2 14 L -2 -2 L -6 -2 Z" fill="rgba(255,255,255,.96)"></path>
-        </svg>
-      </span>
-      <div class="wind-direction">${directionText}</div>
-      <div class="wind-speed">${escapeHtml(speedText)}</div>`;
+    return `
+      <rect class="hsi-label-box" x="${x}" y="${y}" width="${width}" height="${height}" rx="7"></rect>
+      <g transform="translate(${centerX} ${y + 17}) rotate(${direction.toFixed(1)})">
+        <path class="hsi-wind-arrow" d="M 0 -11 L 4.3 -1 L 1.4 -1 L 1.4 10 L -1.4 10 L -1.4 -1 L -4.3 -1 Z"></path>
+      </g>
+      <text class="hsi-wind-text" x="${centerX}" y="${y + 42}" text-anchor="middle">${directionText}</text>
+      <text class="hsi-wind-text" x="${centerX}" y="${y + 58}" text-anchor="middle">${escapeHtml(speedText)}</text>`;
   }
 
   function hsiLabelForDegrees(deg) {
@@ -2989,6 +2951,7 @@ cw_header('Cockpit Recorder Replay');
     const cdi = hsiCdiFromSample(sample);
     const cdiOffset = cdi === null ? 0 : clamp(Number(cdi), -1, 1) * 32;
     const navLabel = hsiNavSourceFromSample(sample);
+    const windHtml = hsiWindIndicatorHtml(sample);
     const alpha = snap ? 1 : smoothFactor(16, dtSec);
     displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
       ? headingDeg
@@ -3051,6 +3014,7 @@ cw_header('Cockpit Recorder Replay');
       headingText,
       hdgBugText,
       crsText,
+      windHtml,
     ].join('|');
     if (signature === hsiOverlaySignature) {
       hsiOverlay.hidden = false;
@@ -3062,6 +3026,7 @@ cw_header('Cockpit Recorder Replay');
       <text class="hsi-heading-value" x="195" y="29" text-anchor="middle">${headingText}</text>
       <rect class="hsi-label-box" x="-2" y="50" width="96" height="34" rx="7"></rect>
       <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
+      ${windHtml}
       <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
       <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="hsi-green">${crsText}</tspan></text>
       <g transform="translate(${cx} ${cy})">
@@ -3791,7 +3756,6 @@ cw_header('Cockpit Recorder Replay');
       updateAirspeedTape(freeSample, 1 / 60, true);
       updateAltimeterTape(freeSample, 1 / 60, true);
       updateHsiOverlay(freeSample, 1 / 60, true);
-      updateWindIndicator(freeSample);
       updateEnginePanel(freeSample, 1 / 60, true);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
@@ -3861,7 +3825,6 @@ cw_header('Cockpit Recorder Replay');
     updateAirspeedTape(sample, dtSec, snap);
     updateAltimeterTape(sample, dtSec, snap);
     updateHsiOverlay(sample, dtSec, snap);
-    updateWindIndicator(sample);
     updateEnginePanel(sample, dtSec, snap);
     updateDebugOverlay(sample, view);
   }
