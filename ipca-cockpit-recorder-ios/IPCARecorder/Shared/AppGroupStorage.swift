@@ -60,6 +60,7 @@ struct PendingG3XImport: Codable, Identifiable, Equatable {
     var startUtc: Date?
     var endUtc: Date?
     var rowCount: Int
+    var importProfile: String?
     var suggestedRecordingID: String?
     var matchMethod: String
 }

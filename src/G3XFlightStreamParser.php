@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/GarminCsvImportProfile.php';
+
 /**
  * Parser for Garmin G3X Flight Stream CSV exports.
  */
@@ -23,11 +25,12 @@ final class G3XFlightStreamParser
      *   aircraft_ident: string,
      *   product: string,
      *   headers: list<string>,
+     *   import_profile: string,
      *   rows: list<array<string,string>>,
      *   row_count: int
      * }
      */
-    public static function parseFile(string $path): array
+    public static function parseFile(string $path, ?string $expectedImportProfile = null): array
     {
         if (!is_file($path)) {
             throw new RuntimeException('G3X CSV file is missing.');
@@ -54,16 +57,27 @@ final class G3XFlightStreamParser
             if ($headerLine === false) {
                 throw new RuntimeException('G3X CSV header row is missing.');
             }
-            $headers = self::parseCsvLine($headerLine);
-            $headers = array_map(static function (string $header): string {
+            $firstHeaders = self::parseCsvLine($headerLine);
+            $firstHeaders = array_map(static function (string $header): string {
                 return ltrim(trim($header), "#");
-            }, $headers);
-            if (!$headers) {
+            }, $firstHeaders);
+            if (!$firstHeaders) {
                 throw new RuntimeException('G3X CSV header row is invalid.');
             }
 
-            // Skip short-header alias row.
-            fgets($handle);
+            $aliasLine = fgets($handle);
+            if ($aliasLine === false) {
+                throw new RuntimeException('Garmin CSV alias row is missing.');
+            }
+            $aliasHeaders = self::parseCsvLine($aliasLine);
+            $aliasHeaders = array_map(static function (string $header): string {
+                return ltrim(trim($header), "#");
+            }, $aliasHeaders);
+            $importProfile = GarminCsvImportProfile::detectFromHeaders($firstHeaders, $aliasHeaders);
+            if ($expectedImportProfile !== null && trim($expectedImportProfile) !== '') {
+                GarminCsvImportProfile::assertMatches($expectedImportProfile, $importProfile);
+            }
+            $headers = $importProfile === GarminCsvImportProfile::G1000_NXI ? $aliasHeaders : $firstHeaders;
 
             $rows = array();
             while (($line = fgets($handle)) !== false) {
@@ -97,6 +111,7 @@ final class G3XFlightStreamParser
             'aircraft_ident' => $meta['aircraft_ident'],
             'product' => $meta['product'],
             'headers' => $headers,
+            'import_profile' => $importProfile,
             'rows' => $rows,
             'row_count' => count($rows),
         );
@@ -107,9 +122,9 @@ final class G3XFlightStreamParser
      */
     public static function rowUtcTimestamp(array $row): ?DateTimeImmutable
     {
-        $date = trim((string)($row['Date (yyyy-mm-dd)'] ?? ''));
-        $localTime = trim((string)($row['Time (hh:mm:ss)'] ?? ''));
-        $utcOffset = trim((string)($row['UTC Offset (hh:mm)'] ?? ''));
+        $date = trim((string)($row['Date (yyyy-mm-dd)'] ?? ($row['Lcl Date'] ?? '')));
+        $localTime = trim((string)($row['Time (hh:mm:ss)'] ?? ($row['Lcl Time'] ?? '')));
+        $utcOffset = trim((string)($row['UTC Offset (hh:mm)'] ?? ($row['UTCOfst'] ?? '')));
         if ($date !== '' && $localTime !== '' && preg_match('/^[+-]\d{2}:\d{2}$/', $utcOffset) === 1) {
             try {
                 return (new DateTimeImmutable($date . ' ' . $localTime . ' ' . $utcOffset))
@@ -119,7 +134,7 @@ final class G3XFlightStreamParser
             }
         }
 
-        $utcTime = trim((string)($row['UTC Time (hh:mm:ss)'] ?? ''));
+        $utcTime = trim((string)($row['UTC Time (hh:mm:ss)'] ?? ($row['UTC Time'] ?? '')));
         if ($date === '' || $utcTime === '') {
             return null;
         }
@@ -197,7 +212,11 @@ final class G3XFlightStreamParser
         $aircraft = '';
         if (isset($values['aircraft_ident'])) {
             $aircraft = trim((string)$values['aircraft_ident']);
+        } elseif (isset($values['airframe_name'])) {
+            $aircraft = trim((string)$values['airframe_name']);
         } elseif (preg_match('/aircraft_ident="{1,2}([^"]*)"{1,2}/', $line, $matches)) {
+            $aircraft = trim((string)$matches[1]);
+        } elseif (preg_match('/airframe_name="{1,2}([^"]*)"{1,2}/', $line, $matches)) {
             $aircraft = trim((string)$matches[1]);
         }
         $product = '';

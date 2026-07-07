@@ -33,8 +33,11 @@ struct ShareExtensionView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Garmin G3X CSV")
+                    Text("Garmin CSV")
                         .font(.headline)
+                    Text(metadata.importProfile == "garmin_g1000nxi" ? "Garmin G1000 NXi data log" : "Garmin G3X / GDU 460")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     if !metadata.aircraftIdent.isEmpty {
                         Text("Aircraft: \(metadata.aircraftIdent)")
                     }

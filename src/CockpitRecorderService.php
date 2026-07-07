@@ -123,7 +123,7 @@ final class CockpitRecorderService
     /**
      * @return array<string,mixed>
      */
-    public function storeSupplementalG3X(string $recordingUid, string $g3xPath): array
+    public function storeSupplementalG3X(string $recordingUid, string $g3xPath, ?string $importProfile = null): array
     {
         $this->requireTables();
         $recording = $this->recordingByUid(self::normalizeRecordingUid($recordingUid));
@@ -134,7 +134,8 @@ final class CockpitRecorderService
             throw new RuntimeException('Assembled G3X CSV is missing.');
         }
 
-        $this->storeLocalG3X((int)$recording['id'], (string)$recording['recording_uid'], $g3xPath);
+        $importProfile = $this->resolveImportProfile($importProfile, $recording);
+        $this->storeLocalG3X((int)$recording['id'], (string)$recording['recording_uid'], $g3xPath, $importProfile);
         $recording = $this->recordingByUid((string)$recording['recording_uid']) ?: $recording;
         $this->markReconstructionStale((int)$recording['id']);
 
@@ -296,7 +297,7 @@ final class CockpitRecorderService
         }
 
         if ($g3xPath !== null && is_file($g3xPath)) {
-            $this->storeLocalG3X((int)$recording['id'], $recordingUid, $g3xPath);
+            $this->storeLocalG3X((int)$recording['id'], $recordingUid, $g3xPath, $this->resolveImportProfile((string)($metadata['import_profile'] ?? ''), $recording));
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -973,7 +974,24 @@ final class CockpitRecorderService
         $this->storeLocalSensorJson($recordingId, $recordingUid, $path, 'GPS', self::relativeGPSPath($recordingUid), 'gps_storage_path', 'gps_file_size_bytes', 'gps_sample_count');
     }
 
-    private function storeLocalG3X(int $recordingId, string $recordingUid, string $path): void
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function resolveImportProfile(?string $importProfile, array $recording): string
+    {
+        require_once __DIR__ . '/GarminCsvImportProfile.php';
+        $importProfile = trim((string)$importProfile);
+        if ($importProfile !== '') {
+            return GarminCsvImportProfile::normalize($importProfile);
+        }
+        return GarminCsvImportProfile::forAircraft(
+            (string)($recording['aircraft_registration'] ?? ''),
+            (string)($recording['aircraft_display_name'] ?? ''),
+            (string)($recording['aircraft_type'] ?? '')
+        );
+    }
+
+    private function storeLocalG3X(int $recordingId, string $recordingUid, string $path, ?string $importProfile = null): void
     {
         if (!$this->hasColumn('g3x_storage_path')) {
             return;
@@ -983,6 +1001,7 @@ final class CockpitRecorderService
         }
 
         require_once __DIR__ . '/G3XFlightStreamParser.php';
+        require_once __DIR__ . '/GarminCsvImportProfile.php';
         $size = (int)filesize($path);
         if ($size <= 0) {
             return;
@@ -991,7 +1010,7 @@ final class CockpitRecorderService
             throw new RuntimeException('G3X CSV is too large (max 50 MB).');
         }
 
-        $parsed = G3XFlightStreamParser::parseFile($path);
+        $parsed = G3XFlightStreamParser::parseFile($path, $importProfile);
         $relativePath = self::relativeG3XPath($recordingUid);
         $absolutePath = self::projectRoot() . '/' . $relativePath;
         self::ensureDirectory(dirname($absolutePath));

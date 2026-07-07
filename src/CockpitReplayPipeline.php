@@ -733,7 +733,7 @@ final class CockpitReplayPipeline
                 continue;
             }
             $altFt = G3XFlightStreamParser::numericValue($row, 'GPS Altitude (ft)', 'AltGPS');
-            $baroAltFt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)', 'AltInd');
+            $baroAltFt = G3XFlightStreamParser::numericValue($row, 'Baro Altitude (ft)', 'AltInd', 'AltB', 'AltMSL');
             if ($altFt === null) {
                 $altFt = $baroAltFt;
             }
@@ -763,7 +763,7 @@ final class CockpitReplayPipeline
                 'vs_fpm' => G3XFlightStreamParser::numericValue($row, 'Vertical Speed (ft/min)', 'VSpd'),
                 'ias_kt' => G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)', 'IAS'),
                 'tas_kt' => G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)', 'TAS'),
-                'altimeter_setting_inhg' => G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)', 'Baro'),
+                'altimeter_setting_inhg' => G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)', 'Baro', 'BaroA'),
                 'heading_bug_deg' => G3XFlightStreamParser::numericValue($row, 'Selected Heading (deg)', 'SelHDG'),
                 'altitude_bug_ft' => G3XFlightStreamParser::numericValue($row, 'Selected Altitude (ft)', 'SelALT'),
                 'sel_vspeed_fpm' => G3XFlightStreamParser::numericValue($row, 'Selected Vertical Speed (ft/min)', 'SelVSpd'),
@@ -772,8 +772,8 @@ final class CockpitReplayPipeline
                 'com2_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Frequency 2 (MHz)', 'COM2'),
                 'nav2_mhz' => G3XFlightStreamParser::numericValue($row, 'NAV Frequency 2 (MHz)', 'NAV2'),
                 'nav_distance_nm' => G3XFlightStreamParser::numericValue($row, 'Nav Distance (nm)', 'NavDist'),
-                'nav_course_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Course (deg)', 'NavCRS'),
-                'nav_bearing_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Bearing (deg)', 'NavBrg'),
+                'nav_course_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Course (deg)', 'NavCRS', 'CRS'),
+                'nav_bearing_deg' => G3XFlightStreamParser::numericValue($row, 'Nav Bearing (deg)', 'NavBrg', 'WptBrg'),
                 'nav_xtk_nm' => G3XFlightStreamParser::numericValue($row, 'Nav Cross Track Distance (nm)', 'NavXTK'),
                 'hcdi' => G3XFlightStreamParser::numericValue($row, 'Horizontal CDI Deflection', 'HCDI'),
                 'hcdi_full_scale_ft' => G3XFlightStreamParser::numericValue($row, 'Horizontal CDI Full Scale (ft)'),
@@ -802,11 +802,11 @@ final class CockpitReplayPipeline
                 'terrain_alert' => trim((string)($row['Terrain Alert'] ?? '')),
                 'transponder_code' => trim((string)($row['Transponder Code'] ?? '')),
                 'transponder_mode' => trim((string)($row['Transponder Mode'] ?? '')),
-                'nav_source' => trim((string)($row['Active Nav Source'] ?? ($row['NavSrc'] ?? ''))),
+                'nav_source' => trim((string)($row['Active Nav Source'] ?? ($row['NavSrc'] ?? ($row['HSIS'] ?? '')))),
                 'nav_annunciation' => trim((string)($row['Nav Annunciation'] ?? '')),
                 'nav_identifier' => trim((string)($row['Nav Identifier'] ?? ($row['NavIdent'] ?? ''))),
-                'autopilot_state' => trim((string)($row['Autopilot State'] ?? '')),
-                'fd_vertical_mode' => trim((string)($row['FD Vertical Mode'] ?? '')),
+                'autopilot_state' => trim((string)($row['Autopilot State'] ?? ($row['AfcsOn'] ?? ''))),
+                'fd_vertical_mode' => trim((string)($row['FD Vertical Mode'] ?? ($row['PitchM'] ?? ''))),
                 'oat_c' => G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'OAT'),
                 'rpm' => G3XFlightStreamParser::numericValue($row, 'RPM', 'E1 RPM'),
                 'manifold_pressure_inhg' => G3XFlightStreamParser::numericValue($row, 'Manifold Press (inch Hg)', 'E1 MAP'),
@@ -814,17 +814,34 @@ final class CockpitReplayPipeline
                 'oil_pressure_psi' => G3XFlightStreamParser::numericValue($row, 'Oil Press (PSI)', 'E1 OilP'),
                 'oil_temp_f' => G3XFlightStreamParser::numericValue($row, 'Oil Temp (deg F)', 'E1 OilT'),
                 'fuel_pressure_psi' => G3XFlightStreamParser::numericValue($row, 'Fuel Press (PSI)', 'E1 FPres'),
-                'fuel_qty_gal' => G3XFlightStreamParser::numericValue($row, 'Fuel Qty (gal)', 'FQty1'),
-                'volts' => G3XFlightStreamParser::numericValue($row, 'Volts', 'Volts1'),
-                'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1'),
+                'fuel_qty_gal' => $this->g3xFuelQtyGal($row),
+                'volts' => G3XFlightStreamParser::numericValue($row, 'Volts', 'Volts1', 'volt1', 'volt2'),
+                'amps' => G3XFlightStreamParser::numericValue($row, 'Amps', 'Amps1', 'amp1', 'amp2'),
                 'egt1_f' => G3XFlightStreamParser::numericValue($row, 'EGT1 (deg F)', 'E1 EGT1'),
                 'egt2_f' => G3XFlightStreamParser::numericValue($row, 'EGT2 (deg F)', 'E1 EGT2'),
-                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 1 (deg F)', 'Coolant Temp1 (deg F)', 'CHT1 (deg F)', 'Cylinder Head Temp 1 (deg F)'),
-                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 2 (deg F)', 'Coolant Temp2 (deg F)', 'CHT2 (deg F)', 'Cylinder Head Temp 2 (deg F)'),
+                'coolant1_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 1 (deg F)', 'Coolant Temp1 (deg F)', 'CHT1 (deg F)', 'Cylinder Head Temp 1 (deg F)', 'E1 CHT1'),
+                'coolant2_f' => G3XFlightStreamParser::numericValue($row, 'Coolant Temp 2 (deg F)', 'Coolant Temp2 (deg F)', 'CHT2 (deg F)', 'Cylinder Head Temp 2 (deg F)', 'E1 CHT2'),
             );
         }
         usort($points, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
         return $points;
+    }
+
+    /**
+     * @param array<string,string> $row
+     */
+    private function g3xFuelQtyGal(array $row): ?float
+    {
+        $single = G3XFlightStreamParser::numericValue($row, 'Fuel Qty (gal)', 'FQty1');
+        if ($single !== null) {
+            return $single;
+        }
+        $left = G3XFlightStreamParser::numericValue($row, 'FQtyL');
+        $right = G3XFlightStreamParser::numericValue($row, 'FQtyR');
+        if ($left === null && $right === null) {
+            return null;
+        }
+        return (float)($left ?? 0.0) + (float)($right ?? 0.0);
     }
 
     /**

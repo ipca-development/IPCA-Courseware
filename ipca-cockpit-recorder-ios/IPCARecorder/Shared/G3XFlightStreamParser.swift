@@ -3,6 +3,7 @@ import Foundation
 struct G3XFlightStreamMetadata: Equatable {
     var aircraftIdent: String
     var product: String
+    var importProfile: String
     var startUtc: Date?
     var endUtc: Date?
     var rowCount: Int
@@ -15,7 +16,9 @@ enum G3XFlightStreamParser {
             throw G3XParserError.invalidFormat("File is empty.")
         }
 
-        let aircraftIdent = captureQuotedValue(in: metaLine, key: "aircraft_ident") ?? ""
+        let aircraftIdent = captureQuotedValue(in: metaLine, key: "aircraft_ident")
+            ?? captureQuotedValue(in: metaLine, key: "airframe_name")
+            ?? ""
         let product = captureQuotedValue(in: metaLine, key: "product") ?? ""
         guard metaLine.contains("#airframe_info") || !aircraftIdent.isEmpty else {
             throw G3XParserError.invalidFormat("Missing Garmin #airframe_info header.")
@@ -25,12 +28,17 @@ enum G3XFlightStreamParser {
             throw G3XParserError.invalidFormat("Garmin CSV header rows are missing.")
         }
 
-        let headers = parseCSVLine(lines[1]).map {
+        let firstHeaders = parseCSVLine(lines[1]).map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         }
-        guard !headers.isEmpty else {
+        guard !firstHeaders.isEmpty else {
             throw G3XParserError.invalidFormat("Could not read Garmin column headers.")
         }
+        let aliasHeaders = parseCSVLine(lines[2]).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        }
+        let importProfile = detectImportProfile(headers: firstHeaders, aliases: aliasHeaders)
+        let headers = importProfile == "garmin_g1000nxi" ? aliasHeaders : firstHeaders
 
         var rows: [[String: String]] = []
         rows.reserveCapacity(max(0, lines.count - 3))
@@ -58,6 +66,7 @@ enum G3XFlightStreamParser {
         let metadata = G3XFlightStreamMetadata(
             aircraftIdent: aircraftIdent,
             product: product,
+            importProfile: importProfile,
             startUtc: startUtc,
             endUtc: endUtc,
             rowCount: rows.count
@@ -71,9 +80,15 @@ enum G3XFlightStreamParser {
     }
 
     static func rowUtcDate(from row: [String: String]) -> Date? {
-        let date = row["Date (yyyy-mm-dd)"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let utcTime = row["UTC Time (hh:mm:ss)"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !date.isEmpty, !utcTime.isEmpty else { return nil }
+        let date = (row["Date (yyyy-mm-dd)"] ?? row["Lcl Date"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let utcTime = (row["UTC Time (hh:mm:ss)"] ?? row["UTC Time"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localTime = (row["Time (hh:mm:ss)"] ?? row["Lcl Time"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let utcOffset = (row["UTC Offset (hh:mm)"] ?? row["UTCOfst"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !date.isEmpty else { return nil }
+        if utcTime.isEmpty, !localTime.isEmpty, utcOffset.range(of: #"^[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil {
+            return localDateFormatter.date(from: "\(date) \(localTime) \(utcOffset)")
+        }
+        guard !utcTime.isEmpty else { return nil }
 
         var components = DateComponents()
         components.timeZone = TimeZone(secondsFromGMT: 0)
@@ -92,6 +107,25 @@ enum G3XFlightStreamParser {
         components.second = second
         return Calendar(identifier: .gregorian).date(from: components)
     }
+
+    private static func detectImportProfile(headers: [String], aliases: [String]) -> String {
+        let headerText = headers.joined(separator: "|")
+        let aliasText = aliases.joined(separator: "|")
+        if headerText.contains("Wind Speed (kt)") || headerText.contains("GPS Time of Week (sec)") {
+            return "garmin_g3x"
+        }
+        if aliasText.contains("AltB") || aliasText.contains("HSIS") || aliasText.contains("AfcsOn") {
+            return "garmin_g1000nxi"
+        }
+        return "garmin_g3x"
+    }
+
+    private static let localDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZZ"
+        return formatter
+    }()
 
     private static func captureQuotedValue(in line: String, key: String) -> String? {
         let pattern = #"\#(key)=\"([^\"]*)\""#

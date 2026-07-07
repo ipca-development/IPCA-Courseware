@@ -35,6 +35,7 @@ try {
         'input_device' => $_POST['input_device'] ?? '',
         'aircraft_id' => $_POST['aircraft_id'] ?? 0,
         'language' => $_POST['language'] ?? 'en',
+        'import_profile' => $_POST['import_profile'] ?? '',
     );
 
     $service = new CockpitRecorderService($pdo);

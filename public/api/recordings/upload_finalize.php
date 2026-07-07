@@ -163,6 +163,7 @@ try {
         'previous_segment_uid' => (string)($payload['previous_segment_uid'] ?? ''),
         'is_test_recording' => (int)($payload['is_test_recording'] ?? 0),
         'source_gap_summary' => (string)($payload['source_gap_summary'] ?? ''),
+        'import_profile' => (string)($payload['import_profile'] ?? ''),
     );
 
     $service = new CockpitRecorderService($pdo);

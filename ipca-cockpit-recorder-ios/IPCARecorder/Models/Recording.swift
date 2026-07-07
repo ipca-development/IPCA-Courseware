@@ -49,6 +49,14 @@ struct CockpitAircraft: Identifiable, Codable, Equatable {
         return "\(name) (\(aircraftType))"
     }
 
+    var garminImportProfile: String {
+        let haystack = "\(registration) \(displayName) \(aircraftType)".uppercased()
+        if haystack.contains("AL172") || haystack.contains("ALSIM") || haystack.contains("G1000") {
+            return "garmin_g1000nxi"
+        }
+        return "garmin_g3x"
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case registration
@@ -96,6 +104,14 @@ struct Recording: Identifiable, Codable, Equatable {
     var previousSegmentID: String?
     var isTestRecording: Bool
     var sourceGapSummary: String?
+
+    var garminImportProfile: String {
+        let haystack = "\(aircraftRegistration ?? "") \(aircraftDisplayName ?? "") \(aircraftType ?? "")".uppercased()
+        if haystack.contains("AL172") || haystack.contains("ALSIM") || haystack.contains("G1000") {
+            return "garmin_g1000nxi"
+        }
+        return "garmin_g3x"
+    }
 
     init(
         id: String,

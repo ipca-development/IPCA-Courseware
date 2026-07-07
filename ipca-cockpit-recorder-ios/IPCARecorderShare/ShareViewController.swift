@@ -161,6 +161,7 @@ final class ShareViewController: UIViewController {
                 startUtc: metadata.startUtc,
                 endUtc: metadata.endUtc,
                 rowCount: metadata.rowCount,
+                importProfile: metadata.importProfile,
                 suggestedRecordingID: recordingID,
                 matchMethod: candidatesMatchMethod(for: recordingID, metadata: metadata)
             )

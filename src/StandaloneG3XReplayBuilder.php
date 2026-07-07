@@ -9,17 +9,17 @@ final class StandaloneG3XReplayBuilder
     /**
      * @return array<string,mixed>
      */
-    public function build(string $csvPath): array
+    public function build(string $csvPath, ?string $importProfile = null, ?string $aircraftLabel = null): array
     {
         $realCsvPath = realpath($csvPath);
         if ($realCsvPath === false || !is_file($realCsvPath)) {
-            throw new RuntimeException('G3X CSV file not found.');
+            throw new RuntimeException('Garmin CSV file not found.');
         }
 
-        $parsed = G3XFlightStreamParser::parseFile($realCsvPath);
+        $parsed = G3XFlightStreamParser::parseFile($realCsvPath, $importProfile);
         $g3xSamples = $this->g3xSamples($parsed['rows']);
         if (!$g3xSamples) {
-            throw new RuntimeException('G3X CSV contains no timestamped samples.');
+            throw new RuntimeException('Garmin CSV contains no timestamped samples.');
         }
 
         $firstRow = $g3xSamples[0]['row'];
@@ -27,13 +27,17 @@ final class StandaloneG3XReplayBuilder
         $duration = max(0.0, (float)$g3xSamples[count($g3xSamples) - 1]['seconds']);
         $startedAt = G3XFlightStreamParser::rowUtcTimestamp($firstRow);
 
+        $aircraftName = trim((string)($aircraftLabel ?? ''));
+        if ($aircraftName === '') {
+            $aircraftName = (string)$parsed['aircraft_ident'];
+        }
         $recording = array(
             'id' => 0,
             'recording_uid' => 'standalone-g3x-' . substr(sha1($realCsvPath), 0, 10),
             'started_at' => $startedAt !== null ? $startedAt->format(DateTimeInterface::ATOM) : null,
             'duration_seconds' => $duration,
-            'aircraft_registration' => (string)$parsed['aircraft_ident'],
-            'aircraft_display_name' => (string)$parsed['aircraft_ident'],
+            'aircraft_registration' => $aircraftName,
+            'aircraft_display_name' => $aircraftName,
             'aircraft_type' => '',
         );
 
@@ -77,6 +81,7 @@ final class StandaloneG3XReplayBuilder
                 'csv_sha1' => sha1_file($realCsvPath),
                 'aircraft_ident' => (string)$parsed['aircraft_ident'],
                 'product' => (string)$parsed['product'],
+                'import_profile' => (string)($parsed['import_profile'] ?? ''),
                 'row_count' => (int)$parsed['row_count'],
                 'first_utc' => $this->rowUtcString($firstRow),
                 'last_utc' => $this->rowUtcString($lastRow),

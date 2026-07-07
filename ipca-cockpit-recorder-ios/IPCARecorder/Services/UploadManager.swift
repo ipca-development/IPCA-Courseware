@@ -431,7 +431,12 @@ final class UploadManager: ObservableObject {
                 }
 
                 do {
-                    try await performServerG3XUpload(recordingID: recordingID, csvURL: csvURL, baseURL: baseURL)
+                    try await performServerG3XUpload(
+                        recordingID: recordingID,
+                        csvURL: csvURL,
+                        baseURL: baseURL,
+                        importProfile: item.importProfile ?? "garmin_g3x"
+                    )
                     await MainActor.run {
                         SharedRecordingIndexStore.removePendingImport(id: item.id)
                         try? FileManager.default.removeItem(at: csvURL)
@@ -474,7 +479,7 @@ final class UploadManager: ObservableObject {
             store: store
         )
 
-        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recording.id)
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recording.id, importProfile: recording.garminImportProfile)
         let (data, response) = try await data(for: finalizeRequest)
         let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
         if !uploadResponse.ok {
@@ -489,7 +494,7 @@ final class UploadManager: ObservableObject {
         }
     }
 
-    private func performServerG3XUpload(recordingID: String, csvURL: URL, baseURL: URL) async throws {
+    private func performServerG3XUpload(recordingID: String, csvURL: URL, baseURL: URL, importProfile: String) async throws {
         let client = APIClient(serverURL: baseURL)
         let fileSize = try fileSize(csvURL)
         guard fileSize > 0 else { return }
@@ -506,7 +511,7 @@ final class UploadManager: ObservableObject {
             totalBytes: fileSize
         )
 
-        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recordingID)
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recordingID, importProfile: importProfile)
         let (data, response) = try await data(for: finalizeRequest)
         let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
         if !uploadResponse.ok {

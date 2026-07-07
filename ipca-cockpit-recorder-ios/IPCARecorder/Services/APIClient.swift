@@ -191,7 +191,7 @@ struct APIClient {
         return request
     }
 
-    func finalizeG3XUploadRequest(recordingID: String) throws -> URLRequest {
+    func finalizeG3XUploadRequest(recordingID: String, importProfile: String) throws -> URLRequest {
         let url = serverURL.appending(path: "api/recordings/g3x_finalize.php")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -199,6 +199,7 @@ struct APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "recording_id": recordingID,
+            "import_profile": importProfile,
         ])
         return request
     }
@@ -210,6 +211,7 @@ struct APIClient {
             "duration": recording.duration,
             "input_device": recording.inputDeviceName,
             "aircraft_id": recording.aircraftID ?? 0,
+            "import_profile": recording.garminImportProfile,
             "language": language,
             "flight_session_uid": recording.flightSessionID,
             "flight_segment_index": recording.segmentIndex,
@@ -255,6 +257,7 @@ struct APIClient {
             ("duration", String(recording.duration)),
             ("input_device", recording.inputDeviceName),
             ("aircraft_id", recording.aircraftID.map(String.init) ?? ""),
+            ("import_profile", recording.garminImportProfile),
             ("language", language),
             ("flight_session_uid", recording.flightSessionID),
             ("flight_segment_index", String(recording.segmentIndex)),

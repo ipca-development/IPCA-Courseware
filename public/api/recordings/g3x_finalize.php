@@ -138,7 +138,7 @@ try {
     }
 
     $service = new CockpitRecorderService($pdo);
-    $result = $service->storeSupplementalG3X($recordingUid, $g3xPath);
+    $result = $service->storeSupplementalG3X($recordingUid, $g3xPath, (string)($payload['import_profile'] ?? ''));
 
     cockpit_g3x_finalize_remove_tree($sessionDir);
     cockpit_g3x_finalize_json(200, $result);
