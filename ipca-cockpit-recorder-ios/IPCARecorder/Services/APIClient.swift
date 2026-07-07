@@ -181,13 +181,13 @@ struct APIClient {
         return try decode(ChunkUploadStatusResponse.self, from: data, response: response)
     }
 
-    func finalizeChunkedUploadRequest(for recording: Recording, language: String) throws -> URLRequest {
+    func finalizeChunkedUploadRequest(for recording: Recording, language: String, importProfile: String? = nil) throws -> URLRequest {
         let url = serverURL.appending(path: "api/recordings/upload_finalize.php")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 3600
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: finalizePayload(for: recording, language: language))
+        request.httpBody = try JSONSerialization.data(withJSONObject: finalizePayload(for: recording, language: language, importProfile: importProfile))
         return request
     }
 
@@ -204,14 +204,16 @@ struct APIClient {
         return request
     }
 
-    private func finalizePayload(for recording: Recording, language: String) -> [String: Any] {
+    private func finalizePayload(for recording: Recording, language: String, importProfile: String? = nil) -> [String: Any] {
+        let selectedImportProfile = importProfile?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let uploadImportProfile = selectedImportProfile?.isEmpty == false ? selectedImportProfile! : recording.garminUploadImportProfile
         var payload: [String: Any] = [
             "recording_id": recording.id,
             "started_at": ISO8601DateFormatter().string(from: recording.startedAt),
             "duration": recording.duration,
             "input_device": recording.inputDeviceName,
             "aircraft_id": recording.aircraftID ?? 0,
-            "import_profile": recording.garminImportProfile,
+            "import_profile": uploadImportProfile,
             "language": language,
             "flight_session_uid": recording.flightSessionID,
             "flight_segment_index": recording.segmentIndex,
@@ -257,7 +259,7 @@ struct APIClient {
             ("duration", String(recording.duration)),
             ("input_device", recording.inputDeviceName),
             ("aircraft_id", recording.aircraftID.map(String.init) ?? ""),
-            ("import_profile", recording.garminImportProfile),
+            ("import_profile", recording.garminUploadImportProfile),
             ("language", language),
             ("flight_session_uid", recording.flightSessionID),
             ("flight_segment_index", String(recording.segmentIndex)),

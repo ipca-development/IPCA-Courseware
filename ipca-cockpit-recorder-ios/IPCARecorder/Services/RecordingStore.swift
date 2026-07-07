@@ -176,6 +176,7 @@ final class RecordingStore: ObservableObject {
             recording.g3xCsvPath = destination.path
             recording.g3xImportedAt = Date()
             recording.g3xAircraftIdent = metadata.aircraftIdent
+            recording.g3xImportProfile = metadata.importProfile
             recording.g3xMatchMethod = matchMethod
             recording.g3xRowCount = metadata.rowCount
             recording.g3xServerSynced = false

@@ -1656,6 +1656,7 @@ final class CockpitReconstructionService
             'available' => true,
             'row_count' => (int)$parsed['row_count'],
             'aircraft_ident' => (string)$parsed['aircraft_ident'],
+            'import_profile' => (string)($parsed['import_profile'] ?? ''),
             'offset_seconds' => $offsetSeconds,
             'source' => isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload',
             'path' => $path,

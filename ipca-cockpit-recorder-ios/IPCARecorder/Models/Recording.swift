@@ -96,6 +96,7 @@ struct Recording: Identifiable, Codable, Equatable {
     var g3xCsvPath: String?
     var g3xImportedAt: Date?
     var g3xAircraftIdent: String?
+    var g3xImportProfile: String?
     var g3xMatchMethod: String?
     var g3xRowCount: Int
     var g3xServerSynced: Bool
@@ -111,6 +112,11 @@ struct Recording: Identifiable, Codable, Equatable {
             return "garmin_g1000nxi"
         }
         return "garmin_g3x"
+    }
+
+    var garminUploadImportProfile: String {
+        let csvProfile = g3xImportProfile?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return csvProfile.isEmpty ? garminImportProfile : csvProfile
     }
 
     init(
@@ -141,6 +147,7 @@ struct Recording: Identifiable, Codable, Equatable {
         g3xCsvPath: String? = nil,
         g3xImportedAt: Date? = nil,
         g3xAircraftIdent: String? = nil,
+        g3xImportProfile: String? = nil,
         g3xMatchMethod: String? = nil,
         g3xRowCount: Int = 0,
         g3xServerSynced: Bool = false,
@@ -177,6 +184,7 @@ struct Recording: Identifiable, Codable, Equatable {
         self.g3xCsvPath = g3xCsvPath
         self.g3xImportedAt = g3xImportedAt
         self.g3xAircraftIdent = g3xAircraftIdent
+        self.g3xImportProfile = g3xImportProfile
         self.g3xMatchMethod = g3xMatchMethod
         self.g3xRowCount = g3xRowCount
         self.g3xServerSynced = g3xServerSynced
@@ -215,6 +223,7 @@ struct Recording: Identifiable, Codable, Equatable {
         case g3xCsvPath
         case g3xImportedAt
         case g3xAircraftIdent
+        case g3xImportProfile
         case g3xMatchMethod
         case g3xRowCount
         case g3xServerSynced
@@ -254,6 +263,7 @@ struct Recording: Identifiable, Codable, Equatable {
         g3xCsvPath = try container.decodeIfPresent(String.self, forKey: .g3xCsvPath)
         g3xImportedAt = try container.decodeIfPresent(Date.self, forKey: .g3xImportedAt)
         g3xAircraftIdent = try container.decodeIfPresent(String.self, forKey: .g3xAircraftIdent)
+        g3xImportProfile = try container.decodeIfPresent(String.self, forKey: .g3xImportProfile)
         g3xMatchMethod = try container.decodeIfPresent(String.self, forKey: .g3xMatchMethod)
         g3xRowCount = try container.decodeIfPresent(Int.self, forKey: .g3xRowCount) ?? 0
         g3xServerSynced = try container.decodeIfPresent(Bool.self, forKey: .g3xServerSynced) ?? false

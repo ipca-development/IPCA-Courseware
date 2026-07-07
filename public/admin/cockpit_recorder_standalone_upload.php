@@ -11,7 +11,7 @@ require_once __DIR__ . '/../../src/StandaloneG3XReplayBuilder.php';
 cw_require_admin();
 
 @set_time_limit(0);
-@ini_set('memory_limit', '768M');
+@ini_set('memory_limit', '2048M');
 
 $error = '';
 $result = null;

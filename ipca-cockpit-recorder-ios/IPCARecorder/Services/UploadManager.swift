@@ -128,6 +128,11 @@ final class UploadManager: ObservableObject {
             }
         }
 
+        var detectedGarminImportProfile: String?
+        if let g3xFile = files.first(where: { $0.type == "g3x" }) {
+            detectedGarminImportProfile = try? G3XFlightStreamParser.parse(fileURL: g3xFile.url).metadata.importProfile
+        }
+
         let totalBytes = max(1, files.reduce(Int64(0)) { $0 + max(0, $1.size) })
         var uploadedBytes: Int64 = 0
 
@@ -160,7 +165,11 @@ final class UploadManager: ObservableObject {
             }
         }
 
-        let finalizeRequest = try client.finalizeChunkedUploadRequest(for: recording, language: language)
+        let finalizeRequest = try client.finalizeChunkedUploadRequest(
+            for: recording,
+            language: language,
+            importProfile: detectedGarminImportProfile
+        )
         let (data, response) = try await data(for: finalizeRequest)
         return try client.decodeUploadResponse(data: data, response: response)
     }
@@ -479,7 +488,8 @@ final class UploadManager: ObservableObject {
             store: store
         )
 
-        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recording.id, importProfile: recording.garminImportProfile)
+        let detectedProfile = (try? G3XFlightStreamParser.parse(fileURL: g3xURL).metadata.importProfile) ?? recording.garminUploadImportProfile
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recording.id, importProfile: detectedProfile)
         let (data, response) = try await data(for: finalizeRequest)
         let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
         if !uploadResponse.ok {
@@ -511,7 +521,8 @@ final class UploadManager: ObservableObject {
             totalBytes: fileSize
         )
 
-        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recordingID, importProfile: importProfile)
+        let detectedProfile = (try? G3XFlightStreamParser.parse(fileURL: csvURL).metadata.importProfile) ?? importProfile
+        let finalizeRequest = try client.finalizeG3XUploadRequest(recordingID: recordingID, importProfile: detectedProfile)
         let (data, response) = try await data(for: finalizeRequest)
         let uploadResponse = try client.decodeUploadResponse(data: data, response: response)
         if !uploadResponse.ok {
