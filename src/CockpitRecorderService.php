@@ -1006,8 +1006,8 @@ final class CockpitRecorderService
         if ($size <= 0) {
             return;
         }
-        if ($size > 50 * 1024 * 1024) {
-            throw new RuntimeException('G3X CSV is too large (max 50 MB).');
+        if ($size > 250 * 1024 * 1024) {
+            throw new RuntimeException('Garmin CSV is too large (max 250 MB).');
         }
 
         $parsed = G3XFlightStreamParser::parseFile($path, $importProfile);

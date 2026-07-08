@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 require_once __DIR__ . '/../../src/CockpitReconstructionService.php';
 require_once __DIR__ . '/../../src/CockpitAdsbEnrichmentService.php';
+require_once __DIR__ . '/../../src/GarminCsvImportProfile.php';
 
 cw_require_admin();
 
@@ -91,9 +92,13 @@ if ((string)($_GET['reconstruction'] ?? '') === 'started') {
     $pollRecordingId = (int)($_GET['id'] ?? 0);
     $notice = 'Reconstruction started in the background. Progress updates automatically below.';
 }
+if ((string)($_GET['g3x_upload'] ?? '') === 'attached') {
+    $notice = 'Garmin CSV attached. Run reconstruction again for the updated replay.';
+}
 $recordings = array();
 $service = null;
 $adsbService = null;
+$importProfileOptions = GarminCsvImportProfile::options();
 try {
     $service = new CockpitRecorderService($pdo);
     $adsbService = new CockpitAdsbEnrichmentService($pdo);
@@ -138,6 +143,8 @@ cw_header('Cockpit Recorder POC');
 .cockpit-chunk-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .cockpit-actions { display: grid; gap: 6px; min-width: 210px; }
 .cockpit-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 7px 10px; cursor: pointer; }
+.cockpit-input { display: block; width: 100%; max-width: 220px; margin-top: 4px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; background: #fff; color: #0f172a; }
+.cockpit-upload-form { display: grid; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
 .cockpit-link-grid { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 12px; }
 .cockpit-summary-grid { display: grid; gap: 3px; margin-top: 6px; font-size: 12px; color: #334155; }
 </style>
@@ -219,6 +226,11 @@ cw_header('Cockpit Recorder POC');
             $reconStatus = (string)($row['reconstruction_status'] ?? 'not_started');
             $timelineStatus = (string)($row['timeline_status'] ?? 'not_started');
             $adsbStatus = (string)($row['adsb_status'] ?? 'not_started');
+            $defaultImportProfile = GarminCsvImportProfile::forAircraft(
+                (string)($row['aircraft_registration'] ?? ''),
+                (string)($row['aircraft_display_name'] ?? ''),
+                (string)($row['aircraft_type'] ?? '')
+            );
             $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
             $replayJsonUrl = '/api/recordings/replay.php?id=' . $id;
             $replayJsonV2Url = '/api/recordings/replay.php?id=' . $id . '&version=2';
@@ -479,6 +491,30 @@ cw_header('Cockpit Recorder POC');
                     <?php endif; ?>
                   </div>
                 <?php endif; ?>
+                <form class="cockpit-upload-form" method="post" action="/admin/api/cockpit_recorder_g3x_upload.php" enctype="multipart/form-data">
+                  <input type="hidden" name="id" value="<?= $id ?>">
+                  <strong>Attach Garmin CSV</strong>
+                  <?php if (!empty($row['g3x_storage_path'])): ?>
+                    <div class="cockpit-muted">
+                      Current: <?= (int)($row['g3x_row_count'] ?? 0) ?> rows<?= !empty($row['g3x_file_size_bytes']) ? h(' · ' . cockpit_admin_fmt_bytes((int)$row['g3x_file_size_bytes'])) : '' ?><?= !empty($row['g3x_aircraft_ident']) ? h(' · ' . (string)$row['g3x_aircraft_ident']) : '' ?>
+                    </div>
+                  <?php else: ?>
+                    <div class="cockpit-muted">No Garmin CSV attached yet.</div>
+                  <?php endif; ?>
+                  <label class="cockpit-muted">
+                    Import type
+                    <select class="cockpit-input" name="import_profile">
+                      <?php foreach ($importProfileOptions as $profile => $label): ?>
+                        <option value="<?= h($profile) ?>"<?= $profile === $defaultImportProfile ? ' selected' : '' ?>><?= h($label) ?></option>
+                      <?php endforeach; ?>
+                    </select>
+                  </label>
+                  <label class="cockpit-muted">
+                    Garmin CSV file
+                    <input class="cockpit-input" type="file" name="g3x_csv" accept=".csv,text/csv" required>
+                  </label>
+                  <button class="cockpit-button" type="submit">Attach CSV</button>
+                </form>
                 <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php?id=<?= $id ?>">
                   <input type="hidden" name="id" value="<?= $id ?>">
                   <input type="hidden" name="replay_source_mode" value="g3x_only">
