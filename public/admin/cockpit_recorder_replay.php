@@ -3534,7 +3534,7 @@ cw_header('Cockpit Recorder Replay');
       insetMap.hidden = true;
       return false;
     }
-    const desiredLeft = airspeedRect ? airspeedRect.right + 12 : rootRect.left + 18;
+    const desiredLeft = airspeedRect ? airspeedRect.left : rootRect.left + 18;
     const profileHeight = clamp(Math.round(hsiRect.height * 0.17), 42, 58);
     const topSize = clamp(Math.round(hsiRect.height - profileHeight - 4), 170, 240);
     const totalHeight = topSize + profileHeight + 4;
