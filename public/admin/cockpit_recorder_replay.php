@@ -341,7 +341,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-inset-map {
   position: absolute;
-  z-index: 18;
+  z-index: 20;
   width: 240px;
   color: rgba(255, 255, 255, .94);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -3534,18 +3534,13 @@ cw_header('Cockpit Recorder Replay');
       insetMap.hidden = true;
       return false;
     }
-    const leftLimit = airspeedRect ? airspeedRect.right + 12 : rootRect.left + 18;
-    const rightLimit = hsiRect.left - 12;
-    const availableWidth = Math.max(0, rightLimit - leftLimit);
+    const desiredLeft = airspeedRect ? airspeedRect.right + 12 : rootRect.left + 18;
     const profileHeight = clamp(Math.round(hsiRect.height * 0.17), 42, 58);
-    const topSize = Math.floor(Math.min(availableWidth, Math.max(160, hsiRect.height - profileHeight - 4)));
-    if (topSize < 150) {
-      insetMap.hidden = true;
-      return false;
-    }
+    const topSize = clamp(Math.round(hsiRect.height - profileHeight - 4), 170, 240);
     const totalHeight = topSize + profileHeight + 4;
     const top = hsiRect.bottom - totalHeight;
-    insetMap.style.left = `${Math.round(leftLimit - rootRect.left)}px`;
+    const left = Math.min(desiredLeft, rootRect.right - topSize - 12);
+    insetMap.style.left = `${Math.round(Math.max(rootRect.left + 12, left) - rootRect.left)}px`;
     insetMap.style.top = `${Math.round(top - rootRect.top)}px`;
     insetMap.style.width = `${topSize}px`;
     insetMap.style.setProperty('--inset-map-profile-height', `${profileHeight}px`);
