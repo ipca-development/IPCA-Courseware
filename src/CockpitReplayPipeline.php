@@ -743,12 +743,16 @@ final class CockpitReplayPipeline
             $variationSource = $variation !== null ? 'g3x_magvar' : self::FALLBACK_MAGNETIC_VARIATION_SOURCE;
             $variation ??= self::FALLBACK_MAGNETIC_VARIATION_DEG;
             $trackTrue = G3XFlightStreamParser::numericValue($row, 'GPS Ground Track (deg)', 'TRK', 'Track');
+            $groundSpeedKt = G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)', 'GndSpd');
+            $iasKt = G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)', 'IAS');
+            $tasKt = G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)', 'TAS');
+            $motionSpeedKt = $groundSpeedKt ?? $iasKt ?? $tasKt ?? 0.0;
             $points[] = array(
                 't' => $t,
                 'lat' => (float)$lat,
                 'lon' => (float)$lon,
                 'alt_m' => $altM,
-                'speed_kt' => (float)(G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)', 'GndSpd') ?? 0.0),
+                'speed_kt' => (float)$motionSpeedKt,
                 'heading_deg' => $headingMagnetic !== null ? $this->magneticToTrue((float)$headingMagnetic, (float)$variation, 0.0) : null,
                 'heading_deg_magnetic' => $headingMagnetic !== null ? self::normalizeDegrees((float)$headingMagnetic) : null,
                 'track_deg_true' => $trackTrue !== null ? self::normalizeDegrees((float)$trackTrue) : null,
@@ -1045,9 +1049,10 @@ final class CockpitReplayPipeline
 
             $distanceM = hypot((float)$curr['e'] - (float)$prev['e'], (float)$curr['n'] - (float)$prev['n']);
             $impliedKt = $this->metersPerSecondToKnots($distanceM / $dt);
-            $groundSpeed = min((float)$prev['speed_kt'], (float)$curr['speed_kt']);
+            $groundSpeed = max((float)$prev['speed_kt'], (float)$curr['speed_kt']);
             $altDeltaFt = abs(((float)$curr['alt_m'] - (float)$prev['alt_m']) * self::FT_PER_M);
-            $isGround = $groundSpeed < self::GROUND_SPEED_MAX_KT;
+            $isGround = $groundSpeed < self::GROUND_SPEED_MAX_KT
+                && $impliedKt < self::GROUND_SPEED_MAX_KT;
 
             if ($isGround && (
                 $impliedKt > 40.0
@@ -2048,7 +2053,6 @@ final class CockpitReplayPipeline
             }
 
             $lastHeading = (float)$sample['heading_deg_true'];
-            $samples[$idx] = $sample;
         }
         unset($sample);
 

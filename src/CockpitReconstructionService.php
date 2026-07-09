@@ -1717,6 +1717,21 @@ final class CockpitReconstructionService
         if ($firstUtc === null) {
             return 0.0;
         }
+        $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($g3xRows);
+        $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
+            ? max(0.0, (float)$recording['duration_seconds'])
+            : 0.0;
+        if ($lastUtc !== null && $duration > 0.0) {
+            $recordingStart = $startedAt->getTimestamp();
+            $recordingEnd = $recordingStart + $duration;
+            $g3xStart = $firstUtc->getTimestamp();
+            $g3xEnd = $lastUtc->getTimestamp();
+            $overlapSeconds = min($recordingEnd, $g3xEnd) - max($recordingStart, $g3xStart);
+            $expectedOverlap = min($duration, max(0, $g3xEnd - $g3xStart));
+            if ($overlapSeconds >= min(60.0, max(1.0, $expectedOverlap * 0.25))) {
+                return 0.0;
+            }
+        }
 
         $baseOffset = 0.0;
         $deltas = array();
@@ -1819,7 +1834,10 @@ final class CockpitReconstructionService
         $baro = G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)');
         $windSpeed = G3XFlightStreamParser::numericValue($row, 'Wind Speed (kt)');
         $windDir = G3XFlightStreamParser::numericValue($row, 'Wind Direction (deg)');
-        $groundspeed = G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)');
+        $groundspeed = G3XFlightStreamParser::numericValue($row, 'GPS Ground Speed (kt)', 'GndSpd');
+        if ($groundspeed === null) {
+            $groundspeed = G3XFlightStreamParser::numericValue($row, 'Indicated Airspeed (kt)', 'IAS');
+        }
         $track = G3XFlightStreamParser::numericValue($row, 'GPS Ground Track (deg)');
         $gpsAlt = G3XFlightStreamParser::numericValue($row, 'GPS Altitude (ft)');
         $latitude = G3XFlightStreamParser::numericValue($row, 'Latitude (deg)');
@@ -1906,6 +1924,12 @@ final class CockpitReconstructionService
             $sample['source_mask'] = trim($mask . ' g3x');
         }
         $sample['g3x_row'] = $this->buildImportedG3XRow($row);
+        if (trim((string)($sample['g3x_row']['Longitude'] ?? '')) === '' && ($sample['longitude'] ?? null) !== null) {
+            $sample['g3x_row']['Longitude'] = self::fmt($sample['longitude'], 7, true);
+        }
+        if (trim((string)($sample['g3x_row']['Latitude (deg)'] ?? '')) === '' && ($sample['latitude'] ?? null) !== null) {
+            $sample['g3x_row']['Latitude (deg)'] = self::fmt($sample['latitude'], 7, true);
+        }
         return $sample;
     }
 
@@ -1920,6 +1944,12 @@ final class CockpitReconstructionService
             if (isset($row[$column])) {
                 $mapped[$column] = (string)$row[$column];
             }
+        }
+        if (trim($mapped['Longitude']) === '' && isset($row['Longitude (deg)'])) {
+            $mapped['Longitude'] = (string)$row['Longitude (deg)'];
+        }
+        if (trim($mapped['Latitude (deg)']) === '' && isset($row['Latitude'])) {
+            $mapped['Latitude (deg)'] = (string)$row['Latitude'];
         }
         return $mapped;
     }
