@@ -339,6 +339,87 @@ cw_header('Cockpit Recorder Replay');
   font-size: 8px;
   font-weight: 650;
 }
+.replay-inset-map {
+  position: absolute;
+  z-index: 18;
+  width: 240px;
+  color: rgba(255, 255, 255, .94);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
+}
+.replay-inset-map[hidden] { display: none !important; }
+.replay-inset-map-top,
+.replay-inset-map-profile {
+  background: rgba(40, 40, 40, .46);
+  border: 1px solid rgba(255, 255, 255, .28);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.replay-inset-map-top {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 17px 17px 8px 8px;
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.replay-inset-map-profile {
+  width: 100%;
+  height: var(--inset-map-profile-height, 54px);
+  margin-top: 4px;
+  border-radius: 8px 8px 17px 17px;
+  pointer-events: none;
+}
+.replay-inset-map-svg,
+.replay-inset-altitude-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.replay-inset-map-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.replay-inset-map-zoom {
+  width: 21px;
+  height: 21px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 50%;
+  background: rgba(15, 23, 42, .50);
+  color: rgba(255, 255, 255, .96);
+  font: 800 15px/17px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 0;
+  text-align: center;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.replay-inset-map-range {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, .56);
+  color: rgba(255, 255, 255, .96);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: center;
+}
+.replay-inset-map svg text {
+  fill: rgba(255, 255, 255, .95);
+  font-weight: 720;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, .45);
+  stroke-width: .8px;
+  stroke-linejoin: round;
+}
 .replay-engine-placeholder {
   width: calc(100% - 16px);
   color: #f8fafc;
@@ -1389,6 +1470,19 @@ cw_header('Cockpit Recorder Replay');
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
+    <div id="insetMap" class="replay-inset-map" aria-label="Interactive inset map" hidden>
+      <div id="insetMapTop" class="replay-inset-map-top" aria-label="Horizontal flight track map">
+        <svg id="insetMapSvg" class="replay-inset-map-svg" viewBox="0 0 240 240" role="img" aria-label="North-up flight track"></svg>
+        <div class="replay-inset-map-controls" aria-label="Inset map zoom controls">
+          <button id="insetMapZoomIn" class="replay-inset-map-zoom" type="button" aria-label="Zoom inset map in">+</button>
+          <button id="insetMapZoomOut" class="replay-inset-map-zoom" type="button" aria-label="Zoom inset map out">-</button>
+        </div>
+        <div id="insetMapRange" class="replay-inset-map-range">-- NM</div>
+      </div>
+      <div id="insetMapProfile" class="replay-inset-map-profile" aria-label="Vertical altitude profile">
+        <svg id="insetAltitudeSvg" class="replay-inset-altitude-svg" viewBox="0 0 240 58" role="img" aria-label="Baro altitude and terrain profile"></svg>
+      </div>
+    </div>
     <div id="airspeedTape" class="airspeed-tape" aria-label="Airspeed indicator" hidden>
       <div class="airspeed-tape-header">
         <span class="airspeed-tape-title">TAS</span>
@@ -1612,6 +1706,13 @@ cw_header('Cockpit Recorder Replay');
   const horizonLine = document.getElementById('horizonLine');
   const attitudeOverlay = document.getElementById('attitudeOverlay');
   const hsiOverlay = document.getElementById('hsiOverlay');
+  const insetMap = document.getElementById('insetMap');
+  const insetMapTop = document.getElementById('insetMapTop');
+  const insetMapSvg = document.getElementById('insetMapSvg');
+  const insetAltitudeSvg = document.getElementById('insetAltitudeSvg');
+  const insetMapRange = document.getElementById('insetMapRange');
+  const insetMapZoomIn = document.getElementById('insetMapZoomIn');
+  const insetMapZoomOut = document.getElementById('insetMapZoomOut');
   const enginePanel = document.getElementById('enginePanel');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
@@ -1698,6 +1799,9 @@ cw_header('Cockpit Recorder Replay');
   let altimeterSettingUnit = 'hpa';
   let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
+  let insetMapSignature = '';
+  let insetMapZoom = 1;
+  let insetMapProjection = null;
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
   let visualFallbackPlaying = false;
@@ -1756,9 +1860,12 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'inset_map']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
+  const INSET_MAP_SIZE = 240;
+  const INSET_MAP_PADDING = 18;
+  const INSET_MAP_MAGENTA = '#ff00df';
   let cameraSettings = null;
   let cameraCalibration = null;
 
@@ -2055,6 +2162,7 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    updateInsetMap(sampleAt(activeT), true);
     safeRenderCesium(true);
   }
 
@@ -2227,6 +2335,7 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
+    updateInsetMap(sampleAt(activeT), true);
   }
 
   function instrumentEnabled(key) {
@@ -3306,6 +3415,280 @@ cw_header('Cockpit Recorder Replay');
     };
   }
 
+  function insetTrackSamples() {
+    if (!payload || !Array.isArray(payload.samples)) return [];
+    return payload.samples
+      .map((sample) => {
+        const lat = finiteNumber(sample.lat);
+        const lon = finiteNumber(sample.lon);
+        const t = finiteNumber(sample.t);
+        if (lat === null || lon === null || t === null) return null;
+        return { sample, lat, lon, t };
+      })
+      .filter(Boolean);
+  }
+
+  function insetMapAirports() {
+    const airports = payload && payload.airports && typeof payload.airports === 'object' ? payload.airports : {};
+    const entries = [];
+    ['departure', 'destination'].forEach((role) => {
+      const airport = airports[role];
+      const lat = finiteNumber(airport && airport.lat);
+      const lon = finiteNumber(airport && airport.lon);
+      const icao = String((airport && airport.icao) || '').trim().toUpperCase();
+      if (lat === null || lon === null || icao === '') return;
+      if (entries.some((entry) => entry.icao === icao && Math.abs(entry.lat - lat) < 0.0001 && Math.abs(entry.lon - lon) < 0.0001)) return;
+      entries.push({ role, icao, lat, lon });
+    });
+    return entries;
+  }
+
+  function insetProjector(track, sample) {
+    if (!track.length) return null;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLon = Infinity;
+    let maxLon = -Infinity;
+    track.forEach((point) => {
+      minLat = Math.min(minLat, point.lat);
+      maxLat = Math.max(maxLat, point.lat);
+      minLon = Math.min(minLon, point.lon);
+      maxLon = Math.max(maxLon, point.lon);
+    });
+    const originLat = (minLat + maxLat) / 2;
+    const originLon = (minLon + maxLon) / 2;
+    const latLonToNm = (lat, lon) => ({
+      e: (lon - originLon) * 60 * Math.cos(degToRad(originLat)),
+      n: (lat - originLat) * 60,
+    });
+    const nmPoints = track.map((point) => ({ ...point, ...latLonToNm(point.lat, point.lon) }));
+    let minE = Infinity;
+    let maxE = -Infinity;
+    let minN = Infinity;
+    let maxN = -Infinity;
+    nmPoints.forEach((point) => {
+      minE = Math.min(minE, point.e);
+      maxE = Math.max(maxE, point.e);
+      minN = Math.min(minN, point.n);
+      maxN = Math.max(maxN, point.n);
+    });
+    const currentLat = finiteNumber(sample && sample.lat);
+    const currentLon = finiteNumber(sample && sample.lon);
+    const currentNm = currentLat !== null && currentLon !== null ? latLonToNm(currentLat, currentLon) : null;
+    const baseCenterE = (minE + maxE) / 2;
+    const baseCenterN = (minN + maxN) / 2;
+    const zoom = clamp(insetMapZoom, 1, 16);
+    const centerE = zoom > 1 && currentNm ? currentNm.e : baseCenterE;
+    const centerN = zoom > 1 && currentNm ? currentNm.n : baseCenterN;
+    const widthNm = Math.max(0.01, maxE - minE);
+    const heightNm = Math.max(0.01, maxN - minN);
+    const fullRangeNm = Math.max(widthNm, heightNm, 0.25);
+    const scale = ((INSET_MAP_SIZE - INSET_MAP_PADDING * 2) / fullRangeNm) * zoom;
+    const project = (lat, lon) => {
+      const nm = latLonToNm(lat, lon);
+      return {
+        x: INSET_MAP_SIZE / 2 + (nm.e - centerE) * scale,
+        y: INSET_MAP_SIZE / 2 - (nm.n - centerN) * scale,
+        e: nm.e,
+        n: nm.n,
+      };
+    };
+    return {
+      project,
+      rangeNm: fullRangeNm / zoom,
+      points: nmPoints,
+    };
+  }
+
+  function insetTrackDirection(sample, track, currentIndex) {
+    const trueTrack = firstFinite(sample && sample.track_deg_true, sample && sample.gps_track_deg);
+    if (trueTrack !== null) return normalizeDeg(trueTrack);
+    const prev = track[Math.max(0, currentIndex - 1)];
+    const next = track[Math.min(track.length - 1, currentIndex + 1)];
+    if (prev && next && (prev.lat !== next.lat || prev.lon !== next.lon)) {
+      return bearingDeg(prev.lat, prev.lon, next.lat, next.lon);
+    }
+    return 0;
+  }
+
+  function nearestInsetTrackIndex(track, time) {
+    if (!track.length) return 0;
+    let bestIndex = 0;
+    let bestDelta = Infinity;
+    track.forEach((point, index) => {
+      const delta = Math.abs(point.t - time);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestIndex = index;
+      }
+    });
+    return bestIndex;
+  }
+
+  function updateInsetMapPlacement() {
+    if (!insetMap || !root) return false;
+    const rootRect = root.getBoundingClientRect();
+    const hsiRect = hsiOverlay && !hsiOverlay.hidden ? hsiOverlay.getBoundingClientRect() : null;
+    const airspeedRect = airspeedTape && !airspeedTape.hidden ? airspeedTape.getBoundingClientRect() : null;
+    if (!hsiRect || hsiRect.width <= 0 || hsiRect.height <= 0) {
+      insetMap.hidden = true;
+      return false;
+    }
+    const leftLimit = airspeedRect ? airspeedRect.right + 12 : rootRect.left + 18;
+    const rightLimit = hsiRect.left - 12;
+    const availableWidth = Math.max(0, rightLimit - leftLimit);
+    const profileHeight = clamp(Math.round(hsiRect.height * 0.17), 42, 58);
+    const topSize = Math.floor(Math.min(availableWidth, Math.max(160, hsiRect.height - profileHeight - 4)));
+    if (topSize < 150) {
+      insetMap.hidden = true;
+      return false;
+    }
+    const totalHeight = topSize + profileHeight + 4;
+    const top = hsiRect.bottom - totalHeight;
+    insetMap.style.left = `${Math.round(leftLimit - rootRect.left)}px`;
+    insetMap.style.top = `${Math.round(top - rootRect.top)}px`;
+    insetMap.style.width = `${topSize}px`;
+    insetMap.style.setProperty('--inset-map-profile-height', `${profileHeight}px`);
+    return true;
+  }
+
+  function updateInsetMap(sample, snap = false) {
+    if (!insetMap || !insetMapSvg || !insetAltitudeSvg) return;
+    if (!sample || !instrumentEnabled('inset_map')) {
+      insetMap.hidden = true;
+      insetMapSignature = '';
+      insetMapProjection = null;
+      return;
+    }
+    const track = insetTrackSamples();
+    if (track.length < 2 || !updateInsetMapPlacement()) {
+      insetMap.hidden = true;
+      insetMapSignature = '';
+      insetMapProjection = null;
+      return;
+    }
+    const projector = insetProjector(track, sample);
+    if (!projector) {
+      insetMap.hidden = true;
+      return;
+    }
+    const activeTime = firstFinite(sample.t, activeT) || 0;
+    const currentIndex = nearestInsetTrackIndex(track, activeTime);
+    const currentTrackPoint = track[currentIndex] || track[0];
+    const aircraftPos = projector.project(currentTrackPoint.lat, currentTrackPoint.lon);
+    const aircraftTrack = insetTrackDirection(currentTrackPoint.sample, track, currentIndex);
+    const stride = Math.max(1, Math.ceil(track.length / 1300));
+    const pathPoints = [];
+    track.forEach((point, index) => {
+      if (index % stride !== 0 && index !== track.length - 1) return;
+      const projected = projector.project(point.lat, point.lon);
+      pathPoints.push(`${projected.x.toFixed(1)},${projected.y.toFixed(1)}`);
+    });
+    const airports = insetMapAirports().map((airport) => ({
+      ...airport,
+      ...projector.project(airport.lat, airport.lon),
+    }));
+    const rangeNm = projector.rangeNm;
+    if (insetMapRange) {
+      insetMapRange.textContent = `${rangeNm >= 10 ? Math.round(rangeNm) : rangeNm.toFixed(1)} NM`;
+    }
+    const signature = [
+      Math.round(activeTime * 5),
+      insetMapZoom,
+      pathPoints.length,
+      airports.map((airport) => airport.icao).join(','),
+      Math.round(aircraftPos.x),
+      Math.round(aircraftPos.y),
+      Math.round(aircraftTrack),
+      Math.round(rangeNm * 10),
+      insetMap.style.left,
+      insetMap.style.top,
+      insetMap.style.width,
+      snap ? 'snap' : 'run',
+    ].join('|');
+    if (signature !== insetMapSignature) {
+      const airportHtml = airports.map((airport) => `
+        <g>
+          <circle cx="${airport.x.toFixed(1)}" cy="${airport.y.toFixed(1)}" r="8.0" fill="none" stroke="rgba(255,255,255,.90)" stroke-width="3"></circle>
+          <text x="${(airport.x + 12).toFixed(1)}" y="${(airport.y - 9).toFixed(1)}" font-size="11" text-anchor="start">${escapeHtml(airport.icao)}</text>
+        </g>
+      `).join('');
+      const planePath = 'M 0.0 -30.4 L 0.7 -29.5 L 1.3 -28.6 L 1.8 -27.7 L 2.4 -26.8 L 2.9 -25.9 L 3.3 -24.9 L 3.7 -24.0 L 3.9 -23.1 L 4.2 -22.2 L 4.5 -21.3 L 4.7 -20.3 L 4.9 -19.4 L 5.0 -18.5 L 5.1 -17.6 L 5.2 -16.7 L 28.5 -15.7 L 42.0 -14.8 L 47.8 -13.9 L 48.6 -13.0 L 49.2 -12.1 L 49.6 -11.2 L 49.9 -10.2 L 50.0 -9.3 L 50.0 -8.4 L 49.9 -7.5 L 21.8 -6.6 L 4.7 -5.6 L 4.5 -4.7 L 4.2 -3.8 L 3.9 -2.9 L 3.7 -2.0 L 3.4 -1.0 L 3.3 -0.1 L 3.0 0.8 L 2.8 1.7 L 2.5 2.6 L 2.4 3.5 L 2.1 4.5 L 2.0 5.4 L 1.8 6.3 L 1.7 7.2 L 1.6 8.1 L 1.6 9.1 L 1.4 10.0 L 1.3 10.9 L 1.3 11.8 L 1.3 12.7 L 1.2 13.6 L 1.2 14.6 L 1.2 15.5 L 1.0 16.4 L 1.0 17.3 L 1.0 18.2 L 1.0 19.2 L 1.0 20.1 L 1.0 21.0 L 1.0 21.9 L 1.0 22.8 L 2.2 23.8 L 8.0 24.7 L 10.8 25.6 L 11.3 26.5 L 11.5 27.4 L 11.4 28.3 L 11.0 29.3 L 3.8 30.2 L -1.0 30.4 L -1.4 30.4 L -4.7 30.2 L -11.2 29.3 L -11.4 28.3 L -11.5 27.4 L -11.3 26.5 L -10.6 25.6 L -7.3 24.7 L -1.7 23.8 L -1.0 22.8 L -1.0 21.9 L -1.0 21.0 L -1.0 20.1 L -1.0 19.2 L -1.0 18.2 L -1.0 17.3 L -1.0 16.4 L -1.0 15.5 L -1.0 14.6 L -1.0 13.6 L -1.2 12.7 L -1.3 11.8 L -1.3 10.9 L -1.4 10.0 L -1.6 9.1 L -1.6 8.1 L -1.7 7.2 L -1.8 6.3 L -2.0 5.4 L -2.1 4.5 L -2.4 3.5 L -2.5 2.6 L -2.8 1.7 L -3.0 0.8 L -3.3 -0.1 L -3.4 -1.0 L -3.7 -2.0 L -3.9 -2.9 L -4.2 -3.8 L -4.5 -4.7 L -4.7 -5.6 L -30.8 -6.6 L -49.9 -7.5 L -50.0 -8.4 L -50.0 -9.3 L -49.9 -10.2 L -49.6 -11.2 L -49.2 -12.1 L -48.6 -13.0 L -47.6 -13.9 L -40.7 -14.8 L -26.6 -15.7 L -5.2 -16.7 L -5.1 -17.6 L -5.0 -18.5 L -4.9 -19.4 L -4.7 -20.3 L -4.5 -21.3 L -4.2 -22.2 L -3.9 -23.1 L -3.5 -24.0 L -3.1 -24.9 L -2.8 -25.9 L -2.4 -26.8 L -1.8 -27.7 L -1.2 -28.6 L -0.5 -29.5 L 0.0 -30.4 Z';
+      insetMapSvg.innerHTML = `
+        <rect x="0" y="0" width="${INSET_MAP_SIZE}" height="${INSET_MAP_SIZE}" fill="rgba(40,40,40,.12)"></rect>
+        <polyline points="${pathPoints.join(' ')}" fill="none" stroke="${INSET_MAP_MAGENTA}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"></polyline>
+        ${airportHtml}
+        <g transform="translate(${aircraftPos.x.toFixed(1)} ${aircraftPos.y.toFixed(1)}) rotate(${aircraftTrack.toFixed(1)}) scale(.46)">
+          <path d="${planePath}" fill="rgba(0,0,0,.96)" stroke="rgba(255,255,255,.96)" stroke-width="9" stroke-linejoin="round"></path>
+        </g>
+        <g transform="translate(208 37)">
+          <text x="0" y="-18" font-size="11" text-anchor="middle">N</text>
+          <polygon points="0,-13 -6,8 0,4 6,8" fill="rgba(255,255,255,.96)" stroke="rgba(15,23,42,.35)" stroke-width=".7"></polygon>
+        </g>
+      `;
+      insetMapSignature = signature;
+    }
+    insetMapProjection = { projector, track };
+    updateInsetAltitudeProfile(sample, track);
+    insetMap.hidden = false;
+  }
+
+  function insetProfileAltitudeFt(sample) {
+    return firstFinite(
+      sample && sample.estimated_indicated_altitude_ft,
+      sample && sample.baro_altitude_ft,
+      sample && sample.altitude_ft_msl,
+      sample && sample.altitude_ft
+    );
+  }
+
+  function updateInsetAltitudeProfile(sample, track) {
+    if (!insetAltitudeSvg || !track.length) return;
+    const currentT = firstFinite(sample && sample.t, activeT) || 0;
+    const windowS = 600;
+    const halfWindow = windowS / 2;
+    const profile = track
+      .filter((point) => Math.abs(point.t - currentT) <= halfWindow)
+      .map((point) => {
+        const altitude = insetProfileAltitudeFt(point.sample);
+        if (altitude === null) return null;
+        const agl = firstFinite(point.sample && point.sample.height_agl_ft);
+        const terrain = agl !== null ? altitude - agl : null;
+        return { t: point.t, altitude, terrain };
+      })
+      .filter(Boolean);
+    const currentAltitude = insetProfileAltitudeFt(sample);
+    const currentAgl = firstFinite(sample && sample.height_agl_ft);
+    if (profile.length < 2 || currentAltitude === null) {
+      insetAltitudeSvg.innerHTML = '';
+      return;
+    }
+    const terrainValues = profile.map((point) => point.terrain).filter((value) => value !== null);
+    const minValue = Math.min(...profile.map((point) => point.altitude), ...(terrainValues.length ? terrainValues : profile.map((point) => point.altitude))) - 120;
+    const maxValue = Math.max(...profile.map((point) => point.altitude), currentAltitude) + 120;
+    const span = Math.max(100, maxValue - minValue);
+    const width = 240;
+    const height = 58;
+    const yForAlt = (altitude) => clamp(height - 8 - ((altitude - minValue) / span) * (height - 16), 6, height - 7);
+    const xForT = (t) => width / 2 + ((t - currentT) / windowS) * width;
+    const altPoints = profile.map((point) => `${xForT(point.t).toFixed(1)},${yForAlt(point.altitude).toFixed(1)}`);
+    const terrainPoints = profile.map((point) => {
+      const terrain = point.terrain !== null ? point.terrain : minValue;
+      return `${xForT(point.t).toFixed(1)},${yForAlt(terrain).toFixed(1)}`;
+    });
+    const terrainPolygon = [`0,${height}`, ...terrainPoints, `${width},${height}`].join(' ');
+    const currentY = yForAlt(currentAltitude);
+    const aglText = currentAgl !== null ? `AGL ${Math.round(currentAgl)} FT` : 'AGL --';
+    insetAltitudeSvg.innerHTML = `
+      <polygon points="${terrainPolygon}" fill="rgba(34,197,94,.25)" stroke="rgba(34,197,94,.45)" stroke-width=".8"></polygon>
+      <polyline points="${altPoints.join(' ')}" fill="none" stroke="${INSET_MAP_MAGENTA}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      <line x1="120" y1="5" x2="120" y2="${height - 5}" stroke="rgba(255,255,255,.20)" stroke-width="1"></line>
+      <circle cx="120" cy="${currentY.toFixed(1)}" r="4.2" fill="${INSET_MAP_MAGENTA}" stroke="rgba(255,255,255,.92)" stroke-width="1.4"></circle>
+      <text x="8" y="17" font-size="10" text-anchor="start">BARO ${Math.round(currentAltitude)} FT</text>
+      <text x="8" y="32" font-size="10" text-anchor="start">${escapeHtml(aglText)}</text>
+    `;
+  }
+
   function trueHeadingFromSample(sample) {
     if (!sample) return 0;
     const explicitTrue = firstFinite(sample.heading_deg_true, sample.true_heading_deg);
@@ -3445,6 +3828,7 @@ cw_header('Cockpit Recorder Replay');
     displayEngineValues.clear();
     hsiOverlaySignature = '';
     attitudeOverlaySignature = '';
+    insetMapSignature = '';
   }
 
   function applyCameraModeControls() {
@@ -3747,6 +4131,7 @@ cw_header('Cockpit Recorder Replay');
       updateAltimeterTape(freeSample, 1 / 60, true);
       updateHsiOverlay(freeSample, 1 / 60, true);
       updateEnginePanel(freeSample, 1 / 60, true);
+      updateInsetMap(freeSample, true);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
       return;
@@ -3816,6 +4201,7 @@ cw_header('Cockpit Recorder Replay');
     updateAltimeterTape(sample, dtSec, snap);
     updateHsiOverlay(sample, dtSec, snap);
     updateEnginePanel(sample, dtSec, snap);
+    updateInsetMap(sample, snap);
     updateDebugOverlay(sample, view);
   }
 
@@ -4390,6 +4776,53 @@ cw_header('Cockpit Recorder Replay');
     seek(Math.max(0, Math.min(maxT, activeT + deltaSeconds)), !standaloneReplay, true);
   }
 
+  function playFromInsetMap() {
+    if (standaloneReplay) {
+      if (!standalonePlaying) {
+        togglePlayback();
+      }
+      return;
+    }
+    if (audio.paused && !visualFallbackPlaying) {
+      togglePlayback();
+    }
+  }
+
+  function setInsetMapZoom(nextZoom) {
+    insetMapZoom = clamp(Number(nextZoom) || 1, 1, 16);
+    insetMapSignature = '';
+    updateInsetMap(sampleAt(activeT), true);
+  }
+
+  function insetMapSvgPoint(event) {
+    if (!insetMapSvg) return null;
+    const rect = insetMapSvg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * INSET_MAP_SIZE,
+      y: ((event.clientY - rect.top) / rect.height) * INSET_MAP_SIZE,
+    };
+  }
+
+  function seekInsetMapTrack(event) {
+    if (!insetMapProjection || !insetMapProjection.track || !insetMapProjection.projector) return;
+    const click = insetMapSvgPoint(event);
+    if (!click) return;
+    let best = null;
+    for (const point of insetMapProjection.track) {
+      const projected = insetMapProjection.projector.project(point.lat, point.lon);
+      const distance = Math.hypot(projected.x - click.x, projected.y - click.y);
+      if (best === null || distance < best.distance) {
+        best = { distance, t: point.t };
+      }
+    }
+    if (!best || best.distance > 16) return;
+    event.preventDefault();
+    event.stopPropagation();
+    seek(best.t, !standaloneReplay, true);
+    playFromInsetMap();
+  }
+
   cameraModeSelect.addEventListener('change', () => {
     cameraMode = cameraModeSelect.value || 'synthetic_vision';
     applyCameraModeControls();
@@ -4518,6 +4951,23 @@ cw_header('Cockpit Recorder Replay');
       updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
     });
   }
+  if (insetMapZoomIn) {
+    insetMapZoomIn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setInsetMapZoom(insetMapZoom * 2);
+    });
+  }
+  if (insetMapZoomOut) {
+    insetMapZoomOut.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setInsetMapZoom(insetMapZoom / 2);
+    });
+  }
+  if (insetMapTop) {
+    insetMapTop.addEventListener('click', seekInsetMapTrack);
+  }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
     if (!standaloneReplay && audio.paused) {
@@ -4528,7 +4978,7 @@ cw_header('Cockpit Recorder Replay');
   rewindButton.addEventListener('click', () => skipBy(-10));
   forwardButton.addEventListener('click', () => skipBy(10));
   root.addEventListener('click', (event) => {
-    if (event.target.closest('.replay-dock, .replay-menu, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer')) {
+    if (event.target.closest('.replay-dock, .replay-menu, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer, .replay-inset-map')) {
       return;
     }
     togglePlayback();

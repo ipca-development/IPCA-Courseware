@@ -676,6 +676,7 @@ final class CockpitReconstructionService
             ),
             'sample_rate_hz' => (int)($diagnostics['sample_rate_hz'] ?? 10),
             'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
+            'airports' => $this->replayEndpointAirports($recordingId),
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
             'replay_sample_count' => $sampleCount,
@@ -730,6 +731,65 @@ final class CockpitReconstructionService
             echo json_encode($sample, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         }
         echo ']}';
+    }
+
+    /**
+     * @return array{departure:array<string,mixed>|null,destination:array<string,mixed>|null}
+     */
+    private function replayEndpointAirports(int $recordingId): array
+    {
+        $first = $this->replayEndpointSample($recordingId, 'ASC');
+        $last = $this->replayEndpointSample($recordingId, 'DESC');
+        return array(
+            'departure' => $first !== null ? $this->nearestReplayAirport((float)$first['latitude'], (float)$first['longitude']) : null,
+            'destination' => $last !== null ? $this->nearestReplayAirport((float)$last['latitude'], (float)$last['longitude']) : null,
+        );
+    }
+
+    /**
+     * @return array{latitude:float,longitude:float}|null
+     */
+    private function replayEndpointSample(int $recordingId, string $direction): ?array
+    {
+        $direction = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
+        $stmt = $this->pdo->prepare('
+            SELECT latitude, longitude
+            FROM ' . self::REPLAY_SAMPLE_TABLE . '
+            WHERE recording_id = ?
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY sample_index ' . $direction . '
+            LIMIT 1
+        ');
+        $stmt->execute(array($recordingId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || !is_numeric($row['latitude'] ?? null) || !is_numeric($row['longitude'] ?? null)) {
+            return null;
+        }
+        return array('latitude' => (float)$row['latitude'], 'longitude' => (float)$row['longitude']);
+    }
+
+    /**
+     * @return array{icao:string,lat:float,lon:float,distance_nm:float}|null
+     */
+    private function nearestReplayAirport(float $lat, float $lon): ?array
+    {
+        $best = null;
+        foreach (tv_adsb_airports() as $icao => $airport) {
+            if (!isset($airport['lat'], $airport['lon'])) {
+                continue;
+            }
+            $distanceNm = self::distanceNm($lat, $lon, (float)$airport['lat'], (float)$airport['lon']);
+            if ($best === null || $distanceNm < (float)$best['distance_nm']) {
+                $best = array(
+                    'icao' => (string)$icao,
+                    'lat' => (float)$airport['lat'],
+                    'lon' => (float)$airport['lon'],
+                    'distance_nm' => round($distanceNm, 2),
+                );
+            }
+        }
+        return $best !== null && (float)$best['distance_nm'] <= 8.0 ? $best : null;
     }
 
     /**
