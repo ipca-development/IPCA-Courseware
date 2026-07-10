@@ -3629,7 +3629,7 @@ cw_header('Cockpit Recorder Replay');
         <polyline points="${pathPoints.join(' ')}" fill="none" stroke="${INSET_MAP_MAGENTA}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"></polyline>
         ${airportHtml}
         <g transform="translate(${aircraftPos.x.toFixed(1)} ${aircraftPos.y.toFixed(1)}) rotate(${aircraftTrack.toFixed(1)}) scale(.46)">
-          <path d="${planePath}" fill="rgba(0,0,0,.96)" stroke="rgba(255,255,255,.96)" stroke-width="9" stroke-linejoin="round"></path>
+          <path d="${planePath}" fill="rgba(0,0,0,.96)" stroke="rgba(255,255,255,.96)" stroke-width="4.5" stroke-linejoin="round"></path>
         </g>
         <g transform="translate(208 37)">
           <text x="0" y="-18" font-size="11" text-anchor="middle">N</text>
@@ -4805,7 +4805,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function startInsetMapPan(event) {
-    if (!insetMapProjection || !insetMapProjection.scale) return;
+    if (!insetMapProjection || !insetMapProjection.projector || !insetMapProjection.projector.scale) return;
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -4827,7 +4827,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function moveInsetMapPan(event) {
-    if (!insetMapDragState || event.pointerId !== insetMapDragState.pointerId || !insetMapProjection || !insetMapProjection.scale) return;
+    if (!insetMapDragState || event.pointerId !== insetMapDragState.pointerId || !insetMapProjection || !insetMapProjection.projector || !insetMapProjection.projector.scale) return;
     event.preventDefault();
     event.stopPropagation();
     const dx = event.clientX - insetMapDragState.lastX;
@@ -4838,8 +4838,8 @@ cw_header('Cockpit Recorder Replay');
       insetMapDragState.moved = true;
       suppressInsetMapClick = true;
     }
-    insetMapPanE -= dx / insetMapProjection.scale;
-    insetMapPanN += dy / insetMapProjection.scale;
+    insetMapPanE -= dx / insetMapProjection.projector.scale;
+    insetMapPanN += dy / insetMapProjection.projector.scale;
     insetMapDragState.lastX = event.clientX;
     insetMapDragState.lastY = event.clientY;
     insetMapSignature = '';
