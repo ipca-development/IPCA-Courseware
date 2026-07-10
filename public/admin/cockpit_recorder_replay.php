@@ -913,7 +913,7 @@ cw_header('Cockpit Recorder Replay');
 .attitude-overlay .attitude-fpv {
   fill: none;
   stroke: #10d510;
-  stroke-width: 4;
+  stroke-width: 1;
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .46));
@@ -1916,6 +1916,8 @@ cw_header('Cockpit Recorder Replay');
   let displayHsiRmiBearingDeg = null;
   let displayHsiCdiOffsetPx = null;
   let displayAttitudeYellowReferenceX = null;
+  let displayFpvHeadingDeltaDeg = null;
+  let displayFpvPitchDeltaDeg = null;
   let displayFpvX = null;
   let displayFpvY = null;
   let displayRpm = null;
@@ -3386,22 +3388,33 @@ cw_header('Cockpit Recorder Replay');
     const velE = firstFinite(sample && sample.velocity_e_mps, sample && sample.g3x && sample.g3x.velocity_e_mps);
     const velN = firstFinite(sample && sample.velocity_n_mps, sample && sample.g3x && sample.g3x.velocity_n_mps);
     let velU = firstFinite(sample && sample.velocity_u_mps, sample && sample.g3x && sample.g3x.velocity_u_mps);
-    if (velE === null || velN === null) return null;
-    const horizontalMps = Math.hypot(Number(velE), Number(velN));
+    const groundspeedKt = firstFinite(sample && sample.ground_speed_kt, sample && sample.groundspeed_kt, sample && sample.g3x && sample.g3x.ground_speed_kt);
+    const horizontalMps = velE !== null && velN !== null
+      ? Math.hypot(Number(velE), Number(velN))
+      : (groundspeedKt === null ? null : Number(groundspeedKt) * 0.514444);
+    const horizontalSpeedOk = (Number.isFinite(horizontalMps) && horizontalMps >= 2.5) || (groundspeedKt !== null && Number(groundspeedKt) >= 5);
+    if (!horizontalSpeedOk) return null;
+    const trackTrue = firstFinite(sample && sample.track_deg_true, sample && sample.gps_track_deg, sample && sample.g3x && sample.g3x.track_deg_true, sample && sample.g3x && sample.g3x.gps_track_deg);
+    const fpvHeadingDeg = trackTrue !== null
+      ? normalizeDeg(trackTrue)
+      : (velE !== null && velN !== null ? normalizeDeg(Math.atan2(Number(velE), Number(velN)) * 180 / Math.PI) : null);
+    if (fpvHeadingDeg === null) return null;
     if (!Number.isFinite(horizontalMps) || horizontalMps < 2.5) return null;
     if (velU === null) {
       const vsiFpm = firstFinite(sample && sample.vertical_speed_fpm, sample && sample.estimated_vertical_speed_fpm);
       velU = vsiFpm === null ? 0 : Number(vsiFpm) * 0.00508;
     }
-    const fpvHeadingDeg = normalizeDeg(Math.atan2(Number(velE), Number(velN)) * 180 / Math.PI);
-    const fpvPitchDeg = Math.atan2(Number(velU), horizontalMps) * 180 / Math.PI;
-    const aircraftHeadingDeg = aircraftTrueHeadingFromSample(sample);
+    const fpvPitchDeg = Math.atan2(Number(velU), Number(horizontalMps)) * 180 / Math.PI;
+    const aircraftHeadingDeg = trueHeadingFromSample(sample);
     if (aircraftHeadingDeg === null) return null;
+    const headingDeltaDeg = normalizeSignedDeg(fpvHeadingDeg - aircraftHeadingDeg);
     return {
-      headingDeltaDeg: normalizeSignedDeg(fpvHeadingDeg - aircraftHeadingDeg),
+      headingDeltaDeg,
+      displayHeadingDeltaDeg: clamp(headingDeltaDeg, -22, 22),
       pitchDeltaDeg: fpvPitchDeg - Number(aircraftPitchDeg || 0),
       fpvHeadingDeg,
       fpvPitchDeg,
+      aircraftHeadingDeg,
     };
   }
 
@@ -3711,7 +3724,7 @@ cw_header('Cockpit Recorder Replay');
     horizonLine.style.transform = `translate(-50%, -50%) rotate(${-rollDeg}deg)`;
   }
 
-  function updateAttitudeIndicator(view, sample) {
+  function updateAttitudeIndicator(view, sample, dtSec = 1 / 60, snap = false) {
     if (!attitudeOverlay) return;
     if (!view) view = instrumentViewFromSample(sample);
     const mode = view && view.mode ? view.mode : cameraMode;
@@ -3719,6 +3732,8 @@ cw_header('Cockpit Recorder Replay');
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
       displayAttitudeYellowReferenceX = null;
+      displayFpvHeadingDeltaDeg = null;
+      displayFpvPitchDeltaDeg = null;
       displayFpvX = null;
       displayFpvY = null;
       return;
@@ -3730,6 +3745,8 @@ cw_header('Cockpit Recorder Replay');
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
       displayAttitudeYellowReferenceX = null;
+      displayFpvHeadingDeltaDeg = null;
+      displayFpvPitchDeltaDeg = null;
       displayFpvX = null;
       displayFpvY = null;
       return;
@@ -3801,7 +3818,7 @@ cw_header('Cockpit Recorder Replay');
     const slipHeight = 8;
     const yellowBankShiftPx = Math.tan(degToRad(clamp(rollDeg, -75, 75))) * (yellowReferenceY - horizonY);
     const yellowReferenceXTarget = centerX + yellowBankShiftPx;
-    const yellowAlpha = smoothFactor(12, 1 / 60);
+    const yellowAlpha = snap ? 1 : smoothFactor(12, dtSec);
     displayAttitudeYellowReferenceX = displayAttitudeYellowReferenceX === null || !Number.isFinite(displayAttitudeYellowReferenceX)
       ? yellowReferenceXTarget
       : displayAttitudeYellowReferenceX + (yellowReferenceXTarget - displayAttitudeYellowReferenceX) * yellowAlpha;
@@ -3809,26 +3826,37 @@ cw_header('Cockpit Recorder Replay');
     const fpv = instrumentEnabled('flight_path_vector') ? fpvVectorFromSample(sample, pitchDeg) : null;
     let fpvHtml = '';
     if (fpv) {
+      const fpvSourceAlpha = snap ? 1 : smoothFactor(5, dtSec);
+      displayFpvHeadingDeltaDeg = displayFpvHeadingDeltaDeg === null || !Number.isFinite(displayFpvHeadingDeltaDeg)
+        ? fpv.headingDeltaDeg
+        : normalizeSignedDeg(displayFpvHeadingDeltaDeg + normalizeSignedDeg(fpv.headingDeltaDeg - displayFpvHeadingDeltaDeg) * fpvSourceAlpha);
+      displayFpvPitchDeltaDeg = displayFpvPitchDeltaDeg === null || !Number.isFinite(displayFpvPitchDeltaDeg)
+        ? fpv.pitchDeltaDeg
+        : displayFpvPitchDeltaDeg + (fpv.pitchDeltaDeg - displayFpvPitchDeltaDeg) * fpvSourceAlpha;
+      const fpvDisplayHeadingDeltaDeg = clamp(displayFpvHeadingDeltaDeg, -22, 22);
+      const fpvDisplayPitchDeltaDeg = clamp(displayFpvPitchDeltaDeg, -22, 22);
       const fpvOffsetX = clamp(
-        Math.tan(degToRad(fpv.headingDeltaDeg)) / Math.tan(degToRad(horizontalFovDeg) / 2) * (width / 2),
+        Math.tan(degToRad(fpvDisplayHeadingDeltaDeg)) / Math.tan(degToRad(horizontalFovDeg) / 2) * (width / 2),
         -width * 0.42,
         width * 0.42
       );
-      const fpvOffsetY = clamp(pitchPx(fpv.pitchDeltaDeg), -height * 0.42, height * 0.42);
+      const fpvOffsetY = clamp(pitchPx(fpvDisplayPitchDeltaDeg), -height * 0.42, height * 0.42);
       const rollRad = degToRad(-rollDeg);
       const fpvTargetX = displayAttitudeYellowReferenceX + (Math.cos(rollRad) * fpvOffsetX) - (Math.sin(rollRad) * fpvOffsetY);
       const fpvTargetY = yellowReferenceY + (Math.sin(rollRad) * fpvOffsetX) + (Math.cos(rollRad) * fpvOffsetY);
-      const fpvAlpha = smoothFactor(12, 1 / 60);
+      const fpvAlpha = snap ? 1 : smoothFactor(8, dtSec);
       displayFpvX = displayFpvX === null || !Number.isFinite(displayFpvX) ? fpvTargetX : displayFpvX + (fpvTargetX - displayFpvX) * fpvAlpha;
       displayFpvY = displayFpvY === null || !Number.isFinite(displayFpvY) ? fpvTargetY : displayFpvY + (fpvTargetY - displayFpvY) * fpvAlpha;
       fpvHtml = `
       <g class="attitude-fpv" transform="translate(${displayFpvX.toFixed(1)} ${displayFpvY.toFixed(1)})">
-        <circle cx="0" cy="0" r="18"></circle>
-        <line x1="-42" y1="0" x2="-18" y2="0"></line>
-        <line x1="18" y1="0" x2="42" y2="0"></line>
-        <line x1="0" y1="-34" x2="0" y2="-18"></line>
+        <circle cx="0" cy="0" r="9"></circle>
+        <line x1="-21" y1="0" x2="-9" y2="0"></line>
+        <line x1="9" y1="0" x2="21" y2="0"></line>
+        <line x1="0" y1="-17" x2="0" y2="-9"></line>
       </g>`;
     } else {
+      displayFpvHeadingDeltaDeg = null;
+      displayFpvPitchDeltaDeg = null;
       displayFpvX = null;
       displayFpvY = null;
     }
@@ -4416,6 +4444,8 @@ cw_header('Cockpit Recorder Replay');
     displayHsiRmiBearingDeg = null;
     displayHsiCdiOffsetPx = null;
     displayAttitudeYellowReferenceX = null;
+    displayFpvHeadingDeltaDeg = null;
+    displayFpvPitchDeltaDeg = null;
     displayFpvX = null;
     displayFpvY = null;
     displayRpm = null;
@@ -4721,7 +4751,7 @@ cw_header('Cockpit Recorder Replay');
       const freeSample = sampleAt(activeT);
       const freeInstrumentView = instrumentViewFromSample(freeSample);
       updateHorizonLine(freeInstrumentView);
-      updateAttitudeIndicator(freeInstrumentView, freeSample);
+      updateAttitudeIndicator(freeInstrumentView, freeSample, 1 / 60, true);
       updateAirspeedTape(freeSample, 1 / 60, true);
       updateAoaIndicator(freeSample);
       updateAltimeterTape(freeSample, 1 / 60, true);
@@ -4741,7 +4771,7 @@ cw_header('Cockpit Recorder Replay');
     if (!target) {
       const fallbackInstrumentView = instrumentViewFromSample(sample);
       updateHorizonLine(fallbackInstrumentView);
-      updateAttitudeIndicator(fallbackInstrumentView, sample);
+      updateAttitudeIndicator(fallbackInstrumentView, sample, dtSec, snap);
       updateAirspeedTape(sample, dtSec, snap);
       updateAoaIndicator(sample);
       updateAltimeterTape(sample, dtSec, snap);
@@ -4804,7 +4834,7 @@ cw_header('Cockpit Recorder Replay');
       applyWorldCameraView(view, cameraPos, cameraAltitudeM);
     }
     updateHorizonLine(view);
-    updateAttitudeIndicator(view, sample);
+    updateAttitudeIndicator(view, sample, dtSec, snap);
     updateAirspeedTape(sample, dtSec, snap);
     updateAoaIndicator(sample);
     updateAltimeterTape(sample, dtSec, snap);
@@ -4998,6 +5028,7 @@ cw_header('Cockpit Recorder Replay');
     const debugNavBearing = sample ? hsiNavBearingFromSample(sample) : null;
     const debugNavSource = sample ? hsiRawNavSourceFromSample(sample) || hsiNavSourceFromSample(sample) : '';
     const debugHcdi = firstFinite(sample && sample.hcdi, sample && sample.horizontal_cdi_deflection, sample && sample.nav_cdi);
+    const debugFpv = sample ? fpvVectorFromSample(sample, pitch === null ? 0 : pitch) : null;
     const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
     const qualityRows = [
       ['position', 'position_quality', 'position_source', 'position_quality_reason'],
@@ -5156,6 +5187,9 @@ cw_header('Cockpit Recorder Replay');
       `NavCRS/course: ${debugNavCourse === null ? '--' : normalizeDeg(debugNavCourse).toFixed(1)} deg`,
       `NavBrg/RMI: ${debugNavBearing === null ? '--' : normalizeDeg(debugNavBearing).toFixed(1)} deg`,
       `HCDI: ${debugHcdi === null ? '--' : debugHcdi.toFixed(3)}`,
+      `FPV heading/pitch: ${debugFpv ? `${debugFpv.fpvHeadingDeg.toFixed(1)} / ${debugFpv.fpvPitchDeg.toFixed(1)} deg` : '--'}`,
+      `FPV drift/display: ${debugFpv ? `${debugFpv.headingDeltaDeg.toFixed(1)} / ${debugFpv.displayHeadingDeltaDeg.toFixed(1)} deg` : '--'}`,
+      `FPV aircraft true heading: ${debugFpv ? `${debugFpv.aircraftHeadingDeg.toFixed(1)} deg` : '--'}`,
       `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
       `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
     ];
