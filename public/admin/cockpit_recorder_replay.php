@@ -3505,6 +3505,9 @@ cw_header('Cockpit Recorder Replay');
     };
     return {
       project,
+      latLonToNm,
+      baseCenterE,
+      baseCenterN,
       rangeNm: fullRangeNm / zoom,
       scale,
       points: nmPoints,
@@ -4891,12 +4894,21 @@ cw_header('Cockpit Recorder Replay');
       const projected = insetMapProjection.projector.project(point.lat, point.lon);
       const distance = Math.hypot(projected.x - click.x, projected.y - click.y);
       if (best === null || distance < best.distance) {
-        best = { distance, t: point.t };
+        best = { distance, t: point.t, point };
       }
     }
     if (!best || best.distance > 16) return;
     event.preventDefault();
     event.stopPropagation();
+    const selectedNm = insetMapProjection.projector.latLonToNm(best.point.lat, best.point.lon);
+    if (insetMapZoom > 1) {
+      insetMapPanE = 0;
+      insetMapPanN = 0;
+    } else {
+      insetMapPanE = selectedNm.e - insetMapProjection.projector.baseCenterE;
+      insetMapPanN = selectedNm.n - insetMapProjection.projector.baseCenterN;
+    }
+    insetMapSignature = '';
     seek(best.t, !standaloneReplay, true);
     playFromInsetMap();
   }
