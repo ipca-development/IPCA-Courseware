@@ -301,6 +301,19 @@ cw_header('Cockpit Recorder Replay');
   stroke: rgba(255, 255, 255, .66);
   stroke-width: .8;
 }
+.hsi-overlay .hsi-heading-trend {
+  fill: none;
+  stroke: #d84cff;
+  stroke-width: 6.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
+}
+.hsi-overlay .hsi-heading-trend-arrow {
+  fill: #d84cff;
+  stroke: #d84cff;
+  stroke-width: 1;
+}
 .hsi-overlay .hsi-top-pointer {
   fill: rgba(255, 255, 255, .96);
   stroke: rgba(255, 255, 255, .72);
@@ -3145,6 +3158,53 @@ cw_header('Cockpit Recorder Replay');
     return String(normalized / 10);
   }
 
+  function hsiHeadingRateDegPerSec(sample) {
+    if (!payload || !Array.isArray(payload.samples) || payload.samples.length < 2 || !sample) return null;
+    const samples = payload.samples;
+    const firstT = Number(samples[0] && samples[0].t);
+    const lastT = Number(samples[samples.length - 1] && samples[samples.length - 1].t);
+    const t = clamp(firstFinite(sample.t, activeT), firstT, lastT);
+    let beforeT = Math.max(firstT, t - 1.0);
+    let afterT = Math.min(lastT, t);
+    if (afterT - beforeT < 0.25) {
+      beforeT = t;
+      afterT = Math.min(lastT, t + 1.0);
+    }
+    const span = afterT - beforeT;
+    if (!Number.isFinite(span) || span < 0.25) return null;
+    const beforeHeading = hsiHeadingFromSample(sampleAt(beforeT));
+    const afterHeading = hsiHeadingFromSample(sampleAt(afterT));
+    if (beforeHeading === null || afterHeading === null) return null;
+    return normalizeSignedDeg(Number(afterHeading) - Number(beforeHeading)) / span;
+  }
+
+  function hsiTrendPoint(deg, radius) {
+    const rad = degToRad(deg);
+    return {
+      x: Math.sin(rad) * radius,
+      y: -Math.cos(rad) * radius,
+    };
+  }
+
+  function hsiHeadingTrendHtml(sample, radius) {
+    const rateDegPerSec = hsiHeadingRateDegPerSec(sample);
+    if (rateDegPerSec === null || Math.abs(rateDegPerSec) < 0.15) return '';
+    const projectedDeg = clamp(rateDegPerSec * 6.0, -60, 60);
+    if (Math.abs(projectedDeg) < 1) return '';
+    const start = hsiTrendPoint(0, radius);
+    const end = hsiTrendPoint(projectedDeg, radius);
+    const large = Math.abs(projectedDeg) > 180 ? 1 : 0;
+    const sweep = projectedDeg >= 0 ? 1 : 0;
+    const arrow = Math.abs(rateDegPerSec) > 4.0;
+    return `
+      <defs>
+        <marker id="hsiHeadingTrendArrow" markerWidth="7" markerHeight="7" refX="6.2" refY="3.5" orient="auto" markerUnits="strokeWidth">
+          <path class="hsi-heading-trend-arrow" d="M 0 0 L 7 3.5 L 0 7 Z"></path>
+        </marker>
+      </defs>
+      <path class="hsi-heading-trend" d="M ${start.x.toFixed(1)} ${start.y.toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 ${large} ${sweep} ${end.x.toFixed(1)} ${end.y.toFixed(1)}"${arrow ? ' marker-end="url(#hsiHeadingTrendArrow)"' : ''}></path>`;
+  }
+
   function updateHsiOverlay(sample, dtSec = 1 / 60, snap = false) {
     if (!hsiOverlay) return;
     const heading = hsiHeadingFromSample(sample);
@@ -3178,6 +3238,7 @@ cw_header('Cockpit Recorder Replay');
     const cy = 176;
     const r = 126;
     const innerR = 72;
+    const trendHtml = hsiHeadingTrendHtml(sample, r - 18);
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
@@ -3228,6 +3289,7 @@ cw_header('Cockpit Recorder Replay');
       hdgBugText,
       crsText,
       windHtml,
+      trendHtml,
     ].join('|');
     if (signature === hsiOverlaySignature) {
       hsiOverlay.hidden = false;
@@ -3250,6 +3312,7 @@ cw_header('Cockpit Recorder Replay');
           ${bugHtml}
           ${trackHtml}
         </g>
+        ${trendHtml}
         <polygon class="hsi-top-pointer" points="0,${(-r + 4).toFixed(1)} -5.8,${(-r - 8.2).toFixed(1)} 5.8,${(-r - 8.2).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
         ${courseHtml}
