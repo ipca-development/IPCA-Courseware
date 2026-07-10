@@ -3751,7 +3751,7 @@ cw_header('Cockpit Recorder Replay');
     const slipGap = 2;
     const slipHeight = 8;
     const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
-    const yellowBankShiftPx = -Math.tan(degToRad(clamp(rollDeg, -75, 75))) * (yellowReferenceY - horizonY);
+    const yellowBankShiftPx = Math.tan(degToRad(clamp(rollDeg, -75, 75))) * (yellowReferenceY - horizonY);
     const yellowReferenceXTarget = centerX + yellowBankShiftPx;
     const yellowAlpha = smoothFactor(12, 1 / 60);
     displayAttitudeYellowReferenceX = displayAttitudeYellowReferenceX === null || !Number.isFinite(displayAttitudeYellowReferenceX)
