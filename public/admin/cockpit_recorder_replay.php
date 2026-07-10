@@ -913,7 +913,7 @@ cw_header('Cockpit Recorder Replay');
 .attitude-overlay .attitude-fpv {
   fill: none;
   stroke: #10d510;
-  stroke-width: 1;
+  stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .46));
@@ -3395,17 +3395,29 @@ cw_header('Cockpit Recorder Replay');
     const horizontalSpeedOk = (Number.isFinite(horizontalMps) && horizontalMps >= 2.5) || (groundspeedKt !== null && Number(groundspeedKt) >= 5);
     if (!horizontalSpeedOk) return null;
     const trackTrue = firstFinite(sample && sample.track_deg_true, sample && sample.gps_track_deg, sample && sample.g3x && sample.g3x.track_deg_true, sample && sample.g3x && sample.g3x.gps_track_deg);
-    const fpvHeadingDeg = trackTrue !== null
-      ? normalizeDeg(trackTrue)
-      : (velE !== null && velN !== null ? normalizeDeg(Math.atan2(Number(velE), Number(velN)) * 180 / Math.PI) : null);
-    if (fpvHeadingDeg === null) return null;
+    const velocityHeadingTrueDeg = velE !== null && velN !== null ? normalizeDeg(Math.atan2(Number(velE), Number(velN)) * 180 / Math.PI) : null;
+    const fpvHeadingTrueDeg = velocityHeadingTrueDeg !== null ? velocityHeadingTrueDeg : (trackTrue !== null ? normalizeDeg(trackTrue) : null);
+    if (fpvHeadingTrueDeg === null) return null;
     if (!Number.isFinite(horizontalMps) || horizontalMps < 2.5) return null;
     if (velU === null) {
       const vsiFpm = firstFinite(sample && sample.vertical_speed_fpm, sample && sample.estimated_vertical_speed_fpm);
       velU = vsiFpm === null ? 0 : Number(vsiFpm) * 0.00508;
     }
     const fpvPitchDeg = Math.atan2(Number(velU), Number(horizontalMps)) * 180 / Math.PI;
-    const aircraftHeadingDeg = trueHeadingFromSample(sample);
+    const magneticHeadingDeg = firstFinite(
+      sample && sample.heading_deg_magnetic,
+      sample && sample.magnetic_heading_deg,
+      sample && sample.g3x && sample.g3x.heading_deg_magnetic
+    );
+    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
+    const screenHeadingDeg = syntheticVisionHeadingFromSample(sample);
+    let aircraftHeadingDeg = screenHeadingDeg === null ? null : normalizeDeg(screenHeadingDeg);
+    let fpvHeadingDeg = fpvHeadingTrueDeg;
+    let headingReference = magneticHeadingDeg !== null ? 'SCREEN_MAGNETIC' : 'SCREEN_TRUE';
+    if (aircraftHeadingDeg === null) {
+      aircraftHeadingDeg = aircraftTrueHeadingFromSample(sample);
+      headingReference = 'TRUE';
+    }
     if (aircraftHeadingDeg === null) return null;
     const headingDeltaDeg = normalizeSignedDeg(fpvHeadingDeg - aircraftHeadingDeg);
     return {
@@ -3413,8 +3425,13 @@ cw_header('Cockpit Recorder Replay');
       displayHeadingDeltaDeg: clamp(headingDeltaDeg, -22, 22),
       pitchDeltaDeg: fpvPitchDeg - Number(aircraftPitchDeg || 0),
       fpvHeadingDeg,
+      fpvHeadingTrueDeg,
+      velocityHeadingTrueDeg,
+      trackTrueDeg: trackTrue === null ? null : normalizeDeg(trackTrue),
       fpvPitchDeg,
       aircraftHeadingDeg,
+      magneticVariationDeg: variation,
+      headingReference,
     };
   }
 
@@ -3849,10 +3866,10 @@ cw_header('Cockpit Recorder Replay');
       displayFpvY = displayFpvY === null || !Number.isFinite(displayFpvY) ? fpvTargetY : displayFpvY + (fpvTargetY - displayFpvY) * fpvAlpha;
       fpvHtml = `
       <g class="attitude-fpv" transform="translate(${displayFpvX.toFixed(1)} ${displayFpvY.toFixed(1)})">
-        <circle cx="0" cy="0" r="9"></circle>
-        <line x1="-21" y1="0" x2="-9" y2="0"></line>
-        <line x1="9" y1="0" x2="21" y2="0"></line>
-        <line x1="0" y1="-17" x2="0" y2="-9"></line>
+        <circle cx="0" cy="0" r="12"></circle>
+        <line x1="-27" y1="0" x2="-12" y2="0"></line>
+        <line x1="12" y1="0" x2="27" y2="0"></line>
+        <line x1="0" y1="-22" x2="0" y2="-12"></line>
       </g>`;
     } else {
       displayFpvHeadingDeltaDeg = null;
@@ -5187,9 +5204,12 @@ cw_header('Cockpit Recorder Replay');
       `NavCRS/course: ${debugNavCourse === null ? '--' : normalizeDeg(debugNavCourse).toFixed(1)} deg`,
       `NavBrg/RMI: ${debugNavBearing === null ? '--' : normalizeDeg(debugNavBearing).toFixed(1)} deg`,
       `HCDI: ${debugHcdi === null ? '--' : debugHcdi.toFixed(3)}`,
-      `FPV heading/pitch: ${debugFpv ? `${debugFpv.fpvHeadingDeg.toFixed(1)} / ${debugFpv.fpvPitchDeg.toFixed(1)} deg` : '--'}`,
+      `FPV ref/display heading: ${debugFpv ? `${debugFpv.headingReference} / ${debugFpv.fpvHeadingDeg.toFixed(1)} deg` : '--'}`,
+      `FPV true velocity/track: ${debugFpv ? `${debugFpv.velocityHeadingTrueDeg === null ? '--' : debugFpv.velocityHeadingTrueDeg.toFixed(1)} / ${debugFpv.trackTrueDeg === null ? '--' : debugFpv.trackTrueDeg.toFixed(1)} deg` : '--'}`,
+      `FPV true heading/pitch: ${debugFpv ? `${debugFpv.fpvHeadingTrueDeg.toFixed(1)} / ${debugFpv.fpvPitchDeg.toFixed(1)} deg` : '--'}`,
       `FPV drift/display: ${debugFpv ? `${debugFpv.headingDeltaDeg.toFixed(1)} / ${debugFpv.displayHeadingDeltaDeg.toFixed(1)} deg` : '--'}`,
-      `FPV aircraft true heading: ${debugFpv ? `${debugFpv.aircraftHeadingDeg.toFixed(1)} deg` : '--'}`,
+      `FPV aircraft heading/ref: ${debugFpv ? `${debugFpv.aircraftHeadingDeg.toFixed(1)} deg / ${debugFpv.headingReference}` : '--'}`,
+      `FPV magnetic variation: ${debugFpv && debugFpv.magneticVariationDeg !== null ? `${Number(debugFpv.magneticVariationDeg).toFixed(1)} deg` : '--'}`,
       `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
       `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
     ];
