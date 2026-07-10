@@ -829,6 +829,9 @@ final class CockpitReconstructionService
             'heading_bug_deg',
             'track_deg_true',
             'track_source',
+            'velocity_e_mps',
+            'velocity_n_mps',
+            'velocity_u_mps',
             'nav_course_deg',
             'nav_bearing_deg',
             'nav_xtk_nm',
@@ -954,6 +957,9 @@ final class CockpitReconstructionService
             'heading_deg_magnetic',
             'track_deg_true',
             'wind_direction_deg_true',
+            'velocity_e_mps',
+            'velocity_n_mps',
+            'velocity_u_mps',
             'magnetic_variation_deg',
             'magnetic_variation_source',
             'compass_deviation_deg',
@@ -976,6 +982,9 @@ final class CockpitReconstructionService
             'track_quality_reason',
             'speed_quality_reason',
             'crab_angle_deg',
+            'velocity_e_mps',
+            'velocity_n_mps',
+            'velocity_u_mps',
             'gps_altitude_ft',
             'baro_altitude_ft',
             'estimated_indicated_altitude_ft',
@@ -1138,14 +1147,14 @@ final class CockpitReconstructionService
         if (array_key_exists('raw_attitude_quality', $row)) {
             $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
         }
-        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
         }
         if (isset($row['canonical_g3x_row_json']) && trim((string)$row['canonical_g3x_row_json']) !== '') {
             $canonicalG3x = $this->publicG3XFields(array('g3x_row_json' => $row['canonical_g3x_row_json']));
-            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm') as $field) {
+            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && $canonicalG3x[$field] !== null) {
                     $sample[$field] = (float)$canonicalG3x[$field];
                 }
@@ -3765,6 +3774,9 @@ final class CockpitReconstructionService
             'heading_deg_magnetic',
             'track_deg_true',
             'wind_direction_deg_true',
+            'velocity_e_mps',
+            'velocity_n_mps',
+            'velocity_u_mps',
             'magnetic_variation_deg',
             'magnetic_variation_source',
             'compass_deviation_deg',
@@ -4279,6 +4291,7 @@ final class CockpitReconstructionService
             'magnetic_variation_deg' => $num($g3x, 'Magnetic Variation (deg)', 'MagVar'),
             'velocity_e_mps' => $num($g3x, 'GPS Velocity E (m/sec)', 'GPSVelE'),
             'velocity_n_mps' => $num($g3x, 'GPS Velocity N (m/sec)', 'GPSVelN'),
+            'velocity_u_mps' => $num($g3x, 'GPS Velocity U (m/sec)', 'GPSVelU'),
             'groundspeed_kt' => $num($g3x, 'GPS Ground Speed (kt)', 'GndSpd'),
             'track_deg' => $num($g3x, 'GPS Ground Track (deg)', 'TRK'),
             'slip_g' => $num($g3x, 'Lateral Acceleration (G)', 'LatAc'),

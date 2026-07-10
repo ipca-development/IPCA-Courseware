@@ -35,6 +35,9 @@ CALL ipca_add_replay_column_if_missing('vnav_altitude_ft', 'DECIMAL(10,1) NULL')
 CALL ipca_add_replay_column_if_missing('nav_distance_nm', 'DECIMAL(10,3) NULL');
 CALL ipca_add_replay_column_if_missing('sel_vspeed_fpm', 'DECIMAL(10,1) NULL');
 CALL ipca_add_replay_column_if_missing('sel_ias_kt', 'DECIMAL(10,2) NULL');
+CALL ipca_add_replay_column_if_missing('velocity_e_mps', 'DECIMAL(10,3) NULL');
+CALL ipca_add_replay_column_if_missing('velocity_n_mps', 'DECIMAL(10,3) NULL');
+CALL ipca_add_replay_column_if_missing('velocity_u_mps', 'DECIMAL(10,3) NULL');
 CALL ipca_add_replay_column_if_missing('density_altitude_ft', 'DECIMAL(10,1) NULL');
 CALL ipca_add_replay_column_if_missing('height_agl_ft', 'DECIMAL(10,1) NULL');
 CALL ipca_add_replay_column_if_missing('wind_speed_kt', 'DECIMAL(10,2) NULL');

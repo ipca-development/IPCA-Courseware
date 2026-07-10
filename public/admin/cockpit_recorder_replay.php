@@ -910,6 +910,14 @@ cw_header('Cockpit Recorder Replay');
 .attitude-overlay .attitude-bank-pointer {
   fill: #fff;
 }
+.attitude-overlay .attitude-fpv {
+  fill: none;
+  stroke: #10d510;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .46));
+}
 .airspeed-tape {
   position: absolute;
   left: calc(clamp(112px, 18.5vw, 220px) + 60px);
@@ -1908,6 +1916,8 @@ cw_header('Cockpit Recorder Replay');
   let displayHsiRmiBearingDeg = null;
   let displayHsiCdiOffsetPx = null;
   let displayAttitudeYellowReferenceX = null;
+  let displayFpvX = null;
+  let displayFpvY = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
   let altimeterSettingUnit = 'hpa';
@@ -3363,6 +3373,38 @@ cw_header('Cockpit Recorder Replay');
     return direction === null ? null : normalizeDeg(direction);
   }
 
+  function aircraftTrueHeadingFromSample(sample) {
+    const trueHeading = firstFinite(sample && sample.heading_deg_true, sample && sample.true_heading_deg);
+    if (trueHeading !== null) return normalizeDeg(trueHeading);
+    const magnetic = firstFinite(sample && sample.heading_deg_magnetic, sample && sample.magnetic_heading_deg, sample && sample.heading_deg);
+    if (magnetic === null) return null;
+    const variation = firstFinite(sample && sample.magnetic_variation_deg, sample && sample.g3x && sample.g3x.magnetic_variation_deg);
+    return normalizeDeg(Number(magnetic) + (variation === null ? 0 : Number(variation)));
+  }
+
+  function fpvVectorFromSample(sample, aircraftPitchDeg) {
+    const velE = firstFinite(sample && sample.velocity_e_mps, sample && sample.g3x && sample.g3x.velocity_e_mps);
+    const velN = firstFinite(sample && sample.velocity_n_mps, sample && sample.g3x && sample.g3x.velocity_n_mps);
+    let velU = firstFinite(sample && sample.velocity_u_mps, sample && sample.g3x && sample.g3x.velocity_u_mps);
+    if (velE === null || velN === null) return null;
+    const horizontalMps = Math.hypot(Number(velE), Number(velN));
+    if (!Number.isFinite(horizontalMps) || horizontalMps < 2.5) return null;
+    if (velU === null) {
+      const vsiFpm = firstFinite(sample && sample.vertical_speed_fpm, sample && sample.estimated_vertical_speed_fpm);
+      velU = vsiFpm === null ? 0 : Number(vsiFpm) * 0.00508;
+    }
+    const fpvHeadingDeg = normalizeDeg(Math.atan2(Number(velE), Number(velN)) * 180 / Math.PI);
+    const fpvPitchDeg = Math.atan2(Number(velU), horizontalMps) * 180 / Math.PI;
+    const aircraftHeadingDeg = aircraftTrueHeadingFromSample(sample);
+    if (aircraftHeadingDeg === null) return null;
+    return {
+      headingDeltaDeg: normalizeSignedDeg(fpvHeadingDeg - aircraftHeadingDeg),
+      pitchDeltaDeg: fpvPitchDeg - Number(aircraftPitchDeg || 0),
+      fpvHeadingDeg,
+      fpvPitchDeg,
+    };
+  }
+
   function hsiWindIndicatorHtml(sample, headingDeg) {
     if (!instrumentEnabled('wind_indicator')) return '';
     const speed = windSpeedFromSample(sample);
@@ -3677,6 +3719,8 @@ cw_header('Cockpit Recorder Replay');
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
       displayAttitudeYellowReferenceX = null;
+      displayFpvX = null;
+      displayFpvY = null;
       return;
     }
     const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
@@ -3686,6 +3730,8 @@ cw_header('Cockpit Recorder Replay');
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
       displayAttitudeYellowReferenceX = null;
+      displayFpvX = null;
+      displayFpvY = null;
       return;
     }
     const dbg = currentCameraDebug || {};
@@ -3759,6 +3805,33 @@ cw_header('Cockpit Recorder Replay');
     displayAttitudeYellowReferenceX = displayAttitudeYellowReferenceX === null || !Number.isFinite(displayAttitudeYellowReferenceX)
       ? yellowReferenceXTarget
       : displayAttitudeYellowReferenceX + (yellowReferenceXTarget - displayAttitudeYellowReferenceX) * yellowAlpha;
+    const horizontalFovDeg = Math.max(1, firstFinite(dbg.activeHorizontalFovDeg, dbg.horizontalFovDeg, syntheticVisionHorizontalFovDeg()) || syntheticVisionHorizontalFovDeg());
+    const fpv = instrumentEnabled('flight_path_vector') ? fpvVectorFromSample(sample, pitchDeg) : null;
+    let fpvHtml = '';
+    if (fpv) {
+      const fpvOffsetX = clamp(
+        Math.tan(degToRad(fpv.headingDeltaDeg)) / Math.tan(degToRad(horizontalFovDeg) / 2) * (width / 2),
+        -width * 0.42,
+        width * 0.42
+      );
+      const fpvOffsetY = clamp(pitchPx(fpv.pitchDeltaDeg), -height * 0.42, height * 0.42);
+      const rollRad = degToRad(-rollDeg);
+      const fpvTargetX = displayAttitudeYellowReferenceX + (Math.cos(rollRad) * fpvOffsetX) - (Math.sin(rollRad) * fpvOffsetY);
+      const fpvTargetY = yellowReferenceY + (Math.sin(rollRad) * fpvOffsetX) + (Math.cos(rollRad) * fpvOffsetY);
+      const fpvAlpha = smoothFactor(12, 1 / 60);
+      displayFpvX = displayFpvX === null || !Number.isFinite(displayFpvX) ? fpvTargetX : displayFpvX + (fpvTargetX - displayFpvX) * fpvAlpha;
+      displayFpvY = displayFpvY === null || !Number.isFinite(displayFpvY) ? fpvTargetY : displayFpvY + (fpvTargetY - displayFpvY) * fpvAlpha;
+      fpvHtml = `
+      <g class="attitude-fpv" transform="translate(${displayFpvX.toFixed(1)} ${displayFpvY.toFixed(1)})">
+        <circle cx="0" cy="0" r="18"></circle>
+        <line x1="-42" y1="0" x2="-18" y2="0"></line>
+        <line x1="18" y1="0" x2="42" y2="0"></line>
+        <line x1="0" y1="-34" x2="0" y2="-18"></line>
+      </g>`;
+    } else {
+      displayFpvX = null;
+      displayFpvY = null;
+    }
     const signature = [
       Math.round(width),
       Math.round(height),
@@ -3775,6 +3848,8 @@ cw_header('Cockpit Recorder Replay');
       Math.round(attitudeYellowReferenceScale * 100),
       Math.round(slipX),
       Math.round(displayAttitudeYellowReferenceX),
+      displayFpvX === null ? 'fpv-x' : Math.round(displayFpvX),
+      displayFpvY === null ? 'fpv-y' : Math.round(displayFpvY),
     ].join('|');
     if (signature === attitudeOverlaySignature) {
       setElementHidden(attitudeOverlay, false);
@@ -3801,6 +3876,7 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-yellow" points="-272,76 0,-12 -176,76"></polygon>
         <polygon class="attitude-yellow" points="272,76 0,-12 176,76"></polygon>
       </g>
+      ${fpvHtml}
     `;
     setElementHidden(attitudeOverlay, false);
   }
@@ -4340,6 +4416,8 @@ cw_header('Cockpit Recorder Replay');
     displayHsiRmiBearingDeg = null;
     displayHsiCdiOffsetPx = null;
     displayAttitudeYellowReferenceX = null;
+    displayFpvX = null;
+    displayFpvY = null;
     displayRpm = null;
     displayEngineValues.clear();
     hsiOverlaySignature = '';
@@ -4827,6 +4905,9 @@ cw_header('Cockpit Recorder Replay');
       heading_bug_deg: lerpAngle(before.heading_bug_deg, after.heading_bug_deg),
       nav_course_deg: lerpAngle(before.nav_course_deg, after.nav_course_deg),
       nav_bearing_deg: lerpAngle(before.nav_bearing_deg, after.nav_bearing_deg),
+      velocity_e_mps: lerp(before.velocity_e_mps, after.velocity_e_mps),
+      velocity_n_mps: lerp(before.velocity_n_mps, after.velocity_n_mps),
+      velocity_u_mps: lerp(before.velocity_u_mps, after.velocity_u_mps),
       nav_xtk_nm: lerp(before.nav_xtk_nm, after.nav_xtk_nm),
       nav_distance_nm: lerp(before.nav_distance_nm, after.nav_distance_nm),
       hcdi: lerp(before.hcdi, after.hcdi),
