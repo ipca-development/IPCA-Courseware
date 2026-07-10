@@ -1898,6 +1898,7 @@ cw_header('Cockpit Recorder Replay');
   let displayHsiHeadingDeg = null;
   let displayHsiHeadingBugDeg = null;
   let displayHsiRmiBearingDeg = null;
+  let displayHsiCdiOffsetPx = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
   let altimeterSettingUnit = 'hpa';
@@ -3393,6 +3394,7 @@ cw_header('Cockpit Recorder Replay');
       displayHsiHeadingDeg = null;
       displayHsiHeadingBugDeg = null;
       displayHsiRmiBearingDeg = null;
+      displayHsiCdiOffsetPx = null;
       return;
     }
     const headingDeg = normalizeDeg(heading);
@@ -3402,12 +3404,13 @@ cw_header('Cockpit Recorder Replay');
     const courseDeg = course === null ? null : normalizeDeg(course);
     const trackMag = hsiTrackMagneticFromSample(sample);
     const navDisplay = hsiNavDisplay(sample);
-    const cdiOffset = hsiCdiOffsetPxFromSample(sample, courseDeg, navDisplay);
+    const cdiOffsetTarget = hsiCdiOffsetPxFromSample(sample, courseDeg, navDisplay);
     const navLabel = navDisplay.label;
     const navColorClass = navDisplay.isGps ? 'is-gps' : '';
     const crsValueClass = navDisplay.isGps ? 'hsi-magenta' : 'hsi-green';
     const toFrom = hsiToFromFromSample(sample, courseDeg);
     const alpha = snap ? 1 : smoothFactor(16, dtSec);
+    const cdiAlpha = snap ? 1 : smoothFactor(8, dtSec);
     displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
       ? headingDeg
       : lerpAngleDeg(displayHsiHeadingDeg, headingDeg, alpha);
@@ -3422,6 +3425,9 @@ cw_header('Cockpit Recorder Replay');
       : ((snap || displayHsiRmiBearingDeg === null || !Number.isFinite(displayHsiRmiBearingDeg))
         ? normalizeDeg(rmiBearing)
         : lerpAngleDeg(displayHsiRmiBearingDeg, normalizeDeg(rmiBearing), alpha));
+    displayHsiCdiOffsetPx = (snap || displayHsiCdiOffsetPx === null || !Number.isFinite(displayHsiCdiOffsetPx))
+      ? cdiOffsetTarget
+      : lerp(displayHsiCdiOffsetPx, cdiOffsetTarget, cdiAlpha);
 
     const cx = 195;
     const cy = 176;
@@ -3477,7 +3483,7 @@ cw_header('Cockpit Recorder Replay');
           <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 12).toFixed(1)}" x2="0" y2="54"></line>
           <line class="hsi-nav ${navColorClass}" x1="0" y1="-54" x2="0" y2="${(-r + 36).toFixed(1)}"></line>
           <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r + 24).toFixed(1)} -7,${(-r + 38).toFixed(1)} 7,${(-r + 38).toFixed(1)}"></polygon>
-          <g transform="translate(${cdiOffset.toFixed(1)} 0)">
+          <g transform="translate(${displayHsiCdiOffsetPx.toFixed(1)} 0)">
             <line class="hsi-cdi-course ${navColorClass}" x1="0" y1="-48" x2="0" y2="48"></line>
           </g>
           ${toFrom === 'FROM'
@@ -3491,7 +3497,7 @@ cw_header('Cockpit Recorder Replay');
       trackMag === null ? 't' : Math.round(trackMag * 10),
       courseDeg === null ? 'c' : Math.round(courseDeg * 10),
       courseDeg === null ? 'cr' : Math.round(courseRotation * 10),
-      Math.round(cdiOffset),
+      Math.round(displayHsiCdiOffsetPx),
       navLabel,
       headingText,
       hdgBugText,
@@ -4224,6 +4230,7 @@ cw_header('Cockpit Recorder Replay');
     displayHsiHeadingDeg = null;
     displayHsiHeadingBugDeg = null;
     displayHsiRmiBearingDeg = null;
+    displayHsiCdiOffsetPx = null;
     displayRpm = null;
     displayEngineValues.clear();
     hsiOverlaySignature = '';
