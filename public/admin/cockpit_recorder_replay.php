@@ -3655,8 +3655,8 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
     const dbg = currentCameraDebug || {};
-    const pitchDeg = firstFinite(dbg.pitchDegUsed, view.pitch, 0) || 0;
-    const rollDeg = firstFinite(dbg.rollDegUsed, view.roll, 0) || 0;
+    const pitchDeg = firstFinite(view.pitch, dbg.uncalibratedPitchDeg, dbg.pitchDegUsed, 0) || 0;
+    const rollDeg = firstFinite(view.roll, dbg.uncalibratedRollDeg, dbg.rollDegUsed, 0) || 0;
     const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = height / 2;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
@@ -3687,8 +3687,8 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
     const dbg = currentCameraDebug || {};
-    const pitchDeg = firstFinite(dbg.pitchDegUsed, view.pitch, 0) || 0;
-    const rollDeg = firstFinite(dbg.rollDegUsed, view.roll, 0) || 0;
+    const pitchDeg = firstFinite(view.pitch, dbg.uncalibratedPitchDeg, dbg.pitchDegUsed, 0) || 0;
+    const rollDeg = firstFinite(view.roll, dbg.uncalibratedRollDeg, dbg.rollDegUsed, 0) || 0;
     const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = height / 2;
     const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
