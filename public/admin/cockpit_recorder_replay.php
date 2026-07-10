@@ -362,7 +362,11 @@ cw_header('Cockpit Recorder Replay');
   aspect-ratio: 1 / 1;
   border-radius: 17px 17px 8px 8px;
   pointer-events: auto;
-  cursor: crosshair;
+  cursor: grab;
+  touch-action: none;
+}
+.replay-inset-map-top.is-dragging {
+  cursor: grabbing;
 }
 .replay-inset-map-profile {
   width: 100%;
@@ -1802,6 +1806,10 @@ cw_header('Cockpit Recorder Replay');
   let insetMapSignature = '';
   let insetMapZoom = 1;
   let insetMapProjection = null;
+  let insetMapPanE = 0;
+  let insetMapPanN = 0;
+  let insetMapDragState = null;
+  let suppressInsetMapClick = false;
   let localVisualAltitudeOffsetM = null;
   let localVisualAltitudeOffsetSource = 'not_initialized';
   let visualFallbackPlaying = false;
@@ -3478,8 +3486,8 @@ cw_header('Cockpit Recorder Replay');
     const baseCenterE = (minE + maxE) / 2;
     const baseCenterN = (minN + maxN) / 2;
     const zoom = clamp(insetMapZoom, 1, 16);
-    const centerE = zoom > 1 && currentNm ? currentNm.e : baseCenterE;
-    const centerN = zoom > 1 && currentNm ? currentNm.n : baseCenterN;
+    const centerE = (zoom > 1 && currentNm ? currentNm.e : baseCenterE) + insetMapPanE;
+    const centerN = (zoom > 1 && currentNm ? currentNm.n : baseCenterN) + insetMapPanN;
     const widthNm = Math.max(0.01, maxE - minE);
     const heightNm = Math.max(0.01, maxN - minN);
     const fullRangeNm = Math.max(widthNm, heightNm, 0.25);
@@ -3496,6 +3504,7 @@ cw_header('Cockpit Recorder Replay');
     return {
       project,
       rangeNm: fullRangeNm / zoom,
+      scale,
       points: nmPoints,
     };
   }
@@ -3603,6 +3612,8 @@ cw_header('Cockpit Recorder Replay');
       insetMap.style.left,
       insetMap.style.top,
       insetMap.style.width,
+      Math.round(insetMapPanE * 100),
+      Math.round(insetMapPanN * 100),
       snap ? 'snap' : 'run',
     ].join('|');
     if (signature !== insetMapSignature) {
@@ -4793,6 +4804,66 @@ cw_header('Cockpit Recorder Replay');
     updateInsetMap(sampleAt(activeT), true);
   }
 
+  function startInsetMapPan(event) {
+    if (!insetMapProjection || !insetMapProjection.scale) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressInsetMapClick = false;
+    insetMapDragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      moved: false,
+    };
+    if (insetMapTop && typeof insetMapTop.setPointerCapture === 'function') {
+      insetMapTop.setPointerCapture(event.pointerId);
+    }
+    if (insetMapTop) {
+      insetMapTop.classList.add('is-dragging');
+    }
+  }
+
+  function moveInsetMapPan(event) {
+    if (!insetMapDragState || event.pointerId !== insetMapDragState.pointerId || !insetMapProjection || !insetMapProjection.scale) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dx = event.clientX - insetMapDragState.lastX;
+    const dy = event.clientY - insetMapDragState.lastY;
+    const totalDx = event.clientX - insetMapDragState.startX;
+    const totalDy = event.clientY - insetMapDragState.startY;
+    if (Math.hypot(totalDx, totalDy) > 3) {
+      insetMapDragState.moved = true;
+      suppressInsetMapClick = true;
+    }
+    insetMapPanE -= dx / insetMapProjection.scale;
+    insetMapPanN += dy / insetMapProjection.scale;
+    insetMapDragState.lastX = event.clientX;
+    insetMapDragState.lastY = event.clientY;
+    insetMapSignature = '';
+    updateInsetMap(sampleAt(activeT), true);
+  }
+
+  function endInsetMapPan(event) {
+    if (!insetMapDragState || event.pointerId !== insetMapDragState.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (insetMapTop && typeof insetMapTop.releasePointerCapture === 'function') {
+      try {
+        insetMapTop.releasePointerCapture(event.pointerId);
+      } catch (err) {
+        // Pointer capture may already be released by the browser.
+      }
+    }
+    if (insetMapTop) {
+      insetMapTop.classList.remove('is-dragging');
+    }
+    suppressInsetMapClick = insetMapDragState.moved;
+    insetMapDragState = null;
+  }
+
   function insetMapSvgPoint(event) {
     if (!insetMapSvg) return null;
     const rect = insetMapSvg.getBoundingClientRect();
@@ -4804,6 +4875,12 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function seekInsetMapTrack(event) {
+    if (suppressInsetMapClick) {
+      suppressInsetMapClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!insetMapProjection || !insetMapProjection.track || !insetMapProjection.projector) return;
     const click = insetMapSvgPoint(event);
     if (!click) return;
@@ -4951,6 +5028,7 @@ cw_header('Cockpit Recorder Replay');
     });
   }
   if (insetMapZoomIn) {
+    insetMapZoomIn.addEventListener('pointerdown', (event) => event.stopPropagation());
     insetMapZoomIn.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -4958,6 +5036,7 @@ cw_header('Cockpit Recorder Replay');
     });
   }
   if (insetMapZoomOut) {
+    insetMapZoomOut.addEventListener('pointerdown', (event) => event.stopPropagation());
     insetMapZoomOut.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -4965,6 +5044,10 @@ cw_header('Cockpit Recorder Replay');
     });
   }
   if (insetMapTop) {
+    insetMapTop.addEventListener('pointerdown', startInsetMapPan);
+    insetMapTop.addEventListener('pointermove', moveInsetMapPan);
+    insetMapTop.addEventListener('pointerup', endInsetMapPan);
+    insetMapTop.addEventListener('pointercancel', endInsetMapPan);
     insetMapTop.addEventListener('click', seekInsetMapTrack);
   }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
