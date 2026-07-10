@@ -3182,6 +3182,32 @@ cw_header('Cockpit Recorder Replay');
     );
   }
 
+  function hsiCdiOffsetPxFromSample(sample, courseDeg, navDisplay) {
+    const fullScalePx = 64;
+    const bearing = hsiNavBearingFromSample(sample);
+    if (!navDisplay.isGps && bearing !== null && courseDeg !== null) {
+      const courseDelta = normalizeSignedDeg(Number(bearing) - Number(courseDeg));
+      return -clamp(courseDelta / 10, -1, 1) * fullScalePx;
+    }
+
+    const cdi = hsiCdiFromSample(sample);
+    if (cdi === null) return 0;
+
+    const cdiValue = Number(cdi);
+    if (!Number.isFinite(cdiValue)) return 0;
+
+    const fullScaleFt = firstFinite(
+      sample && sample.hcdi_full_scale_ft,
+      sample && sample.g3x && sample.g3x.hcdi_full_scale_ft
+    );
+    if (fullScaleFt !== null && Number(fullScaleFt) > 0 && Math.abs(cdiValue) > 1) {
+      return clamp(cdiValue / Number(fullScaleFt), -1, 1) * fullScalePx;
+    }
+
+    const normalizedCdi = Math.abs(cdiValue) > 1 ? cdiValue / 2 : cdiValue;
+    return clamp(normalizedCdi, -1, 1) * fullScalePx;
+  }
+
   function hsiToFromFromSample(sample, courseDeg) {
     const explicit = String(
       (sample && (sample.nav_to_from || sample.to_from || sample.nav_flag)) ||
@@ -3375,9 +3401,8 @@ cw_header('Cockpit Recorder Replay');
     const course = hsiCourseFromSample(sample);
     const courseDeg = course === null ? null : normalizeDeg(course);
     const trackMag = hsiTrackMagneticFromSample(sample);
-    const cdi = hsiCdiFromSample(sample);
-    const cdiOffset = cdi === null ? 0 : clamp(Number(cdi), -1, 1) * 32;
     const navDisplay = hsiNavDisplay(sample);
+    const cdiOffset = hsiCdiOffsetPxFromSample(sample, courseDeg, navDisplay);
     const navLabel = navDisplay.label;
     const navColorClass = navDisplay.isGps ? 'is-gps' : '';
     const crsValueClass = navDisplay.isGps ? 'hsi-magenta' : 'hsi-green';
