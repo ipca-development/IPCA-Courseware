@@ -1897,6 +1897,7 @@ cw_header('Cockpit Recorder Replay');
   let displayVsiFpm = null;
   let displayHsiHeadingDeg = null;
   let displayHsiHeadingBugDeg = null;
+  let displayHsiRmiBearingDeg = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
   let altimeterSettingUnit = 'hpa';
@@ -3210,14 +3211,14 @@ cw_header('Cockpit Recorder Replay');
     );
   }
 
-  function hsiRmiBearingHtml(sample, headingDeg, innerR, outerR) {
-    const bearing = hsiNavBearingFromSample(sample);
-    if (bearing === null) return '';
-    const rotation = normalizeSignedDeg(Number(bearing) - Number(headingDeg));
-    const topOuter = -outerR + 13;
-    const topInner = -innerR - 9;
-    const bottomInner = innerR + 9;
-    const bottomOuter = outerR - 13;
+  function hsiRmiBearingHtml(bearingDeg, headingDeg, innerR, outerR) {
+    if (bearingDeg === null) return '';
+    const rotation = normalizeSignedDeg(Number(bearingDeg) - Number(headingDeg));
+    const tickBoundary = outerR - 12;
+    const topOuter = -tickBoundary;
+    const topInner = -innerR;
+    const bottomInner = innerR;
+    const bottomOuter = tickBoundary;
     return `
       <g transform="rotate(${rotation.toFixed(2)})">
         <line class="hsi-rmi-bearing" x1="0" y1="${topInner.toFixed(1)}" x2="0" y2="${topOuter.toFixed(1)}"></line>
@@ -3365,6 +3366,7 @@ cw_header('Cockpit Recorder Replay');
       hsiOverlaySignature = '';
       displayHsiHeadingDeg = null;
       displayHsiHeadingBugDeg = null;
+      displayHsiRmiBearingDeg = null;
       return;
     }
     const headingDeg = normalizeDeg(heading);
@@ -3389,6 +3391,12 @@ cw_header('Cockpit Recorder Replay');
       : ((snap || displayHsiHeadingBugDeg === null || !Number.isFinite(displayHsiHeadingBugDeg))
         ? bugDeg
         : lerpAngleDeg(displayHsiHeadingBugDeg, bugDeg, alpha));
+    const rmiBearing = hsiNavBearingFromSample(sample);
+    displayHsiRmiBearingDeg = rmiBearing === null
+      ? null
+      : ((snap || displayHsiRmiBearingDeg === null || !Number.isFinite(displayHsiRmiBearingDeg))
+        ? normalizeDeg(rmiBearing)
+        : lerpAngleDeg(displayHsiRmiBearingDeg, normalizeDeg(rmiBearing), alpha));
 
     const cx = 195;
     const cy = 176;
@@ -3397,7 +3405,7 @@ cw_header('Cockpit Recorder Replay');
     const turnMarkRadius = r - 1;
     const trendHtml = hsiHeadingTrendHtml(sample, turnMarkRadius);
     const turnRateMarksHtml = hsiTurnRateMarksHtml(turnMarkRadius);
-    const rmiBearingHtml = hsiRmiBearingHtml(sample, displayHsiHeadingDeg, innerR, r);
+    const rmiBearingHtml = hsiRmiBearingHtml(displayHsiRmiBearingDeg, displayHsiHeadingDeg, innerR, r);
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
@@ -4190,6 +4198,7 @@ cw_header('Cockpit Recorder Replay');
     displayVsiFpm = null;
     displayHsiHeadingDeg = null;
     displayHsiHeadingBugDeg = null;
+    displayHsiRmiBearingDeg = null;
     displayRpm = null;
     displayEngineValues.clear();
     hsiOverlaySignature = '';
