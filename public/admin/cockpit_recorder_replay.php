@@ -3216,7 +3216,7 @@ cw_header('Cockpit Recorder Replay');
     return [-18, -9, 9, 18].map((deg) => {
       const half = Math.abs(deg) === 9;
       const inner = hsiTrendPoint(deg, radius + 2);
-      const outer = hsiTrendPoint(deg, radius + (half ? 16 : 21));
+      const outer = hsiTrendPoint(deg, radius + 14);
       return `<line class="hsi-turn-rate-mark ${half ? 'is-half' : ''}" x1="${inner.x.toFixed(1)}" y1="${inner.y.toFixed(1)}" x2="${outer.x.toFixed(1)}" y2="${outer.y.toFixed(1)}"></line>`;
     }).join('');
   }
