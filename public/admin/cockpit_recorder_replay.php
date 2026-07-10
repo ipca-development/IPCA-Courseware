@@ -334,21 +334,42 @@ cw_header('Cockpit Recorder Replay');
   stroke-width: 7;
   fill: none;
 }
+.hsi-overlay .hsi-nav.is-gps {
+  stroke: #d84cff;
+}
 .hsi-overlay .hsi-nav-arrow {
   fill: #10d510;
   stroke: #10d510;
   stroke-width: 1;
+}
+.hsi-overlay .hsi-nav-arrow.is-gps {
+  fill: #d84cff;
+  stroke: #d84cff;
+}
+.hsi-overlay .hsi-cdi-dot {
+  fill: none;
+  stroke: rgba(255, 255, 255, .96);
+  stroke-width: 2.4;
+}
+.hsi-overlay .hsi-to-from-flag {
+  fill: #10d510;
+  stroke: #10d510;
+  stroke-width: .7;
 }
 .hsi-overlay .hsi-nav-text {
   fill: #10d510;
   stroke: rgba(15, 23, 42, .20);
   stroke-width: .8px;
 }
+.hsi-overlay .hsi-nav-text.is-gps {
+  fill: #d84cff;
+}
 .hsi-overlay .hsi-heading-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-heading-value { fill: #ffffff; font-size: 17px; }
 .hsi-overlay .hsi-crs-text { fill: rgba(255, 255, 255, .98); font-size: 16px; }
 .hsi-overlay .hsi-cyan { fill: #9ffcff; }
 .hsi-overlay .hsi-green { fill: #18d918; }
+.hsi-overlay .hsi-magenta { fill: #d84cff; }
 .hsi-overlay .hsi-wind-text {
   fill: rgba(255, 255, 255, .96);
   font-size: 13px;
@@ -3081,6 +3102,37 @@ cw_header('Cockpit Recorder Replay');
     return value === '' ? 'NAV2' : value.slice(0, 8);
   }
 
+  function hsiRawNavSourceFromSample(sample) {
+    return String(
+      (sample && sample.nav_source) ||
+      (sample && sample.g3x && sample.g3x.nav_source) ||
+      ''
+    ).trim();
+  }
+
+  function hsiNavAnnunciationFromSample(sample) {
+    return String(
+      (sample && (sample.nav_annunciation || sample.gps_annunciation || sample.gps_mode)) ||
+      (sample && sample.g3x && (sample.g3x.nav_annunciation || sample.g3x.gps_annunciation || sample.g3x.gps_mode)) ||
+      ''
+    ).trim();
+  }
+
+  function hsiNavDisplay(sample) {
+    const rawSource = hsiRawNavSourceFromSample(sample);
+    const fallback = hsiNavSourceFromSample(sample);
+    const source = (rawSource || fallback || 'NAV2').toUpperCase().replace(/\s+/g, '');
+    const isGps = source.includes('GPS') || source.includes('FMS');
+    if (isGps) {
+      const annunciation = hsiNavAnnunciationFromSample(sample).toUpperCase();
+      const suffix = annunciation === '' ? '' : ` ${annunciation.slice(0, 5)}`;
+      return { label: `GPS${suffix}`, isGps: true };
+    }
+    const navLabel = source.includes('VOR2') || source.includes('NAV2') ? 'NAV2'
+      : (source.includes('VOR1') || source.includes('NAV1') ? 'NAV1' : fallback.toUpperCase().slice(0, 8));
+    return { label: navLabel, isGps: false };
+  }
+
   function hsiCdiFromSample(sample) {
     return firstFinite(
       sample && sample.horizontal_cdi_deflection,
@@ -3088,6 +3140,19 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.nav_cdi,
       sample && sample.g3x && sample.g3x.hcdi
     );
+  }
+
+  function hsiToFromFromSample(sample, courseDeg) {
+    const explicit = String(
+      (sample && (sample.nav_to_from || sample.to_from || sample.nav_flag)) ||
+      (sample && sample.g3x && (sample.g3x.nav_to_from || sample.g3x.to_from || sample.g3x.nav_flag)) ||
+      ''
+    ).toUpperCase();
+    if (explicit.includes('FROM') || explicit === 'FR') return 'FROM';
+    if (explicit.includes('TO')) return 'TO';
+    const bearing = firstFinite(sample && sample.nav_bearing_deg, sample && sample.g3x && sample.g3x.nav_bearing_deg);
+    if (bearing === null || courseDeg === null) return 'TO';
+    return Math.abs(normalizeSignedDeg(Number(bearing) - Number(courseDeg))) <= 90 ? 'TO' : 'FROM';
   }
 
   function hsiTrackMagneticFromSample(sample) {
@@ -3239,7 +3304,11 @@ cw_header('Cockpit Recorder Replay');
     const trackMag = hsiTrackMagneticFromSample(sample);
     const cdi = hsiCdiFromSample(sample);
     const cdiOffset = cdi === null ? 0 : clamp(Number(cdi), -1, 1) * 32;
-    const navLabel = hsiNavSourceFromSample(sample);
+    const navDisplay = hsiNavDisplay(sample);
+    const navLabel = navDisplay.label;
+    const navColorClass = navDisplay.isGps ? 'is-gps' : '';
+    const crsValueClass = navDisplay.isGps ? 'hsi-magenta' : 'hsi-green';
+    const toFrom = hsiToFromFromSample(sample, courseDeg);
     const alpha = snap ? 1 : smoothFactor(16, dtSec);
     displayHsiHeadingDeg = (snap || displayHsiHeadingDeg === null || !Number.isFinite(displayHsiHeadingDeg))
       ? headingDeg
@@ -3290,12 +3359,25 @@ cw_header('Cockpit Recorder Replay');
       </g>`;
     })();
     const courseRotation = courseDeg === null ? 0 : normalizeSignedDeg(courseDeg - displayHsiHeadingDeg);
+    const navTextHtml = navDisplay.isGps
+      ? (() => {
+        const parts = navLabel.split(/\s+/, 2);
+        const mode = parts.length > 1 ? parts[1] : '';
+        return `<text class="hsi-nav-text is-gps" x="-76" y="-28" font-size="17">${escapeHtml(parts[0] || 'GPS')}</text>${mode ? `<text class="hsi-nav-text is-gps" x="28" y="-28" font-size="17">${escapeHtml(mode)}</text>` : ''}`;
+      })()
+      : `<text class="hsi-nav-text" x="-76" y="-28" font-size="17">${escapeHtml(navLabel)}</text>`;
     const courseHtml = courseDeg === null ? '' : `
-        <g transform="rotate(${courseRotation.toFixed(2)}) translate(${cdiOffset.toFixed(1)} 0)">
-          <line class="hsi-nav" x1="0" y1="${(r - 10).toFixed(1)}" x2="0" y2="${(-r + 10).toFixed(1)}"></line>
-          <polygon class="hsi-nav-arrow" points="0,${(-r - 9).toFixed(1)} -8,${(-r + 10).toFixed(1)} 8,${(-r + 10).toFixed(1)}"></polygon>
+        <g transform="rotate(${courseRotation.toFixed(2)})">
+          ${[-64, -32, 32, 64].map((x) => `<circle class="hsi-cdi-dot" cx="${x}" cy="0" r="4.2"></circle>`).join('')}
+          <g transform="translate(${cdiOffset.toFixed(1)} 0)">
+            <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 10).toFixed(1)}" x2="0" y2="${(-r + 10).toFixed(1)}"></line>
+            <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r - 9).toFixed(1)} -8,${(-r + 10).toFixed(1)} 8,${(-r + 10).toFixed(1)}"></polygon>
+          </g>
+          ${toFrom === 'FROM'
+            ? '<polygon class="hsi-to-from-flag" points="-6,33 6,33 0,47"></polygon>'
+            : '<polygon class="hsi-to-from-flag" points="-6,-33 6,-33 0,-47"></polygon>'}
         </g>
-        <text class="hsi-nav-text" x="-76" y="-28" font-size="17">${escapeHtml(navLabel)}</text>`;
+        ${navTextHtml}`;
     const signature = [
       Math.round(displayHsiHeadingDeg * 10),
       displayHsiHeadingBugDeg === null ? 'x' : Math.round(displayHsiHeadingBugDeg * 10),
@@ -3307,6 +3389,10 @@ cw_header('Cockpit Recorder Replay');
       hdgBugText,
       crsText,
       windHtml,
+      navColorClass,
+      crsValueClass,
+      toFrom,
+      navTextHtml,
       trendHtml,
       turnRateMarksHtml,
     ].join('|');
@@ -3322,7 +3408,7 @@ cw_header('Cockpit Recorder Replay');
       <text class="hsi-heading-text" x="11" y="74">HDG <tspan class="hsi-cyan">${hdgBugText}</tspan></text>
       ${windHtml}
       <rect class="hsi-label-box" x="294" y="50" width="96" height="34" rx="7"></rect>
-      <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="hsi-green">${crsText}</tspan></text>
+      <text class="hsi-crs-text" x="307" y="74">CRS <tspan class="${crsValueClass}">${crsText}</tspan></text>
       <g transform="translate(${cx} ${cy})">
         <circle class="hsi-card-fill" cx="0" cy="0" r="${r}"></circle>
         <circle class="hsi-rose-line" cx="0" cy="0" r="${innerR}"></circle>
