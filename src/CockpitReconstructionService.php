@@ -842,6 +842,8 @@ final class CockpitReconstructionService
             'nav_distance_nm',
             'sel_vspeed_fpm',
             'sel_ias_kt',
+            'aoa',
+            'aoa_cp',
             'density_altitude_ft',
             'height_agl_ft',
             'wind_speed_kt',
@@ -993,6 +995,8 @@ final class CockpitReconstructionService
             'nav_distance_nm',
             'sel_vspeed_fpm',
             'sel_ias_kt',
+            'aoa',
+            'aoa_cp',
             'density_altitude_ft',
             'height_agl_ft',
             'wind_speed_kt',
@@ -1106,7 +1110,7 @@ final class CockpitReconstructionService
         if (array_key_exists('raw_attitude_quality', $row)) {
             $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
         }
-        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
@@ -3762,6 +3766,8 @@ final class CockpitReconstructionService
             'nav_distance_nm',
             'sel_vspeed_fpm',
             'sel_ias_kt',
+            'aoa',
+            'aoa_cp',
             'density_altitude_ft',
             'height_agl_ft',
             'wind_speed_kt',

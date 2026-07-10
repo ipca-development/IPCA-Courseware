@@ -24,6 +24,13 @@ $defaultAirspeedProfile = array(
     'green_arc' => array('from_kt' => 49, 'to_kt' => 104),
     'yellow_arc' => array('from_kt' => 104, 'to_kt' => 130),
     'red_line_kt' => 130,
+    'aoa_indicator' => array(
+        'visible_threshold' => 0.35,
+        'caution_threshold' => 0.55,
+        'warning_threshold' => 0.75,
+        'stall_threshold' => 1.0,
+        'units' => 'normalized',
+    ),
     'bugs' => array(
         array('label' => 'R', 'speed_kt' => 50, 'description' => 'Vr Rotation Speed'),
         array('label' => 'X', 'speed_kt' => 58, 'description' => 'Vx Best Angle of Climb'),
@@ -1134,6 +1141,37 @@ cw_header('Cockpit Recorder Replay');
   border-bottom: 10px solid transparent;
   border-right: 14px solid #111;
 }
+.aoa-indicator {
+  position: absolute;
+  z-index: 20;
+  width: 72px;
+  height: 144px;
+  box-sizing: border-box;
+  border-radius: 13px;
+  background: rgba(40, 40, 40, .56);
+  border: 2px solid rgba(78, 92, 100, .95);
+  overflow: hidden;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+}
+.aoa-indicator[hidden] { display: none !important; }
+.aoa-indicator svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.aoa-symbol {
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+.aoa-symbol.is-green { stroke: #73ff45; }
+.aoa-symbol.is-yellow { stroke: #ffff00; }
+.aoa-symbol.is-red { stroke: #ff2317; }
+.aoa-center {
+  fill: none;
+  stroke: #73ff45;
+  stroke-width: 7.5;
+}
 .temperature-box {
   position: absolute;
   left: 0;
@@ -1492,6 +1530,9 @@ cw_header('Cockpit Recorder Replay');
         <span><span id="airspeedGsValue" class="airspeed-tape-gs-value">--</span><span class="airspeed-tape-unit airspeed-tape-gs-unit">KT</span></span>
       </div>
     </div>
+    <div id="aoaIndicator" class="aoa-indicator" aria-label="Angle of attack indicator" hidden>
+      <svg id="aoaIndicatorSvg" viewBox="0 0 72 144" role="img" aria-label="Angle of attack"></svg>
+    </div>
     <div id="altimeterStack" class="altimeter-stack" aria-label="Altimeter and vertical speed indicator" hidden>
       <div class="altimeter-tape">
         <div id="altimeterBugValue" class="altimeter-header">----</div>
@@ -1715,6 +1756,8 @@ cw_header('Cockpit Recorder Replay');
   const airspeedTapePointer = document.getElementById('airspeedTapePointer');
   const airspeedTasValue = document.getElementById('airspeedTasValue');
   const airspeedGsValue = document.getElementById('airspeedGsValue');
+  const aoaIndicator = document.getElementById('aoaIndicator');
+  const aoaIndicatorSvg = document.getElementById('aoaIndicatorSvg');
   const altimeterStack = document.getElementById('altimeterStack');
   const altimeterBody = document.getElementById('altimeterBody');
   const altimeterScale = document.getElementById('altimeterScale');
@@ -1857,7 +1900,7 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'inset_map']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -2159,6 +2202,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateAoaIndicator(sampleAt(activeT));
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
     safeRenderCesium(true);
@@ -2294,6 +2338,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateAoaIndicator(sampleAt(activeT));
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
   }
 
@@ -2332,6 +2377,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateAoaIndicator(sampleAt(activeT));
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
   }
@@ -2429,6 +2475,74 @@ cw_header('Cockpit Recorder Replay');
     if (airspeedTapePointer) airspeedTapePointer.textContent = String(Math.round(displayAirspeedKt));
     if (airspeedTasValue) airspeedTasValue.textContent = tas === null ? '--' : String(Math.round(tas));
     if (airspeedGsValue) airspeedGsValue.textContent = gs === null ? '--' : String(Math.round(gs));
+  }
+
+  function aoaProfileNumber(key, fallback) {
+    return airspeedProfileNumber(['aoa_indicator', key], fallback);
+  }
+
+  function normalizedAoaRatio(aoa, stallThreshold) {
+    const value = Number(aoa);
+    const stall = Number(stallThreshold);
+    if (!Number.isFinite(value) || !Number.isFinite(stall) || stall <= 0) return null;
+    return clamp(value / stall, 0, 1.2);
+  }
+
+  function aoaIndicatorPlacement() {
+    if (!aoaIndicator || !airspeedTape) return false;
+    const airspeedRect = airspeedTape.getBoundingClientRect();
+    const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+    const airspeedStyle = window.getComputedStyle(airspeedTape);
+    const scaleMatch = String(airspeedStyle.transform || '').match(/^matrix\(([^,]+),/);
+    const scale = scaleMatch ? Number(scaleMatch[1]) : 1;
+    const width = Math.max(44, Math.round(72 * scale));
+    const vsiHeight = Math.max(0, airspeedRect.height - (84 * scale));
+    const height = Math.max(96, Math.round(vsiHeight * 0.4));
+    const gap = Math.max(8, Math.round(10 * scale));
+    aoaIndicator.style.width = `${width}px`;
+    aoaIndicator.style.height = `${height}px`;
+    aoaIndicator.style.left = `${Math.round(airspeedRect.left - rootRect.left - width - gap)}px`;
+    aoaIndicator.style.top = `${Math.round(airspeedRect.top - rootRect.top)}px`;
+    return true;
+  }
+
+  function updateAoaIndicator(sample) {
+    if (!aoaIndicator || !aoaIndicatorSvg) return;
+    const aoa = firstFinite(sample && sample.aoa, sample && sample.angle_of_attack_deg);
+    const visibleThreshold = aoaProfileNumber('visible_threshold', 0.35);
+    const cautionThreshold = aoaProfileNumber('caution_threshold', 0.55);
+    const warningThreshold = aoaProfileNumber('warning_threshold', 0.75);
+    const stallThreshold = aoaProfileNumber('stall_threshold', 1.0);
+    if (!sample || !instrumentEnabled('aoa_indicator') || aoa === null || aoa < visibleThreshold || !aoaIndicatorPlacement()) {
+      aoaIndicator.hidden = true;
+      return;
+    }
+    const ratio = normalizedAoaRatio(aoa, stallThreshold);
+    if (ratio === null) {
+      aoaIndicator.hidden = true;
+      return;
+    }
+    const activeGreen = aoa >= visibleThreshold ? 1 : 0;
+    const activeYellow = aoa >= cautionThreshold ? 1 : 0;
+    const activeRed = aoa >= warningThreshold ? 1 : 0;
+    const clipY = clamp(144 - (ratio * 144), 0, 144);
+    aoaIndicatorSvg.innerHTML = `
+      <defs>
+        <clipPath id="aoaActiveClip"><rect x="0" y="${clipY.toFixed(1)}" width="72" height="${(144 - clipY).toFixed(1)}"></rect></clipPath>
+      </defs>
+      <g opacity=".28">
+        <path class="aoa-symbol is-red" d="M16 8 L36 28 L56 8 M16 26 L36 46 L56 26" fill="none" stroke-width="7"></path>
+        <path class="aoa-symbol is-yellow" d="M16 48 L36 68 L56 48 M16 66 L36 86 L56 66" fill="none" stroke-width="7"></path>
+        <path class="aoa-symbol is-yellow" d="M14 94 H28 L34 101 M58 94 H44 L38 101" fill="none" stroke-width="6"></path>
+        <path class="aoa-symbol is-green" d="M14 111 H27 M45 111 H58 M14 123 H58 M14 135 H58" fill="none" stroke-width="6"></path>
+        <circle class="aoa-center" cx="36" cy="111" r="9"></circle>
+      </g>
+      <g clip-path="url(#aoaActiveClip)">
+        ${activeRed ? '<path class="aoa-symbol is-red" d="M16 8 L36 28 L56 8 M16 26 L36 46 L56 26" fill="none" stroke-width="7"></path>' : ''}
+        ${activeYellow ? '<path class="aoa-symbol is-yellow" d="M16 48 L36 68 L56 48 M16 66 L36 86 L56 66 M14 94 H28 L34 101 M58 94 H44 L38 101" fill="none" stroke-width="6"></path>' : ''}
+        ${activeGreen ? '<path class="aoa-symbol is-green" d="M14 111 H27 M45 111 H58 M14 123 H58 M14 135 H58" fill="none" stroke-width="6"></path><circle class="aoa-center" cx="36" cy="111" r="9"></circle>' : ''}
+      </g>`;
+    aoaIndicator.hidden = false;
   }
 
   function altitudeSpeedToY(altitudeFt, currentAltitudeFt, centerY, pxPerFt) {
@@ -4134,6 +4248,7 @@ cw_header('Cockpit Recorder Replay');
       updateAttitudeIndicator(null, null);
       const freeSample = sampleAt(activeT);
       updateAirspeedTape(freeSample, 1 / 60, true);
+      updateAoaIndicator(freeSample);
       updateAltimeterTape(freeSample, 1 / 60, true);
       updateHsiOverlay(freeSample, 1 / 60, true);
       updateEnginePanel(freeSample, 1 / 60, true);
@@ -4204,6 +4319,7 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(view);
     updateAttitudeIndicator(view, sample);
     updateAirspeedTape(sample, dtSec, snap);
+    updateAoaIndicator(sample);
     updateAltimeterTape(sample, dtSec, snap);
     updateHsiOverlay(sample, dtSec, snap);
     updateEnginePanel(sample, dtSec, snap);
@@ -4286,6 +4402,8 @@ cw_header('Cockpit Recorder Replay');
       sel_vspeed_fpm: lerp(before.sel_vspeed_fpm, after.sel_vspeed_fpm),
       ias_kt: lerp(before.ias_kt, after.ias_kt),
       tas_kt: lerp(before.tas_kt, after.tas_kt),
+      aoa: lerp(before.aoa, after.aoa),
+      aoa_cp: lerp(before.aoa_cp, after.aoa_cp),
       groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt),
       pitch_deg: lerp(before.pitch_deg, after.pitch_deg),
       roll_deg: lerp(before.roll_deg, after.roll_deg),
@@ -4380,6 +4498,12 @@ cw_header('Cockpit Recorder Replay');
     const altitudeFt = sample && Number.isFinite(Number(sample.altitude_ft_msl ?? sample.altitude_ft)) ? Number(sample.altitude_ft_msl ?? sample.altitude_ft) : null;
     const visualFt = Number.isFinite(lastVisualAltitudeM) ? lastVisualAltitudeM / 0.3048 : null;
     const vs = sample && Number.isFinite(Number(sample.vertical_speed_fpm)) ? Number(sample.vertical_speed_fpm) : null;
+    const aoa = firstFinite(sample && sample.aoa, sample && sample.angle_of_attack_deg);
+    const aoaCp = firstFinite(sample && sample.aoa_cp);
+    const aoaVisibleThreshold = aoaProfileNumber('visible_threshold', 0.35);
+    const aoaCautionThreshold = aoaProfileNumber('caution_threshold', 0.55);
+    const aoaWarningThreshold = aoaProfileNumber('warning_threshold', 0.75);
+    const aoaStallThreshold = aoaProfileNumber('stall_threshold', 1.0);
     const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
     const qualityRows = [
       ['position', 'position_quality', 'position_source', 'position_quality_reason'],
@@ -4531,6 +4655,9 @@ cw_header('Cockpit Recorder Replay');
       `raw Garmin roll_deg: ${fmtNum(dbg.rawGarminRollDeg, 1)} deg`,
       `pitch: ${pitch === null ? '--' : pitch.toFixed(1)} deg`,
       `roll/bank: ${roll === null ? '--' : roll.toFixed(1)} deg`,
+      `AOA: ${aoa === null ? '--' : aoa.toFixed(4)}`,
+      `AOA Cp: ${aoaCp === null ? '--' : aoaCp.toFixed(4)}`,
+      `AOA thresholds: visible ${fmtNum(aoaVisibleThreshold, 4)} / caution ${fmtNum(aoaCautionThreshold, 4)} / warning ${fmtNum(aoaWarningThreshold, 4)} / stall ${fmtNum(aoaStallThreshold, 4)}`,
       `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
       `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
     ];
