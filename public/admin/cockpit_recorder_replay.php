@@ -3427,7 +3427,7 @@ cw_header('Cockpit Recorder Replay');
         : lerpAngleDeg(displayHsiRmiBearingDeg, normalizeDeg(rmiBearing), alpha));
     displayHsiCdiOffsetPx = (snap || displayHsiCdiOffsetPx === null || !Number.isFinite(displayHsiCdiOffsetPx))
       ? cdiOffsetTarget
-      : lerp(displayHsiCdiOffsetPx, cdiOffsetTarget, cdiAlpha);
+      : displayHsiCdiOffsetPx + (cdiOffsetTarget - displayHsiCdiOffsetPx) * cdiAlpha;
 
     const cx = 195;
     const cy = 176;
