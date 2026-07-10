@@ -1067,8 +1067,8 @@ cw_header('Cockpit Recorder Replay');
 .altimeter-bug {
   position: absolute;
   left: 0;
-  width: 22px;
-  height: 22px;
+  width: 29px;
+  height: 29px;
   transform: translateY(-50%);
   overflow: visible;
 }
