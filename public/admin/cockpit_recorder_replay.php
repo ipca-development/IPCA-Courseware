@@ -331,7 +331,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay .hsi-nav {
   stroke: #10d510;
-  stroke-width: 7;
+  stroke-width: 5;
   fill: none;
 }
 .hsi-overlay .hsi-nav.is-gps {
@@ -353,7 +353,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay .hsi-cdi-course {
   stroke: #10d510;
-  stroke-width: 6;
+  stroke-width: 4;
   fill: none;
 }
 .hsi-overlay .hsi-cdi-course.is-gps {
@@ -3393,15 +3393,15 @@ cw_header('Cockpit Recorder Replay');
     const courseHtml = courseDeg === null ? '' : `
         <g transform="rotate(${courseRotation.toFixed(2)})">
           ${[-64, -32, 32, 64].map((x) => `<circle class="hsi-cdi-dot" cx="${x}" cy="0" r="4.2"></circle>`).join('')}
-          <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 36).toFixed(1)}" x2="0" y2="54"></line>
+          <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 12).toFixed(1)}" x2="0" y2="54"></line>
           <line class="hsi-nav ${navColorClass}" x1="0" y1="-54" x2="0" y2="${(-r + 36).toFixed(1)}"></line>
-          <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r + 24).toFixed(1)} -5,${(-r + 38).toFixed(1)} 5,${(-r + 38).toFixed(1)}"></polygon>
+          <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r + 24).toFixed(1)} -7,${(-r + 38).toFixed(1)} 7,${(-r + 38).toFixed(1)}"></polygon>
           <g transform="translate(${cdiOffset.toFixed(1)} 0)">
             <line class="hsi-cdi-course ${navColorClass}" x1="0" y1="-48" x2="0" y2="48"></line>
           </g>
           ${toFrom === 'FROM'
-            ? '<polygon class="hsi-to-from-flag" points="-5,21 5,21 0,32"></polygon>'
-            : '<polygon class="hsi-to-from-flag" points="-5,-21 5,-21 0,-32"></polygon>'}
+            ? '<polygon class="hsi-to-from-flag" points="-5,54 5,54 0,65"></polygon>'
+            : '<polygon class="hsi-to-from-flag" points="-5,-54 5,-54 0,-65"></polygon>'}
         </g>
         ${navTextHtml}`;
     const signature = [
