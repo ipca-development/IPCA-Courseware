@@ -3106,6 +3106,10 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.g3x && sample.g3x.NavCRS,
       sample && sample.g3x && sample.g3x['Nav Course (deg)'],
       sample && sample.g3x && sample.g3x.CRS,
+      sample && sample.g3x_raw && sample.g3x_raw.NavCRS,
+      sample && sample.g3x_raw && sample.g3x_raw['Nav Course (deg)'],
+      sample && sample.raw_g3x && sample.raw_g3x.NavCRS,
+      sample && sample.raw_g3x && sample.raw_g3x['Nav Course (deg)'],
       sample && sample.g3x && sample.g3x.selected_course_deg,
       sample && sample.g3x && sample.g3x.selected_course,
       sample && sample.g3x && sample.g3x.course_deg,
@@ -4696,6 +4700,9 @@ cw_header('Cockpit Recorder Replay');
     const aoaCautionThreshold = aoaProfileNumber('caution_threshold', 0.55);
     const aoaWarningThreshold = aoaProfileNumber('warning_threshold', 0.75);
     const aoaStallThreshold = aoaProfileNumber('stall_threshold', 1.0);
+    const debugNavCourse = sample ? hsiCourseFromSample(sample) : null;
+    const debugNavSource = sample ? hsiRawNavSourceFromSample(sample) || hsiNavSourceFromSample(sample) : '';
+    const debugHcdi = firstFinite(sample && sample.hcdi, sample && sample.horizontal_cdi_deflection, sample && sample.nav_cdi);
     const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
     const qualityRows = [
       ['position', 'position_quality', 'position_source', 'position_quality_reason'],
@@ -4850,6 +4857,9 @@ cw_header('Cockpit Recorder Replay');
       `AOA: ${aoa === null ? '--' : aoa.toFixed(4)}`,
       `AOA Cp: ${aoaCp === null ? '--' : aoaCp.toFixed(4)}`,
       `AOA thresholds: visible ${fmtNum(aoaVisibleThreshold, 4)} / caution ${fmtNum(aoaCautionThreshold, 4)} / warning ${fmtNum(aoaWarningThreshold, 4)} / stall ${fmtNum(aoaStallThreshold, 4)}`,
+      `NavSrc: ${debugNavSource || '--'}`,
+      `NavCRS/course: ${debugNavCourse === null ? '--' : normalizeDeg(debugNavCourse).toFixed(1)} deg`,
+      `HCDI: ${debugHcdi === null ? '--' : debugHcdi.toFixed(3)}`,
       `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
       `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
     ];
