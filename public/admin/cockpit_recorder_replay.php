@@ -366,7 +366,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay .hsi-rmi-bearing {
   stroke: #7fefff;
-  stroke-width: 4;
+  stroke-width: 2;
   stroke-linecap: butt;
   fill: none;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
@@ -374,7 +374,7 @@ cw_header('Cockpit Recorder Replay');
 .hsi-overlay .hsi-rmi-bearing-arrow {
   fill: none;
   stroke: #7fefff;
-  stroke-width: 4;
+  stroke-width: 2;
   stroke-linecap: butt;
   stroke-linejoin: miter;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
@@ -3220,7 +3220,8 @@ cw_header('Cockpit Recorder Replay');
     const bottomOuter = outerR - 13;
     return `
       <g transform="rotate(${rotation.toFixed(2)})">
-        <path class="hsi-rmi-bearing-arrow" d="M 0 ${topInner.toFixed(1)} L 0 ${topOuter.toFixed(1)} L -9 ${(topOuter + 16).toFixed(1)} M 0 ${topOuter.toFixed(1)} L 9 ${(topOuter + 16).toFixed(1)}"></path>
+        <line class="hsi-rmi-bearing" x1="0" y1="${topInner.toFixed(1)}" x2="0" y2="${topOuter.toFixed(1)}"></line>
+        <path class="hsi-rmi-bearing-arrow" d="M -9 ${(topOuter + 15).toFixed(1)} L 0 ${topOuter.toFixed(1)} L 9 ${(topOuter + 15).toFixed(1)}"></path>
         <line class="hsi-rmi-bearing" x1="0" y1="${bottomInner.toFixed(1)}" x2="0" y2="${bottomOuter.toFixed(1)}"></line>
       </g>`;
   }
