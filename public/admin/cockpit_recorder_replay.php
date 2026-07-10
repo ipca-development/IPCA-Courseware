@@ -304,7 +304,7 @@ cw_header('Cockpit Recorder Replay');
 .hsi-overlay .hsi-heading-trend {
   fill: none;
   stroke: #d84cff;
-  stroke-width: 6.5;
+  stroke-width: 5;
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
@@ -313,6 +313,16 @@ cw_header('Cockpit Recorder Replay');
   fill: #d84cff;
   stroke: #d84cff;
   stroke-width: 1;
+}
+.hsi-overlay .hsi-turn-rate-mark {
+  stroke: rgba(255, 255, 255, .96);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  fill: none;
+}
+.hsi-overlay .hsi-turn-rate-mark.is-half {
+  opacity: .86;
+  stroke-width: 2;
 }
 .hsi-overlay .hsi-top-pointer {
   fill: rgba(255, 255, 255, .96);
@@ -3195,14 +3205,20 @@ cw_header('Cockpit Recorder Replay');
     const end = hsiTrendPoint(projectedDeg, radius);
     const large = Math.abs(projectedDeg) > 180 ? 1 : 0;
     const sweep = projectedDeg >= 0 ? 1 : 0;
-    const arrow = Math.abs(rateDegPerSec) > 4.0;
-    return `
-      <defs>
-        <marker id="hsiHeadingTrendArrow" markerWidth="7" markerHeight="7" refX="6.2" refY="3.5" orient="auto" markerUnits="strokeWidth">
-          <path class="hsi-heading-trend-arrow" d="M 0 0 L 7 3.5 L 0 7 Z"></path>
-        </marker>
-      </defs>
-      <path class="hsi-heading-trend" d="M ${start.x.toFixed(1)} ${start.y.toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 ${large} ${sweep} ${end.x.toFixed(1)} ${end.y.toFixed(1)}"${arrow ? ' marker-end="url(#hsiHeadingTrendArrow)"' : ''}></path>`;
+    const arrowAngle = projectedDeg >= 0 ? projectedDeg : projectedDeg + 180;
+    const arrowHtml = Math.abs(rateDegPerSec) > 4.0
+      ? `<polygon class="hsi-heading-trend-arrow" points="0,-5 9,0 0,5" transform="translate(${end.x.toFixed(1)} ${end.y.toFixed(1)}) rotate(${arrowAngle.toFixed(1)})"></polygon>`
+      : '';
+    return `<path class="hsi-heading-trend" d="M ${start.x.toFixed(1)} ${start.y.toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 ${large} ${sweep} ${end.x.toFixed(1)} ${end.y.toFixed(1)}"></path>${arrowHtml}`;
+  }
+
+  function hsiTurnRateMarksHtml(radius) {
+    return [-18, -9, 9, 18].map((deg) => {
+      const point = hsiTrendPoint(deg, radius);
+      const half = Math.abs(deg) === 9;
+      const length = half ? 13 : 18;
+      return `<line class="hsi-turn-rate-mark ${half ? 'is-half' : ''}" x1="${point.x.toFixed(1)}" y1="${(point.y - length / 2).toFixed(1)}" x2="${point.x.toFixed(1)}" y2="${(point.y + length / 2).toFixed(1)}"></line>`;
+    }).join('');
   }
 
   function updateHsiOverlay(sample, dtSec = 1 / 60, snap = false) {
@@ -3238,7 +3254,9 @@ cw_header('Cockpit Recorder Replay');
     const cy = 176;
     const r = 126;
     const innerR = 72;
-    const trendHtml = hsiHeadingTrendHtml(sample, r - 18);
+    const turnMarkRadius = r - 1;
+    const trendHtml = hsiHeadingTrendHtml(sample, turnMarkRadius);
+    const turnRateMarksHtml = hsiTurnRateMarksHtml(turnMarkRadius);
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
@@ -3290,6 +3308,7 @@ cw_header('Cockpit Recorder Replay');
       crsText,
       windHtml,
       trendHtml,
+      turnRateMarksHtml,
     ].join('|');
     if (signature === hsiOverlaySignature) {
       hsiOverlay.hidden = false;
@@ -3312,6 +3331,7 @@ cw_header('Cockpit Recorder Replay');
           ${bugHtml}
           ${trackHtml}
         </g>
+        ${turnRateMarksHtml}
         ${trendHtml}
         <polygon class="hsi-top-pointer" points="0,${(-r + 4).toFixed(1)} -5.8,${(-r - 8.2).toFixed(1)} 5.8,${(-r - 8.2).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
