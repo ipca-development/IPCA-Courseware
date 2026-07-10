@@ -2468,6 +2468,7 @@ cw_header('Cockpit Recorder Replay');
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
     updateEnginePanel(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
+    safeRenderCesium(true);
   }
 
   function instrumentEnabled(key) {
@@ -3144,7 +3145,9 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.magnetic_heading_deg,
       sample && sample.heading_deg,
       sample && sample.heading_deg_true,
-      sample && sample.true_heading_deg
+      sample && sample.true_heading_deg,
+      displayCamera && displayCamera.heading,
+      displayCamera && displayCamera.aircraftHeading
     );
   }
 
@@ -3604,7 +3607,8 @@ cw_header('Cockpit Recorder Replay');
 
   function updateHorizonLine(view) {
     if (!horizonLine) return;
-    if (!view || !isSyntheticCameraMode(view.mode) || !instrumentEnabled('horizon_bar')) {
+    const mode = view && view.mode ? view.mode : cameraMode;
+    if (!view || !isSyntheticCameraMode(mode) || !instrumentEnabled('horizon_bar')) {
       horizonLine.hidden = true;
       return;
     }
@@ -3630,7 +3634,8 @@ cw_header('Cockpit Recorder Replay');
 
   function updateAttitudeIndicator(view, sample) {
     if (!attitudeOverlay) return;
-    if (!view || !isSyntheticCameraMode(view.mode) || !instrumentEnabled('attitude_indicator')) {
+    const mode = view && view.mode ? view.mode : cameraMode;
+    if (!view || !isSyntheticCameraMode(mode) || !instrumentEnabled('attitude_indicator')) {
       attitudeOverlay.hidden = true;
       attitudeOverlay.innerHTML = '';
       return;
