@@ -1978,6 +1978,7 @@ cw_header('Cockpit Recorder Replay');
     'wind_indicator',
   ];
   const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack']);
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'horizon_bar', 'attitude_indicator', 'engine_instrument_stack', 'wind_indicator'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -2244,6 +2245,11 @@ cw_header('Cockpit Recorder Replay');
     INSTRUMENT_TOGGLE_IDS.forEach((key) => {
       instruments[key] = savedInstruments[key] === true || (savedInstruments[key] === undefined && DEFAULT_ENABLED_INSTRUMENTS.has(key));
     });
+    if (!IMPLEMENTED_INSTRUMENTS.some((key) => instruments[key] === true)) {
+      DEFAULT_ENABLED_INSTRUMENTS.forEach((key) => {
+        instruments[key] = true;
+      });
+    }
     return {
       forwardM: clamp(firstFinite(saved.forwardM, 0), -200, 200),
       rightM: clamp(firstFinite(saved.rightM, 0), -200, 200),
@@ -2348,6 +2354,7 @@ cw_header('Cockpit Recorder Replay');
       const key = toggle.getAttribute('data-instrument-toggle') || '';
       toggle.checked = cameraCalibration.instruments && cameraCalibration.instruments[key] === true;
     });
+    applyInstrumentVisibility();
     if (!calibrationValues) return;
     const agl = currentCameraDebug && Number.isFinite(Number(currentCameraDebug.cameraHeightAboveTerrainM))
       ? `${Number(currentCameraDebug.cameraHeightAboveTerrainM).toFixed(1)}m AGL`
@@ -2452,6 +2459,7 @@ cw_header('Cockpit Recorder Replay');
     cameraCalibration.instruments[key] = enabled === true;
     saveCameraCalibration();
     updateCalibrationPanel();
+    applyInstrumentVisibility();
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
@@ -2465,6 +2473,17 @@ cw_header('Cockpit Recorder Replay');
   function instrumentEnabled(key) {
     if (!cameraCalibration || !cameraCalibration.instruments) return DEFAULT_ENABLED_INSTRUMENTS.has(key);
     return cameraCalibration.instruments[key] === true;
+  }
+
+  function applyInstrumentVisibility() {
+    if (airspeedTape && !instrumentEnabled('airspeed_indicator')) airspeedTape.hidden = true;
+    if (altimeterStack && !instrumentEnabled('altimeter')) altimeterStack.hidden = true;
+    if (hsiOverlay && !instrumentEnabled('hsi')) hsiOverlay.hidden = true;
+    if (attitudeOverlay && !instrumentEnabled('attitude_indicator')) attitudeOverlay.hidden = true;
+    if (horizonLine && !instrumentEnabled('horizon_bar')) horizonLine.hidden = true;
+    if (insetMap && !instrumentEnabled('inset_map')) insetMap.hidden = true;
+    if (aoaIndicator && !instrumentEnabled('aoa_indicator')) aoaIndicator.hidden = true;
+    if (enginePanel && !instrumentEnabled('engine_instrument_stack')) enginePanel.hidden = true;
   }
 
   function instrumentAnchorRect(element) {
