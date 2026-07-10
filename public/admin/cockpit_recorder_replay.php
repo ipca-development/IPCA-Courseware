@@ -336,7 +336,7 @@ cw_header('Cockpit Recorder Replay');
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .42));
 }
 .hsi-overlay .hsi-rose-label {
-  font-size: 8px;
+  font-size: 20px;
   font-weight: 650;
 }
 .replay-inset-map {
@@ -1060,21 +1060,10 @@ cw_header('Cockpit Recorder Replay');
 .altimeter-bug {
   position: absolute;
   left: 0;
-  width: 20px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   transform: translateY(-50%);
-  background: #20e4e4;
-  border-radius: 2px;
-}
-.altimeter-bug::after {
-  content: "";
-  position: absolute;
-  right: -10px;
-  top: 50%;
-  transform: translateY(-50%);
-  border-top: 7px solid transparent;
-  border-bottom: 7px solid transparent;
-  border-left: 10px solid #20e4e4;
+  overflow: visible;
 }
 .altimeter-da {
   position: absolute;
@@ -2552,7 +2541,9 @@ cw_header('Cockpit Recorder Replay');
     const bugFt = selectedAltitudeBugFt(sample);
     const bugY = bugFt === null ? null : altitudeSpeedToY(bugFt, displayAltitudeFt, centerY, pxPerFt);
     const bugHtml = bugY !== null && bugY >= -20 && bugY <= bodyHeight + 20
-      ? `<div class="altimeter-bug" style="top:${bugY.toFixed(1)}px"></div>`
+      ? `<svg class="altimeter-bug" style="top:${bugY.toFixed(1)}px" viewBox="-11 -11 22 22" aria-hidden="true">
+          <path d="M -10 -6 H -3.4 L 0 -1.5 L 3.4 -6 H 10 V 7 H -10 Z" transform="rotate(90)" fill="rgba(127, 237, 255, .92)" stroke="rgba(255, 255, 255, .66)" stroke-width=".8" stroke-linejoin="round"></path>
+        </svg>`
       : '';
     const oatC = firstFinite(sample.oat_c);
     const isaDevC = isaDeviationC(sample, altitudeFt, oatC);
