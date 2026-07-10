@@ -316,13 +316,13 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay .hsi-turn-rate-mark {
   stroke: rgba(255, 255, 255, .96);
-  stroke-width: 2.4;
+  stroke-width: 1.6;
   stroke-linecap: round;
   fill: none;
 }
 .hsi-overlay .hsi-turn-rate-mark.is-half {
   opacity: .86;
-  stroke-width: 2;
+  stroke-width: 1.3;
 }
 .hsi-overlay .hsi-top-pointer {
   fill: rgba(255, 255, 255, .96);
@@ -3199,7 +3199,7 @@ cw_header('Cockpit Recorder Replay');
   function hsiHeadingTrendHtml(sample, radius) {
     const rateDegPerSec = hsiHeadingRateDegPerSec(sample);
     if (rateDegPerSec === null || Math.abs(rateDegPerSec) < 0.15) return '';
-    const projectedDeg = clamp(rateDegPerSec * 6.0, -60, 60);
+    const projectedDeg = clamp(rateDegPerSec * 6.0, -30, 30);
     if (Math.abs(projectedDeg) < 1) return '';
     const start = hsiTrendPoint(0, radius);
     const end = hsiTrendPoint(projectedDeg, radius);
@@ -3214,10 +3214,10 @@ cw_header('Cockpit Recorder Replay');
 
   function hsiTurnRateMarksHtml(radius) {
     return [-18, -9, 9, 18].map((deg) => {
-      const point = hsiTrendPoint(deg, radius);
       const half = Math.abs(deg) === 9;
-      const length = half ? 13 : 18;
-      return `<line class="hsi-turn-rate-mark ${half ? 'is-half' : ''}" x1="${point.x.toFixed(1)}" y1="${(point.y - length / 2).toFixed(1)}" x2="${point.x.toFixed(1)}" y2="${(point.y + length / 2).toFixed(1)}"></line>`;
+      const inner = hsiTrendPoint(deg, radius - (half ? 6 : 8));
+      const outer = hsiTrendPoint(deg, radius + (half ? 8 : 11));
+      return `<line class="hsi-turn-rate-mark ${half ? 'is-half' : ''}" x1="${inner.x.toFixed(1)}" y1="${inner.y.toFixed(1)}" x2="${outer.x.toFixed(1)}" y2="${outer.y.toFixed(1)}"></line>`;
     }).join('');
   }
 
