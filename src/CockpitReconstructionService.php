@@ -1059,6 +1059,24 @@ final class CockpitReconstructionService
             }
         }
 
+        $canonicalG3xRows = array();
+        $canonicalStmt = $this->pdo->prepare('
+            SELECT seconds_since_start, g3x_row_json
+            FROM ' . self::SAMPLE_TABLE . '
+            WHERE recording_id = ?
+              AND g3x_row_json IS NOT NULL
+              AND g3x_row_json <> \'\'
+            ORDER BY seconds_since_start ASC
+        ');
+        $canonicalStmt->execute(array($recordingId));
+        while (($canonicalRow = $canonicalStmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $canonicalG3xRows[] = array(
+                't' => (float)($canonicalRow['seconds_since_start'] ?? 0.0),
+                'g3x_row_json' => (string)($canonicalRow['g3x_row_json'] ?? ''),
+            );
+        }
+        $canonicalIndex = 0;
+
         $stmt = $this->pdo->prepare('
             SELECT ' . implode(', ', $columns) . '
             FROM ' . self::REPLAY_SAMPLE_TABLE . '
@@ -1067,6 +1085,16 @@ final class CockpitReconstructionService
         ');
         $stmt->execute(array($recordingId));
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            if ($canonicalG3xRows !== array()) {
+                $timeS = (float)($row['time_s'] ?? 0.0);
+                while (
+                    $canonicalIndex + 1 < count($canonicalG3xRows)
+                    && abs((float)$canonicalG3xRows[$canonicalIndex + 1]['t'] - $timeS) <= abs((float)$canonicalG3xRows[$canonicalIndex]['t'] - $timeS)
+                ) {
+                    $canonicalIndex++;
+                }
+                $row['canonical_g3x_row_json'] = $canonicalG3xRows[$canonicalIndex]['g3x_row_json'];
+            }
             yield $this->publicSlimReplaySample($row, $recordingStartedAt);
         }
     }
@@ -1113,6 +1141,19 @@ final class CockpitReconstructionService
         foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
+            }
+        }
+        if (isset($row['canonical_g3x_row_json']) && trim((string)$row['canonical_g3x_row_json']) !== '') {
+            $canonicalG3x = $this->publicG3XFields(array('g3x_row_json' => $row['canonical_g3x_row_json']));
+            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm') as $field) {
+                if (array_key_exists($field, $canonicalG3x) && $canonicalG3x[$field] !== null) {
+                    $sample[$field] = (float)$canonicalG3x[$field];
+                }
+            }
+            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier') as $field) {
+                if (array_key_exists($field, $canonicalG3x) && trim((string)$canonicalG3x[$field]) !== '') {
+                    $sample[$field] = (string)$canonicalG3x[$field];
+                }
             }
         }
         $pitch = isset($sample['pitch_deg']) && is_numeric($sample['pitch_deg']) ? (float)$sample['pitch_deg'] : 0.0;
@@ -4214,10 +4255,13 @@ final class CockpitReconstructionService
             'sel_hdg_deg' => $num($g3x, 'Selected Heading (deg)', 'SelHDG'),
             'sel_alt_ft' => $num($g3x, 'Selected Altitude (ft)', 'SelALT'),
             'sel_ias_kt' => $num($g3x, 'Selected Airspeed (kt)', 'SelIAS'),
+            'nav_distance_nm' => $num($g3x, 'Nav Distance (nm)', 'NavDist'),
             'nav_course_deg' => $num($g3x, 'Nav Course (deg)', 'NavCRS'),
             'nav_bearing_deg' => $num($g3x, 'Nav Bearing (deg)', 'NavBrg'),
             'nav_xtk_nm' => $num($g3x, 'Nav Cross Track Distance (nm)', 'NavXTK'),
             'nav_source' => $txt($g3x, 'Active Nav Source', 'NavSrc'),
+            'nav_annunciation' => $txt($g3x, 'Nav Annunciation'),
+            'nav_identifier' => $txt($g3x, 'Nav Identifier', 'NavIdent'),
             'hcdi' => $num($g3x, 'Horizontal CDI Deflection', 'HCDI'),
             'vcdi' => $num($g3x, 'Vertical CDI Deflection', 'VCDI'),
             'ap_state' => $txt($g3x, 'Autopilot State'),
