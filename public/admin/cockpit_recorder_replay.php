@@ -1147,9 +1147,9 @@ cw_header('Cockpit Recorder Replay');
   width: 72px;
   height: 144px;
   box-sizing: border-box;
-  border-radius: 13px;
+  border-radius: 7px;
   background: rgba(40, 40, 40, .56);
-  border: 2px solid rgba(78, 92, 100, .95);
+  border: 1px solid rgba(255, 255, 255, .20);
   overflow: hidden;
   pointer-events: none;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
@@ -1531,7 +1531,7 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div id="aoaIndicator" class="aoa-indicator" aria-label="Angle of attack indicator" hidden>
-      <svg id="aoaIndicatorSvg" viewBox="0 0 72 144" role="img" aria-label="Angle of attack"></svg>
+      <svg id="aoaIndicatorSvg" viewBox="0 10 72 124" role="img" aria-label="Angle of attack"></svg>
     </div>
     <div id="altimeterStack" class="altimeter-stack" aria-label="Altimeter and vertical speed indicator" hidden>
       <div class="altimeter-tape">
@@ -2497,7 +2497,7 @@ cw_header('Cockpit Recorder Replay');
     const scale = scaleMatch ? Number(scaleMatch[1]) : 1;
     const width = Math.max(44, Math.round(72 * scale));
     const vsiHeight = Math.max(0, airspeedRect.height - (84 * scale));
-    const height = Math.max(96, Math.round(vsiHeight * 0.4));
+    const height = Math.max(76, Math.round(vsiHeight * 0.4) - 20);
     const gap = Math.max(8, Math.round(10 * scale));
     aoaIndicator.style.width = `${width}px`;
     aoaIndicator.style.height = `${height}px`;
