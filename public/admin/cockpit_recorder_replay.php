@@ -3187,7 +3187,7 @@ cw_header('Cockpit Recorder Replay');
     const bearing = hsiNavBearingFromSample(sample);
     if (!navDisplay.isGps && bearing !== null && courseDeg !== null) {
       const courseDelta = normalizeSignedDeg(Number(bearing) - Number(courseDeg));
-      return -clamp(courseDelta / 10, -1, 1) * fullScalePx;
+      return clamp(courseDelta / 10, -1, 1) * fullScalePx;
     }
 
     const cdi = hsiCdiFromSample(sample);
