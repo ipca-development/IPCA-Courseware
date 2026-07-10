@@ -262,7 +262,7 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay[hidden],
 .attitude-overlay[hidden],
-.horizon-line[hidden],
+.replay-horizon-line[hidden],
 .airspeed-tape[hidden],
 .altimeter-stack[hidden],
 .engine-panel[hidden] {
@@ -3146,6 +3146,8 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.heading_deg,
       sample && sample.heading_deg_true,
       sample && sample.true_heading_deg,
+      sample && sample.track_deg_true,
+      sample && sample.gps_track_deg,
       displayCamera && displayCamera.heading,
       displayCamera && displayCamera.aircraftHeading
     );
@@ -3605,10 +3607,26 @@ cw_header('Cockpit Recorder Replay');
     hsiOverlay.hidden = false;
   }
 
+  function instrumentViewFromSample(sample) {
+    if (!sample) return null;
+    return {
+      mode: cameraMode || 'synthetic_vision',
+      heading: firstFinite(
+        displayCamera && displayCamera.heading,
+        displayCamera && displayCamera.aircraftHeading,
+        hsiHeadingFromSample(sample),
+        0
+      ) || 0,
+      pitch: aircraftPitchFromSample(sample),
+      roll: aircraftRollFromSample(sample),
+    };
+  }
+
   function updateHorizonLine(view) {
     if (!horizonLine) return;
+    if (!view) view = instrumentViewFromSample(sampleAt(activeT));
     const mode = view && view.mode ? view.mode : cameraMode;
-    if (!view || !isSyntheticCameraMode(mode) || !instrumentEnabled('horizon_bar')) {
+    if (!view || !instrumentEnabled('horizon_bar')) {
       horizonLine.hidden = true;
       return;
     }
@@ -3634,8 +3652,9 @@ cw_header('Cockpit Recorder Replay');
 
   function updateAttitudeIndicator(view, sample) {
     if (!attitudeOverlay) return;
+    if (!view) view = instrumentViewFromSample(sample);
     const mode = view && view.mode ? view.mode : cameraMode;
-    if (!view || !isSyntheticCameraMode(mode) || !instrumentEnabled('attitude_indicator')) {
+    if (!view || !instrumentEnabled('attitude_indicator')) {
       attitudeOverlay.hidden = true;
       attitudeOverlay.innerHTML = '';
       return;
@@ -4592,9 +4611,10 @@ cw_header('Cockpit Recorder Replay');
   function renderCesium(snap = false) {
     if (!cesiumReady || !cesiumViewer) return;
     if (cameraMode === 'free') {
-      updateHorizonLine(null);
-      updateAttitudeIndicator(null, null);
       const freeSample = sampleAt(activeT);
+      const freeInstrumentView = instrumentViewFromSample(freeSample);
+      updateHorizonLine(freeInstrumentView);
+      updateAttitudeIndicator(freeInstrumentView, freeSample);
       updateAirspeedTape(freeSample, 1 / 60, true);
       updateAoaIndicator(freeSample);
       updateAltimeterTape(freeSample, 1 / 60, true);
@@ -4611,7 +4631,19 @@ cw_header('Cockpit Recorder Replay');
     const sample = sampleAt(activeT);
     updateTerrainHeight(sample);
     const target = targetCameraAt(activeT);
-    if (!target) return;
+    if (!target) {
+      const fallbackInstrumentView = instrumentViewFromSample(sample);
+      updateHorizonLine(fallbackInstrumentView);
+      updateAttitudeIndicator(fallbackInstrumentView, sample);
+      updateAirspeedTape(sample, dtSec, snap);
+      updateAoaIndicator(sample);
+      updateAltimeterTape(sample, dtSec, snap);
+      updateHsiOverlay(sample, dtSec, snap);
+      updateEnginePanel(sample, dtSec, snap);
+      updateInsetMap(sample, snap);
+      updateDebugOverlay(sample, fallbackInstrumentView);
+      return;
+    }
 
     let view = target;
     if (!snap && displayCamera && isSyntheticCameraMode(target.mode)) {
