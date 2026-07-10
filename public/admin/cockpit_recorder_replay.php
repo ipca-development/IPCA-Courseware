@@ -364,6 +364,21 @@ cw_header('Cockpit Recorder Replay');
   stroke: #10d510;
   stroke-width: .7;
 }
+.hsi-overlay .hsi-rmi-bearing {
+  stroke: #7fefff;
+  stroke-width: 4;
+  stroke-linecap: butt;
+  fill: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
+}
+.hsi-overlay .hsi-rmi-bearing-arrow {
+  fill: none;
+  stroke: #7fefff;
+  stroke-width: 4;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
+}
 .hsi-overlay .hsi-nav-text {
   fill: #10d510;
   stroke: rgba(15, 23, 42, .20);
@@ -3179,6 +3194,37 @@ cw_header('Cockpit Recorder Replay');
     return Math.abs(normalizeSignedDeg(Number(bearing) - Number(courseDeg))) <= 90 ? 'TO' : 'FROM';
   }
 
+  function hsiNavBearingFromSample(sample) {
+    return firstFinite(
+      sample && sample.nav_bearing_deg,
+      sample && sample.nav_brg_deg,
+      sample && sample.bearing_deg,
+      sample && sample.g3x && sample.g3x.nav_bearing_deg,
+      sample && sample.g3x && sample.g3x.nav_brg_deg,
+      sample && sample.g3x && sample.g3x.NavBrg,
+      sample && sample.g3x && sample.g3x['Nav Bearing (deg)'],
+      sample && sample.g3x_raw && sample.g3x_raw.NavBrg,
+      sample && sample.g3x_raw && sample.g3x_raw['Nav Bearing (deg)'],
+      sample && sample.raw_g3x && sample.raw_g3x.NavBrg,
+      sample && sample.raw_g3x && sample.raw_g3x['Nav Bearing (deg)']
+    );
+  }
+
+  function hsiRmiBearingHtml(sample, headingDeg, innerR, outerR) {
+    const bearing = hsiNavBearingFromSample(sample);
+    if (bearing === null) return '';
+    const rotation = normalizeSignedDeg(Number(bearing) - Number(headingDeg));
+    const topOuter = -outerR + 13;
+    const topInner = -innerR - 9;
+    const bottomInner = innerR + 9;
+    const bottomOuter = outerR - 13;
+    return `
+      <g transform="rotate(${rotation.toFixed(2)})">
+        <path class="hsi-rmi-bearing-arrow" d="M 0 ${topInner.toFixed(1)} L 0 ${topOuter.toFixed(1)} L -9 ${(topOuter + 16).toFixed(1)} M 0 ${topOuter.toFixed(1)} L 9 ${(topOuter + 16).toFixed(1)}"></path>
+        <line class="hsi-rmi-bearing" x1="0" y1="${bottomInner.toFixed(1)}" x2="0" y2="${bottomOuter.toFixed(1)}"></line>
+      </g>`;
+  }
+
   function hsiTrackMagneticFromSample(sample) {
     const explicitMagnetic = firstFinite(
       sample && sample.track_deg_magnetic,
@@ -3350,6 +3396,7 @@ cw_header('Cockpit Recorder Replay');
     const turnMarkRadius = r - 1;
     const trendHtml = hsiHeadingTrendHtml(sample, turnMarkRadius);
     const turnRateMarksHtml = hsiTurnRateMarksHtml(turnMarkRadius);
+    const rmiBearingHtml = hsiRmiBearingHtml(sample, displayHsiHeadingDeg, innerR, r);
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;
@@ -3422,6 +3469,7 @@ cw_header('Cockpit Recorder Replay');
       navTextHtml,
       trendHtml,
       turnRateMarksHtml,
+      rmiBearingHtml,
     ].join('|');
     if (signature === hsiOverlaySignature) {
       hsiOverlay.hidden = false;
@@ -3448,6 +3496,7 @@ cw_header('Cockpit Recorder Replay');
         ${trendHtml}
         <polygon class="hsi-top-pointer" points="0,${(-r + 4).toFixed(1)} -5.8,${(-r - 8.2).toFixed(1)} 5.8,${(-r - 8.2).toFixed(1)}"></polygon>
         <line class="hsi-course-line" x1="0" y1="${(-r - 12).toFixed(1)}" x2="0" y2="${(-innerR + 8).toFixed(1)}" stroke-dasharray="9 9"></line>
+        ${rmiBearingHtml}
         ${courseHtml}
         <g transform="scale(.60)">
           <path d="${AIRCRAFT_SILHOUETTE_PATH}" fill="none" stroke="rgba(255,255,255,.96)" stroke-width="2.2" stroke-linejoin="round"></path>
@@ -4701,6 +4750,7 @@ cw_header('Cockpit Recorder Replay');
     const aoaWarningThreshold = aoaProfileNumber('warning_threshold', 0.75);
     const aoaStallThreshold = aoaProfileNumber('stall_threshold', 1.0);
     const debugNavCourse = sample ? hsiCourseFromSample(sample) : null;
+    const debugNavBearing = sample ? hsiNavBearingFromSample(sample) : null;
     const debugNavSource = sample ? hsiRawNavSourceFromSample(sample) || hsiNavSourceFromSample(sample) : '';
     const debugHcdi = firstFinite(sample && sample.hcdi, sample && sample.horizontal_cdi_deflection, sample && sample.nav_cdi);
     const terrain = Number.isFinite(lastTerrainHeightM) ? `${lastTerrainHeightM.toFixed(1)} m` : '--';
@@ -4859,6 +4909,7 @@ cw_header('Cockpit Recorder Replay');
       `AOA thresholds: visible ${fmtNum(aoaVisibleThreshold, 4)} / caution ${fmtNum(aoaCautionThreshold, 4)} / warning ${fmtNum(aoaWarningThreshold, 4)} / stall ${fmtNum(aoaStallThreshold, 4)}`,
       `NavSrc: ${debugNavSource || '--'}`,
       `NavCRS/course: ${debugNavCourse === null ? '--' : normalizeDeg(debugNavCourse).toFixed(1)} deg`,
+      `NavBrg/RMI: ${debugNavBearing === null ? '--' : normalizeDeg(debugNavBearing).toFixed(1)} deg`,
       `HCDI: ${debugHcdi === null ? '--' : debugHcdi.toFixed(3)}`,
       `slip/skid: ${slipSkid === null ? '--' : slipSkid.toFixed(3)} g`,
       `slip/skid source: ${sourceValue(sample, 'estimated_slip_skid_source') || '--'}`,
