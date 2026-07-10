@@ -260,6 +260,14 @@ cw_header('Cockpit Recorder Replay');
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
   overflow: visible;
 }
+.hsi-overlay[hidden],
+.attitude-overlay[hidden],
+.horizon-line[hidden],
+.airspeed-tape[hidden],
+.altimeter-stack[hidden],
+.engine-panel[hidden] {
+  display: none !important;
+}
 .hsi-overlay text {
   fill: rgba(255, 255, 255, .94);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -1262,7 +1270,7 @@ cw_header('Cockpit Recorder Replay');
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto auto auto auto auto 1fr auto;
+  grid-template-columns: auto auto auto auto auto minmax(0, 1fr) max-content;
   gap: 10px;
   align-items: center;
   padding: 10px 14px;
@@ -1272,8 +1280,8 @@ cw_header('Cockpit Recorder Replay');
 .replay-dock a { color: #e2e8f0; font-size: 13px; text-decoration: none; white-space: nowrap; }
 .replay-dock a:hover { color: #fff; }
 .replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 8px 14px; cursor: pointer; }
-.replay-range { width: 100%; accent-color: #60a5fa; margin: 0; }
-.replay-time { color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.replay-range { width: 100%; min-width: 0; accent-color: #60a5fa; margin: 0; }
+.replay-time { min-width: 5.5ch; color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .replay-load { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; color: #e2e8f0; background: #0f172a; font-size: 14px; }
 .replay-load-card {
   width: min(460px, 78vw);
@@ -1969,7 +1977,7 @@ cw_header('Cockpit Recorder Replay');
     'engine_instrument_stack',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack']);
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -2448,13 +2456,30 @@ cw_header('Cockpit Recorder Replay');
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
     updateAoaIndicator(sampleAt(activeT));
+    updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
+    updateEnginePanel(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
   }
 
   function instrumentEnabled(key) {
     if (!cameraCalibration || !cameraCalibration.instruments) return DEFAULT_ENABLED_INSTRUMENTS.has(key);
     return cameraCalibration.instruments[key] === true;
+  }
+
+  function instrumentAnchorRect(element) {
+    if (!element) return null;
+    if (!element.hidden) {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 ? rect : null;
+    }
+    const previousVisibility = element.style.visibility;
+    element.style.visibility = 'hidden';
+    element.hidden = false;
+    const rect = element.getBoundingClientRect();
+    element.hidden = true;
+    element.style.visibility = previousVisibility;
+    return rect.width > 0 && rect.height > 0 ? rect : null;
   }
 
   function airspeedProfileNumber(path, fallback) {
@@ -2560,7 +2585,8 @@ cw_header('Cockpit Recorder Replay');
 
   function aoaIndicatorPlacement() {
     if (!aoaIndicator || !airspeedTape) return false;
-    const airspeedRect = airspeedTape.getBoundingClientRect();
+    const airspeedRect = instrumentAnchorRect(airspeedTape);
+    if (!airspeedRect) return false;
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
     const airspeedStyle = window.getComputedStyle(airspeedTape);
     const scaleMatch = String(airspeedStyle.transform || '').match(/^matrix\(([^,]+),/);
@@ -3077,12 +3103,14 @@ cw_header('Cockpit Recorder Replay');
   function updateEnginePanel(sample, dtSec = 1 / 60, snap = false) {
     if (!enginePanel) return;
     const instruments = engineProfileInstruments();
-    if (!sample || instruments.length === 0) {
+    if (!sample || instruments.length === 0 || !instrumentEnabled('engine_instrument_stack')) {
+      enginePanel.hidden = true;
       enginePanel.innerHTML = '';
       displayRpm = null;
       displayEngineValues.clear();
       return;
     }
+    enginePanel.hidden = false;
     enginePanel.innerHTML = instruments.filter((instrument) => {
       const key = String(instrument && instrument.key || '').toLowerCase();
       return key !== 'coolant2_f' && key !== 'egt2_f';
@@ -3387,6 +3415,15 @@ cw_header('Cockpit Recorder Replay');
 
   function updateHsiOverlay(sample, dtSec = 1 / 60, snap = false) {
     if (!hsiOverlay) return;
+    if (!instrumentEnabled('hsi')) {
+      hsiOverlay.hidden = true;
+      hsiOverlaySignature = '';
+      displayHsiHeadingDeg = null;
+      displayHsiHeadingBugDeg = null;
+      displayHsiRmiBearingDeg = null;
+      displayHsiCdiOffsetPx = null;
+      return;
+    }
     const heading = hsiHeadingFromSample(sample);
     if (heading === null) {
       hsiOverlay.hidden = true;
@@ -3597,8 +3634,8 @@ cw_header('Cockpit Recorder Replay');
     const horizonY = clamp(halfHeight + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
     const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, height - 90);
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
-    const airspeedRect = airspeedTape && !airspeedTape.hidden ? airspeedTape.getBoundingClientRect() : null;
-    const altimeterRect = altimeterStack && !altimeterStack.hidden ? altimeterStack.getBoundingClientRect() : null;
+    const airspeedRect = instrumentAnchorRect(airspeedTape);
+    const altimeterRect = instrumentAnchorRect(altimeterStack);
     const airspeedWidth = airspeedRect ? airspeedRect.width : 118;
     const tapeMargin = airspeedWidth * 0.8;
     const arcLeft = airspeedRect ? airspeedRect.right - rootRect.left + tapeMargin : width * 0.23;
@@ -3932,8 +3969,8 @@ cw_header('Cockpit Recorder Replay');
   function updateInsetMapPlacement() {
     if (!insetMap || !root) return false;
     const rootRect = root.getBoundingClientRect();
-    const hsiRect = hsiOverlay && !hsiOverlay.hidden ? hsiOverlay.getBoundingClientRect() : null;
-    const airspeedRect = airspeedTape && !airspeedTape.hidden ? airspeedTape.getBoundingClientRect() : null;
+    const hsiRect = instrumentAnchorRect(hsiOverlay);
+    const airspeedRect = instrumentAnchorRect(airspeedTape);
     if (!hsiRect || hsiRect.width <= 0 || hsiRect.height <= 0) {
       insetMap.hidden = true;
       return false;
