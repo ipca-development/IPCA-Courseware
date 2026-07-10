@@ -1979,6 +1979,7 @@ cw_header('Cockpit Recorder Replay');
     return normalized > 180 ? normalized - 360 : normalized;
   };
   const finiteNumber = (value) => {
+    if (typeof value === 'string' && value.trim() === '') return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   };
@@ -3097,7 +3098,18 @@ cw_header('Cockpit Recorder Replay');
       sample && sample.nav_course_deg,
       sample && sample.nav_crs_deg,
       sample && sample.selected_course_deg,
-      sample && sample.g3x && sample.g3x.nav_course_deg
+      sample && sample.selected_course,
+      sample && sample.course_deg,
+      sample && sample.crs_deg,
+      sample && sample.g3x && sample.g3x.nav_course_deg,
+      sample && sample.g3x && sample.g3x.nav_crs_deg,
+      sample && sample.g3x && sample.g3x.NavCRS,
+      sample && sample.g3x && sample.g3x['Nav Course (deg)'],
+      sample && sample.g3x && sample.g3x.CRS,
+      sample && sample.g3x && sample.g3x.selected_course_deg,
+      sample && sample.g3x && sample.g3x.selected_course,
+      sample && sample.g3x && sample.g3x.course_deg,
+      sample && sample.g3x && sample.g3x.crs_deg
     );
   }
 
@@ -3377,9 +3389,9 @@ cw_header('Cockpit Recorder Replay');
     const courseHtml = courseDeg === null ? '' : `
         <g transform="rotate(${courseRotation.toFixed(2)})">
           ${[-64, -32, 32, 64].map((x) => `<circle class="hsi-cdi-dot" cx="${x}" cy="0" r="4.2"></circle>`).join('')}
-          <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 10).toFixed(1)}" x2="0" y2="54"></line>
-          <line class="hsi-nav ${navColorClass}" x1="0" y1="-54" x2="0" y2="${(-r + 10).toFixed(1)}"></line>
-          <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r - 2).toFixed(1)} -5,${(-r + 12).toFixed(1)} 5,${(-r + 12).toFixed(1)}"></polygon>
+          <line class="hsi-nav ${navColorClass}" x1="0" y1="${(r - 36).toFixed(1)}" x2="0" y2="54"></line>
+          <line class="hsi-nav ${navColorClass}" x1="0" y1="-54" x2="0" y2="${(-r + 36).toFixed(1)}"></line>
+          <polygon class="hsi-nav-arrow ${navColorClass}" points="0,${(-r + 24).toFixed(1)} -5,${(-r + 38).toFixed(1)} 5,${(-r + 38).toFixed(1)}"></polygon>
           <g transform="translate(${cdiOffset.toFixed(1)} 0)">
             <line class="hsi-cdi-course ${navColorClass}" x1="0" y1="-48" x2="0" y2="48"></line>
           </g>
