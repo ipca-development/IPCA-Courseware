@@ -2501,8 +2501,8 @@ cw_header('Cockpit Recorder Replay');
     const gap = Math.max(8, Math.round(10 * scale));
     aoaIndicator.style.width = `${width}px`;
     aoaIndicator.style.height = `${height}px`;
-    aoaIndicator.style.left = `${Math.round(airspeedRect.left - rootRect.left - width - gap)}px`;
-    aoaIndicator.style.top = `${Math.round(airspeedRect.top - rootRect.top)}px`;
+    aoaIndicator.style.left = `${Math.round(airspeedRect.right - rootRect.left + gap)}px`;
+    aoaIndicator.style.top = `${Math.round(airspeedRect.top - rootRect.top + (42 * scale))}px`;
     return true;
   }
 
