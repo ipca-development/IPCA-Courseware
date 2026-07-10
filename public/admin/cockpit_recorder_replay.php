@@ -1907,6 +1907,7 @@ cw_header('Cockpit Recorder Replay');
   let displayHsiHeadingBugDeg = null;
   let displayHsiRmiBearingDeg = null;
   let displayHsiCdiOffsetPx = null;
+  let displayAttitudeYellowReferenceX = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
   let altimeterSettingUnit = 'hpa';
@@ -3673,6 +3674,7 @@ cw_header('Cockpit Recorder Replay');
     if (!view || !instrumentEnabled('attitude_indicator')) {
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
+      displayAttitudeYellowReferenceX = null;
       return;
     }
     const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
@@ -3681,6 +3683,7 @@ cw_header('Cockpit Recorder Replay');
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
+      displayAttitudeYellowReferenceX = null;
       return;
     }
     const dbg = currentCameraDebug || {};
@@ -3748,6 +3751,12 @@ cw_header('Cockpit Recorder Replay');
     const slipGap = 2;
     const slipHeight = 8;
     const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
+    const yellowBankShiftPx = -Math.tan(degToRad(clamp(rollDeg, -75, 75))) * (yellowReferenceY - horizonY);
+    const yellowReferenceXTarget = centerX + yellowBankShiftPx;
+    const yellowAlpha = smoothFactor(12, 1 / 60);
+    displayAttitudeYellowReferenceX = displayAttitudeYellowReferenceX === null || !Number.isFinite(displayAttitudeYellowReferenceX)
+      ? yellowReferenceXTarget
+      : displayAttitudeYellowReferenceX + (yellowReferenceXTarget - displayAttitudeYellowReferenceX) * yellowAlpha;
     const signature = [
       Math.round(width),
       Math.round(height),
@@ -3763,6 +3772,7 @@ cw_header('Cockpit Recorder Replay');
       Math.round(attitudePitchMarkScale * 100),
       Math.round(attitudeYellowReferenceScale * 100),
       Math.round(slipX),
+      Math.round(displayAttitudeYellowReferenceX),
     ].join('|');
     if (signature === attitudeOverlaySignature) {
       setElementHidden(attitudeOverlay, false);
@@ -3783,7 +3793,7 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight}"></polygon>
       </g>
-      <g transform="translate(${centerX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
+      <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
         <rect class="attitude-yellow" x="-508" y="-6" width="132" height="12" rx="4" ry="4"></rect>
         <rect class="attitude-yellow" x="376" y="-6" width="132" height="12" rx="4" ry="4"></rect>
         <polygon class="attitude-yellow" points="-272,76 0,-12 -176,76"></polygon>
@@ -4327,6 +4337,7 @@ cw_header('Cockpit Recorder Replay');
     displayHsiHeadingBugDeg = null;
     displayHsiRmiBearingDeg = null;
     displayHsiCdiOffsetPx = null;
+    displayAttitudeYellowReferenceX = null;
     displayRpm = null;
     displayEngineValues.clear();
     hsiOverlaySignature = '';
