@@ -3855,9 +3855,9 @@ cw_header('Cockpit Recorder Replay');
     }
     let fpvHtml = '';
     if (fpv) {
-      const fpvSourceAlpha = snap ? 1 : smoothFactor(1.6, dtSec);
-      const fpvMaxHeadingStepDeg = snap ? Infinity : 7 * Math.max(1 / 120, dtSec);
-      const fpvMaxPitchStepDeg = snap ? Infinity : 5 * Math.max(1 / 120, dtSec);
+      const fpvSourceAlpha = snap ? 1 : smoothFactor(0.9, dtSec);
+      const fpvMaxHeadingStepDeg = snap ? Infinity : 4 * Math.max(1 / 120, dtSec);
+      const fpvMaxPitchStepDeg = snap ? Infinity : 3 * Math.max(1 / 120, dtSec);
       displayFpvHeadingDeltaDeg = displayFpvHeadingDeltaDeg === null || !Number.isFinite(displayFpvHeadingDeltaDeg)
         ? fpv.headingDeltaDeg
         : normalizeSignedDeg(displayFpvHeadingDeltaDeg + clamp(
@@ -3938,13 +3938,13 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-slip" points="0,0 -${pointerHalfWidth},${pointerHeight} ${pointerHalfWidth},${pointerHeight}"></polygon>
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight}"></polygon>
       </g>
+      ${fpvHtml}
       <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
         <rect class="attitude-yellow" x="-508" y="-6" width="132" height="12" rx="4" ry="4"></rect>
         <rect class="attitude-yellow" x="376" y="-6" width="132" height="12" rx="4" ry="4"></rect>
         <polygon class="attitude-yellow" points="-272,76 0,-12 -176,76"></polygon>
         <polygon class="attitude-yellow" points="272,76 0,-12 176,76"></polygon>
       </g>
-      ${fpvHtml}
     `;
     setElementHidden(attitudeOverlay, false);
   }
