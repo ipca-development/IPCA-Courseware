@@ -97,7 +97,7 @@ final class CockpitAdsbEnrichmentService
 
             $this->setStatus($recordingId, 'processing', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, null, $rawPath, null);
             $normalized = array(
-                'provider' => 'adsbexchange_trace',
+                'provider' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_trace',
                 'hex' => $hex,
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
@@ -126,7 +126,7 @@ final class CockpitAdsbEnrichmentService
         } catch (CockpitAdsbTraceNotAvailable $e) {
             $this->clearOwnshipSamples($recordingId);
             $diagnosticsPath = $this->storeJson($recording, 'raw', array(
-                'provider' => 'adsbexchange_trace',
+                'provider' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_trace',
                 'hex' => $hex,
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
@@ -1011,7 +1011,7 @@ final class CockpitAdsbEnrichmentService
             return array(
                 'sample_count' => 0,
                 'provider' => tv_adsb_provider(),
-                'note' => 'Traffic enrichment requires CW_ADSBEXCHANGE_PROVIDER=gateway.',
+                'note' => 'Traffic enrichment requires the ADS-B Exchange gateway API; set CW_ADSBEXCHANGE_PROVIDER=rapidapi only to opt out.',
             );
         }
 

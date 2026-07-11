@@ -18,8 +18,8 @@ function tv_adsb_api_key(): string
 
 function tv_adsb_provider(): string
 {
-    $provider = strtolower(trim((string)(getenv('CW_ADSBEXCHANGE_PROVIDER') ?: 'rapidapi')));
-    return $provider === 'gateway' ? 'gateway' : 'rapidapi';
+    $provider = strtolower(trim((string)(getenv('CW_ADSBEXCHANGE_PROVIDER') ?: '')));
+    return $provider === 'rapidapi' ? 'rapidapi' : 'gateway';
 }
 
 function tv_adsb_api_config(): array
