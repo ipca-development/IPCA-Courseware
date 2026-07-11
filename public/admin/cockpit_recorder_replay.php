@@ -1119,6 +1119,12 @@ cw_header('Cockpit Recorder Replay');
   stroke-width: 2;
   stroke-linejoin: round;
 }
+.attitude-overlay .attitude-flight-director-cap {
+  fill: none;
+  stroke: rgba(0, 0, 0, .82);
+  stroke-width: 2;
+  stroke-linecap: square;
+}
 .attitude-overlay .attitude-slip {
   fill: rgba(255, 255, 255, .88);
 }
@@ -4491,10 +4497,10 @@ cw_header('Cockpit Recorder Replay');
       const fdY = yellowReferenceY + clamp(pitchPx(fdPitchErrorDeg), -height * 0.28, height * 0.28);
       flightDirectorHtml = `
       <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${fdY.toFixed(1)}) rotate(${(-fdRollErrorDeg).toFixed(2)}) scale(${attitudeYellowReferenceScale})">
-        <rect class="attitude-flight-director" x="-528" y="-14" width="168" height="28" rx="7" ry="7"></rect>
-        <rect class="attitude-flight-director" x="360" y="-14" width="168" height="28" rx="7" ry="7"></rect>
-        <path class="attitude-flight-director" fill-rule="evenodd" d="M -348 100 L 0 -30 L -158 100 Z M -292 80 L 0 -9 L -170 80 Z"></path>
-        <path class="attitude-flight-director" fill-rule="evenodd" d="M 348 100 L 0 -30 L 158 100 Z M 292 80 L 0 -9 L 170 80 Z"></path>
+        <polygon class="attitude-flight-director" points="-458,82 -392,104 0,-54 -70,-38"></polygon>
+        <polygon class="attitude-flight-director" points="458,82 392,104 0,-54 70,-38"></polygon>
+        <line class="attitude-flight-director-cap" x1="-458" y1="82" x2="-392" y2="104"></line>
+        <line class="attitude-flight-director-cap" x1="458" y1="82" x2="392" y2="104"></line>
       </g>`;
     } else {
       displayFdRollCommandDeg = null;
