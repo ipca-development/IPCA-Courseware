@@ -31,8 +31,10 @@ CALL ipca_add_replay_avionics_column_if_missing('nav2_standby_mhz', 'DECIMAL(6,3
 CALL ipca_add_replay_avionics_column_if_missing('fd_lateral_mode', 'VARCHAR(32) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('autopilot_armed_mode', 'VARCHAR(32) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('com1_name', 'VARCHAR(64) NULL');
+CALL ipca_add_replay_avionics_column_if_missing('com1_status', 'VARCHAR(16) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('com1_standby_name', 'VARCHAR(64) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('com2_name', 'VARCHAR(64) NULL');
+CALL ipca_add_replay_avionics_column_if_missing('com2_status', 'VARCHAR(16) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('com2_standby_name', 'VARCHAR(64) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('nav2_name', 'VARCHAR(64) NULL');
 CALL ipca_add_replay_avionics_column_if_missing('nav2_standby_name', 'VARCHAR(64) NULL');

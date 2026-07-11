@@ -182,9 +182,9 @@ cw_header('Cockpit Recorder Replay');
   min-height: 45px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 72px minmax(0, 1.18fr) minmax(74px, .52fr) minmax(0, 1.55fr) minmax(0, 1.18fr) minmax(0, 1.18fr);
+  grid-template-columns: 112px minmax(0, 1fr) minmax(68px, .42fr) minmax(0, 1.34fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   padding: 3px 4px;
   background: linear-gradient(180deg, rgba(15, 23, 42, .96), rgba(15, 23, 42, .88));
   border-bottom: 1px solid rgba(148, 163, 184, .24);
@@ -195,10 +195,11 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
 }
 .replay-avionics-brand {
+  visibility: hidden;
   color: rgba(226, 232, 240, .70);
   font-size: 7px;
   letter-spacing: .10em;
-  padding-left: 3px;
+  padding-left: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -213,7 +214,7 @@ cw_header('Cockpit Recorder Replay');
   height: 39px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
   overflow: hidden;
   border: 1px solid rgba(226, 232, 240, .32);
@@ -231,16 +232,16 @@ cw_header('Cockpit Recorder Replay');
 }
 .avionics-box.is-xpdr {
   min-width: 0;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
 }
 .avionics-box.is-afcs {
   min-width: 0;
-  grid-template-columns: 34px repeat(4, minmax(0, 1fr));
+  grid-template-columns: 30px repeat(4, minmax(0, 1fr));
 }
 .avionics-label {
   min-width: 0;
-  padding: 6px 4px 0;
-  font-size: 8px;
+  padding: 5px 2px 0;
+  font-size: 7px;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
@@ -273,10 +274,24 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
   text-overflow: clip;
   color: #5fe348;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: .02em;
   white-space: nowrap;
+}
+.avionics-value-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+  min-width: 0;
+}
+.avionics-rx-tx {
+  color: #5fe348;
+  font-size: 7px;
+  font-weight: 900;
+  line-height: 1;
 }
 .avionics-value.is-standby {
   color: #78fff1;
@@ -285,27 +300,30 @@ cw_header('Cockpit Recorder Replay');
   color: #f8fafc;
 }
 .avionics-name {
-  margin-top: 2px;
+  margin-top: 1px;
   max-width: 100%;
   color: #f8fafc;
-  font-size: 6px;
+  font-size: 5.5px;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.avionics-box.is-nav .avionics-frequency:first-of-type .avionics-name {
+  font-size: 6.9px;
+}
 .avionics-box.is-xpdr .avionics-value {
-  font-size: 15px;
+  font-size: 13px;
 }
 .avionics-box.is-xpdr .avionics-name {
   color: #5fe348;
-  font-size: 9px;
+  font-size: 7px;
 }
 .avionics-afcs-title {
   align-self: start;
-  padding: 5px 4px 0;
-  font-size: 7px;
+  padding: 5px 2px 0;
+  font-size: 6.5px;
   font-weight: 900;
   white-space: nowrap;
   overflow: hidden;
@@ -318,17 +336,34 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
   border-left: 1px solid rgba(226, 232, 240, .28);
   color: #5fe348;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
 .avionics-afcs-cell.is-white {
   color: #f8fafc;
-  font-size: 9px;
+  font-size: 8px;
 }
-.avionics-box.is-nav.is-active-cdi {
-  border-color: rgba(95, 227, 72, .82);
+.avionics-afcs-cell.is-pft {
+  color: #f8fafc;
+  animation: afcs-flash 0.55s steps(1, end) infinite;
+}
+.avionics-afcs-cell.is-ap-disconnect {
+  color: #111827;
+  background: #f5d328;
+  font-weight: 900;
+  animation: afcs-flash 0.45s steps(1, end) infinite;
+}
+@keyframes afcs-flash {
+  0%, 48% { opacity: 1; }
+  49%, 100% { opacity: .12; }
+}
+.avionics-box.is-nav .avionics-frequency:first-of-type .avionics-value {
+  color: #f8fafc;
+}
+.avionics-box.is-nav.is-active-cdi .avionics-frequency:first-of-type .avionics-value {
+  color: #5fe348;
 }
 .avionics-muted {
   opacity: .45;
@@ -2096,6 +2131,8 @@ cw_header('Cockpit Recorder Replay');
   let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
   let insetMapSignature = '';
+  let afcsManualDisconnectReplayT = null;
+  let afcsLastStateUpper = '';
   let insetMapZoom = 1;
   let insetMapProjection = null;
   let insetMapPanE = 0;
@@ -2740,7 +2777,7 @@ cw_header('Cockpit Recorder Replay');
     const raw = String(value ?? '').trim().toUpperCase();
     if (raw === '') return fallback;
     if (['0', 'FALSE', 'OFF', 'NO', 'NONE'].includes(raw)) return fallback;
-    if (raw.includes('POWER') || raw.includes('AFCS') || raw.includes('AUTOPILOT') || raw === '1' || raw === 'TRUE' || raw === 'ON') return 'AP';
+    if (raw === '1' || raw === 'TRUE' || raw === 'ON') return 'AP';
     if (raw.includes('HEADING')) return 'HDG';
     if (raw.includes('NAV')) return raw.includes('2') ? 'NAV2' : 'NAV';
     if (raw.includes('GPS') || raw.includes('FMS')) return 'GPS';
@@ -2754,18 +2791,86 @@ cw_header('Cockpit Recorder Replay');
     return raw.replace(/\s+/g, '').slice(0, maxLen);
   }
 
-  function radioFrequencyBoxHtml(kind, label, activeFreq, activeName, standbyFreq, standbyName, activeCdi = false) {
+  function afcsStateDisplay(sample) {
+    const raw = String(g3xField(sample, 'autopilot_state', 'ap_state') ||
+      g3xRawField(sample, 'Autopilot State', 'AP State', 'AfcsOn') ||
+      '').trim();
+    const upper = raw.toUpperCase();
+    const sampleT = sample && Number.isFinite(Number(sample.t)) ? Number(sample.t) : activeT;
+    if (upper.includes('MANUAL') && upper.includes('DISENG')) {
+      if (!(afcsLastStateUpper.includes('MANUAL') && afcsLastStateUpper.includes('DISENG')) || afcsManualDisconnectReplayT === null || Number(sampleT) < afcsManualDisconnectReplayT) {
+        afcsManualDisconnectReplayT = Number(sampleT);
+      }
+      afcsLastStateUpper = upper;
+      if (Number(sampleT) - afcsManualDisconnectReplayT <= 3) {
+        return { text: 'AP', className: ' is-ap-disconnect' };
+      }
+      return { text: '', className: '' };
+    }
+    if (upper.includes('PFT')) {
+      afcsManualDisconnectReplayT = null;
+      afcsLastStateUpper = upper;
+      return { text: 'PFT', className: ' is-pft' };
+    }
+    if (upper.includes('POWER')) {
+      afcsManualDisconnectReplayT = null;
+      afcsLastStateUpper = upper;
+      return { text: 'Powerup', className: ' is-white' };
+    }
+    if (upper === 'AP' || upper.includes('ENGAGED') || upper === '1' || upper === 'TRUE' || upper === 'ON') {
+      afcsManualDisconnectReplayT = null;
+      afcsLastStateUpper = upper;
+      return { text: 'AP', className: '' };
+    }
+    afcsManualDisconnectReplayT = null;
+    afcsLastStateUpper = upper;
+    return { text: '', className: '' };
+  }
+
+  function splitVerticalAfcsMode(value, fallback = '--') {
+    const raw = String(value ?? '').trim();
+    if (raw === '') return { active: fallback, armed: '' };
+    const match = raw.match(/^([^()]+?)(?:\s*\(([^)]+)\))?$/);
+    const active = normalizeAfcsToken(match ? match[1] : raw, fallback, 4);
+    const armed = match && match[2] ? normalizeAfcsToken(match[2], '', 4) : '';
+    return { active, armed };
+  }
+
+  function comRxTxStatus(sample, index) {
+    const prefix = `com${index}`;
+    const raw = String(
+      g3xField(sample, `${prefix}_status`, `${prefix}_rx_tx`, `${prefix}_rxtx`) ||
+      g3xRawField(
+        sample,
+        `COM${index} Status`,
+        `COM ${index} Status`,
+        `COM${index} RX/TX`,
+        `COM ${index} RX/TX`,
+        `COM${index} RxTx`,
+        `COM ${index} RxTx`,
+        `COM${index} Monitor`,
+        `COM ${index} Monitor`
+      ) ||
+      ''
+    ).toUpperCase();
+    if (raw.includes('TX') || raw.includes('TRANSMIT')) return 'TX';
+    if (raw.includes('RX') || raw.includes('RECEIV')) return 'RX';
+    return '';
+  }
+
+  function radioFrequencyBoxHtml(kind, label, activeFreq, activeName, standbyFreq, standbyName, activeCdi = false, activeStatus = '') {
     const activeNameText = formatAvionicsText(activeName, '');
     const standbyNameText = formatAvionicsText(standbyName, '');
     const band = kind === 'nav' ? 'nav' : 'com';
     const activeFrequencyText = formatAvionicsFrequency(activeFreq, band);
     const standbyFrequencyText = formatAvionicsFrequency(standbyFreq, band);
     const standbyMissing = standbyFrequencyText === '---.---' && standbyNameText === '';
+    const statusText = String(activeStatus || '').toUpperCase();
     return `
       <div class="avionics-box is-${kind}${activeCdi ? ' is-active-cdi' : ''}">
         <div class="avionics-label">${escapeHtml(label)}</div>
         <div class="avionics-frequency">
-          <div class="avionics-value">${escapeHtml(activeFrequencyText)}</div>
+          <div class="avionics-value-line"><span class="avionics-value">${escapeHtml(activeFrequencyText)}</span>${statusText ? `<span class="avionics-rx-tx">${escapeHtml(statusText)}</span>` : ''}</div>
           <div class="avionics-name">${escapeHtml(activeNameText || ' ')}</div>
         </div>
         <div class="avionics-frequency${standbyMissing ? ' avionics-muted' : ''}">
@@ -2793,26 +2898,23 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function autopilotFmaHtml(sample) {
-    const apState = g3xField(sample, 'autopilot_state', 'ap_state') ||
-      g3xRawField(sample, 'Autopilot State', 'AP State', 'AfcsOn');
     const lateralMode = g3xField(sample, 'fd_lateral_mode', 'fd_lat_mode', 'autopilot_lateral_mode') ||
       g3xRawField(sample, 'FD Lateral Mode', 'AP Lateral Mode', 'Lateral Mode');
     const verticalMode = g3xField(sample, 'fd_vertical_mode', 'fd_vert_mode', 'autopilot_vertical_mode') ||
       g3xRawField(sample, 'FD Vertical Mode', 'AP Vertical Mode', 'Vertical Mode');
     const armedMode = g3xField(sample, 'autopilot_armed_mode', 'ap_armed_mode') ||
       g3xRawField(sample, 'AP Armed Mode', 'Armed Mode', 'ALT Armed');
-    const source = hsiNavDisplay(sample);
-    const apLabel = normalizeAfcsToken(apState, '--', 3);
-    const navLabel = normalizeAfcsToken(lateralMode, source.isGps ? 'GPS' : source.label, 4);
-    const verticalLabel = normalizeAfcsToken(verticalMode, '--', 4);
-    const armedLabel = normalizeAfcsToken(armedMode, 'ALTS', 4);
+    const apState = afcsStateDisplay(sample);
+    const lateralLabel = normalizeAfcsToken(lateralMode, '--', 4);
+    const verticalModes = splitVerticalAfcsMode(verticalMode, '--');
+    const armedLabel = verticalModes.armed || normalizeAfcsToken(armedMode, '', 4);
     return `
       <div class="avionics-box is-afcs">
         <div class="avionics-afcs-title">AFCS</div>
-        <div class="avionics-afcs-cell">${escapeHtml(apLabel)}</div>
-        <div class="avionics-afcs-cell">${escapeHtml(navLabel)}</div>
-        <div class="avionics-afcs-cell">${escapeHtml(verticalLabel)}</div>
-        <div class="avionics-afcs-cell is-white">${escapeHtml(armedLabel)}</div>
+        <div class="avionics-afcs-cell${apState.className}">${escapeHtml(apState.text || ' ')}</div>
+        <div class="avionics-afcs-cell">${escapeHtml(lateralLabel)}</div>
+        <div class="avionics-afcs-cell">${escapeHtml(verticalModes.active)}</div>
+        <div class="avionics-afcs-cell is-white">${escapeHtml(armedLabel || ' ')}</div>
       </div>`;
   }
 
@@ -2838,14 +2940,14 @@ cw_header('Cockpit Recorder Replay');
       if (radioStackGroup) {
         setElementHidden(radioStackGroup, !radioVisible);
         radioStackGroup.innerHTML = [
-          radioFrequencyBoxHtml('radio', 'COM 1', com1Active, g3xField(sample, 'com1_name', 'com1_active_name') || g3xRawField(sample, 'COM1 Name', 'COM1 Active Name'), com1Standby, g3xField(sample, 'com1_standby_name', 'com1_stby_name') || g3xRawField(sample, 'COM1 Standby Name')),
+          radioFrequencyBoxHtml('radio', 'COM 1', com1Active, g3xField(sample, 'com1_name', 'com1_active_name') || g3xRawField(sample, 'COM1 Name', 'COM1 Active Name'), com1Standby, g3xField(sample, 'com1_standby_name', 'com1_stby_name') || g3xRawField(sample, 'COM1 Standby Name'), false, comRxTxStatus(sample, 1)),
           transponderBoxHtml(sample),
         ].join('');
       }
       if (radioStackEndGroup) {
         setElementHidden(radioStackEndGroup, !radioVisible);
         radioStackEndGroup.innerHTML = radioVisible
-          ? radioFrequencyBoxHtml('radio', 'COM 2', com2Active, g3xField(sample, 'com2_name', 'com2_active_name') || g3xRawField(sample, 'COM2 Name', 'COM2 Active Name'), com2Standby, g3xField(sample, 'com2_standby_name', 'com2_stby_name') || g3xRawField(sample, 'COM2 Standby Name'))
+          ? radioFrequencyBoxHtml('radio', 'COM 2', com2Active, g3xField(sample, 'com2_name', 'com2_active_name') || g3xRawField(sample, 'COM2 Name', 'COM2 Active Name'), com2Standby, g3xField(sample, 'com2_standby_name', 'com2_stby_name') || g3xRawField(sample, 'COM2 Standby Name'), false, comRxTxStatus(sample, 2))
           : '';
       }
     }

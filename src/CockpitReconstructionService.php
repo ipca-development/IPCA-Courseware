@@ -907,8 +907,10 @@ final class CockpitReconstructionService
             'fd_vertical_mode',
             'autopilot_armed_mode',
             'com1_name',
+            'com1_status',
             'com1_standby_name',
             'com2_name',
+            'com2_status',
             'com2_standby_name',
             'nav2_name',
             'nav2_standby_name',
@@ -1075,8 +1077,10 @@ final class CockpitReconstructionService
             'fd_vertical_mode',
             'autopilot_armed_mode',
             'com1_name',
+            'com1_status',
             'com1_standby_name',
             'com2_name',
+            'com2_status',
             'com2_standby_name',
             'nav2_name',
             'nav2_standby_name',
@@ -1181,7 +1185,7 @@ final class CockpitReconstructionService
                     $sample[$field] = (float)$canonicalG3x[$field];
                 }
             }
-            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier', 'transponder_code', 'transponder_mode', 'autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_name', 'com1_standby_name', 'com2_name', 'com2_standby_name', 'nav2_name', 'nav2_standby_name') as $field) {
+            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier', 'transponder_code', 'transponder_mode', 'autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_name', 'com1_status', 'com1_standby_name', 'com2_name', 'com2_status', 'com2_standby_name', 'nav2_name', 'nav2_standby_name') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && trim((string)$canonicalG3x[$field]) !== '') {
                     $sample[$field] = (string)$canonicalG3x[$field];
                 }
@@ -1223,8 +1227,10 @@ final class CockpitReconstructionService
             'fd_vertical_mode',
             'autopilot_armed_mode',
             'com1_name',
+            'com1_status',
             'com1_standby_name',
             'com2_name',
+            'com2_status',
             'com2_standby_name',
             'nav2_name',
             'nav2_standby_name',
@@ -3908,8 +3914,10 @@ final class CockpitReconstructionService
             'fd_vertical_mode',
             'autopilot_armed_mode',
             'com1_name',
+            'com1_status',
             'com1_standby_name',
             'com2_name',
+            'com2_status',
             'com2_standby_name',
             'nav2_name',
             'nav2_standby_name',
@@ -4289,10 +4297,12 @@ final class CockpitReconstructionService
             'com1_mhz' => $txt($g3x, 'COM Frequency 1 (MHz)'),
             'com1_standby_mhz' => $txt($g3x, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB'),
             'com1_name' => $txt($g3x, 'COM1 Name', 'COM1 Active Name'),
+            'com1_status' => $txt($g3x, 'COM1 Status', 'COM 1 Status', 'COM1 RX/TX', 'COM 1 RX/TX', 'COM1 RxTx', 'COM 1 RxTx'),
             'com1_standby_name' => $txt($g3x, 'COM1 Standby Name'),
             'com2_mhz' => $txt($g3x, 'COM Frequency 2 (MHz)'),
             'com2_standby_mhz' => $txt($g3x, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB'),
             'com2_name' => $txt($g3x, 'COM2 Name', 'COM2 Active Name'),
+            'com2_status' => $txt($g3x, 'COM2 Status', 'COM 2 Status', 'COM2 RX/TX', 'COM 2 RX/TX', 'COM2 RxTx', 'COM 2 RxTx'),
             'com2_standby_name' => $txt($g3x, 'COM2 Standby Name'),
             'nav2_mhz' => $txt($g3x, 'NAV Frequency 2 (MHz)'),
             'nav2_standby_mhz' => $txt($g3x, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB'),
