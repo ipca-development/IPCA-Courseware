@@ -862,8 +862,11 @@ final class CockpitReconstructionService
             'ap_roll_torque_pct',
             'ap_pitch_torque_pct',
             'com1_mhz',
+            'com1_standby_mhz',
             'com2_mhz',
+            'com2_standby_mhz',
             'nav2_mhz',
+            'nav2_standby_mhz',
             'lateral_acceleration_g',
             'normal_acceleration_g',
             'acceleration_g',
@@ -900,7 +903,15 @@ final class CockpitReconstructionService
             'nav_annunciation',
             'nav_identifier',
             'autopilot_state',
+            'fd_lateral_mode',
             'fd_vertical_mode',
+            'autopilot_armed_mode',
+            'com1_name',
+            'com1_standby_name',
+            'com2_name',
+            'com2_standby_name',
+            'nav2_name',
+            'nav2_standby_name',
             'estimated_slip_skid_g',
             'estimated_slip_skid_source',
             'estimated_slip_skid_quality',
@@ -1021,8 +1032,11 @@ final class CockpitReconstructionService
             'ap_roll_torque_pct',
             'ap_pitch_torque_pct',
             'com1_mhz',
+            'com1_standby_mhz',
             'com2_mhz',
+            'com2_standby_mhz',
             'nav2_mhz',
+            'nav2_standby_mhz',
             'lateral_acceleration_g',
             'normal_acceleration_g',
             'acceleration_g',
@@ -1057,7 +1071,15 @@ final class CockpitReconstructionService
             'nav_annunciation',
             'nav_identifier',
             'autopilot_state',
+            'fd_lateral_mode',
             'fd_vertical_mode',
+            'autopilot_armed_mode',
+            'com1_name',
+            'com1_standby_name',
+            'com2_name',
+            'com2_standby_name',
+            'nav2_name',
+            'nav2_standby_name',
             'raw_pitch_deg',
             'raw_roll_deg',
             'raw_attitude_source',
@@ -1147,19 +1169,19 @@ final class CockpitReconstructionService
         if (array_key_exists('raw_attitude_quality', $row)) {
             $sample['raw_attitude_quality'] = (string)($row['raw_attitude_quality'] ?? '');
         }
-        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com2_mhz', 'nav2_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
+        foreach (array('heading_deg_true', 'heading_deg_magnetic', 'track_deg_true', 'wind_direction_deg_true', 'magnetic_variation_deg', 'compass_deviation_deg', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'aoa', 'aoa_cp', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz', 'nav2_mhz', 'nav2_standby_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'crab_angle_deg', 'estimated_indicated_altitude_ft', 'estimated_vertical_speed_fpm', 'altimeter_setting_inhg', 'heading_bug_deg', 'altitude_bug_ft', 'oat_c', 'isa_deviation_c', 'decision_altitude_ft', 'da_ft', 'minimums_ft', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'estimated_slip_skid_g', 'slip_skid_g') as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
         }
         if (isset($row['canonical_g3x_row_json']) && trim((string)$row['canonical_g3x_row_json']) !== '') {
             $canonicalG3x = $this->publicG3XFields(array('g3x_row_json' => $row['canonical_g3x_row_json']));
-            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps') as $field) {
+            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz', 'nav2_mhz', 'nav2_standby_mhz') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && $canonicalG3x[$field] !== null) {
                     $sample[$field] = (float)$canonicalG3x[$field];
                 }
             }
-            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier') as $field) {
+            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier', 'transponder_code', 'transponder_mode', 'autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_name', 'com1_standby_name', 'com2_name', 'com2_standby_name', 'nav2_name', 'nav2_standby_name') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && trim((string)$canonicalG3x[$field]) !== '') {
                     $sample[$field] = (string)$canonicalG3x[$field];
                 }
@@ -1197,7 +1219,15 @@ final class CockpitReconstructionService
             'nav_annunciation',
             'nav_identifier',
             'autopilot_state',
+            'fd_lateral_mode',
             'fd_vertical_mode',
+            'autopilot_armed_mode',
+            'com1_name',
+            'com1_standby_name',
+            'com2_name',
+            'com2_standby_name',
+            'nav2_name',
+            'nav2_standby_name',
         ) as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = (string)($row[$field] ?? '');
@@ -3836,8 +3866,11 @@ final class CockpitReconstructionService
             'ap_roll_torque_pct',
             'ap_pitch_torque_pct',
             'com1_mhz',
+            'com1_standby_mhz',
             'com2_mhz',
+            'com2_standby_mhz',
             'nav2_mhz',
+            'nav2_standby_mhz',
             'lateral_acceleration_g',
             'normal_acceleration_g',
             'acceleration_g',
@@ -3871,7 +3904,15 @@ final class CockpitReconstructionService
             'nav_annunciation',
             'nav_identifier',
             'autopilot_state',
+            'fd_lateral_mode',
             'fd_vertical_mode',
+            'autopilot_armed_mode',
+            'com1_name',
+            'com1_standby_name',
+            'com2_name',
+            'com2_standby_name',
+            'nav2_name',
+            'nav2_standby_name',
             'raw_pitch_deg',
             'raw_roll_deg',
             'raw_attitude_source',
@@ -4246,10 +4287,21 @@ final class CockpitReconstructionService
 
         return array(
             'com1_mhz' => $txt($g3x, 'COM Frequency 1 (MHz)'),
+            'com1_standby_mhz' => $txt($g3x, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB'),
+            'com1_name' => $txt($g3x, 'COM1 Name', 'COM1 Active Name'),
+            'com1_standby_name' => $txt($g3x, 'COM1 Standby Name'),
             'com2_mhz' => $txt($g3x, 'COM Frequency 2 (MHz)'),
+            'com2_standby_mhz' => $txt($g3x, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB'),
+            'com2_name' => $txt($g3x, 'COM2 Name', 'COM2 Active Name'),
+            'com2_standby_name' => $txt($g3x, 'COM2 Standby Name'),
             'nav2_mhz' => $txt($g3x, 'NAV Frequency 2 (MHz)'),
+            'nav2_standby_mhz' => $txt($g3x, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB'),
+            'nav2_name' => $txt($g3x, 'NAV2 Name', 'NAV2 Active Name'),
+            'nav2_standby_name' => $txt($g3x, 'NAV2 Standby Name'),
             'xpdr_code' => $txt($g3x, 'Transponder Code'),
             'xpdr_mode' => $txt($g3x, 'Transponder Mode'),
+            'transponder_code' => $txt($g3x, 'Transponder Code'),
+            'transponder_mode' => $txt($g3x, 'Transponder Mode'),
             'rpm' => $num($g3x, 'RPM', 'E1 RPM'),
             'fuel_flow_gph' => $num($g3x, 'Fuel Flow (gal/hour)', 'E1 FFlow'),
             'oil_psi' => $num($g3x, 'Oil Press (PSI)', 'E1 OilP'),
@@ -4279,6 +4331,10 @@ final class CockpitReconstructionService
             'ap_state' => $txt($g3x, 'Autopilot State'),
             'fd_lat_mode' => $txt($g3x, 'FD Lateral Mode'),
             'fd_vert_mode' => $txt($g3x, 'FD Vertical Mode'),
+            'autopilot_state' => $txt($g3x, 'Autopilot State', 'AfcsOn'),
+            'fd_lateral_mode' => $txt($g3x, 'FD Lateral Mode', 'RollM', 'LatMode'),
+            'fd_vertical_mode' => $txt($g3x, 'FD Vertical Mode', 'PitchM'),
+            'autopilot_armed_mode' => $txt($g3x, 'AP Armed Mode', 'Armed Mode', 'ALT Armed'),
             'wind_speed_kt' => $num($g3x, 'Wind Speed (kt)', 'WndSpd'),
             'wind_dir_deg' => $num($g3x, 'Wind Direction (deg)', 'WndDr'),
             'oat_c' => $num($g3x, 'Outside Air Temp (deg C)', 'OAT'),
