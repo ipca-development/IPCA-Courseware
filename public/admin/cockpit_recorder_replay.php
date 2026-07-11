@@ -1113,6 +1113,12 @@ cw_header('Cockpit Recorder Replay');
   stroke-width: 2;
   stroke-linejoin: round;
 }
+.attitude-overlay .attitude-flight-director {
+  fill: #d946ef;
+  stroke: rgba(0, 0, 0, .82);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
 .attitude-overlay .attitude-slip {
   fill: rgba(255, 255, 255, .88);
 }
@@ -2140,6 +2146,8 @@ cw_header('Cockpit Recorder Replay');
   let displayFpvPitchDeltaDeg = null;
   let displayFpvX = null;
   let displayFpvY = null;
+  let displayFdRollCommandDeg = null;
+  let displayFdPitchCommandDeg = null;
   let lastValidFpvVector = null;
   let lastValidFpvReplayT = null;
   let displayRpm = null;
@@ -2215,7 +2223,7 @@ cw_header('Cockpit Recorder Replay');
     'wind_indicator',
   ];
   const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack']);
-  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'horizon_bar', 'attitude_indicator', 'engine_instrument_stack', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -2876,6 +2884,36 @@ cw_header('Cockpit Recorder Replay');
     const text = String(value ?? '').trim().toUpperCase();
     if (text === '' || ['0', 'FALSE', 'OFF', 'NO', 'NONE', '--', '---'].includes(text)) return '';
     return text;
+  }
+
+  function flightDirectorCommandsActive(sample) {
+    if (!sample) return false;
+    const apState = String(g3xField(sample, 'autopilot_state', 'ap_state') || '').trim().toUpperCase();
+    const lateralMode = afcsModeActiveText(g3xField(sample, 'fd_lateral_mode', 'fd_lat_mode', 'autopilot_lateral_mode'));
+    const verticalMode = afcsModeActiveText(g3xField(sample, 'fd_vertical_mode', 'fd_vert_mode', 'autopilot_vertical_mode'));
+    if (flightDirectorActive(sample) || lateralMode !== '' || verticalMode !== '') return true;
+    return apState === 'AP' || apState.startsWith('AP ') || apState.includes('AP /') || apState.includes('ENGAGED');
+  }
+
+  function flightDirectorCommandFromSample(sample) {
+    if (!flightDirectorCommandsActive(sample)) return null;
+    const rollCommand = firstFinite(
+      sample && sample.fd_roll_command_deg,
+      sample && sample.ap_roll_command_deg,
+      sample && sample.g3x && sample.g3x.fd_roll_command_deg,
+      sample && sample.g3x && sample.g3x.ap_roll_command_deg
+    );
+    const pitchCommand = firstFinite(
+      sample && sample.fd_pitch_command_deg,
+      sample && sample.ap_pitch_command_deg,
+      sample && sample.g3x && sample.g3x.fd_pitch_command_deg,
+      sample && sample.g3x && sample.g3x.ap_pitch_command_deg
+    );
+    if (rollCommand === null && pitchCommand === null) return null;
+    return {
+      rollDeg: rollCommand,
+      pitchDeg: pitchCommand,
+    };
   }
 
   function comRxTxStatus(sample, index) {
@@ -4282,6 +4320,8 @@ cw_header('Cockpit Recorder Replay');
       displayFpvPitchDeltaDeg = null;
       displayFpvX = null;
       displayFpvY = null;
+      displayFdRollCommandDeg = null;
+      displayFdPitchCommandDeg = null;
       lastValidFpvVector = null;
       lastValidFpvReplayT = null;
       return;
@@ -4297,6 +4337,8 @@ cw_header('Cockpit Recorder Replay');
       displayFpvPitchDeltaDeg = null;
       displayFpvX = null;
       displayFpvY = null;
+      displayFdRollCommandDeg = null;
+      displayFdPitchCommandDeg = null;
       lastValidFpvVector = null;
       lastValidFpvReplayT = null;
       return;
@@ -4431,6 +4473,33 @@ cw_header('Cockpit Recorder Replay');
       lastValidFpvVector = null;
       lastValidFpvReplayT = null;
     }
+    const fdBarsEnabled = instrumentEnabled('flight_director_bars');
+    const fdCommand = fdBarsEnabled ? flightDirectorCommandFromSample(sample) : null;
+    let flightDirectorHtml = '';
+    if (fdCommand) {
+      const fdAlpha = snap ? 1 : smoothFactor(10, dtSec);
+      const fdRollTarget = fdCommand.rollDeg === null ? rollDeg : Number(fdCommand.rollDeg);
+      const fdPitchTarget = fdCommand.pitchDeg === null ? pitchDeg : Number(fdCommand.pitchDeg);
+      displayFdRollCommandDeg = displayFdRollCommandDeg === null || !Number.isFinite(displayFdRollCommandDeg)
+        ? fdRollTarget
+        : displayFdRollCommandDeg + normalizeSignedDeg(fdRollTarget - displayFdRollCommandDeg) * fdAlpha;
+      displayFdPitchCommandDeg = displayFdPitchCommandDeg === null || !Number.isFinite(displayFdPitchCommandDeg)
+        ? fdPitchTarget
+        : displayFdPitchCommandDeg + (fdPitchTarget - displayFdPitchCommandDeg) * fdAlpha;
+      const fdRollErrorDeg = clamp(normalizeSignedDeg(displayFdRollCommandDeg - rollDeg), -35, 35);
+      const fdPitchErrorDeg = clamp(displayFdPitchCommandDeg - pitchDeg, -15, 15);
+      const fdY = yellowReferenceY + clamp(pitchPx(fdPitchErrorDeg), -height * 0.28, height * 0.28);
+      flightDirectorHtml = `
+      <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${fdY.toFixed(1)}) rotate(${(-fdRollErrorDeg).toFixed(2)}) scale(${attitudeYellowReferenceScale})">
+        <rect class="attitude-flight-director" x="-508" y="-7" width="132" height="14" rx="4" ry="4"></rect>
+        <rect class="attitude-flight-director" x="376" y="-7" width="132" height="14" rx="4" ry="4"></rect>
+        <polygon class="attitude-flight-director" points="-272,78 0,-14 -176,78"></polygon>
+        <polygon class="attitude-flight-director" points="272,78 0,-14 176,78"></polygon>
+      </g>`;
+    } else {
+      displayFdRollCommandDeg = null;
+      displayFdPitchCommandDeg = null;
+    }
     const signature = [
       Math.round(width),
       Math.round(height),
@@ -4449,6 +4518,9 @@ cw_header('Cockpit Recorder Replay');
       Math.round(displayAttitudeYellowReferenceX),
       displayFpvX === null ? 'fpv-x' : Math.round(displayFpvX),
       displayFpvY === null ? 'fpv-y' : Math.round(displayFpvY),
+      fdBarsEnabled ? 'fd-on' : 'fd-off',
+      displayFdRollCommandDeg === null ? 'fd-roll' : Math.round(displayFdRollCommandDeg * 10),
+      displayFdPitchCommandDeg === null ? 'fd-pitch' : Math.round(displayFdPitchCommandDeg * 10),
     ].join('|');
     if (signature === attitudeOverlaySignature) {
       setElementHidden(attitudeOverlay, false);
@@ -4470,6 +4542,7 @@ cw_header('Cockpit Recorder Replay');
         <polygon class="attitude-slip" points="${(slipX - slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipTopHalfWidth).toFixed(1)},${pointerHeight + slipGap} ${(slipX + slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight} ${(slipX - slipBottomHalfWidth).toFixed(1)},${pointerHeight + slipGap + slipHeight}"></polygon>
       </g>
       ${fpvHtml}
+      ${flightDirectorHtml}
       <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${yellowReferenceY.toFixed(1)}) scale(${attitudeYellowReferenceScale})">
         <rect class="attitude-yellow" x="-508" y="-6" width="132" height="12" rx="4" ry="4"></rect>
         <rect class="attitude-yellow" x="376" y="-6" width="132" height="12" rx="4" ry="4"></rect>
@@ -5019,6 +5092,8 @@ cw_header('Cockpit Recorder Replay');
     displayFpvPitchDeltaDeg = null;
     displayFpvX = null;
     displayFpvY = null;
+    displayFdRollCommandDeg = null;
+    displayFdPitchCommandDeg = null;
     lastValidFpvVector = null;
     lastValidFpvReplayT = null;
     displayRpm = null;
