@@ -176,6 +176,28 @@ cw_header('Cockpit Recorder Replay');
 <link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
 .replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; margin: 16px; }
+.replay-avionics-header {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, .96), rgba(15, 23, 42, .88));
+  border-bottom: 1px solid rgba(148, 163, 184, .24);
+  color: rgba(226, 232, 240, .72);
+  font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.replay-avionics-header-placeholder {
+  border: 1px dashed rgba(148, 163, 184, .28);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: rgba(15, 23, 42, .42);
+}
 .replay-immersive {
   position: relative;
   width: 100%;
@@ -1562,6 +1584,9 @@ cw_header('Cockpit Recorder Replay');
 <?php if ($error !== ''): ?>
   <div class="replay-error"><?= h($error) ?></div>
 <?php else: ?>
+  <div class="replay-avionics-header" aria-label="Avionics data header">
+    <div class="replay-avionics-header-placeholder">Avionics data</div>
+  </div>
   <div
     class="replay-immersive"
     data-replay-id="<?= h((string)$id) ?>"
