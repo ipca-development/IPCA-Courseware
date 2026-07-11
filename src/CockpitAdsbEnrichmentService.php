@@ -385,7 +385,13 @@ final class CockpitAdsbEnrichmentService
     private function fetchHistoricalTraceForDate(string $hex, DateTimeImmutable $day): array
     {
         if (tv_adsb_provider() === 'gateway') {
-            return tv_adsb_fetch_historical_trace($hex, $day);
+            try {
+                return tv_adsb_fetch_historical_trace($hex, $day);
+            } catch (Throwable $e) {
+                if (!str_contains($e->getMessage(), 'HTTP 403')) {
+                    throw $e;
+                }
+            }
         }
 
         $folder = substr($hex, -2);
@@ -1007,22 +1013,15 @@ final class CockpitAdsbEnrichmentService
         array $window
     ): array {
         $this->clearTrafficSamples($recordingId);
-        if (tv_adsb_provider() !== 'gateway') {
-            return array(
-                'sample_count' => 0,
-                'provider' => tv_adsb_provider(),
-                'note' => 'Traffic enrichment requires the ADS-B Exchange gateway API; set CW_ADSBEXCHANGE_PROVIDER=rapidapi only to opt out.',
-            );
-        }
 
         $anchors = $this->trafficAnchors($ownshipSamples);
         if ($anchors === array()) {
-            return array('sample_count' => 0, 'provider' => 'gateway', 'note' => 'No ownship anchors for traffic correlation.');
+            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'note' => 'No ownship anchors for traffic correlation.');
         }
 
         $candidates = $this->discoverTrafficCandidateHexes($ownshipHex, $anchors, $recording, $window);
         if ($candidates === array()) {
-            return array('sample_count' => 0, 'provider' => 'gateway', 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
+            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
         }
 
         $dates = $this->traceDatesForWindow($window);
@@ -1031,7 +1030,7 @@ final class CockpitAdsbEnrichmentService
             $epochSamples = array();
             foreach ($dates as $day) {
                 try {
-                    $payload = tv_adsb_fetch_historical_trace($candidateHex, $day);
+                    $payload = $this->fetchHistoricalTraceForDate($candidateHex, $day);
                 } catch (Throwable) {
                     continue;
                 }
@@ -1084,7 +1083,7 @@ final class CockpitAdsbEnrichmentService
 
         return array(
             'sample_count' => count($rows),
-            'provider' => 'gateway',
+            'provider' => tv_adsb_provider(),
             'anchor_count' => count($anchors),
             'candidate_count' => count($candidates),
             'trace_count' => count($candidateTraces),
