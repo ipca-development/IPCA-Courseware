@@ -4483,7 +4483,7 @@ cw_header('Cockpit Recorder Replay');
     const fdCommand = fdBarsEnabled ? flightDirectorCommandFromSample(sample) : null;
     let flightDirectorHtml = '';
     if (fdCommand) {
-      const fdAlpha = snap ? 1 : smoothFactor(10, dtSec);
+      const fdAlpha = snap ? 1 : smoothFactor(16, dtSec);
       const fdRollTarget = fdCommand.rollDeg === null ? rollDeg : Number(fdCommand.rollDeg);
       const fdPitchTarget = fdCommand.pitchDeg === null ? pitchDeg : Number(fdCommand.pitchDeg);
       displayFdRollCommandDeg = displayFdRollCommandDeg === null || !Number.isFinite(displayFdRollCommandDeg)
