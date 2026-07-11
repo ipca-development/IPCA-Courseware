@@ -181,10 +181,11 @@ cw_header('Cockpit Recorder Replay');
   height: 45px;
   min-height: 45px;
   box-sizing: border-box;
-  display: flex;
+  display: grid;
+  grid-template-columns: 92px minmax(168px, 1fr) 88px minmax(260px, 1.35fr) minmax(168px, 1fr) minmax(168px, 1fr);
   align-items: center;
   gap: 3px;
-  padding: 3px 5px;
+  padding: 3px 4px;
   background: linear-gradient(180deg, rgba(15, 23, 42, .96), rgba(15, 23, 42, .88));
   border-bottom: 1px solid rgba(148, 163, 184, .24);
   color: rgba(226, 232, 240, .72);
@@ -194,11 +195,13 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
 }
 .replay-avionics-brand {
-  flex: 0 0 108px;
   color: rgba(226, 232, 240, .70);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: .10em;
-  padding-left: 4px;
+  padding-left: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .replay-avionics-group {
   display: contents;
@@ -210,38 +213,38 @@ cw_header('Cockpit Recorder Replay');
   height: 39px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: minmax(46px, .48fr) minmax(82px, 1fr) minmax(82px, 1fr);
+  grid-template-columns: minmax(42px, .46fr) minmax(58px, 1fr) minmax(58px, 1fr);
   align-items: stretch;
   overflow: hidden;
-  border: 2px solid rgba(125, 139, 163, .68);
-  border-radius: 7px;
-  background: linear-gradient(180deg, rgba(21, 27, 48, .96), rgba(17, 24, 43, .94));
-  box-shadow: inset 0 0 12px rgba(15, 23, 42, .52);
+  border: 1px solid rgba(226, 232, 240, .32);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .52);
+  backdrop-filter: blur(7px);
+  box-shadow: inset 0 0 12px rgba(15, 23, 42, .42), 0 1px 3px rgba(0, 0, 0, .24);
   color: #f8fafc;
 }
 .avionics-box.is-radio {
-  flex: 1.1 1 250px;
-  min-width: 170px;
+  min-width: 0;
 }
 .avionics-box.is-nav {
-  flex: 1.1 1 250px;
-  min-width: 170px;
+  min-width: 0;
 }
 .avionics-box.is-xpdr {
-  flex: .52 0 116px;
-  min-width: 90px;
-  grid-template-columns: .72fr 1fr;
+  min-width: 0;
+  grid-template-columns: minmax(38px, .72fr) minmax(42px, 1fr);
 }
 .avionics-box.is-afcs {
-  flex: 1.05 1 260px;
-  min-width: 220px;
-  grid-template-columns: .42fr repeat(4, minmax(48px, 1fr));
+  min-width: 0;
+  grid-template-columns: minmax(40px, .42fr) repeat(4, minmax(44px, 1fr));
 }
 .avionics-label {
-  padding: 8px 7px 0;
-  font-size: clamp(13px, 1.7vw, 22px);
+  min-width: 0;
+  padding: 8px 5px 0;
+  font-size: 14px;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 .avionics-sub-label {
   align-self: end;
@@ -260,14 +263,19 @@ cw_header('Cockpit Recorder Replay');
   align-items: center;
   justify-content: center;
   min-width: 0;
-  border-left: 2px solid rgba(125, 139, 163, .55);
+  overflow: hidden;
+  border-left: 1px solid rgba(226, 232, 240, .28);
   line-height: 1;
 }
 .avionics-value {
   color: #5fe348;
-  font-size: clamp(17px, 2.3vw, 31px);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+  color: #5fe348;
+  font-size: 22px;
   font-weight: 500;
-  letter-spacing: .02em;
+  letter-spacing: .01em;
   white-space: nowrap;
 }
 .avionics-value.is-standby {
@@ -277,44 +285,48 @@ cw_header('Cockpit Recorder Replay');
   color: #f8fafc;
 }
 .avionics-name {
-  margin-top: 2px;
+  margin-top: 3px;
   max-width: 100%;
   color: #f8fafc;
-  font-size: clamp(7px, .72vw, 11px);
+  font-size: 8px;
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .avionics-box.is-xpdr .avionics-value {
-  font-size: clamp(20px, 2.6vw, 34px);
+  font-size: 22px;
 }
 .avionics-box.is-xpdr .avionics-name {
   color: #5fe348;
-  font-size: clamp(12px, 1.45vw, 22px);
+  font-size: 14px;
 }
 .avionics-afcs-title {
   align-self: start;
-  padding: 5px 6px 0;
-  font-size: clamp(10px, 1.05vw, 15px);
+  padding: 5px 5px 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .avionics-afcs-cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-left: 2px solid rgba(125, 139, 163, .55);
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid rgba(226, 232, 240, .28);
   color: #5fe348;
-  font-size: clamp(15px, 1.9vw, 25px);
+  font-size: 20px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
 .avionics-afcs-cell.is-white {
   color: #f8fafc;
-  font-size: clamp(12px, 1.3vw, 18px);
+  font-size: 14px;
 }
 .avionics-box.is-nav.is-active-cdi {
-  border-color: rgba(95, 227, 72, .86);
+  border-color: rgba(95, 227, 72, .82);
 }
 .avionics-muted {
   opacity: .45;
@@ -2721,16 +2733,18 @@ cw_header('Cockpit Recorder Replay');
   function radioFrequencyBoxHtml(kind, label, activeFreq, activeName, standbyFreq, standbyName, activeCdi = false) {
     const activeNameText = formatAvionicsText(activeName, '');
     const standbyNameText = formatAvionicsText(standbyName, '');
-    const standbyMissing = standbyFreq === null && standbyNameText === '';
+    const activeFrequencyText = formatAvionicsFrequency(activeFreq);
+    const standbyFrequencyText = formatAvionicsFrequency(standbyFreq);
+    const standbyMissing = standbyFrequencyText === '---.---' && standbyNameText === '';
     return `
       <div class="avionics-box is-${kind}${activeCdi ? ' is-active-cdi' : ''}">
         <div class="avionics-label">${escapeHtml(label)}</div>
         <div class="avionics-frequency">
-          <div class="avionics-value">${escapeHtml(formatAvionicsFrequency(activeFreq))}</div>
+          <div class="avionics-value">${escapeHtml(activeFrequencyText)}</div>
           <div class="avionics-name">${escapeHtml(activeNameText || ' ')}</div>
         </div>
         <div class="avionics-frequency${standbyMissing ? ' avionics-muted' : ''}">
-          <div class="avionics-value is-standby">${escapeHtml(formatAvionicsFrequency(standbyFreq))}</div>
+          <div class="avionics-value is-standby">${escapeHtml(standbyFrequencyText)}</div>
           <div class="avionics-name">${escapeHtml(standbyNameText || ' ')}</div>
         </div>
       </div>`;
