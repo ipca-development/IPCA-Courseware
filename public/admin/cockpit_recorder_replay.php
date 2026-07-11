@@ -299,6 +299,10 @@ cw_header('Cockpit Recorder Replay');
 .avionics-value.is-white {
   color: #f8fafc;
 }
+.avionics-box.is-radio .avionics-value,
+.avionics-box.is-nav .avionics-value {
+  font-size: 17.5px;
+}
 .avionics-name {
   margin-top: 1px;
   max-width: 100%;
@@ -311,10 +315,11 @@ cw_header('Cockpit Recorder Replay');
   text-overflow: ellipsis;
 }
 .avionics-box.is-nav .avionics-frequency:first-of-type .avionics-name {
-  font-size: 6.9px;
+  margin-top: 3px;
+  font-size: 13.8px;
 }
 .avionics-box.is-xpdr .avionics-value {
-  font-size: 13px;
+  font-size: 17.5px;
 }
 .avionics-box.is-xpdr .avionics-name {
   color: #5fe348;
@@ -336,7 +341,7 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
   border-left: 1px solid rgba(226, 232, 240, .28);
   color: #5fe348;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
