@@ -4904,7 +4904,7 @@ cw_header('Cockpit Recorder Replay');
       insetMapZoom,
       pathPoints.length,
       airports.map((airport) => airport.icao).join(','),
-      trafficTargets.map((target) => `${target.hex}:${Math.round(target.x)}:${Math.round(target.y)}:${Math.round(target.trk)}`).join(','),
+      trafficTargets.map((target) => `${target.hex}:${target.cs}:${Math.round(target.x)}:${Math.round(target.y)}:${Math.round(target.trk)}`).join(','),
       Math.round(aircraftPos.x),
       Math.round(aircraftPos.y),
       Math.round(aircraftTrack),
@@ -4923,11 +4923,17 @@ cw_header('Cockpit Recorder Replay');
           <text x="${(airport.x + 12).toFixed(1)}" y="${(airport.y - 9).toFixed(1)}" font-size="11" text-anchor="start">${escapeHtml(airport.icao)}</text>
         </g>
       `).join('');
-      const trafficHtml = trafficTargets.map((target) => `
-        <g transform="translate(${target.x.toFixed(1)} ${target.y.toFixed(1)}) rotate(${target.trk.toFixed(1)})">
-          <polygon points="0,-5.5 3.4,4.2 0,1.8 -3.4,4.2" fill="rgba(180,245,255,.95)" stroke="rgba(255,255,255,.88)" stroke-width="1.1" stroke-linejoin="round"></polygon>
-        </g>
-      `).join('');
+      const trafficHtml = trafficTargets.map((target) => {
+        const label = escapeHtml(target.cs || target.hex.toUpperCase());
+        const labelX = clamp(target.x + 7, 4, INSET_MAP_SIZE - 4);
+        const labelY = clamp(target.y - 7, 10, INSET_MAP_SIZE - 4);
+        return `
+          <g transform="translate(${target.x.toFixed(1)} ${target.y.toFixed(1)}) rotate(${target.trk.toFixed(1)})">
+            <polygon points="0,-5.5 3.4,4.2 0,1.8 -3.4,4.2" fill="rgba(180,245,255,.95)" stroke="rgba(255,255,255,.88)" stroke-width="1.1" stroke-linejoin="round"></polygon>
+          </g>
+          <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" font-size="9.5" text-anchor="start" fill="rgba(225,250,255,.98)" stroke="rgba(0,0,0,.85)" stroke-width="2.4" paint-order="stroke">${label}</text>
+        `;
+      }).join('');
       const planePath = 'M 0.0 -30.4 L 0.7 -29.5 L 1.3 -28.6 L 1.8 -27.7 L 2.4 -26.8 L 2.9 -25.9 L 3.3 -24.9 L 3.7 -24.0 L 3.9 -23.1 L 4.2 -22.2 L 4.5 -21.3 L 4.7 -20.3 L 4.9 -19.4 L 5.0 -18.5 L 5.1 -17.6 L 5.2 -16.7 L 28.5 -15.7 L 42.0 -14.8 L 47.8 -13.9 L 48.6 -13.0 L 49.2 -12.1 L 49.6 -11.2 L 49.9 -10.2 L 50.0 -9.3 L 50.0 -8.4 L 49.9 -7.5 L 21.8 -6.6 L 4.7 -5.6 L 4.5 -4.7 L 4.2 -3.8 L 3.9 -2.9 L 3.7 -2.0 L 3.4 -1.0 L 3.3 -0.1 L 3.0 0.8 L 2.8 1.7 L 2.5 2.6 L 2.4 3.5 L 2.1 4.5 L 2.0 5.4 L 1.8 6.3 L 1.7 7.2 L 1.6 8.1 L 1.6 9.1 L 1.4 10.0 L 1.3 10.9 L 1.3 11.8 L 1.3 12.7 L 1.2 13.6 L 1.2 14.6 L 1.2 15.5 L 1.0 16.4 L 1.0 17.3 L 1.0 18.2 L 1.0 19.2 L 1.0 20.1 L 1.0 21.0 L 1.0 21.9 L 1.0 22.8 L 2.2 23.8 L 8.0 24.7 L 10.8 25.6 L 11.3 26.5 L 11.5 27.4 L 11.4 28.3 L 11.0 29.3 L 3.8 30.2 L -1.0 30.4 L -1.4 30.4 L -4.7 30.2 L -11.2 29.3 L -11.4 28.3 L -11.5 27.4 L -11.3 26.5 L -10.6 25.6 L -7.3 24.7 L -1.7 23.8 L -1.0 22.8 L -1.0 21.9 L -1.0 21.0 L -1.0 20.1 L -1.0 19.2 L -1.0 18.2 L -1.0 17.3 L -1.0 16.4 L -1.0 15.5 L -1.0 14.6 L -1.0 13.6 L -1.2 12.7 L -1.3 11.8 L -1.3 10.9 L -1.4 10.0 L -1.6 9.1 L -1.6 8.1 L -1.7 7.2 L -1.8 6.3 L -2.0 5.4 L -2.1 4.5 L -2.4 3.5 L -2.5 2.6 L -2.8 1.7 L -3.0 0.8 L -3.3 -0.1 L -3.4 -1.0 L -3.7 -2.0 L -3.9 -2.9 L -4.2 -3.8 L -4.5 -4.7 L -4.7 -5.6 L -30.8 -6.6 L -49.9 -7.5 L -50.0 -8.4 L -50.0 -9.3 L -49.9 -10.2 L -49.6 -11.2 L -49.2 -12.1 L -48.6 -13.0 L -47.6 -13.9 L -40.7 -14.8 L -26.6 -15.7 L -5.2 -16.7 L -5.1 -17.6 L -5.0 -18.5 L -4.9 -19.4 L -4.7 -20.3 L -4.5 -21.3 L -4.2 -22.2 L -3.9 -23.1 L -3.5 -24.0 L -3.1 -24.9 L -2.8 -25.9 L -2.4 -26.8 L -1.8 -27.7 L -1.2 -28.6 L -0.5 -29.5 L 0.0 -30.4 Z';
       insetMapSvg.innerHTML = `
         <rect x="0" y="0" width="${INSET_MAP_SIZE}" height="${INSET_MAP_SIZE}" fill="rgba(40,40,40,.12)"></rect>
