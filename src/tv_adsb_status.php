@@ -30,6 +30,7 @@ function tv_adsb_api_config(): array
             'headers' => array(
                 'Accept: application/json',
                 'Accept-Encoding: gzip',
+                'x-api-key: ' . tv_adsb_api_key(),
                 'api-auth: ' . tv_adsb_api_key(),
             ),
         );
@@ -182,7 +183,17 @@ function tv_adsb_request(string $path): array
     }
 
     if ($code < 200 || $code >= 300) {
-        throw new RuntimeException('ADS-B API returned HTTP ' . $code);
+        $detail = '';
+        $decoded = json_decode((string)$body, true);
+        if (is_array($decoded)) {
+            $message = $decoded['msg'] ?? $decoded['message'] ?? $decoded['error'] ?? null;
+            if (is_scalar($message) && trim((string)$message) !== '') {
+                $detail = ': ' . trim((string)$message);
+            }
+        } elseif (is_string($body) && trim($body) !== '') {
+            $detail = ': ' . substr(trim($body), 0, 180);
+        }
+        throw new RuntimeException('ADS-B API returned HTTP ' . $code . $detail);
     }
 
     $decoded = json_decode((string)$body, true);
