@@ -3855,13 +3855,23 @@ cw_header('Cockpit Recorder Replay');
     }
     let fpvHtml = '';
     if (fpv) {
-      const fpvSourceAlpha = snap ? 1 : smoothFactor(5, dtSec);
+      const fpvSourceAlpha = snap ? 1 : smoothFactor(3, dtSec);
+      const fpvMaxHeadingStepDeg = snap ? Infinity : 18 * Math.max(1 / 120, dtSec);
+      const fpvMaxPitchStepDeg = snap ? Infinity : 12 * Math.max(1 / 120, dtSec);
       displayFpvHeadingDeltaDeg = displayFpvHeadingDeltaDeg === null || !Number.isFinite(displayFpvHeadingDeltaDeg)
         ? fpv.headingDeltaDeg
-        : normalizeSignedDeg(displayFpvHeadingDeltaDeg + normalizeSignedDeg(fpv.headingDeltaDeg - displayFpvHeadingDeltaDeg) * fpvSourceAlpha);
+        : normalizeSignedDeg(displayFpvHeadingDeltaDeg + clamp(
+          normalizeSignedDeg(fpv.headingDeltaDeg - displayFpvHeadingDeltaDeg) * fpvSourceAlpha,
+          -fpvMaxHeadingStepDeg,
+          fpvMaxHeadingStepDeg
+        ));
       displayFpvPitchDeltaDeg = displayFpvPitchDeltaDeg === null || !Number.isFinite(displayFpvPitchDeltaDeg)
         ? fpv.pitchDeltaDeg
-        : displayFpvPitchDeltaDeg + (fpv.pitchDeltaDeg - displayFpvPitchDeltaDeg) * fpvSourceAlpha;
+        : displayFpvPitchDeltaDeg + clamp(
+          (fpv.pitchDeltaDeg - displayFpvPitchDeltaDeg) * fpvSourceAlpha,
+          -fpvMaxPitchStepDeg,
+          fpvMaxPitchStepDeg
+        );
       const fpvDisplayHeadingDeltaDeg = clamp(displayFpvHeadingDeltaDeg, -22, 22);
       const fpvDisplayPitchDeltaDeg = clamp(displayFpvPitchDeltaDeg, -22, 22);
       const fpvOffsetX = clamp(
