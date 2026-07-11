@@ -4743,7 +4743,7 @@ cw_header('Cockpit Recorder Replay');
     return Array.from(nearestByHex.values()).sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
   }
 
-  function insetProjector(track, sample) {
+  function insetProjector(track, sample, extraPoints = []) {
     if (!track.length) return null;
     let minLat = Infinity;
     let maxLat = -Infinity;
@@ -4755,6 +4755,15 @@ cw_header('Cockpit Recorder Replay');
       minLon = Math.min(minLon, point.lon);
       maxLon = Math.max(maxLon, point.lon);
     });
+    extraPoints.forEach((point) => {
+      const lat = finiteNumber(point && point.lat);
+      const lon = finiteNumber(point && point.lon);
+      if (lat === null || lon === null) return;
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      minLon = Math.min(minLon, lon);
+      maxLon = Math.max(maxLon, lon);
+    });
     const originLat = (minLat + maxLat) / 2;
     const originLon = (minLon + maxLon) / 2;
     const latLonToNm = (lat, lon) => ({
@@ -4762,11 +4771,24 @@ cw_header('Cockpit Recorder Replay');
       n: (lat - originLat) * 60,
     });
     const nmPoints = track.map((point) => ({ ...point, ...latLonToNm(point.lat, point.lon) }));
+    const extraNmPoints = extraPoints
+      .map((point) => {
+        const lat = finiteNumber(point && point.lat);
+        const lon = finiteNumber(point && point.lon);
+        return lat !== null && lon !== null ? latLonToNm(lat, lon) : null;
+      })
+      .filter(Boolean);
     let minE = Infinity;
     let maxE = -Infinity;
     let minN = Infinity;
     let maxN = -Infinity;
     nmPoints.forEach((point) => {
+      minE = Math.min(minE, point.e);
+      maxE = Math.max(maxE, point.e);
+      minN = Math.min(minN, point.n);
+      maxN = Math.max(maxN, point.n);
+    });
+    extraNmPoints.forEach((point) => {
       minE = Math.min(minE, point.e);
       maxE = Math.max(maxE, point.e);
       minN = Math.min(minN, point.n);
@@ -4870,12 +4892,13 @@ cw_header('Cockpit Recorder Replay');
       insetMapProjection = null;
       return;
     }
-    const projector = insetProjector(track, sample);
+    const activeTime = firstFinite(sample.t, activeT) || 0;
+    const rawTrafficTargets = insetTrafficTargetsAt(activeTime);
+    const projector = insetProjector(track, sample, rawTrafficTargets);
     if (!projector) {
       setElementHidden(insetMap, true);
       return;
     }
-    const activeTime = firstFinite(sample.t, activeT) || 0;
     const currentIndex = nearestInsetTrackIndex(track, activeTime);
     const currentTrackPoint = track[currentIndex] || track[0];
     const aircraftPos = projector.project(currentTrackPoint.lat, currentTrackPoint.lon);
@@ -4891,7 +4914,7 @@ cw_header('Cockpit Recorder Replay');
       ...airport,
       ...projector.project(airport.lat, airport.lon),
     }));
-    const trafficTargets = insetTrafficTargetsAt(activeTime).map((target) => ({
+    const trafficTargets = rawTrafficTargets.map((target) => ({
       ...target,
       ...projector.project(target.lat, target.lon),
     }));
