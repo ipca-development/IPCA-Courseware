@@ -178,8 +178,8 @@ cw_header('Cockpit Recorder Replay');
 .replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; margin: 16px; }
 .replay-avionics-header {
   width: 100%;
-  height: 30px;
-  min-height: 30px;
+  height: 45px;
+  min-height: 45px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
