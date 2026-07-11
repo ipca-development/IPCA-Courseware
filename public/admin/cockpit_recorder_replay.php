@@ -350,6 +350,18 @@ cw_header('Cockpit Recorder Replay');
   animation: afcs-flash 0.55s steps(1, end) infinite;
 }
 .avionics-afcs-cell.is-ap-disconnect {
+  color: #f8fafc;
+}
+.avionics-afcs-ap-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 1px;
+  line-height: 1;
+}
+.avionics-afcs-cell.is-ap-disconnect .avionics-afcs-ap-badge {
   color: #111827;
   background: #f5d328;
   font-weight: 900;
@@ -2760,7 +2772,8 @@ cw_header('Cockpit Recorder Replay');
 
   function formatAvionicsFrequency(value, band = 'generic') {
     if (value === null || value === undefined || String(value).trim() === '') return '---.---';
-    const n = Number(value);
+    const match = String(value).trim().match(/-?\d+(?:\.\d+)?/);
+    const n = match ? Number(match[0]) : Number(value);
     if (!Number.isFinite(n)) return String(value).trim().toUpperCase().slice(0, 7);
     if (band === 'com' && (n < 118 || n > 136.995)) return '---.---';
     if (band === 'nav' && (n < 108 || n > 117.995)) return '---.---';
@@ -2771,6 +2784,13 @@ cw_header('Cockpit Recorder Replay');
   function formatAvionicsText(value, fallback = '---') {
     const text = String(value ?? '').trim();
     return text === '' ? fallback : text.toUpperCase();
+  }
+
+  function firstAvionicsValue(...values) {
+    for (const value of values) {
+      if (value !== null && value !== undefined && String(value).trim() !== '') return value;
+    }
+    return null;
   }
 
   function normalizeAfcsToken(value, fallback = '--', maxLen = 4) {
@@ -2803,28 +2823,28 @@ cw_header('Cockpit Recorder Replay');
       }
       afcsLastStateUpper = upper;
       if (Number(sampleT) - afcsManualDisconnectReplayT <= 3) {
-        return { text: 'AP', className: ' is-ap-disconnect' };
+        return { text: 'AP', className: ' is-ap-disconnect', modesActive: false };
       }
-      return { text: '', className: '' };
+      return { text: '', className: '', modesActive: false };
     }
     if (upper.includes('PFT')) {
       afcsManualDisconnectReplayT = null;
       afcsLastStateUpper = upper;
-      return { text: 'PFT', className: ' is-pft' };
+      return { text: 'PFT', className: ' is-pft', modesActive: false };
     }
     if (upper.includes('POWER')) {
       afcsManualDisconnectReplayT = null;
       afcsLastStateUpper = upper;
-      return { text: 'Powerup', className: ' is-white' };
+      return { text: 'Powerup', className: ' is-white', modesActive: false };
     }
-    if (upper === 'AP' || upper.includes('ENGAGED') || upper === '1' || upper === 'TRUE' || upper === 'ON') {
+    if (upper === 'AP' || upper.startsWith('AP ') || upper.includes('AP /') || upper.includes('ENGAGED') || upper === '1' || upper === 'TRUE' || upper === 'ON') {
       afcsManualDisconnectReplayT = null;
       afcsLastStateUpper = upper;
-      return { text: 'AP', className: '' };
+      return { text: 'AP', className: '', modesActive: true };
     }
     afcsManualDisconnectReplayT = null;
     afcsLastStateUpper = upper;
-    return { text: '', className: '' };
+    return { text: '', className: '', modesActive: false };
   }
 
   function splitVerticalAfcsMode(value, fallback = '--') {
@@ -2836,12 +2856,26 @@ cw_header('Cockpit Recorder Replay');
     return { active, armed };
   }
 
+  function flightDirectorActive(sample) {
+    const raw = String(
+      g3xField(sample, 'flight_director_state', 'fd_state', 'flight_director_active', 'fd_active') ||
+      g3xRawField(sample, 'Flight Director State', 'FD State', 'Flight Director Active', 'FD Active') ||
+      ''
+    ).trim().toUpperCase();
+    if (raw === '') return false;
+    if (['0', 'FALSE', 'OFF', 'NO', 'NONE'].includes(raw)) return false;
+    return raw.includes('FD') || raw.includes('ON') || raw.includes('ACTIVE') || raw === '1' || raw === 'TRUE';
+  }
+
   function comRxTxStatus(sample, index) {
     const prefix = `com${index}`;
     const exact = String(
-      g3xField(sample, `${prefix}_status`, `${prefix}_rx_tx`, `${prefix}_rxtx`) ||
+      g3xField(sample, `${prefix}_status`, `${prefix}_rx_tx`, `${prefix}_rxtx`, `${prefix}_mhz`, `${prefix}_active_mhz`) ||
       g3xRawField(
         sample,
+        `COM Frequency ${index} (MHz)`,
+        `COM${index}`,
+        `COM${index} Active Frequency (MHz)`,
         `COM${index} Status`,
         `COM ${index} Status`,
         `COM${index} RX/TX`,
@@ -2923,15 +2957,16 @@ cw_header('Cockpit Recorder Replay');
     const armedMode = g3xField(sample, 'autopilot_armed_mode', 'ap_armed_mode') ||
       g3xRawField(sample, 'AP Armed Mode', 'Armed Mode', 'ALT Armed');
     const apState = afcsStateDisplay(sample);
-    const lateralLabel = normalizeAfcsToken(lateralMode, '--', 4);
-    const verticalModes = splitVerticalAfcsMode(verticalMode, '--');
-    const armedLabel = verticalModes.armed || normalizeAfcsToken(armedMode, '', 4);
+    const modesActive = apState.modesActive || flightDirectorActive(sample);
+    const lateralLabel = modesActive ? normalizeAfcsToken(lateralMode, '--', 4) : '';
+    const verticalModes = modesActive ? splitVerticalAfcsMode(verticalMode, '--') : { active: '', armed: '' };
+    const armedLabel = modesActive ? (verticalModes.armed || normalizeAfcsToken(armedMode, '', 4)) : '';
     return `
       <div class="avionics-box is-afcs">
         <div class="avionics-afcs-title">AFCS</div>
-        <div class="avionics-afcs-cell${apState.className}">${escapeHtml(apState.text || ' ')}</div>
-        <div class="avionics-afcs-cell">${escapeHtml(lateralLabel)}</div>
-        <div class="avionics-afcs-cell">${escapeHtml(verticalModes.active)}</div>
+        <div class="avionics-afcs-cell${apState.className}"><span class="avionics-afcs-ap-badge">${escapeHtml(apState.text || ' ')}</span></div>
+        <div class="avionics-afcs-cell">${escapeHtml(lateralLabel || ' ')}</div>
+        <div class="avionics-afcs-cell">${escapeHtml(verticalModes.active || ' ')}</div>
         <div class="avionics-afcs-cell is-white">${escapeHtml(armedLabel || ' ')}</div>
       </div>`;
   }
@@ -2939,19 +2974,19 @@ cw_header('Cockpit Recorder Replay');
   function updateAvionicsHeader(sample) {
     const radioVisible = instrumentEnabled('radio_stack');
     if (radioStackGroup || radioStackEndGroup) {
-      const com1Active = firstFinite(
+      const com1Active = firstAvionicsValue(
         g3xField(sample, 'com1_mhz', 'com1_active_mhz'),
         g3xRawField(sample, 'COM Frequency 1 (MHz)', 'COM1', 'COM1 Active Frequency (MHz)')
       );
-      const com1Standby = firstFinite(
+      const com1Standby = firstAvionicsValue(
         g3xField(sample, 'com1_standby_mhz', 'com1_stby_mhz'),
         g3xRawField(sample, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB')
       );
-      const com2Active = firstFinite(
+      const com2Active = firstAvionicsValue(
         g3xField(sample, 'com2_mhz', 'com2_active_mhz'),
         g3xRawField(sample, 'COM Frequency 2 (MHz)', 'COM2', 'COM2 Active Frequency (MHz)')
       );
-      const com2Standby = firstFinite(
+      const com2Standby = firstAvionicsValue(
         g3xField(sample, 'com2_standby_mhz', 'com2_stby_mhz'),
         g3xRawField(sample, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB')
       );
@@ -2980,11 +3015,11 @@ cw_header('Cockpit Recorder Replay');
       if (visible) {
         const rawSource = hsiRawNavSourceFromSample(sample).toUpperCase().replace(/\s+/g, '');
         const navActive = rawSource.includes('NAV2') || rawSource.includes('VOR2');
-        const nav2Active = firstFinite(
+        const nav2Active = firstAvionicsValue(
           g3xField(sample, 'nav2_mhz', 'nav2_active_mhz'),
           g3xRawField(sample, 'NAV Frequency 2 (MHz)', 'NAV2', 'NAV2 Active Frequency (MHz)')
         );
-        const nav2Standby = firstFinite(
+        const nav2Standby = firstAvionicsValue(
           g3xField(sample, 'nav2_standby_mhz', 'nav2_stby_mhz'),
           g3xRawField(sample, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB')
         );

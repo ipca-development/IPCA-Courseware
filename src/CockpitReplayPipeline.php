@@ -763,6 +763,41 @@ final class CockpitReplayPipeline
                 continue;
             }
             $row = $sample['row'];
+            $frequencyValue = static function (array $row, string ...$keys): ?float {
+                foreach ($keys as $key) {
+                    $value = trim((string)($row[$key] ?? ''));
+                    if ($value === '') {
+                        continue;
+                    }
+                    if (preg_match('/-?\d+(?:\.\d+)?/', $value, $matches) === 1) {
+                        return (float)$matches[0];
+                    }
+                }
+                return null;
+            };
+            $comStatusValue = static function (array $row, int $index): string {
+                $keys = array(
+                    'COM Frequency ' . $index . ' (MHz)',
+                    'COM' . $index,
+                    'COM' . $index . ' Active Frequency (MHz)',
+                    'COM' . $index . ' Status',
+                    'COM ' . $index . ' Status',
+                    'COM' . $index . ' RX/TX',
+                    'COM ' . $index . ' RX/TX',
+                    'COM' . $index . ' RxTx',
+                    'COM ' . $index . ' RxTx',
+                );
+                foreach ($keys as $key) {
+                    $text = strtoupper(trim((string)($row[$key] ?? '')));
+                    if (str_contains($text, 'TX') || str_contains($text, 'TRANSMIT')) {
+                        return 'TX';
+                    }
+                    if (str_contains($text, 'RX') || str_contains($text, 'RECEIV')) {
+                        return 'RX';
+                    }
+                }
+                return '';
+            };
             $lat = G3XFlightStreamParser::numericValue($row, 'Latitude (deg)', 'Latitude');
             $lon = G3XFlightStreamParser::numericValue($row, 'Longitude (deg)', 'Longitude');
             if ($lat === null || $lon === null) {
@@ -810,12 +845,12 @@ final class CockpitReplayPipeline
                 'sel_ias_kt' => G3XFlightStreamParser::numericValue($row, 'Selected Airspeed (kt)', 'SelIAS'),
                 'aoa' => G3XFlightStreamParser::numericValue($row, 'AOA', 'Angle of Attack', 'Angle of Attack (deg)'),
                 'aoa_cp' => G3XFlightStreamParser::numericValue($row, 'AOA Cp'),
-                'com1_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Frequency 1 (MHz)', 'COM1'),
-                'com1_standby_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB'),
-                'com2_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Frequency 2 (MHz)', 'COM2'),
-                'com2_standby_mhz' => G3XFlightStreamParser::numericValue($row, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB'),
-                'nav2_mhz' => G3XFlightStreamParser::numericValue($row, 'NAV Frequency 2 (MHz)', 'NAV2'),
-                'nav2_standby_mhz' => G3XFlightStreamParser::numericValue($row, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB'),
+                'com1_mhz' => $frequencyValue($row, 'COM Frequency 1 (MHz)', 'COM1'),
+                'com1_standby_mhz' => $frequencyValue($row, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB'),
+                'com2_mhz' => $frequencyValue($row, 'COM Frequency 2 (MHz)', 'COM2'),
+                'com2_standby_mhz' => $frequencyValue($row, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB'),
+                'nav2_mhz' => $frequencyValue($row, 'NAV Frequency 2 (MHz)', 'NAV2'),
+                'nav2_standby_mhz' => $frequencyValue($row, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB'),
                 'nav_distance_nm' => G3XFlightStreamParser::numericValue($row, 'Nav Distance (nm)', 'NavDist'),
                 'velocity_e_mps' => G3XFlightStreamParser::numericValue($row, 'GPS Velocity E (m/sec)', 'GPSVelE'),
                 'velocity_n_mps' => G3XFlightStreamParser::numericValue($row, 'GPS Velocity N (m/sec)', 'GPSVelN'),
@@ -858,10 +893,10 @@ final class CockpitReplayPipeline
                 'fd_vertical_mode' => trim((string)($row['FD Vertical Mode'] ?? ($row['PitchM'] ?? ''))),
                 'autopilot_armed_mode' => trim((string)($row['AP Armed Mode'] ?? ($row['Armed Mode'] ?? ($row['ALT Armed'] ?? '')))),
                 'com1_name' => trim((string)($row['COM1 Name'] ?? ($row['COM1 Active Name'] ?? ''))),
-                'com1_status' => trim((string)($row['COM1 Status'] ?? ($row['COM 1 Status'] ?? ($row['COM1 RX/TX'] ?? ($row['COM 1 RX/TX'] ?? ($row['COM1 RxTx'] ?? '')))))),
+                'com1_status' => $comStatusValue($row, 1),
                 'com1_standby_name' => trim((string)($row['COM1 Standby Name'] ?? '')),
                 'com2_name' => trim((string)($row['COM2 Name'] ?? ($row['COM2 Active Name'] ?? ''))),
-                'com2_status' => trim((string)($row['COM2 Status'] ?? ($row['COM 2 Status'] ?? ($row['COM2 RX/TX'] ?? ($row['COM 2 RX/TX'] ?? ($row['COM2 RxTx'] ?? '')))))),
+                'com2_status' => $comStatusValue($row, 2),
                 'com2_standby_name' => trim((string)($row['COM2 Standby Name'] ?? '')),
                 'nav2_name' => trim((string)($row['NAV2 Name'] ?? ($row['NAV2 Active Name'] ?? ''))),
                 'nav2_standby_name' => trim((string)($row['NAV2 Standby Name'] ?? '')),
