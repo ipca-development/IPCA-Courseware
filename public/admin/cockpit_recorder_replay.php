@@ -182,7 +182,7 @@ cw_header('Cockpit Recorder Replay');
   min-height: 45px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr) minmax(68px, .42fr) minmax(0, 1.34fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(68px, .42fr) minmax(0, 1.34fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 2px;
   padding: 3px 4px;
@@ -195,7 +195,7 @@ cw_header('Cockpit Recorder Replay');
   overflow: hidden;
 }
 .replay-avionics-brand {
-  visibility: hidden;
+  display: none;
   color: rgba(226, 232, 240, .70);
   font-size: 7px;
   letter-spacing: .10em;
@@ -2838,7 +2838,7 @@ cw_header('Cockpit Recorder Replay');
 
   function comRxTxStatus(sample, index) {
     const prefix = `com${index}`;
-    const raw = String(
+    const exact = String(
       g3xField(sample, `${prefix}_status`, `${prefix}_rx_tx`, `${prefix}_rxtx`) ||
       g3xRawField(
         sample,
@@ -2853,8 +2853,26 @@ cw_header('Cockpit Recorder Replay');
       ) ||
       ''
     ).toUpperCase();
+    const raw = exact || scannedComRxTxStatus(sample, index);
     if (raw.includes('TX') || raw.includes('TRANSMIT')) return 'TX';
     if (raw.includes('RX') || raw.includes('RECEIV')) return 'RX';
+    return '';
+  }
+
+  function scannedComRxTxStatus(sample, index) {
+    const sources = [sample, sample && sample.g3x, sample && sample.g3x_raw, sample && sample.raw_g3x];
+    const otherIndex = index === 1 ? '2' : '1';
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue;
+      for (const [key, value] of Object.entries(source)) {
+        const keyText = String(key || '').toUpperCase();
+        const compactKey = keyText.replace(/[^A-Z0-9]/g, '');
+        if (!compactKey.includes('COM') || !compactKey.includes(String(index)) || compactKey.includes(`COM${otherIndex}`)) continue;
+        const valueText = String(value ?? '').trim().toUpperCase();
+        if (valueText.includes('TX') || valueText.includes('TRANSMIT')) return valueText;
+        if (valueText.includes('RX') || valueText.includes('RECEIV')) return valueText;
+      }
+    }
     return '';
   }
 

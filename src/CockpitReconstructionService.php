@@ -4292,17 +4292,45 @@ final class CockpitReconstructionService
             }
             return null;
         };
+        $comStatus = static function (array $source, int $index) use ($txt): ?string {
+            $exact = $txt(
+                $source,
+                'COM' . $index . ' Status',
+                'COM ' . $index . ' Status',
+                'COM' . $index . ' RX/TX',
+                'COM ' . $index . ' RX/TX',
+                'COM' . $index . ' RxTx',
+                'COM ' . $index . ' RxTx',
+                'COM' . $index . ' Monitor',
+                'COM ' . $index . ' Monitor'
+            );
+            if ($exact !== null) {
+                return $exact;
+            }
+            $otherIndex = $index === 1 ? '2' : '1';
+            foreach ($source as $key => $value) {
+                $compactKey = strtoupper((string)preg_replace('/[^A-Za-z0-9]/', '', (string)$key));
+                if (!str_contains($compactKey, 'COM') || !str_contains($compactKey, (string)$index) || str_contains($compactKey, 'COM' . $otherIndex)) {
+                    continue;
+                }
+                $text = strtoupper(trim((string)$value));
+                if (str_contains($text, 'TX') || str_contains($text, 'TRANSMIT') || str_contains($text, 'RX') || str_contains($text, 'RECEIV')) {
+                    return $text;
+                }
+            }
+            return null;
+        };
 
         return array(
             'com1_mhz' => $txt($g3x, 'COM Frequency 1 (MHz)'),
             'com1_standby_mhz' => $txt($g3x, 'COM Standby Frequency 1 (MHz)', 'COM1 Standby Frequency (MHz)', 'COM1 Stby', 'COM1SB'),
             'com1_name' => $txt($g3x, 'COM1 Name', 'COM1 Active Name'),
-            'com1_status' => $txt($g3x, 'COM1 Status', 'COM 1 Status', 'COM1 RX/TX', 'COM 1 RX/TX', 'COM1 RxTx', 'COM 1 RxTx'),
+            'com1_status' => $comStatus($g3x, 1),
             'com1_standby_name' => $txt($g3x, 'COM1 Standby Name'),
             'com2_mhz' => $txt($g3x, 'COM Frequency 2 (MHz)'),
             'com2_standby_mhz' => $txt($g3x, 'COM Standby Frequency 2 (MHz)', 'COM2 Standby Frequency (MHz)', 'COM2 Stby', 'COM2SB'),
             'com2_name' => $txt($g3x, 'COM2 Name', 'COM2 Active Name'),
-            'com2_status' => $txt($g3x, 'COM2 Status', 'COM 2 Status', 'COM2 RX/TX', 'COM 2 RX/TX', 'COM2 RxTx', 'COM 2 RxTx'),
+            'com2_status' => $comStatus($g3x, 2),
             'com2_standby_name' => $txt($g3x, 'COM2 Standby Name'),
             'nav2_mhz' => $txt($g3x, 'NAV Frequency 2 (MHz)'),
             'nav2_standby_mhz' => $txt($g3x, 'NAV Standby Frequency 2 (MHz)', 'NAV2 Standby Frequency (MHz)', 'NAV2 Stby', 'NAV2SB'),
