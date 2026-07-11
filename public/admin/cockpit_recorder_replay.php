@@ -3855,9 +3855,9 @@ cw_header('Cockpit Recorder Replay');
     }
     let fpvHtml = '';
     if (fpv) {
-      const fpvSourceAlpha = snap ? 1 : smoothFactor(3, dtSec);
-      const fpvMaxHeadingStepDeg = snap ? Infinity : 18 * Math.max(1 / 120, dtSec);
-      const fpvMaxPitchStepDeg = snap ? Infinity : 12 * Math.max(1 / 120, dtSec);
+      const fpvSourceAlpha = snap ? 1 : smoothFactor(1.6, dtSec);
+      const fpvMaxHeadingStepDeg = snap ? Infinity : 7 * Math.max(1 / 120, dtSec);
+      const fpvMaxPitchStepDeg = snap ? Infinity : 5 * Math.max(1 / 120, dtSec);
       displayFpvHeadingDeltaDeg = displayFpvHeadingDeltaDeg === null || !Number.isFinite(displayFpvHeadingDeltaDeg)
         ? fpv.headingDeltaDeg
         : normalizeSignedDeg(displayFpvHeadingDeltaDeg + clamp(
