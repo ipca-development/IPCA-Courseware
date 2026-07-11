@@ -4497,10 +4497,10 @@ cw_header('Cockpit Recorder Replay');
       const fdY = yellowReferenceY + clamp(pitchPx(fdPitchErrorDeg), -height * 0.28, height * 0.28);
       flightDirectorHtml = `
       <g transform="translate(${displayAttitudeYellowReferenceX.toFixed(1)} ${fdY.toFixed(1)}) rotate(${(-fdRollErrorDeg).toFixed(2)}) scale(${attitudeYellowReferenceScale})">
-        <polygon class="attitude-flight-director" points="0,-12 -508,42 -508,72 -456,72 -272,76"></polygon>
-        <polygon class="attitude-flight-director" points="0,-12 508,42 508,72 456,72 272,76"></polygon>
-        <line class="attitude-flight-director-cap" x1="-508" y1="42" x2="-456" y2="72"></line>
-        <line class="attitude-flight-director-cap" x1="508" y1="42" x2="456" y2="72"></line>
+        <polygon class="attitude-flight-director" points="0,-12 -326,42 -326,72 -272,76"></polygon>
+        <polygon class="attitude-flight-director" points="0,-12 326,42 326,72 272,76"></polygon>
+        <line class="attitude-flight-director-cap" x1="-326" y1="42" x2="-272" y2="76"></line>
+        <line class="attitude-flight-director-cap" x1="326" y1="42" x2="272" y2="76"></line>
       </g>`;
     } else {
       displayFdRollCommandDeg = null;
