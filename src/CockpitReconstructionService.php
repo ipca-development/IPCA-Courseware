@@ -31,6 +31,7 @@ final class CockpitReconstructionService
     private const EVENT_TABLE = 'ipca_cockpit_timeline_events';
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const ADSB_OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
+    private const ADSB_TRAFFIC_TABLE = 'ipca_cockpit_adsb_traffic_samples';
 
     public const STAGE_QUEUED = 'queued';
     public const STAGE_LOADING = 'loading_raw';
@@ -653,6 +654,14 @@ final class CockpitReconstructionService
             );
         }
 
+        $trafficRows = $this->loadAdsbTraffic($recordingId);
+        $trafficMeta = array(
+            'available' => $trafficRows !== array(),
+            'sample_count' => count($trafficRows),
+            'range_nm' => 10.0,
+            'provider' => tv_adsb_provider(),
+        );
+
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
@@ -669,6 +678,7 @@ final class CockpitReconstructionService
                     'registration' => (string)($recording['aircraft_registration'] ?? ''),
                     'display_name' => (string)($recording['aircraft_display_name'] ?? ''),
                     'type' => (string)($recording['aircraft_type'] ?? ''),
+                    'adsb_hex' => (string)($recording['aircraft_adsb_hex'] ?? ''),
                 ),
                 'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $recordingId,
                 'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
@@ -677,6 +687,8 @@ final class CockpitReconstructionService
             'sample_rate_hz' => (int)($diagnostics['sample_rate_hz'] ?? 10),
             'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
             'airports' => $this->replayEndpointAirports($recordingId),
+            'traffic' => array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
+            'traffic_meta' => $trafficMeta,
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
             'replay_sample_count' => $sampleCount,
@@ -2151,6 +2163,40 @@ final class CockpitReconstructionService
         $stmt->execute(array($recordingId));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function loadAdsbTraffic(int $recordingId): array
+    {
+        if (!$this->tablePresent(self::ADSB_TRAFFIC_TABLE)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . self::ADSB_TRAFFIC_TABLE . ' WHERE recording_id = ? ORDER BY seconds_since_start ASC, distance_nm ASC');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function compactTrafficSample(array $row): array
+    {
+        return array(
+            't' => isset($row['seconds_since_start']) ? (float)$row['seconds_since_start'] : null,
+            'hex' => strtolower(trim((string)($row['aircraft_hex'] ?? ''))),
+            'cs' => trim((string)($row['callsign'] ?? '')),
+            'lat' => isset($row['latitude']) && is_numeric($row['latitude']) ? (float)$row['latitude'] : null,
+            'lon' => isset($row['longitude']) && is_numeric($row['longitude']) ? (float)$row['longitude'] : null,
+            'trk' => isset($row['track_deg']) && is_numeric($row['track_deg']) ? (float)$row['track_deg'] : null,
+            'alt' => isset($row['altitude_ft']) && is_numeric($row['altitude_ft']) ? (float)$row['altitude_ft'] : null,
+            'dist' => isset($row['distance_nm']) && is_numeric($row['distance_nm']) ? (float)$row['distance_nm'] : null,
+            'brg' => isset($row['bearing_deg']) && is_numeric($row['bearing_deg']) ? (float)$row['bearing_deg'] : null,
+            'rel_alt' => isset($row['relative_altitude_ft']) && is_numeric($row['relative_altitude_ft']) ? (float)$row['relative_altitude_ft'] : null,
+        );
     }
 
     /**

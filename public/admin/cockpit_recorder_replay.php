@@ -2229,7 +2229,7 @@ cw_header('Cockpit Recorder Replay');
     'wind_indicator',
   ];
   const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack']);
-  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -4705,6 +4705,44 @@ cw_header('Cockpit Recorder Replay');
     return entries;
   }
 
+  function insetOwnshipHex() {
+    const hex = payload && payload.recording && payload.recording.aircraft
+      ? String(payload.recording.aircraft.adsb_hex || '').trim().toLowerCase()
+      : '';
+    return hex.replace(/[^a-f0-9]/g, '').slice(0, 6);
+  }
+
+  function insetTrafficTargetsAt(t) {
+    const rows = payload && Array.isArray(payload.traffic) ? payload.traffic : [];
+    if (!rows.length || !instrumentEnabled('traffic')) return [];
+    const ownshipHex = insetOwnshipHex();
+    const activeT = finiteNumber(t) || 0;
+    const windowS = 20;
+    const nearestByHex = new Map();
+    rows.forEach((row) => {
+      const rowT = finiteNumber(row && row.t);
+      const lat = finiteNumber(row && row.lat);
+      const lon = finiteNumber(row && row.lon);
+      const hex = String((row && row.hex) || '').trim().toLowerCase();
+      if (rowT === null || lat === null || lon === null || hex === '' || (ownshipHex && hex === ownshipHex)) return;
+      if (Math.abs(rowT - activeT) > windowS) return;
+      const existing = nearestByHex.get(hex);
+      if (!existing || Math.abs(existing.t - activeT) > Math.abs(rowT - activeT)) {
+        nearestByHex.set(hex, {
+          t: rowT,
+          hex,
+          cs: String((row && row.cs) || '').trim().toUpperCase(),
+          lat,
+          lon,
+          trk: finiteNumber(row && row.trk) || 0,
+          alt: finiteNumber(row && row.alt),
+          dist: finiteNumber(row && row.dist),
+        });
+      }
+    });
+    return Array.from(nearestByHex.values()).sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
+  }
+
   function insetProjector(track, sample) {
     if (!track.length) return null;
     let minLat = Infinity;
@@ -4853,6 +4891,10 @@ cw_header('Cockpit Recorder Replay');
       ...airport,
       ...projector.project(airport.lat, airport.lon),
     }));
+    const trafficTargets = insetTrafficTargetsAt(activeTime).map((target) => ({
+      ...target,
+      ...projector.project(target.lat, target.lon),
+    }));
     const rangeNm = projector.rangeNm;
     if (insetMapRange) {
       insetMapRange.textContent = `${rangeNm >= 10 ? Math.round(rangeNm) : rangeNm.toFixed(1)} NM`;
@@ -4862,6 +4904,7 @@ cw_header('Cockpit Recorder Replay');
       insetMapZoom,
       pathPoints.length,
       airports.map((airport) => airport.icao).join(','),
+      trafficTargets.map((target) => `${target.hex}:${Math.round(target.x)}:${Math.round(target.y)}:${Math.round(target.trk)}`).join(','),
       Math.round(aircraftPos.x),
       Math.round(aircraftPos.y),
       Math.round(aircraftTrack),
@@ -4880,11 +4923,17 @@ cw_header('Cockpit Recorder Replay');
           <text x="${(airport.x + 12).toFixed(1)}" y="${(airport.y - 9).toFixed(1)}" font-size="11" text-anchor="start">${escapeHtml(airport.icao)}</text>
         </g>
       `).join('');
+      const trafficHtml = trafficTargets.map((target) => `
+        <g transform="translate(${target.x.toFixed(1)} ${target.y.toFixed(1)}) rotate(${target.trk.toFixed(1)})">
+          <polygon points="0,-5.5 3.4,4.2 0,1.8 -3.4,4.2" fill="rgba(180,245,255,.95)" stroke="rgba(255,255,255,.88)" stroke-width="1.1" stroke-linejoin="round"></polygon>
+        </g>
+      `).join('');
       const planePath = 'M 0.0 -30.4 L 0.7 -29.5 L 1.3 -28.6 L 1.8 -27.7 L 2.4 -26.8 L 2.9 -25.9 L 3.3 -24.9 L 3.7 -24.0 L 3.9 -23.1 L 4.2 -22.2 L 4.5 -21.3 L 4.7 -20.3 L 4.9 -19.4 L 5.0 -18.5 L 5.1 -17.6 L 5.2 -16.7 L 28.5 -15.7 L 42.0 -14.8 L 47.8 -13.9 L 48.6 -13.0 L 49.2 -12.1 L 49.6 -11.2 L 49.9 -10.2 L 50.0 -9.3 L 50.0 -8.4 L 49.9 -7.5 L 21.8 -6.6 L 4.7 -5.6 L 4.5 -4.7 L 4.2 -3.8 L 3.9 -2.9 L 3.7 -2.0 L 3.4 -1.0 L 3.3 -0.1 L 3.0 0.8 L 2.8 1.7 L 2.5 2.6 L 2.4 3.5 L 2.1 4.5 L 2.0 5.4 L 1.8 6.3 L 1.7 7.2 L 1.6 8.1 L 1.6 9.1 L 1.4 10.0 L 1.3 10.9 L 1.3 11.8 L 1.3 12.7 L 1.2 13.6 L 1.2 14.6 L 1.2 15.5 L 1.0 16.4 L 1.0 17.3 L 1.0 18.2 L 1.0 19.2 L 1.0 20.1 L 1.0 21.0 L 1.0 21.9 L 1.0 22.8 L 2.2 23.8 L 8.0 24.7 L 10.8 25.6 L 11.3 26.5 L 11.5 27.4 L 11.4 28.3 L 11.0 29.3 L 3.8 30.2 L -1.0 30.4 L -1.4 30.4 L -4.7 30.2 L -11.2 29.3 L -11.4 28.3 L -11.5 27.4 L -11.3 26.5 L -10.6 25.6 L -7.3 24.7 L -1.7 23.8 L -1.0 22.8 L -1.0 21.9 L -1.0 21.0 L -1.0 20.1 L -1.0 19.2 L -1.0 18.2 L -1.0 17.3 L -1.0 16.4 L -1.0 15.5 L -1.0 14.6 L -1.0 13.6 L -1.2 12.7 L -1.3 11.8 L -1.3 10.9 L -1.4 10.0 L -1.6 9.1 L -1.6 8.1 L -1.7 7.2 L -1.8 6.3 L -2.0 5.4 L -2.1 4.5 L -2.4 3.5 L -2.5 2.6 L -2.8 1.7 L -3.0 0.8 L -3.3 -0.1 L -3.4 -1.0 L -3.7 -2.0 L -3.9 -2.9 L -4.2 -3.8 L -4.5 -4.7 L -4.7 -5.6 L -30.8 -6.6 L -49.9 -7.5 L -50.0 -8.4 L -50.0 -9.3 L -49.9 -10.2 L -49.6 -11.2 L -49.2 -12.1 L -48.6 -13.0 L -47.6 -13.9 L -40.7 -14.8 L -26.6 -15.7 L -5.2 -16.7 L -5.1 -17.6 L -5.0 -18.5 L -4.9 -19.4 L -4.7 -20.3 L -4.5 -21.3 L -4.2 -22.2 L -3.9 -23.1 L -3.5 -24.0 L -3.1 -24.9 L -2.8 -25.9 L -2.4 -26.8 L -1.8 -27.7 L -1.2 -28.6 L -0.5 -29.5 L 0.0 -30.4 Z';
       insetMapSvg.innerHTML = `
         <rect x="0" y="0" width="${INSET_MAP_SIZE}" height="${INSET_MAP_SIZE}" fill="rgba(40,40,40,.12)"></rect>
         <polyline points="${pathPoints.join(' ')}" fill="none" stroke="${INSET_MAP_MAGENTA}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"></polyline>
         ${airportHtml}
+        ${trafficHtml}
         <g transform="translate(${aircraftPos.x.toFixed(1)} ${aircraftPos.y.toFixed(1)}) rotate(${aircraftTrack.toFixed(1)}) scale(.46)">
           <path d="${planePath}" fill="rgba(0,0,0,.96)" stroke="rgba(255,255,255,.96)" stroke-width="4.5" stroke-linejoin="round"></path>
         </g>

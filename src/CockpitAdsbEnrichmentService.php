@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/CockpitRecorderService.php';
+require_once __DIR__ . '/CockpitAircraftService.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -22,6 +23,10 @@ final class CockpitAdsbEnrichmentService
     private const MAX_ADSB_GPS_DISTANCE_NM = 1.0;
     private const MAX_ADSB_GPS_SPEED_DELTA_KT = 45.0;
     private const MAX_ADSB_GPS_TRACK_DELTA_DEG = 60.0;
+    private const TRAFFIC_RANGE_NM = 10.0;
+    private const TRAFFIC_ANCHOR_INTERVAL_S = 30.0;
+    private const TRAFFIC_NEARBY_AIRPORT_NM = 30.0;
+    private const MAX_CANDIDATE_HEXES = 80;
 
     public function __construct(private PDO $pdo)
     {
@@ -104,13 +109,17 @@ final class CockpitAdsbEnrichmentService
             );
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
             $this->storeOwnshipSamples($recordingId, $samples);
-            $this->setStatus($recordingId, 'ready', $hex, $window['start_mysql'], $window['end_mysql'], count($samples), 0, null, $rawPath, $normalizedPath);
+            $traffic = $this->enrichTraffic($recordingId, $hex, $samples, $recording, $window);
+            $normalized['traffic'] = $traffic;
+            $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
+            $this->setStatus($recordingId, 'ready', $hex, $window['start_mysql'], $window['end_mysql'], count($samples), (int)($traffic['sample_count'] ?? 0), null, $rawPath, $normalizedPath);
 
             return array(
                 'ok' => true,
                 'status' => 'ready',
                 'recording_id' => $recordingId,
                 'ownship_sample_count' => count($samples),
+                'traffic_sample_count' => (int)($traffic['sample_count'] ?? 0),
                 'raw_storage_path' => $rawPath,
                 'normalized_storage_path' => $normalizedPath,
             );
@@ -363,7 +372,7 @@ final class CockpitAdsbEnrichmentService
         return array(
             'icao' => $hex,
             'timestamp' => 0,
-            'source' => 'adsbexchange_globe_history',
+            'source' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway_traces_hist' : 'adsbexchange_globe_history',
             'source_dates' => $sources,
             'errors' => $errors,
             'trace' => $trace,
@@ -375,6 +384,10 @@ final class CockpitAdsbEnrichmentService
      */
     private function fetchHistoricalTraceForDate(string $hex, DateTimeImmutable $day): array
     {
+        if (tv_adsb_provider() === 'gateway') {
+            return tv_adsb_fetch_historical_trace($hex, $day);
+        }
+
         $folder = substr($hex, -2);
         $base = rtrim((string)(getenv('CW_ADSBEXCHANGE_HISTORY_BASE') ?: 'https://globe.adsbexchange.com/globe_history'), '/');
         $url = $base . '/' . $day->format('Y/m/d') . '/traces/' . rawurlencode($folder) . '/trace_full_' . rawurlencode($hex) . '.json';
@@ -980,6 +993,344 @@ final class CockpitAdsbEnrichmentService
         $this->pdo->prepare('DELETE FROM ' . self::OWNSHIP_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
     }
 
+    /**
+     * @param list<array<string,mixed>> $ownshipSamples
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return array<string,mixed>
+     */
+    private function enrichTraffic(
+        int $recordingId,
+        string $ownshipHex,
+        array $ownshipSamples,
+        array $recording,
+        array $window
+    ): array {
+        $this->clearTrafficSamples($recordingId);
+        if (tv_adsb_provider() !== 'gateway') {
+            return array(
+                'sample_count' => 0,
+                'provider' => tv_adsb_provider(),
+                'note' => 'Traffic enrichment requires CW_ADSBEXCHANGE_PROVIDER=gateway.',
+            );
+        }
+
+        $anchors = $this->trafficAnchors($ownshipSamples);
+        if ($anchors === array()) {
+            return array('sample_count' => 0, 'provider' => 'gateway', 'note' => 'No ownship anchors for traffic correlation.');
+        }
+
+        $candidates = $this->discoverTrafficCandidateHexes($ownshipHex, $anchors, $recording, $window);
+        if ($candidates === array()) {
+            return array('sample_count' => 0, 'provider' => 'gateway', 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
+        }
+
+        $dates = $this->traceDatesForWindow($window);
+        $candidateTraces = array();
+        foreach ($candidates as $candidateHex) {
+            $epochSamples = array();
+            foreach ($dates as $day) {
+                try {
+                    $payload = tv_adsb_fetch_historical_trace($candidateHex, $day);
+                } catch (Throwable) {
+                    continue;
+                }
+                if (!isset($payload['trace']) || !is_array($payload['trace'])) {
+                    continue;
+                }
+                $epochSamples = array_merge($epochSamples, $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']));
+            }
+            if ($epochSamples !== array()) {
+                $candidateTraces[$candidateHex] = $epochSamples;
+            }
+        }
+
+        $rows = array();
+        foreach ($anchors as $anchor) {
+            foreach ($candidateTraces as $candidateHex => $epochSamples) {
+                $position = tv_adsb_interpolate_trace_at_epoch($epochSamples, (float)$anchor['epoch']);
+                if ($position === null || !isset($position['latitude'], $position['longitude']) || !is_numeric($position['latitude']) || !is_numeric($position['longitude'])) {
+                    continue;
+                }
+
+                $lat = (float)$position['latitude'];
+                $lon = (float)$position['longitude'];
+                $distanceNm = self::distanceNm((float)$anchor['latitude'], (float)$anchor['longitude'], $lat, $lon);
+                if ($distanceNm > self::TRAFFIC_RANGE_NM) {
+                    continue;
+                }
+
+                $ownshipAlt = isset($anchor['baro_altitude_ft']) && is_numeric($anchor['baro_altitude_ft']) ? (float)$anchor['baro_altitude_ft'] : null;
+                $trafficAlt = isset($position['baro_altitude_ft']) && is_numeric($position['baro_altitude_ft']) ? (float)$position['baro_altitude_ft'] : null;
+                $rows[] = array(
+                    'sample_time_utc' => self::epochIso((float)$anchor['epoch']),
+                    'seconds_since_start' => (float)$anchor['seconds_since_start'],
+                    'aircraft_hex' => $candidateHex,
+                    'callsign' => tv_adsb_normalize_label((string)($position['callsign'] ?? '')),
+                    'latitude' => $lat,
+                    'longitude' => $lon,
+                    'altitude_ft' => $trafficAlt,
+                    'groundspeed_kt' => isset($position['groundspeed_kt']) && is_numeric($position['groundspeed_kt']) ? (float)$position['groundspeed_kt'] : null,
+                    'track_deg' => isset($position['track_deg']) && is_numeric($position['track_deg']) ? (float)$position['track_deg'] : null,
+                    'distance_nm' => round($distanceNm, 2),
+                    'bearing_deg' => round(tv_adsb_bearing((float)$anchor['latitude'], (float)$anchor['longitude'], $lat, $lon), 1),
+                    'relative_altitude_ft' => $ownshipAlt !== null && $trafficAlt !== null ? round($trafficAlt - $ownshipAlt, 1) : null,
+                    'raw_json' => json_encode($position, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                );
+            }
+        }
+
+        $this->storeTrafficSamples($recordingId, $rows);
+
+        return array(
+            'sample_count' => count($rows),
+            'provider' => 'gateway',
+            'anchor_count' => count($anchors),
+            'candidate_count' => count($candidates),
+            'trace_count' => count($candidateTraces),
+            'range_nm' => self::TRAFFIC_RANGE_NM,
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $ownshipSamples
+     * @return list<array<string,mixed>>
+     */
+    private function trafficAnchors(array $ownshipSamples): array
+    {
+        if ($ownshipSamples === array()) {
+            return array();
+        }
+
+        $anchors = array();
+        $nextAnchorAt = -self::TRAFFIC_ANCHOR_INTERVAL_S;
+        foreach ($ownshipSamples as $sample) {
+            $seconds = (float)($sample['seconds_since_start'] ?? -1);
+            if ($seconds < 0 || $seconds < $nextAnchorAt) {
+                continue;
+            }
+            if (!isset($sample['latitude'], $sample['longitude']) || !is_numeric($sample['latitude']) || !is_numeric($sample['longitude'])) {
+                continue;
+            }
+            $sampleTime = trim((string)($sample['sample_time_utc'] ?? ''));
+            $epoch = null;
+            if ($sampleTime !== '') {
+                try {
+                    $epoch = (float)(new DateTimeImmutable($sampleTime))->setTimezone(new DateTimeZone('UTC'))->format('U.u');
+                } catch (Throwable) {
+                    $epoch = null;
+                }
+            }
+            if ($epoch === null) {
+                continue;
+            }
+            $anchors[] = array(
+                'seconds_since_start' => $seconds,
+                'epoch' => $epoch,
+                'latitude' => (float)$sample['latitude'],
+                'longitude' => (float)$sample['longitude'],
+                'baro_altitude_ft' => $sample['baro_altitude_ft'] ?? null,
+            );
+            $nextAnchorAt = $seconds + self::TRAFFIC_ANCHOR_INTERVAL_S;
+        }
+
+        $last = $ownshipSamples[count($ownshipSamples) - 1];
+        if ($anchors !== array()) {
+            $lastSeconds = (float)($last['seconds_since_start'] ?? -1);
+            $lastAnchorSeconds = (float)$anchors[count($anchors) - 1]['seconds_since_start'];
+            if ($lastSeconds >= 0 && abs($lastSeconds - $lastAnchorSeconds) >= 5.0
+                && isset($last['latitude'], $last['longitude']) && is_numeric($last['latitude']) && is_numeric($last['longitude'])
+            ) {
+                $sampleTime = trim((string)($last['sample_time_utc'] ?? ''));
+                try {
+                    $epoch = (float)(new DateTimeImmutable($sampleTime))->setTimezone(new DateTimeZone('UTC'))->format('U.u');
+                    $anchors[] = array(
+                        'seconds_since_start' => $lastSeconds,
+                        'epoch' => $epoch,
+                        'latitude' => (float)$last['latitude'],
+                        'longitude' => (float)$last['longitude'],
+                        'baro_altitude_ft' => $last['baro_altitude_ft'] ?? null,
+                    );
+                } catch (Throwable) {
+                }
+            }
+        }
+
+        return $anchors;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $anchors
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return list<string>
+     */
+    private function discoverTrafficCandidateHexes(string $ownshipHex, array $anchors, array $recording, array $window): array
+    {
+        $seen = array();
+        $candidates = array();
+
+        $addHex = static function (string $hex) use (&$seen, &$candidates, $ownshipHex): void {
+            $hex = tv_adsb_normalize_hex($hex);
+            if ($hex === '' || $hex === $ownshipHex || isset($seen[$hex])) {
+                return;
+            }
+            $seen[$hex] = true;
+            $candidates[] = $hex;
+        };
+
+        if (CockpitAircraftService::tablesPresent($this->pdo)) {
+            foreach ((new CockpitAircraftService($this->pdo))->activeAircraft() as $aircraft) {
+                $addHex((string)($aircraft['adsb_hex'] ?? ''));
+                if (count($candidates) >= self::MAX_CANDIDATE_HEXES) {
+                    return $candidates;
+                }
+            }
+        }
+
+        $timeFrom = (int)floor((float)$window['start_epoch']);
+        $timeTo = (int)ceil((float)$window['end_epoch']);
+        foreach ($this->nearbyAirportIcaos($anchors) as $icao) {
+            foreach (tv_adsb_fetch_airport_operations($icao, $timeFrom, $timeTo) as $operation) {
+                $addHex((string)($operation['icao'] ?? ''));
+                if (count($candidates) >= self::MAX_CANDIDATE_HEXES) {
+                    return $candidates;
+                }
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $anchors
+     * @return list<string>
+     */
+    private function nearbyAirportIcaos(array $anchors): array
+    {
+        if ($anchors === array()) {
+            return array();
+        }
+
+        $minLat = $maxLat = (float)$anchors[0]['latitude'];
+        $minLon = $maxLon = (float)$anchors[0]['longitude'];
+        foreach ($anchors as $anchor) {
+            $minLat = min($minLat, (float)$anchor['latitude']);
+            $maxLat = max($maxLat, (float)$anchor['latitude']);
+            $minLon = min($minLon, (float)$anchor['longitude']);
+            $maxLon = max($maxLon, (float)$anchor['longitude']);
+        }
+        $centerLat = ($minLat + $maxLat) / 2;
+        $centerLon = ($minLon + $maxLon) / 2;
+
+        $icaos = array();
+        foreach (tv_adsb_airports() as $icao => $airport) {
+            if (!isset($airport['lat'], $airport['lon'])) {
+                continue;
+            }
+            $distanceNm = self::distanceNm($centerLat, $centerLon, (float)$airport['lat'], (float)$airport['lon']);
+            if ($distanceNm <= self::TRAFFIC_NEARBY_AIRPORT_NM) {
+                $icaos[] = (string)$icao;
+            }
+        }
+
+        return $icaos;
+    }
+
+    /**
+     * @param array<string,mixed> $window
+     * @return list<DateTimeImmutable>
+     */
+    private function traceDatesForWindow(array $window): array
+    {
+        $start = new DateTimeImmutable((string)$window['start_iso']);
+        $end = new DateTimeImmutable((string)$window['end_iso']);
+        $dates = array();
+        for ($day = $start->setTime(0, 0); $day <= $end->setTime(0, 0); $day = $day->modify('+1 day')) {
+            $dates[] = $day;
+        }
+        return $dates;
+    }
+
+    /**
+     * @param array<string,mixed> $trace
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeTraceEpochSamples(array $trace, float $startEpoch, float $endEpoch): array
+    {
+        $base = isset($trace['timestamp']) && is_numeric($trace['timestamp']) ? (float)$trace['timestamp'] : null;
+        $rows = isset($trace['trace']) && is_array($trace['trace']) ? $trace['trace'] : array();
+        if ($base === null || !$rows) {
+            return array();
+        }
+
+        $callsign = tv_adsb_normalize_label((string)($trace['r'] ?? ($trace['flight'] ?? '')));
+        $samples = array();
+        foreach ($rows as $row) {
+            if (!is_array($row) || count($row) < 3 || !isset($row[0], $row[1], $row[2]) || !is_numeric($row[0]) || !is_numeric($row[1]) || !is_numeric($row[2])) {
+                continue;
+            }
+            $epoch = $base + (float)$row[0];
+            if ($epoch < $startEpoch - 60 || $epoch > $endEpoch + 60) {
+                continue;
+            }
+            $alt = $row[3] ?? null;
+            $samples[] = array(
+                'epoch' => $epoch,
+                'latitude' => (float)$row[1],
+                'longitude' => (float)$row[2],
+                'baro_altitude_ft' => is_numeric($alt) ? (float)$alt : null,
+                'groundspeed_kt' => isset($row[4]) && is_numeric($row[4]) ? (float)$row[4] : null,
+                'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
+                'callsign' => $callsign,
+            );
+        }
+
+        usort($samples, fn(array $a, array $b): int => ((float)$a['epoch']) <=> ((float)$b['epoch']));
+        return $samples;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     */
+    private function storeTrafficSamples(int $recordingId, array $rows): void
+    {
+        if ($rows === array()) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO ' . self::TRAFFIC_TABLE . ' (
+                recording_id, sample_time_utc, seconds_since_start, aircraft_hex, callsign,
+                latitude, longitude, altitude_ft, groundspeed_kt, track_deg,
+                distance_nm, bearing_deg, relative_altitude_ft, raw_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ');
+        foreach ($rows as $row) {
+            $stmt->execute(array(
+                $recordingId,
+                self::mysqlDateTimeMillis((string)($row['sample_time_utc'] ?? '')),
+                (float)($row['seconds_since_start'] ?? 0),
+                (string)($row['aircraft_hex'] ?? ''),
+                (string)($row['callsign'] ?? ''),
+                $row['latitude'] ?? null,
+                $row['longitude'] ?? null,
+                $row['altitude_ft'] ?? null,
+                $row['groundspeed_kt'] ?? null,
+                $row['track_deg'] ?? null,
+                $row['distance_nm'] ?? null,
+                $row['bearing_deg'] ?? null,
+                $row['relative_altitude_ft'] ?? null,
+                $row['raw_json'] ?? null,
+            ));
+        }
+    }
+
+    private function clearTrafficSamples(int $recordingId): void
+    {
+        $this->pdo->prepare('DELETE FROM ' . self::TRAFFIC_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
+    }
+
     private function setStatus(
         int $recordingId,
         string $status,
@@ -1011,7 +1362,7 @@ final class CockpitAdsbEnrichmentService
                 error_message = VALUES(error_message),
                 updated_at = CURRENT_TIMESTAMP
         ');
-        $stmt->execute(array($recordingId, $status, 'adsbexchange_trace', $hex, $start, $end, $rawPath, $normalizedPath, $ownshipCount, $trafficCount, $error));
+        $stmt->execute(array($recordingId, $status, tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_trace', $hex, $start, $end, $rawPath, $normalizedPath, $ownshipCount, $trafficCount, $error));
         $this->pdo->prepare('UPDATE ' . self::RECORDINGS_TABLE . ' SET adsb_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')->execute(array($status, $recordingId));
     }
 

@@ -244,6 +244,134 @@ function tv_adsb_extract_aircraft_list(array $payload): array
     return array();
 }
 
+/**
+ * @return array<string,mixed>
+ */
+function tv_adsb_fetch_historical_trace(string $hex, DateTimeImmutable $day): array
+{
+    $hex = tv_adsb_normalize_hex($hex);
+    if ($hex === '') {
+        return array();
+    }
+
+    $folder = substr($hex, -2);
+    $path = '/traces-hist/'
+        . $day->format('Y') . '/'
+        . $day->format('m') . '/'
+        . $day->format('d')
+        . '/traces/' . rawurlencode($folder)
+        . '/trace_full_' . rawurlencode($hex) . '.json';
+
+    return tv_adsb_request($path);
+}
+
+/**
+ * @return list<array<string,mixed>>
+ */
+function tv_adsb_fetch_airport_operations(string $icao, int $timeFrom, int $timeTo): array
+{
+    $icao = strtoupper(trim($icao));
+    if ($icao === '') {
+        return array();
+    }
+
+    $timeFrom = max(0, $timeFrom);
+    $timeTo = max($timeFrom, $timeTo);
+    $path = '/operations/airport/' . rawurlencode($icao)
+        . '?time_from=' . rawurlencode((string)$timeFrom)
+        . '&time_to=' . rawurlencode((string)$timeTo);
+
+    try {
+        $payload = tv_adsb_request($path);
+    } catch (Throwable) {
+        return array();
+    }
+
+    if (!isset($payload['items']) || !is_array($payload['items'])) {
+        return array();
+    }
+
+    $items = array();
+    foreach ($payload['items'] as $item) {
+        if (is_array($item)) {
+            $items[] = $item;
+        }
+    }
+
+    return $items;
+}
+
+/**
+ * @param list<array<string,mixed>> $samples
+ * @return array<string,mixed>|null
+ */
+function tv_adsb_interpolate_trace_at_epoch(array $samples, float $epoch): ?array
+{
+    if ($samples === array()) {
+        return null;
+    }
+
+    $before = null;
+    $after = null;
+    foreach ($samples as $sample) {
+        if (!isset($sample['epoch']) || !is_numeric($sample['epoch'])) {
+            continue;
+        }
+        $sampleEpoch = (float)$sample['epoch'];
+        if ($sampleEpoch <= $epoch) {
+            $before = $sample;
+            continue;
+        }
+        $after = $sample;
+        break;
+    }
+
+    if ($before === null && $after === null) {
+        return null;
+    }
+    if ($before === null) {
+        return abs((float)$after['epoch'] - $epoch) <= 45.0 ? $after : null;
+    }
+    if ($after === null) {
+        return abs($epoch - (float)$before['epoch']) <= 45.0 ? $before : null;
+    }
+
+    $beforeEpoch = (float)$before['epoch'];
+    $afterEpoch = (float)$after['epoch'];
+    $gap = $afterEpoch - $beforeEpoch;
+    if ($gap <= 0.0 || $gap > 120.0) {
+        $nearest = abs($epoch - $beforeEpoch) <= abs($afterEpoch - $epoch) ? $before : $after;
+        return abs($epoch - (float)$nearest['epoch']) <= 45.0 ? $nearest : null;
+    }
+
+    $ratio = max(0.0, min(1.0, ($epoch - $beforeEpoch) / $gap));
+    $lerp = static function (mixed $a, mixed $b) use ($ratio): ?float {
+        if (!is_numeric($a) || !is_numeric($b)) {
+            return is_numeric($a) ? (float)$a : (is_numeric($b) ? (float)$b : null);
+        }
+        return (float)$a + ((float)$b - (float)$a) * $ratio;
+    };
+    $lerpAngle = static function (mixed $a, mixed $b) use ($ratio): ?float {
+        if (!is_numeric($a) || !is_numeric($b)) {
+            return is_numeric($a) ? (float)$a : (is_numeric($b) ? (float)$b : null);
+        }
+        $from = (float)$a;
+        $to = (float)$b;
+        $delta = fmod($to - $from + 540.0, 360.0) - 180.0;
+        return fmod($from + $delta * $ratio + 360.0, 360.0);
+    };
+
+    return array(
+        'epoch' => $epoch,
+        'latitude' => $lerp($before['latitude'] ?? null, $after['latitude'] ?? null),
+        'longitude' => $lerp($before['longitude'] ?? null, $after['longitude'] ?? null),
+        'baro_altitude_ft' => $lerp($before['baro_altitude_ft'] ?? null, $after['baro_altitude_ft'] ?? null),
+        'groundspeed_kt' => $lerp($before['groundspeed_kt'] ?? null, $after['groundspeed_kt'] ?? null),
+        'track_deg' => $lerpAngle($before['track_deg'] ?? null, $after['track_deg'] ?? null),
+        'callsign' => (string)($before['callsign'] ?? $after['callsign'] ?? ''),
+    );
+}
+
 function tv_adsb_fetch_near_point(float $lat, float $lon, float $distNm): array
 {
     return tv_adsb_fetch_near_point_result($lat, $lon, $distNm)['aircraft'];
