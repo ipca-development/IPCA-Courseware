@@ -30,7 +30,7 @@ function tv_adsb_api_config(): array
             'headers' => array(
                 'Accept: application/json',
                 'Accept-Encoding: gzip',
-                'X-Api-Key: ' . tv_adsb_api_key(),
+                'api-auth: ' . tv_adsb_api_key(),
             ),
         );
     }
