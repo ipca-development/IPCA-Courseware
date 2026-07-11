@@ -233,15 +233,15 @@ final class CockpitReplayPipeline
             'nav_source' => $this->buildG3xTextKnots($g3xPoints, 'nav_source'),
             'nav_annunciation' => $this->buildG3xTextKnots($g3xPoints, 'nav_annunciation'),
             'nav_identifier' => $this->buildG3xTextKnots($g3xPoints, 'nav_identifier'),
-            'autopilot_state' => $this->buildG3xTextKnots($g3xPoints, 'autopilot_state'),
-            'fd_lateral_mode' => $this->buildG3xTextKnots($g3xPoints, 'fd_lateral_mode'),
-            'fd_vertical_mode' => $this->buildG3xTextKnots($g3xPoints, 'fd_vertical_mode'),
-            'autopilot_armed_mode' => $this->buildG3xTextKnots($g3xPoints, 'autopilot_armed_mode'),
+            'autopilot_state' => $this->buildG3xTextKnots($g3xPoints, 'autopilot_state', true),
+            'fd_lateral_mode' => $this->buildG3xTextKnots($g3xPoints, 'fd_lateral_mode', true),
+            'fd_vertical_mode' => $this->buildG3xTextKnots($g3xPoints, 'fd_vertical_mode', true),
+            'autopilot_armed_mode' => $this->buildG3xTextKnots($g3xPoints, 'autopilot_armed_mode', true),
             'com1_name' => $this->buildG3xTextKnots($g3xPoints, 'com1_name'),
-            'com1_status' => $this->buildG3xTextKnots($g3xPoints, 'com1_status'),
+            'com1_status' => $this->buildG3xTextKnots($g3xPoints, 'com1_status', true),
             'com1_standby_name' => $this->buildG3xTextKnots($g3xPoints, 'com1_standby_name'),
             'com2_name' => $this->buildG3xTextKnots($g3xPoints, 'com2_name'),
-            'com2_status' => $this->buildG3xTextKnots($g3xPoints, 'com2_status'),
+            'com2_status' => $this->buildG3xTextKnots($g3xPoints, 'com2_status', true),
             'com2_standby_name' => $this->buildG3xTextKnots($g3xPoints, 'com2_standby_name'),
             'nav2_name' => $this->buildG3xTextKnots($g3xPoints, 'nav2_name'),
             'nav2_standby_name' => $this->buildG3xTextKnots($g3xPoints, 'nav2_standby_name'),
@@ -1487,14 +1487,20 @@ final class CockpitReplayPipeline
      * @param list<array<string,mixed>> $g3xPoints
      * @return list<array{t:float,v:string}>
      */
-    private function buildG3xTextKnots(array $g3xPoints, string $field): array
+    private function buildG3xTextKnots(array $g3xPoints, string $field, bool $preserveBlankTransitions = false): array
     {
         $knots = array();
+        $lastValue = null;
         foreach ($g3xPoints as $point) {
             $value = trim((string)($point[$field] ?? ''));
-            if ($value !== '') {
-                $knots[] = array('t' => (float)$point['t'], 'v' => $value);
+            if (!$preserveBlankTransitions && $value === '') {
+                continue;
             }
+            if ($lastValue !== null && $value === $lastValue) {
+                continue;
+            }
+            $knots[] = array('t' => (float)$point['t'], 'v' => $value);
+            $lastValue = $value;
         }
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
         return $knots;

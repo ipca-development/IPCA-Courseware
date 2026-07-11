@@ -2867,6 +2867,12 @@ cw_header('Cockpit Recorder Replay');
     return raw.includes('FD') || raw.includes('ON') || raw.includes('ACTIVE') || raw === '1' || raw === 'TRUE';
   }
 
+  function afcsModeActiveText(value) {
+    const text = String(value ?? '').trim().toUpperCase();
+    if (text === '' || ['0', 'FALSE', 'OFF', 'NO', 'NONE', '--', '---'].includes(text)) return '';
+    return text;
+  }
+
   function comRxTxStatus(sample, index) {
     const prefix = `com${index}`;
     const exact = String(
@@ -2957,7 +2963,9 @@ cw_header('Cockpit Recorder Replay');
     const armedMode = g3xField(sample, 'autopilot_armed_mode', 'ap_armed_mode') ||
       g3xRawField(sample, 'AP Armed Mode', 'Armed Mode', 'ALT Armed');
     const apState = afcsStateDisplay(sample);
-    const modesActive = apState.modesActive || flightDirectorActive(sample);
+    const lateralModeActive = afcsModeActiveText(lateralMode);
+    const verticalModeActive = afcsModeActiveText(verticalMode);
+    const modesActive = apState.modesActive || flightDirectorActive(sample) || lateralModeActive !== '' || verticalModeActive !== '';
     const lateralLabel = modesActive ? normalizeAfcsToken(lateralMode, '--', 4) : '';
     const verticalModes = modesActive ? splitVerticalAfcsMode(verticalMode, '--') : { active: '', armed: '' };
     const armedLabel = modesActive ? (verticalModes.armed || normalizeAfcsToken(armedMode, '', 4)) : '';

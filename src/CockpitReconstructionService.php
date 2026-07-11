@@ -1178,14 +1178,31 @@ final class CockpitReconstructionService
                 $sample[$field] = $row[$field] !== null ? (float)$row[$field] : null;
             }
         }
+        $canonicalG3x = null;
         if (isset($row['canonical_g3x_row_json']) && trim((string)$row['canonical_g3x_row_json']) !== '') {
             $canonicalG3x = $this->publicG3XFields(array('g3x_row_json' => $row['canonical_g3x_row_json']));
-            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz', 'nav2_mhz', 'nav2_standby_mhz') as $field) {
+            foreach (array('nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'vcdi', 'nav_distance_nm', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav2_mhz', 'nav2_standby_mhz') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && $canonicalG3x[$field] !== null) {
                     $sample[$field] = (float)$canonicalG3x[$field];
                 }
             }
-            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier', 'transponder_code', 'transponder_mode', 'autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_name', 'com1_status', 'com1_standby_name', 'com2_name', 'com2_status', 'com2_standby_name', 'nav2_name', 'nav2_standby_name') as $field) {
+            foreach (array('com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz') as $field) {
+                if (array_key_exists($field, $canonicalG3x) && $canonicalG3x[$field] !== null) {
+                    $value = trim((string)$canonicalG3x[$field]);
+                    if (preg_match('/-?\d+(?:\.\d+)?/', $value, $matches) === 1) {
+                        $sample[$field] = (float)$matches[0];
+                    }
+                    if (($field === 'com1_mhz' || $field === 'com2_mhz') && preg_match('/\b(TX|RX)\b/i', $value, $statusMatch) === 1) {
+                        $sample[$field === 'com1_mhz' ? 'com1_status' : 'com2_status'] = strtoupper($statusMatch[1]);
+                    }
+                }
+            }
+            foreach (array('autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_status', 'com2_status') as $field) {
+                if (array_key_exists($field, $canonicalG3x)) {
+                    $sample[$field] = trim((string)($canonicalG3x[$field] ?? ''));
+                }
+            }
+            foreach (array('nav_source', 'nav_annunciation', 'nav_identifier', 'transponder_code', 'transponder_mode', 'com1_name', 'com1_standby_name', 'com2_name', 'com2_standby_name', 'nav2_name', 'nav2_standby_name') as $field) {
                 if (array_key_exists($field, $canonicalG3x) && trim((string)$canonicalG3x[$field]) !== '') {
                     $sample[$field] = (string)$canonicalG3x[$field];
                 }
@@ -1237,6 +1254,13 @@ final class CockpitReconstructionService
         ) as $field) {
             if (array_key_exists($field, $row)) {
                 $sample[$field] = (string)($row[$field] ?? '');
+            }
+        }
+        if (is_array($canonicalG3x)) {
+            foreach (array('autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_status', 'com2_status') as $field) {
+                if (array_key_exists($field, $canonicalG3x)) {
+                    $sample[$field] = trim((string)($canonicalG3x[$field] ?? ''));
+                }
             }
         }
 
@@ -4305,7 +4329,14 @@ final class CockpitReconstructionService
                 'COM ' . $index . ' Monitor'
             );
             if ($exact !== null) {
-                return $exact;
+                $text = strtoupper(trim($exact));
+                if (str_contains($text, 'TX') || str_contains($text, 'TRANSMIT')) {
+                    return 'TX';
+                }
+                if (str_contains($text, 'RX') || str_contains($text, 'RECEIV')) {
+                    return 'RX';
+                }
+                return null;
             }
             $otherIndex = $index === 1 ? '2' : '1';
             foreach ($source as $key => $value) {
@@ -4315,7 +4346,7 @@ final class CockpitReconstructionService
                 }
                 $text = strtoupper(trim((string)$value));
                 if (str_contains($text, 'TX') || str_contains($text, 'TRANSMIT') || str_contains($text, 'RX') || str_contains($text, 'RECEIV')) {
-                    return $text;
+                    return str_contains($text, 'TX') || str_contains($text, 'TRANSMIT') ? 'TX' : 'RX';
                 }
             }
             return null;
