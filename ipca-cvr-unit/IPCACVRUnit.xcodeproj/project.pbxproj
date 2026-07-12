@@ -16,7 +16,6 @@
 		100000000000000000000007 /* AudioRecorderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* AudioRecorderManager.swift */; };
 		100000000000000000000008 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* NetworkMonitor.swift */; };
 		100000000000000000000009 /* SystemMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SystemMonitor.swift */; };
-		10000000000000000000000A /* GarminBluetoothMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* GarminBluetoothMonitor.swift */; };
 		10000000000000000000000B /* RemoteIPadLinkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* RemoteIPadLinkManager.swift */; };
 		10000000000000000000000C /* CVRUnitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* CVRUnitCoordinator.swift */; };
 		10000000000000000000000D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* ContentView.swift */; };
@@ -24,6 +23,10 @@
 		10000000000000000000000F /* AdminRecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* AdminRecordingsView.swift */; };
 		100000000000000000000010 /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* IPCATheme.swift */; };
 		100000000000000000000011 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* LaunchScreen.storyboard */; };
+		100000000000000000000016 /* AvionicsBeaconLogEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* AvionicsBeaconLogEntry.swift */; };
+		100000000000000000000017 /* AvionicsBeaconExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* AvionicsBeaconExportService.swift */; };
+		100000000000000000000018 /* AvionicsBeaconManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AvionicsBeaconManager.swift */; };
+		10000000000000000000001A /* AvionicsBeaconTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* AvionicsBeaconTestView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,7 +39,6 @@
 		200000000000000000000007 /* AudioRecorderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderManager.swift; sourceTree = "<group>"; };
 		200000000000000000000008 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		200000000000000000000009 /* SystemMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMonitor.swift; sourceTree = "<group>"; };
-		20000000000000000000000A /* GarminBluetoothMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminBluetoothMonitor.swift; sourceTree = "<group>"; };
 		20000000000000000000000B /* RemoteIPadLinkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteIPadLinkManager.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* CVRUnitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVRUnitCoordinator.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -46,6 +48,10 @@
 		200000000000000000000011 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		200000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		200000000000000000000013 /* IPCACVRUnit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCACVRUnit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000018 /* AvionicsBeaconLogEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconLogEntry.swift; sourceTree = "<group>"; };
+		200000000000000000000019 /* AvionicsBeaconExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconExportService.swift; sourceTree = "<group>"; };
+		20000000000000000000001A /* AvionicsBeaconManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconManager.swift; sourceTree = "<group>"; };
+		20000000000000000000001C /* AvionicsBeaconTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconTestView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +89,7 @@
 		400000000000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				200000000000000000000018 /* AvionicsBeaconLogEntry.swift */,
 				200000000000000000000002 /* Recording.swift */,
 			);
 			path = Models;
@@ -93,8 +100,9 @@
 			children = (
 				200000000000000000000007 /* AudioRecorderManager.swift */,
 				200000000000000000000005 /* APIClient.swift */,
+				200000000000000000000019 /* AvionicsBeaconExportService.swift */,
+				20000000000000000000001A /* AvionicsBeaconManager.swift */,
 				20000000000000000000000C /* CVRUnitCoordinator.swift */,
-				20000000000000000000000A /* GarminBluetoothMonitor.swift */,
 				200000000000000000000008 /* NetworkMonitor.swift */,
 				200000000000000000000004 /* RecordingStore.swift */,
 				20000000000000000000000B /* RemoteIPadLinkManager.swift */,
@@ -109,6 +117,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000F /* AdminRecordingsView.swift */,
+				20000000000000000000001C /* AvionicsBeaconTestView.swift */,
 				20000000000000000000000D /* ContentView.swift */,
 				200000000000000000000010 /* IPCATheme.swift */,
 				20000000000000000000000E /* StatusDashboardView.swift */,
@@ -202,13 +211,16 @@
 				100000000000000000000007 /* AudioRecorderManager.swift in Sources */,
 				100000000000000000000008 /* NetworkMonitor.swift in Sources */,
 				100000000000000000000009 /* SystemMonitor.swift in Sources */,
-				10000000000000000000000A /* GarminBluetoothMonitor.swift in Sources */,
 				10000000000000000000000B /* RemoteIPadLinkManager.swift in Sources */,
 				10000000000000000000000C /* CVRUnitCoordinator.swift in Sources */,
 				10000000000000000000000D /* ContentView.swift in Sources */,
 				10000000000000000000000E /* StatusDashboardView.swift in Sources */,
 				10000000000000000000000F /* AdminRecordingsView.swift in Sources */,
 				100000000000000000000010 /* IPCATheme.swift in Sources */,
+				100000000000000000000016 /* AvionicsBeaconLogEntry.swift in Sources */,
+				100000000000000000000017 /* AvionicsBeaconExportService.swift in Sources */,
+				100000000000000000000018 /* AvionicsBeaconManager.swift in Sources */,
+				10000000000000000000001A /* AvionicsBeaconTestView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

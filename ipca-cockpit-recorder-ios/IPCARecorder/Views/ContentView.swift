@@ -15,6 +15,12 @@ struct ContentView: View {
             RealisticCockpitSetupView()
                 .tabItem { Label("Cockpit Setup", systemImage: "gyroscope") }
 
+            ExternalGPSTestView()
+                .tabItem { Label("GPS Test", systemImage: "location.viewfinder") }
+
+            AvionicsBeaconTestView()
+                .tabItem { Label("Beacon Test", systemImage: "antenna.radiowaves.left.and.right") }
+
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

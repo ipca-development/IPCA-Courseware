@@ -21,7 +21,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>IPCA CVR Unit monitors the aircraft Garmin Bluetooth devices to automatically start and stop cockpit voice recordings.</string>
+	<string>IPCA CVR Unit uses Bluetooth to monitor aircraft trigger devices and test the IPCA avionics-power BLE beacon.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>IPCA CVR Unit records cockpit audio from the connected USB-C EarPods or external audio input for transcription testing.</string>
 	<key>UIBackgroundModes</key>

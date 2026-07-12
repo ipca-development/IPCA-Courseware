@@ -48,7 +48,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>IPCA Cockpit Recorder connects to the IPCA-CVR BLE device to receive live AHRS data during cockpit recording tests.</string>
+	<string>IPCA Cockpit Recorder uses Bluetooth to connect to IPCA-CVR AHRS devices and to test the IPCA avionics-power BLE beacon.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>IPCA Cockpit Recorder logs GPS position, speed, altitude, and course during cockpit recording tests.</string>
 	<key>NSMicrophoneUsageDescription</key>

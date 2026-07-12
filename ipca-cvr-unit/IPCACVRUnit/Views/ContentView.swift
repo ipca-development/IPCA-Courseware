@@ -12,6 +12,11 @@ struct ContentView: View {
                     Label("Status", systemImage: "waveform")
                 }
 
+            AvionicsBeaconTestView()
+                .tabItem {
+                    Label("Beacon Test", systemImage: "antenna.radiowaves.left.and.right")
+                }
+
             if adminUnlocked {
                 AdminRecordingsView()
                     .tabItem {
@@ -72,8 +77,8 @@ private struct AdminUnlockView: View {
 
 private struct AdminSettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
-    @EnvironmentObject private var bluetooth: GarminBluetoothMonitor
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var audio: AudioRecorderManager
 
     var body: some View {
@@ -102,18 +107,34 @@ private struct AdminSettingsView: View {
                     }
                 }
 
-                Section("Garmin Bluetooth") {
-                    TextField("G3X advertised name contains", text: $settings.garminG3XName)
-                    TextField("GNX375 advertised name contains", text: $settings.garminGNX375Name)
-                    TextField("Optional BLE service UUIDs, comma separated", text: $settings.garminServiceUUIDs)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("Refresh Bluetooth Monitor") {
-                        bluetooth.refresh(settings: settings)
+                Section("Avionics Beacon") {
+                    Text("One-time setup for the ESP-32 avionics-power beacon. After connection is enabled, the iPhone listens for the beacon and uses it to start and stop recording.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+
+                    Button(settings.isBeaconTriggerEnabled ? "Beacon Connected" : "Connect Beacon") {
+                        settings.isBeaconTriggerEnabled = true
+                        beacon.startScan(scanAll: false)
                     }
-                    if !bluetooth.lastError.isEmpty {
-                        Text(bluetooth.lastError)
-                            .foregroundStyle(IPCATheme.warning)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(settings.isBeaconTriggerEnabled)
+
+                    Button("Disconnect Beacon Trigger", role: .destructive) {
+                        settings.isBeaconTriggerEnabled = false
+                        beacon.stopScan()
+                    }
+                    .disabled(!settings.isBeaconTriggerEnabled)
+
+                    LabeledContent("Trigger") {
+                        Text(settings.isBeaconTriggerEnabled ? "Enabled" : "Not connected")
+                            .foregroundStyle(settings.isBeaconTriggerEnabled ? IPCATheme.success : IPCATheme.secondaryText)
+                    }
+                    LabeledContent("Beacon state") {
+                        Text(operationalBeaconStatus.label)
+                            .foregroundStyle(operationalBeaconStatusColor)
+                    }
+                    LabeledContent("Advertisements") {
+                        Text("\(beacon.advertisementCount)")
                     }
                 }
 
@@ -130,6 +151,23 @@ private struct AdminSettingsView: View {
                 }
             }
             .navigationTitle("CVR Unit Admin")
+        }
+    }
+
+    private var operationalBeaconStatus: AvionicsBeaconOperationalStatus {
+        beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement)
+    }
+
+    private var operationalBeaconStatusColor: Color {
+        switch operationalBeaconStatus.severity {
+        case .nominal:
+            return IPCATheme.success
+        case .warning:
+            return IPCATheme.warning
+        case .danger:
+            return IPCATheme.danger
+        case .inactive:
+            return IPCATheme.secondaryText
         }
     }
 }

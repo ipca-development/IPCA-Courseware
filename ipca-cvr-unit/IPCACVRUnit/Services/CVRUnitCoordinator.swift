@@ -19,7 +19,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private weak var audio: AudioRecorderManager?
-    private weak var bluetooth: GarminBluetoothMonitor?
+    private weak var beacon: AvionicsBeaconManager?
     private weak var network: NetworkMonitor?
     private weak var remoteIPads: RemoteIPadLinkManager?
     private weak var store: RecordingStore?
@@ -28,7 +28,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     func bind(
         audio: AudioRecorderManager,
-        bluetooth: GarminBluetoothMonitor,
+        beacon: AvionicsBeaconManager,
         network: NetworkMonitor,
         remoteIPads: RemoteIPadLinkManager,
         store: RecordingStore,
@@ -37,21 +37,12 @@ final class CVRUnitCoordinator: ObservableObject {
     ) {
         guard self.audio == nil else { return }
         self.audio = audio
-        self.bluetooth = bluetooth
+        self.beacon = beacon
         self.network = network
         self.remoteIPads = remoteIPads
         self.store = store
         self.settings = settings
         self.uploadManager = uploadManager
-
-        Publishers.CombineLatest(bluetooth.$isG3XConnected, bluetooth.$isGNX375Connected)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] g3x, gnx in
-                Task { @MainActor in
-                    await self?.handleGarminConnectionChange(g3xConnected: g3x, gnx375Connected: gnx)
-                }
-            }
-            .store(in: &cancellables)
 
         network.$statusText
             .receive(on: RunLoop.main)
@@ -59,6 +50,30 @@ final class CVRUnitCoordinator: ObservableObject {
                 self?.attemptPendingUploads()
             }
             .store(in: &cancellables)
+
+        settings.$isBeaconTriggerEnabled
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                self?.handleBeaconTriggerEnabled(enabled)
+            }
+            .store(in: &cancellables)
+
+        beacon.$avionicsPowerState
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                Task { @MainActor in
+                    await self?.handleAvionicsPowerState(state)
+                }
+            }
+            .store(in: &cancellables)
+
+        beacon.onMatchingBeaconAdvertisement = { [weak self] in
+            Task { @MainActor in
+                await self?.handleMatchingBeaconAdvertisement()
+            }
+        }
 
         audio.$isInternalMicWarning
             .removeDuplicates()
@@ -77,6 +92,8 @@ final class CVRUnitCoordinator: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        handleBeaconTriggerEnabled(settings.isBeaconTriggerEnabled)
     }
 
     func appBecameActive() {
@@ -84,6 +101,10 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     func appEnteredBackground() {
+        if settings?.isBeaconTriggerEnabled == true {
+            beacon?.startScan(scanAll: false)
+            log("App entered background. Beacon listener confirmed active.")
+        }
         audio?.appDidEnterBackground()
     }
 
@@ -99,26 +120,39 @@ final class CVRUnitCoordinator: ObservableObject {
         handleAudioWarningChanged(audio.isInternalMicWarning)
     }
 
-    private func handleGarminConnectionChange(g3xConnected: Bool, gnx375Connected: Bool) async {
-        if g3xConnected && gnx375Connected {
-            if audio?.isRecording == true || mode == .starting {
-                return
-            }
-            await startRecording()
-            return
+    private func handleBeaconTriggerEnabled(_ enabled: Bool) {
+        if enabled {
+            beacon?.startScan(scanAll: false)
+            log("Beacon trigger enabled. Listening for ESP-32 avionics beacon.")
+        } else {
+            beacon?.stopScan()
+            log("Beacon trigger disabled.")
         }
+    }
 
-        if audio?.isRecording == true {
-            stopRecording(reason: "Garmin Bluetooth disconnected.")
-        } else if mode != .pendingUpload && mode != .uploading {
-            mode = .standby
+    private func handleAvionicsPowerState(_ state: AvionicsPowerState) async {
+        guard settings?.isBeaconTriggerEnabled == true else { return }
+        switch state {
+        case .on:
+            guard audio?.isRecording != true, mode != .starting else { return }
+            await startRecording()
+        case .off:
+            guard audio?.isRecording == true else { return }
+            stopRecording(reason: "Avionics beacon OFF.")
         }
+    }
+
+    private func handleMatchingBeaconAdvertisement() async {
+        guard settings?.isBeaconTriggerEnabled == true else { return }
+        guard audio?.isRecording != true, mode != .starting else { return }
+        log("ESP-32 beacon advertisement received. Starting recording.")
+        await startRecording()
     }
 
     private func startRecording() async {
         guard let audio, let settings else { return }
         mode = .starting
-        log("Both Garmin devices connected. Starting cockpit voice recording.")
+        log("Starting cockpit voice recording.")
         UIApplication.shared.isIdleTimerDisabled = true
 
         let started = await audio.startRecording(language: settings.language)
@@ -179,7 +213,12 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     private func handleAudioWarningChanged(_ warning: Bool) {
-        guard warning, let audio else { return }
+        guard let audio else { return }
+        guard warning else {
+            remoteIPads?.clearAudioSourceWarning()
+            log("Audio source restored: \(audio.selectedInputName).")
+            return
+        }
         let message = "Audio source is \(audio.selectedInputName). Reset USB-C EarPods audio path."
         remoteIPads?.publishAudioSourceWarning(message)
         log(message)

@@ -19,6 +19,11 @@ final class RemoteIPadLinkManager: ObservableObject {
         // Future transport hook: forward this warning to instructor/student iPads.
     }
 
+    func clearAudioSourceWarning() {
+        latestWarning = nil
+        // Future transport hook: clear this warning on instructor/student iPads.
+    }
+
     func publishStatus(_ message: String) {
         _ = message
         // Future transport hook for live iPad status.

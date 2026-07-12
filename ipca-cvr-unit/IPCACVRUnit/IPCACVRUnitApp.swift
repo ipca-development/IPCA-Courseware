@@ -9,7 +9,7 @@ struct IPCACVRUnitApp: App {
     @StateObject private var uploadManager = UploadManager()
     @StateObject private var network = NetworkMonitor()
     @StateObject private var systemMonitor = SystemMonitor()
-    @StateObject private var bluetooth = GarminBluetoothMonitor()
+    @StateObject private var beaconManager = AvionicsBeaconManager()
     @StateObject private var remoteIPads = RemoteIPadLinkManager()
     @StateObject private var coordinator = CVRUnitCoordinator()
 
@@ -22,7 +22,7 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(uploadManager)
                 .environmentObject(network)
                 .environmentObject(systemMonitor)
-                .environmentObject(bluetooth)
+                .environmentObject(beaconManager)
                 .environmentObject(remoteIPads)
                 .environmentObject(coordinator)
                 .preferredColorScheme(.light)
@@ -31,11 +31,10 @@ struct IPCACVRUnitApp: App {
                     await audioRecorder.refreshInputs()
                     network.start()
                     systemMonitor.start()
-                    bluetooth.start(settings: settings)
                     await settings.refreshAircraft()
                     coordinator.bind(
                         audio: audioRecorder,
-                        bluetooth: bluetooth,
+                        beacon: beaconManager,
                         network: network,
                         remoteIPads: remoteIPads,
                         store: recordingStore,

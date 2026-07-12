@@ -15,20 +15,12 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(selectedAircraftID, forKey: Keys.selectedAircraftID) }
     }
 
-    @Published var garminG3XName: String {
-        didSet { UserDefaults.standard.set(garminG3XName, forKey: Keys.garminG3XName) }
-    }
-
-    @Published var garminGNX375Name: String {
-        didSet { UserDefaults.standard.set(garminGNX375Name, forKey: Keys.garminGNX375Name) }
-    }
-
-    @Published var garminServiceUUIDs: String {
-        didSet { UserDefaults.standard.set(garminServiceUUIDs, forKey: Keys.garminServiceUUIDs) }
-    }
-
     @Published var allowCellularUpload: Bool {
         didSet { UserDefaults.standard.set(allowCellularUpload, forKey: Keys.allowCellularUpload) }
+    }
+
+    @Published var isBeaconTriggerEnabled: Bool {
+        didSet { UserDefaults.standard.set(isBeaconTriggerEnabled, forKey: Keys.isBeaconTriggerEnabled) }
     }
 
     @Published var adminPIN: String {
@@ -46,10 +38,8 @@ final class SettingsStore: ObservableObject {
         serverURL = UserDefaults.standard.string(forKey: Keys.serverURL) ?? ""
         language = UserDefaults.standard.string(forKey: Keys.language) ?? "en"
         selectedAircraftID = UserDefaults.standard.integer(forKey: Keys.selectedAircraftID)
-        garminG3XName = UserDefaults.standard.string(forKey: Keys.garminG3XName) ?? "G3X"
-        garminGNX375Name = UserDefaults.standard.string(forKey: Keys.garminGNX375Name) ?? "GNX375"
-        garminServiceUUIDs = UserDefaults.standard.string(forKey: Keys.garminServiceUUIDs) ?? ""
         allowCellularUpload = UserDefaults.standard.object(forKey: Keys.allowCellularUpload) as? Bool ?? true
+        isBeaconTriggerEnabled = UserDefaults.standard.object(forKey: Keys.isBeaconTriggerEnabled) as? Bool ?? false
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
     }
 
@@ -66,13 +56,6 @@ final class SettingsStore: ObservableObject {
 
     var selectedAircraft: CockpitAircraft? {
         aircraft.first(where: { $0.id == selectedAircraftID })
-    }
-
-    var configuredGarminServiceUUIDs: [String] {
-        garminServiceUUIDs
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
     }
 
     func refreshAircraft() async {
@@ -127,10 +110,8 @@ final class SettingsStore: ObservableObject {
         static let serverURL = "ipca.cvrUnit.serverURL"
         static let language = "ipca.cvrUnit.language"
         static let selectedAircraftID = "ipca.cvrUnit.selectedAircraftID"
-        static let garminG3XName = "ipca.cvrUnit.garminG3XName"
-        static let garminGNX375Name = "ipca.cvrUnit.garminGNX375Name"
-        static let garminServiceUUIDs = "ipca.cvrUnit.garminServiceUUIDs"
         static let allowCellularUpload = "ipca.cvrUnit.allowCellularUpload"
+        static let isBeaconTriggerEnabled = "ipca.cvrUnit.isBeaconTriggerEnabled"
         static let adminPIN = "ipca.cvrUnit.adminPIN"
     }
 }

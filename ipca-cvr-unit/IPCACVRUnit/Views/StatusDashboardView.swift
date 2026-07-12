@@ -6,7 +6,7 @@ struct StatusDashboardView: View {
     @EnvironmentObject private var audio: AudioRecorderManager
     @EnvironmentObject private var network: NetworkMonitor
     @EnvironmentObject private var system: SystemMonitor
-    @EnvironmentObject private var bluetooth: GarminBluetoothMonitor
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var remoteIPads: RemoteIPadLinkManager
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @Binding var adminUnlocked: Bool
@@ -28,17 +28,17 @@ struct StatusDashboardView: View {
                         StatusLine(label: "Storage Available", value: system.storageText, color: system.availableStorageBytes > 2_000_000_000 ? IPCATheme.success : IPCATheme.warning)
                     }
 
-                    IPCACard(title: "Garmin Trigger", systemImage: "antenna.radiowaves.left.and.right") {
-                        StatusLine(label: "Bluetooth", value: bluetooth.bluetoothState, color: bluetooth.bluetoothState == "Powered On" ? IPCATheme.success : IPCATheme.danger)
-                        StatusLine(label: "Garmin G3X", value: bluetooth.isG3XConnected ? "Connected" : "Disconnected", color: bluetooth.isG3XConnected ? IPCATheme.success : IPCATheme.warning)
-                        StatusLine(label: "Garmin GNX375", value: bluetooth.isGNX375Connected ? "Connected" : "Disconnected", color: bluetooth.isGNX375Connected ? IPCATheme.success : IPCATheme.warning)
-                    }
-
                     IPCACard(title: "Instructor / Student iPads", systemImage: "ipad.landscape") {
                         StatusLine(label: "Connections", value: remoteIPads.instructorStudentConnectionText, color: IPCATheme.secondaryText)
                         Text("Future live warning/reset channel")
                             .font(.caption)
                             .foregroundStyle(IPCATheme.secondaryText)
+                    }
+
+                    IPCACard(title: "ESP-32 Beacon", systemImage: "antenna.radiowaves.left.and.right") {
+                        StatusLine(label: "Trigger", value: settings.isBeaconTriggerEnabled ? "Connected" : "Not Connected", color: settings.isBeaconTriggerEnabled ? IPCATheme.success : IPCATheme.secondaryText)
+                        StatusLine(label: "Scan", value: beacon.isScanning ? "Listening" : "Stopped", color: beacon.isScanning ? IPCATheme.success : IPCATheme.warning)
+                        StatusLine(label: "State", value: operationalBeaconStatus.label, color: beaconStateColor)
                     }
 
                     IPCACard(title: "Recording", systemImage: "record.circle") {
@@ -144,6 +144,23 @@ struct StatusDashboardView: View {
         case .failed: return IPCATheme.danger
         case .pending: return IPCATheme.secondaryText
         }
+    }
+
+    private var beaconStateColor: Color {
+        switch operationalBeaconStatus.severity {
+        case .nominal:
+            return IPCATheme.success
+        case .warning:
+            return IPCATheme.warning
+        case .danger:
+            return IPCATheme.danger
+        case .inactive:
+            return IPCATheme.secondaryText
+        }
+    }
+
+    private var operationalBeaconStatus: AvionicsBeaconOperationalStatus {
+        beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement)
     }
 
     private func percent(_ value: Double) -> String {
