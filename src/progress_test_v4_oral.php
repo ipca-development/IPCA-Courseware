@@ -404,15 +404,20 @@ function ptv4_is_likely_non_english(string $text): bool
     if ($t === '') return false;
     if (preg_match('/[\x{0400}-\x{04FF}\x{0600}-\x{06FF}\x{4E00}-\x{9FFF}]/u', $t)) return true;
     $norm = ptv4_normalize_text($t);
-    $dutch = ['ik ', ' je ', ' het ', ' de ', ' een ', ' niet ', ' wel ', ' antwoord ', ' vraag '];
-    foreach ($dutch as $w) {
-        if (strpos(' ' . $norm . ' ', $w) !== false) return true;
+    $padded = ' ' . $norm . ' ';
+    $strongMarkers = [' antwoord ', ' vraag ', ' antwoordt ', ' porque ', ' respuesta '];
+    foreach ($strongMarkers as $w) {
+        if (strpos($padded, $w) !== false) return true;
     }
-    $spanish = [' el ', ' la ', ' los ', ' las ', ' que ', ' porque ', ' respuesta '];
-    foreach ($spanish as $w) {
-        if (strpos(' ' . $norm . ' ', $w) !== false) return true;
+
+    $markers = [' ik ', ' je ', ' het ', ' de ', ' een ', ' niet ', ' wel ', ' el ', ' la ', ' los ', ' las ', ' que '];
+    $hits = 0;
+    foreach ($markers as $w) {
+        if (strpos($padded, $w) !== false) {
+            $hits++;
+        }
     }
-    return false;
+    return $hits >= 2;
 }
 
 function ptv4_evaluator_schema(): array
