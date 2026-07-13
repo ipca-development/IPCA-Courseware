@@ -10,6 +10,7 @@ const LOGBOOK_API = `${BASE_URL}/fly-garmin/api/logbook/`;
 const PROFILE_DIR = process.env.GARMIN_BROWSER_PROFILE_DIR || path.resolve(process.cwd(), 'storage/garmin-browser-profile');
 const DOWNLOAD_DIR = process.env.GARMIN_PRIVATE_DOWNLOAD_DIR || path.resolve(process.cwd(), 'storage/garmin-downloads');
 const PORT = Number.parseInt(process.env.GARMIN_WORKER_PORT || '8791', 10);
+const HOST = process.env.GARMIN_WORKER_HOST || '127.0.0.1';
 const TOKEN = process.env.GARMIN_WORKER_TOKEN || '';
 
 function ok(operation, status, data = {}, warnings = []) {
@@ -313,6 +314,9 @@ async function stdinPayload() {
 }
 
 async function serve() {
+  if (HOST !== '127.0.0.1') {
+    throw new Error('GARMIN_WORKER_HOST must be 127.0.0.1; public bind addresses are not allowed.');
+  }
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST' || req.url !== '/garmin-worker') {
       res.writeHead(404, { 'content-type': 'application/json' });
@@ -336,8 +340,8 @@ async function serve() {
       res.end(JSON.stringify(fail('http', 'sync_error', 'GARMIN_WORKER_EXCEPTION', error.message)));
     }
   });
-  server.listen(PORT, '127.0.0.1', () => {
-    console.error(`FlyGarmin worker listening on 127.0.0.1:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.error(`FlyGarmin worker listening on ${HOST}:${PORT}`);
   });
 }
 
