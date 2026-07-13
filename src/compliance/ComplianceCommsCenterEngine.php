@@ -909,6 +909,11 @@ final class ComplianceCommsCenterEngine
                  JOIN ipca_compliance_email_attachments a ON a.email_id = e.id
                 WHERE e.thread_id = t.id)';
         }
+        if (!empty($filters['has_outbound'])) {
+            $sql .= " AND EXISTS (
+                SELECT 1 FROM ipca_compliance_emails e
+                WHERE e.thread_id = t.id AND e.direction = 'outbound')";
+        }
         if (isset($filters['linked'])) {
             if ((bool)$filters['linked']) {
                 $sql .= ' AND EXISTS (SELECT 1 FROM ipca_compliance_email_obj_links l WHERE l.thread_id = t.id)';
@@ -917,11 +922,39 @@ final class ComplianceCommsCenterEngine
             }
         }
         if (!empty($filters['q'])) {
-            $sql .= ' AND (t.subject_normalized LIKE ? OR t.primary_contact_email LIKE ? OR t.authority_name LIKE ?)';
+            $sql .= ' AND (
+                t.subject_normalized LIKE ?
+                OR t.primary_contact_email LIKE ?
+                OR t.authority_name LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM ipca_compliance_emails e
+                    WHERE e.thread_id = t.id
+                      AND (
+                        e.subject LIKE ?
+                        OR e.text_body LIKE ?
+                        OR e.html_body LIKE ?
+                        OR e.from_email LIKE ?
+                        OR e.to_json LIKE ?
+                        OR e.cc_json LIKE ?
+                        OR e.bcc_json LIKE ?
+                      )
+                )
+                OR EXISTS (
+                    SELECT 1 FROM ipca_compliance_emails e
+                    JOIN ipca_compliance_email_attachments a ON a.email_id = e.id
+                    WHERE e.thread_id = t.id
+                      AND (a.original_filename LIKE ? OR a.content_type LIKE ?)
+                )
+                OR EXISTS (
+                    SELECT 1 FROM ipca_compliance_email_obj_links l
+                    WHERE l.thread_id = t.id
+                      AND (l.linked_object_type LIKE ? OR l.linked_object_id LIKE ?)
+                )
+            )';
             $q = '%' . (string)$filters['q'] . '%';
-            $args[] = $q;
-            $args[] = $q;
-            $args[] = $q;
+            for ($i = 0; $i < 14; $i++) {
+                $args[] = $q;
+            }
         }
         $sql .= ' ORDER BY COALESCE(t.last_message_at, t.created_at) DESC, t.id DESC LIMIT ' . (int)$limit;
 
@@ -2439,11 +2472,29 @@ final class ComplianceCommsCenterEngine
                            NULL AS relevance
                       FROM ipca_compliance_emails e
                  LEFT JOIN ipca_compliance_email_threads t ON t.id = e.thread_id
-                     WHERE e.subject LIKE ? OR e.text_body LIKE ? OR e.from_email LIKE ?
+                     WHERE e.subject LIKE ?
+                        OR e.text_body LIKE ?
+                        OR e.html_body LIKE ?
+                        OR e.from_email LIKE ?
+                        OR e.to_json LIKE ?
+                        OR e.cc_json LIKE ?
+                        OR e.bcc_json LIKE ?
+                        OR t.subject_normalized LIKE ?
+                        OR t.primary_contact_email LIKE ?
+                        OR EXISTS (
+                            SELECT 1 FROM ipca_compliance_email_attachments a
+                            WHERE a.email_id = e.id
+                              AND (a.original_filename LIKE ? OR a.content_type LIKE ?)
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM ipca_compliance_email_obj_links l
+                            WHERE l.thread_id = e.thread_id
+                              AND (l.linked_object_type LIKE ? OR l.linked_object_id LIKE ?)
+                        )
                   ORDER BY COALESCE(e.received_at, e.sent_at) DESC
                      LIMIT ' . $limit;
             $st = $pdo->prepare($sql);
-            $st->execute(array($like, $like, $like));
+            $st->execute(array($like, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like, $like));
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
             return is_array($rows) ? $rows : array();

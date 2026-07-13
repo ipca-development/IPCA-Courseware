@@ -5,6 +5,8 @@ require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/AsyncJobService.php';
 require_once __DIR__ . '/../src/FlightRecordDerivationService.php';
 require_once __DIR__ . '/../src/GarminCsvSessionMatchService.php';
+require_once __DIR__ . '/../src/GarminSourceGroupMatchService.php';
+require_once __DIR__ . '/../src/GarminSourceGroupSelectionService.php';
 
 @set_time_limit(0);
 
@@ -52,6 +54,20 @@ echo "Processed {$processed} job(s).\n";
  */
 function run_cvr_async_job(PDO $pdo, string $jobType, array $payload): array
 {
+    if ($jobType === 'GARMIN_SOURCE_GROUP_MATCH') {
+        $sourceGroupId = (int)($payload['source_group_id'] ?? 0);
+        if ($sourceGroupId <= 0) {
+            return array('ok' => true, 'message' => 'No source group id in payload.');
+        }
+        return (new GarminSourceGroupMatchService($pdo))->matchGroup($sourceGroupId);
+    }
+    if ($jobType === 'GARMIN_SOURCE_ROLE_SELECTION') {
+        $sourceGroupId = (int)($payload['source_group_id'] ?? 0);
+        if ($sourceGroupId <= 0) {
+            return array('ok' => true, 'message' => 'No source group id in payload.');
+        }
+        return (new GarminSourceGroupSelectionService($pdo))->selectForGroup($sourceGroupId);
+    }
     $csvFileId = (int)($payload['csv_file_id'] ?? 0);
     if ($csvFileId <= 0) {
         return array('ok' => true, 'message' => 'No CSV file id in payload.');
@@ -63,7 +79,24 @@ function run_cvr_async_job(PDO $pdo, string $jobType, array $payload): array
         if (!is_array($csvFile)) {
             throw new RuntimeException('CSV file not found for session-match job.');
         }
-        return (new GarminCsvSessionMatchService($pdo))->match($csvFile);
+        $result = (new GarminCsvSessionMatchService($pdo))->match($csvFile);
+        $garminSourceId = (int)($payload['garmin_source_id'] ?? 0);
+        if ($garminSourceId > 0) {
+            $pdo->prepare("
+                UPDATE ipca_garmin_flight_data_sources
+                SET matched_flight_session_id = ?,
+                    match_status = ?,
+                    match_confidence = ?,
+                    updated_at = CURRENT_TIMESTAMP(3)
+                WHERE id = ?
+            ")->execute(array(
+                ((int)($result['session_id'] ?? 0)) > 0 ? (int)$result['session_id'] : null,
+                (string)($result['status'] ?? 'needs_admin_review'),
+                (float)($result['confidence'] ?? 0),
+                $garminSourceId,
+            ));
+        }
+        return $result;
     }
     if ($jobType === 'GARMIN_CSV_DEEP_ANALYSIS') {
         return array('ok' => true, 'message' => 'Deep analysis placeholder completed for Phase 1.', 'csv_file_id' => $csvFileId);

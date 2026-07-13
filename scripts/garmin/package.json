@@ -1,0 +1,13 @@
+{
+  "name": "ipca-garmin-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node flygarmin-worker.js login",
+    "status": "node flygarmin-worker.js status",
+    "serve": "node flygarmin-worker.js serve"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}

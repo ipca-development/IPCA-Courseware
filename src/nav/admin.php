@@ -122,6 +122,15 @@ return [
                 ],
             ],
             [
+                'key' => 'flight_log_garmin_connection',
+                'label' => 'Garmin Connection',
+                'icon' => 'flight',
+                'href' => '/admin/flight_log_garmin_connection.php',
+                'match_paths' => [
+                    '/admin/flight_log_garmin_connection.php',
+                ],
+            ],
+            [
                 'key' => 'flight_training_requirement_categories',
                 'label' => 'Requirement Categories',
                 'icon' => 'documents',
@@ -260,9 +269,17 @@ return [
             ],
             [
                 'key' => 'compliance_inbox',
-                'label' => 'Inbox',
+                'label' => 'Mail',
                 'icon' => 'documents',
                 'href' => '/admin/compliance/inbox.php',
+                'match_paths' => [
+                    '/admin/compliance/inbox.php',
+                    '/admin/compliance/email_thread.php',
+                    '/admin/compliance/email_compose.php',
+                    '/admin/compliance/email_drafts.php',
+                    '/admin/compliance/mail_api.php',
+                    '/admin/compliance/email_attachment.php',
+                ],
             ],
             [
                 'key' => 'compliance_reports',

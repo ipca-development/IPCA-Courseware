@@ -1,0 +1,6 @@
+#airframe_info,aircraft_ident="OO-TST",product="G3X Touch"
+Date (yyyy-mm-dd),Time (hh:mm:ss),UTC Offset (hh:mm),Latitude (deg),Longitude (deg),GPS Altitude (ft),GPS Ground Speed (kt),Pitch (deg),Roll (deg),Indicated Airspeed (kt),RPM,Fuel Flow (gal/hour),Fuel Qty (gal)
+Date (yyyy-mm-dd),Time (hh:mm:ss),UTCOfst,Latitude,Longitude,GPS Altitude,GndSpd,Pitch,Roll,IAS,E1 RPM,E1 FFlow,FQty1
+2026-07-13,10:00:00,+00:00,50.9010,4.4844,184,0,0.1,0.0,0,0,0.0,38.0
+2026-07-13,10:05:00,+00:00,50.9200,4.5200,1500,92,4.1,2.0,85,2300,8.4,37.2
+2026-07-13,10:10:00,+00:00,50.9400,4.5600,2200,104,2.0,-1.5,97,2350,8.1,36.5
