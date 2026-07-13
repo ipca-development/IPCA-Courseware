@@ -112,12 +112,40 @@ return [
                 ],
             ],
             [
+                'key' => 'flight_records',
+                'label' => 'Flight Records',
+                'icon' => 'flight',
+                'href' => '/admin/flight_records.php',
+                'match_paths' => [
+                    '/admin/flight_records.php',
+                    '/admin/flight_record_logbook_proposals.php',
+                ],
+            ],
+            [
                 'key' => 'flight_training_requirement_categories',
                 'label' => 'Requirement Categories',
                 'icon' => 'documents',
                 'href' => '/admin/flight_training/requirements/index.php',
                 'match_paths' => [
                     '/admin/flight_training/requirements/index.php',
+                ],
+            ],
+            [
+                'key' => 'mission_catalog',
+                'label' => 'Mission Catalog',
+                'icon' => 'documents',
+                'href' => '/admin/missions.php',
+                'match_paths' => [
+                    '/admin/missions.php',
+                ],
+            ],
+            [
+                'key' => 'flight_debriefs',
+                'label' => 'Flight Debriefs',
+                'icon' => 'reviews',
+                'href' => '/admin/flight_debriefs.php',
+                'match_paths' => [
+                    '/admin/flight_debriefs.php',
                 ],
             ],
         ],

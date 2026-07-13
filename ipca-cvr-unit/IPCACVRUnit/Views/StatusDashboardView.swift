@@ -22,7 +22,7 @@ struct StatusDashboardView: View {
             VStack(spacing: 14) {
                 header
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], spacing: 14) {
                     IPCACard(title: "Power & Storage", systemImage: "battery.100") {
                         StatusLine(label: "Battery", value: "\(system.batteryLevelPercent)% \(system.batteryStateText)", color: batteryColor)
                         StatusLine(label: "Storage Available", value: system.storageText, color: system.availableStorageBytes > 2_000_000_000 ? IPCATheme.success : IPCATheme.warning)
@@ -99,13 +99,13 @@ struct StatusDashboardView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("IPCA CVR Unit")
-                    .font(.largeTitle.weight(.bold))
+                    .font(.title.weight(.bold))
                     .foregroundStyle(.white)
                 Text("Dedicated iPhone cockpit voice recorder")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
             }
             Spacer()

@@ -17,6 +17,11 @@ struct ContentView: View {
                     Label("Beacon Test", systemImage: "antenna.radiowaves.left.and.right")
                 }
 
+            PostflightWorkflowView()
+                .tabItem {
+                    Label("Postflight", systemImage: "checklist")
+                }
+
             if adminUnlocked {
                 AdminRecordingsView()
                     .tabItem {
@@ -35,6 +40,158 @@ struct ContentView: View {
             }
         }
         .background(IPCATheme.pageBackground.ignoresSafeArea())
+    }
+}
+
+private struct PostflightWorkflowView: View {
+    @EnvironmentObject private var store: RecordingStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var network: NetworkMonitor
+
+    private var latestRecording: Recording? {
+        store.recordings.max { lhs, rhs in
+            lhs.startedAt < rhs.startedAt
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Postflight")
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(IPCATheme.navy)
+
+                    Text("After avionics power is removed, the CVR Unit keeps the recording locally and uploads/transcribes automatically when internet access is available.")
+                        .font(.subheadline)
+                        .foregroundStyle(IPCATheme.secondaryText)
+
+                    if let recording = latestRecording {
+                        IPCACard(title: "Latest Recording", systemImage: "waveform.badge.checkmark") {
+                            PostflightStatusLine(label: "Started", value: recording.startedAt.formatted(date: .abbreviated, time: .shortened), color: IPCATheme.navy)
+                            PostflightStatusLine(label: "Duration", value: format(duration: recording.duration), color: IPCATheme.navy)
+                            PostflightStatusLine(label: "Audio", value: recording.inputDeviceName, color: recording.inputDeviceName.localizedCaseInsensitiveContains("iPhone") ? IPCATheme.warning : IPCATheme.success)
+                            PostflightStatusLine(label: "Upload", value: uploadLabel(for: recording), color: uploadColor(for: recording))
+                            PostflightStatusLine(label: "Transcript", value: transcriptLabel(for: recording), color: transcriptColor(for: recording))
+                        }
+
+                        IPCACard(title: "Readiness", systemImage: "airplane.departure") {
+                            PostflightStep(title: "Audio saved permanently", isComplete: recording.fileSize > 0, detail: ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file))
+                            PostflightStep(title: "Upload completed", isComplete: recording.uploadStatus == .uploaded, detail: uploadLabel(for: recording))
+                            PostflightStep(title: "Transcript ready", isComplete: recording.transcriptStatus == .ready, detail: transcriptLabel(for: recording))
+
+                            Button("Retry Upload Now") {
+                                uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!network.canUpload(allowCellular: settings.allowCellularUpload))
+                        }
+                    } else {
+                        IPCACard(title: "No Recording Yet", systemImage: "record.circle") {
+                            Text("The first completed avionics-on event will appear here automatically.")
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .background(IPCATheme.pageBackground.ignoresSafeArea())
+            .navigationTitle("Postflight")
+        }
+    }
+
+    private func uploadLabel(for recording: Recording) -> String {
+        switch recording.uploadStatus {
+        case .uploaded:
+            return "Complete"
+        case .uploading:
+            return "\(Int((recording.uploadProgress * 100).rounded()))%"
+        case .failed:
+            return "Failed"
+        case .pending:
+            return "Pending"
+        }
+    }
+
+    private func transcriptLabel(for recording: Recording) -> String {
+        switch recording.transcriptStatus {
+        case .ready:
+            return "Complete"
+        case .transcribing:
+            return "\(recording.transcriptProgress)%"
+        case .failed:
+            return "Failed"
+        case .pending:
+            return "Pending"
+        }
+    }
+
+    private func uploadColor(for recording: Recording) -> Color {
+        switch recording.uploadStatus {
+        case .uploaded: return IPCATheme.success
+        case .uploading: return IPCATheme.brightBlue
+        case .failed: return IPCATheme.danger
+        case .pending: return IPCATheme.warning
+        }
+    }
+
+    private func transcriptColor(for recording: Recording) -> Color {
+        switch recording.transcriptStatus {
+        case .ready: return IPCATheme.success
+        case .transcribing: return IPCATheme.brightBlue
+        case .failed: return IPCATheme.danger
+        case .pending: return IPCATheme.warning
+        }
+    }
+
+    private func format(duration: TimeInterval) -> String {
+        let total = Int(duration.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+}
+
+private struct PostflightStatusLine: View {
+    var label: String
+    var value: String
+    var color: Color
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(IPCATheme.secondaryText)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct PostflightStep: View {
+    var title: String
+    var isComplete: Bool
+    var detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isComplete ? "checkmark.circle.fill" : "clock.fill")
+                .foregroundStyle(isComplete ? IPCATheme.success : IPCATheme.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(IPCATheme.navy)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(IPCATheme.secondaryText)
+            }
+            Spacer()
+        }
     }
 }
 

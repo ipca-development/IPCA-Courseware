@@ -68,6 +68,15 @@ return [
         'label' => 'Operations',
     ],
     [
+        'key' => 'flight_records',
+        'label' => 'Flight Records',
+        'icon' => 'flight',
+        'href' => '/instructor/flight_records.php',
+        'match_paths' => [
+            '/instructor/flight_records.php',
+        ],
+    ],
+    [
         'key' => 'manuals',
         'label' => 'Documents',
         'icon' => 'documents',

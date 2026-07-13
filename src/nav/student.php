@@ -77,6 +77,15 @@ return [
                     '/student/logbook_print.php',
                 ],
             ],
+            [
+                'key' => 'my_flight_records',
+                'label' => 'My Flight Records',
+                'icon' => 'flight',
+                'href' => '/student/flight_records.php',
+                'match_paths' => [
+                    '/student/flight_records.php',
+                ],
+            ],
         ],
     ],
     [
