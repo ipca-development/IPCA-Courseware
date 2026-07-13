@@ -70,7 +70,7 @@ final class ComplianceMailUi
             $html .= '<button type="button" class="mail-action" data-compose-reply-all="' . $latestInbound . '">Reply all</button>';
         }
         $html .= '<button type="button" class="mail-action" data-compose-thread="' . (int)$thread['id'] . '">New message</button>';
-        $html .= '<button type="button" class="mail-action" data-sidebar-toggle>Compliance</button>';
+        $html .= '<button type="button" class="mail-action" data-sidebar-toggle aria-expanded="false">Compliance</button>';
         $html .= '</div></header>';
 
         $html .= '<div class="mail-reader-grid">';
@@ -189,14 +189,43 @@ final class ComplianceMailUi
         $linkable = ComplianceCommsCenterEngine::linkableObjectTypes();
         $labelIndex = self::pickerLabelIndex($pickerGroups);
         $html = '<aside class="mail-compliance-sidebar" id="mailComplianceSidebar">';
+        $deadline = self::deadlineLabel($thread);
+        $primaryLink = self::primaryLinkLabel($links, $labelIndex);
+        $html .= '<div class="mail-sidebar-sticky">';
         $html .= '<div class="mail-sidebar-head"><div><span>Compliance Intelligence</span><strong>' . self::e(self::workflowLabel($thread)) . '</strong></div><button type="button" data-sidebar-close>Close</button></div>';
-        $html .= '<div class="mail-sidebar-section"><h3>Status</h3>';
+        $html .= '<div class="mail-sidebar-summary">';
+        $html .= '<button type="button" class="mail-summary-badge" data-compliance-edit><span>Waiting For</span><strong>' . self::e(self::workflowLabel($thread)) . '</strong></button>';
+        $html .= '<button type="button" class="mail-summary-badge" data-compliance-edit><span>Priority</span><strong>' . self::e(ucfirst($priority)) . '</strong></button>';
+        $html .= '<button type="button" class="mail-summary-badge" data-compliance-edit><span>Linked</span><strong>' . self::e($primaryLink) . '</strong></button>';
+        $html .= '<button type="button" class="mail-summary-badge" data-compliance-edit><span>Deadline</span><strong>' . self::e($deadline) . '</strong></button>';
+        $html .= '</div>';
+        $html .= '<button type="button" class="mail-edit-compliance" data-compliance-edit>Edit Compliance</button>';
+        $html .= '</div>';
+
+        $html .= '<div class="mail-sidebar-scroll">';
+        $html .= '<div class="mail-sidebar-section is-read-mode"><h3>Linked Objects</h3>';
+        if ($links === array()) {
+            $html .= '<p class="mail-muted">No compliance objects linked yet.</p>';
+        } else {
+            foreach ($links as $link) {
+                $type = (string)($link['linked_object_type'] ?? '');
+                $id = (string)($link['linked_object_id'] ?? '');
+                $label = (string)($labelIndex[$type . ':' . $id] ?? $id);
+                $href = self::objectHref($type, $id);
+                $html .= '<div class="mail-linked-object is-read"><span>' . self::e((string)($linkable[$type] ?? $type)) . '</span>';
+                $html .= $href !== '' ? '<a href="' . self::e($href) . '">' . self::e($label) . '</a>' : '<strong>' . self::e($label) . '</strong>';
+                $html .= '</div>';
+            }
+        }
+        $html .= '</div>';
+
+        $html .= '<div class="mail-sidebar-section is-edit-mode"><h3>Status and Priority</h3>';
         $html .= '<form class="mail-inline-form" data-thread-update><input type="hidden" name="thread_id" value="' . (int)$thread['id'] . '">';
         $html .= '<label>Status<select name="status">' . self::options(array('open','waiting_internal','waiting_external','closed','archived'), $status) . '</select></label>';
         $html .= '<label>Priority<select name="priority">' . self::options(array('low','normal','high','urgent'), $priority) . '</select></label>';
         $html .= '<button type="submit">Save</button></form></div>';
 
-        $html .= '<div class="mail-sidebar-section"><h3>Linked Objects</h3>';
+        $html .= '<div class="mail-sidebar-section is-edit-mode"><h3>Linked Objects</h3>';
         if ($links === array()) {
             $html .= '<p class="mail-muted">No compliance objects linked yet.</p>';
         } else {
@@ -219,8 +248,9 @@ final class ComplianceMailUi
         $html .= '<dl class="mail-context-list">';
         $html .= '<div><dt>Authority</dt><dd>' . self::e($authority !== '' ? $authority : 'Not set') . '</dd></div>';
         $html .= '<div><dt>Contact</dt><dd>' . self::e($contact !== '' ? $contact : 'Not set') . '</dd></div>';
+        $html .= '<div><dt>Deadline</dt><dd>' . self::e($deadline) . '</dd></div>';
         $html .= '<div><dt>Thread</dt><dd>#' . (int)$thread['id'] . '</dd></div>';
-        $html .= '</dl></div></aside>';
+        $html .= '</dl></div></div></aside>';
         return $html;
     }
 
@@ -463,5 +493,34 @@ final class ComplianceMailUi
             case 'compliance_case': return '/admin/compliance/moc.php?id=' . rawurlencode($id);
             default: return '';
         }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $links
+     * @param array<string,string> $labelIndex
+     */
+    private static function primaryLinkLabel(array $links, array $labelIndex): string
+    {
+        if ($links === array()) {
+            return 'No links';
+        }
+        $link = $links[0];
+        $type = (string)($link['linked_object_type'] ?? '');
+        $id = (string)($link['linked_object_id'] ?? '');
+        $label = (string)($labelIndex[$type . ':' . $id] ?? $id);
+        return $label !== '' ? $label : 'Linked object';
+    }
+
+    /**
+     * @param array<string,mixed> $thread
+     */
+    private static function deadlineLabel(array $thread): string
+    {
+        foreach (array('due_at', 'deadline_at', 'target_date', 'response_due_at') as $key) {
+            if (!empty($thread[$key])) {
+                return self::shortDate((string)$thread[$key]);
+            }
+        }
+        return 'No deadline';
     }
 }
