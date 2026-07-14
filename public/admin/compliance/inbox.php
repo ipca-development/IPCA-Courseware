@@ -143,13 +143,14 @@ cw_header('Compliance Mail');
 ?>
 <style>
   .app-main,.app-content{overflow:hidden;}
-  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:8px;overflow:hidden;background:#fff;}
+  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden;background:#fff;}
   .mail-page:fullscreen{height:100vh;padding:16px;background:#fff;}
   .mail-page.is-fullscreen{height:100vh;padding:16px;background:#fff;}
   .mail-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:linear-gradient(135deg,#0d1d34 0%,#1e3c72 58%,#27538f 100%);box-shadow:0 18px 42px rgba(15,23,42,.14);color:#fff;}
   .mail-top h1{margin:0;font-size:26px;letter-spacing:-.03em;color:#fff;}
   .mail-top p{margin:4px 0 0;color:rgba(255,255,255,.74);font-size:13px;}
-  .mail-toolbar{--mail-folder-width:220px;--mail-list-width:280px;display:grid;grid-template-columns:var(--mail-folder-width) var(--mail-list-width) minmax(0,1fr);align-items:center;gap:0;border:1px solid rgba(15,23,42,.07);border-radius:18px;background:rgba(248,250,252,.96);box-shadow:0 10px 24px rgba(15,23,42,.05);overflow:visible;}
+  .mail-client-box{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);}
+  .mail-toolbar{--mail-folder-width:220px;--mail-list-width:280px;position:sticky;top:0;z-index:45;display:grid;grid-template-columns:var(--mail-folder-width) var(--mail-list-width) minmax(0,1fr);align-items:center;gap:0;border:0;border-bottom:1px solid rgba(15,23,42,.07);border-radius:28px 28px 0 0;background:rgba(248,250,252,.98);box-shadow:none;overflow:visible;}
   .mail-toolbar.folders-collapsed{grid-template-columns:72px var(--mail-list-width) minmax(0,1fr);}
   .mail-toolbar-left,.mail-toolbar-center,.mail-toolbar-actions{min-width:0;display:flex;align-items:center;gap:8px;padding:7px 10px;}
   .mail-toolbar-left{border-right:1px solid rgba(15,23,42,.06);}
@@ -171,7 +172,7 @@ cw_header('Compliance Mail');
   .mail-selected-count{font-size:11px;color:#728198;white-space:nowrap;padding:0 4px;}
   .mail-toolbar-search{height:34px;min-width:220px;width:min(360px,32vw);border:0;border-radius:999px;background:#fff;color:#152235;padding:0 15px;font-size:13px;box-shadow:0 5px 16px rgba(15,23,42,.045);}
   .mail-action{border:1px solid rgba(15,23,42,.08);border-radius:999px;background:#fff;color:#1e3c72;padding:9px 14px;font-size:13px;font-weight:760;text-decoration:none;cursor:pointer;}
-  .mail-workspace{--mail-folder-width:220px;--mail-list-width:280px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);overflow:hidden;}
+  .mail-workspace{--mail-folder-width:220px;--mail-list-width:280px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:0;border-radius:0 0 28px 28px;background:#fff;box-shadow:none;overflow:hidden;}
   .mail-workspace.folders-collapsed{grid-template-columns:28px var(--mail-list-width) 6px minmax(0,1fr);}
   .mail-workspace.folders-collapsed .mail-folders{display:none;}
   .mail-workspace.folders-collapsed .mail-resizer[data-resizer="folders"]{grid-column:1;cursor:pointer;background:#f0f4fb;}
@@ -250,8 +251,8 @@ cw_header('Compliance Mail');
   .mail-reader-grid{display:block;min-height:0;}
   .mail-timeline{padding:16px 46px 16px 30px;max-width:1040px;width:min(100%,1040px);margin:0 auto;overflow-x:hidden;box-sizing:border-box;}
   .mail-reader-shell.sidebar-open .mail-timeline{padding-right:calc(var(--mail-compliance-width) + 36px);}
-  .mail-compliance-sidebar{position:absolute;right:0;top:0;bottom:0;width:var(--mail-compliance-width);max-width:450px;min-width:220px;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(15,23,42,.06);background:#fbfcfe;box-shadow:-22px 0 60px rgba(15,23,42,.14);transform:translateX(105%);transition:transform .18s ease;z-index:30;}
-  .mail-reader-shell.sidebar-open .mail-compliance-sidebar{transform:translateX(0);}
+  .mail-compliance-sidebar{position:absolute;right:0;top:0;bottom:0;width:var(--mail-compliance-width);max-width:450px;min-width:220px;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(15,23,42,.06);background:#fbfcfe;box-shadow:none;transform:translateX(105%);transition:transform .18s ease;z-index:30;}
+  .mail-reader-shell.sidebar-open .mail-compliance-sidebar{transform:translateX(0);box-shadow:-22px 0 60px rgba(15,23,42,.14);}
   .mail-compliance-sidebar::before{content:"";position:absolute;top:0;bottom:0;left:-6px;width:6px;cursor:col-resize;background:rgba(15,23,42,.04);}
   .mail-compliance-sidebar.is-resizing::before,.mail-compliance-sidebar:hover::before{background:rgba(30,60,114,.22);}
   .mail-sidebar-sticky{position:sticky;top:0;z-index:2;background:rgba(251,252,254,.96);border-bottom:1px solid rgba(15,23,42,.06);padding:16px 18px 14px;backdrop-filter:blur(14px);}
@@ -355,67 +356,68 @@ cw_header('Compliance Mail');
     <div class="mail-flash <?= (string)($flash['type'] ?? '') === 'error' ? 'is-error' : '' ?>"><?= h((string)$flash['message']) ?></div>
   <?php endif; ?>
 
-  <section class="mail-toolbar" aria-label="Mail controls">
-    <div class="mail-toolbar-left">
-      <button type="button" class="mail-toolbar-btn" data-folder-toggle aria-label="Hide folders" title="Hide folders">▣</button>
-    </div>
-    <div class="mail-toolbar-center">
-      <div class="mail-toolbar-title">
-        <strong id="mailToolbarTitle"><?= h($selectedMailboxTitle) ?></strong>
-        <span id="mailToolbarMeta">Compliance Mail · <?= (int)$selectedMailboxCount ?> conversations</span>
+  <section class="mail-client-box" aria-label="Mail workspace">
+    <section class="mail-toolbar" aria-label="Mail controls">
+      <div class="mail-toolbar-left">
+        <button type="button" class="mail-toolbar-btn" data-folder-toggle aria-label="Hide folders" title="Hide folders">▣</button>
       </div>
-      <span class="mail-selected-count" id="mailBulkCount">0 selected</span>
-    </div>
-    <div class="mail-toolbar-actions">
-      <span class="mail-toolbar-group">
-        <button type="button" class="mail-toolbar-btn" data-compose-new aria-label="New message" title="New message">✎</button>
-      </span>
-      <span class="mail-toolbar-group">
-        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply" title="Reply">↩</button>
-        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply all" title="Reply all">↞</button>
-        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Forward" title="Forward">↪</button>
-      </span>
-      <span class="mail-toolbar-group">
-        <details class="mail-toolbar-menu">
-          <summary aria-label="Set status" title="Set status">✓</summary>
-          <div class="mail-toolbar-popover">
-            <label>Status
-              <select name="bulk_status_value" aria-label="Bulk status">
-                <option value="open">open</option>
-                <option value="waiting_internal">waiting internal</option>
-                <option value="waiting_external">waiting external</option>
-                <option value="closed">closed</option>
-                <option value="archived">archived</option>
-              </select>
-            </label>
-            <button type="button" data-bulk-status>Apply status</button>
-          </div>
-        </details>
-        <details class="mail-toolbar-menu">
-          <summary aria-label="Set priority" title="Set priority">⚑</summary>
-          <div class="mail-toolbar-popover">
-            <label>Priority
-              <select name="bulk_priority_value" aria-label="Bulk priority">
-                <option value="low">low</option>
-                <option value="normal">normal</option>
-                <option value="high">high</option>
-                <option value="urgent">urgent</option>
-              </select>
-            </label>
-            <button type="button" data-bulk-priority>Apply priority</button>
-          </div>
-        </details>
-      </span>
-      <span class="mail-toolbar-group">
-        <a class="mail-toolbar-link" href="/admin/compliance/email_drafts.php" aria-label="Draft outbox" title="Draft outbox">▱</a>
-        <button type="button" class="mail-toolbar-btn" data-compliance-modal-open="inboxIntegrationModal" aria-label="Settings" title="Settings">⋯</button>
-        <button type="button" class="mail-toolbar-btn" data-fullscreen-toggle aria-label="Full screen" title="Full screen">⛶</button>
-      </span>
-      <input class="mail-toolbar-search" type="search" id="mailSearch" placeholder="Search" value="<?= h($q) ?>">
-    </div>
-  </section>
+      <div class="mail-toolbar-center">
+        <div class="mail-toolbar-title">
+          <strong id="mailToolbarTitle"><?= h($selectedMailboxTitle) ?></strong>
+          <span id="mailToolbarMeta">Compliance Mail · <?= (int)$selectedMailboxCount ?> conversations</span>
+        </div>
+        <span class="mail-selected-count" id="mailBulkCount">0 selected</span>
+      </div>
+      <div class="mail-toolbar-actions">
+        <span class="mail-toolbar-group">
+          <button type="button" class="mail-toolbar-btn" data-compose-new aria-label="New message" title="New message">✎</button>
+        </span>
+        <span class="mail-toolbar-group">
+          <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply" title="Reply">↩</button>
+          <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply all" title="Reply all">↞</button>
+          <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Forward" title="Forward">↪</button>
+        </span>
+        <span class="mail-toolbar-group">
+          <details class="mail-toolbar-menu">
+            <summary aria-label="Set status" title="Set status">✓</summary>
+            <div class="mail-toolbar-popover">
+              <label>Status
+                <select name="bulk_status_value" aria-label="Bulk status">
+                  <option value="open">open</option>
+                  <option value="waiting_internal">waiting internal</option>
+                  <option value="waiting_external">waiting external</option>
+                  <option value="closed">closed</option>
+                  <option value="archived">archived</option>
+                </select>
+              </label>
+              <button type="button" data-bulk-status>Apply status</button>
+            </div>
+          </details>
+          <details class="mail-toolbar-menu">
+            <summary aria-label="Set priority" title="Set priority">⚑</summary>
+            <div class="mail-toolbar-popover">
+              <label>Priority
+                <select name="bulk_priority_value" aria-label="Bulk priority">
+                  <option value="low">low</option>
+                  <option value="normal">normal</option>
+                  <option value="high">high</option>
+                  <option value="urgent">urgent</option>
+                </select>
+              </label>
+              <button type="button" data-bulk-priority>Apply priority</button>
+            </div>
+          </details>
+        </span>
+        <span class="mail-toolbar-group">
+          <a class="mail-toolbar-link" href="/admin/compliance/email_drafts.php" aria-label="Draft outbox" title="Draft outbox">▱</a>
+          <button type="button" class="mail-toolbar-btn" data-compliance-modal-open="inboxIntegrationModal" aria-label="Settings" title="Settings">⋯</button>
+          <button type="button" class="mail-toolbar-btn" data-fullscreen-toggle aria-label="Full screen" title="Full screen">⛶</button>
+        </span>
+        <input class="mail-toolbar-search" type="search" id="mailSearch" placeholder="Search" value="<?= h($q) ?>">
+      </div>
+    </section>
 
-  <section class="mail-workspace" id="mailWorkspace" data-initial-thread="<?= (int)$selectedThreadId ?>" data-folder="<?= h($folder) ?>">
+    <section class="mail-workspace" id="mailWorkspace" data-initial-thread="<?= (int)$selectedThreadId ?>" data-folder="<?= h($folder) ?>">
     <nav class="mail-folders" aria-label="Mail folders">
       <?php foreach ($folders as $key => $meta): ?>
         <button type="button" class="mail-folder <?= $key === $folder ? 'is-active' : '' ?>" data-folder="<?= h($key) ?>" data-folder-label="<?= h((string)$meta['label']) ?>" data-folder-count="<?= (int)$meta['count'] ?>">
@@ -449,6 +451,7 @@ cw_header('Compliance Mail');
         </div>
       </div>
     </main>
+    </section>
   </section>
 </div>
 
