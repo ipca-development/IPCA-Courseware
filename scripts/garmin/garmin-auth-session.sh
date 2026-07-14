@@ -82,7 +82,20 @@ load_env() {
 }
 
 ensure_runtime_dir() {
-  install -d -m 0750 -o root -g "$SERVICE_USER" "$RUNTIME_DIR"
+  install -d -m 0770 -o root -g "$SERVICE_USER" "$RUNTIME_DIR"
+}
+
+preflight_browser_runtime() {
+  runuser -u "$SERVICE_USER" -- env GARMIN_AUTH_RUNTIME_DIR="$RUNTIME_DIR" python3 - <<'PY' || fail "runtime_dir_not_writable_by_ipca_garmin"
+import json
+import os
+import pathlib
+
+runtime = pathlib.Path(os.environ["GARMIN_AUTH_RUNTIME_DIR"])
+probe = runtime / ".browser-write-test.json"
+probe.write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
+probe.unlink()
+PY
 }
 
 now_epoch() {
@@ -231,6 +244,7 @@ start_auth_session() {
     exit 0
   fi
   cleanup_processes
+  preflight_browser_runtime
   STARTED_AT="$(iso_now)"
   EXPIRES_AT="$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")"
   VNC_PASSWORD="$(generate_vnc_password)"
@@ -308,6 +322,8 @@ verify_session() {
   cat > "$COMMAND_FILE" <<EOF
 {"command_id":"$command_id","action":"verify"}
 EOF
+  chown root:"$SERVICE_USER" "$COMMAND_FILE"
+  chmod 640 "$COMMAND_FILE"
   rm -f "$RESULT_FILE"
   for _ in $(seq 1 30); do
     if [[ -f "$RESULT_FILE" ]] && grep -q "\"command_id\": \"$command_id\"" "$RESULT_FILE"; then

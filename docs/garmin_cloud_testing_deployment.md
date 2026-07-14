@@ -253,6 +253,17 @@ The Garmin Connection page can start a temporary headed Chromium session on the 
 - Playwright Chromium using `/var/lib/ipca/garmin/browser-profile`
 - runtime files under `/run/ipca/garmin-auth/`
 
+Runtime directory permissions:
+
+- `/run/ipca/garmin-auth/` is created as `root:ipca-garmin` with mode `0770`.
+- Root-owned files: `session.json`, `command.json`, PID files, and helper-managed state.
+- `command.json` is `root:ipca-garmin` with mode `0640` so the browser runner can read fixed commands but not modify them.
+- Browser-owned files: `browser-ready.json`, `browser-error.json`, and `verify-result.json`, written by `ipca-garmin` with mode `0600`.
+- `vnc.pass` is owned by `ipca-garmin:ipca-garmin` with mode `0600`.
+- The helper preflights write access as `ipca-garmin` before launching Chromium.
+- Cleanup is performed by the root-invoked helper and works for both root-owned and `ipca-garmin`-owned runtime files.
+- Do not use `0777` and do not grant access to unrelated users.
+
 Do not open firewall ports for VNC. The Admin connects through SSH tunneling only:
 
 ```shell
@@ -303,7 +314,7 @@ Password-generation regression test:
 /var/www/ipca/scripts/garmin/test-garmin-auth-helper.sh
 ```
 
-This runs under `set -euo pipefail`, verifies the 14-character safe password generation path, and does not print the generated password.
+This runs under `set -euo pipefail`, verifies the 14-character safe password generation path, and does not print the generated password. When the `ipca-garmin` user exists, it also creates a temporary runtime directory with the intended group/mode, verifies browser JSON writes as `ipca-garmin`, and confirms an unrelated user cannot access it.
 
 Post-deployment verification order:
 

@@ -18,6 +18,15 @@ function writeJson(file, payload) {
   fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
 }
 
+function writeRuntimeError(payload) {
+  try {
+    fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+    writeJson(path.join(RUNTIME_DIR, 'browser-error.json'), payload);
+  } catch (error) {
+    process.stderr.write(`Garmin auth browser runtime write failed: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+  }
+}
+
 async function verifyContext() {
   const response = await context.request.fetch(LOGBOOK_API, {
     method: 'GET',
@@ -153,7 +162,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  writeJson(path.join(RUNTIME_DIR, 'browser-error.json'), {
+  writeRuntimeError({
     ok: false,
     status: 'failed',
     error_code: 'GARMIN_AUTH_BROWSER_ERROR',
