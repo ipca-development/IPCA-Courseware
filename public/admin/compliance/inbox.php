@@ -101,6 +101,7 @@ if ($folder === 'archive') { $filters['status'] = 'archived'; }
 if ($folder === 'sent') { $filters['has_outbound'] = true; }
 if ($q !== '') { $filters['q'] = $q; }
 
+$draftRows = $folder === 'drafts' ? ComplianceCommsCenterEngine::listDrafts($pdo, array(), 200) : array();
 $threads = $folder === 'drafts' ? array() : ComplianceCommsCenterEngine::listThreads($pdo, $filters, 200);
 $stats = ComplianceCommsCenterEngine::threadStats($pdo);
 $summary = CompliancePostmarkConfig::publicSummary();
@@ -130,7 +131,7 @@ $folders = array(
     'inbox' => array('label' => 'Inbox', 'count' => (int)$stats['open']),
     'waiting_external' => array('label' => 'Waiting External', 'count' => (int)$stats['waiting_external']),
     'waiting_internal' => array('label' => 'Waiting Internal', 'count' => (int)$stats['waiting_internal']),
-    'drafts' => array('label' => 'Drafts', 'count' => count(ComplianceCommsCenterEngine::listDrafts($pdo, array('status' => 'draft'), 200))),
+    'drafts' => array('label' => 'Drafts', 'count' => count(ComplianceCommsCenterEngine::listDrafts($pdo, array(), 200))),
     'sent' => array('label' => 'Sent', 'count' => $sentCount),
     'archive' => array('label' => 'Archive', 'count' => (int)$stats['archived']),
     'closed' => array('label' => 'Closed', 'count' => (int)$stats['closed']),
@@ -151,7 +152,7 @@ cw_header('Compliance Mail');
   .mail-top p{margin:4px 0 0;color:rgba(255,255,255,.74);font-size:13px;}
   .mail-client-box{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);}
   .mail-toolbar{--mail-folder-width:220px;--mail-list-width:360px;position:sticky;top:0;z-index:45;display:grid;grid-template-columns:var(--mail-folder-width) 2px var(--mail-list-width) 2px minmax(0,1fr);align-items:center;gap:0;border:0;border-bottom:1px solid rgba(15,23,42,.07);border-radius:28px 28px 0 0;background:rgba(248,250,252,.98);box-shadow:none;overflow:visible;}
-  .mail-toolbar.folders-collapsed{grid-template-columns:28px var(--mail-list-width) 2px minmax(0,1fr);}
+  .mail-toolbar.folders-collapsed{grid-template-columns:28px 2px var(--mail-list-width) 2px minmax(0,1fr);}
   .mail-toolbar-left,.mail-toolbar-center,.mail-toolbar-actions{min-width:0;display:flex;align-items:center;gap:8px;padding:7px 14px;}
   .mail-toolbar-left{grid-column:1;}
   .mail-toolbar-center{grid-column:3;}
@@ -159,9 +160,9 @@ cw_header('Compliance Mail');
   .mail-toolbar-divider{align-self:stretch;background:rgba(15,23,42,.07);}
   .mail-toolbar-divider.folders{grid-column:2;}
   .mail-toolbar-divider.list{grid-column:4;}
-  .mail-toolbar.folders-collapsed .mail-toolbar-divider.folders{display:none;}
-  .mail-toolbar.folders-collapsed .mail-toolbar-center{grid-column:2;}
-  .mail-toolbar.folders-collapsed .mail-toolbar-actions{grid-column:4;}
+  .mail-toolbar.folders-collapsed .mail-toolbar-divider.folders{display:block;grid-column:2;}
+  .mail-toolbar.folders-collapsed .mail-toolbar-center{grid-column:3;}
+  .mail-toolbar.folders-collapsed .mail-toolbar-actions{grid-column:5;}
   .mail-toolbar-center .mail-toolbar-title{flex:1;min-width:0;}
   .mail-toolbar-title strong{display:block;font-size:13px;line-height:1.1;color:#152235;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .mail-toolbar-title span{display:block;margin-top:2px;font-size:11px;line-height:1.15;color:#728198;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -327,15 +328,37 @@ cw_header('Compliance Mail');
   .mail-attachment-actions a{border:1px solid rgba(15,23,42,.08);background:#fff;border-radius:999px;padding:6px 9px;text-decoration:none;color:#1e3c72;font-size:12px;font-weight:760;}
   .mail-quoted,.mail-events{margin-top:14px;color:#526174;font-size:13px;}
   .mail-quoted summary,.mail-events summary{cursor:pointer;font-weight:800;color:#1e3c72;}
-  .mail-composer-backdrop{position:fixed;inset:0;z-index:200;background:rgba(15,23,42,.28);display:none;align-items:flex-end;justify-content:center;padding:28px;}
+  .mail-composer-backdrop{position:fixed;inset:0;z-index:200;background:rgba(15,23,42,.22);display:none;align-items:flex-start;justify-content:center;padding:34px 24px;}
   .mail-composer-backdrop.is-open{display:flex;}
-  .mail-composer{width:min(860px,calc(100vw - 28px));max-height:min(780px,calc(100vh - 56px));display:flex;flex-direction:column;border-radius:24px;background:#fff;box-shadow:0 30px 90px rgba(15,23,42,.28);overflow:hidden;}
-  .mail-composer header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#0d1d34;color:#fff;}
-  .mail-composer-grid{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:16px 18px;overflow:auto;}
-  .mail-composer-grid label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
-  .mail-composer-grid input,.mail-composer-grid select{height:40px;border:1px solid rgba(15,23,42,.1);border-radius:12px;padding:0 12px;}
-  .mail-editor{min-height:190px;border:1px solid rgba(15,23,42,.1);border-radius:14px;padding:14px;line-height:1.55;outline:none;}
+  .mail-composer{width:min(980px,calc(100vw - 32px));max-height:min(900px,calc(100vh - 68px));display:flex;flex-direction:column;border-radius:22px;background:#fff;box-shadow:0 30px 90px rgba(15,23,42,.28);overflow:hidden;}
+  .mail-composer-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:10px 14px;background:rgba(248,250,252,.96);border-bottom:1px solid rgba(15,23,42,.08);}
+  .mail-window-dots{display:flex;gap:7px;align-items:center;}
+  .mail-window-dots span{width:12px;height:12px;border-radius:999px;display:block;}
+  .mail-window-dots span:nth-child(1){background:#ff5f57;}
+  .mail-window-dots span:nth-child(2){background:#ffbd2e;}
+  .mail-window-dots span:nth-child(3){background:#28c840;}
+  .mail-composer-title{text-align:center;font-weight:850;color:#152235;}
+  .mail-composer-head-actions{display:flex;justify-content:flex-end;gap:8px;}
+  .mail-composer-head-actions button,.mail-format-btn{border:0;border-radius:999px;background:#fff;color:#243247;min-width:32px;height:32px;padding:0 10px;font-weight:850;box-shadow:0 5px 16px rgba(15,23,42,.06);cursor:pointer;}
+  .mail-composer-head-actions .primary{background:#1e3c72;color:#fff;}
+  .mail-composer-fields{display:grid;border-bottom:1px solid rgba(15,23,42,.08);}
+  .mail-compose-row{display:grid;grid-template-columns:82px minmax(0,1fr);align-items:center;min-height:44px;border-bottom:1px solid rgba(15,23,42,.07);}
+  .mail-compose-row:last-child{border-bottom:0;}
+  .mail-compose-row label{padding-left:22px;color:#728198;font-size:13px;font-weight:760;}
+  .mail-compose-row input,.mail-compose-row select{height:100%;border:0;outline:0;background:#fff;color:#152235;font-size:14px;padding:0 14px;min-width:0;}
+  .mail-compose-template{background:#fbfcfe;}
+  .mail-compose-template select{font-weight:850;color:#1e3c72;}
+  .mail-format-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid rgba(15,23,42,.08);background:#fff;}
+  .mail-format-toolbar select,.mail-format-toolbar input[type="color"]{height:32px;border:1px solid rgba(15,23,42,.08);border-radius:9px;background:#f8fafc;color:#243247;padding:0 8px;}
+  .mail-format-group{display:inline-flex;gap:3px;padding:2px;border-radius:12px;background:#f8fafc;}
+  .mail-format-btn{box-shadow:none;background:transparent;min-width:28px;height:28px;padding:0 8px;border-radius:9px;}
+  .mail-format-btn:hover{background:#eaf1fb;color:#1e3c72;}
+  .mail-compose-body{min-height:0;overflow:auto;padding:22px;}
+  .mail-editor{min-height:300px;border:0;border-radius:0;padding:0;line-height:1.55;outline:none;font-size:14px;color:#152235;}
   .mail-composer.is-dragging .mail-editor{border-color:#1e3c72;background:#f3f7ff;}
+  .mail-compose-extras{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:14px 22px;border-top:1px solid rgba(15,23,42,.08);background:#fbfcfe;}
+  .mail-compose-extras label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
+  .mail-compose-extras input,.mail-compose-extras select{min-height:38px;border:1px solid rgba(15,23,42,.1);border-radius:12px;padding:0 12px;background:#fff;}
   .mail-composer-actions{display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid rgba(15,23,42,.06);}
   .mail-composer-actions button{border:1px solid rgba(15,23,42,.1);border-radius:999px;background:#fff;padding:10px 14px;font-weight:800;}
   .mail-composer-actions .primary{background:#1e3c72;color:#fff;border-color:#1e3c72;}
@@ -418,7 +441,7 @@ cw_header('Compliance Mail');
           </details>
         </span>
         <span class="mail-toolbar-group">
-          <a class="mail-toolbar-link" href="/admin/compliance/email_drafts.php" aria-label="Draft outbox" title="Draft outbox">▱</a>
+          <button type="button" class="mail-toolbar-btn" data-open-folder="drafts" aria-label="Drafts" title="Drafts">▱</button>
           <button type="button" class="mail-toolbar-btn" data-compliance-modal-open="inboxIntegrationModal" aria-label="Settings" title="Settings">⋯</button>
           <button type="button" class="mail-toolbar-btn" data-fullscreen-toggle aria-label="Full screen" title="Full screen">⛶</button>
         </span>
@@ -440,7 +463,13 @@ cw_header('Compliance Mail');
     <aside class="mail-list-pane">
       <div class="mail-thread-list" id="mailThreadList">
         <?php if ($folder === 'drafts'): ?>
-          <div class="mail-empty">Open the Draft outbox or create a new message.</div>
+          <?php if ($draftRows === array()): ?>
+            <div class="mail-empty">No draft or outbox records found.</div>
+          <?php else: ?>
+            <?php foreach ($draftRows as $draft): ?>
+              <?= ComplianceMailUi::draftCard($draft) ?>
+            <?php endforeach; ?>
+          <?php endif; ?>
         <?php elseif ($threads === array()): ?>
           <div class="mail-empty">No conversations in this folder.</div>
         <?php else: ?>
@@ -466,26 +495,67 @@ cw_header('Compliance Mail');
 
 <div class="mail-composer-backdrop" id="mailComposerBackdrop" aria-hidden="true">
   <form class="mail-composer" id="mailComposer" enctype="multipart/form-data">
-    <header>
-      <strong id="mailComposerTitle">New message</strong>
-      <button type="button" data-compose-close>Close</button>
+    <header class="mail-composer-top">
+      <div class="mail-window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      <strong class="mail-composer-title" id="mailComposerTitle">New message</strong>
+      <div class="mail-composer-head-actions">
+        <button type="submit" data-compose-action="save_draft" title="Save draft">Draft</button>
+        <button type="submit" data-compose-action="send_now" class="primary" title="Send">Send ↑</button>
+        <button type="button" data-compose-close title="Close">Close</button>
+      </div>
     </header>
-    <div class="mail-composer-grid">
+    <div class="mail-composer-fields">
       <input type="hidden" name="draft_id" id="composeDraftId" value="0">
       <input type="hidden" name="thread_id" id="composeThreadId" value="0">
       <input type="hidden" name="reply_to_email_id" id="composeReplyId" value="0">
       <input type="hidden" name="html_body" id="composeHtmlBody" value="">
       <input type="hidden" name="text_body" id="composeTextBody" value="">
-      <label for="composeTo">To</label><input id="composeTo" name="to" required>
-      <label for="composeCc">Cc</label><input id="composeCc" name="cc">
-      <label for="composeBcc">Bcc</label><input id="composeBcc" name="bcc">
-      <label for="composeSubject">Subject</label><input id="composeSubject" name="subject" required>
-      <label for="composeTemplateStyle">Layout</label>
-      <select id="composeTemplateStyle" name="template_style">
-        <option value="standard" selected>Standard Compliance Layout</option>
-        <option value="none">No style</option>
+      <div class="mail-compose-row"><label for="composeTo">To:</label><input id="composeTo" name="to" required></div>
+      <div class="mail-compose-row"><label for="composeCc">Cc:</label><input id="composeCc" name="cc"></div>
+      <div class="mail-compose-row"><label for="composeBcc">Bcc:</label><input id="composeBcc" name="bcc"></div>
+      <div class="mail-compose-row"><label for="composeSubject">Subject:</label><input id="composeSubject" name="subject" required></div>
+      <div class="mail-compose-row mail-compose-template">
+        <label for="composeTemplateStyle">Template:</label>
+        <select id="composeTemplateStyle" name="template_style">
+          <option value="standard" selected>Standard Compliance Layout</option>
+          <option value="none">No style</option>
+        </select>
+      </div>
+    </div>
+    <div class="mail-format-toolbar" aria-label="Text formatting">
+      <select data-format-font aria-label="Font">
+        <option value="Arial">Arial</option>
+        <option value="Helvetica">Helvetica</option>
+        <option value="Georgia">Georgia</option>
+        <option value="Times New Roman">Times New Roman</option>
+        <option value="Courier New">Courier New</option>
       </select>
-      <label>Message</label><div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
+      <select data-format-size aria-label="Text size">
+        <option value="2">12</option>
+        <option value="3" selected>14</option>
+        <option value="4">16</option>
+        <option value="5">18</option>
+      </select>
+      <input type="color" data-format-color value="#152235" aria-label="Text color">
+      <span class="mail-format-group">
+        <button type="button" class="mail-format-btn" data-format-cmd="bold"><strong>B</strong></button>
+        <button type="button" class="mail-format-btn" data-format-cmd="italic"><em>I</em></button>
+        <button type="button" class="mail-format-btn" data-format-cmd="underline"><u>U</u></button>
+      </span>
+      <span class="mail-format-group">
+        <button type="button" class="mail-format-btn" data-format-cmd="justifyLeft">☰</button>
+        <button type="button" class="mail-format-btn" data-format-cmd="justifyCenter">≡</button>
+        <button type="button" class="mail-format-btn" data-format-cmd="justifyRight">☷</button>
+      </span>
+      <span class="mail-format-group">
+        <button type="button" class="mail-format-btn" data-format-cmd="insertUnorderedList">• list</button>
+        <button type="button" class="mail-format-btn" data-format-cmd="insertOrderedList">1. list</button>
+      </span>
+    </div>
+    <div class="mail-compose-body">
+      <div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
+    </div>
+    <div class="mail-compose-extras">
       <label for="composeAttachments">Attachments</label><input type="file" id="composeAttachments" name="attachments[]" multiple>
       <label for="composeObjectRefs">Links</label>
       <select id="composeObjectRefs" name="object_refs[]" multiple>
@@ -499,11 +569,6 @@ cw_header('Compliance Mail');
         <?php endforeach; ?>
       </select>
       <div></div><div class="mail-muted" id="composeStatus">Draft autosaves when recipient, subject, and message are present.</div>
-    </div>
-    <div class="mail-composer-actions">
-      <button type="button" data-compose-close>Cancel</button>
-      <button type="submit" data-compose-action="save_draft">Save Draft</button>
-      <button type="submit" data-compose-action="send_now" class="primary">Send</button>
     </div>
   </form>
 </div>
@@ -760,6 +825,9 @@ cw_header('Compliance Mail');
         list.innerHTML = json.html || '<div class="mail-empty">No conversations found.</div>';
         updateBulkCount();
         if (json.first_id) { loadThread(parseInt(json.first_id, 10)); }
+        if (!json.first_id && currentFolder === 'drafts') {
+          reader.innerHTML = '<div class="mail-reader-placeholder"><div><strong>Drafts</strong><p>Select an unsent draft to edit it, or a sent outbox record with a thread to view the conversation.</p></div></div>';
+        }
       });
   }
   function postForm(action, data) {
@@ -784,7 +852,7 @@ cw_header('Compliance Mail');
       .then(function (json) {
         if (!json.ok) { throw new Error(json.error || 'Unable to open composer.'); }
         var p = json.prefill || {};
-        document.getElementById('composeDraftId').value = '0';
+        document.getElementById('composeDraftId').value = p.draft_id || '0';
         document.getElementById('composeThreadId').value = p.thread_id || params.thread_id || '0';
         document.getElementById('composeReplyId').value = p.reply_to_email_id || params.reply_to_email_id || '0';
         document.getElementById('composeTo').value = p.to || '';
@@ -792,9 +860,10 @@ cw_header('Compliance Mail');
         document.getElementById('composeBcc').value = p.bcc || '';
         document.getElementById('composeSubject').value = p.subject || '';
         document.getElementById('composeTemplateStyle').value = 'standard';
-        document.getElementById('composeEditor').innerText = p.text_body || '';
+        document.getElementById('composeEditor').innerHTML = p.html_body || '';
+        if (!p.html_body) { document.getElementById('composeEditor').innerText = p.text_body || ''; }
         document.getElementById('composeStatus').textContent = 'Draft autosaves when recipient, subject, and message are present.';
-        document.getElementById('mailComposerTitle').textContent = p.reply_to_email_id ? 'Reply' : 'New message';
+        document.getElementById('mailComposerTitle').textContent = p.draft_id ? 'Draft' : (p.reply_to_email_id ? 'Reply' : 'New message');
         document.getElementById('mailComposerBackdrop').classList.add('is-open');
       })
       .catch(function (err) { alert(err.message); });
@@ -853,6 +922,11 @@ cw_header('Compliance Mail');
     }
     var card = ev.target.closest('.mail-thread-card');
     if (!card) { return; }
+    if (card.classList.contains('is-draft') && card.getAttribute('data-draft-status') === 'draft') {
+      var draftId = parseInt(card.getAttribute('data-draft-id') || '0', 10);
+      if (draftId > 0) { openComposer({draft_id: draftId}); }
+      return;
+    }
     var id = parseInt(card.getAttribute('data-thread-id') || '0', 10);
     if (id > 0) { loadThread(id); }
   });
@@ -886,6 +960,14 @@ cw_header('Compliance Mail');
     layout.foldersCollapsed = !layout.foldersCollapsed;
     applyLayout();
     saveLayout();
+  });
+  document.querySelectorAll('[data-open-folder]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var folderKey = btn.getAttribute('data-open-folder') || 'inbox';
+      var folderBtn = document.querySelector('.mail-folder[data-folder="' + folderKey + '"]');
+      if (folderBtn) { folderBtn.click(); return; }
+      loadList(folderKey, search.value || '');
+    });
   });
   document.querySelector('[data-fullscreen-toggle]').addEventListener('click', function () {
     var page = document.querySelector('.mail-page');
@@ -971,6 +1053,37 @@ cw_header('Compliance Mail');
   ['composeTo','composeSubject','composeCc','composeBcc'].forEach(function (id) {
     document.getElementById(id).addEventListener('input', maybeAutosave);
   });
+  document.querySelectorAll('[data-format-cmd]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('composeEditor').focus();
+      document.execCommand(btn.getAttribute('data-format-cmd') || '', false, null);
+      maybeAutosave();
+    });
+  });
+  var formatFont = document.querySelector('[data-format-font]');
+  if (formatFont) {
+    formatFont.addEventListener('change', function () {
+      document.getElementById('composeEditor').focus();
+      document.execCommand('fontName', false, formatFont.value);
+      maybeAutosave();
+    });
+  }
+  var formatSize = document.querySelector('[data-format-size]');
+  if (formatSize) {
+    formatSize.addEventListener('change', function () {
+      document.getElementById('composeEditor').focus();
+      document.execCommand('fontSize', false, formatSize.value);
+      maybeAutosave();
+    });
+  }
+  var formatColor = document.querySelector('[data-format-color]');
+  if (formatColor) {
+    formatColor.addEventListener('input', function () {
+      document.getElementById('composeEditor').focus();
+      document.execCommand('foreColor', false, formatColor.value);
+      maybeAutosave();
+    });
+  }
   (function () {
     var composer = document.getElementById('mailComposer');
     var input = document.getElementById('composeAttachments');

@@ -46,6 +46,37 @@ final class ComplianceMailUi
     }
 
     /**
+     * @param array<string,mixed> $draft
+     */
+    public static function draftCard(array $draft): string
+    {
+        $id = (int)($draft['id'] ?? 0);
+        $threadId = (int)($draft['thread_id'] ?? 0);
+        $status = (string)($draft['status'] ?? 'draft');
+        $subject = trim((string)($draft['subject'] ?? '')) !== ''
+            ? (string)$draft['subject']
+            : (string)($draft['thread_subject'] ?? '(no subject)');
+        $recipient = self::addressLine((string)($draft['to_json'] ?? ''));
+        if ($recipient === '') {
+            $recipient = (string)($draft['thread_contact'] ?? 'No recipient');
+        }
+        $time = self::shortDate((string)($draft['updated_at'] ?? $draft['created_at'] ?? ''));
+        $preview = self::messagePreview($draft);
+        $search = strtolower('draft outbox ' . $status . ' ' . $subject . ' ' . $recipient . ' ' . $preview);
+
+        return '<div class="mail-thread-card is-draft" role="button" tabindex="0" data-draft-id="' . $id . '" data-draft-status="' . self::e($status) . '"' . ($threadId > 0 ? ' data-thread-id="' . $threadId . '"' : '') . ' data-search="' . self::e($search) . '">'
+            . '<span class="mail-thread-select"><input type="checkbox" value="' . $threadId . '" aria-label="Select draft" ' . ($threadId > 0 ? '' : 'disabled') . '></span>'
+            . '<span class="mail-thread-unread is-visible"></span>'
+            . '<span class="mail-thread-main">'
+            . '<span class="mail-thread-row"><strong class="mail-thread-sender">' . self::e($status === 'draft' ? 'Draft' : 'Outbox') . '</strong><span class="mail-thread-time">' . self::e($time) . '</span></span>'
+            . '<span class="mail-thread-subject">' . self::e($subject !== '' ? $subject : '(no subject)') . '</span>'
+            . '<span class="mail-thread-preview">' . self::e($recipient) . '</span>'
+            . '<span class="mail-thread-meta"><span class="mail-chip wait">' . self::e(str_replace('_', ' ', $status)) . '</span>'
+            . ($threadId > 0 ? '<span class="mail-icon-chip">Thread #' . $threadId . '</span>' : '<span class="mail-icon-chip muted">Unthreaded</span>')
+            . '</span></span></div>';
+    }
+
+    /**
      * @param array<string,mixed> $thread
      * @param list<array<string,mixed>> $emails
      * @param list<array<string,mixed>> $links

@@ -79,6 +79,23 @@ function mail_api_primary_recipient(string $to): ?string
     return null;
 }
 
+function mail_api_address_json_to_input(string $json): string
+{
+    $rows = json_decode($json, true);
+    if (!is_array($rows)) {
+        return '';
+    }
+    $out = array();
+    foreach ($rows as $row) {
+        if (is_string($row) && trim($row) !== '') {
+            $out[] = trim($row);
+        } elseif (is_array($row) && !empty($row['Email'])) {
+            $out[] = trim((string)$row['Email']);
+        }
+    }
+    return implode(', ', $out);
+}
+
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 
 try {
@@ -114,14 +131,10 @@ try {
         if ($folder === 'sent') { $filters['has_outbound'] = true; }
         if ($q !== '') { $filters['q'] = $q; }
         if ($folder === 'drafts') {
-            $drafts = ComplianceCommsCenterEngine::listDrafts($pdo, array('status' => 'draft'), 200);
+            $drafts = ComplianceCommsCenterEngine::listDrafts($pdo, array(), 200);
             $html = '';
             foreach ($drafts as $draft) {
-                $threadId = (int)($draft['thread_id'] ?? 0);
-                $subject = (string)($draft['subject'] ?? '(draft)');
-                $html .= '<button type="button" class="mail-thread-card is-draft" ' . ($threadId > 0 ? 'data-thread-id="' . $threadId . '"' : 'data-draft-id="' . (int)$draft['id'] . '"') . '>'
-                    . '<span class="mail-thread-main"><span class="mail-thread-row"><strong class="mail-thread-sender">Draft</strong><span class="mail-thread-time">' . ComplianceMailUi::e(ComplianceMailUi::shortDate((string)($draft['updated_at'] ?? ''))) . '</span></span>'
-                    . '<span class="mail-thread-subject">' . ComplianceMailUi::e($subject) . '</span><span class="mail-thread-preview">Draft not sent</span></span></button>';
+                $html .= ComplianceMailUi::draftCard($draft);
             }
             mail_api_json(array('ok' => true, 'html' => $html, 'first_id' => 0));
         }
@@ -136,11 +149,24 @@ try {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'compose_prefill') {
+        $draftId = (int)($_GET['draft_id'] ?? 0);
         $replyId = (int)($_GET['reply_to_email_id'] ?? 0);
         $forwardId = (int)($_GET['forward_email_id'] ?? 0);
         $threadId = (int)($_GET['thread_id'] ?? 0);
-        $prefill = array('to' => '', 'cc' => '', 'bcc' => '', 'subject' => '', 'html_body' => '', 'text_body' => '', 'thread_id' => $threadId, 'reply_to_email_id' => $replyId);
-        if ($replyId > 0) {
+        $prefill = array('draft_id' => 0, 'to' => '', 'cc' => '', 'bcc' => '', 'subject' => '', 'html_body' => '', 'text_body' => '', 'thread_id' => $threadId, 'reply_to_email_id' => $replyId);
+        if ($draftId > 0) {
+            $draft = ComplianceCommsCenterEngine::getDraft($pdo, $draftId);
+            if (is_array($draft) && (string)($draft['status'] ?? '') === 'draft') {
+                $prefill['draft_id'] = $draftId;
+                $prefill['thread_id'] = (int)($draft['thread_id'] ?? 0);
+                $prefill['to'] = mail_api_address_json_to_input((string)($draft['to_json'] ?? '[]'));
+                $prefill['cc'] = mail_api_address_json_to_input((string)($draft['cc_json'] ?? '[]'));
+                $prefill['bcc'] = mail_api_address_json_to_input((string)($draft['bcc_json'] ?? '[]'));
+                $prefill['subject'] = (string)($draft['subject'] ?? '');
+                $prefill['text_body'] = (string)($draft['text_body'] ?? '');
+                $prefill['html_body'] = (string)($draft['html_body'] ?? '');
+            }
+        } elseif ($replyId > 0) {
             $st = $pdo->prepare('SELECT id, thread_id, from_email, subject, text_body, stripped_text_reply FROM ipca_compliance_emails WHERE id = ? LIMIT 1');
             $st->execute(array($replyId));
             $src = $st->fetch(PDO::FETCH_ASSOC);
