@@ -1681,10 +1681,13 @@ final class ComplianceCommsCenterEngine
             $threadId = (int)$thread['id'];
         }
 
-        $rendered = self::renderOutboundEmailTemplate($pdo, $subject, $textBody, $htmlBody, $threadId, $to);
-        $subject = $rendered['subject'];
-        $textBody = $rendered['text_body'];
-        $htmlBody = $rendered['html_body'];
+        $templateStyle = (string)($opts['template_style'] ?? 'standard');
+        if ($templateStyle !== 'none') {
+            $rendered = self::renderOutboundEmailTemplate($pdo, $subject, $textBody, $htmlBody, $threadId, $to);
+            $subject = $rendered['subject'];
+            $textBody = $rendered['text_body'];
+            $htmlBody = $rendered['html_body'];
+        }
 
         // Generate our own RFC822 Message-Id so future inbound replies thread back.
         $host = self::messageIdHost($fromAddress);

@@ -230,6 +230,7 @@ try {
             'html_body' => (string)($_POST['html_body'] ?? ''),
             'thread_id' => $threadId > 0 ? $threadId : null,
             'created_by' => $uid > 0 ? $uid : null,
+            'template_style' => (string)($_POST['template_style'] ?? 'standard'),
         );
         if ($draftId > 0) {
             ComplianceCommsCenterEngine::updateDraft($pdo, $draftId, $opts);

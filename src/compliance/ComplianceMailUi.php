@@ -58,17 +58,25 @@ final class ComplianceMailUi
         $priority = (string)($thread['priority'] ?? 'normal');
         $waiting = self::workflowLabel($thread);
         $latestInbound = self::latestInboundId($emails);
+        $linkCount = count($links);
+        $complianceSummary = '<div class="mail-reader-compliance-strip">'
+            . '<span class="mail-status-pill s-' . self::e($status) . '">' . self::e($waiting) . '</span>'
+            . '<span class="mail-status-pill p-' . self::e($priority) . '">' . self::e(ucfirst($priority)) . ' priority</span>'
+            . '<span class="mail-status-pill l-' . ($linkCount > 0 ? 'linked' : 'unlinked') . '">' . ($linkCount > 0 ? self::e('Linked ' . $linkCount) : 'Unlinked') . '</span>'
+            . '</div>';
 
         $html = '<div class="mail-reader-shell" data-thread-id="' . (int)$thread['id'] . '">';
         $html .= '<header class="mail-reader-header">';
-        $html .= '<div><div class="mail-reader-kicker"><span class="mail-status-pill s-' . self::e($status) . '">' . self::e($waiting) . '</span></div><h2>' . self::e($subject !== '' ? $subject : '(no subject)') . '</h2>';
+        $html .= '<div class="mail-reader-title-block"><div class="mail-reader-kicker">Compliance Control</div>' . $complianceSummary . '<h2>' . self::e($subject !== '' ? $subject : '(no subject)') . '</h2>';
         $html .= '<p>' . self::e(self::participantsSummary($thread, $emails)) . '</p></div>';
         $html .= '<div class="mail-reader-actions">';
+        $html .= '<details class="mail-action-menu"><summary>Actions</summary><div>';
         if ($latestInbound > 0) {
-            $html .= '<button type="button" class="mail-action primary" data-compose-reply="' . $latestInbound . '">Reply</button>';
-            $html .= '<button type="button" class="mail-action" data-compose-reply-all="' . $latestInbound . '">Reply all</button>';
+            $html .= '<button type="button" data-compose-reply="' . $latestInbound . '">Reply</button>';
+            $html .= '<button type="button" data-compose-reply-all="' . $latestInbound . '">Reply all</button>';
         }
-        $html .= '<button type="button" class="mail-action" data-compose-thread="' . (int)$thread['id'] . '">New message</button>';
+        $html .= '<button type="button" data-compose-thread="' . (int)$thread['id'] . '">New message</button>';
+        $html .= '</div></details>';
         $html .= '<button type="button" class="mail-action" data-sidebar-toggle aria-expanded="false">Compliance</button>';
         $html .= '</div></header>';
 
@@ -114,9 +122,18 @@ final class ComplianceMailUi
         $html .= '<div class="mail-message-accent"></div><div class="mail-message-content">';
         $html .= '<header class="mail-message-header">';
         $html .= '<div class="mail-avatar">' . self::e(self::initials($from !== '' ? $from : $fromEmail)) . '</div>';
-        $html .= '<div class="mail-message-meta"><div><strong>' . self::e($from !== '' ? $from : 'Unknown sender') . '</strong> <span>' . self::e($fromEmail) . '</span></div>';
-        $html .= '<div class="mail-message-submeta">' . self::e(ucfirst($direction)) . ' · ' . self::e(self::longDate($when)) . ($status !== '' ? ' · ' . self::e($status) : '') . '</div></div>';
+        $html .= '<div class="mail-message-meta"><div class="mail-message-topline"><strong>' . self::e($from !== '' ? $from : 'Unknown sender') . '</strong><span>' . self::e(self::longDate($when)) . '</span></div>';
+        $html .= '<div class="mail-message-subject">' . self::e($subject) . '</div>';
+        $html .= '<div class="mail-message-recipients">' . self::e(self::recipientSummary($to, $cc)) . '</div>';
+        $html .= '<details class="mail-message-details"><summary>Details</summary><dl>';
+        $html .= '<div><dt>From</dt><dd>' . self::e($fromEmail) . '</dd></div>';
+        if ($to !== '') { $html .= '<div><dt>To</dt><dd>' . self::e($to) . '</dd></div>'; }
+        if ($cc !== '') { $html .= '<div><dt>Cc</dt><dd>' . self::e($cc) . '</dd></div>'; }
+        if ($bcc !== '') { $html .= '<div><dt>Bcc</dt><dd>' . self::e($bcc) . '</dd></div>'; }
+        $html .= '<div><dt>Status</dt><dd>' . self::e(trim(ucfirst($direction) . ($status !== '' ? ' · ' . $status : ''))) . '</dd></div>';
+        $html .= '</dl></details></div>';
         $html .= '<div class="mail-message-tools">';
+        $html .= '<details class="mail-action-menu"><summary>Actions</summary><div>';
         $html .= '<button type="button" data-compose-reply="' . (int)$email['id'] . '">Reply</button>';
         $html .= '<button type="button" data-compose-forward="' . (int)$email['id'] . '">Forward</button>';
         $html .= '<a href="/admin/compliance/email_source.php?id=' . (int)$email['id'] . '&format=eml">Download .eml</a>';
@@ -125,14 +142,8 @@ final class ComplianceMailUi
         $html .= '<a href="/admin/compliance/findings.php?source_email_id=' . (int)$email['id'] . '">Create Finding</a>';
         $html .= '<a href="/admin/compliance/audits.php?source_email_id=' . (int)$email['id'] . '">Create Audit</a>';
         $html .= '<a href="/admin/compliance/corrective_actions.php?source_email_id=' . (int)$email['id'] . '">Create CA</a>';
+        $html .= '</div></details>';
         $html .= '</div></header>';
-
-        $html .= '<dl class="mail-message-fields">';
-        if ($to !== '') { $html .= '<div><dt>To</dt><dd>' . self::e($to) . '</dd></div>'; }
-        if ($cc !== '') { $html .= '<div><dt>Cc</dt><dd>' . self::e($cc) . '</dd></div>'; }
-        if ($bcc !== '') { $html .= '<div><dt>Bcc</dt><dd>' . self::e($bcc) . '</dd></div>'; }
-        $html .= '<div><dt>Subject</dt><dd>' . self::e($subject) . '</dd></div>';
-        $html .= '</dl>';
 
         if ($attachments !== array()) {
             $html .= self::attachments($attachments);
@@ -359,6 +370,18 @@ final class ComplianceMailUi
             }
         }
         return implode(', ', $out);
+    }
+
+    private static function recipientSummary(string $to, string $cc): string
+    {
+        $parts = array();
+        if ($to !== '') {
+            $parts[] = 'To: ' . $to;
+        }
+        if ($cc !== '') {
+            $parts[] = 'Cc: ' . $cc;
+        }
+        return $parts !== array() ? implode('   ', $parts) : 'No visible recipients';
     }
 
     /**

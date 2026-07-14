@@ -140,11 +140,17 @@ cw_header('Compliance Mail');
 ?>
 <style>
   .app-main,.app-content{overflow:hidden;}
-  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:14px;overflow:hidden;}
-  .mail-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:linear-gradient(135deg,#0d1d34 0%,#1e3c72 58%,#27538f 100%);box-shadow:0 18px 42px rgba(15,23,42,.14);color:#fff;}
+  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:14px;overflow:hidden;background:#fff;}
+  .mail-page:fullscreen{height:100vh;padding:16px;background:#fff;}
+  .mail-page.is-fullscreen{height:100vh;padding:16px;background:#fff;}
+  .mail-top{display:grid;grid-template-columns:minmax(220px,1fr) minmax(420px,1.4fr) auto;align-items:center;gap:16px;padding:18px 22px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:linear-gradient(135deg,#0d1d34 0%,#1e3c72 58%,#27538f 100%);box-shadow:0 18px 42px rgba(15,23,42,.14);color:#fff;}
   .mail-top h1{margin:0;font-size:26px;letter-spacing:-.03em;color:#fff;}
   .mail-top p{margin:4px 0 0;color:rgba(255,255,255,.74);font-size:13px;}
-  .mail-top-actions{display:flex;gap:10px;flex-wrap:wrap;}
+  .mail-top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+  .mail-hero-controls{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto auto auto;gap:8px;align-items:center;}
+  .mail-hero-controls input,.mail-hero-controls select{height:34px;border:1px solid rgba(255,255,255,.24);border-radius:999px;background:rgba(255,255,255,.94);color:#152235;padding:0 12px;font-size:12px;min-width:0;}
+  .mail-hero-controls button{height:34px;border:1px solid rgba(255,255,255,.24);border-radius:999px;background:#fff;color:#1e3c72;padding:0 12px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;}
+  .mail-hero-controls .mail-selected-count{font-size:11px;color:rgba(255,255,255,.75);white-space:nowrap;}
   .mail-action,.mail-top-actions button,.mail-top-actions a{border:1px solid rgba(255,255,255,.24);border-radius:999px;background:rgba(255,255,255,.12);color:#fff;padding:9px 14px;font-size:13px;font-weight:760;text-decoration:none;cursor:pointer;}
   .mail-action.primary,.mail-top-actions .primary{background:#fff;color:#1e3c72;border-color:#fff;}
   .mail-workspace{--mail-folder-width:220px;--mail-list-width:280px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);overflow:hidden;}
@@ -164,12 +170,7 @@ cw_header('Compliance Mail');
   .mail-folder{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;border:0;border-radius:14px;background:transparent;padding:11px 12px;color:#334155;font-weight:760;cursor:pointer;text-align:left;}
   .mail-folder:hover,.mail-folder.is-active{background:#e9eef8;color:#152235;}
   .mail-folder span:last-child{color:#728198;font-size:12px;}
-  .mail-list-pane{display:flex;flex-direction:column;min-width:0;border-right:1px solid rgba(15,23,42,.06);background:#fbfcfe;}
-  .mail-search{padding:10px 12px;border-bottom:1px solid rgba(15,23,42,.06);}
-  .mail-search input{width:100%;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:#fff;padding:9px 12px;font-size:13px;}
-  .mail-bulk{display:flex;gap:5px;align-items:center;padding:0 10px 8px;color:#728198;font-size:10px;}
-  .mail-bulk select{height:30px;border-radius:9px;border:1px solid rgba(15,23,42,.08);background:#fff;font-size:11px;}
-  .mail-bulk button{height:30px;border:0;border-radius:9px;background:#1e3c72;color:#fff;font-weight:760;padding:0 8px;font-size:10px;}
+  .mail-list-pane{display:flex;flex-direction:column;min-width:0;border-right:1px solid rgba(15,23,42,.06);background:#fff;}
   .mail-thread-list{overflow:auto;min-height:0;padding:4px 6px;}
   .mail-thread-card{position:relative;width:100%;display:grid;grid-template-columns:18px 8px minmax(0,1fr);gap:6px;border:0;border-radius:11px;background:transparent;padding:7px 8px;text-align:left;cursor:pointer;color:#152235;transition:background .15s ease,box-shadow .15s ease,transform .15s ease;}
   .mail-thread-card:hover{background:#f0f4fb;}
@@ -188,10 +189,10 @@ cw_header('Compliance Mail');
   .mail-chip,.mail-priority,.mail-icon-chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;background:#eef2f8;color:#526174;font-size:10px;line-height:1.2;font-weight:740;}
   .mail-priority.p-high,.mail-priority.p-urgent{background:#fff3df;color:#9a5a00;}
   .mail-icon-chip.muted{opacity:.7;}
-  .mail-reader-pane{position:relative;min-width:0;overflow:auto;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);}
+  .mail-reader-pane{position:relative;min-width:0;overflow:auto;overflow-x:hidden;background:#fff;}
   .mail-reader-placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:#728198;text-align:center;padding:40px;}
-  .mail-reader-shell{position:relative;min-height:100%;}
-  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 16px;background:rgba(255,255,255,.94);border-bottom:1px solid rgba(15,23,42,.06);backdrop-filter:blur(18px);}
+  .mail-reader-shell{position:relative;min-height:100%;overflow-x:hidden;background:#fff;}
+  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 16px;background:rgba(255,255,255,.96);border-bottom:1px solid rgba(15,23,42,.08);backdrop-filter:blur(18px);overflow:visible;}
   .mail-reader-header h2{margin:4px 0 3px;font-size:13px;line-height:1.25;letter-spacing:-.01em;font-weight:760;}
   .mail-reader-header p{margin:0;color:#728198;font-size:10.5px;line-height:1.25;}
   .mail-reader-kicker{color:#1e3c72;text-transform:uppercase;letter-spacing:.08em;font-size:9px;font-weight:800;}
@@ -201,9 +202,14 @@ cw_header('Compliance Mail');
   .mail-status-pill.s-open{background:#eff6ff;color:#1d4ed8;}
   .mail-status-pill.s-closed{background:#ecfdf5;color:#047857;}
   .mail-status-pill.s-archived{background:#f1f5f9;color:#475569;}
-  .mail-reader-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+  .mail-status-pill.p-high,.mail-status-pill.p-urgent{background:#fff7ed;color:#9a5a00;}
+  .mail-status-pill.l-linked{background:#ecfdf5;color:#047857;}
+  .mail-status-pill.l-unlinked{background:#f1f5f9;color:#64748b;}
+  .mail-reader-compliance-strip{display:flex;flex-wrap:wrap;gap:5px;margin:3px 0 4px;}
+  .mail-reader-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto;}
+  .mail-reader-actions .mail-action{border-color:rgba(15,23,42,.08);background:#fff;color:#1e3c72;padding:7px 11px;font-size:12px;}
   .mail-reader-grid{display:block;min-height:0;}
-  .mail-timeline{padding:16px 18px;max-width:1120px;width:min(100%,1120px);margin:0 auto;}
+  .mail-timeline{padding:16px 18px;max-width:1120px;width:min(100%,1120px);margin:0 auto;overflow-x:hidden;}
   .mail-reader-shell.sidebar-open .mail-timeline{padding-right:calc(var(--mail-compliance-width) + 36px);}
   .mail-compliance-sidebar{position:absolute;right:0;top:0;bottom:0;width:var(--mail-compliance-width);max-width:450px;min-width:220px;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(15,23,42,.06);background:#fbfcfe;box-shadow:-22px 0 60px rgba(15,23,42,.14);transform:translateX(105%);transition:transform .18s ease;z-index:30;}
   .mail-reader-shell.sidebar-open .mail-compliance-sidebar{transform:translateX(0);}
@@ -235,22 +241,32 @@ cw_header('Compliance Mail');
   .mail-context-list div{display:flex;justify-content:space-between;gap:10px;}
   .mail-context-list dt{color:#728198;font-size:12px;}
   .mail-context-list dd{margin:0;text-align:right;font-weight:760;}
-  .mail-message-card{position:relative;display:grid;grid-template-columns:4px minmax(0,1fr);margin-bottom:18px;border:1px solid rgba(15,23,42,.07);border-radius:22px;background:rgba(255,255,255,.96);box-shadow:0 18px 38px rgba(15,23,42,.055);overflow:hidden;}
+  .mail-message-card{position:relative;display:grid;grid-template-columns:4px minmax(0,1fr);margin-bottom:18px;border:1px solid rgba(15,23,42,.07);border-radius:18px;background:#fff;box-shadow:none;overflow:visible;max-width:100%;}
   .mail-message-accent{background:#2f80ed;}
   .mail-message-card.is-outgoing .mail-message-accent{background:#2f9e62;}
-  .mail-message-content{padding:18px 20px;}
-  .mail-message-header{display:flex;gap:12px;align-items:flex-start;}
+  .mail-message-content{padding:14px 16px;min-width:0;overflow-x:hidden;background:#fff;border-radius:0 18px 18px 0;}
+  .mail-message-header{display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid rgba(15,23,42,.08);padding-bottom:10px;margin-bottom:12px;min-width:0;}
   .mail-avatar{width:42px;height:42px;border-radius:14px;background:#e9eef8;color:#1e3c72;display:flex;align-items:center;justify-content:center;font-weight:850;flex:0 0 auto;}
-  .mail-message-meta{min-width:0;flex:1;}
-  .mail-message-meta span,.mail-message-submeta{color:#728198;font-size:13px;}
-  .mail-message-tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
-  .mail-message-tools button,.mail-message-tools a{border:1px solid rgba(15,23,42,.08);background:#fff;border-radius:999px;padding:6px 9px;font-size:12px;font-weight:760;cursor:pointer;color:#1e3c72;text-decoration:none;}
-  .mail-message-fields{margin:14px 0 0;display:grid;gap:5px;color:#526174;font-size:13px;}
-  .mail-message-fields div{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;}
-  .mail-message-fields dt{color:#728198;}
-  .mail-message-fields dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;}
-  .mail-message-body{margin-top:16px;}
-  .mail-html-frame{display:block;width:100%;min-height:80px;border:0;background:transparent;overflow:hidden;}
+  .mail-message-meta{min-width:0;flex:1;overflow:hidden;}
+  .mail-message-topline{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
+  .mail-message-topline strong{font-size:13px;color:#152235;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mail-message-topline span{color:#728198;font-size:11.5px;white-space:nowrap;}
+  .mail-message-subject{font-size:12px;color:#152235;margin-top:2px;overflow-wrap:anywhere;}
+  .mail-message-recipients{font-size:11.5px;color:#526174;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mail-message-details{margin-top:4px;font-size:11.5px;color:#64748b;}
+  .mail-message-details summary{cursor:pointer;color:#1e3c72;font-weight:760;}
+  .mail-message-details dl{display:grid;gap:4px;margin:6px 0 0;}
+  .mail-message-details div{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;}
+  .mail-message-details dd{margin:0;min-width:0;overflow-wrap:anywhere;}
+  .mail-message-tools{display:flex;gap:6px;justify-content:flex-end;flex:0 0 auto;}
+  .mail-message-body{margin-top:12px;max-width:100%;overflow-x:hidden;}
+  .mail-html-frame{display:block;width:100%;max-width:100%;min-height:80px;border:0;background:transparent;overflow:hidden;}
+  .mail-action-menu{position:relative;}
+  .mail-action-menu summary{list-style:none;border:1px solid rgba(15,23,42,.08);background:#fff;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;cursor:pointer;color:#1e3c72;}
+  .mail-action-menu summary::-webkit-details-marker{display:none;}
+  .mail-action-menu div{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:190px;display:grid;gap:2px;padding:6px;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:#fff;box-shadow:0 18px 42px rgba(15,23,42,.16);}
+  .mail-action-menu button,.mail-action-menu a{display:block;width:100%;border:0;background:transparent;border-radius:10px;padding:8px 10px;text-align:left;font-size:12px;font-weight:740;color:#152235;text-decoration:none;cursor:pointer;}
+  .mail-action-menu button:hover,.mail-action-menu a:hover{background:#f1f5f9;}
   .mail-text-fallback{white-space:pre-wrap;font-size:15px;line-height:1.65;color:#152235;}
   .mail-attachments{display:grid;gap:9px;margin-top:14px;}
   .mail-attachment{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid rgba(15,23,42,.07);border-radius:14px;background:#f8fafc;padding:9px;}
@@ -267,7 +283,7 @@ cw_header('Compliance Mail');
   .mail-composer-backdrop.is-open{display:flex;}
   .mail-composer{width:min(860px,calc(100vw - 28px));max-height:min(780px,calc(100vh - 56px));display:flex;flex-direction:column;border-radius:24px;background:#fff;box-shadow:0 30px 90px rgba(15,23,42,.28);overflow:hidden;}
   .mail-composer header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#0d1d34;color:#fff;}
-  .mail-composer-grid{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px 12px;padding:16px 18px;overflow:auto;}
+  .mail-composer-grid{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:16px 18px;overflow:auto;}
   .mail-composer-grid label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
   .mail-composer-grid input,.mail-composer-grid select{height:40px;border:1px solid rgba(15,23,42,.1);border-radius:12px;padding:0 12px;}
   .mail-editor{min-height:190px;border:1px solid rgba(15,23,42,.1);border-radius:14px;padding:14px;line-height:1.55;outline:none;}
@@ -282,8 +298,8 @@ cw_header('Compliance Mail');
   #inboxIntegrationModal{width:min(980px,calc(100vw - 32px));}
   .mail-template-code{width:100%;min-height:180px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;}
   .mail-template-code.small{min-height:110px;}
-  @media (max-width:1360px){.mail-timeline{max-width:980px;}.mail-reader-shell.sidebar-open .mail-timeline{padding-right:22px;}.mail-compliance-sidebar{position:fixed;right:0;top:0;bottom:0;height:auto;width:min(var(--mail-compliance-width),92vw);z-index:50;}}
-  @media (max-width:980px){.mail-page{height:calc(100vh - 112px);}.mail-workspace{grid-template-columns:minmax(300px,var(--mail-list-width)) 6px minmax(0,1fr);}.mail-folders{position:absolute;z-index:40;width:250px;inset:0 auto 0 0;transform:translateX(-105%);transition:transform .18s ease;box-shadow:20px 0 60px rgba(15,23,42,.16);}.mail-workspace.folders-open .mail-folders{transform:translateX(0);}.mail-workspace > .mail-resizer[data-resizer="folders"]{display:none;}.mail-top h1{font-size:22px;}}
+  @media (max-width:1360px){.mail-top{grid-template-columns:1fr;}.mail-top-actions{justify-content:flex-start;}.mail-timeline{max-width:980px;}.mail-reader-shell.sidebar-open .mail-timeline{padding-right:22px;}.mail-compliance-sidebar{position:fixed;right:0;top:0;bottom:0;height:auto;width:min(var(--mail-compliance-width),92vw);z-index:50;}}
+  @media (max-width:980px){.mail-page{height:calc(100vh - 112px);}.mail-workspace{grid-template-columns:minmax(300px,var(--mail-list-width)) 6px minmax(0,1fr);}.mail-folders{position:absolute;z-index:40;width:250px;inset:0 auto 0 0;transform:translateX(-105%);transition:transform .18s ease;box-shadow:20px 0 60px rgba(15,23,42,.16);}.mail-workspace.folders-open .mail-folders{transform:translateX(0);}.mail-workspace > .mail-resizer[data-resizer="folders"]{display:none;}.mail-top h1{font-size:22px;}.mail-hero-controls{grid-template-columns:1fr 1fr;}.mail-hero-controls input{grid-column:1/-1;}}
   @media (max-width:760px){.mail-workspace{grid-template-columns:1fr;}.mail-resizer{display:none;}.mail-list-pane{border-right:0;}.mail-reader-pane{position:absolute;inset:0;z-index:30;transform:translateX(105%);transition:transform .2s ease;}.mail-workspace.reader-open .mail-reader-pane{transform:translateX(0);}.mail-reader-header{position:relative;}.mail-reader-actions{width:100%;justify-content:flex-start;}.mail-reader-header{flex-direction:column;}.mail-top{align-items:flex-start;flex-direction:column;}.mail-message-header{flex-wrap:wrap;}.mail-message-tools{justify-content:flex-start;}.mail-attachment{grid-template-columns:42px minmax(0,1fr);}.mail-attachment-actions{grid-column:1/-1;}.mail-compliance-sidebar{width:min(92vw,var(--mail-compliance-width));}}
 </style>
 
@@ -293,11 +309,31 @@ cw_header('Compliance Mail');
       <h1>Compliance Mail</h1>
       <p>Professional communication workspace with compliance intelligence built around the conversation.</p>
     </div>
+    <div class="mail-hero-controls">
+      <input type="search" id="mailSearch" placeholder="Search subject, sender, body, attachments, compliance objects..." value="<?= h($q) ?>">
+      <span class="mail-selected-count" id="mailBulkCount">0 selected</span>
+      <select name="bulk_status_value" aria-label="Bulk status">
+        <option value="open">open</option>
+        <option value="waiting_internal">waiting internal</option>
+        <option value="waiting_external">waiting external</option>
+        <option value="closed">closed</option>
+        <option value="archived">archived</option>
+      </select>
+      <button type="button" data-bulk-status>Set status</button>
+      <select name="bulk_priority_value" aria-label="Bulk priority">
+        <option value="low">low</option>
+        <option value="normal">normal</option>
+        <option value="high">high</option>
+        <option value="urgent">urgent</option>
+      </select>
+      <button type="button" data-bulk-priority>Set priority</button>
+    </div>
     <div class="mail-top-actions">
       <button type="button" data-folder-toggle>Folders</button>
       <button type="button" class="primary" data-compose-new>New message</button>
       <a href="/admin/compliance/email_drafts.php">Draft outbox</a>
       <button type="button" data-compliance-modal-open="inboxIntegrationModal">Settings</button>
+      <button type="button" data-fullscreen-toggle>Full Screen</button>
     </div>
   </section>
 
@@ -317,27 +353,6 @@ cw_header('Compliance Mail');
     <div class="mail-resizer" data-resizer="folders" role="separator" aria-orientation="vertical" aria-label="Resize folder pane"></div>
 
     <aside class="mail-list-pane">
-      <div class="mail-search">
-        <input type="search" id="mailSearch" placeholder="Search subject, sender, body, attachments, compliance objects..." value="<?= h($q) ?>">
-      </div>
-      <form class="mail-bulk" id="mailBulkForm">
-        <span id="mailBulkCount">0 selected</span>
-        <select name="bulk_status_value" aria-label="Bulk status">
-          <option value="open">open</option>
-          <option value="waiting_internal">waiting internal</option>
-          <option value="waiting_external">waiting external</option>
-          <option value="closed">closed</option>
-          <option value="archived">archived</option>
-        </select>
-        <button type="button" data-bulk-status>Set status</button>
-        <select name="bulk_priority_value" aria-label="Bulk priority">
-          <option value="low">low</option>
-          <option value="normal">normal</option>
-          <option value="high">high</option>
-          <option value="urgent">urgent</option>
-        </select>
-        <button type="button" data-bulk-priority>Set priority</button>
-      </form>
       <div class="mail-thread-list" id="mailThreadList">
         <?php if ($folder === 'drafts'): ?>
           <div class="mail-empty">Open the Draft outbox or create a new message.</div>
@@ -379,6 +394,11 @@ cw_header('Compliance Mail');
       <label for="composeCc">Cc</label><input id="composeCc" name="cc">
       <label for="composeBcc">Bcc</label><input id="composeBcc" name="bcc">
       <label for="composeSubject">Subject</label><input id="composeSubject" name="subject" required>
+      <label for="composeTemplateStyle">Layout</label>
+      <select id="composeTemplateStyle" name="template_style">
+        <option value="standard" selected>Standard Compliance Layout</option>
+        <option value="none">No style</option>
+      </select>
       <label>Message</label><div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
       <label for="composeAttachments">Attachments</label><input type="file" id="composeAttachments" name="attachments[]" multiple>
       <label for="composeObjectRefs">Links</label>
@@ -561,6 +581,12 @@ cw_header('Compliance Mail');
     var el = document.getElementById('mailBulkCount');
     if (el) { el.textContent = selectedIds().length + ' selected'; }
   }
+  function updateFullscreenButton() {
+    var btn = document.querySelector('[data-fullscreen-toggle]');
+    if (!btn) { return; }
+    btn.textContent = document.fullscreenElement ? 'Exit Full Screen' : 'Full Screen';
+    document.querySelector('.mail-page').classList.toggle('is-fullscreen', !!document.fullscreenElement);
+  }
   function loadThread(id) {
     if (!id) { return; }
     currentThreadId = id;
@@ -620,6 +646,7 @@ cw_header('Compliance Mail');
         document.getElementById('composeCc').value = p.cc || '';
         document.getElementById('composeBcc').value = p.bcc || '';
         document.getElementById('composeSubject').value = p.subject || '';
+        document.getElementById('composeTemplateStyle').value = 'standard';
         document.getElementById('composeEditor').innerText = p.text_body || '';
         document.getElementById('composeStatus').textContent = 'Draft autosaves when recipient, subject, and message are present.';
         document.getElementById('mailComposerTitle').textContent = p.reply_to_email_id ? 'Reply' : 'New message';
@@ -695,6 +722,15 @@ cw_header('Compliance Mail');
     applyLayout();
     saveLayout();
   });
+  document.querySelector('[data-fullscreen-toggle]').addEventListener('click', function () {
+    var page = document.querySelector('.mail-page');
+    if (!document.fullscreenElement && page && page.requestFullscreen) {
+      page.requestFullscreen();
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  });
+  document.addEventListener('fullscreenchange', updateFullscreenButton);
   document.querySelector('[data-compose-new]').addEventListener('click', function () { openComposer({thread_id: currentThreadId || 0}); });
   document.addEventListener('click', function (ev) {
     var reply = ev.target.closest('[data-compose-reply]');
