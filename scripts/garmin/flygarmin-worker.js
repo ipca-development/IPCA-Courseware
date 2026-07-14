@@ -25,6 +25,14 @@ async function status() {
   return ok('status', session.statusSnapshot().authentication_state === 'authenticated' ? 'authenticated' : 'authentication_required', session.statusSnapshot());
 }
 
+async function browserStatus() {
+  return session.browserStatus();
+}
+
+async function browserRecover() {
+  return session.recover();
+}
+
 async function testConnection() {
   return session.testConnection();
 }
@@ -52,6 +60,10 @@ async function dispatch(payload) {
       return login();
     case 'status':
       return status();
+    case 'browser-status':
+      return browserStatus();
+    case 'browser-recover':
+      return browserRecover();
     case 'test-connection':
       return testConnection();
     case 'verify-auth':

@@ -40,6 +40,8 @@ export class FlyGarminBrowserSession {
       status: this.authenticationState === 'authenticated' ? 'authenticated' : 'authentication_required',
       browser_state: this.browserState,
       authentication_state: this.authenticationState,
+      browser_running: this.context !== null,
+      context_present: this.context !== null,
       browser_profile_present: this.browserProfilePresent(),
       browser_context_present: this.context !== null,
       page_present: this.page !== null && !this.page.isClosed(),
@@ -161,6 +163,17 @@ export class FlyGarminBrowserSession {
 
   async verifyAuth() {
     return this.enqueue('verify-auth', 'verify-auth', async () => this.probeAuthentication({ operationName: 'verify-auth' }));
+  }
+
+  browserStatus() {
+    const snapshot = this.statusSnapshot();
+    return {
+      ok: true,
+      operation: 'browser-status',
+      provider: this.provider,
+      status: snapshot.browser_running ? 'ready' : 'not_ready',
+      data: snapshot,
+    };
   }
 
   async probeAuthentication({ operationName = 'status', timeoutMs = 20000 } = {}) {
@@ -498,9 +511,11 @@ export class FlyGarminBrowserSession {
   }
 
   async recover() {
-    this.page = null;
-    await this.ensureFlyGarminLoaded();
-    return this.probeAuthentication({ operationName: 'browser-recover' });
+    return this.enqueue('browser-recover', 'browser-recover', async () => {
+      this.page = null;
+      await this.ensureFlyGarminLoaded();
+      return this.probeAuthentication({ operationName: 'browser-recover' });
+    });
   }
 
   async shutdown() {

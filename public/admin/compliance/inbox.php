@@ -355,6 +355,10 @@ cw_header('Compliance Mail');
   .mail-format-btn:hover{background:#eaf1fb;color:#1e3c72;}
   .mail-compose-body{min-height:0;overflow:auto;padding:22px;}
   .mail-editor{min-height:300px;border:0;border-radius:0;padding:0;line-height:1.55;outline:none;font-size:14px;color:#152235;}
+  .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;}
+  .mail-template-preview-wrap.is-visible{display:block;}
+  .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
+  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;}
   .mail-composer.is-dragging .mail-editor{border-color:#1e3c72;background:#f3f7ff;}
   .mail-compose-extras{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:14px 22px;border-top:1px solid rgba(15,23,42,.08);background:#fbfcfe;}
   .mail-compose-extras label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
@@ -554,6 +558,10 @@ cw_header('Compliance Mail');
     </div>
     <div class="mail-compose-body">
       <div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
+    </div>
+    <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap">
+      <div class="mail-template-preview-head"><span>Standard Compliance Layout Preview</span><span>Final styling is applied when sent</span></div>
+      <iframe class="mail-template-preview" id="composeTemplatePreview" title="Compliance template preview"></iframe>
     </div>
     <div class="mail-compose-extras">
       <label for="composeAttachments">Attachments</label><input type="file" id="composeAttachments" name="attachments[]" multiple>
@@ -834,6 +842,39 @@ cw_header('Compliance Mail');
     data.append('action', action);
     return fetch('/admin/compliance/mail_api.php', {method: 'POST', body: data, headers: {'Accept': 'application/json'}}).then(function (r) { return r.json(); });
   }
+  var complianceTemplateHtml = <?= json_encode($emailTemplateHtml, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+  function renderTemplatePreview() {
+    var style = document.getElementById('composeTemplateStyle').value || 'standard';
+    var wrap = document.getElementById('composeTemplatePreviewWrap');
+    var frame = document.getElementById('composeTemplatePreview');
+    if (!wrap || !frame) { return; }
+    wrap.classList.toggle('is-visible', style !== 'none');
+    if (style === 'none') {
+      frame.removeAttribute('srcdoc');
+      return;
+    }
+    var subject = document.getElementById('composeSubject').value || 'Compliance email';
+    var bodyHtml = document.getElementById('composeEditor').innerHTML || '<p>Compose your message here...</p>';
+    var bodyText = document.getElementById('composeEditor').innerText || 'Compose your message here...';
+    var html = complianceTemplateHtml
+      .replaceAll('{{EMAIL_TITLE}}', escapeHtml(subject))
+      .replaceAll('{{RECIPIENT_NAME}}', 'Recipient')
+      .replaceAll('{{EMAIL_BODY_HTML}}', bodyHtml)
+      .replaceAll('{{EMAIL_BODY_TEXT}}', escapeHtml(bodyText).replace(/\n/g, '<br>'))
+      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_NAME}}', 'Compliance Monitoring Manager')
+      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_TITLE}}', 'Compliance')
+      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML}}', '')
+      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT}}', '')
+      .replaceAll('{{COMPLIANCE_THREAD_CODE}}', 'CMP-THREAD')
+      .replaceAll('{{COMPLIANCE_OBJECT_SUMMARY_TEXT}}', 'Selected compliance objects')
+      .replaceAll('{{COMPLIANCE_OBJECT_PILLS_HTML}}', '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#eaf1fb;color:#1e3c72;font-size:12px;font-weight:700;">Compliance</span>');
+    frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#f8fafc;">' + html + '</body></html>';
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (ch) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch] || ch;
+    });
+  }
   document.querySelectorAll('.mail-resizer').forEach(function (resizer) {
     resizer.addEventListener('pointerdown', function (ev) {
       if (resizer.getAttribute('data-resizer') === 'folders' && layout.foldersCollapsed) {
@@ -864,6 +905,7 @@ cw_header('Compliance Mail');
         if (!p.html_body) { document.getElementById('composeEditor').innerText = p.text_body || ''; }
         document.getElementById('composeStatus').textContent = 'Draft autosaves when recipient, subject, and message are present.';
         document.getElementById('mailComposerTitle').textContent = p.draft_id ? 'Draft' : (p.reply_to_email_id ? 'Reply' : 'New message');
+        renderTemplatePreview();
         document.getElementById('mailComposerBackdrop').classList.add('is-open');
       })
       .catch(function (err) { alert(err.message); });
@@ -872,6 +914,7 @@ cw_header('Compliance Mail');
     var editor = document.getElementById('composeEditor');
     document.getElementById('composeHtmlBody').value = editor.innerHTML;
     document.getElementById('composeTextBody').value = editor.innerText;
+    renderTemplatePreview();
   }
   function maybeAutosave() {
     window.clearTimeout(autosaveTimer);
@@ -980,6 +1023,29 @@ cw_header('Compliance Mail');
   document.addEventListener('fullscreenchange', updateFullscreenButton);
   document.querySelector('[data-compose-new]').addEventListener('click', function () { openComposer({thread_id: currentThreadId || 0}); });
   document.addEventListener('click', function (ev) {
+    var modalOpen = ev.target.closest('[data-compliance-modal-open]');
+    if (modalOpen) {
+      var modalId = modalOpen.getAttribute('data-compliance-modal-open');
+      var modal = modalId ? document.getElementById(modalId) : null;
+      if (modal) {
+        if (typeof modal.showModal === 'function') {
+          modal.showModal();
+        } else {
+          modal.setAttribute('open', 'open');
+        }
+      }
+      ev.preventDefault();
+      return;
+    }
+    if (ev.target.closest('[data-compliance-modal-close]')) {
+      var dialog = ev.target.closest('dialog');
+      if (dialog) {
+        if (typeof dialog.close === 'function') { dialog.close(); }
+        dialog.removeAttribute('open');
+      }
+      ev.preventDefault();
+      return;
+    }
     if (ev.target.closest('[data-toolbar-thread-compose]')) {
       openComposer({thread_id: currentThreadId || 0});
     }
@@ -1053,6 +1119,8 @@ cw_header('Compliance Mail');
   ['composeTo','composeSubject','composeCc','composeBcc'].forEach(function (id) {
     document.getElementById(id).addEventListener('input', maybeAutosave);
   });
+  document.getElementById('composeSubject').addEventListener('input', renderTemplatePreview);
+  document.getElementById('composeTemplateStyle').addEventListener('change', renderTemplatePreview);
   document.querySelectorAll('[data-format-cmd]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.getElementById('composeEditor').focus();

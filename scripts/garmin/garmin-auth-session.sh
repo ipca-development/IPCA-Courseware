@@ -112,23 +112,41 @@ write_state() {
   local safe_error="${2:-}"
   local started_at="${STARTED_AT:-$(iso_now)}"
   local expires_at="${EXPIRES_AT:-$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")}"
+  local browser_status_json="${BROWSER_STATUS_JSON:-{}}"
   umask 077
-  cat > "$STATE_FILE" <<EOF
-{
-  "ok": true,
-  "status": "$status",
-  "browser_running": $(browser_running_json),
-  "started_at": "$started_at",
-  "expires_at": "$expires_at",
-  "vnc_host": "$VNC_HOST",
-  "vnc_port": $VNC_PORT,
-  "mac_ssh_command": "ssh -L 5905:127.0.0.1:5905 root@157.230.237.72",
-  "mac_vnc_url": "vnc://localhost:5905",
-  "vnc_password": "${VNC_PASSWORD:-}",
-  "credentials_stored": false,
-  "error": "$safe_error"
+  python3 - "$STATE_FILE" "$browser_status_json" "$status" "$started_at" "$expires_at" "$VNC_HOST" "$VNC_PORT" "${VNC_PASSWORD:-}" "$safe_error" <<'PY'
+import json, sys
+target, browser_json, status, started_at, expires_at, vnc_host, vnc_port, vnc_password, safe_error = sys.argv[1:10]
+try:
+    worker = json.loads(browser_json)
+except Exception:
+    worker = {}
+data = worker.get("data") if isinstance(worker.get("data"), dict) else worker
+payload = {
+    "ok": True,
+    "status": status,
+    "browser_state": data.get("browser_state"),
+    "authentication_state": data.get("authentication_state"),
+    "browser_running": bool(data.get("browser_running")),
+    "page_present": bool(data.get("page_present")),
+    "context_present": bool(data.get("context_present") or data.get("browser_context_present")),
+    "profile_present": bool(data.get("browser_profile_present")),
+    "display": data.get("display"),
+    "active_operation": data.get("active_operation"),
+    "started_at": started_at,
+    "expires_at": expires_at,
+    "vnc_host": vnc_host,
+    "vnc_port": int(vnc_port),
+    "mac_ssh_command": "ssh -L 5905:127.0.0.1:5905 root@157.230.237.72",
+    "mac_vnc_url": "vnc://localhost:5905",
+    "vnc_password": vnc_password,
+    "credentials_stored": False,
+    "error": safe_error,
 }
-EOF
+with open(target, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, indent=2)
+    fh.write("\n")
+PY
 }
 
 write_final_state() {
@@ -150,14 +168,6 @@ write_final_state() {
   "error": "$safe_error"
 }
 EOF
-}
-
-browser_running_json() {
-  if [[ -f "$RUNTIME_DIR/browser.pid" ]] && kill -0 "$(cat "$RUNTIME_DIR/browser.pid")" 2>/dev/null; then
-    printf 'true'
-  else
-    printf 'false'
-  fi
 }
 
 state_value() {
@@ -222,6 +232,22 @@ worker_request() {
     -d "{\"operation\":\"${operation}\"}"
 }
 
+worker_browser_status() {
+  worker_request "browser-status"
+}
+
+worker_browser_running() {
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    payload = json.loads(sys.argv[1])
+    data = payload.get("data", {})
+    print("1" if data.get("browser_running") else "0")
+except Exception:
+    print("0")
+PY
+}
+
 wait_worker_ready() {
   systemctl is-active --quiet "$WORKER_SERVICE" || fail "garmin_worker_not_active"
   for _ in $(seq 1 20); do
@@ -258,6 +284,16 @@ start_auth_session() {
   cleanup_processes
   preflight_browser_runtime
   wait_worker_ready
+  BROWSER_STATUS_JSON="$(worker_browser_status || true)"
+  if [[ "$(worker_browser_running "$BROWSER_STATUS_JSON")" != "1" ]]; then
+    worker_request "browser-recover" >/dev/null 2>&1 || true
+    for _ in $(seq 1 10); do
+      sleep 1
+      BROWSER_STATUS_JSON="$(worker_browser_status || true)"
+      [[ "$(worker_browser_running "$BROWSER_STATUS_JSON")" = "1" ]] && break
+    done
+  fi
+  [[ "$(worker_browser_running "$BROWSER_STATUS_JSON")" = "1" ]] || fail "garmin_worker_browser_not_running"
   STARTED_AT="$(iso_now)"
   EXPIRES_AT="$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")"
   VNC_PASSWORD="$(generate_vnc_password)"
@@ -280,9 +316,15 @@ start_auth_session() {
 
 status_session() {
   require_root
+  load_env
   ensure_runtime_dir
   if [[ ! -f "$STATE_FILE" ]]; then
-    printf '{"ok":true,"status":"idle","browser_running":false,"vnc_port":%s,"credentials_stored":false}\n' "$VNC_PORT"
+    BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
+    STARTED_AT=""
+    EXPIRES_AT=""
+    VNC_PASSWORD=""
+    write_state "idle"
+    cat "$STATE_FILE"
     exit 0
   fi
   local status
@@ -291,9 +333,15 @@ status_session() {
     STARTED_AT="$(state_value started_at)"
     EXPIRES_AT="$(state_value expires_at)"
     cleanup_processes
-    restart_worker
+    BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_final_state "expired"
   fi
+  status="$(state_value status)"
+  STARTED_AT="$(state_value started_at)"
+  EXPIRES_AT="$(state_value expires_at)"
+  VNC_PASSWORD="$(state_value vnc_password)"
+  BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
+  write_state "$status"
   cat "$STATE_FILE"
 }
 
@@ -309,7 +357,7 @@ verify_session() {
     STARTED_AT="$(state_value started_at)"
     EXPIRES_AT="$(state_value expires_at)"
     cleanup_processes
-    restart_worker
+    BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_final_state "expired"
     cat "$STATE_FILE"
     exit 0
@@ -335,11 +383,13 @@ PY
     sleep 1
   done
   if [[ "$ok" != "1" ]]; then
+    BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_state "failed" "verification_pending"
     printf '%s\n' "$worker_response"
     exit 0
   fi
   cleanup_processes
+  BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
   write_final_state "authenticated"
   python3 - "$STATE_FILE" "$worker_response" <<'PY'
 import json, sys
@@ -367,6 +417,8 @@ stop_session() {
   STARTED_AT="$(state_value started_at)"
   EXPIRES_AT="$(state_value expires_at)"
   cleanup_processes
+  load_env
+  BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
   write_final_state "cancelled"
   cat "$STATE_FILE"
 }

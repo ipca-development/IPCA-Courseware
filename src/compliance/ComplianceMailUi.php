@@ -90,6 +90,8 @@ final class ComplianceMailUi
         $waiting = self::workflowLabel($thread);
         $latestInbound = self::latestInboundId($emails);
         $linkCount = count($links);
+        $template = ComplianceCommsCenterEngine::getCurrentEmailTemplate($pdo);
+        $outboundTemplateHtml = is_array($template) ? (string)($template['html_template'] ?? '') : '';
         $complianceSummary = '<div class="mail-reader-compliance-strip">'
             . '<span class="mail-status-pill s-' . self::e($status) . '">' . self::e($waiting) . '</span>'
             . '<span class="mail-status-pill p-' . self::e($priority) . '">' . self::e(ucfirst($priority)) . ' priority</span>'
@@ -119,7 +121,7 @@ final class ComplianceMailUi
             foreach ($emails as $email) {
                 $attachments = ComplianceCommsCenterEngine::listAttachmentsForEmail($pdo, (int)$email['id']);
                 $events = ComplianceCommsCenterEngine::listEventsForEmail($pdo, (int)$email['id']);
-                $html .= self::messageCard($email, $attachments, $events);
+                $html .= self::messageCard($email, $attachments, $events, $outboundTemplateHtml);
             }
         }
         $html .= '</main>';
@@ -173,7 +175,7 @@ final class ComplianceMailUi
      * @param list<array<string,mixed>> $attachments
      * @param list<array<string,mixed>> $events
      */
-    public static function messageCard(array $email, array $attachments, array $events): string
+    public static function messageCard(array $email, array $attachments, array $events, string $outboundTemplateHtml = ''): string
     {
         $direction = (string)($email['direction'] ?? 'inbound');
         $tone = $direction === 'outbound' ? 'outgoing' : 'incoming';
@@ -185,6 +187,9 @@ final class ComplianceMailUi
         $bcc = self::addressLine((string)($email['bcc_json'] ?? ''));
         $subject = (string)($email['subject'] ?? '(no subject)');
         $status = (string)($email['status'] ?? '');
+        if ($direction === 'outbound' && trim((string)($email['html_body'] ?? '')) === '' && trim($outboundTemplateHtml) !== '') {
+            $email['html_body'] = self::outboundTemplateForDisplay($outboundTemplateHtml, $email);
+        }
         $body = ComplianceEmailHtmlRenderer::iframeForMessage($email, $attachments);
         $quote = self::collapsedQuote((string)($email['text_body'] ?? ''), (string)($email['stripped_text_reply'] ?? ''));
 
@@ -468,6 +473,35 @@ final class ComplianceMailUi
             $parts[] = 'Cc: ' . $cc;
         }
         return $parts !== array() ? implode('   ', $parts) : 'No visible recipients';
+    }
+
+    /**
+     * Older outbound rows may only have text_body because they were sent before
+     * the standard template was enforced in the mail workspace.
+     *
+     * @param array<string,mixed> $email
+     */
+    private static function outboundTemplateForDisplay(string $templateHtml, array $email): string
+    {
+        $subject = (string)($email['subject'] ?? 'Compliance email');
+        $text = trim((string)($email['text_body'] ?? ''));
+        $threadId = (int)($email['thread_id'] ?? 0);
+        $threadCode = $threadId > 0 ? 'CMP-THREAD-' . str_pad((string)$threadId, 6, '0', STR_PAD_LEFT) : 'CMP-THREAD';
+        $bodyHtml = $text !== '' ? nl2br(self::e($text)) : '<p>(empty message)</p>';
+        $replacements = array(
+            '{{EMAIL_TITLE}}' => self::e($subject),
+            '{{RECIPIENT_NAME}}' => 'Recipient',
+            '{{EMAIL_BODY_HTML}}' => $bodyHtml,
+            '{{EMAIL_BODY_TEXT}}' => $bodyHtml,
+            '{{COMPLIANCE_MONITORING_MANAGER_NAME}}' => '',
+            '{{COMPLIANCE_MONITORING_MANAGER_TITLE}}' => '',
+            '{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML}}' => '',
+            '{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT}}' => '',
+            '{{COMPLIANCE_THREAD_CODE}}' => self::e($threadCode),
+            '{{COMPLIANCE_OBJECT_SUMMARY_TEXT}}' => 'No linked compliance objects.',
+            '{{COMPLIANCE_OBJECT_PILLS_HTML}}' => '',
+        );
+        return strtr($templateHtml, $replacements);
     }
 
     /**
