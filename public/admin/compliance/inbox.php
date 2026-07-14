@@ -143,27 +143,33 @@ cw_header('Compliance Mail');
 ?>
 <style>
   .app-main,.app-content{overflow:hidden;}
-  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:14px;overflow:hidden;background:#fff;}
+  .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:8px;overflow:hidden;background:#fff;}
   .mail-page:fullscreen{height:100vh;padding:16px;background:#fff;}
   .mail-page.is-fullscreen{height:100vh;padding:16px;background:#fff;}
   .mail-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:linear-gradient(135deg,#0d1d34 0%,#1e3c72 58%,#27538f 100%);box-shadow:0 18px 42px rgba(15,23,42,.14);color:#fff;}
   .mail-top h1{margin:0;font-size:26px;letter-spacing:-.03em;color:#fff;}
   .mail-top p{margin:4px 0 0;color:rgba(255,255,255,.74);font-size:13px;}
-  .mail-toolbar{--mail-folder-width:220px;--mail-list-width:280px;display:grid;grid-template-columns:var(--mail-folder-width) var(--mail-list-width) minmax(0,1fr);align-items:center;gap:0;border:1px solid rgba(15,23,42,.07);border-radius:22px;background:rgba(248,250,252,.94);box-shadow:0 12px 30px rgba(15,23,42,.06);overflow:hidden;}
+  .mail-toolbar{--mail-folder-width:220px;--mail-list-width:280px;display:grid;grid-template-columns:var(--mail-folder-width) var(--mail-list-width) minmax(0,1fr);align-items:center;gap:0;border:1px solid rgba(15,23,42,.07);border-radius:18px;background:rgba(248,250,252,.96);box-shadow:0 10px 24px rgba(15,23,42,.05);overflow:visible;}
   .mail-toolbar.folders-collapsed{grid-template-columns:72px var(--mail-list-width) minmax(0,1fr);}
-  .mail-toolbar-left,.mail-toolbar-center,.mail-toolbar-actions{min-width:0;display:flex;align-items:center;gap:8px;padding:10px 12px;}
+  .mail-toolbar-left,.mail-toolbar-center,.mail-toolbar-actions{min-width:0;display:flex;align-items:center;gap:8px;padding:7px 10px;}
   .mail-toolbar-left{border-right:1px solid rgba(15,23,42,.06);}
   .mail-toolbar-center{border-right:1px solid rgba(15,23,42,.06);}
   .mail-toolbar-center .mail-toolbar-title{flex:1;min-width:0;}
-  .mail-toolbar-title strong{display:block;font-size:14px;line-height:1.1;color:#152235;}
+  .mail-toolbar-title strong{display:block;font-size:13px;line-height:1.1;color:#152235;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .mail-toolbar-title span{display:block;margin-top:2px;font-size:11px;line-height:1.15;color:#728198;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .mail-toolbar-actions{justify-content:flex-end;flex-wrap:wrap;}
-  .mail-toolbar-group{display:inline-flex;align-items:center;gap:4px;padding:3px;border-radius:999px;background:#fff;box-shadow:0 5px 16px rgba(15,23,42,.045);}
-  .mail-toolbar-btn,.mail-toolbar-link{width:34px;height:34px;border:0;border-radius:999px;background:#fff;color:#243247;display:inline-flex;align-items:center;justify-content:center;font-size:17px;font-weight:850;text-decoration:none;cursor:pointer;}
+  .mail-toolbar-actions{justify-content:flex-end;flex-wrap:nowrap;}
+  .mail-toolbar-group{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:#fff;box-shadow:0 5px 16px rgba(15,23,42,.045);}
+  .mail-toolbar-btn,.mail-toolbar-link{width:30px;height:30px;border:0;border-radius:999px;background:#fff;color:#243247;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:850;text-decoration:none;cursor:pointer;}
   .mail-toolbar-btn:hover,.mail-toolbar-link:hover{background:#eef4ff;color:#1e3c72;}
-  .mail-toolbar-select{height:32px;max-width:122px;border:0;border-radius:999px;background:#fff;color:#243247;padding:0 10px;font-size:11px;font-weight:760;}
+  .mail-toolbar-menu{position:relative;}
+  .mail-toolbar-menu summary{list-style:none;width:30px;height:30px;border-radius:999px;background:#fff;color:#243247;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:850;cursor:pointer;}
+  .mail-toolbar-menu summary::-webkit-details-marker{display:none;}
+  .mail-toolbar-popover{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:170px;display:grid;gap:8px;padding:10px;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:#fff;box-shadow:0 20px 48px rgba(15,23,42,.18);}
+  .mail-toolbar-popover label{display:grid;gap:5px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#728198;font-weight:850;}
+  .mail-toolbar-popover select{height:32px;border:1px solid rgba(15,23,42,.08);border-radius:10px;background:#fff;color:#243247;padding:0 9px;font-size:12px;font-weight:760;}
+  .mail-toolbar-popover button{height:32px;border:0;border-radius:10px;background:#1e3c72;color:#fff;font-size:12px;font-weight:850;cursor:pointer;}
   .mail-selected-count{font-size:11px;color:#728198;white-space:nowrap;padding:0 4px;}
-  .mail-toolbar-search{height:38px;min-width:220px;width:min(360px,32vw);border:0;border-radius:999px;background:#fff;color:#152235;padding:0 15px;font-size:13px;box-shadow:0 5px 16px rgba(15,23,42,.045);}
+  .mail-toolbar-search{height:34px;min-width:220px;width:min(360px,32vw);border:0;border-radius:999px;background:#fff;color:#152235;padding:0 15px;font-size:13px;box-shadow:0 5px 16px rgba(15,23,42,.045);}
   .mail-action{border:1px solid rgba(15,23,42,.08);border-radius:999px;background:#fff;color:#1e3c72;padding:9px 14px;font-size:13px;font-weight:760;text-decoration:none;cursor:pointer;}
   .mail-workspace{--mail-folder-width:220px;--mail-list-width:280px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);overflow:hidden;}
   .mail-workspace.folders-collapsed{grid-template-columns:28px var(--mail-list-width) 6px minmax(0,1fr);}
@@ -359,25 +365,48 @@ cw_header('Compliance Mail');
         <span id="mailToolbarMeta">Compliance Mail · <?= (int)$selectedMailboxCount ?> conversations</span>
       </div>
       <span class="mail-selected-count" id="mailBulkCount">0 selected</span>
-      <select class="mail-toolbar-select" name="bulk_status_value" aria-label="Bulk status">
-        <option value="open">open</option>
-        <option value="waiting_internal">waiting internal</option>
-        <option value="waiting_external">waiting external</option>
-        <option value="closed">closed</option>
-        <option value="archived">archived</option>
-      </select>
-      <button type="button" class="mail-toolbar-btn" data-bulk-status aria-label="Set status" title="Set status">✓</button>
-      <select class="mail-toolbar-select" name="bulk_priority_value" aria-label="Bulk priority">
-        <option value="low">low</option>
-        <option value="normal">normal</option>
-        <option value="high">high</option>
-        <option value="urgent">urgent</option>
-      </select>
-      <button type="button" class="mail-toolbar-btn" data-bulk-priority aria-label="Set priority" title="Set priority">⚑</button>
     </div>
     <div class="mail-toolbar-actions">
       <span class="mail-toolbar-group">
         <button type="button" class="mail-toolbar-btn" data-compose-new aria-label="New message" title="New message">✎</button>
+      </span>
+      <span class="mail-toolbar-group">
+        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply" title="Reply">↩</button>
+        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Reply all" title="Reply all">↞</button>
+        <button type="button" class="mail-toolbar-btn" data-toolbar-thread-compose aria-label="Forward" title="Forward">↪</button>
+      </span>
+      <span class="mail-toolbar-group">
+        <details class="mail-toolbar-menu">
+          <summary aria-label="Set status" title="Set status">✓</summary>
+          <div class="mail-toolbar-popover">
+            <label>Status
+              <select name="bulk_status_value" aria-label="Bulk status">
+                <option value="open">open</option>
+                <option value="waiting_internal">waiting internal</option>
+                <option value="waiting_external">waiting external</option>
+                <option value="closed">closed</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
+            <button type="button" data-bulk-status>Apply status</button>
+          </div>
+        </details>
+        <details class="mail-toolbar-menu">
+          <summary aria-label="Set priority" title="Set priority">⚑</summary>
+          <div class="mail-toolbar-popover">
+            <label>Priority
+              <select name="bulk_priority_value" aria-label="Bulk priority">
+                <option value="low">low</option>
+                <option value="normal">normal</option>
+                <option value="high">high</option>
+                <option value="urgent">urgent</option>
+              </select>
+            </label>
+            <button type="button" data-bulk-priority>Apply priority</button>
+          </div>
+        </details>
+      </span>
+      <span class="mail-toolbar-group">
         <a class="mail-toolbar-link" href="/admin/compliance/email_drafts.php" aria-label="Draft outbox" title="Draft outbox">▱</a>
         <button type="button" class="mail-toolbar-btn" data-compliance-modal-open="inboxIntegrationModal" aria-label="Settings" title="Settings">⋯</button>
         <button type="button" class="mail-toolbar-btn" data-fullscreen-toggle aria-label="Full screen" title="Full screen">⛶</button>
@@ -857,6 +886,9 @@ cw_header('Compliance Mail');
   document.addEventListener('fullscreenchange', updateFullscreenButton);
   document.querySelector('[data-compose-new]').addEventListener('click', function () { openComposer({thread_id: currentThreadId || 0}); });
   document.addEventListener('click', function (ev) {
+    if (ev.target.closest('[data-toolbar-thread-compose]')) {
+      openComposer({thread_id: currentThreadId || 0});
+    }
     var reply = ev.target.closest('[data-compose-reply]');
     if (reply) { openComposer({reply_to_email_id: reply.getAttribute('data-compose-reply')}); }
     var replyAll = ev.target.closest('[data-compose-reply-all]');
@@ -917,11 +949,11 @@ cw_header('Compliance Mail');
   });
   document.querySelector('[data-bulk-status]').addEventListener('click', function () {
     var ids = selectedIds(); if (ids.length === 0) { return; }
-    Promise.all(ids.map(function (id) { var fd = new FormData(); fd.append('thread_id', id); fd.append('status', document.querySelector('[name="bulk_status_value"]').value); return postForm('update_thread', fd); })).then(function () { loadList(currentFolder, search.value || ''); });
+    Promise.all(ids.map(function (id) { var fd = new FormData(); fd.append('thread_id', id); fd.append('status', document.querySelector('[name="bulk_status_value"]').value); return postForm('update_thread', fd); })).then(function () { document.querySelectorAll('.mail-toolbar-menu[open]').forEach(function (m) { m.removeAttribute('open'); }); loadList(currentFolder, search.value || ''); });
   });
   document.querySelector('[data-bulk-priority]').addEventListener('click', function () {
     var ids = selectedIds(); if (ids.length === 0) { return; }
-    Promise.all(ids.map(function (id) { var fd = new FormData(); fd.append('thread_id', id); fd.append('priority', document.querySelector('[name="bulk_priority_value"]').value); return postForm('update_thread', fd); })).then(function () { loadList(currentFolder, search.value || ''); });
+    Promise.all(ids.map(function (id) { var fd = new FormData(); fd.append('thread_id', id); fd.append('priority', document.querySelector('[name="bulk_priority_value"]').value); return postForm('update_thread', fd); })).then(function () { document.querySelectorAll('.mail-toolbar-menu[open]').forEach(function (m) { m.removeAttribute('open'); }); loadList(currentFolder, search.value || ''); });
   });
   document.getElementById('composeEditor').addEventListener('input', maybeAutosave);
   ['composeTo','composeSubject','composeCc','composeBcc'].forEach(function (id) {
