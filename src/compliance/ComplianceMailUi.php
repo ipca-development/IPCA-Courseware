@@ -99,6 +99,41 @@ final class ComplianceMailUi
     }
 
     /**
+     * @param list<array<string,mixed>> $emails
+     */
+    public static function threadMessageList(array $emails): string
+    {
+        if ($emails === array()) {
+            return '';
+        }
+
+        $html = '<div class="mail-thread-messages" aria-label="Messages in selected conversation">';
+        foreach (array_reverse($emails) as $email) {
+            $id = (int)($email['id'] ?? 0);
+            $from = (string)($email['from_name'] ?? '') !== '' ? (string)$email['from_name'] : (string)($email['from_email'] ?? '');
+            $when = (string)($email['received_at'] ?? $email['sent_at'] ?? $email['created_at'] ?? '');
+            $subject = trim((string)($email['subject'] ?? ''));
+            $preview = self::messagePreview($email);
+            $hasAttachments = !empty($email['attachment_count']) || !empty($email['has_attachments']);
+
+            $html .= '<button type="button" class="mail-thread-message-row" data-jump-email="' . $id . '">';
+            $html .= '<span class="mail-thread-message-dot"></span>';
+            $html .= '<span class="mail-thread-message-main">';
+            $html .= '<span class="mail-thread-message-line"><strong>' . self::e($from !== '' ? self::displayName($from) : 'Unknown sender') . '</strong><time>' . self::e(self::shortDate($when)) . '</time></span>';
+            if ($subject !== '') {
+                $html .= '<span class="mail-thread-message-subject">' . self::e($subject) . '</span>';
+            }
+            $html .= '<span class="mail-thread-message-preview">' . self::e($preview) . '</span>';
+            $html .= '</span>';
+            if ($hasAttachments) {
+                $html .= '<span class="mail-thread-message-attachment">Att</span>';
+            }
+            $html .= '</button>';
+        }
+        return $html . '</div>';
+    }
+
+    /**
      * @param array<string,mixed> $email
      * @param list<array<string,mixed>> $attachments
      * @param list<array<string,mixed>> $events
@@ -118,7 +153,7 @@ final class ComplianceMailUi
         $body = ComplianceEmailHtmlRenderer::iframeForMessage($email, $attachments);
         $quote = self::collapsedQuote((string)($email['text_body'] ?? ''), (string)($email['stripped_text_reply'] ?? ''));
 
-        $html = '<article class="mail-message-card is-' . self::e($tone) . '">';
+        $html = '<article class="mail-message-card is-' . self::e($tone) . '" id="mail-message-' . (int)$email['id'] . '" data-email-id="' . (int)$email['id'] . '">';
         $html .= '<div class="mail-message-accent"></div><div class="mail-message-content">';
         $html .= '<header class="mail-message-header">';
         $html .= '<div class="mail-avatar">' . self::e(self::initials($from !== '' ? $from : $fromEmail)) . '</div>';
@@ -331,6 +366,22 @@ final class ComplianceMailUi
             return $contact;
         }
         return ((int)($thread['message_count'] ?? 0)) . ' messages';
+    }
+
+    /**
+     * @param array<string,mixed> $email
+     */
+    private static function messagePreview(array $email): string
+    {
+        $text = trim((string)($email['stripped_text_reply'] ?? ''));
+        if ($text === '') {
+            $text = trim((string)($email['text_body'] ?? ''));
+        }
+        if ($text === '') {
+            $text = trim(strip_tags((string)($email['html_body'] ?? '')));
+        }
+        $text = (string)preg_replace('/\s+/', ' ', $text);
+        return $text !== '' ? $text : 'No preview available';
     }
 
     private static function displayName(string $emailOrName): string

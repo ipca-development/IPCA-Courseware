@@ -189,6 +189,19 @@ cw_header('Compliance Mail');
   .mail-chip,.mail-priority,.mail-icon-chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;background:#eef2f8;color:#526174;font-size:10px;line-height:1.2;font-weight:740;}
   .mail-priority.p-high,.mail-priority.p-urgent{background:#fff3df;color:#9a5a00;}
   .mail-icon-chip.muted{opacity:.7;}
+  .mail-thread-messages{grid-column:1/-1;margin:7px -8px -7px 24px;padding:3px 0 0;border-top:1px solid rgba(30,60,114,.12);}
+  .mail-thread-message-row{width:100%;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:7px;align-items:start;border:0;border-bottom:1px solid rgba(15,23,42,.09);background:rgba(255,255,255,.34);padding:7px 8px;text-align:left;color:#152235;cursor:pointer;}
+  .mail-thread-message-row:last-child{border-bottom:0;border-radius:0 0 11px 11px;}
+  .mail-thread-message-row:hover{background:rgba(255,255,255,.68);}
+  .mail-thread-message-dot{width:7px;height:7px;border-radius:999px;background:#1685f6;margin-top:5px;}
+  .mail-thread-message-main{min-width:0;display:grid;gap:2px;}
+  .mail-thread-message-line{display:flex;justify-content:space-between;gap:8px;min-width:0;}
+  .mail-thread-message-line strong{font-size:11px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mail-thread-message-line time{font-size:10.5px;color:#64748b;white-space:nowrap;}
+  .mail-thread-message-subject,.mail-thread-message-preview{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mail-thread-message-subject{font-size:10.5px;line-height:1.2;font-weight:720;color:#243247;}
+  .mail-thread-message-preview{font-size:10.5px;line-height:1.25;color:#728198;}
+  .mail-thread-message-attachment{align-self:center;color:#64748b;font-size:9px;font-weight:850;}
   .mail-reader-pane{position:relative;min-width:0;overflow:auto;overflow-x:hidden;background:#fff;}
   .mail-reader-placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:#728198;text-align:center;padding:40px;}
   .mail-reader-shell{position:relative;min-height:100%;overflow-x:hidden;background:#fff;}
@@ -242,6 +255,7 @@ cw_header('Compliance Mail');
   .mail-context-list dt{color:#728198;font-size:12px;}
   .mail-context-list dd{margin:0;text-align:right;font-weight:760;}
   .mail-message-card{position:relative;display:grid;grid-template-columns:4px minmax(0,1fr);margin-bottom:18px;border:1px solid rgba(15,23,42,.07);border-radius:18px;background:#fff;box-shadow:none;overflow:visible;max-width:100%;}
+  .mail-message-card.is-jump-target{box-shadow:0 0 0 3px rgba(22,133,246,.2);}
   .mail-message-accent{background:#2f80ed;}
   .mail-message-card.is-outgoing .mail-message-accent{background:#2f9e62;}
   .mail-message-content{padding:14px 16px;min-width:0;overflow-x:hidden;background:#fff;border-radius:0 18px 18px 0;}
@@ -587,6 +601,22 @@ cw_header('Compliance Mail');
     btn.textContent = document.fullscreenElement ? 'Exit Full Screen' : 'Full Screen';
     document.querySelector('.mail-page').classList.toggle('is-fullscreen', !!document.fullscreenElement);
   }
+  function showThreadMessages(threadId, html) {
+    list.querySelectorAll('.mail-thread-messages').forEach(function (existing) {
+      existing.remove();
+    });
+    if (!html) { return; }
+    var selected = list.querySelector('.mail-thread-card[data-thread-id="' + threadId + '"]');
+    if (!selected) { return; }
+    selected.insertAdjacentHTML('beforeend', html);
+  }
+  function jumpToMessage(emailId) {
+    var target = reader.querySelector('[data-email-id="' + emailId + '"]');
+    if (!target) { return; }
+    target.scrollIntoView({behavior: 'smooth', block: 'start'});
+    target.classList.add('is-jump-target');
+    window.setTimeout(function () { target.classList.remove('is-jump-target'); }, 1400);
+  }
   function loadThread(id) {
     if (!id) { return; }
     currentThreadId = id;
@@ -599,6 +629,7 @@ cw_header('Compliance Mail');
         list.querySelectorAll('.mail-thread-card').forEach(function (card) {
           card.classList.toggle('is-selected', parseInt(card.getAttribute('data-thread-id') || '0', 10) === id);
         });
+        showThreadMessages(id, json.message_list_html || '');
         workspace.classList.add('reader-open');
         applyLayout();
       })
@@ -688,6 +719,12 @@ cw_header('Compliance Mail');
   list.addEventListener('click', function (ev) {
     var checkbox = ev.target.closest('.mail-thread-select input');
     if (checkbox) { ev.stopPropagation(); updateBulkCount(); return; }
+    var messageRow = ev.target.closest('[data-jump-email]');
+    if (messageRow) {
+      ev.stopPropagation();
+      jumpToMessage(messageRow.getAttribute('data-jump-email'));
+      return;
+    }
     var card = ev.target.closest('.mail-thread-card');
     if (!card) { return; }
     var id = parseInt(card.getAttribute('data-thread-id') || '0', 10);
@@ -695,6 +732,7 @@ cw_header('Compliance Mail');
   });
   list.addEventListener('keydown', function (ev) {
     if (ev.key !== 'Enter' && ev.key !== ' ') { return; }
+    if (ev.target.closest('[data-jump-email]')) { return; }
     var card = ev.target.closest('.mail-thread-card');
     if (!card) { return; }
     ev.preventDefault();

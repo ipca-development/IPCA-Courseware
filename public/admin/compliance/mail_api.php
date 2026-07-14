@@ -99,6 +99,7 @@ try {
             'thread_id' => $threadId,
             'title' => (string)($thread['subject_normalized'] ?? '(no subject)'),
             'html' => ComplianceMailUi::threadWorkspace($pdo, $thread, $emails, $links, $pickerGroups),
+            'message_list_html' => ComplianceMailUi::threadMessageList($emails),
         ));
     }
 
