@@ -108,9 +108,9 @@ final class ComplianceMailUi
         }
 
         $count = count($emails);
-        $html = '<div class="mail-thread-messages" aria-label="Messages in selected conversation">';
-        $html .= '<button type="button" class="mail-thread-string-toggle" data-thread-string-toggle aria-expanded="true">';
-        $html .= '<span>' . $count . ' email' . ($count === 1 ? '' : 's') . '</span><strong>Collapse</strong>';
+        $html = '<div class="mail-thread-messages is-collapsed" aria-label="Messages in selected conversation">';
+        $html .= '<span class="mail-thread-string-count">' . $count . '</span>';
+        $html .= '<button type="button" class="mail-thread-string-toggle" data-thread-string-toggle aria-expanded="false" aria-label="Expand email string" title="Expand email string">';
         $html .= '</button>';
         foreach (array_reverse($emails) as $email) {
             $id = (int)($email['id'] ?? 0);
