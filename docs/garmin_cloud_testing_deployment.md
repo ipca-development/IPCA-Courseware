@@ -46,6 +46,7 @@ env[GARMIN_WORKER_MODE] = server_worker
 env[GARMIN_WORKER_URL] = http://127.0.0.1:8791
 env[GARMIN_WORKER_PORT] = 8791
 env[GARMIN_WORKER_HOST] = 127.0.0.1
+env[GARMIN_WORKER_DISPLAY] = :95
 env[GARMIN_BROWSER_PROFILE_DIR] = /var/lib/ipca/garmin/browser-profile
 env[GARMIN_PRIVATE_DOWNLOAD_DIR] = /var/lib/ipca/garmin/downloads
 env[PLAYWRIGHT_BROWSERS_PATH] = /var/lib/ipca/garmin/playwright-browsers
@@ -130,11 +131,30 @@ Repeat those ownership and mode commands after each code deployment if the deplo
 Create the systemd service:
 
 ```shell
+sudo tee /etc/systemd/system/garmin-display.service >/dev/null <<'EOF'
+[Unit]
+Description=IPCA Garmin Virtual Display
+After=network-online.target
+
+[Service]
+Type=simple
+User=ipca-garmin
+Group=ipca-garmin
+ExecStart=/usr/bin/Xvfb :95 -screen 0 1280x900x24 -nolisten tcp
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo tee /etc/systemd/system/garmin-worker.service >/dev/null <<EOF
 [Unit]
 Description=IPCA Garmin Worker
-After=network-online.target
+After=network-online.target garmin-display.service
 Wants=network-online.target
+Requires=garmin-display.service
 
 [Service]
 Type=simple
@@ -145,6 +165,7 @@ Environment=PHP_FPM_POOL=$PHP_FPM_POOL
 ExecStart=$APP_ROOT/scripts/garmin/start-garmin-worker.sh
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=30
 NoNewPrivileges=true
 PrivateTmp=true
 
@@ -159,8 +180,11 @@ Restart services:
 sudo systemctl daemon-reload
 sudo systemctl restart "$PHP_FPM_SERVICE"
 sudo systemctl reload "$WEB_SERVICE"
+sudo systemctl enable garmin-display
+sudo systemctl restart garmin-display
 sudo systemctl enable garmin-worker
 sudo systemctl restart garmin-worker
+sudo systemctl status garmin-display --no-pager
 sudo systemctl status garmin-worker --no-pager
 ```
 
@@ -214,23 +238,26 @@ Open `/admin/garmin_env_probe.php` as an admin, confirm values are visible and t
 sudo rm "$APP_ROOT/public/admin/garmin_env_probe.php"
 ```
 
-Initial authentication happens on the same Droplet and writes the browser profile to `/var/lib/ipca/garmin/browser-profile`. Use SSH X11 forwarding or temporary VNC through an SSH tunnel only:
+The Garmin worker owns the only Chromium process using `/var/lib/ipca/garmin/browser-profile`. It runs headed on the permanent Xvfb display `:95`; x11vnc only exposes that already-running browser temporarily through an SSH tunnel.
+
+If Xvfb leaves a stale lock after a crash, stop `garmin-display`, remove only stale `/tmp/.X95-lock` and `/tmp/.X11-unix/X95` after confirming no Xvfb process is running, then restart `garmin-display`.
+
+Initial authentication happens on the same Droplet using the existing worker browser. Use temporary VNC through an SSH tunnel only:
 
 ```shell
-sudo systemctl stop garmin-worker
-sudo -u ipca-garmin -H env PHP_FPM_POOL="$PHP_FPM_POOL" "$APP_ROOT/scripts/garmin/start-garmin-worker.sh" login
+sudo -u www-data sudo -n /var/www/ipca/scripts/garmin/garmin-auth-session.sh start
 ```
 
-Verify the profile in a fresh headless process without printing secrets:
+Verify through the worker without printing secrets:
 
 ```shell
-sudo -u ipca-garmin -H env PHP_FPM_POOL="$PHP_FPM_POOL" "$APP_ROOT/scripts/garmin/start-garmin-worker.sh" status
+sudo -u www-data sudo -n /var/www/ipca/scripts/garmin/garmin-auth-session.sh verify
 ```
 
-After login, stop the temporary display service and leave only the headless worker running:
+After login, stop only the temporary VNC session and leave the worker browser running:
 
 ```shell
-sudo systemctl restart garmin-worker
+sudo -u www-data sudo -n /var/www/ipca/scripts/garmin/garmin-auth-session.sh stop
 ```
 
 Open `/admin/flight_log_garmin_connection.php` and run:
@@ -250,7 +277,7 @@ The Garmin Connection page can start a temporary headed Chromium session on the 
 - Xvfb display `:95`
 - x11vnc bound to `127.0.0.1:5905`
 - openbox as a minimal window manager
-- Playwright Chromium using `/var/lib/ipca/garmin/browser-profile`
+- the already-running Garmin worker Chromium using `/var/lib/ipca/garmin/browser-profile`
 - runtime files under `/run/ipca/garmin-auth/`
 
 Runtime directory permissions:
@@ -392,7 +419,7 @@ sudo systemctl status garmin-worker --no-pager
 
 10. Run `Test Connection`, then `Initial Synchronization`.
 
-Cancellation and expiration must terminate Chromium, x11vnc, openbox, Xvfb, remove temporary runtime files, preserve the Garmin browser profile, and restart `garmin-worker`.
+Cancellation and expiration must stop x11vnc, stop helper-started openbox, remove temporary runtime files, preserve the Garmin browser profile, and leave `garmin-worker` and Chromium running.
 
 ## Same-Flight Multi-Log Acceptance
 

@@ -62,8 +62,11 @@ final class ComplianceEmailHtmlRenderer
 
         $doc = new DOMDocument();
         $prev = libxml_use_internal_errors(true);
-        $wrapped = '<?xml encoding="utf-8" ?><div id="mail-root">' . $html . '</div>';
-        $loaded = $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        $isFullDocument = stripos($html, '<html') !== false || stripos($html, '<body') !== false;
+        $source = $isFullDocument
+            ? '<?xml encoding="utf-8" ?>' . $html
+            : '<?xml encoding="utf-8" ?><div id="mail-root">' . $html . '</div>';
+        $loaded = $doc->loadHTML($source, $isFullDocument ? 0 : (LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD));
         libxml_clear_errors();
         libxml_use_internal_errors($prev);
         if (!$loaded) {
@@ -71,17 +74,44 @@ final class ComplianceEmailHtmlRenderer
         }
 
         $cidMap = self::cidUrlMap($attachments);
-        $root = $doc->getElementById('mail-root');
+        $root = $isFullDocument ? self::documentBody($doc) : $doc->getElementById('mail-root');
         if ($root === null) {
             return '';
         }
+        $headStyles = $isFullDocument ? self::sanitizedHeadStyles($doc) : '';
         self::sanitizeNode($root, $cidMap);
 
-        $out = '';
+        $out = $headStyles;
         foreach ($root->childNodes as $child) {
             $out .= $doc->saveHTML($child);
         }
         return trim($out);
+    }
+
+    private static function documentBody(DOMDocument $doc): ?DOMElement
+    {
+        $bodies = $doc->getElementsByTagName('body');
+        if ($bodies->length > 0) {
+            $body = $bodies->item(0);
+            return $body instanceof DOMElement ? $body : null;
+        }
+        $html = $doc->documentElement;
+        return $html instanceof DOMElement ? $html : null;
+    }
+
+    private static function sanitizedHeadStyles(DOMDocument $doc): string
+    {
+        $out = '';
+        foreach ($doc->getElementsByTagName('style') as $style) {
+            $css = (string)$style->textContent;
+            $css = (string)preg_replace('#@import[^;]+;#i', '', $css);
+            $css = (string)preg_replace('#expression\s*\([^)]*\)#i', '', $css);
+            $css = (string)preg_replace('#url\s*\(\s*[\'"]?\s*(?!https?:|data:image/|/|#)[^)]+\)#i', '', $css);
+            if (trim($css) !== '') {
+                $out .= '<style>' . $css . '</style>';
+            }
+        }
+        return $out;
     }
 
     /**

@@ -49,6 +49,35 @@ return [
                 ],
             ],
             [
+                'key' => 'written_test_preparation',
+                'label' => 'Written Test Preparation',
+                'icon' => 'training',
+                'href' => '/student/written_test.php',
+                'match_paths' => [
+                    '/student/written_test.php',
+                ],
+                'visible' => static function (): bool {
+                    global $pdo;
+                    if (!isset($pdo) || !($pdo instanceof PDO) || !function_exists('cw_current_user')) {
+                        return false;
+                    }
+                    $path = __DIR__ . '/../written_test/bootstrap.php';
+                    if (is_file($path)) {
+                        require_once $path;
+                    }
+                    if (!function_exists('written_test_student_has_any_allocation')) {
+                        return false;
+                    }
+                    try {
+                        $u = cw_current_user($pdo);
+                        $studentId = function_exists('cw_student_view_user_id') ? cw_student_view_user_id($pdo, $u) : (int)($u['id'] ?? 0);
+                        return written_test_student_has_any_allocation($pdo, $studentId);
+                    } catch (Throwable) {
+                        return false;
+                    }
+                },
+            ],
+            [
                 'key' => 'mock_oral',
                 'label' => 'Mock Oral Prep',
                 'icon' => 'training',

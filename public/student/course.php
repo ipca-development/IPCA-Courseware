@@ -3,6 +3,7 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 require_once __DIR__ . '/../../src/progress_test_prep.php';
+require_once __DIR__ . '/../../src/written_test/bootstrap.php';
 
 $progression = new CoursewareProgressionV2($pdo);
 
@@ -1194,6 +1195,20 @@ foreach ($allLessonsFlat as $lx) {
 $immediateAttention = array_slice($immediateAttention, 0, 6);
 $recommendedLessonId = $nextBestStep ? (int)$nextBestStep['lesson_id'] : 0;
 
+$writtenTestCourseStates = [];
+try {
+    $writtenTestAllocationSvc = new WrittenTestAllocationService($pdo);
+    $writtenTestAccessSvc = new WrittenTestAccessService($pdo);
+    foreach ($writtenTestAllocationSvc->allocationsForStudent($userId) as $wtAllocation) {
+        if ((int)($wtAllocation['cohort_id'] ?? 0) !== $cohortId) {
+            continue;
+        }
+        $writtenTestCourseStates[] = $writtenTestAccessSvc->evaluate($userId, (int)$wtAllocation['id']);
+    }
+} catch (Throwable $e) {
+    $writtenTestCourseStates = [];
+}
+
 $momentumMessage = '';
 if ($totalCompletedLessons > 0) {
     $momentumMessage = ($totalCompletedLessons >= 5)
@@ -1261,6 +1276,14 @@ cw_header('Course');
   .ai-placeholder{padding:20px 22px;border:1px solid rgba(15,23,42,0.06);border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,0.055)}
   .ai-title{margin:0;font-size:20px;font-weight:800;color:#152235;line-height:1.15}
   .ai-text{margin-top:10px;font-size:14px;color:#56677f;line-height:1.6}
+  .wt-course-card{padding:20px 22px;border:1px solid rgba(15,23,42,.06);border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.055)}
+  .wt-course-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+  .wt-course-title{margin:0;font-size:21px;font-weight:900;color:#152235;letter-spacing:-.02em}
+  .wt-course-copy{margin-top:7px;font-size:14px;color:#56677f;line-height:1.5}
+  .wt-course-pill{display:inline-flex;align-items:center;padding:7px 10px;border-radius:999px;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+  .wt-course-pill.unlocked{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}
+  .wt-course-pill.locked,.wt-course-pill.policy_required,.wt-course-pill.manual_denial{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
+  .wt-course-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
 
   .modules-stack{display:flex;flex-direction:column;gap:12px}
 
@@ -1729,6 +1752,40 @@ cw_header('Course');
 
  
   </div>
+
+  <?php if ($writtenTestCourseStates): ?>
+    <?php foreach ($writtenTestCourseStates as $wtState): ?>
+      <?php
+        $wtAllocation = is_array($wtState['allocation'] ?? null) ? $wtState['allocation'] : [];
+        $wtLockReasons = is_array($wtState['lock_reasons'] ?? null) ? $wtState['lock_reasons'] : [];
+        $wtFirstReason = $wtLockReasons[0]['message'] ?? '';
+        $wtStateCode = (string)($wtState['state_code'] ?? 'locked');
+        $wtPillClass = in_array($wtStateCode, ['unlocked','locked','policy_required','manual_denial'], true) ? $wtStateCode : 'locked';
+        $wtHref = '/student/written_test.php?allocation_id=' . (int)($wtAllocation['id'] ?? 0) . $adminStudentPreviewQS;
+      ?>
+      <section class="wt-course-card">
+        <div class="wt-course-head">
+          <div>
+            <div class="hero-eyebrow">Ground School Training</div>
+            <h2 class="wt-course-title">Written Test Preparation</h2>
+            <div class="wt-course-copy">
+              <?= h((string)($wtAllocation['written_test_program_name'] ?? 'Written Test Preparation')) ?>
+              is separate from your lesson sequence and opens only after the cohort policy requirements are met.
+            </div>
+            <?php if ($wtFirstReason !== ''): ?>
+              <div class="wt-course-copy"><strong>Next requirement:</strong> <?= h((string)$wtFirstReason) ?></div>
+            <?php elseif (!empty($wtState['access_granted'])): ?>
+              <div class="wt-course-copy"><strong>Status:</strong> Phase 1 access requirements are met. Question delivery is coming in a later phase.</div>
+            <?php endif; ?>
+          </div>
+          <span class="wt-course-pill <?= h($wtPillClass) ?>"><?= h((string)($wtState['state_label'] ?? 'Locked')) ?></span>
+        </div>
+        <div class="wt-course-actions">
+          <a class="hero-btn primary" href="<?= h($wtHref) ?>">View Written Test Preparation</a>
+        </div>
+      </section>
+    <?php endforeach; ?>
+  <?php endif; ?>
 
   <div class="card section-card">
     <div class="section-head">

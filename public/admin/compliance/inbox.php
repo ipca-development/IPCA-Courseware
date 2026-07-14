@@ -141,13 +141,21 @@ cw_header('Compliance Mail');
 <style>
   .app-main,.app-content{overflow:hidden;}
   .mail-page{height:calc(100vh - 132px);min-height:0;display:flex;flex-direction:column;gap:14px;overflow:hidden;}
-  .mail-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;border:1px solid rgba(15,23,42,.06);border-radius:24px;background:rgba(255,255,255,.86);box-shadow:0 18px 42px rgba(15,23,42,.06);backdrop-filter:blur(14px);}
-  .mail-top h1{margin:0;font-size:26px;letter-spacing:-.03em;color:#152235;}
-  .mail-top p{margin:4px 0 0;color:#728198;font-size:13px;}
+  .mail-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:linear-gradient(135deg,#0d1d34 0%,#1e3c72 58%,#27538f 100%);box-shadow:0 18px 42px rgba(15,23,42,.14);color:#fff;}
+  .mail-top h1{margin:0;font-size:26px;letter-spacing:-.03em;color:#fff;}
+  .mail-top p{margin:4px 0 0;color:rgba(255,255,255,.74);font-size:13px;}
   .mail-top-actions{display:flex;gap:10px;flex-wrap:wrap;}
-  .mail-action,.mail-top-actions button,.mail-top-actions a{border:1px solid rgba(15,23,42,.09);border-radius:999px;background:#fff;color:#152235;padding:9px 14px;font-size:13px;font-weight:760;text-decoration:none;cursor:pointer;}
-  .mail-action.primary,.mail-top-actions .primary{background:#1e3c72;color:#fff;border-color:#1e3c72;}
-  .mail-workspace{--mail-folder-width:220px;--mail-list-width:360px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);overflow:hidden;}
+  .mail-action,.mail-top-actions button,.mail-top-actions a{border:1px solid rgba(255,255,255,.24);border-radius:999px;background:rgba(255,255,255,.12);color:#fff;padding:9px 14px;font-size:13px;font-weight:760;text-decoration:none;cursor:pointer;}
+  .mail-action.primary,.mail-top-actions .primary{background:#fff;color:#1e3c72;border-color:#fff;}
+  .mail-workspace{--mail-folder-width:220px;--mail-list-width:280px;--mail-compliance-width:340px;flex:1;min-height:0;display:grid;grid-template-columns:var(--mail-folder-width) 6px var(--mail-list-width) 6px minmax(0,1fr);gap:0;border:1px solid rgba(15,23,42,.07);border-radius:28px;background:#fff;box-shadow:0 22px 54px rgba(15,23,42,.075);overflow:hidden;}
+  .mail-workspace.folders-collapsed{grid-template-columns:28px var(--mail-list-width) 6px minmax(0,1fr);}
+  .mail-workspace.folders-collapsed .mail-folders{display:none;}
+  .mail-workspace.folders-collapsed .mail-resizer[data-resizer="folders"]{grid-column:1;cursor:pointer;background:#f0f4fb;}
+  .mail-workspace.folders-collapsed .mail-resizer[data-resizer="folders"]::before{content:"›";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18px;height:34px;border-radius:999px;background:#fff;border:1px solid rgba(15,23,42,.08);color:#1e3c72;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;box-shadow:0 8px 20px rgba(15,23,42,.08);}
+  .mail-workspace.folders-collapsed .mail-resizer[data-resizer="folders"]::after{display:none;}
+  .mail-workspace.folders-collapsed .mail-list-pane{grid-column:2;}
+  .mail-workspace.folders-collapsed .mail-resizer[data-resizer="list"]{grid-column:3;}
+  .mail-workspace.folders-collapsed .mail-reader-pane{grid-column:4;}
   .mail-resizer{position:relative;background:rgba(15,23,42,.04);cursor:col-resize;z-index:8;touch-action:none;}
   .mail-resizer::after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:rgba(30,60,114,.08);transition:background .12s ease,width .12s ease,left .12s ease;}
   .mail-resizer:hover::after,.mail-resizer.is-dragging::after{left:1px;width:4px;background:rgba(30,60,114,.35);}
@@ -159,11 +167,11 @@ cw_header('Compliance Mail');
   .mail-list-pane{display:flex;flex-direction:column;min-width:0;border-right:1px solid rgba(15,23,42,.06);background:#fbfcfe;}
   .mail-search{padding:10px 12px;border-bottom:1px solid rgba(15,23,42,.06);}
   .mail-search input{width:100%;border:1px solid rgba(15,23,42,.08);border-radius:14px;background:#fff;padding:9px 12px;font-size:13px;}
-  .mail-bulk{display:flex;gap:6px;align-items:center;padding:0 12px 8px;color:#728198;font-size:11px;}
+  .mail-bulk{display:flex;gap:5px;align-items:center;padding:0 10px 8px;color:#728198;font-size:10px;}
   .mail-bulk select{height:30px;border-radius:9px;border:1px solid rgba(15,23,42,.08);background:#fff;font-size:11px;}
-  .mail-bulk button{height:30px;border:0;border-radius:9px;background:#1e3c72;color:#fff;font-weight:760;padding:0 9px;font-size:11px;}
+  .mail-bulk button{height:30px;border:0;border-radius:9px;background:#1e3c72;color:#fff;font-weight:760;padding:0 8px;font-size:10px;}
   .mail-thread-list{overflow:auto;min-height:0;padding:4px 6px;}
-  .mail-thread-card{position:relative;width:100%;display:grid;grid-template-columns:20px 10px minmax(0,1fr);gap:7px;border:0;border-radius:12px;background:transparent;padding:8px 9px;text-align:left;cursor:pointer;color:#152235;transition:background .15s ease,box-shadow .15s ease,transform .15s ease;}
+  .mail-thread-card{position:relative;width:100%;display:grid;grid-template-columns:18px 8px minmax(0,1fr);gap:6px;border:0;border-radius:11px;background:transparent;padding:7px 8px;text-align:left;cursor:pointer;color:#152235;transition:background .15s ease,box-shadow .15s ease,transform .15s ease;}
   .mail-thread-card:hover{background:#f0f4fb;}
   .mail-thread-card.is-selected{background:#eaf1fb;box-shadow:inset 0 0 0 1px rgba(30,60,114,.12);}
   .mail-thread-select input{margin-top:2px;width:13px;height:13px;}
@@ -172,9 +180,9 @@ cw_header('Compliance Mail');
   .mail-thread-main{min-width:0;display:flex;flex-direction:column;gap:2px;}
   .mail-thread-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .mail-thread-sender,.mail-thread-subject,.mail-thread-preview{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .mail-thread-sender{font-size:13px;line-height:1.2;font-weight:780;}
+  .mail-thread-sender{font-size:11px;line-height:1.2;font-weight:760;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#243247;}
   .mail-thread-time{font-size:11px;line-height:1.2;color:#728198;flex:0 0 auto;}
-  .mail-thread-subject{font-size:12px;line-height:1.25;font-weight:700;}
+  .mail-thread-subject{font-size:11px;line-height:1.25;font-weight:700;}
   .mail-thread-preview{font-size:11.5px;line-height:1.25;color:#728198;}
   .mail-thread-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
   .mail-chip,.mail-priority,.mail-icon-chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;background:#eef2f8;color:#526174;font-size:10px;line-height:1.2;font-weight:740;}
@@ -183,13 +191,19 @@ cw_header('Compliance Mail');
   .mail-reader-pane{position:relative;min-width:0;overflow:auto;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);}
   .mail-reader-placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:#728198;text-align:center;padding:40px;}
   .mail-reader-shell{position:relative;min-height:100%;}
-  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;padding:20px 24px;background:rgba(255,255,255,.92);border-bottom:1px solid rgba(15,23,42,.06);backdrop-filter:blur(18px);}
-  .mail-reader-header h2{margin:4px 0;font-size:25px;letter-spacing:-.03em;}
-  .mail-reader-header p{margin:0;color:#728198;font-size:13px;}
-  .mail-reader-kicker{color:#1e3c72;text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:800;}
+  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 16px;background:rgba(255,255,255,.94);border-bottom:1px solid rgba(15,23,42,.06);backdrop-filter:blur(18px);}
+  .mail-reader-header h2{margin:4px 0 3px;font-size:13px;line-height:1.25;letter-spacing:-.01em;font-weight:760;}
+  .mail-reader-header p{margin:0;color:#728198;font-size:10.5px;line-height:1.25;}
+  .mail-reader-kicker{color:#1e3c72;text-transform:uppercase;letter-spacing:.08em;font-size:9px;font-weight:800;}
+  .mail-status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 7px;background:#eef2ff;color:#1e3c72;border:1px solid rgba(30,60,114,.12);font-size:9px;line-height:1;font-weight:850;}
+  .mail-status-pill.s-waiting_external{background:#eef2ff;color:#3730a3;}
+  .mail-status-pill.s-waiting_internal{background:#fff7ed;color:#9a5a00;}
+  .mail-status-pill.s-open{background:#eff6ff;color:#1d4ed8;}
+  .mail-status-pill.s-closed{background:#ecfdf5;color:#047857;}
+  .mail-status-pill.s-archived{background:#f1f5f9;color:#475569;}
   .mail-reader-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
   .mail-reader-grid{display:block;min-height:0;}
-  .mail-timeline{padding:22px;max-width:1120px;width:min(100%,1120px);margin:0 auto;}
+  .mail-timeline{padding:16px 18px;max-width:1120px;width:min(100%,1120px);margin:0 auto;}
   .mail-reader-shell.sidebar-open .mail-timeline{padding-right:calc(var(--mail-compliance-width) + 36px);}
   .mail-compliance-sidebar{position:absolute;right:0;top:0;bottom:0;width:var(--mail-compliance-width);max-width:450px;min-width:220px;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(15,23,42,.06);background:#fbfcfe;box-shadow:-22px 0 60px rgba(15,23,42,.14);transform:translateX(105%);transition:transform .18s ease;z-index:30;}
   .mail-reader-shell.sidebar-open .mail-compliance-sidebar{transform:translateX(0);}
@@ -445,16 +459,17 @@ cw_header('Compliance Mail');
     return Math.max(min, Math.min(max, n));
   }
   function loadLayout() {
-    var fallback = {folderWidth: 220, listWidth: 360, complianceWidth: 340, complianceOpen: false};
+    var fallback = {folderWidth: 220, listWidth: 280, complianceWidth: 340, complianceOpen: false, foldersCollapsed: false};
     try {
       var raw = localStorage.getItem(layoutKey);
       if (!raw) { return fallback; }
       var parsed = JSON.parse(raw);
       return {
         folderWidth: clamp(parseInt(parsed.folderWidth || fallback.folderWidth, 10), 180, 300),
-        listWidth: clamp(parseInt(parsed.listWidth || fallback.listWidth, 10), 250, 600),
+        listWidth: clamp(parseInt(parsed.listWidth || fallback.listWidth, 10), 230, 360),
         complianceWidth: clamp(parseInt(parsed.complianceWidth || fallback.complianceWidth, 10), 0, 450),
-        complianceOpen: parsed.complianceOpen === true
+        complianceOpen: parsed.complianceOpen === true,
+        foldersCollapsed: parsed.foldersCollapsed === true
       };
     } catch (e) {
       return fallback;
@@ -465,8 +480,13 @@ cw_header('Compliance Mail');
   }
   function applyLayout() {
     workspace.style.setProperty('--mail-folder-width', clamp(layout.folderWidth, 180, 300) + 'px');
-    workspace.style.setProperty('--mail-list-width', clamp(layout.listWidth, 250, 600) + 'px');
+    workspace.style.setProperty('--mail-list-width', clamp(layout.listWidth, 230, 360) + 'px');
     workspace.style.setProperty('--mail-compliance-width', clamp(layout.complianceWidth, 0, 450) + 'px');
+    workspace.classList.toggle('folders-collapsed', layout.foldersCollapsed === true);
+    var folderToggle = document.querySelector('[data-folder-toggle]');
+    if (folderToggle) {
+      folderToggle.textContent = layout.foldersCollapsed ? 'Show folders' : 'Hide folders';
+    }
     applySidebarState();
   }
   function applySidebarState() {
@@ -493,7 +513,7 @@ cw_header('Compliance Mail');
       if (kind === 'folders') {
         layout.folderWidth = clamp(startFolder + dx, 180, 300);
       } else {
-        layout.listWidth = clamp(startList + dx, 250, 600);
+        layout.listWidth = clamp(startList + dx, 230, 360);
       }
       applyLayout();
     }
@@ -577,6 +597,12 @@ cw_header('Compliance Mail');
   }
   document.querySelectorAll('.mail-resizer').forEach(function (resizer) {
     resizer.addEventListener('pointerdown', function (ev) {
+      if (resizer.getAttribute('data-resizer') === 'folders' && layout.foldersCollapsed) {
+        layout.foldersCollapsed = false;
+        applyLayout();
+        saveLayout();
+        return;
+      }
       startResize(resizer.getAttribute('data-resizer') || '', ev);
     });
   });
@@ -665,7 +691,9 @@ cw_header('Compliance Mail');
     searchTimer = window.setTimeout(function () { loadList(currentFolder, search.value || ''); }, 350);
   });
   document.querySelector('[data-folder-toggle]').addEventListener('click', function () {
-    workspace.classList.toggle('folders-open');
+    layout.foldersCollapsed = !layout.foldersCollapsed;
+    applyLayout();
+    saveLayout();
   });
   document.querySelector('[data-compose-new]').addEventListener('click', function () { openComposer({thread_id: currentThreadId || 0}); });
   document.addEventListener('click', function (ev) {

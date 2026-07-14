@@ -75,6 +75,15 @@ return [
                 'icon' => 'enrich',
                 'href' => '/admin/lesson_summary_blueprints.php',
             ],
+            [
+                'key' => 'written_test_preparation',
+                'label' => 'Written Test Preparation',
+                'icon' => 'training',
+                'href' => '/admin/written_test.php',
+                'match_paths' => [
+                    '/admin/written_test.php',
+                ],
+            ],
         ],
     ],
     [

@@ -10,8 +10,6 @@ SERVICE_USER="ipca-garmin"
 WORKER_SERVICE="garmin-worker"
 RUNTIME_DIR="/run/ipca/garmin-auth"
 STATE_FILE="$RUNTIME_DIR/session.json"
-COMMAND_FILE="$RUNTIME_DIR/command.json"
-RESULT_FILE="$RUNTIME_DIR/verify-result.json"
 LOCK_FILE="$RUNTIME_DIR/profile.lock"
 DISPLAY_ID=":95"
 VNC_HOST="127.0.0.1"
@@ -41,7 +39,7 @@ extract_env() {
   local name="$1"
   local matches count value
   case "$name" in
-    GARMIN_WORKER_PORT|GARMIN_WORKER_HOST|GARMIN_BROWSER_PROFILE_DIR|GARMIN_PRIVATE_DOWNLOAD_DIR|GARMIN_WORKER_TOKEN|PLAYWRIGHT_BROWSERS_PATH)
+    GARMIN_WORKER_PORT|GARMIN_WORKER_HOST|GARMIN_WORKER_DISPLAY|GARMIN_BROWSER_PROFILE_DIR|GARMIN_PRIVATE_DOWNLOAD_DIR|GARMIN_WORKER_TOKEN|PLAYWRIGHT_BROWSERS_PATH)
       ;;
     *)
       fail "non_allowlisted_env"
@@ -69,6 +67,9 @@ load_env() {
   GARMIN_WORKER_PORT="$(extract_env GARMIN_WORKER_PORT)"
   export GARMIN_WORKER_HOST
   GARMIN_WORKER_HOST="$(extract_env GARMIN_WORKER_HOST)"
+  export GARMIN_WORKER_DISPLAY
+  GARMIN_WORKER_DISPLAY="$(extract_env GARMIN_WORKER_DISPLAY)"
+  DISPLAY_ID="$GARMIN_WORKER_DISPLAY"
   export GARMIN_BROWSER_PROFILE_DIR
   GARMIN_BROWSER_PROFILE_DIR="$(extract_env GARMIN_BROWSER_PROFILE_DIR)"
   export GARMIN_PRIVATE_DOWNLOAD_DIR
@@ -197,12 +198,12 @@ kill_pid_file() {
 }
 
 cleanup_processes() {
-  kill_pid_file "$RUNTIME_DIR/browser.pid"
   kill_pid_file "$RUNTIME_DIR/x11vnc.pid"
-  kill_pid_file "$RUNTIME_DIR/openbox.pid"
-  kill_pid_file "$RUNTIME_DIR/xvfb.pid"
-  kill_pid_file "$RUNTIME_DIR/lock-holder.pid"
-  rm -f "$COMMAND_FILE" "$RESULT_FILE" "$RUNTIME_DIR/browser-ready.json" "$RUNTIME_DIR/browser-error.json" "$RUNTIME_DIR/vnc.pass"
+  if [[ -f "$RUNTIME_DIR/openbox.started_by_helper" ]]; then
+    kill_pid_file "$RUNTIME_DIR/openbox.pid"
+    rm -f "$RUNTIME_DIR/openbox.started_by_helper"
+  fi
+  rm -f "$RUNTIME_DIR/vnc.pass"
 }
 
 restart_worker() {
@@ -211,6 +212,25 @@ restart_worker() {
 
 stop_worker() {
   systemctl stop "$WORKER_SERVICE" >/dev/null 2>&1 || true
+}
+
+worker_request() {
+  local operation="$1"
+  curl -sS -X POST "http://${GARMIN_WORKER_HOST}:${GARMIN_WORKER_PORT}/garmin-worker" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${GARMIN_WORKER_TOKEN}" \
+    -d "{\"operation\":\"${operation}\"}"
+}
+
+wait_worker_ready() {
+  systemctl is-active --quiet "$WORKER_SERVICE" || fail "garmin_worker_not_active"
+  for _ in $(seq 1 20); do
+    if worker_request "status" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "garmin_worker_not_ready"
 }
 
 active_session_exists() {
@@ -227,14 +247,6 @@ active_session_exists() {
   esac
 }
 
-start_lock_holder() {
-  (
-    flock -x 9
-    sleep "$TTL_SECONDS"
-  ) 9>"$LOCK_FILE" &
-  echo $! > "$RUNTIME_DIR/lock-holder.pid"
-}
-
 start_auth_session() {
   require_root
   load_env
@@ -245,32 +257,22 @@ start_auth_session() {
   fi
   cleanup_processes
   preflight_browser_runtime
+  wait_worker_ready
   STARTED_AT="$(iso_now)"
   EXPIRES_AT="$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")"
   VNC_PASSWORD="$(generate_vnc_password)"
   write_state "starting"
-  stop_worker
-  start_lock_holder
   x11vnc -storepasswd "$VNC_PASSWORD" "$RUNTIME_DIR/vnc.pass" >/dev/null 2>&1
   chown "$SERVICE_USER:$SERVICE_USER" "$RUNTIME_DIR/vnc.pass"
   chmod 600 "$RUNTIME_DIR/vnc.pass"
-  runuser -u "$SERVICE_USER" -- env XAUTHORITY="$RUNTIME_DIR/xauth" Xvfb "$DISPLAY_ID" -screen 0 1280x900x24 -nolisten tcp >"$RUNTIME_DIR/xvfb.log" 2>&1 &
-  echo $! > "$RUNTIME_DIR/xvfb.pid"
-  sleep 1
-  runuser -u "$SERVICE_USER" -- env DISPLAY="$DISPLAY_ID" openbox >"$RUNTIME_DIR/openbox.log" 2>&1 &
-  echo $! > "$RUNTIME_DIR/openbox.pid"
-  sleep 1
+  if ! pgrep -u "$SERVICE_USER" -f "openbox" >/dev/null 2>&1; then
+    runuser -u "$SERVICE_USER" -- env DISPLAY="$DISPLAY_ID" openbox >"$RUNTIME_DIR/openbox.log" 2>&1 &
+    echo $! > "$RUNTIME_DIR/openbox.pid"
+    touch "$RUNTIME_DIR/openbox.started_by_helper"
+    sleep 1
+  fi
   runuser -u "$SERVICE_USER" -- env DISPLAY="$DISPLAY_ID" x11vnc -display "$DISPLAY_ID" -localhost -rfbport "$VNC_PORT" -rfbauth "$RUNTIME_DIR/vnc.pass" -forever -shared -quiet >"$RUNTIME_DIR/x11vnc.log" 2>&1 &
   echo $! > "$RUNTIME_DIR/x11vnc.pid"
-  sleep 1
-  runuser -u "$SERVICE_USER" -- env \
-    DISPLAY="$DISPLAY_ID" \
-    GARMIN_BROWSER_PROFILE_DIR="$GARMIN_BROWSER_PROFILE_DIR" \
-    GARMIN_PRIVATE_DOWNLOAD_DIR="$GARMIN_PRIVATE_DOWNLOAD_DIR" \
-    PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
-    GARMIN_AUTH_RUNTIME_DIR="$RUNTIME_DIR" \
-    "$NODE_BIN" "$SCRIPT_DIR/garmin-auth-browser.js" >"$RUNTIME_DIR/browser.log" 2>&1 &
-  echo $! > "$RUNTIME_DIR/browser.pid"
   sleep 2
   write_state "awaiting_admin_login"
   cat "$STATE_FILE"
@@ -316,58 +318,37 @@ verify_session() {
   EXPIRES_AT="$(state_value expires_at)"
   VNC_PASSWORD="$(state_value vnc_password)"
   write_state "verifying"
-  local command_id
-  command_id="$(date -u +%s)-$$"
-  umask 077
-  cat > "$COMMAND_FILE" <<EOF
-{"command_id":"$command_id","action":"verify"}
-EOF
-  chown root:"$SERVICE_USER" "$COMMAND_FILE"
-  chmod 640 "$COMMAND_FILE"
-  rm -f "$RESULT_FILE"
-  for _ in $(seq 1 30); do
-    if [[ -f "$RESULT_FILE" ]] && grep -q "\"command_id\": \"$command_id\"" "$RESULT_FILE"; then
-      break
-    fi
-    sleep 1
-  done
-  if [[ ! -f "$RESULT_FILE" ]]; then
-    write_state "failed" "verification_timeout"
-    cat "$STATE_FILE"
-    exit 0
-  fi
-  local ok
-  ok="$(python3 - "$RESULT_FILE" <<'PY'
+  local worker_response ok
+  worker_response=""
+  ok="0"
+  for _ in $(seq 1 20); do
+    worker_response="$(worker_request "verify-auth" || true)"
+    ok="$(python3 - "$worker_response" <<'PY'
 import json, sys
 try:
-    print('1' if json.load(open(sys.argv[1], encoding='utf-8')).get('ok') else '0')
+    print('1' if json.loads(sys.argv[1]).get('ok') else '0')
 except Exception:
     print('0')
 PY
 )"
+    [[ "$ok" = "1" ]] && break
+    sleep 1
+  done
   if [[ "$ok" != "1" ]]; then
-    write_state "failed" "verification_failed"
-    cat "$RESULT_FILE"
+    write_state "failed" "verification_pending"
+    printf '%s\n' "$worker_response"
     exit 0
   fi
   cleanup_processes
-  restart_worker
-  sleep 2
-  local worker_response
-  worker_response="$(curl -sS -X POST "http://${GARMIN_WORKER_HOST}:${GARMIN_WORKER_PORT}/garmin-worker" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${GARMIN_WORKER_TOKEN}" \
-    -d '{"operation":"test-connection"}' || true)"
   write_final_state "authenticated"
-  python3 - "$STATE_FILE" "$RESULT_FILE" "$worker_response" <<'PY'
+  python3 - "$STATE_FILE" "$worker_response" <<'PY'
 import json, sys
 state = json.load(open(sys.argv[1], encoding='utf-8'))
-verify = json.load(open(sys.argv[2], encoding='utf-8'))
 try:
-    worker = json.loads(sys.argv[3])
+    worker = json.loads(sys.argv[2])
 except Exception:
     worker = {"ok": False, "status": "sync_error"}
-state["verification"] = verify
+state["verification"] = worker
 state["fresh_worker_test"] = {
     "ok": bool(worker.get("ok")),
     "status": worker.get("status"),
@@ -386,7 +367,6 @@ stop_session() {
   STARTED_AT="$(state_value started_at)"
   EXPIRES_AT="$(state_value expires_at)"
   cleanup_processes
-  restart_worker
   write_final_state "cancelled"
   cat "$STATE_FILE"
 }

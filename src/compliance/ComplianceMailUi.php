@@ -33,9 +33,8 @@ final class ComplianceMailUi
             . '<span class="mail-thread-select"><input type="checkbox" value="' . $id . '" aria-label="Select conversation"></span>'
             . '<span class="mail-thread-unread' . ($unread ? ' is-visible' : '') . '"></span>'
             . '<span class="mail-thread-main">'
-            . '<span class="mail-thread-row"><strong class="mail-thread-sender">' . self::e(self::displayName($sender)) . '</strong><span class="mail-thread-time">' . self::e($time) . '</span></span>'
+            . '<span class="mail-thread-row"><strong class="mail-thread-sender">' . self::e($sender) . '</strong><span class="mail-thread-time">' . self::e($time) . '</span></span>'
             . '<span class="mail-thread-subject">' . self::e($subject !== '' ? $subject : '(no subject)') . '</span>'
-            . '<span class="mail-thread-preview">' . self::e($preview) . '</span>'
             . '<span class="mail-thread-meta">'
             . '<span class="mail-chip wait">' . self::e($waiting) . '</span>'
             . '<span class="mail-priority p-' . self::e($priority) . '">' . self::e($priority) . '</span>'
@@ -62,7 +61,7 @@ final class ComplianceMailUi
 
         $html = '<div class="mail-reader-shell" data-thread-id="' . (int)$thread['id'] . '">';
         $html .= '<header class="mail-reader-header">';
-        $html .= '<div><div class="mail-reader-kicker">' . self::e($waiting) . '</div><h2>' . self::e($subject !== '' ? $subject : '(no subject)') . '</h2>';
+        $html .= '<div><div class="mail-reader-kicker"><span class="mail-status-pill s-' . self::e($status) . '">' . self::e($waiting) . '</span></div><h2>' . self::e($subject !== '' ? $subject : '(no subject)') . '</h2>';
         $html .= '<p>' . self::e(self::participantsSummary($thread, $emails)) . '</p></div>';
         $html .= '<div class="mail-reader-actions">';
         if ($latestInbound > 0) {
