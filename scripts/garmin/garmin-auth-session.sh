@@ -27,6 +27,16 @@ require_root() {
   [[ "$(id -u)" = "0" ]] || fail "helper_must_run_as_root"
 }
 
+generate_vnc_password() {
+  command -v openssl >/dev/null 2>&1 || fail "openssl_is_required_to_generate_temporary_vnc_password"
+  local password
+  password="$(openssl rand -hex 16)"
+  password="${password:0:14}"
+  [[ "${#password}" = "14" ]] || fail "temporary_vnc_password_length_invalid"
+  [[ "$password" =~ ^[0-9a-f]{14}$ ]] || fail "temporary_vnc_password_charset_invalid"
+  printf '%s' "$password"
+}
+
 extract_env() {
   local name="$1"
   local matches count value
@@ -223,7 +233,7 @@ start_auth_session() {
   cleanup_processes
   STARTED_AT="$(iso_now)"
   EXPIRES_AT="$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")"
-  VNC_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 14)"
+  VNC_PASSWORD="$(generate_vnc_password)"
   write_state "starting"
   stop_worker
   start_lock_holder
@@ -365,7 +375,25 @@ stop_session() {
   cat "$STATE_FILE"
 }
 
+self_test() {
+  command -v openssl >/dev/null 2>&1 || fail "openssl_missing"
+  command -v Xvfb >/dev/null 2>&1 || fail "xvfb_missing"
+  command -v openbox >/dev/null 2>&1 || fail "openbox_missing"
+  command -v x11vnc >/dev/null 2>&1 || fail "x11vnc_missing"
+  [[ -x "$NODE_BIN" ]] || fail "node_missing"
+  [[ "$RUNTIME_DIR" = "/run/ipca/garmin-auth" ]] || fail "runtime_dir_invalid"
+  bash -n "$0" >/dev/null 2>&1 || fail "helper_syntax_invalid"
+  local password
+  password="$(generate_vnc_password)"
+  [[ "${#password}" = "14" ]] || fail "password_generation_failed"
+  [[ "$password" =~ ^[0-9a-f]{14}$ ]] || fail "password_charset_failed"
+  printf '{"ok":true,"password_generation":"passed","password_length":14,"required_binaries":"passed","helper_syntax":"passed"}\n'
+}
+
 case "$ACTION" in
+  self-test)
+    self_test
+    ;;
   start)
     start_auth_session
     ;;

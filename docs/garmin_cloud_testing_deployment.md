@@ -121,7 +121,11 @@ sudo chown root:root "$APP_ROOT/scripts/garmin/start-garmin-worker.sh"
 sudo chmod 755 "$APP_ROOT/scripts/garmin/start-garmin-worker.sh"
 sudo chown root:root "$APP_ROOT/scripts/garmin/garmin-auth-session.sh"
 sudo chmod 755 "$APP_ROOT/scripts/garmin/garmin-auth-session.sh"
+sudo chown root:root "$APP_ROOT/scripts/garmin/garmin-auth-browser.js"
+sudo chmod 644 "$APP_ROOT/scripts/garmin/garmin-auth-browser.js"
 ```
+
+Repeat those ownership and mode commands after each code deployment if the deployment process resets file ownership. The auth helper is reachable through a tightly scoped sudoers rule and must not be writable by `www-data`.
 
 Create the systemd service:
 
@@ -275,6 +279,89 @@ www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.s
 www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh verify
 www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh stop
 ```
+
+The sudoers file must remain mode `0440`:
+
+```shell
+sudo chmod 440 /etc/sudoers.d/ipca-garmin-auth
+sudo visudo -c
+```
+
+Do not add `self-test` to the sudoers file. It is a shell-level diagnostic only and is not exposed through the Admin UI.
+
+Helper self-test:
+
+```shell
+sudo /var/www/ipca/scripts/garmin/garmin-auth-session.sh self-test
+```
+
+This checks `openssl`, password generation, password length, safe character set, runtime path, required binaries, and helper syntax without starting Xvfb, openbox, x11vnc, Chromium, or stopping `garmin-worker`. It does not print the generated password.
+
+Password-generation regression test:
+
+```shell
+/var/www/ipca/scripts/garmin/test-garmin-auth-helper.sh
+```
+
+This runs under `set -euo pipefail`, verifies the 14-character safe password generation path, and does not print the generated password.
+
+Post-deployment verification order:
+
+1. Deploy the code.
+2. Restore secure helper ownership and modes:
+
+```shell
+sudo chown root:root /var/www/ipca/scripts/garmin/garmin-auth-session.sh
+sudo chmod 755 /var/www/ipca/scripts/garmin/garmin-auth-session.sh
+sudo chown root:root /var/www/ipca/scripts/garmin/garmin-auth-browser.js
+sudo chmod 644 /var/www/ipca/scripts/garmin/garmin-auth-browser.js
+```
+
+3. Confirm sudoers syntax:
+
+```shell
+sudo visudo -c
+```
+
+4. Confirm idle status:
+
+```shell
+sudo -u www-data sudo -n \
+  /var/www/ipca/scripts/garmin/garmin-auth-session.sh status
+```
+
+5. Start the auth session directly for validation:
+
+```shell
+sudo -u www-data sudo -n \
+  /var/www/ipca/scripts/garmin/garmin-auth-session.sh start
+```
+
+6. Do not display or copy the returned VNC password into logs or documentation.
+7. Confirm state becomes `awaiting_admin_login`.
+8. Confirm localhost-only listener:
+
+```shell
+sudo ss -ltnp | grep ':5905'
+```
+
+Expected: `127.0.0.1:5905`, not `0.0.0.0:5905`.
+
+9. Confirm the normal worker is paused during authentication:
+
+```shell
+systemctl is-active garmin-worker
+```
+
+10. Cancel the direct test:
+
+```shell
+sudo -u www-data sudo -n \
+  /var/www/ipca/scripts/garmin/garmin-auth-session.sh stop
+```
+
+11. Confirm `garmin-worker` restarts.
+12. Then test through `/admin/flight_log_garmin_connection.php`.
 
 Manual auth test:
 
