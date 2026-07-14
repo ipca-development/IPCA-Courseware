@@ -107,7 +107,11 @@ final class ComplianceMailUi
             return '';
         }
 
+        $count = count($emails);
         $html = '<div class="mail-thread-messages" aria-label="Messages in selected conversation">';
+        $html .= '<button type="button" class="mail-thread-string-toggle" data-thread-string-toggle aria-expanded="true">';
+        $html .= '<span>' . $count . ' email' . ($count === 1 ? '' : 's') . '</span><strong>Collapse</strong>';
+        $html .= '</button>';
         foreach (array_reverse($emails) as $email) {
             $id = (int)($email['id'] ?? 0);
             $from = (string)($email['from_name'] ?? '') !== '' ? (string)$email['from_name'] : (string)($email['from_email'] ?? '');
@@ -180,10 +184,10 @@ final class ComplianceMailUi
         $html .= '</div></details>';
         $html .= '</div></header>';
 
+        $html .= '<div class="mail-message-body">' . $body . '</div>';
         if ($attachments !== array()) {
             $html .= self::attachments($attachments);
         }
-        $html .= '<div class="mail-message-body">' . $body . '</div>';
         if ($quote !== '') {
             $html .= '<details class="mail-quoted"><summary>Show previous conversation</summary><div>' . nl2br(self::e($quote)) . '</div></details>';
         }
