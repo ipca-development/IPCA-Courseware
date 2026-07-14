@@ -48,6 +48,7 @@ env[GARMIN_WORKER_PORT] = 8791
 env[GARMIN_WORKER_HOST] = 127.0.0.1
 env[GARMIN_BROWSER_PROFILE_DIR] = /var/lib/ipca/garmin/browser-profile
 env[GARMIN_PRIVATE_DOWNLOAD_DIR] = /var/lib/ipca/garmin/downloads
+env[PLAYWRIGHT_BROWSERS_PATH] = /var/lib/ipca/garmin/playwright-browsers
 env[GARMIN_WORKER_TOKEN] = <secret-token>
 ; END IPCA GARMIN ENV
 ```
@@ -81,22 +82,28 @@ Install Node and Playwright dependencies on the same Droplet:
 
 ```shell
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg
+sudo apt-get install -y ca-certificates curl gnupg xvfb x11vnc openbox dbus-x11 x11-utils
 node --version || curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 node --version || sudo apt-get install -y nodejs
 cd "$APP_ROOT/scripts/garmin"
 npm install
 npx playwright install-deps chromium
-npx playwright install chromium
 ```
 
 Create the dedicated user and private persistent storage:
 
 ```shell
 sudo useradd --system --home /var/lib/ipca/garmin --shell /usr/sbin/nologin ipca-garmin || true
-sudo mkdir -p /var/lib/ipca/garmin/browser-profile /var/lib/ipca/garmin/downloads
+sudo mkdir -p /var/lib/ipca/garmin/browser-profile /var/lib/ipca/garmin/downloads /var/lib/ipca/garmin/playwright-browsers
 sudo chown -R ipca-garmin:ipca-garmin /var/lib/ipca/garmin
-sudo chmod 700 /var/lib/ipca/garmin /var/lib/ipca/garmin/browser-profile /var/lib/ipca/garmin/downloads
+sudo chmod 700 /var/lib/ipca/garmin /var/lib/ipca/garmin/browser-profile /var/lib/ipca/garmin/downloads /var/lib/ipca/garmin/playwright-browsers
+```
+
+Install Chromium into the persistent browser path:
+
+```shell
+cd "$APP_ROOT/scripts/garmin"
+sudo -u ipca-garmin -H env PLAYWRIGHT_BROWSERS_PATH=/var/lib/ipca/garmin/playwright-browsers npx playwright install chromium
 ```
 
 Add the Garmin environment block to the active PHP-FPM pool:
@@ -112,6 +119,8 @@ Ensure the launcher is executable and not writable by the worker user:
 ```shell
 sudo chown root:root "$APP_ROOT/scripts/garmin/start-garmin-worker.sh"
 sudo chmod 755 "$APP_ROOT/scripts/garmin/start-garmin-worker.sh"
+sudo chown root:root "$APP_ROOT/scripts/garmin/garmin-auth-session.sh"
+sudo chmod 755 "$APP_ROOT/scripts/garmin/garmin-auth-session.sh"
 ```
 
 Create the systemd service:
@@ -229,6 +238,63 @@ Open `/admin/flight_log_garmin_connection.php` and run:
 5. Verify session matching or expected review-required status
 6. Mark UI Visible
 7. Enable scheduled testing sync only after all gates pass
+
+## Temporary Garmin Authentication Session
+
+The Garmin Connection page can start a temporary headed Chromium session on the same Droplet. This uses:
+
+- Xvfb display `:95`
+- x11vnc bound to `127.0.0.1:5905`
+- openbox as a minimal window manager
+- Playwright Chromium using `/var/lib/ipca/garmin/browser-profile`
+- runtime files under `/run/ipca/garmin-auth/`
+
+Do not open firewall ports for VNC. The Admin connects through SSH tunneling only:
+
+```shell
+ssh -L 5905:127.0.0.1:5905 root@157.230.237.72
+```
+
+Then open:
+
+```text
+vnc://localhost:5905
+```
+
+Create a tightly scoped sudoers rule for the web user. Adjust `www-data` only if the web server runs PHP as a different user:
+
+```shell
+sudo visudo -f /etc/sudoers.d/ipca-garmin-auth
+```
+
+Add:
+
+```text
+www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh start
+www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh status
+www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh verify
+www-data ALL=(root) NOPASSWD: /var/www/ipca/scripts/garmin/garmin-auth-session.sh stop
+```
+
+Manual auth test:
+
+1. Open `/admin/flight_log_garmin_connection.php`.
+2. Click `Start Garmin Authentication Session`.
+3. Confirm state `awaiting_admin_login`, expiration time, SSH command, VNC URL, and one-time VNC password.
+4. On the Mac, run `ssh -L 5905:127.0.0.1:5905 root@157.230.237.72`.
+5. Open `vnc://localhost:5905` and enter the one-time VNC password.
+6. Complete Garmin username/password, MFA, trusted-device prompts, and security challenges.
+7. Click `Complete Authentication`.
+8. Confirm the UI reports `authenticated`.
+9. Confirm `garmin-worker` restarted:
+
+```shell
+sudo systemctl status garmin-worker --no-pager
+```
+
+10. Run `Test Connection`, then `Initial Synchronization`.
+
+Cancellation and expiration must terminate Chromium, x11vnc, openbox, Xvfb, remove temporary runtime files, preserve the Garmin browser profile, and restart `garmin-worker`.
 
 ## Same-Flight Multi-Log Acceptance
 

@@ -86,4 +86,10 @@ case "$GARMIN_WORKER_PORT" in
     ;;
 esac
 
+if [[ "$WORKER_COMMAND" == "serve" && -e "/run/ipca/garmin-auth/profile.lock" ]]; then
+  (
+    flock -n 9 || fail "Garmin authentication session is using the browser profile"
+  ) 9>"/run/ipca/garmin-auth/profile.lock"
+fi
+
 exec "$NODE_BIN" "$SCRIPT_DIR/flygarmin-worker.js" "$WORKER_COMMAND"

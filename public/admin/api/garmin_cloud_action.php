@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/GarminAuthSessionService.php';
 require_once __DIR__ . '/../../../src/GarminCloudIntegrationService.php';
 require_once __DIR__ . '/../../../src/GarminProviderStateService.php';
 
@@ -26,6 +27,21 @@ try {
 
     if ($action === 'test_connection') {
         garmin_cloud_json(200, array('ok' => true, 'result' => $service->testConnection($actorUserId)));
+    }
+    if ($action === 'auth_start') {
+        garmin_cloud_json(200, array('ok' => true, 'result' => (new GarminAuthSessionService($pdo))->start($actorUserId)));
+    }
+    if ($action === 'auth_status') {
+        garmin_cloud_json(200, array('ok' => true, 'result' => (new GarminAuthSessionService($pdo))->status($actorUserId)));
+    }
+    if ($action === 'auth_complete') {
+        garmin_cloud_json(200, array('ok' => true, 'result' => (new GarminAuthSessionService($pdo))->complete($actorUserId)));
+    }
+    if ($action === 'auth_cancel') {
+        garmin_cloud_json(200, array('ok' => true, 'result' => (new GarminAuthSessionService($pdo))->cancel($actorUserId)));
+    }
+    if ($action === 'auth_reauthenticate') {
+        garmin_cloud_json(200, array('ok' => true, 'result' => (new GarminAuthSessionService($pdo))->reauthenticate($actorUserId)));
     }
     if ($action === 'initial_sync') {
         garmin_cloud_json(200, array('ok' => true, 'result' => $service->runSync('initial', 'manual', $actorUserId)));

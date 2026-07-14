@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/AsyncJobService.php';
 require_once __DIR__ . '/FlyGarminWebSessionProvider.php';
+require_once __DIR__ . '/GarminAuthSessionService.php';
 require_once __DIR__ . '/GarminCsvValidationService.php';
 require_once __DIR__ . '/GarminFlightDataSourceClassificationService.php';
 require_once __DIR__ . '/GarminFlightDataSourceService.php';
@@ -32,7 +33,24 @@ final class GarminCloudIntegrationService
             'provider' => $state,
             'recent_runs' => (new GarminSyncRunService($this->pdo, $this->providerName))->recentRuns(),
             'entries' => (new GarminFlightDataSourceService($this->pdo, $this->providerName))->recentEntries(),
+            'auth_session' => $this->safeAuthSessionStatus(),
         );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function safeAuthSessionStatus(): array
+    {
+        try {
+            return (new GarminAuthSessionService($this->pdo, $this->providerName))->status();
+        } catch (Throwable $e) {
+            return array(
+                'ok' => false,
+                'status' => 'unknown',
+                'error' => $e->getMessage(),
+            );
+        }
     }
 
     /**

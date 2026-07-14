@@ -142,6 +142,37 @@ async function testConnection() {
   });
 }
 
+async function verifyAuth() {
+  return withContext(true, async (context) => {
+    const test = await responseJsonFromContext(context, LOGBOOK_API);
+    if (!test.ok) {
+      return fail('verify-auth', 'authentication_required', 'GARMIN_AUTHENTICATION_REQUIRED', 'Garmin logbook API did not return authenticated JSON.', {
+        browser_profile_present: browserProfilePresent(),
+        authentication_status: 'authentication_required',
+        response_status: test.statusCode || null,
+        response_content_type: test.contentType || null,
+      });
+    }
+    const missing = ['version', 'entries', 'settings'].filter((key) => !Object.prototype.hasOwnProperty.call(test.json, key));
+    if (missing.length > 0) {
+      return fail('verify-auth', 'authentication_required', 'GARMIN_UNEXPECTED_LOGBOOK_JSON', `Garmin logbook JSON is missing expected field(s): ${missing.join(', ')}.`, {
+        browser_profile_present: browserProfilePresent(),
+        authentication_status: 'authentication_required',
+        response_status: test.statusCode,
+        response_content_type: test.contentType,
+        top_level_keys: Object.keys(test.json).slice(0, 20),
+      });
+    }
+    return ok('verify-auth', 'authenticated', {
+      browser_profile_present: browserProfilePresent(),
+      authentication_status: 'authenticated',
+      response_status: test.statusCode,
+      response_content_type: test.contentType,
+      top_level_keys: Object.keys(test.json).slice(0, 20),
+    });
+  });
+}
+
 async function sync(operation, cursor = null) {
   return withContext(true, async (context) => {
     const url = cursor ? `${LOGBOOK_API}?version=${encodeURIComponent(cursor)}` : LOGBOOK_API;
@@ -291,6 +322,8 @@ async function dispatch(payload) {
       return status();
     case 'test-connection':
       return testConnection();
+    case 'verify-auth':
+      return verifyAuth();
     case 'sync-initial':
       return sync('sync-initial');
     case 'sync-incremental':

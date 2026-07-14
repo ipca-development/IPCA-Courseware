@@ -35,6 +35,7 @@ $checks = json_decode((string)($provider['acceptance_checks_json'] ?? '{}'), tru
 $checks = is_array($checks) ? $checks : array();
 $scheduledEnabled = (int)($provider['scheduled_sync_enabled'] ?? 0) === 1;
 $acceptancePassed = (int)($provider['deployment_acceptance_passed'] ?? 0) === 1;
+$authSession = is_array($data['auth_session'] ?? null) ? $data['auth_session'] : array('status' => 'unknown');
 
 cw_header('Flight Log - Garmin Connection');
 ?>
@@ -70,6 +71,41 @@ cw_header('Flight Log - Garmin Connection');
     </div>
     <p class="garmin-muted">The “Enable Scheduled Sync” action is server-enforced and will fail unless all acceptance checks have passed.</p>
     <div id="garmin-result" class="garmin-result"></div>
+  </section>
+
+  <section class="garmin-card">
+    <h3 style="margin-top:0">Garmin Authentication Session</h3>
+    <p class="garmin-muted">Temporary headed Chromium access runs only on this Droplet and is reachable only through an SSH tunnel. Garmin username, password, MFA values, cookies, and browser storage are not captured by IPCA.training.</p>
+    <div class="garmin-grid">
+      <div class="garmin-kv"><div class="garmin-label">Session Status</div><div class="garmin-value"><span class="garmin-badge <?= garmin_badge_class((string)($authSession['status'] ?? 'idle')) ?>"><?= h((string)($authSession['status'] ?? 'idle')) ?></span></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Temporary Browser</div><div class="garmin-value"><?= !empty($authSession['browser_running']) ? 'Running' : 'Not running' ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Started</div><div class="garmin-value"><?= h((string)($authSession['started_at'] ?? '')) ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Expires</div><div class="garmin-value"><?= h((string)($authSession['expires_at'] ?? '')) ?></div></div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="garmin-label">Mac SSH Tunnel</div>
+      <code><?= h((string)($authSession['mac_ssh_command'] ?? 'ssh -L 5905:127.0.0.1:5905 root@157.230.237.72')) ?></code>
+    </div>
+    <div style="margin-top:10px">
+      <div class="garmin-label">Mac VNC URL</div>
+      <code><?= h((string)($authSession['mac_vnc_url'] ?? 'vnc://localhost:5905')) ?></code>
+    </div>
+    <?php if (!empty($authSession['vnc_password'])): ?>
+      <div style="margin-top:10px">
+        <div class="garmin-label">One-time VNC Password</div>
+        <code><?= h((string)$authSession['vnc_password']) ?></code>
+      </div>
+    <?php endif; ?>
+    <?php if (!empty($authSession['error'])): ?>
+      <p><span class="garmin-badge garmin-badge-danger"><?= h((string)$authSession['error']) ?></span></p>
+    <?php endif; ?>
+    <div class="garmin-actions" style="margin-top:14px">
+      <button data-action="auth_start">Start Garmin Authentication Session</button>
+      <button data-action="auth_status" class="secondary">Check Authentication Session</button>
+      <button data-action="auth_complete">Complete Authentication</button>
+      <button data-action="auth_cancel" class="danger">Cancel Authentication Session</button>
+      <button data-action="auth_reauthenticate" class="secondary">Reauthenticate Garmin</button>
+    </div>
   </section>
 
   <section class="garmin-card">
