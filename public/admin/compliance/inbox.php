@@ -174,7 +174,7 @@ cw_header('Compliance Mail');
   .mail-thread-list{overflow:auto;min-height:0;padding:4px 6px;}
   .mail-thread-card{position:relative;width:100%;display:grid;grid-template-columns:18px 8px minmax(0,1fr);gap:6px;border:0;border-radius:11px;background:transparent;padding:7px 8px;text-align:left;cursor:pointer;color:#152235;transition:background .15s ease,box-shadow .15s ease,transform .15s ease;}
   .mail-thread-card:hover{background:#f0f4fb;}
-  .mail-thread-card.is-selected{background:#eaf1fb;box-shadow:inset 0 0 0 1px rgba(30,60,114,.12);}
+  .mail-thread-card.is-selected{background:#eaf1fb;box-shadow:inset 0 0 0 1px rgba(30,60,114,.12);padding-right:44px;}
   .mail-thread-select input{margin-top:2px;width:13px;height:13px;}
   .mail-thread-unread{width:7px;height:7px;border-radius:999px;background:transparent;margin-top:5px;}
   .mail-thread-unread.is-visible{background:#1e68d7;}
@@ -189,15 +189,15 @@ cw_header('Compliance Mail');
   .mail-chip,.mail-priority,.mail-icon-chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;background:#eef2f8;color:#526174;font-size:10px;line-height:1.2;font-weight:740;}
   .mail-priority.p-high,.mail-priority.p-urgent{background:#fff3df;color:#9a5a00;}
   .mail-icon-chip.muted{opacity:.7;}
-  .mail-thread-messages{grid-column:1/-1;margin:7px -8px -7px 24px;padding:3px 0 0;border-top:1px solid rgba(30,60,114,.12);}
-  .mail-thread-messages.is-collapsed{position:absolute;top:28px;right:8px;margin:0;padding:0;border:0;grid-column:auto;}
-  .mail-thread-string-count{position:absolute;top:1px;right:25px;color:#1685f6;font-size:11px;line-height:18px;font-weight:850;}
-  .mail-thread-string-toggle{position:absolute;top:0;right:0;width:20px;height:20px;border-radius:999px;border:1px solid rgba(30,60,114,.24);background:#fff;color:#1685f6;box-shadow:0 2px 8px rgba(15,23,42,.08);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;z-index:3;}
-  .mail-thread-string-toggle::before{content:"⌄";font-size:13px;line-height:1;font-weight:850;}
+  .mail-thread-messages{grid-column:1/-1;margin:8px -44px -7px 24px;padding:7px 0 0;border-top:1px solid rgba(30,60,114,.12);}
+  .mail-thread-messages.is-collapsed{margin:0;padding:0;border:0;height:0;overflow:visible;}
+  .mail-thread-string-count{position:absolute;top:33px;right:35px;color:#1685f6;font-size:11px;line-height:19px;font-weight:850;z-index:3;}
+  .mail-thread-string-toggle{position:absolute;top:33px;right:10px;width:20px;height:20px;border-radius:999px;border:1px solid rgba(30,60,114,.24);background:#fff;color:#1685f6;box-shadow:0 2px 8px rgba(15,23,42,.08);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;z-index:3;}
+  .mail-thread-string-toggle::before{content:"⌄";font-size:12px;line-height:1;font-weight:850;}
   .mail-thread-messages.is-collapsed .mail-thread-string-toggle::before{content:"›";}
   .mail-thread-messages.is-collapsed .mail-thread-message-row{display:none;}
-  .mail-thread-messages:not(.is-collapsed) .mail-thread-string-toggle{top:-12px;}
-  .mail-thread-messages:not(.is-collapsed) .mail-thread-string-count{top:-11px;}
+  .mail-thread-messages:not(.is-collapsed) .mail-thread-string-toggle{top:33px;}
+  .mail-thread-messages:not(.is-collapsed) .mail-thread-string-count{top:33px;}
   .mail-thread-message-row{width:100%;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:7px;align-items:start;border:0;border-bottom:1px solid rgba(15,23,42,.09);background:rgba(255,255,255,.34);padding:7px 8px;text-align:left;color:#152235;cursor:pointer;}
   .mail-thread-message-row:last-child{border-bottom:0;border-radius:0 0 11px 11px;}
   .mail-thread-message-row:hover{background:rgba(255,255,255,.68);}
@@ -213,7 +213,7 @@ cw_header('Compliance Mail');
   .mail-reader-pane{position:relative;min-width:0;overflow:auto;overflow-x:hidden;background:#fff;}
   .mail-reader-placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:#728198;text-align:center;padding:40px;}
   .mail-reader-shell{position:relative;min-height:100%;overflow-x:hidden;background:#fff;}
-  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 16px;background:rgba(255,255,255,.96);border-bottom:1px solid rgba(15,23,42,.08);backdrop-filter:blur(18px);overflow:visible;}
+  .mail-reader-header{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 30px 10px 20px;background:rgba(255,255,255,.96);border-bottom:1px solid rgba(15,23,42,.08);backdrop-filter:blur(18px);overflow:visible;}
   .mail-reader-header h2{margin:4px 0 3px;font-size:13px;line-height:1.25;letter-spacing:-.01em;font-weight:760;}
   .mail-reader-header p{margin:0;color:#728198;font-size:10.5px;line-height:1.25;}
   .mail-reader-kicker{color:#1e3c72;text-transform:uppercase;letter-spacing:.08em;font-size:9px;font-weight:800;}
@@ -230,7 +230,7 @@ cw_header('Compliance Mail');
   .mail-reader-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto;}
   .mail-reader-actions .mail-action{border-color:rgba(15,23,42,.08);background:#fff;color:#1e3c72;padding:7px 11px;font-size:12px;}
   .mail-reader-grid{display:block;min-height:0;}
-  .mail-timeline{padding:16px 22px 16px 30px;max-width:1120px;width:min(100%,1120px);margin:0 auto;overflow-x:hidden;}
+  .mail-timeline{padding:16px 34px 16px 30px;max-width:1120px;width:min(100%,1120px);margin:0 auto;overflow-x:hidden;}
   .mail-reader-shell.sidebar-open .mail-timeline{padding-right:calc(var(--mail-compliance-width) + 36px);}
   .mail-compliance-sidebar{position:absolute;right:0;top:0;bottom:0;width:var(--mail-compliance-width);max-width:450px;min-width:220px;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(15,23,42,.06);background:#fbfcfe;box-shadow:-22px 0 60px rgba(15,23,42,.14);transform:translateX(105%);transition:transform .18s ease;z-index:30;}
   .mail-reader-shell.sidebar-open .mail-compliance-sidebar{transform:translateX(0);}
@@ -266,7 +266,7 @@ cw_header('Compliance Mail');
   .mail-message-card.is-jump-target{box-shadow:0 0 0 3px rgba(22,133,246,.2);}
   .mail-message-accent{background:#2f80ed;}
   .mail-message-card.is-outgoing .mail-message-accent{background:#2f9e62;}
-  .mail-message-content{padding:14px 16px;min-width:0;overflow-x:hidden;background:#fff;border-radius:0 18px 18px 0;}
+  .mail-message-content{padding:14px 24px 14px 16px;min-width:0;overflow-x:hidden;background:#fff;border-radius:0 18px 18px 0;}
   .mail-message-header{display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid rgba(15,23,42,.08);padding-bottom:10px;margin-bottom:12px;min-width:0;}
   .mail-avatar{width:42px;height:42px;border-radius:14px;background:#e9eef8;color:#1e3c72;display:flex;align-items:center;justify-content:center;font-weight:850;flex:0 0 auto;}
   .mail-message-meta{min-width:0;flex:1;overflow:hidden;}
@@ -281,7 +281,7 @@ cw_header('Compliance Mail');
   .mail-message-details div{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;}
   .mail-message-details dd{margin:0;min-width:0;overflow-wrap:anywhere;}
   .mail-message-tools{display:flex;gap:6px;justify-content:flex-end;flex:0 0 auto;}
-  .mail-message-body{margin-top:12px;max-width:100%;overflow-x:hidden;}
+  .mail-message-body{margin-top:12px;max-width:100%;overflow-x:hidden;padding-right:10px;}
   .mail-html-frame{display:block;width:100%;max-width:100%;min-height:80px;border:0;background:transparent;overflow:hidden;}
   .mail-action-menu{position:relative;}
   .mail-action-menu summary{list-style:none;border:1px solid rgba(15,23,42,.08);background:#fff;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;cursor:pointer;color:#1e3c72;}

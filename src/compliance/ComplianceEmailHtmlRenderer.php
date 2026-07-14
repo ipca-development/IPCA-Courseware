@@ -40,7 +40,7 @@ final class ComplianceEmailHtmlRenderer
             . '<base target="_blank">'
             . '<style>'
             . 'html,body{margin:0;padding:0;background:transparent;max-width:100%;overflow-x:hidden;}'
-            . 'body{word-wrap:break-word;overflow-wrap:anywhere;}'
+            . 'body{word-wrap:break-word;overflow-wrap:anywhere;padding-right:14px;}'
             . 'img{max-width:100%!important;height:auto!important;}'
             . 'table{max-width:100%!important;}'
             . 'td,th{overflow-wrap:anywhere;}'
