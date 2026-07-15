@@ -76,8 +76,11 @@ enum GarminRoutes {
     }
 
     static func isValidLogbookAPIURL(_ url: URL) -> Bool {
-        url.scheme == "https" &&
-            url.host == "fly.garmin.com" &&
+        guard url.scheme == "https",
+              url.host == "fly.garmin.com" else {
+            return false
+        }
+        return url.path == "/fly-garmin/api/logbook" ||
             url.path.hasPrefix("/fly-garmin/api/logbook/")
     }
 }

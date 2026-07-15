@@ -405,7 +405,7 @@ final class ComplianceCapEngine
      */
     public static function listEvidence(PDO $pdo, int $capId): array
     {
-        if ($capId <= 0 || !self::evidenceTablePresent($pdo)) {
+        if ($capId <= 0 || !self::ensureEvidenceTable($pdo)) {
             return array();
         }
         $st = $pdo->prepare(
@@ -425,7 +425,7 @@ final class ComplianceCapEngine
      */
     public static function uploadEvidenceDocument(PDO $pdo, int $capId, array $file, array $data, int $userId): int
     {
-        if (!self::evidenceTablePresent($pdo)) {
+        if (!self::ensureEvidenceTable($pdo)) {
             throw new RuntimeException('Corrective action evidence table is not installed.');
         }
         $cap = self::getById($pdo, $capId);
@@ -456,7 +456,7 @@ final class ComplianceCapEngine
 
     public static function attachFindingDocumentEvidence(PDO $pdo, int $capId, int $findingDocumentId, string $note, int $userId): int
     {
-        if (!self::evidenceTablePresent($pdo)) {
+        if (!self::ensureEvidenceTable($pdo)) {
             throw new RuntimeException('Corrective action evidence table is not installed.');
         }
         $cap = self::getById($pdo, $capId);
@@ -500,7 +500,7 @@ final class ComplianceCapEngine
      */
     public static function getEvidenceById(PDO $pdo, int $evidenceId): ?array
     {
-        if ($evidenceId <= 0 || !self::evidenceTablePresent($pdo)) {
+        if ($evidenceId <= 0 || !self::ensureEvidenceTable($pdo)) {
             return null;
         }
         $st = $pdo->prepare('SELECT * FROM ipca_compliance_corrective_action_evidence WHERE id = ? LIMIT 1');
@@ -520,7 +520,7 @@ final class ComplianceCapEngine
 
     private static function hasClosureEvidence(PDO $pdo, int $capId): bool
     {
-        if (!self::evidenceTablePresent($pdo)) {
+        if (!self::ensureEvidenceTable($pdo)) {
             return false;
         }
         $st = $pdo->prepare(
@@ -534,7 +534,7 @@ final class ComplianceCapEngine
 
     private static function recordClosureEvidenceNote(PDO $pdo, int $capId, string $note, int $userId): void
     {
-        if (!self::evidenceTablePresent($pdo)) {
+        if (!self::ensureEvidenceTable($pdo)) {
             throw new RuntimeException('Corrective action evidence table is not installed.');
         }
         $st = $pdo->prepare(
@@ -559,6 +559,38 @@ final class ComplianceCapEngine
         } catch (Throwable) {
             return false;
         }
+    }
+
+    private static function ensureEvidenceTable(PDO $pdo): bool
+    {
+        if (self::evidenceTablePresent($pdo)) {
+            return true;
+        }
+        try {
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  corrective_action_id BIGINT UNSIGNED NOT NULL,
+                  evidence_kind VARCHAR(32) NOT NULL DEFAULT 'DOCUMENT',
+                  storage_relpath VARCHAR(1024) NULL,
+                  external_url VARCHAR(2048) NULL,
+                  title VARCHAR(255) NULL,
+                  description TEXT NULL,
+                  mime_type VARCHAR(128) NULL,
+                  file_size BIGINT UNSIGNED NULL,
+                  sha256 CHAR(64) NULL,
+                  uploaded_by INT UNSIGNED NULL,
+                  uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  KEY idx_ipcacapev_action_kind (corrective_action_id, evidence_kind),
+                  KEY idx_ipcacapev_sha (sha256),
+                  CONSTRAINT fk_ipcacapev_action FOREIGN KEY (corrective_action_id)
+                    REFERENCES ipca_compliance_corrective_actions (id) ON DELETE CASCADE ON UPDATE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+        } catch (Throwable) {
+            return false;
+        }
+        return self::evidenceTablePresent($pdo);
     }
 
     /** @return array{relpath:string,original_name:string,mime_type:string,file_size:int,sha256:string} */

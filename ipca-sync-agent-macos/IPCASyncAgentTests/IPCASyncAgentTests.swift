@@ -55,9 +55,19 @@ final class IPCASyncAgentTests: XCTestCase {
         let url = try GarminRoutes.incrementalLogbookURL(version: "abc/123+version")
         XCTAssertEqual(url.scheme, "https")
         XCTAssertEqual(url.host, "fly.garmin.com")
-        XCTAssertEqual(url.path, "/fly-garmin/api/logbook/")
+        XCTAssertEqual(url.path, "/fly-garmin/api/logbook")
         XCTAssertTrue(url.absoluteString.contains("since="))
         XCTAssertFalse(url.absoluteString.contains("version="))
+    }
+
+    func testIncrementalLogbookURLAcceptsFoundationNormalizedBasePathAndBase64Padding() throws {
+        let cursor = "MjAyNi0wNy0xNVQxMzozNDoyNS43OTMtMDU6MDA="
+        let url = try GarminRoutes.incrementalLogbookURL(version: cursor)
+
+        XCTAssertTrue(GarminRoutes.isValidLogbookAPIURL(url))
+        XCTAssertEqual(url.path, "/fly-garmin/api/logbook")
+        XCTAssertTrue(url.absoluteString.contains("since=MjAyNi0wNy0xNVQxMzozNDoyNS43OTMtMDU6MDA%3D"))
+        XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, cursor)
     }
 
     func testTrackURLUsesKnownLogbookRoute() throws {

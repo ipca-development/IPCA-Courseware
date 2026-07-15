@@ -511,6 +511,9 @@ final class ComplianceFindingEngine
     private static function capHasClosureEvidence(PDO $pdo, int $capId): bool
     {
         try {
+            if (!self::ensureCapEvidenceTable($pdo)) {
+                return false;
+            }
             $st = $pdo->prepare(
                 'SELECT COUNT(*)
                    FROM ipca_compliance_corrective_action_evidence
@@ -518,6 +521,46 @@ final class ComplianceFindingEngine
             );
             $st->execute(array($capId));
             return (int)$st->fetchColumn() > 0;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private static function ensureCapEvidenceTable(PDO $pdo): bool
+    {
+        try {
+            $pdo->query('SELECT id FROM ipca_compliance_corrective_action_evidence LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            // Create the phase-1 evidence table if the migration was not applied yet.
+        }
+        try {
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  corrective_action_id BIGINT UNSIGNED NOT NULL,
+                  evidence_kind VARCHAR(32) NOT NULL DEFAULT 'DOCUMENT',
+                  storage_relpath VARCHAR(1024) NULL,
+                  external_url VARCHAR(2048) NULL,
+                  title VARCHAR(255) NULL,
+                  description TEXT NULL,
+                  mime_type VARCHAR(128) NULL,
+                  file_size BIGINT UNSIGNED NULL,
+                  sha256 CHAR(64) NULL,
+                  uploaded_by INT UNSIGNED NULL,
+                  uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  KEY idx_ipcacapev_action_kind (corrective_action_id, evidence_kind),
+                  KEY idx_ipcacapev_sha (sha256),
+                  CONSTRAINT fk_ipcacapev_action_from_finding FOREIGN KEY (corrective_action_id)
+                    REFERENCES ipca_compliance_corrective_actions (id) ON DELETE CASCADE ON UPDATE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+        } catch (Throwable) {
+            return false;
+        }
+        try {
+            $pdo->query('SELECT id FROM ipca_compliance_corrective_action_evidence LIMIT 0');
+            return true;
         } catch (Throwable) {
             return false;
         }
