@@ -225,8 +225,8 @@ final class GarminProvider: SyncProvider {
     }
 
     func discoverHistoricalBackfill(skippingTrackUUIDs skippedTrackUUIDs: Set<String>, fromDate: String? = "2025-01-01", limit: Int = Int.max) async throws -> GarminBackfillDiscoveryResult {
-        let value = try await withTimeout(seconds: 180, message: "Garmin historical Logbook request timed out.") {
-            try await self.browser.evaluate(Self.initialBootstrapLogbookExpression())
+        let value = try await withTimeout(seconds: 330, message: "Garmin historical Logbook request timed out.") {
+            try await self.browser.evaluate(Self.historicalLogbookExpression())
         }
         let object = try objectValue(value)
         try validateProbe(object)
@@ -1232,18 +1232,29 @@ final class GarminProvider: SyncProvider {
             let tracks = collectTrackUUIDs(from: entry)
             guard let entryID else { return nil }
             if requireArtifacts, sources.isEmpty, tracks.isEmpty { return nil }
+            let version = firstString(in: entry, keys: ["version", "versionId", "modifiedVersion"])
+            let aircraftRegistration = firstString(in: entry, keys: ["aircraftRegistration", "aircraftTailNumber", "aircraftIdent", "tailNumber"])
+            let generatedTrackStart = firstString(in: entry, keys: ["generatedTrackStart", "trackStart", "startTime", "departureTime", "date", "flightDate"])
+            let generatedTrackStop = firstString(in: entry, keys: ["generatedTrackStop", "trackStop", "endTime", "arrivalTime", "date", "flightDate"])
             return RemoteSyncItem(
                 provider: provider,
                 entryID: entryID,
-                version: entry["version"]?.string ?? entry["versionId"]?.string ?? entry["modifiedVersion"]?.string,
-                aircraftRegistration: entry["aircraftRegistration"]?.string ?? entry["aircraftTailNumber"]?.string ?? entry["aircraftIdent"]?.string ?? entry["tailNumber"]?.string,
-                generatedTrackStart: entry["generatedTrackStart"]?.string ?? entry["trackStart"]?.string ?? entry["startTime"]?.string ?? entry["departureTime"]?.string,
-                generatedTrackStop: entry["generatedTrackStop"]?.string ?? entry["trackStop"]?.string ?? entry["endTime"]?.string ?? entry["arrivalTime"]?.string,
+                version: version,
+                aircraftRegistration: aircraftRegistration,
+                generatedTrackStart: generatedTrackStart,
+                generatedTrackStop: generatedTrackStop,
                 sourceUUIDs: sources,
                 trackUUIDs: tracks,
                 rawEntry: entry
             )
         }
+    }
+
+    private static func firstString(in entry: [String: JSONValue], keys: [String]) -> String? {
+        for key in keys {
+            if let value = entry[key]?.string { return value }
+        }
+        return nil
     }
 
     static func collectTrackUUIDs(from entry: [String: JSONValue]) -> [String] {
@@ -1554,7 +1565,14 @@ final class GarminProvider: SyncProvider {
         return try logbookFetchExpression(url: url)
     }
 
-    private static func logbookFetchExpression(url: URL) throws -> String {
+    static func historicalLogbookExpression() throws -> String {
+        guard let url = URL(string: GarminRoutes.logbookBase), GarminRoutes.isValidLogbookAPIURL(url) else {
+            throw GarminError.logbookEndpointUnavailable
+        }
+        return try logbookFetchExpression(url: url, timeoutMilliseconds: 300000)
+    }
+
+    private static func logbookFetchExpression(url: URL, timeoutMilliseconds: Int = 60000) throws -> String {
         guard GarminRoutes.isValidLogbookAPIURL(url) else { throw GarminError.logbookEndpointUnavailable }
         let urlJSON = String(data: try JSONEncoder().encode(url.absoluteString), encoding: .utf8) ?? "\"\""
         return """
@@ -1568,7 +1586,7 @@ final class GarminProvider: SyncProvider {
             return { status: 0, ok: false, jsonOk: false, expectedShape: false, contentType: '', entryCount: 0, topLevelKeys: [], cursor: null, entries: [], pageURL, pageTitle, logbookURL: '', loginRequired: false, humanVerification: false, internalError: 'GARMIN_LOGBOOK_ENDPOINT_UNAVAILABLE' };
           }
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 60000);
+          const timeout = setTimeout(() => controller.abort(), \(timeoutMilliseconds));
           try {
             const response = await fetch(logbookUrl, {
               method: 'GET',
@@ -1624,8 +1642,8 @@ final class GarminProvider: SyncProvider {
                 uuid: entry.uuid || entry.id || entry.logbookEntryUUID || entry.logbookEntryUuid || null,
                 version: entry.version || entry.versionId || entry.modifiedVersion || null,
                 aircraftRegistration: entry.aircraftRegistration || entry.aircraftTailNumber || entry.aircraftIdent || entry.tailNumber || null,
-                generatedTrackStart: entry.generatedTrackStart || entry.trackStart || entry.startTime || entry.departureTime || null,
-                generatedTrackStop: entry.generatedTrackStop || entry.trackStop || entry.endTime || entry.arrivalTime || null,
+                generatedTrackStart: entry.generatedTrackStart || entry.trackStart || entry.startTime || entry.departureTime || entry.date || entry.flightDate || null,
+                generatedTrackStop: entry.generatedTrackStop || entry.trackStop || entry.endTime || entry.arrivalTime || entry.date || entry.flightDate || null,
                 flightDataLogUUIDs: values,
                 trackUUIDs: tracks,
                 raw: entry
@@ -1773,8 +1791,8 @@ final class GarminProvider: SyncProvider {
               uuid: entry.uuid || entry.id || entry.logbookEntryUUID || entry.logbookEntryUuid || null,
               version: entry.version || entry.versionId || entry.modifiedVersion || null,
               aircraftRegistration: entry.aircraftRegistration || entry.aircraftTailNumber || entry.aircraftIdent || entry.tailNumber || null,
-              generatedTrackStart: entry.generatedTrackStart || entry.trackStart || entry.startTime || entry.departureTime || null,
-              generatedTrackStop: entry.generatedTrackStop || entry.trackStop || entry.endTime || entry.arrivalTime || null,
+              generatedTrackStart: entry.generatedTrackStart || entry.trackStart || entry.startTime || entry.departureTime || entry.date || entry.flightDate || null,
+              generatedTrackStop: entry.generatedTrackStop || entry.trackStop || entry.endTime || entry.arrivalTime || entry.date || entry.flightDate || null,
               flightDataLogUUIDs: values,
               trackUUIDs: trackValues,
               raw: entry

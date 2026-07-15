@@ -90,6 +90,54 @@ function cmp_finding_target_date_display(?string $date): string
     }
 }
 
+function cmp_cap_is_closed_status(string $status): bool
+{
+    return in_array(strtoupper(trim($status)), array('EXECUTED', 'COMPLETED', 'VERIFIED', 'CLOSED'), true);
+}
+
+function cmp_cap_status_badge_with_closure_date(string $status, ?string $closureDate): string
+{
+    if (!cmp_cap_is_closed_status($status)) {
+        return compliance_badge($status);
+    }
+    $closureDate = $closureDate !== null ? substr(trim($closureDate), 0, 10) : '';
+    $label = ucfirst(strtolower(str_replace('_', ' ', trim($status))));
+    if ($closureDate !== '') {
+        $label .= ' ' . $closureDate;
+    }
+    return '<span class="cmp-pill compliance-badge compliance-badge--status-ok">' . h($label) . '</span>';
+}
+
+function cmp_cap_deadline_display(?string $deadline, ?string $closureDate, string $status): string
+{
+    $deadline = $deadline !== null ? substr(trim($deadline), 0, 10) : '';
+    if ($deadline === '') {
+        return '<span style="color:#64748b;">No deadline</span>';
+    }
+    if (!cmp_cap_is_closed_status($status)) {
+        return compliance_deadline_badge($deadline);
+    }
+    $closureDate = $closureDate !== null ? substr(trim($closureDate), 0, 10) : '';
+    if ($closureDate === '') {
+        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">No closure date</span>';
+    }
+    try {
+        $due = new DateTimeImmutable($deadline);
+        $closed = new DateTimeImmutable($closureDate);
+        $days = (int)$due->diff($closed)->format('%r%a');
+    } catch (Throwable) {
+        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline) . '</span>';
+    }
+    if ($days === 0) {
+        $label = 'Closed on deadline';
+    } elseif ($days > 0) {
+        $label = 'Closed ' . $days . 'd after deadline';
+    } else {
+        $label = 'Closed ' . abs($days) . 'd before deadline';
+    }
+    return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($label) . '</span>';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
@@ -961,7 +1009,16 @@ if ($detailId > 0) {
             <p style="color:#64748b;font-size:14px;margin:0;">No corrective actions yet for this finding.</p>
           <?php else: ?>
             <div class="compliance-table-wrap">
-            <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
+            <style>
+              .cmp-finding-cap-table .cmp-pill,
+              .cmp-finding-cap-table .compliance-badge{
+                font-size:9px !important;
+                line-height:1.08 !important;
+                padding:3px 6px !important;
+                white-space:normal;
+              }
+            </style>
+            <table class="compliance-table cmp-finding-cap-table" style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
               <thead>
                 <tr style="background:#f8fafc;text-align:left;">
                   <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;width:150px;">Code</th>
@@ -979,9 +1036,9 @@ if ($detailId > 0) {
                       </a>
                     </td>
                     <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)$c['title']) ?></td>
-                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= compliance_badge((string)$c['status']) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= cmp_cap_status_badge_with_closure_date((string)$c['status'], isset($c['completed_at']) ? (string)$c['completed_at'] : null) ?></td>
                     <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#64748b;">
-                      <?= compliance_deadline_badge(isset($c['due_date']) ? (string)$c['due_date'] : null) ?>
+                      <?= cmp_cap_deadline_display(isset($c['due_date']) ? (string)$c['due_date'] : null, isset($c['completed_at']) ? (string)$c['completed_at'] : null, (string)$c['status']) ?>
                     </td>
                   </tr>
                 <?php endforeach; ?>

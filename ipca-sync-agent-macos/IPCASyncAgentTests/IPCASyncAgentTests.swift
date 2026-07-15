@@ -86,8 +86,17 @@ final class IPCASyncAgentTests: XCTestCase {
         let expression = try GarminProvider.incrementalLogbookExpression(version: "cursor-123")
         XCTAssertTrue(expression.contains("fetch(logbookUrl"))
         XCTAssertTrue(expression.contains("cache: 'no-store'"))
+        XCTAssertTrue(expression.contains("setTimeout(() => controller.abort(), 60000)"))
         XCTAssertTrue(expression.contains("since=cursor-123"))
         XCTAssertFalse(expression.contains("_ipca_sync"))
+    }
+
+    func testHistoricalLogbookExpressionUsesLongerTimeoutForLargeHistory() throws {
+        let expression = try GarminProvider.historicalLogbookExpression()
+
+        XCTAssertTrue(expression.contains("https://fly.garmin.com/fly-garmin/api/logbook/"))
+        XCTAssertTrue(expression.contains("setTimeout(() => controller.abort(), 300000)"))
+        XCTAssertFalse(expression.contains("since="))
     }
 
     func testEmptyIncrementalLogbookResponseIsConfirmedAndNoChange() {
@@ -492,6 +501,29 @@ final class IPCASyncAgentTests: XCTestCase {
         XCTAssertEqual(result.selectedItemCount, 1)
         XCTAssertEqual(result.items.first?.entryID, "new-entry")
         XCTAssertEqual(result.items.first?.trackUUIDs, [newTrack])
+    }
+
+    func testBackfillDateFilterUsesGarminDateField() {
+        let track = "abcdefab-1234-1234-1234-abcdefabcdef"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object([
+                    "uuid": .string("entry-with-date-field"),
+                    "date": .string("2025-06-15"),
+                    "canonicalTrackUUID": .string(track)
+                ])
+            ],
+            rawEntryCount: 1,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            fromDate: "2025-01-01",
+            limit: Int.max,
+            sourceDescription: "date-field source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 1)
+        XCTAssertEqual(result.items.first?.generatedTrackStart, "2025-06-15")
     }
 
     func testTrackClassificationTreatsGarminPilotIOSAsGPSOnly() {
