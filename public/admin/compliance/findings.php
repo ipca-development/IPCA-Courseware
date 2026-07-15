@@ -64,21 +64,29 @@ function cmp_rca_steps_from_post(): array
 
 function cmp_finding_target_date(PDO $pdo, int $findingId, ?string $fallback): ?string
 {
+    $fallback = $fallback !== null ? trim($fallback) : '';
+    if ($fallback !== '') {
+        return substr($fallback, 0, 10);
+    }
     $date = ComplianceRcaCapSubmissionEngine::approvedCapDeadlineForFinding($pdo, $findingId);
     if ($date !== null) {
         return $date;
     }
-    $fallback = $fallback !== null ? trim($fallback) : '';
-    return $fallback !== '' ? substr($fallback, 0, 10) : null;
+    return null;
 }
 
-function cmp_finding_target_date_display(?string $date): string
+function cmp_finding_target_date_display(?string $date, string $status = ''): string
 {
     $date = $date !== null ? trim($date) : '';
     if ($date === '') {
         return '<span style="color:var(--text-muted);">—</span>';
     }
     try {
+        if (in_array(strtoupper(trim($status)), array('CLOSED', 'VOID', 'CANCELLED'), true)) {
+            return '<div class="cmp-list-deadline">'
+                . '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h(substr($date, 0, 10)) . '</span>'
+                . '</div>';
+        }
         $today = new DateTimeImmutable('today');
         $target = new DateTimeImmutable(substr($date, 0, 10));
         $class = $target < $today ? 'compliance-badge--deadline-expired' : 'compliance-badge--deadline-ok';
@@ -1328,7 +1336,7 @@ if ($detailId > 0) {
                 <td><?= compliance_badge((string)$r['classification'], 'level') ?></td>
                 <td><?= compliance_badge($sev, 'severity') ?></td>
                 <td><?= compliance_badge($stRaw) ?></td>
-                <td><?= cmp_finding_target_date_display($targetDate) ?></td>
+                <td><?= cmp_finding_target_date_display($targetDate, $stRaw) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

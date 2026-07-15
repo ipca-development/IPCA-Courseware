@@ -154,6 +154,9 @@ final class AppStateController: ObservableObject {
     @Published var filesDownloaded = 0
     @Published var filesUploaded = 0
     @Published var pendingUploads = 0
+    @Published var uploadProgressDetail = "No upload queue loaded yet."
+    @Published var backfillProgressDetail = "No backfill run in progress."
+    @Published var currentWorkDetail = "Idle"
     @Published var lastError = ""
     @Published var repairSummary = ""
     @Published var tokenInput = ""
@@ -233,7 +236,29 @@ final class AppStateController: ObservableObject {
             if status == .waitingForDeviceToken || status == .notConfigured { status = .idle }
         }
         pendingUploads = (try? queue.pendingCount()) ?? 0
+        refreshQueueProgress()
         refreshGarminCursorStatus()
+    }
+
+    func refreshQueueProgress() {
+        let uploadCounts = (try? queue.uploadQueueStateCounts()) ?? [:]
+        let backfillCounts = (try? queue.backfillTrackStateCounts()) ?? [:]
+        let queued = uploadCounts[QueueState.queued.rawValue, default: 0]
+        let uploading = uploadCounts[QueueState.uploading.rawValue, default: 0]
+        let retrying = uploadCounts[QueueState.retryWait.rawValue, default: 0]
+        let failed = uploadCounts[QueueState.failed.rawValue, default: 0]
+        let uploaded = uploadCounts[QueueState.uploaded.rawValue, default: 0] +
+            uploadCounts[QueueState.alreadyExists.rawValue, default: 0] +
+            uploadCounts[QueueState.completed.rawValue, default: 0]
+        pendingUploads = queued + uploading + retrying + failed
+        uploadProgressDetail = "Uploaded \(uploaded) / remaining \(pendingUploads) (queued \(queued), uploading \(uploading), retry \(retrying), failed \(failed))"
+
+        let seen = backfillCounts[GarminBackfillTrackState.seen.rawValue, default: 0]
+        let backfillQueued = backfillCounts[GarminBackfillTrackState.queued.rawValue, default: 0]
+        let backfillUploaded = backfillCounts[GarminBackfillTrackState.uploaded.rawValue, default: 0]
+        let ignored = backfillCounts[GarminBackfillTrackState.ignoredGPSOnly.rawValue, default: 0]
+        let backfillFailed = backfillCounts[GarminBackfillTrackState.failed.rawValue, default: 0]
+        backfillProgressDetail = "Tracks: uploaded \(backfillUploaded), queued \(backfillQueued), seen \(seen), GPS-only ignored \(ignored), failed \(backfillFailed)"
     }
 
     func refreshGarminCursorStatus() {
@@ -434,6 +459,7 @@ final class SyncCoordinator {
                 state?.refreshGarminCursorStatus()
             }
             state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+            state?.refreshQueueProgress()
             if keychain.loadToken() == nil {
                 state?.lastError = "Garmin files were downloaded locally. Paste the IPCA Sync Agent device token to upload them."
             } else {
@@ -490,6 +516,8 @@ final class SyncCoordinator {
             discoveryResult = result
             try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "discovered", error: nil)
             state?.garminBackfillStatus = "Discovered \(result.inspectedEntryCount) entries; selected \(result.selectedItemCount) tracks"
+            state?.currentWorkDetail = "Backfill discovered \(result.selectedItemCount) historical tracks from \(result.inspectedEntryCount) Garmin entries."
+            state?.refreshQueueProgress()
             LoggingService.shared.info("BACKFILL_DISCOVERY runID=\(runID) rawEntries=\(result.inspectedEntryCount) entriesWithTracks=\(result.entriesWithTracksCount) selectedTracks=\(result.selectedItemCount) skippedCompletedOrQueued=\(result.skippedSeenCount) skippedMissingTrack=\(result.skippedMissingTrackCount) remainingEstimate=\(result.remainingEstimate.map(String.init) ?? "n/a") source=\(result.sourceDescription)")
 
             var downloaded = 0
@@ -499,6 +527,7 @@ final class SyncCoordinator {
             for (index, item) in result.items.enumerated() {
                 let trackUUID = item.trackUUIDs.first ?? "unknown"
                 state?.garminBackfillStatus = "Downloading historical track \(index + 1) of \(result.items.count)"
+                state?.currentWorkDetail = "Downloading historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
                 try queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .seen)
                 LoggingService.shared.info("BACKFILL_TRACK_SELECTED runID=\(runID) entry=\(item.entryID) track=\(trackUUID)")
                 do {
@@ -508,6 +537,7 @@ final class SyncCoordinator {
                         try queue.enqueue(artifact)
                         queued += 1
                         try queue.markBackfillTrack(trackUUID: artifact.sourceUUID, entryID: item.entryID, runID: runID, state: .queued)
+                        state?.refreshQueueProgress()
                         LoggingService.shared.info("BACKFILL_QUEUE_RESULT runID=\(runID) entry=\(item.entryID) track=\(artifact.sourceUUID) result=queued")
                     }
                 } catch GarminError.gpxOnly(let message) {
@@ -521,6 +551,7 @@ final class SyncCoordinator {
                 }
             }
             state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+            state?.refreshQueueProgress()
             if keychain.loadToken() != nil {
                 state?.garminBackfillStatus = "Uploading queued historical tracks"
                 try await uploadPending()
@@ -536,6 +567,8 @@ final class SyncCoordinator {
             try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "completed", error: nil)
             state?.garminBackfillStatus = "Completed"
             state?.garminBackfillLastResult = "From 2025-01-01: inspected \(result.inspectedEntryCount), selected \(result.selectedItemCount), downloaded \(downloaded), queued \(queued), GPS-only ignored \(skippedGPSOnly), failed \(failed), skipped \(result.skippedSeenCount)."
+            state?.currentWorkDetail = "Backfill download complete. Upload queue is processing remaining files."
+            state?.refreshQueueProgress()
             LoggingService.shared.info("BACKFILL_RUN_COMPLETED runID=\(runID) downloaded=\(downloaded) queued=\(queued) skippedGPSOnly=\(skippedGPSOnly) failed=\(failed)")
         } catch {
             let cursorAfter = cursorStore.cursor(provider: provider.identifier)
@@ -544,6 +577,8 @@ final class SyncCoordinator {
             try? queue.recordBackfillRun(runID: runID, source: discoveryResult?.sourceDescription ?? "GET /fly-garmin/api/logbook/", result: discoveryResult, status: "failed", error: error.localizedDescription)
             state?.garminBackfillStatus = "Failed"
             state?.garminBackfillLastResult = error.localizedDescription
+            state?.currentWorkDetail = "Backfill failed: \(error.localizedDescription)"
+            state?.refreshQueueProgress()
             LoggingService.shared.error("BACKFILL_RUN_FAILED runID=\(runID) error=\(error.localizedDescription)")
         }
         state?.isBackfillRunning = false
@@ -617,27 +652,37 @@ final class SyncCoordinator {
     @MainActor
     func uploadPending() async throws {
         state?.status = .uploading
-        let items = try queue.pending()
-        state?.pendingUploads = items.count
-        for item in items {
-            do {
-                try queue.markUploading(item.id)
-                let status = try await api.uploadSource(item)
-                try queue.markServerResult(item.id, status: status)
-                if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
-                    try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
-                    LoggingService.shared.info("BACKFILL_UPLOAD_RESULT track=\(item.sourceUUID) result=\(status)")
+        while true {
+            let items = try queue.pending()
+            guard !items.isEmpty else { break }
+            state?.pendingUploads = (try? queue.pendingCount()) ?? items.count
+            state?.refreshQueueProgress()
+            for item in items {
+                do {
+                    try queue.markUploading(item.id)
+                    state?.refreshQueueProgress()
+                    state?.currentWorkDetail = "Uploading \(item.artifactType) for track/source \(item.sourceUUID)."
+                    let status = try await api.uploadSource(item)
+                    try queue.markServerResult(item.id, status: status)
+                    if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
+                        try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
+                        LoggingService.shared.info("BACKFILL_UPLOAD_RESULT track=\(item.sourceUUID) result=\(status)")
+                    }
+                    state?.filesUploaded += 1
+                    state?.refreshQueueProgress()
+                } catch {
+                    if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
+                        try? queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .failed, error: error.localizedDescription)
+                    }
+                    try queue.markRetry(item.id, error: error.localizedDescription, attempts: item.attempts + 1)
+                    state?.refreshQueueProgress()
+                    LoggingService.shared.error("Upload retry scheduled for \(item.sourceUUID): \(error.localizedDescription)")
                 }
-                state?.filesUploaded += 1
-            } catch {
-                if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
-                    try? queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .failed, error: error.localizedDescription)
-                }
-                try queue.markRetry(item.id, error: error.localizedDescription, attempts: item.attempts + 1)
-                LoggingService.shared.error("Upload retry scheduled for \(item.sourceUUID): \(error.localizedDescription)")
             }
         }
         state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+        state?.refreshQueueProgress()
+        state?.currentWorkDetail = (state?.pendingUploads ?? 0) == 0 ? "Upload queue is empty." : "Upload queue paused until retry time or next sync."
     }
 }
 

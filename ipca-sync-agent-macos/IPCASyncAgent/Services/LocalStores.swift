@@ -399,6 +399,14 @@ final class LocalQueueStore {
         try scalarInt("SELECT COUNT(*) FROM upload_queue WHERE state NOT IN ('uploaded','already_exists','completed')")
     }
 
+    func uploadQueueStateCounts() throws -> [String: Int] {
+        try stateCounts(table: "upload_queue")
+    }
+
+    func backfillTrackStateCounts() throws -> [String: Int] {
+        try stateCounts(table: "garmin_backfill_tracks")
+    }
+
     func backfillSkipTrackUUIDs() throws -> Set<String> {
         lock.lock()
         defer { lock.unlock() }
@@ -672,6 +680,22 @@ final class LocalQueueStore {
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(statement) }
         return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int(statement, 0)) : 0
+    }
+
+    private func stateCounts(table: String) throws -> [String: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        let allowedTables = ["upload_queue", "garmin_backfill_tracks"]
+        guard allowedTables.contains(table) else { return [:] }
+        let sql = "SELECT state, COUNT(*) FROM \(table) GROUP BY state"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        var counts: [String: Int] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            counts[text(statement, 0)] = Int(sqlite3_column_int(statement, 1))
+        }
+        return counts
     }
 
     private func bind(_ values: [Any], to statement: OpaquePointer?) {

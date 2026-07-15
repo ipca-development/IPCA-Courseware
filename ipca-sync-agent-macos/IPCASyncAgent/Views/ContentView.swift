@@ -73,6 +73,9 @@ struct ContentView: View {
                 ("Files downloaded", "\(state.filesDownloaded)"),
                 ("Files uploaded", "\(state.filesUploaded)"),
                 ("Pending uploads", "\(state.pendingUploads)"),
+                ("Upload progress", state.uploadProgressDetail),
+                ("Backfill progress", state.backfillProgressDetail),
+                ("Current work", state.currentWorkDetail),
                 ("Backfill result", state.garminBackfillLastResult)
             ])
         }
@@ -216,6 +219,12 @@ struct MenuBarContentView: View {
             Text("Garmin Backfill: \(state.garminBackfillStatus)")
             Text("Last Sync: \(state.lastSuccessfulSync?.formatted(date: .omitted, time: .shortened) ?? "Not yet")")
             Text("Pending Uploads: \(state.pendingUploads)")
+            Text(state.uploadProgressDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(state.currentWorkDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Divider()
             Button("Sync Now") { state.syncNow() }
             Button("Backfill Garmin History") { state.backfillGarminHistory() }
