@@ -398,6 +398,61 @@ final class LocalQueueStore {
         try scalarInt("SELECT COUNT(*) FROM upload_queue WHERE state NOT IN ('uploaded','already_exists','completed')")
     }
 
+    func backfillSkipTrackUUIDs() throws -> Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        let sql = """
+        SELECT DISTINCT source_uuid
+        FROM upload_queue
+        WHERE artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
+          AND state IN ('queued','uploading','retry_wait','uploaded','already_exists','completed','review_required')
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        var values = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            values.insert(text(statement, 0).lowercased())
+        }
+        return values
+    }
+
+    func markBackfillTrack(trackUUID: String, entryID: String, runID: String, state: GarminBackfillTrackState, error: String? = nil) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date().timeIntervalSince1970
+        let sql = """
+        INSERT INTO garmin_backfill_tracks (track_uuid, entry_id, run_id, state, last_error, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(track_uuid) DO UPDATE SET
+          entry_id = excluded.entry_id,
+          run_id = excluded.run_id,
+          state = excluded.state,
+          last_error = excluded.last_error,
+          updated_at = excluded.updated_at
+        """
+        try execute(sql, [trackUUID.lowercased(), entryID, runID, state.rawValue, error as Any, now, now])
+    }
+
+    func recordBackfillRun(runID: String, source: String, result: GarminBackfillDiscoveryResult?, status: String, error: String?) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date().timeIntervalSince1970
+        let resultData = try result.map { try JSONEncoder.ipca.encode($0) }
+        let resultJSON = resultData.flatMap { String(data: $0, encoding: .utf8) }
+        let sql = """
+        INSERT INTO garmin_backfill_runs (run_id, source, status, result_json, error, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          source = excluded.source,
+          status = excluded.status,
+          result_json = excluded.result_json,
+          error = excluded.error,
+          updated_at = excluded.updated_at
+        """
+        try execute(sql, [runID, source, status, resultJSON as Any, error as Any, now, now])
+    }
+
     func isHealthy() -> Bool {
         durable && (try? scalarInt("SELECT COUNT(*) FROM upload_queue")) != nil
     }
@@ -439,6 +494,28 @@ final class LocalQueueStore {
         try execute("CREATE TABLE IF NOT EXISTS server_acknowledgments (idempotency_key TEXT PRIMARY KEY, status TEXT NOT NULL, created_at REAL NOT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS provider_connections (provider TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at REAL NOT NULL)", [])
+        try execute("""
+        CREATE TABLE IF NOT EXISTS garmin_backfill_tracks (
+          track_uuid TEXT PRIMARY KEY,
+          entry_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          state TEXT NOT NULL,
+          last_error TEXT NULL,
+          created_at REAL NOT NULL,
+          updated_at REAL NOT NULL
+        )
+        """, [])
+        try execute("""
+        CREATE TABLE IF NOT EXISTS garmin_backfill_runs (
+          run_id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          result_json TEXT NULL,
+          error TEXT NULL,
+          created_at REAL NOT NULL,
+          updated_at REAL NOT NULL
+        )
+        """, [])
     }
 
     private func exec(_ sql: String) throws {

@@ -76,6 +76,26 @@ struct RemoteSyncItem: Codable, Identifiable {
     var rawEntry: [String: JSONValue]
 }
 
+struct GarminBackfillDiscoveryResult: Codable {
+    var inspectedEntryCount: Int
+    var entriesWithTracksCount: Int
+    var selectedItemCount: Int
+    var skippedSeenCount: Int
+    var skippedMissingTrackCount: Int
+    var remainingEstimate: Int?
+    var items: [RemoteSyncItem]
+    var sourceDescription: String
+    var responseVersion: String?
+}
+
+enum GarminBackfillTrackState: String, Codable {
+    case seen
+    case queued
+    case downloaded
+    case uploaded
+    case failed
+}
+
 struct GarminTrackResponse: Codable {
     var formatVersion: Int?
     var sessions: [GarminTrackSession]

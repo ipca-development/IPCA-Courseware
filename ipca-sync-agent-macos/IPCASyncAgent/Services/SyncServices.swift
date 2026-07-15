@@ -142,6 +142,9 @@ final class AppStateController: ObservableObject {
     @Published var garminAuthenticationStatus = GarminAuthenticationState.unknown.rawValue
     @Published var garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
     @Published var garminSyncStatus = GarminSyncState.idle.rawValue
+    @Published var garminBackfillStatus = "Idle"
+    @Published var garminBackfillLastResult = "Not run"
+    @Published var isBackfillRunning = false
     @Published var browserStatus = "Not Open"
     @Published var networkStatus = "Unknown"
     @Published var queueStartupStatus = "Unknown"
@@ -276,6 +279,10 @@ final class AppStateController: ObservableObject {
 
     func syncNow() {
         Task { await coordinator.syncNow(manual: true) }
+    }
+
+    func backfillGarminHistory() {
+        Task { await coordinator.backfillGarminHistory() }
     }
 
     func reloadGarminForInitialSync() {
@@ -460,6 +467,81 @@ final class SyncCoordinator {
                 state?.setError(error.localizedDescription)
             }
         }
+    }
+
+    @MainActor
+    func backfillGarminHistory() async {
+        if state?.isBackfillRunning == true { return }
+        guard state?.queueAvailable == true else {
+            state?.setError("Local durable queue is unavailable in this app launch. Repair the queue before backfilling.")
+            return
+        }
+        state?.isBackfillRunning = true
+        let runID = UUID().uuidString
+        let cursorBefore = cursorStore.cursor(provider: provider.identifier)
+        cursorStore.logCursor("BACKFILL_RUN_STARTED", provider: provider.identifier, value: cursorBefore, extra: "runID=\(runID)")
+        state?.garminBackfillStatus = "Inspecting Garmin history"
+        state?.garminBackfillLastResult = "Backfill run \(runID) started."
+        var discoveryResult: GarminBackfillDiscoveryResult?
+        do {
+            let skipTracks = try queue.backfillSkipTrackUUIDs()
+            LoggingService.shared.info("BACKFILL_REQUEST_STARTED runID=\(runID) source=GET /fly-garmin/api/logbook/ cursorBeforeSha256=\(cursorStore.valueDiagnostic(provider: provider.identifier, value: cursorBefore).fingerprint)")
+            let result = try await provider.discoverHistoricalBackfill(skippingTrackUUIDs: skipTracks, limit: 25)
+            discoveryResult = result
+            try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "discovered", error: nil)
+            state?.garminBackfillStatus = "Discovered \(result.inspectedEntryCount) entries; selected \(result.selectedItemCount) tracks"
+            LoggingService.shared.info("BACKFILL_DISCOVERY runID=\(runID) rawEntries=\(result.inspectedEntryCount) entriesWithTracks=\(result.entriesWithTracksCount) selectedTracks=\(result.selectedItemCount) skippedCompletedOrQueued=\(result.skippedSeenCount) skippedMissingTrack=\(result.skippedMissingTrackCount) remainingEstimate=\(result.remainingEstimate.map(String.init) ?? "n/a") source=\(result.sourceDescription)")
+
+            var downloaded = 0
+            var queued = 0
+            var failed = 0
+            for (index, item) in result.items.enumerated() {
+                let trackUUID = item.trackUUIDs.first ?? "unknown"
+                state?.garminBackfillStatus = "Downloading historical track \(index + 1) of \(result.items.count)"
+                try queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .seen)
+                LoggingService.shared.info("BACKFILL_TRACK_SELECTED runID=\(runID) entry=\(item.entryID) track=\(trackUUID)")
+                do {
+                    let artifacts = try await provider.download(item: item)
+                    downloaded += artifacts.count
+                    for artifact in artifacts {
+                        try queue.enqueue(artifact)
+                        queued += 1
+                        try queue.markBackfillTrack(trackUUID: artifact.sourceUUID, entryID: item.entryID, runID: runID, state: .queued)
+                        LoggingService.shared.info("BACKFILL_QUEUE_RESULT runID=\(runID) entry=\(item.entryID) track=\(artifact.sourceUUID) result=queued")
+                    }
+                } catch {
+                    failed += 1
+                    try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .failed, error: error.localizedDescription)
+                    LoggingService.shared.error("BACKFILL_TRACK_FAILED runID=\(runID) entry=\(item.entryID) track=\(trackUUID) error=\(error.localizedDescription)")
+                }
+            }
+            state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+            if keychain.loadToken() != nil {
+                state?.garminBackfillStatus = "Uploading queued historical tracks"
+                try await uploadPending()
+            }
+            let cursorAfter = cursorStore.cursor(provider: provider.identifier)
+            cursorStore.logCursor("BACKFILL_CURSOR_AFTER", provider: provider.identifier, value: cursorAfter, extra: "runID=\(runID)")
+            guard cursorBefore == cursorAfter else {
+                let message = "Critical internal error: Garmin incremental cursor changed during backfill."
+                LoggingService.shared.error("BACKFILL_CURSOR_INVARIANT runID=\(runID) result=failed")
+                throw GarminError.unexpectedResponse(message)
+            }
+            LoggingService.shared.info("BACKFILL_CURSOR_INVARIANT runID=\(runID) result=passed")
+            try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "completed", error: nil)
+            state?.garminBackfillStatus = "Completed"
+            state?.garminBackfillLastResult = "Inspected \(result.inspectedEntryCount), selected \(result.selectedItemCount), downloaded \(downloaded), queued \(queued), failed \(failed), skipped \(result.skippedSeenCount)."
+            LoggingService.shared.info("BACKFILL_RUN_COMPLETED runID=\(runID) downloaded=\(downloaded) queued=\(queued) failed=\(failed)")
+        } catch {
+            let cursorAfter = cursorStore.cursor(provider: provider.identifier)
+            cursorStore.logCursor("BACKFILL_CURSOR_AFTER", provider: provider.identifier, value: cursorAfter, extra: "runID=\(runID)")
+            LoggingService.shared.error("BACKFILL_CURSOR_INVARIANT runID=\(runID) result=\(cursorBefore == cursorAfter ? "passed" : "failed")")
+            try? queue.recordBackfillRun(runID: runID, source: discoveryResult?.sourceDescription ?? "GET /fly-garmin/api/logbook/", result: discoveryResult, status: "failed", error: error.localizedDescription)
+            state?.garminBackfillStatus = "Failed"
+            state?.garminBackfillLastResult = error.localizedDescription
+            LoggingService.shared.error("BACKFILL_RUN_FAILED runID=\(runID) error=\(error.localizedDescription)")
+        }
+        state?.isBackfillRunning = false
     }
 
     @MainActor

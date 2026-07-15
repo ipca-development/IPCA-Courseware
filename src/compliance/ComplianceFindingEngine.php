@@ -534,9 +534,7 @@ final class ComplianceFindingEngine
         } catch (Throwable) {
             // Create the phase-1 evidence table if the migration was not applied yet.
         }
-        try {
-            $pdo->exec(
-                "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
+        $baseSql = "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
                   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                   corrective_action_id BIGINT UNSIGNED NOT NULL,
                   evidence_kind VARCHAR(32) NOT NULL DEFAULT 'DOCUMENT',
@@ -550,13 +548,20 @@ final class ComplianceFindingEngine
                   uploaded_by INT UNSIGNED NULL,
                   uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   KEY idx_ipcacapev_action_kind (corrective_action_id, evidence_kind),
-                  KEY idx_ipcacapev_sha (sha256),
+                  KEY idx_ipcacapev_sha (sha256)";
+        try {
+            $pdo->exec(
+                $baseSql . ",
                   CONSTRAINT fk_ipcacapev_action_from_finding FOREIGN KEY (corrective_action_id)
                     REFERENCES ipca_compliance_corrective_actions (id) ON DELETE CASCADE ON UPDATE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             );
         } catch (Throwable) {
-            return false;
+            try {
+                $pdo->exec($baseSql . ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+            } catch (Throwable) {
+                return false;
+            }
         }
         try {
             $pdo->query('SELECT id FROM ipca_compliance_corrective_action_evidence LIMIT 0');

@@ -566,9 +566,7 @@ final class ComplianceCapEngine
         if (self::evidenceTablePresent($pdo)) {
             return true;
         }
-        try {
-            $pdo->exec(
-                "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
+        $baseSql = "CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_evidence (
                   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                   corrective_action_id BIGINT UNSIGNED NOT NULL,
                   evidence_kind VARCHAR(32) NOT NULL DEFAULT 'DOCUMENT',
@@ -582,13 +580,22 @@ final class ComplianceCapEngine
                   uploaded_by INT UNSIGNED NULL,
                   uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   KEY idx_ipcacapev_action_kind (corrective_action_id, evidence_kind),
-                  KEY idx_ipcacapev_sha (sha256),
+                  KEY idx_ipcacapev_sha (sha256)";
+        try {
+            $pdo->exec(
+                $baseSql . ",
                   CONSTRAINT fk_ipcacapev_action FOREIGN KEY (corrective_action_id)
                     REFERENCES ipca_compliance_corrective_actions (id) ON DELETE CASCADE ON UPDATE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             );
         } catch (Throwable) {
-            return false;
+            try {
+                // Some deployed databases reject runtime FK creation. Evidence still works
+                // without the constraint because all writes validate the CAP first.
+                $pdo->exec($baseSql . ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+            } catch (Throwable) {
+                return false;
+            }
         }
         return self::evidenceTablePresent($pdo);
     }

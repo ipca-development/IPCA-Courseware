@@ -224,6 +224,77 @@ final class GarminProvider: SyncProvider {
         }
     }
 
+    func discoverHistoricalBackfill(skippingTrackUUIDs skippedTrackUUIDs: Set<String>, limit: Int = 25) async throws -> GarminBackfillDiscoveryResult {
+        let value = try await withTimeout(seconds: 180, message: "Garmin historical Logbook request timed out.") {
+            try await self.browser.evaluate(Self.initialBootstrapLogbookExpression())
+        }
+        let object = try objectValue(value)
+        try validateProbe(object)
+        let entries = object["entries"]?.array ?? []
+        let inspectedEntryCount = object["rawEntryCount"]?.int ?? entries.count
+        let responseVersion = object["cursor"]?.string
+        var entriesWithTracks = 0
+        var skippedMissingTrackCount = 0
+        var skippedSeenCount = 0
+        var selected: [RemoteSyncItem] = []
+        var seenTracks = Set<String>()
+
+        let sortedItems = Self.remoteItems(from: .object(["entries": .array(entries)]), provider: identifier, requireArtifacts: false)
+            .sorted { lhs, rhs in
+                let lhsDate = lhs.generatedTrackStart ?? lhs.generatedTrackStop ?? ""
+                let rhsDate = rhs.generatedTrackStart ?? rhs.generatedTrackStop ?? ""
+                if lhsDate == rhsDate { return lhs.entryID < rhs.entryID }
+                return lhsDate > rhsDate
+            }
+
+        for item in sortedItems {
+            if item.trackUUIDs.isEmpty {
+                skippedMissingTrackCount += 1
+                continue
+            }
+            entriesWithTracks += 1
+            for trackUUID in item.trackUUIDs.sorted() {
+                let normalizedTrackUUID = trackUUID.lowercased()
+                if seenTracks.contains(normalizedTrackUUID) {
+                    skippedSeenCount += 1
+                    continue
+                }
+                seenTracks.insert(normalizedTrackUUID)
+                if skippedTrackUUIDs.contains(normalizedTrackUUID) {
+                    skippedSeenCount += 1
+                    continue
+                }
+                guard selected.count < limit else { continue }
+                selected.append(RemoteSyncItem(
+                    provider: item.provider,
+                    entryID: item.entryID,
+                    version: item.version,
+                    aircraftRegistration: item.aircraftRegistration,
+                    generatedTrackStart: item.generatedTrackStart,
+                    generatedTrackStop: item.generatedTrackStop,
+                    sourceUUIDs: [],
+                    trackUUIDs: [normalizedTrackUUID],
+                    rawEntry: item.rawEntry
+                ))
+            }
+        }
+
+        let remaining = max(0, seenTracks.count - skippedSeenCount - selected.count)
+        let result = GarminBackfillDiscoveryResult(
+            inspectedEntryCount: inspectedEntryCount,
+            entriesWithTracksCount: entriesWithTracks,
+            selectedItemCount: selected.count,
+            skippedSeenCount: skippedSeenCount,
+            skippedMissingTrackCount: skippedMissingTrackCount,
+            remainingEstimate: remaining,
+            items: selected,
+            sourceDescription: "GET /fly-garmin/api/logbook/ bare endpoint; verified live response returned 2601 entries spanning 2018-07-02 through 2026-07-13 with no top-level pagination fields.",
+            responseVersion: responseVersion
+        )
+        LoggingService.shared.info("BACKFILL_LOGBOOK_RESPONSE source=bare-logbook status=\(object["status"]?.int ?? 0) contentType=\(object["contentType"]?.string ?? "n/a") bytes=\(object["responseByteCount"]?.int ?? 0) rawEntries=\(inspectedEntryCount) entriesWithTracks=\(entriesWithTracks) uniqueTracks=\(seenTracks.count) selectedTracks=\(selected.count) skippedSeen=\(skippedSeenCount) skippedMissingTrack=\(skippedMissingTrackCount)")
+        return result
+    }
+
     func download(item: RemoteSyncItem) async throws -> [DownloadedArtifact] {
         guard !item.sourceUUIDs.isEmpty || !item.trackUUIDs.isEmpty else { return [] }
         var artifacts: [DownloadedArtifact] = []

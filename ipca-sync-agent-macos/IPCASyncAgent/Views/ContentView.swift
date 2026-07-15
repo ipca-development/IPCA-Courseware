@@ -56,6 +56,7 @@ struct ContentView: View {
                 ("Garmin Authentication", state.garminAuthenticationStatus),
                 ("Garmin Cursor", state.garminCursorStatus),
                 ("Garmin Sync", state.garminSyncStatus),
+                ("Garmin Backfill", state.garminBackfillStatus),
                 ("Browser", state.browser.browserStatus),
                 ("Network", state.network.isOnline ? "Online" : "Offline"),
                 ("Local Queue", state.queueStartupStatus)
@@ -71,7 +72,8 @@ struct ContentView: View {
                 ("New entries found", "\(state.newEntriesFound)"),
                 ("Files downloaded", "\(state.filesDownloaded)"),
                 ("Files uploaded", "\(state.filesUploaded)"),
-                ("Pending uploads", "\(state.pendingUploads)")
+                ("Pending uploads", "\(state.pendingUploads)"),
+                ("Backfill result", state.garminBackfillLastResult)
             ])
         }
     }
@@ -98,6 +100,8 @@ struct ContentView: View {
                     Button("Connect Garmin") { state.connectGarmin() }
                     Button("I’m on the Garmin Logbook") { state.confirmGarminLogbook() }
                     Button("Sync Now") { state.syncNow() }
+                    Button("Backfill Garmin History") { state.backfillGarminHistory() }
+                        .disabled(state.isBackfillRunning)
                     Button("Reconnect Garmin") { state.reconnectGarmin() }
                     Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
                 }
@@ -209,10 +213,13 @@ struct MenuBarContentView: View {
             Text("Garmin Auth: \(state.garminAuthenticationStatus)")
             Text("Garmin Cursor: \(state.garminCursorStatus)")
             Text("Garmin Sync: \(state.garminSyncStatus)")
+            Text("Garmin Backfill: \(state.garminBackfillStatus)")
             Text("Last Sync: \(state.lastSuccessfulSync?.formatted(date: .omitted, time: .shortened) ?? "Not yet")")
             Text("Pending Uploads: \(state.pendingUploads)")
             Divider()
             Button("Sync Now") { state.syncNow() }
+            Button("Backfill Garmin History") { state.backfillGarminHistory() }
+                .disabled(state.isBackfillRunning)
             Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
             Button("Open Window") { openWindow(id: "main") }
             Button("Open Logs") { LoggingService.shared.openLogs() }
