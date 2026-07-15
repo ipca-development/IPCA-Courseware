@@ -217,7 +217,7 @@ final class LocalArtifactStore {
         return artifact
     }
 
-    func saveTrackJSON(provider: String, entryID: String, trackUUID: String, bytes: Data, response: GarminTrackResponse, requestPath: String, contentType: String) throws -> DownloadedArtifact {
+    func saveTrackJSON(provider: String, entryID: String, trackUUID: String, bytes: Data, response: GarminTrackResponse, requestPath: String, contentType: String, trackClassification: String = "GARMIN_TRACK_UNCLASSIFIED") throws -> DownloadedArtifact {
         let dir = baseDirectory
             .appendingPathComponent(safePath(entryID), isDirectory: true)
             .appendingPathComponent(safePath(trackUUID), isDirectory: true)
@@ -250,10 +250,11 @@ final class LocalArtifactStore {
             localPath: fileURL.path,
             byteSize: bytes.count,
             sha256: sha256,
-            sourceClassification: "GARMIN_TRACK_NORMALIZED_JSON",
+            sourceClassification: trackClassification,
             metadata: [
                 "trackUUID": .string(trackUUID),
                 "requestPath": .string(requestPath),
+                "trackClassification": .string(trackClassification),
                 "formatVersion": response.formatVersion.map { .number(Double($0)) } ?? .null,
                 "sessionCount": .number(Double(response.sessions.count)),
                 "fieldCount": .number(Double(fieldCount)),

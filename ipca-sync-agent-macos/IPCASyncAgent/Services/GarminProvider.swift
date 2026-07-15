@@ -224,7 +224,7 @@ final class GarminProvider: SyncProvider {
         }
     }
 
-    func discoverHistoricalBackfill(skippingTrackUUIDs skippedTrackUUIDs: Set<String>, limit: Int = 25) async throws -> GarminBackfillDiscoveryResult {
+    func discoverHistoricalBackfill(skippingTrackUUIDs skippedTrackUUIDs: Set<String>, fromDate: String? = "2025-01-01", limit: Int = Int.max) async throws -> GarminBackfillDiscoveryResult {
         let value = try await withTimeout(seconds: 180, message: "Garmin historical Logbook request timed out.") {
             try await self.browser.evaluate(Self.initialBootstrapLogbookExpression())
         }
@@ -237,8 +237,9 @@ final class GarminProvider: SyncProvider {
             responseVersion: object["cursor"]?.string,
             provider: identifier,
             skippingTrackUUIDs: skippedTrackUUIDs,
+            fromDate: fromDate,
             limit: limit,
-            sourceDescription: "GET /fly-garmin/api/logbook/ bare endpoint; verified live response returned 2601 entries spanning 2018-07-02 through 2026-07-13 with no top-level pagination fields."
+            sourceDescription: "GET /fly-garmin/api/logbook/ bare endpoint; verified live response returned 2601 entries spanning 2018-07-02 through 2026-07-13 with no top-level pagination fields. Backfill filtered from \(fromDate ?? "beginning")."
         )
         LoggingService.shared.info("BACKFILL_LOGBOOK_RESPONSE source=bare-logbook status=\(object["status"]?.int ?? 0) contentType=\(object["contentType"]?.string ?? "n/a") bytes=\(object["responseByteCount"]?.int ?? 0) rawEntries=\(result.inspectedEntryCount) entriesWithTracks=\(result.entriesWithTracksCount) selectedTracks=\(result.selectedItemCount) skippedSeen=\(result.skippedSeenCount) skippedMissingTrack=\(result.skippedMissingTrackCount)")
         return result
@@ -250,6 +251,7 @@ final class GarminProvider: SyncProvider {
         responseVersion: String?,
         provider: String,
         skippingTrackUUIDs skippedTrackUUIDs: Set<String>,
+        fromDate: String? = nil,
         limit: Int,
         sourceDescription: String
     ) -> GarminBackfillDiscoveryResult {
@@ -260,6 +262,11 @@ final class GarminProvider: SyncProvider {
         var seenTracks = Set<String>()
 
         let sortedItems = remoteItems(from: .object(["entries": .array(entries)]), provider: provider, requireArtifacts: false)
+            .filter { item in
+                guard let fromDate else { return true }
+                let itemDate = item.generatedTrackStart ?? item.generatedTrackStop ?? ""
+                return itemDate >= fromDate
+            }
             .sorted { lhs, rhs in
                 let lhsDate = lhs.generatedTrackStart ?? lhs.generatedTrackStop ?? ""
                 let rhsDate = rhs.generatedTrackStart ?? rhs.generatedTrackStop ?? ""
@@ -319,6 +326,8 @@ final class GarminProvider: SyncProvider {
             do {
                 let artifact = try await downloadTrackJSON(entryID: item.entryID, trackUUID: trackUUID)
                 artifacts.append(artifact)
+            } catch GarminError.gpxOnly(let message) {
+                throw GarminError.gpxOnly(message)
             } catch {
                 LoggingService.shared.error("Garmin track JSON download failed for \(trackUUID): \(error.localizedDescription)")
             }
@@ -1040,6 +1049,11 @@ final class GarminProvider: SyncProvider {
         }
         let track = try JSONDecoder().decode(GarminTrackResponse.self, from: data)
         let metrics = Self.trackMetrics(response: track, responseByteCount: data.count)
+        let classification = Self.trackClassification(response: track)
+        if classification == "GARMIN_GPS_ONLY" {
+            LoggingService.shared.info("Skipped GPS-only Garmin track entry=\(entryID) track=\(trackUUID) fields=\(metrics.totalFieldCount) sources=\(Self.trackSourceSummary(response: track))")
+            throw GarminError.gpxOnly("Skipped GPS-only Garmin track \(trackUUID).")
+        }
         let artifact = try artifactStore.saveTrackJSON(
             provider: identifier,
             entryID: entryID,
@@ -1047,11 +1061,37 @@ final class GarminProvider: SyncProvider {
             bytes: data,
             response: track,
             requestPath: path,
-            contentType: contentType
+            contentType: contentType,
+            trackClassification: classification
         )
         writeTrackDiagnostic(entryID: entryID, trackUUID: trackUUID, path: path, status: status, contentType: contentType, response: track, metrics: metrics)
         LoggingService.shared.info("Garmin raw track download succeeded entry=\(entryID) track=\(trackUUID) status=\(status) bytes=\(metrics.responseByteCount) sessions=\(metrics.sessionCount) fields=\(metrics.totalFieldCount) rows=\(metrics.totalTelemetryRows) firstTimestamp=\(metrics.firstTimestamp ?? "n/a") lastTimestamp=\(metrics.lastTimestamp ?? "n/a")")
         return artifact
+    }
+
+    static func trackClassification(response: GarminTrackResponse) -> String {
+        let fieldTypes = response.sessions.flatMap(\.fields).compactMap(\.fieldType).map { $0.lowercased() }
+        let fieldCount = response.sessions.reduce(0) { $0 + $1.fields.count }
+        let sourceNames = response.sessions.flatMap { $0.sources ?? [] }.compactMap(\.name).map { $0.lowercased() }
+        let sourceTypes = response.sessions.flatMap { $0.sources ?? [] }.compactMap(\.type).map { $0.lowercased() }
+        let hasFlightDataLogSource = sourceNames.contains { $0.contains("flight data log system id") }
+        let engineFieldPattern = "(engine|rpm|cht|egt|fuel|oil|manifold|voltage|volt|amp|oat|ias|airspeed|vertical|vspeed|altitude|baro|pitch|roll|heading)"
+        let hasAircraftTelemetry = fieldTypes.contains { $0.range(of: engineFieldPattern, options: .regularExpression) != nil }
+        let isGarminPilotMobile = sourceTypes.contains("garmin-pilot.ios")
+        if hasFlightDataLogSource || fieldCount > 20 || hasAircraftTelemetry {
+            return "GARMIN_AVIONICS_FULL_OR_PARTIAL"
+        }
+        if isGarminPilotMobile && fieldCount <= 15 {
+            return "GARMIN_GPS_ONLY"
+        }
+        return "GARMIN_UNKNOWN_TRACK"
+    }
+
+    static func trackSourceSummary(response: GarminTrackResponse) -> String {
+        response.sessions
+            .flatMap { $0.sources ?? [] }
+            .map { "type=\($0.type ?? "") name=\($0.name ?? "")" }
+            .joined(separator: "; ")
     }
 
     static func trackDownloadExpression(trackUUID: String) throws -> String {

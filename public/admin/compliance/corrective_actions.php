@@ -479,6 +479,21 @@ if ($detailId > 0) {
     ));
 }
 
+?>
+<style>
+  .cmp-page .cmp-pill,
+  .cmp-page .compliance-badge,
+  .cmp-page .cmp-deadline-status .cmp-pill,
+  .cmp-page .cmp-list-deadline .cmp-pill{
+    font-size:9px !important;
+    line-height:1.08 !important;
+    padding:3px 6px !important;
+    max-width:100%;
+    white-space:normal;
+  }
+</style>
+<?php
+
 try {
     $findingsPick = ComplianceFindingEngine::listRecent($pdo, 200);
 } catch (Throwable $e) {

@@ -484,9 +484,9 @@ final class SyncCoordinator {
         state?.garminBackfillLastResult = "Backfill run \(runID) started."
         var discoveryResult: GarminBackfillDiscoveryResult?
         do {
-            let skipTracks = try queue.backfillSkipTrackUUIDs()
+            let skipTracks = try queue.backfillSkipTrackUUIDs().union(queue.ignoredGPSOnlyBackfillTrackUUIDs())
             LoggingService.shared.info("BACKFILL_REQUEST_STARTED runID=\(runID) source=GET /fly-garmin/api/logbook/ cursorBeforeSha256=\(cursorStore.valueDiagnostic(provider: provider.identifier, value: cursorBefore).fingerprint)")
-            let result = try await provider.discoverHistoricalBackfill(skippingTrackUUIDs: skipTracks, limit: 25)
+            let result = try await provider.discoverHistoricalBackfill(skippingTrackUUIDs: skipTracks, fromDate: "2025-01-01", limit: Int.max)
             discoveryResult = result
             try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "discovered", error: nil)
             state?.garminBackfillStatus = "Discovered \(result.inspectedEntryCount) entries; selected \(result.selectedItemCount) tracks"
@@ -495,6 +495,7 @@ final class SyncCoordinator {
             var downloaded = 0
             var queued = 0
             var failed = 0
+            var skippedGPSOnly = 0
             for (index, item) in result.items.enumerated() {
                 let trackUUID = item.trackUUIDs.first ?? "unknown"
                 state?.garminBackfillStatus = "Downloading historical track \(index + 1) of \(result.items.count)"
@@ -509,6 +510,10 @@ final class SyncCoordinator {
                         try queue.markBackfillTrack(trackUUID: artifact.sourceUUID, entryID: item.entryID, runID: runID, state: .queued)
                         LoggingService.shared.info("BACKFILL_QUEUE_RESULT runID=\(runID) entry=\(item.entryID) track=\(artifact.sourceUUID) result=queued")
                     }
+                } catch GarminError.gpxOnly(let message) {
+                    skippedGPSOnly += 1
+                    try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .ignoredGPSOnly, error: message)
+                    LoggingService.shared.info("BACKFILL_TRACK_IGNORED_GPS_ONLY runID=\(runID) entry=\(item.entryID) track=\(trackUUID) reason=\(message)")
                 } catch {
                     failed += 1
                     try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .failed, error: error.localizedDescription)
@@ -530,8 +535,8 @@ final class SyncCoordinator {
             LoggingService.shared.info("BACKFILL_CURSOR_INVARIANT runID=\(runID) result=passed")
             try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "completed", error: nil)
             state?.garminBackfillStatus = "Completed"
-            state?.garminBackfillLastResult = "Inspected \(result.inspectedEntryCount), selected \(result.selectedItemCount), downloaded \(downloaded), queued \(queued), failed \(failed), skipped \(result.skippedSeenCount)."
-            LoggingService.shared.info("BACKFILL_RUN_COMPLETED runID=\(runID) downloaded=\(downloaded) queued=\(queued) failed=\(failed)")
+            state?.garminBackfillLastResult = "From 2025-01-01: inspected \(result.inspectedEntryCount), selected \(result.selectedItemCount), downloaded \(downloaded), queued \(queued), GPS-only ignored \(skippedGPSOnly), failed \(failed), skipped \(result.skippedSeenCount)."
+            LoggingService.shared.info("BACKFILL_RUN_COMPLETED runID=\(runID) downloaded=\(downloaded) queued=\(queued) skippedGPSOnly=\(skippedGPSOnly) failed=\(failed)")
         } catch {
             let cursorAfter = cursorStore.cursor(provider: provider.identifier)
             cursorStore.logCursor("BACKFILL_CURSOR_AFTER", provider: provider.identifier, value: cursorAfter, extra: "runID=\(runID)")

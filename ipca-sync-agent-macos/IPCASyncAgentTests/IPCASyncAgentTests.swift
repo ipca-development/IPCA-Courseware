@@ -472,6 +472,58 @@ final class IPCASyncAgentTests: XCTestCase {
         XCTAssertEqual(result.remainingEstimate, 5)
     }
 
+    func testBackfillCanFilterEntriesFromJanuaryFirst2025() {
+        let oldTrack = "12345678-1234-1234-1234-123456789abc"
+        let newTrack = "abcdefab-1234-1234-1234-abcdefabcdef"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object(["uuid": .string("old-entry"), "generatedTrackStart": .string("2024-12-31"), "canonicalTrackUUID": .string(oldTrack)]),
+                .object(["uuid": .string("new-entry"), "generatedTrackStart": .string("2025-01-01"), "canonicalTrackUUID": .string(newTrack)])
+            ],
+            rawEntryCount: 2,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            fromDate: "2025-01-01",
+            limit: Int.max,
+            sourceDescription: "date-filter source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 1)
+        XCTAssertEqual(result.items.first?.entryID, "new-entry")
+        XCTAssertEqual(result.items.first?.trackUUIDs, [newTrack])
+    }
+
+    func testTrackClassificationTreatsGarminPilotIOSAsGPSOnly() {
+        let response = GarminTrackResponse(
+            formatVersion: 1,
+            sessions: [
+                GarminTrackSession(
+                    fields: (0..<10).map { GarminTrackField(fieldType: "gps-\($0)", engine: nil) },
+                    data: [],
+                    sources: [GarminTrackSource(type: "garmin-pilot.ios", name: "iPhone")]
+                )
+            ]
+        )
+
+        XCTAssertEqual(GarminProvider.trackClassification(response: response), "GARMIN_GPS_ONLY")
+    }
+
+    func testTrackClassificationTreatsFlightDataLogAsUsableAvionics() {
+        let response = GarminTrackResponse(
+            formatVersion: 1,
+            sessions: [
+                GarminTrackSession(
+                    fields: [GarminTrackField(fieldType: "rpm", engine: nil)],
+                    data: [],
+                    sources: [GarminTrackSource(type: "unknown", name: "Flight Data Log System ID: 21D7CA03E")]
+                )
+            ]
+        )
+
+        XCTAssertEqual(GarminProvider.trackClassification(response: response), "GARMIN_AVIONICS_FULL_OR_PARTIAL")
+    }
+
     func testBackfillDoesNotUseBootstrapRequiredStatusForEndpointFailureWithValidCursor() {
         let message = SyncCoordinator.logbookEndpointUnavailableMessage(hasValidSavedCursor: true)
 
