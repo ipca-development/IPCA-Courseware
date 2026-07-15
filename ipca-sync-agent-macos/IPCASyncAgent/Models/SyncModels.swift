@@ -94,6 +94,7 @@ enum GarminBackfillTrackState: String, Codable {
     case downloaded
     case uploaded
     case failed
+    case ignoredGPSOnly = "ignored_gps_only"
 }
 
 struct GarminTrackResponse: Codable {

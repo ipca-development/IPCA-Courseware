@@ -417,6 +417,20 @@ final class LocalQueueStore {
         return values
     }
 
+    func ignoredGPSOnlyBackfillTrackUUIDs() throws -> Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        let sql = "SELECT track_uuid FROM garmin_backfill_tracks WHERE state = 'ignored_gps_only'"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        var values = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            values.insert(text(statement, 0).lowercased())
+        }
+        return values
+    }
+
     func markBackfillTrack(trackUUID: String, entryID: String, runID: String, state: GarminBackfillTrackState, error: String? = nil) throws {
         lock.lock()
         defer { lock.unlock() }

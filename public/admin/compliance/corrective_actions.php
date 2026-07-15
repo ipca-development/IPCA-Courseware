@@ -149,7 +149,7 @@ function cap_closure_deadline_status_display(?string $deadline, ?string $closure
     }
     $closureDate = $closureDate !== null ? substr(trim($closureDate), 0, 10) : '';
     if ($closureDate === '') {
-        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline) . ' · Closed, no closure date</span>';
+        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">No closure date</span>';
     }
     try {
         $due = new DateTimeImmutable($deadline);
@@ -165,7 +165,20 @@ function cap_closure_deadline_status_display(?string $deadline, ?string $closure
     } else {
         $label = 'Closed ' . abs($days) . 'd before deadline';
     }
-    return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline . ' · ' . $label) . '</span>';
+    return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($label) . '</span>';
+}
+
+function cap_status_badge_with_closure_date(string $status, ?string $closureDate): string
+{
+    if (!cap_is_closed_status($status)) {
+        return compliance_badge($status);
+    }
+    $closureDate = $closureDate !== null ? substr(trim($closureDate), 0, 10) : '';
+    $label = ucfirst(strtolower(str_replace('_', ' ', trim($status))));
+    if ($closureDate !== '') {
+        $label .= ' ' . $closureDate;
+    }
+    return '<span class="cmp-pill compliance-badge compliance-badge--status-ok">' . h($label) . '</span>';
 }
 
 if (!empty($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
@@ -523,6 +536,7 @@ if ($detailId > 0) {
           <p class="cmp-meta-line">
             <span>Finding <strong><?= h(trim((string)($cap['finding_reference'] ?? '')) !== '' ? (string)$cap['finding_reference'] : (string)$cap['finding_code']) ?></strong></span>
             <span><?= h((string)$cap['finding_title']) ?></span>
+            <?= cap_status_badge_with_closure_date((string)$cap['status'], isset($cap['completed_at']) ? (string)$cap['completed_at'] : null) ?>
           </p>
           <?php if ($capLocked): ?>
             <p class="queue-status is-warn">This row is locked.</p>
@@ -1263,7 +1277,7 @@ if ($detailId > 0) {
                 </td>
                 <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>
                 <td><?= compliance_badge((string)$r['action_type']) ?></td>
-                <td><?= compliance_badge((string)$r['status']) ?></td>
+                <td><?= cap_status_badge_with_closure_date((string)$r['status'], isset($r['completed_at']) ? (string)$r['completed_at'] : null) ?></td>
                 <td><?= compliance_badge($eff) ?></td>
                 <td><?= $rowClosed ? '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h((string)($effectiveDue ?? 'No deadline')) . '</span>' : cap_deadline_display($effectiveDue) ?></td>
                 <td><?= $rowClosed ? cap_closure_deadline_status_display($effectiveDue, isset($r['completed_at']) ? (string)$r['completed_at'] : null, (string)$r['status']) : cap_deadline_status_display($deadlineStatus, $effectiveDue) ?></td>
