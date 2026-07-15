@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceAuthorityDocumentService.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapSubmissionEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceDeadlineExtensionEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
@@ -179,6 +180,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'closure_evidence_note' => (string)($_POST['closure_evidence_note'] ?? ''),
             ), $uid);
             cap_flash_set('success', 'Corrective action saved.');
+            redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
+        }
+
+        if ($action === 'upload_cap_evidence') {
+            $cid = (int)($_POST['cap_id'] ?? 0);
+            if ($cid <= 0) {
+                throw new RuntimeException('Invalid action.');
+            }
+            ComplianceCapEngine::uploadEvidenceDocument($pdo, $cid, $_FILES['evidence_file'] ?? array(), array(
+                'title' => (string)($_POST['evidence_title'] ?? ''),
+                'description' => (string)($_POST['evidence_description'] ?? ''),
+            ), $uid);
+            cap_flash_set('success', 'Corrective action evidence uploaded.');
+            redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
+        }
+
+        if ($action === 'attach_finding_document_evidence') {
+            $cid = (int)($_POST['cap_id'] ?? 0);
+            $docId = (int)($_POST['finding_document_id'] ?? 0);
+            if ($cid <= 0 || $docId <= 0) {
+                throw new RuntimeException('Select a corrective action and finding document.');
+            }
+            ComplianceCapEngine::attachFindingDocumentEvidence($pdo, $cid, $docId, (string)($_POST['attach_note'] ?? ''), $uid);
+            cap_flash_set('success', 'Existing finding document attached as corrective action evidence.');
             redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
         }
 
@@ -431,6 +456,11 @@ if ($detailId > 0) {
         $submission = $submissionId > 0 ? ComplianceRcaCapSubmissionEngine::getById($pdo, $submissionId) : null;
         $capExtensions = ComplianceDeadlineExtensionEngine::listForCorrectiveAction($pdo, (int)$cap['id']);
         $capEvidence = ComplianceCapEngine::listEvidence($pdo, (int)$cap['id']);
+        try {
+            $findingDocumentsForEvidence = ComplianceAuthorityDocumentService::listFindingDocuments($pdo, $fidRow);
+        } catch (Throwable) {
+            $findingDocumentsForEvidence = array();
+        }
         $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline(
             $pdo,
             (int)$cap['id'],
@@ -543,7 +573,56 @@ if ($detailId > 0) {
           </form>
         </section>
         <section class="cmp-card">
-          <h2 style="margin:0 0 8px;font-size:20px;">Closure evidence</h2>
+          <div class="cmp-card-head">
+            <h2 class="cmp-card-title">Closure evidence</h2>
+          </div>
+          <?php if (!$capLocked): ?>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px;">
+              <form method="post" enctype="multipart/form-data" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>" style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px;">
+                <input type="hidden" name="action" value="upload_cap_evidence">
+                <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
+                <h3 style="margin:0 0 10px;font-size:15px;">Upload evidence document</h3>
+                <label class="cmp-field">
+                  <span>Evidence title</span>
+                  <input name="evidence_title" placeholder="e.g. Procedure update confirmation">
+                </label>
+                <label class="cmp-field">
+                  <span>Evidence note</span>
+                  <textarea name="evidence_description" rows="3" placeholder="Briefly describe how this proves CAP closure."></textarea>
+                </label>
+                <label class="cmp-field">
+                  <span>PDF document *</span>
+                  <input type="file" name="evidence_file" accept="application/pdf,.pdf" required>
+                </label>
+                <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;">Upload evidence</button>
+              </form>
+
+              <form method="post" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>" style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px;">
+                <input type="hidden" name="action" value="attach_finding_document_evidence">
+                <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
+                <h3 style="margin:0 0 10px;font-size:15px;">Attach existing finding document</h3>
+                <label class="cmp-field">
+                  <span>Finding document *</span>
+                  <select name="finding_document_id" required>
+                    <option value="">— Select document —</option>
+                    <?php foreach ($findingDocumentsForEvidence as $doc): ?>
+                      <option value="<?= (int)$doc['id'] ?>">
+                        <?= h('#' . (string)$doc['id'] . ' · ' . (string)$doc['doc_kind'] . ' · ' . (string)$doc['original_name']) ?>
+                      </option>
+                    <?php endforeach; ?>
+                  </select>
+                </label>
+                <label class="cmp-field">
+                  <span>Attach note</span>
+                  <textarea name="attach_note" rows="3" placeholder="Why this finding document proves the corrective action closure."></textarea>
+                </label>
+                <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;" <?= $findingDocumentsForEvidence === array() ? 'disabled' : '' ?>>Attach document</button>
+                <?php if ($findingDocumentsForEvidence === array()): ?>
+                  <p style="margin:8px 0 0;color:#64748b;font-size:13px;">No finding documents are available yet. Upload one on the finding page or upload a CAP evidence PDF here.</p>
+                <?php endif; ?>
+              </form>
+            </div>
+          <?php endif; ?>
           <?php if ($capEvidence === array()): ?>
             <p style="color:#64748b;font-size:14px;margin:0;">No corrective-action evidence has been recorded yet. Add an evidence note when closing or verifying this CAP.</p>
           <?php else: ?>
@@ -561,6 +640,9 @@ if ($detailId > 0) {
                         <?php endif; ?>
                         <?php if (trim((string)($ev['external_url'] ?? '')) !== ''): ?>
                           <div style="margin-top:4px;"><a href="<?= h((string)$ev['external_url']) ?>" target="_blank" rel="noopener">Open external evidence</a></div>
+                        <?php endif; ?>
+                        <?php if (trim((string)($ev['storage_relpath'] ?? '')) !== ''): ?>
+                          <div style="margin-top:4px;"><a href="/admin/compliance/cap_evidence.php?id=<?= (int)$ev['id'] ?>" target="_blank" rel="noopener">Open uploaded evidence</a></div>
                         <?php endif; ?>
                       </td>
                       <td class="cmp-mono"><?= h((string)($ev['uploaded_at'] ?? '')) ?></td>

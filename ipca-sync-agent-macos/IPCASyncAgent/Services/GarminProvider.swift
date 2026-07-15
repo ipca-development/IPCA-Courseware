@@ -299,14 +299,53 @@ final class GarminProvider: SyncProvider {
             throw GarminError.initialSyncBootstrapRequired
         }
         guard let cursor else { throw GarminError.initialSyncBootstrapRequired }
+        let url: URL
+        do {
+            url = try GarminRoutes.incrementalLogbookURL(version: cursor)
+        } catch {
+            writeIncrementalLogbookFailureDiagnostic(
+                cursor: cursor,
+                attemptedURL: nil,
+                error: error,
+                object: nil,
+                reason: "incremental URL construction failed"
+            )
+            throw error
+        }
+        cursorStore.logCursor("SYNC_NOW_CURSOR_READ", provider: identifier, value: cursor, extra: "context=incrementalLogbookFetch url=\(url.absoluteString)")
         do {
             let value = try await withTimeout(seconds: 60, message: "Garmin discovery timed out while reading the Logbook.") {
-                try await self.browser.evaluate(try Self.incrementalLogbookExpression(version: cursor))
+                try await self.browser.evaluate(try Self.logbookFetchExpression(url: url))
             }
             let object = try objectValue(value)
+            if Self.shouldReportLogbookEndpointUnavailable(object) {
+                writeIncrementalLogbookFailureDiagnostic(
+                    cursor: cursor,
+                    attemptedURL: url,
+                    error: GarminError.logbookEndpointUnavailable,
+                    object: object,
+                    reason: "incremental response was not confirmed before validation"
+                )
+            }
             return object
         } catch GarminError.timeout {
+            writeIncrementalLogbookFailureDiagnostic(
+                cursor: cursor,
+                attemptedURL: url,
+                error: GarminError.timeout("Garmin incremental Logbook request timed out."),
+                object: nil,
+                reason: "incremental request timed out"
+            )
             throw GarminError.timeout("Garmin incremental Logbook request timed out.")
+        } catch {
+            writeIncrementalLogbookFailureDiagnostic(
+                cursor: cursor,
+                attemptedURL: url,
+                error: error,
+                object: nil,
+                reason: "incremental browser evaluation failed before response validation"
+            )
+            throw error
         }
     }
 
@@ -1309,6 +1348,46 @@ final class GarminProvider: SyncProvider {
         ]
         try? lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: String.Encoding.utf8)
         LoggingService.shared.error("Garmin logbook endpoint unavailable: status=\(object["status"]?.int ?? 0) url=\(object["logbookURL"]?.string ?? "n/a") keys=\(topKeys.joined(separator: ",")) version=\(versionExists ? "yes" : "no") entries=\(entriesCount.map(String.init) ?? "n/a")")
+    }
+
+    private func writeIncrementalLogbookFailureDiagnostic(
+        cursor: String,
+        attemptedURL: URL?,
+        error: Error,
+        object: [String: JSONValue]?,
+        reason: String
+    ) {
+        let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Logs/IPCA Sync Agent", isDirectory: true)
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let fileURL = logs.appendingPathComponent("garmin-incremental-logbook-diagnostic.txt")
+        let cursorDiagnostic = cursorStore.valueDiagnostic(provider: identifier, value: cursor)
+        let topKeys = object?["topLevelKeys"]?.array?.compactMap(\.string) ?? []
+        let entriesCount = object?["rawEntryCount"]?.int ?? object?["entries"]?.array?.count
+        let lines: [String] = [
+            "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
+            "Reason: \(reason)",
+            "Attempted URL: \(attemptedURL?.absoluteString ?? object?["logbookURL"]?.string ?? "n/a")",
+            "Error: \(error.localizedDescription)",
+            "Cursor present: \(cursorDiagnostic.present ? "yes" : "no")",
+            "Cursor length: \(cursorDiagnostic.length)",
+            "Cursor first six: \(cursorDiagnostic.firstSix.isEmpty ? "n/a" : cursorDiagnostic.firstSix)",
+            "Cursor last four: \(cursorDiagnostic.lastFour.isEmpty ? "n/a" : cursorDiagnostic.lastFour)",
+            "Cursor SHA-256: \(cursorDiagnostic.fingerprint)",
+            "Storage key: \(cursorDiagnostic.storageKey)",
+            "Storage repository: \(cursorDiagnostic.storageRepository)",
+            "HTTP status: \(object?["status"]?.int.map(String.init) ?? "n/a")",
+            "Content type: \(object?["contentType"]?.string ?? "n/a")",
+            "Response byte count: \(object?["responseByteCount"]?.int.map(String.init) ?? "n/a")",
+            "Top-level keys: \(topKeys.joined(separator: ", "))",
+            "Version exists: \(object?["cursor"]?.string?.isEmpty == false ? "yes" : "no")",
+            "Entries exists: \(entriesCount == nil ? "no" : "yes")",
+            "Entries count: \(entriesCount.map(String.init) ?? "n/a")",
+            "JavaScript/browser evaluation error: \(object?["jsEvaluationError"]?.string ?? object?["error"]?.string ?? error.localizedDescription)",
+            "Response body preview: \(object?["bodyPreview"]?.string ?? "n/a")"
+        ]
+        try? lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: String.Encoding.utf8)
+        LoggingService.shared.error("Garmin incremental logbook diagnostic written: reason=\(reason) url=\(attemptedURL?.absoluteString ?? object?["logbookURL"]?.string ?? "n/a") cursorLength=\(cursorDiagnostic.length) cursorSha256=\(cursorDiagnostic.fingerprint) error=\(error.localizedDescription)")
     }
 
     private func logConfirmedLogbookEndpoint(_ object: [String: JSONValue]) {

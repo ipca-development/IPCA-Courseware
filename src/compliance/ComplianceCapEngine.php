@@ -419,6 +419,105 @@ final class ComplianceCapEngine
         return is_array($rows) ? $rows : array();
     }
 
+    /**
+     * @param array{name?:string,tmp_name?:string,type?:string,size?:int,error?:int} $file
+     * @param array<string,mixed> $data
+     */
+    public static function uploadEvidenceDocument(PDO $pdo, int $capId, array $file, array $data, int $userId): int
+    {
+        if (!self::evidenceTablePresent($pdo)) {
+            throw new RuntimeException('Corrective action evidence table is not installed.');
+        }
+        $cap = self::getById($pdo, $capId);
+        if ($cap === null) {
+            throw new RuntimeException('Corrective action not found.');
+        }
+        $stored = self::storeUploadedEvidencePdf($file, $capId);
+        $title = trim((string)($data['title'] ?? ''));
+        $description = trim((string)($data['description'] ?? ''));
+        $st = $pdo->prepare(
+            'INSERT INTO ipca_compliance_corrective_action_evidence
+                (corrective_action_id, evidence_kind, storage_relpath, title, description, mime_type, file_size, sha256, uploaded_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $st->execute(array(
+            $capId,
+            'DOCUMENT',
+            $stored['relpath'],
+            $title !== '' ? $title : $stored['original_name'],
+            $description !== '' ? $description : null,
+            $stored['mime_type'],
+            $stored['file_size'],
+            $stored['sha256'],
+            $userId > 0 ? $userId : null,
+        ));
+        return (int)$pdo->lastInsertId();
+    }
+
+    public static function attachFindingDocumentEvidence(PDO $pdo, int $capId, int $findingDocumentId, string $note, int $userId): int
+    {
+        if (!self::evidenceTablePresent($pdo)) {
+            throw new RuntimeException('Corrective action evidence table is not installed.');
+        }
+        $cap = self::getById($pdo, $capId);
+        if ($cap === null) {
+            throw new RuntimeException('Corrective action not found.');
+        }
+        $st = $pdo->prepare(
+            'SELECT id, finding_id, doc_kind, original_name, notes
+               FROM ipca_compliance_finding_documents
+              WHERE id = ? AND finding_id = ?
+              LIMIT 1'
+        );
+        $st->execute(array($findingDocumentId, (int)$cap['finding_id']));
+        $doc = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($doc)) {
+            throw new RuntimeException('Selected finding document was not found for this corrective action finding.');
+        }
+        $title = 'Linked finding document: ' . trim((string)($doc['original_name'] ?? ('Document #' . $findingDocumentId)));
+        $description = trim($note);
+        if ($description === '') {
+            $description = trim((string)($doc['notes'] ?? ''));
+        }
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_corrective_action_evidence
+                (corrective_action_id, evidence_kind, external_url, title, description, uploaded_by)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $capId,
+            'DOCUMENT',
+            '/admin/compliance/document.php?scope=finding&id=' . $findingDocumentId,
+            $title,
+            $description !== '' ? $description : null,
+            $userId > 0 ? $userId : null,
+        ));
+        return (int)$pdo->lastInsertId();
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public static function getEvidenceById(PDO $pdo, int $evidenceId): ?array
+    {
+        if ($evidenceId <= 0 || !self::evidenceTablePresent($pdo)) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT * FROM ipca_compliance_corrective_action_evidence WHERE id = ? LIMIT 1');
+        $st->execute(array($evidenceId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    public static function evidenceAbsolutePath(array $evidence): string
+    {
+        $rel = str_replace('\\', '/', trim((string)($evidence['storage_relpath'] ?? '')));
+        if ($rel === '' || str_contains($rel, '..')) {
+            throw new RuntimeException('Invalid evidence storage path.');
+        }
+        return self::projectRoot() . '/' . $rel;
+    }
+
     private static function hasClosureEvidence(PDO $pdo, int $capId): bool
     {
         if (!self::evidenceTablePresent($pdo)) {
@@ -460,6 +559,72 @@ final class ComplianceCapEngine
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /** @return array{relpath:string,original_name:string,mime_type:string,file_size:int,sha256:string} */
+    private static function storeUploadedEvidencePdf(array $file, int $capId): array
+    {
+        $err = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Upload failed with error code ' . $err . '.');
+        }
+        $tmp = (string)($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new RuntimeException('Invalid uploaded file.');
+        }
+        $size = (int)($file['size'] ?? 0);
+        if ($size <= 0) {
+            throw new RuntimeException('Uploaded evidence is empty.');
+        }
+        if ($size > 50 * 1024 * 1024) {
+            throw new RuntimeException('Evidence PDF exceeds maximum size of 50 MiB.');
+        }
+        $original = self::safeFilename((string)($file['name'] ?? 'cap-evidence.pdf'));
+        $ext = strtolower(pathinfo($original, PATHINFO_EXTENSION));
+        if ($ext !== 'pdf') {
+            throw new RuntimeException('Only PDF evidence documents can be uploaded.');
+        }
+        $mime = self::detectMime($tmp);
+        if ($mime !== 'application/pdf' && $mime !== 'application/octet-stream') {
+            throw new RuntimeException('Uploaded evidence must be a PDF.');
+        }
+        $dirRel = 'storage/compliance/cap_evidence/' . $capId;
+        $dirAbs = self::projectRoot() . '/' . $dirRel;
+        if (!is_dir($dirAbs) && !mkdir($dirAbs, 0775, true) && !is_dir($dirAbs)) {
+            throw new RuntimeException('Unable to create evidence storage directory.');
+        }
+        $sha = hash_file('sha256', $tmp) ?: bin2hex(random_bytes(16));
+        $targetName = date('Ymd_His') . '_' . substr($sha, 0, 12) . '_' . $original;
+        $targetAbs = $dirAbs . '/' . $targetName;
+        if (!move_uploaded_file($tmp, $targetAbs)) {
+            throw new RuntimeException('Unable to store uploaded evidence.');
+        }
+        return array(
+            'relpath' => $dirRel . '/' . $targetName,
+            'original_name' => $original,
+            'mime_type' => 'application/pdf',
+            'file_size' => $size,
+            'sha256' => $sha,
+        );
+    }
+
+    private static function safeFilename(string $name): string
+    {
+        $name = basename($name);
+        $name = preg_replace('/[^A-Za-z0-9._-]+/', '_', $name) ?: 'cap-evidence.pdf';
+        return substr($name, 0, 180);
+    }
+
+    private static function detectMime(string $path): string
+    {
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file($path);
+        return is_string($mime) && $mime !== '' ? $mime : 'application/octet-stream';
+    }
+
+    private static function projectRoot(): string
+    {
+        return dirname(__DIR__, 2);
     }
 
     /**
