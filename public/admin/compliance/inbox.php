@@ -883,7 +883,7 @@ cw_header('Compliance Mail');
     var slot = preview.querySelector('[data-template-body-slot]');
     var signature = findTemplateSignature(preview);
     if (signature && signature.parentNode) {
-      if (slot && slot.parentNode) { slot.parentNode.removeChild(slot); }
+      if (slot) { removeTemplateBodySlot(slot); }
       if (signature.tagName && signature.tagName.toLowerCase() === 'td') {
         signature.insertBefore(editor, signature.firstChild);
       } else {
@@ -893,6 +893,27 @@ cw_header('Compliance Mail');
       slot.replaceWith(editor);
     } else {
       preview.appendChild(editor);
+    }
+  }
+  function removeTemplateBodySlot(slot) {
+    var node = slot;
+    var parent = node.parentElement;
+    while (parent && parent.id !== 'composeTemplatePreview') {
+      var tag = (parent.tagName || '').toLowerCase();
+      var text = (parent.textContent || '').replace(/\s+/g, '').trim();
+      var hasMedia = !!parent.querySelector('img,svg,canvas,video');
+      var onlyChild = parent.children.length === 1;
+      if (text !== '' || hasMedia || !onlyChild) {
+        break;
+      }
+      if (['div', 'p', 'section', 'article', 'td', 'tr'].indexOf(tag) === -1) {
+        break;
+      }
+      node = parent;
+      parent = parent.parentElement;
+    }
+    if (node.parentNode) {
+      node.parentNode.removeChild(node);
     }
   }
   function findTemplateSignature(root) {
