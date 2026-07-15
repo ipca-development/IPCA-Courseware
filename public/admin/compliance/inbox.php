@@ -333,8 +333,8 @@ cw_header('Compliance Mail');
   .mail-composer{width:min(980px,calc(100vw - 32px));max-height:min(900px,calc(100vh - 68px));display:flex;flex-direction:column;border-radius:22px;background:#fff;box-shadow:0 30px 90px rgba(15,23,42,.28);overflow:hidden;}
   .mail-composer-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:10px 14px;background:rgba(248,250,252,.96);border-bottom:1px solid rgba(15,23,42,.08);}
   .mail-window-dots{display:flex;gap:7px;align-items:center;}
-  .mail-window-dots span{width:12px;height:12px;border-radius:999px;display:block;}
-  .mail-window-dots span:nth-child(1){background:#ff5f57;}
+  .mail-window-dots button,.mail-window-dots span{width:12px;height:12px;border-radius:999px;display:block;border:0;padding:0;}
+  .mail-window-dots button{background:#ff5f57;cursor:pointer;}
   .mail-window-dots span:nth-child(2){background:#ffbd2e;}
   .mail-window-dots span:nth-child(3){background:#28c840;}
   .mail-composer-title{text-align:center;font-weight:850;color:#152235;}
@@ -354,7 +354,8 @@ cw_header('Compliance Mail');
   .mail-format-btn{box-shadow:none;background:transparent;min-width:28px;height:28px;padding:0 8px;border-radius:9px;}
   .mail-format-btn:hover{background:#eaf1fb;color:#1e3c72;}
   .mail-compose-body{min-height:0;overflow:auto;padding:22px;}
-  .mail-editor{min-height:300px;border:0;border-radius:0;padding:0;line-height:1.55;outline:none;font-size:14px;color:#152235;}
+  .mail-editor{min-height:180px;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:16px;line-height:1.55;outline:none;font-size:14px;color:#152235;background:#fff;}
+  .mail-editor:empty::before{content:"Compose your message here...";color:#9aa6b7;}
   .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;}
   .mail-template-preview-wrap.is-visible{display:block;}
   .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
@@ -500,7 +501,7 @@ cw_header('Compliance Mail');
 <div class="mail-composer-backdrop" id="mailComposerBackdrop" aria-hidden="true">
   <form class="mail-composer" id="mailComposer" enctype="multipart/form-data">
     <header class="mail-composer-top">
-      <div class="mail-window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="mail-window-dots"><button type="button" data-compose-close aria-label="Close compose"></button><span aria-hidden="true"></span><span aria-hidden="true"></span></div>
       <strong class="mail-composer-title" id="mailComposerTitle">New message</strong>
       <div class="mail-composer-head-actions">
         <button type="submit" data-compose-action="save_draft" title="Save draft">Draft</button>
@@ -557,6 +558,7 @@ cw_header('Compliance Mail');
       </span>
     </div>
     <div class="mail-compose-body">
+      <div class="mail-template-preview-head"><span>Message body</span><span>Type here</span></div>
       <div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
     </div>
     <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap">
