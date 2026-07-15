@@ -360,8 +360,9 @@ cw_header('Compliance Mail');
   .mail-template-preview-wrap.is-visible{display:block;}
   .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
   .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;overflow:hidden;}
-  .mail-template-preview .mail-editor{min-height:140px;border:0;border-radius:0;padding:0;background:transparent;}
-  .mail-template-preview .mail-editor:focus{outline:2px solid rgba(30,60,114,.18);outline-offset:8px;}
+  .mail-template-preview .mail-editor{min-height:120px;border:0;border-radius:0;padding:0;background:transparent;font:inherit;color:inherit;}
+  .mail-template-preview .mail-editor:focus{outline:0;}
+  .mail-template-preview .mail-editor:empty::before{content:"Type your message here...";color:#8a97aa;}
   .mail-composer.is-dragging .mail-editor{border-color:#1e3c72;background:#f3f7ff;}
   .mail-compose-extras{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:14px 22px;border-top:1px solid rgba(15,23,42,.08);background:#fbfcfe;}
   .mail-compose-extras label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
@@ -857,11 +858,13 @@ cw_header('Compliance Mail');
     wrap.classList.toggle('is-visible', style !== 'none');
     if (style === 'none') {
       plainBody.classList.remove('is-hidden');
+      editor.classList.remove('mail-template-body-editor');
       plainBody.appendChild(editor);
       preview.innerHTML = '';
       return;
     }
     plainBody.classList.add('is-hidden');
+    editor.classList.add('mail-template-body-editor');
     var subject = document.getElementById('composeSubject').value || 'Compliance email';
     var bodyText = editor.innerText || 'Compose your message here...';
     var html = complianceTemplateHtml
@@ -878,11 +881,29 @@ cw_header('Compliance Mail');
       .replaceAll('{{COMPLIANCE_OBJECT_PILLS_HTML}}', '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#eaf1fb;color:#1e3c72;font-size:12px;font-weight:700;">Compliance</span>');
     preview.innerHTML = html;
     var slot = preview.querySelector('[data-template-body-slot]');
-    if (slot) {
-      slot.appendChild(editor);
+    var signature = findTemplateSignature(preview);
+    if (signature && signature.parentNode) {
+      if (slot && slot.parentNode) { slot.parentNode.removeChild(slot); }
+      if (signature.tagName && signature.tagName.toLowerCase() === 'td') {
+        signature.insertBefore(editor, signature.firstChild);
+      } else {
+        signature.parentNode.insertBefore(editor, signature);
+      }
+    } else if (slot) {
+      slot.replaceWith(editor);
     } else {
       preview.appendChild(editor);
     }
+  }
+  function findTemplateSignature(root) {
+    var candidates = root.querySelectorAll('p, div, td');
+    for (var i = candidates.length - 1; i >= 0; i--) {
+      var text = (candidates[i].textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (text.indexOf('sincerely,') === 0 || text.indexOf('sincerely, ') === 0) {
+        return candidates[i];
+      }
+    }
+    return null;
   }
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (ch) {
