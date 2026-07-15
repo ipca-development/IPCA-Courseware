@@ -51,6 +51,12 @@ struct CDPEnvelope: Decodable {
     let exceptionDetails: CDPExceptionDetails?
 }
 
+struct CDPRawEnvelope: Codable {
+    let id: Int?
+    let result: JSONValue?
+    let error: CDPError?
+}
+
 struct CDPResult: Decodable {
     let result: RemoteObject?
 }
@@ -60,7 +66,7 @@ struct RemoteObject: Decodable {
     let description: String?
 }
 
-struct CDPError: Decodable {
+struct CDPError: Codable {
     let message: String
 }
 
@@ -69,17 +75,62 @@ struct CDPExceptionDetails: Decodable {
     let exception: RemoteObject?
 }
 
-final class ChromeDevToolsClient {
+struct GarminLogbookNetworkSnapshot {
+    var requestID: String
+    var url: String
+    var startedAt: Date
+    var responseStatus: Int?
+    var contentType: String?
+    var loadingFinishedAt: Date?
+    var encodedDataLength: Double?
+    var body: String?
+    var method: String?
+    var postDataPrefix: String?
+
+    var isInFlight: Bool { loadingFinishedAt == nil }
+    var duration: TimeInterval? {
+        loadingFinishedAt?.timeIntervalSince(startedAt)
+    }
+
+    var sanitizedPathWithQueryNames: String {
+        guard let components = URLComponents(string: url) else { return "" }
+        let names = (components.queryItems ?? []).map { $0.name }.sorted()
+        return components.path + (names.isEmpty ? "" : "?" + names.map { "\($0)=<redacted>" }.joined(separator: "&"))
+    }
+}
+
+final class ChromeDevToolsClient: @unchecked Sendable {
     private let task: URLSessionWebSocketTask
     private var nextID = 1
+    private var pendingContinuations: [Int: CheckedContinuation<CDPRawEnvelope, Error>] = [:]
+    private var apiRequests: [String: GarminLogbookNetworkSnapshot] = [:]
+    private var disconnected = false
+    private let stateQueue = DispatchQueue(label: "com.ipca.syncagent.cdp.state")
 
     init(webSocketURL: URL) {
         task = URLSession.shared.webSocketTask(with: webSocketURL)
         task.resume()
+        LoggingService.shared.info("CDP receive loop started.")
+        receiveLoop()
     }
 
     func close() {
+        stateQueue.sync {
+            disconnected = true
+            let continuations = pendingContinuations
+            pendingContinuations.removeAll()
+            continuations.values.forEach { $0.resume(throwing: BrowserError.devToolsUnavailable) }
+        }
         task.cancel(with: .normalClosure, reason: nil)
+    }
+
+    func enableNetworkTracking() async throws {
+        _ = try await rawCommand(method: "Network.enable", params: [:])
+        LoggingService.shared.info("CDP Network enabled.")
+    }
+
+    func enableRuntime() async throws {
+        _ = try await rawCommand(method: "Runtime.enable", params: [:])
     }
 
     func evaluate(_ expression: String) async throws -> JSONValue {
@@ -100,26 +151,178 @@ final class ChromeDevToolsClient {
         return value
     }
 
+    func cookieHeader(for urls: [String]) async throws -> String {
+        let response = try await rawCommand(method: "Network.getCookies", params: ["urls": urls])
+        if let error = response.error {
+            throw BrowserError.invalidResponse(error.message)
+        }
+        guard let cookies = response.result?.object?["cookies"]?.array else { return "" }
+        return cookies.compactMap { cookie in
+            guard let object = cookie.object,
+                  let name = object["name"]?.string,
+                  let value = object["value"]?.string,
+                  !name.isEmpty else {
+                return nil
+            }
+            return "\(name)=\(value)"
+        }.joined(separator: "; ")
+    }
+
     private func command(method: String, params: [String: Any]) async throws -> CDPEnvelope {
-        let id = nextID
-        nextID += 1
+        let raw = try await rawCommand(method: method, params: params)
+        let data = try JSONEncoder().encode(raw)
+        return try JSONDecoder().decode(CDPEnvelope.self, from: data)
+    }
+
+    private func rawCommand(method: String, params: [String: Any]) async throws -> CDPRawEnvelope {
+        let id = stateQueue.sync {
+            guard !disconnected else { return -1 }
+            let id = nextID
+            nextID += 1
+            return id
+        }
+        guard id > 0 else { throw BrowserError.devToolsUnavailable }
         let payload: [String: Any] = ["id": id, "method": method, "params": params]
         let data = try JSONSerialization.data(withJSONObject: payload)
         let text = String(data: data, encoding: .utf8) ?? "{}"
-        try await task.send(.string(text))
-
-        while true {
-            let message = try await task.receive()
-            let responseText: String
-            switch message {
-            case .string(let value): responseText = value
-            case .data(let value): responseText = String(data: value, encoding: .utf8) ?? ""
-            @unknown default: continue
+        return try await withCheckedThrowingContinuation { continuation in
+            stateQueue.async {
+                self.pendingContinuations[id] = continuation
+                Task {
+                    do {
+                        try await self.task.send(.string(text))
+                    } catch {
+                        self.stateQueue.async {
+                            self.pendingContinuations.removeValue(forKey: id)?.resume(throwing: error)
+                        }
+                    }
+                }
             }
-            guard let responseData = responseText.data(using: .utf8) else { continue }
-            let envelope = try JSONDecoder().decode(CDPEnvelope.self, from: responseData)
-            if envelope.id == id { return envelope }
         }
+    }
+
+    func completedGarminAPISnapshots() -> [GarminLogbookNetworkSnapshot] {
+        stateQueue.sync {
+            apiRequests.values
+                .filter { !$0.isInFlight }
+                .sorted { $0.startedAt < $1.startedAt }
+        }
+    }
+
+    func inFlightGarminAPICount() -> Int {
+        stateQueue.sync {
+            apiRequests.values.filter(\.isInFlight).count
+        }
+    }
+
+    func responseBody(for requestID: String) async throws -> String? {
+        let response = try await rawCommand(method: "Network.getResponseBody", params: ["requestId": requestID])
+        guard let body = response.result?.object?["body"]?.string else { return nil }
+        if response.result?.object?["base64Encoded"]?.bool == true,
+           let data = Data(base64Encoded: body) {
+            return String(data: data, encoding: .utf8)
+        }
+        return body
+    }
+
+    func navigate(to url: URL) async throws {
+        _ = try await rawCommand(method: "Page.enable", params: [:])
+        _ = try await rawCommand(method: "Page.navigate", params: ["url": url.absoluteString])
+    }
+
+    private func receiveLoop() {
+        Task {
+            while true {
+                do {
+                    let message = try await task.receive()
+                    let responseText: String
+                    switch message {
+                    case .string(let value): responseText = value
+                    case .data(let value): responseText = String(data: value, encoding: .utf8) ?? ""
+                    @unknown default: continue
+                    }
+                    handleMessage(responseText)
+                } catch {
+                    stateQueue.async {
+                        self.disconnected = true
+                        let continuations = self.pendingContinuations
+                        self.pendingContinuations.removeAll()
+                        continuations.values.forEach { $0.resume(throwing: error) }
+                    }
+                    LoggingService.shared.error("CDP disconnected/reconnecting: \(error.localizedDescription)")
+                    return
+                }
+            }
+        }
+    }
+
+    private func handleMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return
+        }
+        if let id = object["id"] as? Int {
+            let envelope = (try? JSONDecoder().decode(CDPRawEnvelope.self, from: data)) ?? CDPRawEnvelope(id: id, result: nil, error: CDPError(message: "Invalid CDP response"))
+            stateQueue.async {
+                self.pendingContinuations.removeValue(forKey: id)?.resume(returning: envelope)
+            }
+            return
+        }
+        guard let method = object["method"] as? String,
+              let params = object["params"] as? [String: Any] else {
+            return
+        }
+        handleNetworkEvent(method: method, params: params)
+    }
+
+    private func handleNetworkEvent(method: String, params: [String: Any]) {
+        switch method {
+        case "Network.requestWillBeSent":
+            guard let requestID = params["requestId"] as? String,
+                  let request = params["request"] as? [String: Any],
+                  let url = request["url"] as? String,
+                  isInitialBootstrapCandidateURL(url) else { return }
+            stateQueue.async {
+                var snapshot = GarminLogbookNetworkSnapshot(requestID: requestID, url: url, startedAt: Date())
+                snapshot.method = request["method"] as? String
+                snapshot.postDataPrefix = (request["postData"] as? String).map { String($0.prefix(400)) }
+                self.apiRequests[requestID] = snapshot
+            }
+        case "Network.responseReceived":
+            guard let requestID = params["requestId"] as? String,
+                  let response = params["response"] as? [String: Any] else { return }
+            stateQueue.async {
+                guard var snapshot = self.apiRequests[requestID] else { return }
+                snapshot.responseStatus = response["status"] as? Int
+                snapshot.contentType = (response["headers"] as? [String: Any])?["content-type"] as? String ??
+                    (response["headers"] as? [String: Any])?["Content-Type"] as? String
+                self.apiRequests[requestID] = snapshot
+            }
+        case "Network.loadingFinished":
+            guard let requestID = params["requestId"] as? String else { return }
+            stateQueue.async {
+                guard var snapshot = self.apiRequests[requestID] else { return }
+                snapshot.loadingFinishedAt = Date()
+                snapshot.encodedDataLength = params["encodedDataLength"] as? Double
+                self.apiRequests[requestID] = snapshot
+            }
+        case "Network.loadingFailed":
+            guard let requestID = params["requestId"] as? String else { return }
+            stateQueue.async {
+                guard var snapshot = self.apiRequests[requestID] else { return }
+                snapshot.loadingFinishedAt = Date()
+                self.apiRequests[requestID] = snapshot
+            }
+        default:
+            return
+        }
+    }
+
+    private func isInitialBootstrapCandidateURL(_ value: String) -> Bool {
+        guard let url = URL(string: value) else { return false }
+        guard url.host == "fly.garmin.com" else { return false }
+        return url.path.hasPrefix("/fly-garmin/api/") ||
+            url.path.localizedCaseInsensitiveContains("graphql")
     }
 }
 
@@ -187,19 +390,42 @@ final class BrowserSessionController: ObservableObject {
     }
 
     func connectDevTools() async throws -> ChromeDevToolsClient {
+        devToolsClient?.close()
+        devToolsClient = nil
         let port = debugPort
         let target = try await waitForFlyGarminTarget(port: port)
+        LoggingService.shared.info("CDP target rediscovered.")
         guard let webSocket = target.webSocketDebuggerUrl, let url = URL(string: webSocket) else {
             throw BrowserError.pageUnavailable
         }
         let client = ChromeDevToolsClient(webSocketURL: url)
+        try await client.enableRuntime()
+        try await client.enableNetworkTracking()
+        LoggingService.shared.info("CDP connected.")
         devToolsClient = client
         return client
+    }
+
+    func devTools() async throws -> ChromeDevToolsClient {
+        return try await connectDevTools()
     }
 
     func evaluate(_ expression: String) async throws -> JSONValue {
         let client = try await connectDevTools()
         return try await client.evaluate(expression)
+    }
+
+    func garminCookieHeader() async throws -> String {
+        let client = try await connectDevTools()
+        return try await client.cookieHeader(for: ["https://fly.garmin.com", "https://fly.garmin.com/fly-garmin/"])
+    }
+
+    func reloadLogbookForInitialSyncCapture() async throws -> ChromeDevToolsClient {
+        let client = try await connectDevTools()
+        let url = URL(string: "https://fly.garmin.com/fly-garmin/logbook/#/list")!
+        try await client.navigate(to: url)
+        LoggingService.shared.info("Reloaded Garmin Logbook after CDP Network was enabled.")
+        return client
     }
 
     func resetConnectionWithUserConfirmation() {

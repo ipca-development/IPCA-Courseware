@@ -19,9 +19,9 @@ struct ContentView: View {
                     }
                 }
                 if !state.lastError.isEmpty {
-                    statusCard(title: "Last Error") {
+                    statusCard(title: messageTitle) {
                         Text(state.lastError)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(messageColor)
                     }
                 }
             }
@@ -53,9 +53,12 @@ struct ContentView: View {
         statusCard(title: "Connection Status") {
             grid([
                 ("IPCA.training", state.ipcaStatus),
-                ("Garmin", state.garminStatus),
+                ("Garmin Authentication", state.garminAuthenticationStatus),
+                ("Garmin Cursor", state.garminCursorStatus),
+                ("Garmin Sync", state.garminSyncStatus),
                 ("Browser", state.browser.browserStatus),
-                ("Network", state.network.isOnline ? "Online" : "Offline")
+                ("Network", state.network.isOnline ? "Online" : "Offline"),
+                ("Local Queue", state.queueStartupStatus)
             ])
         }
     }
@@ -96,11 +99,14 @@ struct ContentView: View {
                     Button("I’m on the Garmin Logbook") { state.confirmGarminLogbook() }
                     Button("Sync Now") { state.syncNow() }
                     Button("Reconnect Garmin") { state.reconnectGarmin() }
+                    Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
                 }
                 HStack {
                     Button("Repair Connection") { state.repairConnection() }
                     Button("Open Downloads") { state.artifactStore.openDownloads() }
                     Button("Open Logs") { LoggingService.shared.openLogs() }
+                    Button("Open Garmin Diagnostic") { LoggingService.shared.openGarminDiagnostic() }
+                    Button("Clear Logs") { LoggingService.shared.clearLogs() }
                     Button("Quit") { NSApplication.shared.terminate(nil) }
                 }
                 Toggle("Launch at Login", isOn: Binding(
@@ -166,6 +172,26 @@ struct ContentView: View {
         }
     }
 
+    private var messageTitle: String {
+        switch state.status {
+        case .syncing, .downloading, .uploading, .connecting, .verifyingGarmin:
+            return "Current Activity"
+        default:
+            return "Last Error"
+        }
+    }
+
+    private var messageColor: Color {
+        switch state.status {
+        case .syncing, .downloading, .uploading, .connecting, .verifyingGarmin:
+            return .secondary
+        case .error, .offline, .ipcaUnavailable:
+            return .red
+        default:
+            return .primary
+        }
+    }
+
     private func format(_ date: Date?) -> String {
         guard let date else { return "Not yet" }
         return date.formatted(date: .abbreviated, time: .shortened)
@@ -180,13 +206,17 @@ struct MenuBarContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("IPCA Sync Agent").font(.headline)
             Text("Status: \(state.status.rawValue)")
-            Text("Garmin: \(state.garminStatus)")
+            Text("Garmin Auth: \(state.garminAuthenticationStatus)")
+            Text("Garmin Cursor: \(state.garminCursorStatus)")
+            Text("Garmin Sync: \(state.garminSyncStatus)")
             Text("Last Sync: \(state.lastSuccessfulSync?.formatted(date: .omitted, time: .shortened) ?? "Not yet")")
             Text("Pending Uploads: \(state.pendingUploads)")
             Divider()
             Button("Sync Now") { state.syncNow() }
+            Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
             Button("Open Window") { openWindow(id: "main") }
             Button("Open Logs") { LoggingService.shared.openLogs() }
+            Button("Clear Logs") { LoggingService.shared.clearLogs() }
             Toggle("Launch at Login", isOn: Binding(
                 get: { state.launchAtLogin.isEnabled },
                 set: { enabled in try? state.launchAtLogin.setEnabled(enabled) }

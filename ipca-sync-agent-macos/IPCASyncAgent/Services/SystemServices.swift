@@ -112,6 +112,23 @@ final class LoggingService {
         NSWorkspace.shared.open(logDirectory)
     }
 
+    func openGarminDiagnostic() {
+        NSWorkspace.shared.activateFileViewerSelecting([logDirectory.appendingPathComponent("garmin-entry-structure.txt")])
+    }
+
+    func clearLogs() {
+        queue.async {
+            let files = (try? FileManager.default.contentsOfDirectory(at: self.logDirectory, includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension == "log" || file.pathExtension == "txt" {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    func markLaunch(version: String, build: String) {
+        append("INFO", "----- IPCA Sync Agent launch ----- version=\(version) build=\(build)")
+    }
+
     private func append(_ level: String, _ message: String) {
         let sanitized = message
             .replacingOccurrences(of: "Authorization", with: "[redacted-header]")

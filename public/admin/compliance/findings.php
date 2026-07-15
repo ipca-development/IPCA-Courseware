@@ -145,6 +145,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'domain_code' => (string)($_POST['domain_code'] ?? ''),
                 'requirement_key' => (string)($_POST['requirement_key'] ?? ''),
                 'audit_id' => $auditId,
+                'closure_late_deadline_evidence_note' => (string)($_POST['closure_late_deadline_evidence_note'] ?? ''),
+                'closure_late_deadline_document_id' => (int)($_POST['closure_late_deadline_document_id'] ?? 0),
             ), $uid);
             cmp_flash_set('success', 'Finding saved.');
             redirect('/admin/compliance/findings.php?id=' . $fid);
@@ -431,6 +433,13 @@ if ($detailId > 0) {
         } catch (Throwable) {
             $findingDocuments = array();
         }
+        $lateDeadlineClosureBlocked = false;
+        foreach ($closureReadiness['reasons'] as $closureReason) {
+            if (stripos((string)$closureReason, 'approved deadline') !== false) {
+                $lateDeadlineClosureBlocked = true;
+                break;
+            }
+        }
 
         $sev = (string)($finding['severity'] ?? '');
         $stRaw = (string)($finding['status'] ?? '');
@@ -567,6 +576,28 @@ if ($detailId > 0) {
               <textarea name="notes" rows="3"
                 <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)($finding['notes'] ?? '')) ?></textarea>
             </label>
+
+            <?php if ($lateDeadlineClosureBlocked && !$findingLocked): ?>
+              <div class="cmp-flash is-warn" style="margin:0 0 16px;">
+                <strong>Late CAP closure evidence required.</strong>
+                <p style="margin:6px 0 10px;">This finding has CAP execution after the approved deadline. You may still close it if the closure is supported by evidence, such as an authority document or a written closure note.</p>
+                <label class="cmp-field compliance-field--full" style="margin-bottom:10px;">
+                  <span>Evidence note / closure rationale</span>
+                  <textarea name="closure_late_deadline_evidence_note" rows="3" placeholder="Explain why closure is accepted despite the late CAP execution, e.g. authority acceptance, documented evidence review, or corrective action effectiveness."></textarea>
+                </label>
+                <label class="cmp-field compliance-field--full" style="margin-bottom:0;">
+                  <span>Linked evidence document (optional)</span>
+                  <select name="closure_late_deadline_document_id">
+                    <option value="0">— No document selected —</option>
+                    <?php foreach ($findingDocuments as $doc): ?>
+                      <option value="<?= (int)$doc['id'] ?>">
+                        <?= h('#' . (string)$doc['id'] . ' · ' . (string)$doc['doc_kind'] . ' · ' . (string)$doc['original_name']) ?>
+                      </option>
+                    <?php endforeach; ?>
+                  </select>
+                </label>
+              </div>
+            <?php endif; ?>
 
             <?php if (!$findingLocked): ?>
               <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">
@@ -1005,7 +1036,11 @@ if ($detailId > 0) {
           <?php endif; ?>
           <?php if (!$closureReadiness['ready']): ?>
             <div class="cmp-flash is-warn" style="margin-top:14px;">
-              <strong>Closure blocked:</strong> <?= h(implode(' ', $closureReadiness['reasons'])) ?>
+              <strong><?= $lateDeadlineClosureBlocked ? 'Closure evidence required:' : 'Closure blocked:' ?></strong>
+              <?= h(implode(' ', $closureReadiness['reasons'])) ?>
+              <?php if ($lateDeadlineClosureBlocked): ?>
+                <div style="margin-top:6px;">Late CAP execution can be accepted at closure when supported by a finding document or written evidence note in the finding details form.</div>
+              <?php endif; ?>
             </div>
           <?php else: ?>
             <div class="cmp-flash is-ok" style="margin-top:14px;">Closure checks passed: approved actions are executed on time and effectiveness is positive.</div>

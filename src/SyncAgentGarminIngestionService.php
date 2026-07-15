@@ -53,6 +53,10 @@ final class SyncAgentGarminIngestionService
         if ($existing) {
             return array('ok' => true, 'status' => 'already_exists', 'acknowledgment_id' => (int)$existing['id']);
         }
+        $artifactType = (string)($payload['artifact_type'] ?? 'GARMIN_ORIGINAL_SOURCE');
+        if ($artifactType === 'GARMIN_TRACK_NORMALIZED_JSON') {
+            return $this->ingestNormalizedTrackJson($token, $payload);
+        }
         $entryUuid = $this->required($payload, 'entry_id');
         $sourceUuid = strtolower($this->required($payload, 'source_uuid'));
         $sha256 = strtolower($this->required($payload, 'sha256'));
@@ -118,6 +122,97 @@ final class SyncAgentGarminIngestionService
         return array('ok' => true, 'status' => 'accepted', 'csv_file_id' => $csvFileId, 'source_id' => (int)$source['id']);
     }
 
+    /**
+     * @param array<string,mixed> $token
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function ingestNormalizedTrackJson(array $token, array $payload): array
+    {
+        $idempotencyKey = $this->required($payload, 'idempotency_key');
+        $entryUuid = $this->required($payload, 'entry_id');
+        $trackUuid = strtolower($this->required($payload, 'source_uuid'));
+        $sha256 = strtolower($this->required($payload, 'sha256'));
+        $bytes = base64_decode((string)($payload['content_base64'] ?? ''), true);
+        if ($bytes === false || $bytes === '') {
+            return array('ok' => false, 'status' => 'rejected', 'message' => 'Invalid normalized track payload.');
+        }
+        if (strlen($bytes) > 100 * 1024 * 1024) {
+            return array('ok' => false, 'status' => 'rejected', 'message' => 'Normalized track payload exceeds maximum size.');
+        }
+        if (hash('sha256', $bytes) !== $sha256) {
+            return array('ok' => false, 'status' => 'rejected', 'message' => 'SHA-256 mismatch.');
+        }
+        $decoded = json_decode($bytes, true);
+        if (!is_array($decoded)) {
+            return array('ok' => false, 'status' => 'rejected', 'message' => 'Normalized track payload is not JSON.');
+        }
+        $metadata = isset($payload['metadata']) && is_array($payload['metadata']) ? $payload['metadata'] : array();
+        $sessionCount = isset($decoded['sessions']) && is_array($decoded['sessions']) ? count($decoded['sessions']) : (int)($metadata['sessionCount'] ?? 0);
+        $fieldCount = 0;
+        $sourceDescriptors = array();
+        if (isset($decoded['sessions']) && is_array($decoded['sessions'])) {
+            foreach ($decoded['sessions'] as $session) {
+                if (!is_array($session)) {
+                    continue;
+                }
+                $fieldCount += isset($session['fields']) && is_array($session['fields']) ? count($session['fields']) : 0;
+                if (isset($session['sources']) && is_array($session['sources'])) {
+                    foreach ($session['sources'] as $source) {
+                        if (is_array($source)) {
+                            $sourceDescriptors[] = array(
+                                'type' => isset($source['type']) ? (string)$source['type'] : '',
+                                'name' => isset($source['name']) ? (string)$source['name'] : '',
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        $entryPayload = isset($payload['entry']) && is_array($payload['entry'])
+            ? $payload['entry']
+            : array('uuid' => $entryUuid, 'canonicalTrackUUID' => $trackUuid);
+        (new GarminFlightDataSourceService($this->pdo, $this->providerName))->upsertEntryWithSources($entryPayload);
+        $storedPath = $this->storeImmutableTrack($entryUuid, $trackUuid, $bytes);
+        $this->ensureTrackArtifactTable();
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_garmin_normalized_track_artifacts
+              (provider_name, garmin_entry_uuid, track_uuid, artifact_type, storage_path, sha256, file_size_bytes,
+               content_type, format_version, session_count, field_count, source_descriptors_json, raw_metadata_json,
+               first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, 'GARMIN_TRACK_NORMALIZED_JSON', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))
+            ON DUPLICATE KEY UPDATE
+              storage_path = VALUES(storage_path),
+              sha256 = VALUES(sha256),
+              file_size_bytes = VALUES(file_size_bytes),
+              content_type = VALUES(content_type),
+              format_version = VALUES(format_version),
+              session_count = VALUES(session_count),
+              field_count = VALUES(field_count),
+              source_descriptors_json = VALUES(source_descriptors_json),
+              raw_metadata_json = VALUES(raw_metadata_json),
+              last_seen_at = CURRENT_TIMESTAMP(3),
+              updated_at = CURRENT_TIMESTAMP(3)
+        ");
+        $stmt->execute(array(
+            $this->providerName,
+            $entryUuid,
+            $trackUuid,
+            $storedPath,
+            $sha256,
+            strlen($bytes),
+            (string)($payload['content_type'] ?? 'application/json'),
+            isset($decoded['formatVersion']) ? (int)$decoded['formatVersion'] : null,
+            $sessionCount,
+            $fieldCount,
+            AuditEventService::jsonEncode($sourceDescriptors),
+            AuditEventService::jsonEncode($metadata),
+        ));
+        $this->recordAcknowledgment((int)$token['id'], $idempotencyKey, $entryUuid, $trackUuid, $sha256, 'accepted', 0);
+        return array('ok' => true, 'status' => 'accepted', 'artifact_type' => 'GARMIN_TRACK_NORMALIZED_JSON', 'track_uuid' => $trackUuid);
+    }
+
     public function completeSync(?string $cursor): array
     {
         return array('ok' => true, 'status' => 'accepted', 'cursor' => $cursor);
@@ -148,9 +243,52 @@ final class SyncAgentGarminIngestionService
             $sourceUuid,
             $sha256,
             $status,
-            $csvFileId,
+            $csvFileId > 0 ? $csvFileId : null,
             AuditEventService::jsonEncode(array('status' => $status, 'csv_file_id' => $csvFileId)),
         ));
+    }
+
+    private function storeImmutableTrack(string $entryUuid, string $trackUuid, string $bytes): string
+    {
+        $dir = dirname(__DIR__) . '/storage/cvr/garmin_sync_agent_tracks/' . gmdate('Y/m/d');
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new RuntimeException('Could not create sync-agent Garmin track storage directory.');
+        }
+        $target = $dir . '/' . preg_replace('/[^A-Za-z0-9._-]+/', '-', $entryUuid) . '-' . $trackUuid . '-track.json';
+        $tmp = $target . '.' . getmypid() . '.tmp';
+        file_put_contents($tmp, $bytes, LOCK_EX);
+        rename($tmp, $target);
+        return $target;
+    }
+
+    private function ensureTrackArtifactTable(): void
+    {
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS ipca_garmin_normalized_track_artifacts (
+              id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              provider_name VARCHAR(64) NOT NULL,
+              garmin_entry_uuid CHAR(36) NOT NULL,
+              track_uuid CHAR(36) NOT NULL,
+              artifact_type VARCHAR(64) NOT NULL,
+              storage_path VARCHAR(1024) NOT NULL,
+              sha256 CHAR(64) NOT NULL,
+              file_size_bytes BIGINT UNSIGNED NOT NULL,
+              content_type VARCHAR(128) NOT NULL,
+              format_version INT NULL,
+              session_count INT NOT NULL DEFAULT 0,
+              field_count INT NOT NULL DEFAULT 0,
+              source_descriptors_json JSON NULL,
+              raw_metadata_json JSON NULL,
+              first_seen_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+              last_seen_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+              created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+              updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+              UNIQUE KEY uk_ipca_garmin_track_artifacts (provider_name, garmin_entry_uuid, track_uuid, sha256),
+              KEY idx_ipca_garmin_track_artifacts_entry (provider_name, garmin_entry_uuid),
+              KEY idx_ipca_garmin_track_artifacts_track (track_uuid)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='Additive normalized Garmin track JSON artifacts from sync-agent.';
+        ");
     }
 
     private function storeImmutable(string $sourceUuid, string $filename, string $bytes): string

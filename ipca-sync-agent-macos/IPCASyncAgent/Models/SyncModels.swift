@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum AgentStatus: String, CaseIterable {
@@ -27,12 +28,39 @@ enum ProviderConnectionStatus: String, Codable {
     case error
 }
 
+enum GarminAuthenticationState: String {
+    case connected = "Connected"
+    case loginRequired = "Login Required"
+    case unknown = "Unknown"
+}
+
+enum GarminCursorState: String {
+    case ready = "Ready"
+    case initialSyncRequired = "Initial Sync Required"
+    case invalid = "Invalid"
+}
+
+enum GarminSyncState: String {
+    case idle = "Idle"
+    case checkingForUpdates = "Checking for updates"
+    case noNewFlights = "No new Garmin flights"
+    case changedEntriesFound = "Changed entries found"
+    case initialBootstrapRequired = "Initial bootstrap required"
+    case error = "Error"
+}
+
 struct ProviderVerificationResult: Codable {
     var connected: Bool
     var entryCount: Int
     var cursor: String?
     var topLevelKeys: [String]
     var firstSourceUUID: String?
+}
+
+struct GarminDebugSummary: Codable {
+    var entryCount: Int
+    var topLevelKeys: [String]
+    var entrySummaries: [String]
 }
 
 struct RemoteSyncItem: Codable, Identifiable {
@@ -44,7 +72,39 @@ struct RemoteSyncItem: Codable, Identifiable {
     var generatedTrackStart: String?
     var generatedTrackStop: String?
     var sourceUUIDs: [String]
+    var trackUUIDs: [String]
     var rawEntry: [String: JSONValue]
+}
+
+struct GarminTrackResponse: Codable {
+    var formatVersion: Int?
+    var sessions: [GarminTrackSession]
+}
+
+struct GarminTrackSession: Codable {
+    var fields: [GarminTrackField]
+    var data: [JSONValue]
+    var sources: [GarminTrackSource]?
+}
+
+struct GarminTrackField: Codable {
+    var fieldType: String?
+    var engine: Int?
+}
+
+struct GarminTrackSource: Codable {
+    var type: String?
+    var name: String?
+}
+
+struct GarminTrackMetrics: Codable {
+    var responseByteCount: Int
+    var sessionCount: Int
+    var totalFieldCount: Int
+    var rowsPerSession: [Int]
+    var totalTelemetryRows: Int
+    var firstTimestamp: String?
+    var lastTimestamp: String?
 }
 
 struct DownloadedArtifact: Codable, Identifiable {
@@ -52,16 +112,21 @@ struct DownloadedArtifact: Codable, Identifiable {
     var provider: String
     var entryID: String
     var sourceUUID: String
+    var artifactType: String
     var originalFilename: String
     var contentType: String
     var contentDisposition: String?
     var localPath: String
     var byteSize: Int
     var sha256: String
+    var sourceClassification: String
+    var metadata: [String: JSONValue]
     var downloadedAt: Date
 
     var idempotencyKey: String {
-        "\(provider):\(entryID):\(sourceUUID):\(sha256)"
+        let raw = "\(provider):\(entryID):\(artifactType):\(sourceUUID):\(sha256)"
+        let data = Data(raw.utf8)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -83,10 +148,13 @@ struct UploadQueueItem: Identifiable, Codable {
     var provider: String
     var entryID: String
     var sourceUUID: String
+    var artifactType: String
     var idempotencyKey: String
     var localPath: String
     var sha256: String
     var byteSize: Int
+    var contentType: String
+    var metadataJSON: String?
     var state: QueueState
     var attempts: Int
     var nextRetryAt: Date?

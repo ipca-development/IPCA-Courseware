@@ -41,7 +41,8 @@ final class IPCAApiClient {
             "provider": item.provider,
             "entry": encodeJSONObject(item.rawEntry),
             "entry_id": item.entryID,
-            "source_uuids": item.sourceUUIDs
+            "source_uuids": item.sourceUUIDs,
+            "track_uuids": item.trackUUIDs
         ]
         _ = try await jsonRequest(path: "/api/sync-agent/garmin_entries.php", body: body)
     }
@@ -54,10 +55,13 @@ final class IPCAApiClient {
             "provider": queueItem.provider,
             "entry_id": queueItem.entryID,
             "source_uuid": queueItem.sourceUUID,
+            "artifact_type": queueItem.artifactType,
             "idempotency_key": queueItem.idempotencyKey,
             "sha256": queueItem.sha256,
             "byte_size": queueItem.byteSize,
             "filename": URL(fileURLWithPath: queueItem.localPath).lastPathComponent,
+            "content_type": queueItem.contentType,
+            "metadata": decodeMetadata(queueItem.metadataJSON),
             "content_base64": fileData.base64EncodedString()
         ]
         let response = try await jsonRequest(path: "/api/sync-agent/garmin_source.php", body: body)
@@ -109,6 +113,15 @@ final class IPCAApiClient {
         }
     }
 
+    private func decodeMetadata(_ value: String?) -> Any {
+        guard let value,
+              let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return [:]
+        }
+        return object
+    }
+
     private func encodeJSONValue(_ json: JSONValue) -> Any {
         switch json {
         case .string(let value): return value
@@ -126,8 +139,12 @@ final class AppStateController: ObservableObject {
     @Published var status: AgentStatus = .notConfigured
     @Published var ipcaStatus = "Waiting for Device Token"
     @Published var garminStatus = "Not Connected"
+    @Published var garminAuthenticationStatus = GarminAuthenticationState.unknown.rawValue
+    @Published var garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+    @Published var garminSyncStatus = GarminSyncState.idle.rawValue
     @Published var browserStatus = "Not Open"
     @Published var networkStatus = "Unknown"
+    @Published var queueStartupStatus = "Unknown"
     @Published var lastSuccessfulSync: Date?
     @Published var nextScheduledSync: Date?
     @Published var newEntriesFound = 0
@@ -153,13 +170,24 @@ final class AppStateController: ObservableObject {
     var coordinator: SyncCoordinator!
     var scheduler: SyncScheduler!
     var repairService: RepairService!
+    private(set) var queueAvailable = true
 
     init() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        LoggingService.shared.markLaunch(version: version, build: build)
         let localQueue: LocalQueueStore
+        let localQueueAvailable: Bool
+        let localQueueStatus: String
         do {
             localQueue = try LocalQueueStore()
+            localQueueAvailable = true
+            localQueueStatus = "Durable queue opened successfully"
+            LoggingService.shared.info("Durable queue opened successfully")
         } catch {
-            LoggingService.shared.error("Could not open durable local queue database: \(error.localizedDescription)")
+            localQueueAvailable = false
+            localQueueStatus = "Durable queue unavailable"
+            LoggingService.shared.error("Durable queue unavailable: \(error.localizedDescription)")
             do {
                 localQueue = try LocalQueueStore(inMemory: true)
             } catch {
@@ -175,6 +203,8 @@ final class AppStateController: ObservableObject {
         api = localAPI
         garminProvider = localGarminProvider
         providerRegistry = localProviderRegistry
+        queueAvailable = localQueueAvailable
+        queueStartupStatus = localQueueStatus
 
         let localCoordinator = SyncCoordinator(state: self, provider: localGarminProvider, api: localAPI, queue: localQueue, cursorStore: cursorStore, keychain: keychain)
         let localScheduler = SyncScheduler(state: self, coordinator: localCoordinator, settings: settings)
@@ -183,6 +213,8 @@ final class AppStateController: ObservableObject {
         coordinator = localCoordinator
         scheduler = localScheduler
         repairService = localRepairService
+        let cursorDiagnostic = cursorStore.cursorDiagnostic(provider: localGarminProvider.identifier)
+        LoggingService.shared.info("Garmin cursor diagnostic: present=\(cursorDiagnostic.present ? "yes" : "no") length=\(cursorDiagnostic.length) updatedAt=\(cursorDiagnostic.updatedAt?.formatted(.iso8601) ?? "n/a")")
         notifications.requestAuthorizationIfNeeded()
         refreshConfigurationState()
         scheduler.start()
@@ -197,6 +229,18 @@ final class AppStateController: ObservableObject {
             if status == .waitingForDeviceToken || status == .notConfigured { status = .idle }
         }
         pendingUploads = (try? queue.pendingCount()) ?? 0
+        refreshGarminCursorStatus()
+    }
+
+    func refreshGarminCursorStatus() {
+        let diagnostic = cursorStore.cursorDiagnostic(provider: garminProvider.identifier)
+        if !diagnostic.present {
+            garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+        } else if diagnostic.length < 8 {
+            garminCursorStatus = GarminCursorState.invalid.rawValue
+        } else {
+            garminCursorStatus = GarminCursorState.ready.rawValue
+        }
     }
 
     func saveToken() {
@@ -233,6 +277,10 @@ final class AppStateController: ObservableObject {
 
     func syncNow() {
         Task { await coordinator.syncNow(manual: true) }
+    }
+
+    func reloadGarminForInitialSync() {
+        Task { await coordinator.reloadGarminForInitialSync() }
     }
 
     func reconnectGarmin() {
@@ -275,6 +323,7 @@ final class SyncCoordinator {
     func connectGarmin() async {
         do {
             state?.status = .waitingForGarminLogin
+            state?.lastError = ""
             state?.garminStatus = "Waiting for Garmin Login"
             try await provider.connect()
             state?.browserStatus = "Open"
@@ -287,28 +336,75 @@ final class SyncCoordinator {
     func verifyGarmin() async {
         do {
             state?.status = .verifyingGarmin
+            state?.lastError = ""
             let result = try await provider.verifyConnection()
             state?.garminStatus = result.connected ? "Connected" : "Action Required"
+            state?.garminAuthenticationStatus = result.connected ? GarminAuthenticationState.connected.rawValue : GarminAuthenticationState.unknown.rawValue
             state?.status = result.connected ? .connected : .actionRequired
             LoggingService.shared.info("Garmin verified with \(result.entryCount) visible entries.")
         } catch {
-            state?.garminStatus = "Garmin Authentication Required"
-            state?.notifications.notify(title: "Garmin Login Required", body: "Open IPCA Sync Agent and reconnect Garmin.")
-            state?.setError(error.localizedDescription)
+            if case GarminError.initialSyncBootstrapRequired = error {
+                state?.garminAuthenticationStatus = GarminAuthenticationState.connected.rawValue
+                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.status = .actionRequired
+                state?.lastError = error.localizedDescription
+            } else if case GarminError.logbookEndpointUnavailable = error {
+                state?.garminAuthenticationStatus = GarminAuthenticationState.unknown.rawValue
+                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.status = .actionRequired
+                state?.lastError = "The app does not yet have a valid initial Garmin sync cursor. Reload Garmin Logbook for Initial Sync."
+            } else {
+                state?.garminStatus = "Garmin Authentication Required"
+                state?.garminAuthenticationStatus = GarminAuthenticationState.loginRequired.rawValue
+                state?.notifications.notify(title: "Garmin Login Required", body: "Open IPCA Sync Agent and reconnect Garmin.")
+                state?.setError(error.localizedDescription)
+            }
         }
     }
 
     @MainActor
     func syncNow(manual: Bool = false) async {
         if isSyncing { return }
+        guard state?.queueAvailable == true else {
+            state?.setError("Local durable queue is unavailable in this app launch. Repair the queue before syncing.")
+            return
+        }
         isSyncing = true
+        let runID = UUID().uuidString
+        LoggingService.shared.info("Sync run \(runID) started.")
         defer { isSyncing = false }
         do {
             state?.status = .syncing
-            state?.lastError = "Reading Garmin Logbook..."
-            let entries = try await provider.discoverNewItems()
+            state?.garminSyncStatus = GarminSyncState.checkingForUpdates.rawValue
+            state?.lastError = "Preparing Garmin sync..."
+            let entries: [RemoteSyncItem]
+            do {
+                entries = try await provider.discoverNewItems()
+            } catch {
+                throw error
+            }
             state?.newEntriesFound = entries.count
-            state?.lastError = entries.isEmpty ? "No new Garmin entries with source files were found." : "Found \(entries.count) Garmin entr\(entries.count == 1 ? "y" : "ies"). Downloading source files..."
+            if entries.isEmpty {
+                state?.garminSyncStatus = GarminSyncState.noNewFlights.rawValue
+                state?.lastError = "Garmin is connected. No new or changed flights."
+                if let cursor = provider.lastReturnedCursor {
+                    cursorStore.setCursor(cursor, provider: provider.identifier)
+                    state?.refreshGarminCursorStatus()
+                }
+                if keychain.loadToken() != nil {
+                    try await uploadPending()
+                }
+                state?.lastSuccessfulSync = Date()
+                state?.nextScheduledSync = Date().addingTimeInterval(TimeInterval((state?.settings.syncIntervalMinutes ?? 10) * 60))
+                state?.status = .idle
+                LoggingService.shared.info("Sync run \(runID) completed with no new Garmin flights.")
+                return
+            }
+            state?.garminSyncStatus = "\(entries.count) changed entr\(entries.count == 1 ? "y" : "ies") found"
+            let downloadedBefore = state?.filesDownloaded ?? 0
+            state?.lastError = "Found \(entries.count) Garmin entr\(entries.count == 1 ? "y" : "ies"). Downloading source files..."
             for entry in entries {
                 state?.status = .downloading
                 state?.lastError = "Downloading Garmin sources for entry \(entry.entryID)..."
@@ -317,6 +413,19 @@ final class SyncCoordinator {
                 for artifact in artifacts {
                     try queue.enqueue(artifact)
                 }
+            }
+            if (state?.filesDownloaded ?? 0) == downloadedBefore {
+                if let cursor = provider.lastReturnedCursor {
+                    cursorStore.setCursor(cursor, provider: provider.identifier)
+                    state?.refreshGarminCursorStatus()
+                }
+                state?.lastError = "Garmin returned changed flight metadata, but no explicit CSV or track artifact was present."
+                state?.status = .idle
+                return
+            }
+            if let cursor = provider.lastReturnedCursor {
+                cursorStore.setCursor(cursor, provider: provider.identifier)
+                state?.refreshGarminCursorStatus()
             }
             state?.pendingUploads = (try? queue.pendingCount()) ?? 0
             if keychain.loadToken() == nil {
@@ -333,8 +442,71 @@ final class SyncCoordinator {
             state?.lastSuccessfulSync = Date()
             state?.nextScheduledSync = Date().addingTimeInterval(TimeInterval((state?.settings.syncIntervalMinutes ?? 10) * 60))
             state?.status = .idle
+            LoggingService.shared.info("Sync run \(runID) completed.")
         } catch {
-            state?.setError(error.localizedDescription)
+            if case GarminError.initialSyncBootstrapRequired = error {
+                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.status = .actionRequired
+                state?.lastError = error.localizedDescription
+                LoggingService.shared.error("Sync run \(runID) requires initial Garmin bootstrap.")
+            } else if case GarminError.logbookEndpointUnavailable = error {
+                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.status = .actionRequired
+                state?.lastError = "The app does not yet have a valid initial Garmin sync cursor. Reload Garmin Logbook for Initial Sync."
+                LoggingService.shared.error("Sync run \(runID) could not capture a confirmed Garmin Logbook endpoint.")
+            } else {
+                state?.garminSyncStatus = GarminSyncState.error.rawValue
+                state?.setError(error.localizedDescription)
+            }
+        }
+    }
+
+    @MainActor
+    func reloadGarminForInitialSync() async {
+        do {
+            state?.status = .syncing
+            state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+            state?.lastError = "Reloading Garmin Logbook for Initial Sync. Leave Chrome visible."
+            let countdown = startGarminReadinessCountdown(seconds: 180)
+            do {
+                try await provider.reloadLogbookForInitialSync()
+                countdown.cancel()
+            } catch {
+                countdown.cancel()
+                throw error
+            }
+            state?.refreshGarminCursorStatus()
+            state?.garminSyncStatus = GarminSyncState.idle.rawValue
+            state?.lastError = "Initial Garmin sync cursor captured. Click Sync Now to check for updates."
+            state?.status = .idle
+        } catch {
+            if case GarminError.logbookEndpointUnavailable = error {
+                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
+                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.status = .actionRequired
+                state?.lastError = "No Garmin Logbook response was captured after reload. Confirm the Garmin Logbook list is visible, then click Reload Garmin Logbook for Initial Sync again."
+            } else {
+                state?.setError(error.localizedDescription)
+            }
+        }
+    }
+
+    @MainActor
+    private func startGarminReadinessCountdown(seconds: Int) -> Task<Void, Never> {
+        Task { @MainActor [weak state] in
+            let started = Date()
+            for remaining in stride(from: seconds, through: 1, by: -1) {
+                guard !Task.isCancelled else { return }
+                let elapsed = Int(Date().timeIntervalSince(started))
+                let readiness = state?.garminProvider.lastReadinessMessage ?? "Waiting for Garmin Logbook to finish loading..."
+                state?.lastError = "\(readiness) Elapsed \(elapsed)s. Waiting up to \(remaining)s more."
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            if !Task.isCancelled {
+                state?.lastError = "Garmin is still loading historical flights. Leave Chrome open and click Sync Now again."
+            }
         }
     }
 

@@ -12,6 +12,18 @@ final class CursorStore {
 
     func setCursor(_ cursor: String, provider: String) {
         defaults.set(cursor, forKey: "cursor.\(provider)")
+        defaults.set(Date().timeIntervalSince1970, forKey: "cursorUpdatedAt.\(provider)")
+        defaults.synchronize()
+    }
+
+    func cursorUpdatedAt(provider: String) -> Date? {
+        let value = defaults.double(forKey: "cursorUpdatedAt.\(provider)")
+        return value > 0 ? Date(timeIntervalSince1970: value) : nil
+    }
+
+    func cursorDiagnostic(provider: String) -> (present: Bool, length: Int, updatedAt: Date?) {
+        let value = cursor(provider: provider) ?? ""
+        return (!value.isEmpty, value.count, cursorUpdatedAt(provider: provider))
     }
 }
 
@@ -40,6 +52,12 @@ final class LocalArtifactStore {
               !bytes.isEmpty else {
             throw GarminError.downloadFailed("Garmin source download was empty or invalid.")
         }
+        let contentType = response["contentType"]?.string ?? "application/octet-stream"
+        let originalFilename = safeFilename(response["filename"]?.string ?? "\(sourceUUID).bin")
+        let classification = classifyDownloadedContent(bytes: bytes, contentType: contentType, filename: originalFilename)
+        if classification == "GPS_ONLY_GPX" {
+            throw GarminError.gpxOnly("Skipped Garmin GPX/track-only source \(sourceUUID).")
+        }
 
         let date = Date()
         let parts = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(secondsFromGMT: 0)!, from: date)
@@ -51,7 +69,6 @@ final class LocalArtifactStore {
             .appendingPathComponent(safePath(sourceUUID), isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let originalFilename = safeFilename(response["filename"]?.string ?? "\(sourceUUID).bin")
         let fileURL = dir.appendingPathComponent(originalFilename)
         let tmpURL = dir.appendingPathComponent(".\(originalFilename).tmp")
         try bytes.write(to: tmpURL, options: .atomic)
@@ -65,13 +82,67 @@ final class LocalArtifactStore {
             provider: provider,
             entryID: entryID,
             sourceUUID: sourceUUID,
+            artifactType: "GARMIN_ORIGINAL_SOURCE",
             originalFilename: originalFilename,
             contentType: response["contentType"]?.string ?? "application/octet-stream",
             contentDisposition: response["contentDisposition"]?.string,
             localPath: fileURL.path,
             byteSize: bytes.count,
             sha256: sha256,
+            sourceClassification: classification,
+            metadata: [:],
             downloadedAt: date
+        )
+        let metadataURL = dir.appendingPathComponent("metadata.json")
+        let metadata = try JSONEncoder.ipca.encode(artifact)
+        try metadata.write(to: metadataURL, options: .atomic)
+        return artifact
+    }
+
+    func saveTrackJSON(provider: String, entryID: String, trackUUID: String, bytes: Data, response: GarminTrackResponse, requestPath: String, contentType: String) throws -> DownloadedArtifact {
+        let dir = baseDirectory
+            .appendingPathComponent(safePath(entryID), isDirectory: true)
+            .appendingPathComponent(safePath(trackUUID), isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let fileURL = dir.appendingPathComponent("track.json")
+        let tmpURL = dir.appendingPathComponent(".track.json.tmp")
+        try bytes.write(to: tmpURL, options: .atomic)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try FileManager.default.removeItem(at: fileURL)
+        }
+        try FileManager.default.moveItem(at: tmpURL, to: fileURL)
+
+        let sha256 = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let fieldCount = response.sessions.reduce(0) { $0 + $1.fields.count }
+        let sourceNames = response.sessions
+            .flatMap { $0.sources ?? [] }
+            .compactMap(\.name)
+        let sourceTypes = response.sessions
+            .flatMap { $0.sources ?? [] }
+            .compactMap(\.type)
+        let artifact = DownloadedArtifact(
+            provider: provider,
+            entryID: entryID,
+            sourceUUID: trackUUID,
+            artifactType: "GARMIN_TRACK_NORMALIZED_JSON",
+            originalFilename: "track.json",
+            contentType: contentType.isEmpty ? "application/json" : contentType,
+            contentDisposition: nil,
+            localPath: fileURL.path,
+            byteSize: bytes.count,
+            sha256: sha256,
+            sourceClassification: "GARMIN_TRACK_NORMALIZED_JSON",
+            metadata: [
+                "trackUUID": .string(trackUUID),
+                "requestPath": .string(requestPath),
+                "formatVersion": response.formatVersion.map { .number(Double($0)) } ?? .null,
+                "sessionCount": .number(Double(response.sessions.count)),
+                "fieldCount": .number(Double(fieldCount)),
+                "sourceNames": .array(sourceNames.map { .string($0) }),
+                "sourceTypes": .array(sourceTypes.map { .string($0) })
+            ],
+            downloadedAt: Date()
         )
         let metadataURL = dir.appendingPathComponent("metadata.json")
         let metadata = try JSONEncoder.ipca.encode(artifact)
@@ -91,6 +162,22 @@ final class LocalArtifactStore {
 
     private func safePath(_ value: String) -> String {
         safeFilename(value)
+    }
+
+    private func classifyDownloadedContent(bytes: Data, contentType: String, filename: String) -> String {
+        let lowerContentType = contentType.lowercased()
+        let lowerFilename = filename.lowercased()
+        let sample = String(data: bytes.prefix(2048), encoding: .utf8)?.lowercased() ?? ""
+        if lowerContentType.contains("gpx") || lowerFilename.hasSuffix(".gpx") || sample.contains("<gpx") {
+            return "GPS_ONLY_GPX"
+        }
+        if lowerContentType.contains("csv") || lowerFilename.hasSuffix(".csv") || sample.contains(",") {
+            if sample.contains("engine") || sample.contains("rpm") || sample.contains("g3x") || sample.contains("fuel") || sample.contains("hobbs") {
+                return "CSV_G3X_FULL_OR_PARTIAL_AVIONICS"
+            }
+            return "CSV_UNKNOWN"
+        }
+        return "UNKNOWN"
     }
 }
 
@@ -123,21 +210,28 @@ final class LocalQueueStore {
         let now = Date()
         let sql = """
         INSERT INTO upload_queue
-          (provider, entry_id, source_uuid, idempotency_key, local_path, sha256, byte_size, state, attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+          (provider, entry_id, source_uuid, artifact_type, idempotency_key, local_path, sha256, byte_size, content_type, metadata_json, state, attempts, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
         ON CONFLICT(idempotency_key) DO UPDATE SET
           local_path = excluded.local_path,
           byte_size = excluded.byte_size,
+          content_type = excluded.content_type,
+          metadata_json = excluded.metadata_json,
           updated_at = excluded.updated_at
         """
+        let metadataData = try JSONEncoder.ipca.encode(artifact.metadata)
+        let metadataJSON = String(data: metadataData, encoding: .utf8) ?? "{}"
         try execute(sql, [
             artifact.provider,
             artifact.entryID,
             artifact.sourceUUID,
+            artifact.artifactType,
             artifact.idempotencyKey,
             artifact.localPath,
             artifact.sha256,
             artifact.byteSize,
+            artifact.contentType,
+            metadataJSON,
             now.timeIntervalSince1970,
             now.timeIntervalSince1970
         ])
@@ -148,7 +242,7 @@ final class LocalQueueStore {
         defer { lock.unlock() }
         let now = Date().timeIntervalSince1970
         let sql = """
-        SELECT id, provider, entry_id, source_uuid, idempotency_key, local_path, sha256, byte_size, state, attempts,
+        SELECT id, provider, entry_id, source_uuid, artifact_type, idempotency_key, local_path, sha256, byte_size, content_type, metadata_json, state, attempts,
                next_retry_at, last_error, server_status, created_at, updated_at, completed_at
         FROM upload_queue
         WHERE state IN ('queued','retry_wait','failed')
@@ -192,7 +286,7 @@ final class LocalQueueStore {
 
     private func migrate() throws {
         if durable {
-            try execute("PRAGMA journal_mode=WAL", [])
+            try exec("PRAGMA journal_mode=WAL")
         }
         try execute("""
         CREATE TABLE IF NOT EXISTS upload_queue (
@@ -200,10 +294,13 @@ final class LocalQueueStore {
           provider TEXT NOT NULL,
           entry_id TEXT NOT NULL,
           source_uuid TEXT NOT NULL,
+          artifact_type TEXT NOT NULL DEFAULT 'GARMIN_ORIGINAL_SOURCE',
           idempotency_key TEXT NOT NULL UNIQUE,
           local_path TEXT NOT NULL,
           sha256 TEXT NOT NULL,
           byte_size INTEGER NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+          metadata_json TEXT NULL,
           state TEXT NOT NULL,
           attempts INTEGER NOT NULL DEFAULT 0,
           next_retry_at REAL NULL,
@@ -214,6 +311,9 @@ final class LocalQueueStore {
           completed_at REAL NULL
         )
         """, [])
+        try addColumnIfMissing(table: "upload_queue", column: "artifact_type", definition: "TEXT NOT NULL DEFAULT 'GARMIN_ORIGINAL_SOURCE'")
+        try addColumnIfMissing(table: "upload_queue", column: "content_type", definition: "TEXT NOT NULL DEFAULT 'application/octet-stream'")
+        try addColumnIfMissing(table: "upload_queue", column: "metadata_json", definition: "TEXT NULL")
         try execute("CREATE TABLE IF NOT EXISTS event_log (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS sync_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, status TEXT NOT NULL, started_at REAL NOT NULL, completed_at REAL NULL, cursor TEXT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS remote_entries (entry_id TEXT PRIMARY KEY, provider TEXT NOT NULL, raw_json TEXT NOT NULL, updated_at REAL NOT NULL)", [])
@@ -221,6 +321,27 @@ final class LocalQueueStore {
         try execute("CREATE TABLE IF NOT EXISTS server_acknowledgments (idempotency_key TEXT PRIMARY KEY, status TEXT NOT NULL, created_at REAL NOT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
         try execute("CREATE TABLE IF NOT EXISTS provider_connections (provider TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at REAL NOT NULL)", [])
+    }
+
+    private func exec(_ sql: String) throws {
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        if sqlite3_exec(db, sql, nil, nil, &errorMessage) != SQLITE_OK {
+            let message = errorMessage.map { String(cString: $0) } ?? String(cString: sqlite3_errmsg(db))
+            sqlite3_free(errorMessage)
+            throw NSError(domain: "LocalQueueStore", code: 3, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    private func addColumnIfMissing(table: String, column: String, definition: String) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let cString = sqlite3_column_text(statement, 1), String(cString: cString) == column {
+                return
+            }
+        }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition)", [])
     }
 
     private func updateState(_ id: Int64, state: QueueState, error: String?, serverStatus: String?, nextRetryAt: Date?, incrementAttempts: Bool = false, completed: Bool = false) throws {
@@ -254,18 +375,21 @@ final class LocalQueueStore {
             provider: text(statement, 1),
             entryID: text(statement, 2),
             sourceUUID: text(statement, 3),
-            idempotencyKey: text(statement, 4),
-            localPath: text(statement, 5),
-            sha256: text(statement, 6),
-            byteSize: Int(sqlite3_column_int64(statement, 7)),
-            state: QueueState(rawValue: text(statement, 8)) ?? .failed,
-            attempts: Int(sqlite3_column_int(statement, 9)),
-            nextRetryAt: date(statement, 10),
-            lastError: nullableText(statement, 11),
-            serverStatus: nullableText(statement, 12),
-            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 13)),
-            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),
-            completedAt: date(statement, 15)
+            artifactType: text(statement, 4),
+            idempotencyKey: text(statement, 5),
+            localPath: text(statement, 6),
+            sha256: text(statement, 7),
+            byteSize: Int(sqlite3_column_int64(statement, 8)),
+            contentType: text(statement, 9),
+            metadataJSON: nullableText(statement, 10),
+            state: QueueState(rawValue: text(statement, 11)) ?? .failed,
+            attempts: Int(sqlite3_column_int(statement, 12)),
+            nextRetryAt: date(statement, 13),
+            lastError: nullableText(statement, 14),
+            serverStatus: nullableText(statement, 15),
+            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 16)),
+            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 17)),
+            completedAt: date(statement, 18)
         )
     }
 

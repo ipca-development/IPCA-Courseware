@@ -361,10 +361,17 @@ final class ComplianceFindingEngine
         self::validateAuditExists($pdo, $auditId);
 
         $closedDate = (string)($row['closed_date'] ?? '');
+        $closureException = self::closureExceptionFromData($pdo, $id, $data);
         if ($status === 'CLOSED') {
-            $closure = self::closureReadiness($pdo, $id);
+            $standardClosure = self::closureReadiness($pdo, $id);
+            $closure = self::closureReadiness($pdo, $id, array(
+                'allow_late_deadline_exception' => $closureException['has_evidence'],
+            ));
             if (!$closure['ready']) {
                 throw new RuntimeException('Finding cannot be closed yet: ' . implode(' ', $closure['reasons']));
+            }
+            if (!$standardClosure['ready'] && $closureException['has_late_deadline_exception'] && !$closureException['has_evidence']) {
+                throw new RuntimeException('Finding closure after a CAP deadline requires an evidence note or linked finding document.');
             }
             if ($closedDate === '' || $closedDate === '0000-00-00') {
                 $closedDate = date('Y-m-d');
@@ -439,13 +446,20 @@ final class ComplianceFindingEngine
         );
 
         if ($status === 'CLOSED') {
+            $approvalNotes = 'Finding closure passed deterministic RCA/CAP governance checks.';
+            if ($closureException['has_late_deadline_exception']) {
+                $approvalNotes .= ' Late CAP deadline exception accepted based on documented evidence.';
+                if ($closureException['summary'] !== '') {
+                    $approvalNotes .= ' Evidence: ' . $closureException['summary'];
+                }
+            }
             ComplianceApprovalEngine::record($pdo, array(
                 'object_type' => 'finding',
                 'object_id' => $id,
                 'approval_type' => 'closure',
                 'decision' => 'approved',
                 'reviewed_by' => $userId,
-                'notes' => 'Finding closure passed deterministic RCA/CAP governance checks.',
+                'notes' => $approvalNotes,
             ));
         }
     }
@@ -453,8 +467,9 @@ final class ComplianceFindingEngine
     /**
      * @return array{ready:bool,reasons:list<string>}
      */
-    public static function closureReadiness(PDO $pdo, int $findingId): array
+    public static function closureReadiness(PDO $pdo, int $findingId, array $options = array()): array
     {
+        $allowLateDeadlineException = !empty($options['allow_late_deadline_exception']);
         $caps = self::approvedCorrectiveActions($pdo, $findingId);
         if ($caps === array()) {
             return array('ready' => false, 'reasons' => array('No approved corrective actions are recorded.'));
@@ -477,7 +492,9 @@ final class ComplianceFindingEngine
                 if ($executedAt === null) {
                     $reasons[] = $code . ' has no execution/completion date for deadline verification.';
                 } elseif ($executedAt > $deadline) {
-                    $reasons[] = $code . ' was executed after its approved deadline.';
+                    if (!$allowLateDeadlineException) {
+                        $reasons[] = $code . ' was executed after its approved deadline.';
+                    }
                 }
             }
 
@@ -487,6 +504,61 @@ final class ComplianceFindingEngine
         }
 
         return array('ready' => $reasons === array(), 'reasons' => $reasons);
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return array{has_late_deadline_exception:bool,has_evidence:bool,summary:string}
+     */
+    private static function closureExceptionFromData(PDO $pdo, int $findingId, array $data): array
+    {
+        $lateReasonExists = false;
+        foreach (self::closureReadiness($pdo, $findingId)['reasons'] as $reason) {
+            if (stripos($reason, 'approved deadline') !== false) {
+                $lateReasonExists = true;
+                break;
+            }
+        }
+
+        $note = trim((string)($data['closure_late_deadline_evidence_note'] ?? ''));
+        $docId = (int)($data['closure_late_deadline_document_id'] ?? 0);
+        $parts = array();
+        if ($note !== '') {
+            $parts[] = 'Note: ' . $note;
+        }
+        if ($docId > 0) {
+            $parts[] = 'Document: ' . self::findingDocumentSummary($pdo, $findingId, $docId);
+        }
+
+        return array(
+            'has_late_deadline_exception' => $lateReasonExists,
+            'has_evidence' => $parts !== array(),
+            'summary' => implode(' | ', $parts),
+        );
+    }
+
+    private static function findingDocumentSummary(PDO $pdo, int $findingId, int $documentId): string
+    {
+        try {
+            $st = $pdo->prepare(
+                'SELECT id, original_name, doc_kind
+                   FROM ipca_compliance_finding_documents
+                  WHERE id = ? AND finding_id = ?
+                  LIMIT 1'
+            );
+            $st->execute(array($documentId, $findingId));
+            $doc = $st->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($doc)) {
+                throw new RuntimeException('Selected closure evidence document was not found for this finding.');
+            }
+            $name = trim((string)($doc['original_name'] ?? ''));
+            $kind = trim((string)($doc['doc_kind'] ?? ''));
+            return '#' . $documentId . ($name !== '' ? ' ' . $name : '') . ($kind !== '' ? ' (' . $kind . ')' : '');
+        } catch (RuntimeException $e) {
+            throw $e;
+        } catch (Throwable) {
+            throw new RuntimeException('Selected closure evidence document could not be verified.');
+        }
     }
 
     /**
