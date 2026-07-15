@@ -94,13 +94,16 @@ final class LocalQueueStore {
     private var db: OpaquePointer?
     private let dbURL: URL
     private let lock = NSLock()
+    private let durable: Bool
 
-    init() throws {
+    init(inMemory: Bool = false) throws {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("IPCA Sync Agent", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         dbURL = dir.appendingPathComponent("sync-agent.sqlite")
-        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
+        durable = !inMemory
+        let path = inMemory ? ":memory:" : dbURL.path
+        if sqlite3_open(path, &db) != SQLITE_OK {
             throw NSError(domain: "LocalQueueStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not open local queue database."])
         }
         try migrate()
@@ -180,11 +183,13 @@ final class LocalQueueStore {
     }
 
     func isHealthy() -> Bool {
-        (try? scalarInt("SELECT COUNT(*) FROM upload_queue")) != nil
+        durable && (try? scalarInt("SELECT COUNT(*) FROM upload_queue")) != nil
     }
 
     private func migrate() throws {
-        try execute("PRAGMA journal_mode=WAL", [])
+        if durable {
+            try execute("PRAGMA journal_mode=WAL", [])
+        }
         try execute("""
         CREATE TABLE IF NOT EXISTS upload_queue (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,7 +272,11 @@ final class LocalQueueStore {
         }
         defer { sqlite3_finalize(statement) }
         bind(values, to: statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else {
+        var step = sqlite3_step(statement)
+        while step == SQLITE_ROW {
+            step = sqlite3_step(statement)
+        }
+        guard step == SQLITE_DONE else {
             throw NSError(domain: "LocalQueueStore", code: 3, userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
     }

@@ -126,11 +126,18 @@ final class ChromeDevToolsClient {
 final class BrowserSessionController: ObservableObject {
     @Published private(set) var browserStatus = "Not Open"
     private let chromeLocator = ChromeLocator()
+    private let defaultDebugPort = 47_919
     private var chromeProcess: Process?
-    private var debugPort: Int?
+    private var debugPort: Int
     private var devToolsClient: ChromeDevToolsClient?
 
     let flyGarminURL = URL(string: "https://fly.garmin.com/fly-garmin/")!
+
+    init() {
+        let saved = UserDefaults.standard.integer(forKey: "garminChromeDebugPort")
+        debugPort = saved > 0 ? saved : defaultDebugPort
+        UserDefaults.standard.set(debugPort, forKey: "garminChromeDebugPort")
+    }
 
     var applicationSupportDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -152,11 +159,15 @@ final class BrowserSessionController: ObservableObject {
     func openGarminForLogin() async throws {
         let chrome = try ensureChromeAvailable()
         try FileManager.default.createDirectory(at: garminProfileDirectory, withIntermediateDirectories: true)
-        if debugPort == nil { debugPort = freeLoopbackPort() }
-        let port = debugPort ?? 0
+        let port = debugPort
 
         if chromeProcess?.isRunning == true {
             browserStatus = "Open"
+            return
+        }
+        if isPortOpen(port) {
+            browserStatus = "Open"
+            LoggingService.shared.info("Reused existing local Garmin Chrome debugging session.")
             return
         }
 
@@ -176,7 +187,7 @@ final class BrowserSessionController: ObservableObject {
     }
 
     func connectDevTools() async throws -> ChromeDevToolsClient {
-        guard let port = debugPort else { throw BrowserError.devToolsUnavailable }
+        let port = debugPort
         let target = try await waitForFlyGarminTarget(port: port)
         guard let webSocket = target.webSocketDebuggerUrl, let url = URL(string: webSocket) else {
             throw BrowserError.pageUnavailable
@@ -222,14 +233,6 @@ final class BrowserSessionController: ObservableObject {
             }
         }
         throw BrowserError.devToolsUnavailable
-    }
-
-    private func freeLoopbackPort() -> Int {
-        for _ in 0..<20 {
-            let port = Int.random(in: 43_000...49_000)
-            if !isPortOpen(port) { return port }
-        }
-        return 47_919
     }
 
     private func isPortOpen(_ port: Int) -> Bool {

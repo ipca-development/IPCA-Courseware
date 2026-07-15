@@ -155,13 +155,34 @@ final class AppStateController: ObservableObject {
     var repairService: RepairService!
 
     init() {
-        queue = try! LocalQueueStore()
-        api = IPCAApiClient(settings: settings, keychain: keychain)
-        garminProvider = GarminProvider(browser: browser, artifactStore: artifactStore, cursorStore: cursorStore)
-        providerRegistry = ProviderRegistry(garminProvider: garminProvider)
-        coordinator = SyncCoordinator(state: self, provider: garminProvider, api: api, queue: queue, cursorStore: cursorStore)
-        scheduler = SyncScheduler(state: self, coordinator: coordinator, settings: settings)
-        repairService = RepairService(state: self, browser: browser, api: api, queue: queue, cursorStore: cursorStore)
+        let localQueue: LocalQueueStore
+        do {
+            localQueue = try LocalQueueStore()
+        } catch {
+            LoggingService.shared.error("Could not open durable local queue database: \(error.localizedDescription)")
+            do {
+                localQueue = try LocalQueueStore(inMemory: true)
+            } catch {
+                fatalError("IPCA Sync Agent could not create a local queue: \(error.localizedDescription)")
+            }
+        }
+
+        let localAPI = IPCAApiClient(settings: settings, keychain: keychain)
+        let localGarminProvider = GarminProvider(browser: browser, artifactStore: artifactStore, cursorStore: cursorStore)
+        let localProviderRegistry = ProviderRegistry(garminProvider: localGarminProvider)
+
+        queue = localQueue
+        api = localAPI
+        garminProvider = localGarminProvider
+        providerRegistry = localProviderRegistry
+
+        let localCoordinator = SyncCoordinator(state: self, provider: localGarminProvider, api: localAPI, queue: localQueue, cursorStore: cursorStore, keychain: keychain)
+        let localScheduler = SyncScheduler(state: self, coordinator: localCoordinator, settings: settings)
+        let localRepairService = RepairService(state: self, browser: browser, api: localAPI, queue: localQueue, cursorStore: cursorStore)
+
+        coordinator = localCoordinator
+        scheduler = localScheduler
+        repairService = localRepairService
         notifications.requestAuthorizationIfNeeded()
         refreshConfigurationState()
         scheduler.start()
@@ -238,14 +259,16 @@ final class SyncCoordinator {
     private let api: IPCAApiClient
     private let queue: LocalQueueStore
     private let cursorStore: CursorStore
+    private let keychain: KeychainStore
     private var isSyncing = false
 
-    init(state: AppStateController, provider: GarminProvider, api: IPCAApiClient, queue: LocalQueueStore, cursorStore: CursorStore) {
+    init(state: AppStateController, provider: GarminProvider, api: IPCAApiClient, queue: LocalQueueStore, cursorStore: CursorStore, keychain: KeychainStore) {
         self.state = state
         self.provider = provider
         self.api = api
         self.queue = queue
         self.cursorStore = cursorStore
+        self.keychain = keychain
     }
 
     @MainActor
@@ -285,7 +308,6 @@ final class SyncCoordinator {
             let entries = try await provider.discoverNewItems()
             state?.newEntriesFound = entries.count
             for entry in entries {
-                try await api.uploadEntry(entry)
                 state?.status = .downloading
                 let artifacts = try await provider.download(item: entry)
                 state?.filesDownloaded += artifacts.count
@@ -293,8 +315,17 @@ final class SyncCoordinator {
                     try queue.enqueue(artifact)
                 }
             }
-            try await uploadPending()
-            try await api.completeSync(provider: provider.identifier, cursor: cursorStore.cursor(provider: provider.identifier))
+            state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+            if keychain.loadToken() == nil {
+                state?.lastError = "Garmin files were downloaded locally. Paste the IPCA Sync Agent device token to upload them."
+            } else {
+                for entry in entries {
+                    try await api.uploadEntry(entry)
+                }
+                try await uploadPending()
+                try await api.completeSync(provider: provider.identifier, cursor: cursorStore.cursor(provider: provider.identifier))
+                state?.lastError = ""
+            }
             state?.lastSuccessfulSync = Date()
             state?.nextScheduledSync = Date().addingTimeInterval(TimeInterval((state?.settings.syncIntervalMinutes ?? 10) * 60))
             state?.status = .idle
