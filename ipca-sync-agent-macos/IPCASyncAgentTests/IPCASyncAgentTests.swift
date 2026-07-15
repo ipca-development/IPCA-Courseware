@@ -2,6 +2,15 @@ import XCTest
 @testable import IPCASyncAgent
 
 final class IPCASyncAgentTests: XCTestCase {
+    private let garminProviderID = "garmin_flygarmin_logbook"
+
+    private func isolatedCursorStore(name: String = UUID().uuidString, synchronize: ((UserDefaults) -> Bool)? = nil) -> CursorStore {
+        let suiteName = "IPCASyncAgentTests.\(name)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return CursorStore(defaults: defaults, storageRepository: "UserDefaults.\(suiteName)", synchronize: synchronize)
+    }
+
     func testIdempotencyKeyKeepsGpsAndFullSourcesSeparate() {
         let one = DownloadedArtifact(
             provider: "garmin_flygarmin_logbook",
@@ -217,5 +226,110 @@ final class IPCASyncAgentTests: XCTestCase {
         let stored = try Data(contentsOf: URL(fileURLWithPath: artifact.localPath))
 
         XCTAssertEqual(stored, bytes)
+    }
+
+    func testBootstrapResponseStoresExactVersionString() throws {
+        let store = isolatedCursorStore()
+        let version = "MjAyNi0wNy0xNVQxMzozNDoyNS43OTMtMDU6MDA="
+
+        try store.persistBootstrapCursor(version, provider: garminProviderID)
+
+        XCTAssertEqual(store.cursor(provider: garminProviderID), version)
+        XCTAssertTrue(store.bootstrapCompleted(provider: garminProviderID))
+    }
+
+    func testCursorSurvivesRecreationOfSyncCoordinatorStorage() throws {
+        let suiteName = "IPCASyncAgentTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let firstStore = CursorStore(defaults: defaults, storageRepository: "UserDefaults.\(suiteName)")
+        let version = "cursor-value-with-padding=="
+
+        try firstStore.persistBootstrapCursor(version, provider: garminProviderID)
+        let recreatedStore = CursorStore(defaults: defaults, storageRepository: "UserDefaults.\(suiteName)")
+
+        XCTAssertEqual(recreatedStore.cursor(provider: garminProviderID), version)
+        XCTAssertTrue(SyncCoordinator.savedCursorIsValid(cursorStore: recreatedStore, providerIdentifier: garminProviderID))
+    }
+
+    func testCursorSurvivesApplicationRestartStorageReopen() throws {
+        let suiteName = "IPCASyncAgentTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let version = "restart-cursor-with-padding="
+
+        try CursorStore(defaults: defaults, storageRepository: "UserDefaults.\(suiteName)").persistBootstrapCursor(version, provider: garminProviderID)
+        let reopenedDefaults = UserDefaults(suiteName: suiteName)!
+        let reopenedStore = CursorStore(defaults: reopenedDefaults, storageRepository: "UserDefaults.\(suiteName)")
+
+        XCTAssertEqual(reopenedStore.cursor(provider: garminProviderID), version)
+    }
+
+    func testBase64CursorPaddingIsPreserved() throws {
+        let store = isolatedCursorStore()
+        let version = "MjAyNi0wNy0xNVQxMzozNDoyNS43OTMtMDU6MDA="
+
+        try store.persistBootstrapCursor(version, provider: garminProviderID)
+
+        XCTAssertTrue(store.cursor(provider: garminProviderID)?.hasSuffix("=") == true)
+        XCTAssertEqual(store.cursor(provider: garminProviderID), version)
+    }
+
+    func testHistoricalLoadingStatusDoesNotClearCursor() throws {
+        let store = isolatedCursorStore()
+        let version = "historical-loading-must-not-clear="
+        try store.persistBootstrapCursor(version, provider: garminProviderID)
+
+        _ = SyncCoordinator.logbookEndpointUnavailableMessage(hasValidSavedCursor: true)
+
+        XCTAssertEqual(store.cursor(provider: garminProviderID), version)
+        XCTAssertTrue(store.bootstrapCompleted(provider: garminProviderID))
+    }
+
+    func testEmptyEntriesArrayDoesNotClearCursor() throws {
+        let store = isolatedCursorStore()
+        let version = "empty-entries-must-not-clear="
+        try store.persistBootstrapCursor(version, provider: garminProviderID)
+        let response: [String: JSONValue] = [
+            "status": .number(200),
+            "jsonOk": .bool(true),
+            "cursor": .string(version),
+            "rawEntryCount": .number(0),
+            "entries": .array([])
+        ]
+
+        XCTAssertTrue(GarminProvider.confirmedLogbookEndpoint(response))
+        XCTAssertTrue(GarminProvider.remoteItems(from: .object(["entries": .array([])]), provider: garminProviderID, requireArtifacts: true).isEmpty)
+        XCTAssertEqual(store.cursor(provider: garminProviderID), version)
+    }
+
+    func testBootstrapSuccessIsBlockedWhenPersistenceFails() {
+        let store = isolatedCursorStore { _ in false }
+
+        XCTAssertThrowsError(try store.persistBootstrapCursor("cursor-that-cannot-sync", provider: garminProviderID))
+        XCTAssertFalse(store.bootstrapCompleted(provider: garminProviderID))
+    }
+
+    func testBootstrapWritingAndSyncReadingUseSameKeyAndRepository() throws {
+        let store = isolatedCursorStore()
+        let version = "same-key-and-repository="
+        try store.persistBootstrapCursor(version, provider: garminProviderID)
+        let diagnostic = store.valueDiagnostic(provider: garminProviderID)
+
+        XCTAssertEqual(diagnostic.storageKey, CursorStore.storageKey(provider: garminProviderID))
+        XCTAssertEqual(store.cursor(provider: garminProviderID), version)
+        XCTAssertTrue(diagnostic.storageRepository.hasPrefix("UserDefaults."))
+    }
+
+    func testAfterBootstrapSucceedsNextSyncNowDoesNotReturnBootstrapRequiredMessage() throws {
+        let store = isolatedCursorStore()
+        try store.persistBootstrapCursor("valid-saved-cursor=", provider: garminProviderID)
+
+        let message = SyncCoordinator.logbookEndpointUnavailableMessage(
+            hasValidSavedCursor: SyncCoordinator.savedCursorIsValid(cursorStore: store, providerIdentifier: garminProviderID)
+        )
+
+        XCTAssertFalse(message.contains("Reload Garmin Logbook for Initial Sync"))
+        XCTAssertTrue(message.contains("saved cursor remains valid"))
     }
 }

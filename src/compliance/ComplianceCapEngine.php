@@ -303,6 +303,13 @@ final class ComplianceCapEngine
         $status = array_key_exists('status', $data)
             ? self::normalizeStatus((string)$data['status'])
             : (string)$row['status'];
+        $oldStatus = self::normalizeStatus((string)($row['status'] ?? ''));
+        $closureEvidenceNote = trim((string)($data['closure_evidence_note'] ?? ''));
+        if (self::isClosureStatus($status) && !self::isClosureStatus($oldStatus)) {
+            if ($closureEvidenceNote === '' && !self::hasClosureEvidence($pdo, $id)) {
+                throw new RuntimeException('Corrective action closure requires an evidence note or existing corrective-action evidence document.');
+            }
+        }
 
         $effort = array_key_exists('effort', $data)
             ? self::normalizeEffort(trim((string)$data['effort']) ?: null) : self::normalizeEffort(
@@ -352,6 +359,10 @@ final class ComplianceCapEngine
             $id,
         ));
 
+        if (self::isClosureStatus($status) && $closureEvidenceNote !== '') {
+            self::recordClosureEvidenceNote($pdo, $id, $closureEvidenceNote, $userId);
+        }
+
         $oldDue = trim((string)($row['due_date'] ?? ''));
         if ($oldDue !== '' && $dueDate !== null && substr($oldDue, 0, 10) !== substr($dueDate, 0, 10)) {
             ComplianceDeadlineExtensionEngine::recordApprovedCorrectiveActionExtension(
@@ -382,6 +393,73 @@ final class ComplianceCapEngine
             $after,
             null
         );
+    }
+
+    public static function isClosureStatus(string $status): bool
+    {
+        return in_array(self::normalizeStatus($status), array('EXECUTED', 'COMPLETED', 'VERIFIED', 'CLOSED'), true);
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public static function listEvidence(PDO $pdo, int $capId): array
+    {
+        if ($capId <= 0 || !self::evidenceTablePresent($pdo)) {
+            return array();
+        }
+        $st = $pdo->prepare(
+            'SELECT *
+               FROM ipca_compliance_corrective_action_evidence
+              WHERE corrective_action_id = ?
+              ORDER BY uploaded_at DESC, id DESC'
+        );
+        $st->execute(array($capId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private static function hasClosureEvidence(PDO $pdo, int $capId): bool
+    {
+        if (!self::evidenceTablePresent($pdo)) {
+            return false;
+        }
+        $st = $pdo->prepare(
+            'SELECT COUNT(*)
+               FROM ipca_compliance_corrective_action_evidence
+              WHERE corrective_action_id = ?'
+        );
+        $st->execute(array($capId));
+        return (int)$st->fetchColumn() > 0;
+    }
+
+    private static function recordClosureEvidenceNote(PDO $pdo, int $capId, string $note, int $userId): void
+    {
+        if (!self::evidenceTablePresent($pdo)) {
+            throw new RuntimeException('Corrective action evidence table is not installed.');
+        }
+        $st = $pdo->prepare(
+            'INSERT INTO ipca_compliance_corrective_action_evidence
+                (corrective_action_id, evidence_kind, title, description, uploaded_by)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $st->execute(array(
+            $capId,
+            'NOTE',
+            'Closure evidence note',
+            $note,
+            $userId > 0 ? $userId : null,
+        ));
+    }
+
+    private static function evidenceTablePresent(PDO $pdo): bool
+    {
+        try {
+            $pdo->query('SELECT id FROM ipca_compliance_corrective_action_evidence LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

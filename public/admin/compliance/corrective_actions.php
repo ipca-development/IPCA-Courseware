@@ -176,6 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'effort' => (string)($_POST['effort'] ?? ''),
                 'responsible_name' => (string)($_POST['responsible_name'] ?? ''),
                 'due_date' => (string)($_POST['due_date'] ?? ''),
+                'closure_evidence_note' => (string)($_POST['closure_evidence_note'] ?? ''),
             ), $uid);
             cap_flash_set('success', 'Corrective action saved.');
             redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
@@ -429,6 +430,7 @@ if ($detailId > 0) {
         $submissionId = isset($cap['submission_id']) ? (int)$cap['submission_id'] : 0;
         $submission = $submissionId > 0 ? ComplianceRcaCapSubmissionEngine::getById($pdo, $submissionId) : null;
         $capExtensions = ComplianceDeadlineExtensionEngine::listForCorrectiveAction($pdo, (int)$cap['id']);
+        $capEvidence = ComplianceCapEngine::listEvidence($pdo, (int)$cap['id']);
         $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline(
             $pdo,
             (int)$cap['id'],
@@ -523,11 +525,51 @@ if ($detailId > 0) {
             <?php endif; ?>
 
             <?php if (!$capLocked): ?>
+              <div class="cmp-flash is-warn" style="margin:16px 0;">
+                <strong>Closure evidence</strong>
+                <p style="margin:6px 0 10px;">When changing this corrective action to Executed, Completed, Verified, or Closed, add the evidence note below unless an evidence record already exists.</p>
+                <label class="cmp-field compliance-field--full" style="margin:0;">
+                  <span>Evidence note / closure rationale</span>
+                  <textarea name="closure_evidence_note" rows="3" placeholder="Describe the evidence that proves this corrective action was implemented, e.g. document reviewed, authority acceptance, training record, procedure update, or operational verification."></textarea>
+                </label>
+              </div>
+            <?php endif; ?>
+
+            <?php if (!$capLocked): ?>
               <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">
                 Save
               </button>
             <?php endif; ?>
           </form>
+        </section>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 8px;font-size:20px;">Closure evidence</h2>
+          <?php if ($capEvidence === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0;">No corrective-action evidence has been recorded yet. Add an evidence note when closing or verifying this CAP.</p>
+          <?php else: ?>
+            <div class="compliance-table-wrap">
+              <table class="compliance-table">
+                <thead><tr><th>Type</th><th>Evidence</th><th>Recorded</th></tr></thead>
+                <tbody>
+                  <?php foreach ($capEvidence as $ev): ?>
+                    <tr>
+                      <td><?= compliance_badge((string)($ev['evidence_kind'] ?? 'NOTE')) ?></td>
+                      <td>
+                        <strong><?= h((string)($ev['title'] ?? 'Evidence')) ?></strong>
+                        <?php if (trim((string)($ev['description'] ?? '')) !== ''): ?>
+                          <div style="margin-top:4px;color:#475569;"><?= nl2br(h((string)$ev['description'])) ?></div>
+                        <?php endif; ?>
+                        <?php if (trim((string)($ev['external_url'] ?? '')) !== ''): ?>
+                          <div style="margin-top:4px;"><a href="<?= h((string)$ev['external_url']) ?>" target="_blank" rel="noopener">Open external evidence</a></div>
+                        <?php endif; ?>
+                      </td>
+                      <td class="cmp-mono"><?= h((string)($ev['uploaded_at'] ?? '')) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
         </section>
         <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Lifecycle history</h2>

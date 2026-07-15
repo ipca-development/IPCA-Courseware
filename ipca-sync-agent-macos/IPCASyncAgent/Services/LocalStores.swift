@@ -3,27 +3,145 @@ import AppKit
 import Foundation
 import SQLite3
 
-final class CursorStore {
-    private let defaults = UserDefaults.standard
+enum CursorPersistenceError: Error, LocalizedError {
+    case invalidCursor(String)
+    case writeFailed
+    case readbackMismatch
 
-    func cursor(provider: String) -> String? {
-        defaults.string(forKey: "cursor.\(provider)")
+    var errorDescription: String? {
+        switch self {
+        case .invalidCursor(let reason): return "Garmin cursor persistence failed: \(reason)"
+        case .writeFailed: return "Garmin cursor persistence failed: UserDefaults did not synchronize."
+        case .readbackMismatch: return "Garmin cursor persistence failed: saved cursor did not match read-back cursor."
+        }
+    }
+}
+
+struct CursorValueDiagnostic {
+    var present: Bool
+    var length: Int
+    var firstSix: String
+    var lastFour: String
+    var fingerprint: String
+    var storageKey: String
+    var storageRepository: String
+    var updatedAt: Date?
+}
+
+final class CursorStore {
+    private let defaults: UserDefaults
+    private let synchronizeDefaults: (UserDefaults) -> Bool
+    let storageRepository: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        storageRepository: String = "UserDefaults.standard",
+        synchronize: ((UserDefaults) -> Bool)? = nil
+    ) {
+        self.defaults = defaults
+        self.storageRepository = storageRepository
+        self.synchronizeDefaults = synchronize ?? { $0.synchronize() }
     }
 
-    func setCursor(_ cursor: String, provider: String) {
-        defaults.set(cursor, forKey: "cursor.\(provider)")
-        defaults.set(Date().timeIntervalSince1970, forKey: "cursorUpdatedAt.\(provider)")
-        defaults.synchronize()
+    static func storageKey(provider: String) -> String { "cursor.\(provider)" }
+    static func cursorUpdatedAtKey(provider: String) -> String { "cursorUpdatedAt.\(provider)" }
+    static func bootstrapCompletedKey(provider: String) -> String { "bootstrapCompleted.\(provider)" }
+
+    func cursor(provider: String) -> String? {
+        defaults.string(forKey: Self.storageKey(provider: provider))
+    }
+
+    @discardableResult
+    func setCursor(_ cursor: String, provider: String) -> Bool {
+        if let previous = self.cursor(provider: provider), previous != cursor {
+            logCursor("CURSOR_OVERWRITTEN", provider: provider, value: cursor)
+        }
+        defaults.set(cursor, forKey: Self.storageKey(provider: provider))
+        defaults.set(Date().timeIntervalSince1970, forKey: Self.cursorUpdatedAtKey(provider: provider))
+        return synchronizeDefaults(defaults)
+    }
+
+    func persistBootstrapCursor(_ cursor: String, provider: String) throws {
+        guard Self.validationRejectionReason(cursor) == nil else {
+            throw CursorPersistenceError.invalidCursor(Self.validationRejectionReason(cursor) ?? "invalid cursor")
+        }
+        logCursor("BOOTSTRAP_CURSOR_SAVE_STARTED", provider: provider, value: cursor)
+        guard setCursor(cursor, provider: provider) else {
+            throw CursorPersistenceError.writeFailed
+        }
+        logCursor("BOOTSTRAP_CURSOR_SAVE_COMPLETED", provider: provider, value: cursor)
+        let readback = self.cursor(provider: provider)
+        logCursor("BOOTSTRAP_CURSOR_READBACK", provider: provider, value: readback)
+        guard readback == cursor else {
+            logCursor("BOOTSTRAP_CURSOR_MATCH", provider: provider, value: readback, extra: "match=no")
+            throw CursorPersistenceError.readbackMismatch
+        }
+        logCursor("BOOTSTRAP_CURSOR_MATCH", provider: provider, value: readback, extra: "match=yes")
+        defaults.set(true, forKey: Self.bootstrapCompletedKey(provider: provider))
+        _ = synchronizeDefaults(defaults)
+        logCursor("BOOTSTRAP_STATE_COMPLETED", provider: provider, value: readback)
+    }
+
+    func bootstrapCompleted(provider: String) -> Bool {
+        defaults.bool(forKey: Self.bootstrapCompletedKey(provider: provider))
+    }
+
+    func clearCursor(provider: String, reason: String) {
+        let existing = cursor(provider: provider)
+        defaults.removeObject(forKey: Self.storageKey(provider: provider))
+        defaults.removeObject(forKey: Self.cursorUpdatedAtKey(provider: provider))
+        defaults.removeObject(forKey: Self.bootstrapCompletedKey(provider: provider))
+        _ = synchronizeDefaults(defaults)
+        logCursor("CURSOR_CLEARED", provider: provider, value: existing, extra: "reason=\(reason)")
     }
 
     func cursorUpdatedAt(provider: String) -> Date? {
-        let value = defaults.double(forKey: "cursorUpdatedAt.\(provider)")
+        let value = defaults.double(forKey: Self.cursorUpdatedAtKey(provider: provider))
         return value > 0 ? Date(timeIntervalSince1970: value) : nil
     }
 
     func cursorDiagnostic(provider: String) -> (present: Bool, length: Int, updatedAt: Date?) {
         let value = cursor(provider: provider) ?? ""
         return (!value.isEmpty, value.count, cursorUpdatedAt(provider: provider))
+    }
+
+    func valueDiagnostic(provider: String, value: String? = nil) -> CursorValueDiagnostic {
+        let cursorValue = value ?? cursor(provider: provider)
+        let present = cursorValue != nil && cursorValue?.isEmpty == false
+        let raw = cursorValue ?? ""
+        let fingerprint = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
+        return CursorValueDiagnostic(
+            present: present,
+            length: raw.count,
+            firstSix: String(raw.prefix(6)),
+            lastFour: String(raw.suffix(4)),
+            fingerprint: fingerprint,
+            storageKey: Self.storageKey(provider: provider),
+            storageRepository: storageRepository,
+            updatedAt: cursorUpdatedAt(provider: provider)
+        )
+    }
+
+    static func validationRejectionReason(_ cursor: String?) -> String? {
+        guard let cursor else { return "missing" }
+        guard !cursor.isEmpty else { return "empty-string" }
+        return nil
+    }
+
+    func logCursor(_ event: String, provider: String, value: String? = nil, extra: String = "") {
+        let diagnostic = valueDiagnostic(provider: provider, value: value)
+        let parts = [
+            event,
+            "present=\(diagnostic.present ? "yes" : "no")",
+            "length=\(diagnostic.length)",
+            "first6=\(diagnostic.firstSix.isEmpty ? "n/a" : diagnostic.firstSix)",
+            "last4=\(diagnostic.lastFour.isEmpty ? "n/a" : diagnostic.lastFour)",
+            "sha256=\(diagnostic.fingerprint)",
+            "storageKey=\(diagnostic.storageKey)",
+            "storageRepository=\(diagnostic.storageRepository)",
+            extra
+        ].filter { !$0.isEmpty }
+        LoggingService.shared.info(parts.joined(separator: " "))
     }
 }
 

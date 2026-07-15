@@ -215,6 +215,7 @@ final class AppStateController: ObservableObject {
         repairService = localRepairService
         let cursorDiagnostic = cursorStore.cursorDiagnostic(provider: localGarminProvider.identifier)
         LoggingService.shared.info("Garmin cursor diagnostic: present=\(cursorDiagnostic.present ? "yes" : "no") length=\(cursorDiagnostic.length) updatedAt=\(cursorDiagnostic.updatedAt?.formatted(.iso8601) ?? "n/a")")
+        cursorStore.logCursor("SYNC_NOW_CURSOR_READ", provider: localGarminProvider.identifier, extra: "context=appLaunch")
         notifications.requestAuthorizationIfNeeded()
         refreshConfigurationState()
         scheduler.start()
@@ -233,11 +234,9 @@ final class AppStateController: ObservableObject {
     }
 
     func refreshGarminCursorStatus() {
-        let diagnostic = cursorStore.cursorDiagnostic(provider: garminProvider.identifier)
-        if !diagnostic.present {
+        let cursor = cursorStore.cursor(provider: garminProvider.identifier)
+        if cursor == nil || cursor?.isEmpty == true {
             garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
-        } else if diagnostic.length < 8 {
-            garminCursorStatus = GarminCursorState.invalid.rawValue
         } else {
             garminCursorStatus = GarminCursorState.ready.rawValue
         }
@@ -351,10 +350,10 @@ final class SyncCoordinator {
                 state?.lastError = error.localizedDescription
             } else if case GarminError.logbookEndpointUnavailable = error {
                 state?.garminAuthenticationStatus = GarminAuthenticationState.unknown.rawValue
-                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
-                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.refreshGarminCursorStatus()
+                state?.garminSyncStatus = GarminSyncState.error.rawValue
                 state?.status = .actionRequired
-                state?.lastError = "The app does not yet have a valid initial Garmin sync cursor. Reload Garmin Logbook for Initial Sync."
+                state?.lastError = Self.logbookEndpointUnavailableMessage(hasValidSavedCursor: self.hasValidSavedCursor())
             } else {
                 state?.garminStatus = "Garmin Authentication Required"
                 state?.garminAuthenticationStatus = GarminAuthenticationState.loginRequired.rawValue
@@ -451,10 +450,10 @@ final class SyncCoordinator {
                 state?.lastError = error.localizedDescription
                 LoggingService.shared.error("Sync run \(runID) requires initial Garmin bootstrap.")
             } else if case GarminError.logbookEndpointUnavailable = error {
-                state?.garminCursorStatus = GarminCursorState.initialSyncRequired.rawValue
-                state?.garminSyncStatus = GarminSyncState.initialBootstrapRequired.rawValue
+                state?.refreshGarminCursorStatus()
+                state?.garminSyncStatus = GarminSyncState.error.rawValue
                 state?.status = .actionRequired
-                state?.lastError = "The app does not yet have a valid initial Garmin sync cursor. Reload Garmin Logbook for Initial Sync."
+                state?.lastError = Self.logbookEndpointUnavailableMessage(hasValidSavedCursor: self.hasValidSavedCursor())
                 LoggingService.shared.error("Sync run \(runID) could not capture a confirmed Garmin Logbook endpoint.")
             } else {
                 state?.garminSyncStatus = GarminSyncState.error.rawValue
@@ -479,6 +478,10 @@ final class SyncCoordinator {
             }
             state?.refreshGarminCursorStatus()
             state?.garminSyncStatus = GarminSyncState.idle.rawValue
+            guard self.hasValidSavedCursor() else {
+                state?.setError("Garmin cursor persistence failed after bootstrap. The app did not save a durable cursor.")
+                return
+            }
             state?.lastError = "Initial Garmin sync cursor captured. Click Sync Now to check for updates."
             state?.status = .idle
         } catch {
@@ -491,6 +494,20 @@ final class SyncCoordinator {
                 state?.setError(error.localizedDescription)
             }
         }
+    }
+
+    private func hasValidSavedCursor() -> Bool {
+        Self.savedCursorIsValid(cursorStore: cursorStore, providerIdentifier: provider.identifier)
+    }
+
+    static func savedCursorIsValid(cursorStore: CursorStore, providerIdentifier: String) -> Bool {
+        CursorStore.validationRejectionReason(cursorStore.cursor(provider: providerIdentifier)) == nil
+    }
+
+    static func logbookEndpointUnavailableMessage(hasValidSavedCursor: Bool) -> String {
+        hasValidSavedCursor ?
+            "Garmin incremental Logbook endpoint could not be confirmed. The saved cursor remains valid; try reloading the Garmin Logbook page and Sync Now again." :
+            "The app does not yet have a valid initial Garmin sync cursor. Reload Garmin Logbook for Initial Sync."
     }
 
     @MainActor

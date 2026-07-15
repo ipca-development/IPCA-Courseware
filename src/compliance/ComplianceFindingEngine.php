@@ -480,6 +480,8 @@ final class ComplianceFindingEngine
             $status = strtoupper((string)($cap['status'] ?? ''));
             if (!in_array($status, array('EXECUTED', 'COMPLETED', 'VERIFIED', 'CLOSED'), true)) {
                 $reasons[] = $code . ' has not been executed.';
+            } elseif (!self::capHasClosureEvidence($pdo, (int)$cap['id'])) {
+                $reasons[] = $code . ' has no corrective-action closure evidence note or document.';
             }
 
             $deadline = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline(
@@ -504,6 +506,21 @@ final class ComplianceFindingEngine
         }
 
         return array('ready' => $reasons === array(), 'reasons' => $reasons);
+    }
+
+    private static function capHasClosureEvidence(PDO $pdo, int $capId): bool
+    {
+        try {
+            $st = $pdo->prepare(
+                'SELECT COUNT(*)
+                   FROM ipca_compliance_corrective_action_evidence
+                  WHERE corrective_action_id = ?'
+            );
+            $st->execute(array($capId));
+            return (int)$st->fetchColumn() > 0;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

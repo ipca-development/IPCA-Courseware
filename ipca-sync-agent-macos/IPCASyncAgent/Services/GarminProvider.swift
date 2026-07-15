@@ -162,10 +162,12 @@ final class GarminProvider: SyncProvider {
             object = try await initialBootstrapLogbookObject()
         }
         try validateProbe(object)
-        guard let cursor = object["cursor"]?.string, cursor.count >= 8 else {
+        guard let cursor = object["cursor"]?.string, CursorStore.validationRejectionReason(cursor) == nil else {
+            cursorStore.logCursor("BOOTSTRAP_CURSOR_REJECTED_REASON", provider: identifier, value: object["cursor"]?.string, extra: "reason=\(CursorStore.validationRejectionReason(object["cursor"]?.string) ?? "unknown")")
             throw GarminError.initialSyncBootstrapRequired
         }
-        cursorStore.setCursor(cursor, provider: identifier)
+        cursorStore.logCursor("BOOTSTRAP_VERSION_EXTRACTED", provider: identifier, value: cursor)
+        try cursorStore.persistBootstrapCursor(cursor, provider: identifier)
         lastReturnedCursor = cursor
         LoggingService.shared.info("Captured initial Garmin cursor. length=\(cursor.count)")
     }
@@ -276,13 +278,17 @@ final class GarminProvider: SyncProvider {
     }
 
     private func requireSavedCursor() throws -> String {
-        guard let cursor = cursorStore.cursor(provider: identifier)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              cursor.count >= 8 else {
-            LoggingService.shared.error("Garmin cursor unavailable for incremental sync.")
+        let cursor = cursorStore.cursor(provider: identifier)
+        cursorStore.logCursor("SYNC_NOW_CURSOR_READ", provider: identifier, value: cursor)
+        if let reason = CursorStore.validationRejectionReason(cursor) {
+            cursorStore.logCursor("SYNC_NOW_CURSOR_VALIDATION", provider: identifier, value: cursor, extra: "valid=no")
+            cursorStore.logCursor("SYNC_NOW_CURSOR_REJECTED_REASON", provider: identifier, value: cursor, extra: "reason=\(reason)")
             throw GarminError.initialSyncBootstrapRequired
         }
-        LoggingService.shared.info("Using saved Garmin cursor for incremental sync. length=\(cursor.count)")
-        return cursor
+        cursorStore.logCursor("SYNC_NOW_CURSOR_VALIDATION", provider: identifier, value: cursor, extra: "valid=yes")
+        let exactCursor = cursor ?? ""
+        LoggingService.shared.info("Using saved Garmin cursor for incremental sync. length=\(exactCursor.count)")
+        return exactCursor
     }
 
     private func logbookObject(cursor: String?, mode: LogbookMode) async throws -> [String: JSONValue] {
