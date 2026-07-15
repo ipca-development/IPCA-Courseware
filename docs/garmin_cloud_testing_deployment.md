@@ -25,7 +25,7 @@ The Garmin Cloud integration runs entirely on the existing IPCA.training Linux D
 - PHP-FPM
 - IPCA.training PHP application
 - Node.js
-- Playwright Chromium
+- Google Chrome Stable or Playwright Chromium
 - Garmin worker systemd service
 - Garmin browser profile
 - Garmin private download staging
@@ -47,6 +47,8 @@ env[GARMIN_WORKER_URL] = http://127.0.0.1:8791
 env[GARMIN_WORKER_PORT] = 8791
 env[GARMIN_WORKER_HOST] = 127.0.0.1
 env[GARMIN_WORKER_DISPLAY] = :95
+env[GARMIN_BROWSER_CHANNEL] = chrome
+env[GARMIN_BROWSER_LOCALE] = en-US
 env[GARMIN_BROWSER_PROFILE_DIR] = /var/lib/ipca/garmin/browser-profile
 env[GARMIN_PRIVATE_DOWNLOAD_DIR] = /var/lib/ipca/garmin/downloads
 env[PLAYWRIGHT_BROWSERS_PATH] = /var/lib/ipca/garmin/playwright-browsers
@@ -55,6 +57,8 @@ env[GARMIN_WORKER_TOKEN] = <secret-token>
 ```
 
 The implementation supports `server_worker`, `remote_worker`, and `local_cli`; use `server_worker` for this topology.
+
+`GARMIN_BROWSER_CHANNEL` accepts only `chrome` or `chromium`; the default code path is `chrome`. Use `chrome` for testing Garmin with normal Google Chrome Stable. Use `chromium` only to return to the Playwright-managed Chromium behavior. `GARMIN_BROWSER_LOCALE` must be stable, for example `en-US`; do not spoof locale dynamically.
 
 Do not create a permanent `/etc/ipca/*.env` file. The systemd worker uses `scripts/garmin/start-garmin-worker.sh`, which reads the PHP-FPM pool file, extracts only allowlisted Garmin variables, exports them to Node, and then uses `exec` to run `flygarmin-worker.js serve`.
 
@@ -79,17 +83,33 @@ export PHP_FPM_POOL="/etc/php/8.3/fpm/pool.d/www.conf"
 export WEB_SERVICE="nginx"
 ```
 
-Install Node and Playwright dependencies on the same Droplet:
+Install Node, Chrome dependencies, and Playwright dependencies on the same Ubuntu 24.04 Droplet:
 
 ```shell
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg xvfb x11vnc openbox dbus-x11 x11-utils
+sudo apt-get install -y ca-certificates curl gnupg fonts-liberation fonts-noto-color-emoji fonts-dejavu-core xvfb x11vnc openbox dbus-x11 x11-utils
 node --version || curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 node --version || sudo apt-get install -y nodejs
 cd "$APP_ROOT/scripts/garmin"
 npm install
 npx playwright install-deps chromium
 ```
+
+Install Google Chrome Stable from Google's signed apt repository, not a third-party repository:
+
+```shell
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-linux-signing-keyring.gpg
+sudo chmod 0644 /etc/apt/keyrings/google-linux-signing-keyring.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable
+google-chrome --version
+which google-chrome
+which google-chrome-stable
+```
+
+When `GARMIN_BROWSER_CHANNEL=chrome`, the worker must use Google Chrome Stable and must fail with `GARMIN_BROWSER_CHANNEL_UNAVAILABLE` if Chrome Stable is not installed. It must not silently fall back to Playwright Chromium.
 
 Create the dedicated user and private persistent storage:
 
@@ -100,7 +120,7 @@ sudo chown -R ipca-garmin:ipca-garmin /var/lib/ipca/garmin
 sudo chmod 700 /var/lib/ipca/garmin /var/lib/ipca/garmin/browser-profile /var/lib/ipca/garmin/downloads /var/lib/ipca/garmin/playwright-browsers
 ```
 
-Install Chromium into the persistent browser path:
+Install Playwright Chromium into the persistent browser path only as the explicit fallback channel:
 
 ```shell
 cd "$APP_ROOT/scripts/garmin"
@@ -238,7 +258,20 @@ Open `/admin/garmin_env_probe.php` as an admin, confirm values are visible and t
 sudo rm "$APP_ROOT/public/admin/garmin_env_probe.php"
 ```
 
-The Garmin worker owns the only Chromium process using `/var/lib/ipca/garmin/browser-profile`. It runs headed on the permanent Xvfb display `:95`; x11vnc only exposes that already-running browser temporarily through an SSH tunnel.
+The Garmin worker owns the only browser process tree using `/var/lib/ipca/garmin/browser-profile`. It runs headed Google Chrome Stable on the permanent Xvfb display `:95` when `GARMIN_BROWSER_CHANNEL=chrome`; x11vnc only exposes that already-running browser temporarily through an SSH tunnel.
+
+Normal browser environment requirements:
+
+- stable locale, configured through `GARMIN_BROWSER_LOCALE=en-US`
+- stable server timezone; do not dynamically spoof timezone
+- common fonts installed through apt
+- persistent browser profile; do not recreate the profile during normal testing
+- one profile owner: `ipca-garmin`
+- one Chrome process tree owned by the worker
+- no geolocation spoofing
+- no stealth plugins, `puppeteer-extra-stealth`, `addInitScript` patches, `--disable-blink-features=AutomationControlled`, user-agent spoofing, fake plugins, fake WebGL values, CAPTCHA-solving services, or challenge-token reuse
+
+The worker opens or reuses the normal FlyGarmin UI at startup but does not automatically call the Garmin logbook API. The first live Garmin API request occurs only from Test Connection, Complete Authentication, or a scheduled/manual sync when no admin authentication session is active.
 
 If Xvfb leaves a stale lock after a crash, stop `garmin-display`, remove only stale `/tmp/.X95-lock` and `/tmp/.X11-unix/X95` after confirming no Xvfb process is running, then restart `garmin-display`.
 
@@ -260,6 +293,16 @@ After login, stop only the temporary VNC session and leave the worker browser ru
 sudo -u www-data sudo -n /var/www/ipca/scripts/garmin/garmin-auth-session.sh stop
 ```
 
+While the temporary VNC authentication session is active, automatic Garmin requests are paused. Sync and download operations return `GARMIN_AUTH_INTERACTION_ACTIVE`; browser status remains available; Complete Authentication performs exactly one explicit `verify-auth` request.
+
+Garmin auth/web failures activate bounded in-memory backoff:
+
+- first failure: 5 minutes
+- second failure: 10 minutes
+- subsequent failures: 30 minutes
+
+Backoff applies to `GARMIN_LOGIN_HTML_RECEIVED`, `GARMIN_WEB_ENDPOINT_ERROR`, `GARMIN_AUTHENTICATION_REQUIRED`, and `GARMIN_HUMAN_VERIFICATION_REQUIRED`. Manual Test Connection may use one bounded override; Complete Authentication may perform one explicit verification. Do not loop verification automatically.
+
 Open `/admin/flight_log_garmin_connection.php` and run:
 
 1. Test Connection
@@ -270,9 +313,86 @@ Open `/admin/flight_log_garmin_connection.php` and run:
 6. Mark UI Visible
 7. Enable scheduled testing sync only after all gates pass
 
+## Chrome Stable Acceptance Order
+
+Use this exact order for the next live deployment test:
+
+1. Install Google Chrome Stable.
+
+```shell
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-linux-signing-keyring.gpg
+sudo chmod 0644 /etc/apt/keyrings/google-linux-signing-keyring.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable
+```
+
+2. Verify Chrome version and path.
+
+```shell
+google-chrome --version
+which google-chrome
+which google-chrome-stable
+```
+
+3. Add these lines to the existing Garmin block in `/etc/php/8.3/fpm/pool.d/www.conf`.
+
+```ini
+env[GARMIN_BROWSER_CHANNEL] = chrome
+env[GARMIN_BROWSER_LOCALE] = en-US
+```
+
+4. Validate PHP-FPM config.
+
+```shell
+sudo php-fpm8.3 -t
+```
+
+5. Restart PHP-FPM.
+
+```shell
+sudo systemctl restart php8.3-fpm
+```
+
+6. Restart the Garmin display.
+
+```shell
+sudo systemctl restart garmin-display
+```
+
+7. Restart the Garmin worker.
+
+```shell
+sudo systemctl restart garmin-worker
+```
+
+8. Confirm the worker reports Google Chrome Stable.
+
+```shell
+TOKEN="$(sudo awk 'BEGIN{p="^[[:space:]]*env\\[GARMIN_WORKER_TOKEN\\][[:space:]]*=[[:space:]]*"} $0 ~ p { sub(p,"",$0); sub(/[[:space:]]*;[[:space:]]*$/,"",$0); print }' /etc/php/8.3/fpm/pool.d/www.conf)"
+curl -sS -X POST http://127.0.0.1:8791/garmin-worker \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"operation":"browser-status"}'
+unset TOKEN
+```
+
+Expected: `browser_engine` is `Google Chrome Stable`.
+
+9. Start Garmin Authentication Session from `/admin/flight_log_garmin_connection.php`.
+10. Confirm the UI shows automatic Garmin requests are paused.
+11. Connect through VNC using the SSH tunnel shown in the UI.
+12. Complete Garmin login, MFA, or human verification manually.
+13. Wait until Garmin Logbook entries are visibly loaded in the browser.
+14. Click Complete Authentication exactly once.
+15. Run Test Connection exactly once.
+16. If successful, run Initial Synchronization.
+17. If the human-verification loop persists, stop further retries and report that Garmin appears to reject automated browser control.
+
 ## Temporary Garmin Authentication Session
 
-The Garmin Connection page can start a temporary headed Chromium session on the same Droplet. This uses:
+The Garmin Connection page can expose the existing headed worker browser on the same Droplet. This uses:
 
 - Xvfb display `:95`
 - x11vnc bound to `127.0.0.1:5905`

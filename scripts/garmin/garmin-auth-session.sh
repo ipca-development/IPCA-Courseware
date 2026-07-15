@@ -39,7 +39,7 @@ extract_env() {
   local name="$1"
   local matches count value
   case "$name" in
-    GARMIN_WORKER_PORT|GARMIN_WORKER_HOST|GARMIN_WORKER_DISPLAY|GARMIN_BROWSER_PROFILE_DIR|GARMIN_PRIVATE_DOWNLOAD_DIR|GARMIN_WORKER_TOKEN|PLAYWRIGHT_BROWSERS_PATH)
+    GARMIN_WORKER_PORT|GARMIN_WORKER_HOST|GARMIN_WORKER_DISPLAY|GARMIN_BROWSER_PROFILE_DIR|GARMIN_PRIVATE_DOWNLOAD_DIR|GARMIN_WORKER_TOKEN|GARMIN_BROWSER_CHANNEL|GARMIN_BROWSER_LOCALE|PLAYWRIGHT_BROWSERS_PATH)
       ;;
     *)
       fail "non_allowlisted_env"
@@ -76,10 +76,16 @@ load_env() {
   GARMIN_PRIVATE_DOWNLOAD_DIR="$(extract_env GARMIN_PRIVATE_DOWNLOAD_DIR)"
   export GARMIN_WORKER_TOKEN
   GARMIN_WORKER_TOKEN="$(extract_env GARMIN_WORKER_TOKEN)"
+  export GARMIN_BROWSER_CHANNEL
+  GARMIN_BROWSER_CHANNEL="$(extract_env GARMIN_BROWSER_CHANNEL)"
+  export GARMIN_BROWSER_LOCALE
+  GARMIN_BROWSER_LOCALE="$(extract_env GARMIN_BROWSER_LOCALE)"
   export PLAYWRIGHT_BROWSERS_PATH
   PLAYWRIGHT_BROWSERS_PATH="$(extract_env PLAYWRIGHT_BROWSERS_PATH)"
   [[ "$GARMIN_WORKER_HOST" = "127.0.0.1" ]] || fail "worker_host_must_be_localhost"
   [[ "$GARMIN_WORKER_PORT" =~ ^[0-9]+$ ]] || fail "worker_port_must_be_numeric"
+  [[ "$GARMIN_BROWSER_CHANNEL" =~ ^(chrome|chromium)$ ]] || fail "browser_channel_invalid"
+  [[ "$GARMIN_BROWSER_LOCALE" =~ ^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$ ]] || fail "browser_locale_invalid"
 }
 
 ensure_runtime_dir() {
@@ -126,7 +132,12 @@ payload = {
     "ok": True,
     "status": status,
     "browser_state": data.get("browser_state"),
+    "browser_engine": data.get("browser_engine"),
+    "browser_channel": data.get("browser_channel"),
+    "browser_locale": data.get("browser_locale"),
     "authentication_state": data.get("authentication_state"),
+    "auth_interaction_state": data.get("auth_interaction_state"),
+    "auth_interaction_active": bool(data.get("auth_interaction_active")),
     "browser_running": bool(data.get("browser_running")),
     "page_present": bool(data.get("page_present")),
     "context_present": bool(data.get("context_present") or data.get("browser_context_present")),
@@ -294,6 +305,8 @@ start_auth_session() {
     done
   fi
   [[ "$(worker_browser_running "$BROWSER_STATUS_JSON")" = "1" ]] || fail "garmin_worker_browser_not_running"
+  worker_request "auth-interaction-start" >/dev/null 2>&1 || fail "garmin_worker_auth_interaction_start_failed"
+  BROWSER_STATUS_JSON="$(worker_browser_status || true)"
   STARTED_AT="$(iso_now)"
   EXPIRES_AT="$(date -u -d "@$(( $(now_epoch) + TTL_SECONDS ))" +"%Y-%m-%dT%H:%M:%SZ")"
   VNC_PASSWORD="$(generate_vnc_password)"
@@ -333,6 +346,8 @@ status_session() {
     STARTED_AT="$(state_value started_at)"
     EXPIRES_AT="$(state_value expires_at)"
     cleanup_processes
+    load_env
+    worker_request "auth-interaction-stop" >/dev/null 2>&1 || true
     BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_final_state "expired"
   fi
@@ -357,6 +372,7 @@ verify_session() {
     STARTED_AT="$(state_value started_at)"
     EXPIRES_AT="$(state_value expires_at)"
     cleanup_processes
+    worker_request "auth-interaction-stop" >/dev/null 2>&1 || true
     BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_final_state "expired"
     cat "$STATE_FILE"
@@ -369,9 +385,8 @@ verify_session() {
   local worker_response ok
   worker_response=""
   ok="0"
-  for _ in $(seq 1 20); do
-    worker_response="$(worker_request "verify-auth" || true)"
-    ok="$(python3 - "$worker_response" <<'PY'
+  worker_response="$(worker_request "verify-auth" || true)"
+  ok="$(python3 - "$worker_response" <<'PY'
 import json, sys
 try:
     print('1' if json.loads(sys.argv[1]).get('ok') else '0')
@@ -379,9 +394,7 @@ except Exception:
     print('0')
 PY
 )"
-    [[ "$ok" = "1" ]] && break
-    sleep 1
-  done
+  worker_request "auth-interaction-stop" >/dev/null 2>&1 || true
   if [[ "$ok" != "1" ]]; then
     BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
     write_state "failed" "verification_pending"
@@ -418,6 +431,7 @@ stop_session() {
   EXPIRES_AT="$(state_value expires_at)"
   cleanup_processes
   load_env
+  worker_request "auth-interaction-stop" >/dev/null 2>&1 || true
   BROWSER_STATUS_JSON="$(worker_browser_status 2>/dev/null || true)"
   write_final_state "cancelled"
   cat "$STATE_FILE"

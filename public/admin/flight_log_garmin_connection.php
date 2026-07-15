@@ -10,13 +10,13 @@ cw_require_admin();
 function garmin_badge_class(string $value): string
 {
     $value = strtolower($value);
-    if (in_array($value, array('authenticated', 'reachable', 'succeeded', 'downloaded', 'supported', 'full_avionics', 'matched', 'imported'), true)) {
+    if (in_array($value, array('authenticated', 'reachable', 'succeeded', 'downloaded', 'supported', 'full_avionics', 'matched', 'imported', 'inactive', 'google chrome stable'), true)) {
         return 'garmin-badge-ok';
     }
-    if (in_array($value, array('gps_only', 'partial_avionics', 'needs_admin_review', 'warning', 'pending', 'unknown_supported'), true)) {
+    if (in_array($value, array('gps_only', 'partial_avionics', 'needs_admin_review', 'warning', 'pending', 'unknown_supported', 'unknown', 'admin login active', 'waiting for verification', 'playwright chromium'), true)) {
         return 'garmin-badge-warn';
     }
-    if (in_array($value, array('failed', 'invalid', 'authentication_required', 'session_expired', 'unsupported_format', 'unreachable'), true)) {
+    if (in_array($value, array('failed', 'invalid', 'authentication_required', 'session_expired', 'unsupported_format', 'unreachable', 'human_verification_required', 'login_required'), true)) {
         return 'garmin-badge-danger';
     }
     return '';
@@ -75,9 +75,14 @@ cw_header('Flight Log - Garmin Connection');
 
   <section class="garmin-card">
     <h3 style="margin-top:0">Garmin Authentication Session</h3>
-    <p class="garmin-muted">Temporary headed Chromium access runs only on this Droplet and is reachable only through an SSH tunnel. Garmin username, password, MFA values, cookies, and browser storage are not captured by IPCA.training.</p>
+    <p class="garmin-muted">Temporary headed browser access runs only on this Droplet and is reachable only through an SSH tunnel. Garmin username, password, MFA values, cookies, and browser storage are not captured by IPCA.training.</p>
+    <?php if (!empty($authSession['auth_interaction_active'])): ?>
+      <p><span class="garmin-badge garmin-badge-warn">Automatic Garmin requests are paused while you complete login, MFA, or human verification.</span></p>
+    <?php endif; ?>
     <div class="garmin-grid">
       <div class="garmin-kv"><div class="garmin-label">Session Status</div><div class="garmin-value"><span class="garmin-badge <?= garmin_badge_class((string)($authSession['status'] ?? 'idle')) ?>"><?= h((string)($authSession['status'] ?? 'idle')) ?></span></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Browser Engine</div><div class="garmin-value"><span class="garmin-badge <?= garmin_badge_class((string)($authSession['browser_engine'] ?? 'unknown')) ?>"><?= h((string)($authSession['browser_engine'] ?? 'unknown')) ?></span></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Authentication Interaction</div><div class="garmin-value"><span class="garmin-badge <?= garmin_badge_class(str_replace('_', ' ', (string)($authSession['auth_interaction_state'] ?? 'inactive'))) ?>"><?= h(str_replace('_', ' ', (string)($authSession['auth_interaction_state'] ?? 'inactive'))) ?></span></div></div>
       <div class="garmin-kv"><div class="garmin-label">Temporary Browser</div><div class="garmin-value"><?= !empty($authSession['browser_running']) ? 'Running' : 'Not running' ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">Started</div><div class="garmin-value"><?= h((string)($authSession['started_at'] ?? '')) ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">Expires</div><div class="garmin-value"><?= h((string)($authSession['expires_at'] ?? '')) ?></div></div>
@@ -93,7 +98,9 @@ cw_header('Flight Log - Garmin Connection');
     <?php if (!empty($authSession['vnc_password'])): ?>
       <div style="margin-top:10px">
         <div class="garmin-label">One-time VNC Password</div>
-        <code><?= h((string)$authSession['vnc_password']) ?></code>
+        <input id="vnc-password" type="password" readonly value="<?= h((string)$authSession['vnc_password']) ?>" style="font-family:monospace;border:1px solid #cbd5e1;border-radius:8px;padding:7px;width:220px">
+        <button type="button" class="secondary" id="reveal-vnc-password">Reveal</button>
+        <button type="button" class="secondary" id="copy-vnc-password">Copy</button>
       </div>
     <?php endif; ?>
     <?php if (!empty($authSession['error'])): ?>
@@ -186,6 +193,19 @@ cw_header('Flight Log - Garmin Connection');
 </div>
 <script>
 document.addEventListener('click', async (event) => {
+  if (event.target && event.target.id === 'reveal-vnc-password') {
+    const input = document.getElementById('vnc-password');
+    if (input) {
+      input.type = input.type === 'password' ? 'text' : 'password';
+      event.target.textContent = input.type === 'password' ? 'Reveal' : 'Hide';
+    }
+    return;
+  }
+  if (event.target && event.target.id === 'copy-vnc-password') {
+    const input = document.getElementById('vnc-password');
+    if (input && navigator.clipboard) await navigator.clipboard.writeText(input.value);
+    return;
+  }
   const button = event.target.closest('button[data-action]');
   if (!button) return;
   const result = document.getElementById('garmin-result');
@@ -198,7 +218,7 @@ document.addEventListener('click', async (event) => {
   try {
     const response = await fetch('/admin/api/garmin_cloud_action.php', { method: 'POST', body: form, credentials: 'same-origin' });
     const json = await response.json();
-    result.textContent = JSON.stringify(json, null, 2);
+    result.textContent = JSON.stringify(redactGarminSecrets(json), null, 2);
     if (json.ok) setTimeout(() => window.location.reload(), 1200);
   } catch (error) {
     result.textContent = String(error);
@@ -206,5 +226,17 @@ document.addEventListener('click', async (event) => {
     button.disabled = false;
   }
 });
+
+function redactGarminSecrets(value) {
+  if (Array.isArray(value)) return value.map(redactGarminSecrets);
+  if (value && typeof value === 'object') {
+    const copy = {};
+    for (const [key, item] of Object.entries(value)) {
+      copy[key] = key === 'vnc_password' ? '[masked]' : redactGarminSecrets(item);
+    }
+    return copy;
+  }
+  return value;
+}
 </script>
 <?php cw_footer(); ?>

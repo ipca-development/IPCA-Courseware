@@ -33,6 +33,14 @@ async function browserRecover() {
   return session.recover();
 }
 
+async function authInteractionStart() {
+  return session.authInteractionStart();
+}
+
+async function authInteractionStop() {
+  return session.authInteractionStop();
+}
+
 async function testConnection() {
   return session.testConnection();
 }
@@ -64,6 +72,10 @@ async function dispatch(payload) {
       return browserStatus();
     case 'browser-recover':
       return browserRecover();
+    case 'auth-interaction-start':
+      return authInteractionStart();
+    case 'auth-interaction-stop':
+      return authInteractionStop();
     case 'test-connection':
       return testConnection();
     case 'verify-auth':

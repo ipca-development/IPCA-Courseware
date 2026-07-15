@@ -1,9 +1,26 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright';
 
 const DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+const BACKOFF_CODES = new Set([
+  'GARMIN_LOGIN_HTML_RECEIVED',
+  'GARMIN_WEB_ENDPOINT_ERROR',
+  'GARMIN_AUTHENTICATION_REQUIRED',
+  'GARMIN_HUMAN_VERIFICATION_REQUIRED',
+  'GARMIN_MFA_REQUIRED',
+  'GARMIN_RATE_LIMITED',
+]);
+const AUTH_STATES = {
+  LOGIN_REQUIRED: 'LOGIN_REQUIRED',
+  MFA_REQUIRED: 'MFA_REQUIRED',
+  HUMAN_VERIFICATION_REQUIRED: 'HUMAN_VERIFICATION_REQUIRED',
+  ADMIN_AUTHENTICATION_ACTIVE: 'ADMIN_AUTHENTICATION_ACTIVE',
+  AUTHENTICATED: 'AUTHENTICATED',
+  UNKNOWN: 'UNKNOWN',
+};
 
 export class FlyGarminBrowserSession {
   constructor(options = {}) {
@@ -14,6 +31,8 @@ export class FlyGarminBrowserSession {
     this.downloadDir = options.downloadDir || process.env.GARMIN_PRIVATE_DOWNLOAD_DIR || path.resolve(process.cwd(), 'storage/garmin-downloads');
     this.maxDownloadBytes = Number.parseInt(process.env.GARMIN_DOWNLOAD_MAX_BYTES || String(DEFAULT_MAX_DOWNLOAD_BYTES), 10);
     this.display = process.env.DISPLAY || '';
+    this.browserChannel = this.normalizeBrowserChannel(options.browserChannel || process.env.GARMIN_BROWSER_CHANNEL || 'chrome');
+    this.browserLocale = this.normalizeBrowserLocale(options.browserLocale || process.env.GARMIN_BROWSER_LOCALE || 'en-US');
 
     this.context = null;
     this.page = null;
@@ -25,21 +44,34 @@ export class FlyGarminBrowserSession {
     this.operationCounter = 0;
 
     this.browserState = 'UNINITIALIZED';
-    this.authenticationState = 'unknown';
+    this.authenticationState = AUTH_STATES.UNKNOWN;
+    this.authInteractionState = 'inactive';
+    this.authInteractionActive = false;
+    this.authInteractionVerifyUsed = false;
     this.lastSuccessfulRequestAt = null;
     this.lastError = null;
     this.consecutiveFailureCount = 0;
     this.nextHeartbeatAt = null;
     this.lastHeartbeatAt = null;
+    this.backoffUntilMs = 0;
+    this.backoffFailureCount = 0;
+    this.backoffManualOverrideUsed = false;
+    this.backoffLastCode = null;
   }
 
   statusSnapshot() {
+    const authenticationState = this.publicAuthenticationState();
     return {
       ok: true,
       provider: this.provider,
-      status: this.authenticationState === 'authenticated' ? 'authenticated' : 'authentication_required',
+      status: authenticationState === 'authenticated' ? 'authenticated' : 'authentication_required',
+      browser_engine: this.browserEngineLabel(),
+      browser_channel: this.browserChannel,
+      browser_locale: this.browserLocale,
       browser_state: this.browserState,
-      authentication_state: this.authenticationState,
+      authentication_state: authenticationState,
+      auth_interaction_state: this.authInteractionState,
+      auth_interaction_active: this.authInteractionActive,
       browser_running: this.context !== null,
       context_present: this.context !== null,
       browser_profile_present: this.browserProfilePresent(),
@@ -52,7 +84,11 @@ export class FlyGarminBrowserSession {
       active_operation: this.activeOperation,
       queued_operations: Math.max(0, this.dedupe.size - (this.activeOperation ? 1 : 0)),
       last_error: this.lastError,
-      reauthentication_required: this.authenticationState !== 'authenticated',
+      auth_backoff_active: this.backoffActive(),
+      auth_backoff_until: this.backoffActive() ? new Date(this.backoffUntilMs).toISOString() : null,
+      auth_backoff_failure_count: this.backoffFailureCount,
+      auth_backoff_last_code: this.backoffLastCode,
+      reauthentication_required: authenticationState !== 'authenticated',
     };
   }
 
@@ -63,7 +99,9 @@ export class FlyGarminBrowserSession {
     this.startupPromise = this.ensureContext()
       .then(async () => {
         await this.ensureFlyGarminLoaded();
-        await this.probeAuthentication({ operationName: 'startup-probe', timeoutMs: 15000 });
+        if (this.authenticationState === AUTH_STATES.UNKNOWN) {
+          this.browserState = 'READY';
+        }
         return this.statusSnapshot();
       })
       .finally(() => {
@@ -80,18 +118,27 @@ export class FlyGarminBrowserSession {
       throw this.error('GARMIN_WORKER_NOT_READY', 'Garmin worker is shutting down.');
     }
     if (!this.display) {
-      throw this.error('GARMIN_WORKER_NOT_READY', 'DISPLAY is not set for headed Garmin worker Chromium.');
+      throw this.error('GARMIN_WORKER_NOT_READY', 'DISPLAY is not set for headed Garmin worker browser.');
+    }
+    if (this.browserChannel === 'chrome' && !this.chromeStableAvailable()) {
+      this.browserState = 'FAILED';
+      throw this.error('GARMIN_BROWSER_CHANNEL_UNAVAILABLE', 'GARMIN_BROWSER_CHANNEL=chrome requires Google Chrome Stable on the worker host.');
     }
     fs.mkdirSync(this.profileDir, { recursive: true });
     fs.mkdirSync(this.downloadDir, { recursive: true });
     try {
       this.browserState = 'STARTING';
-      this.context = await chromium.launchPersistentContext(this.profileDir, {
+      const launchOptions = {
         headless: false,
         acceptDownloads: true,
         downloadsPath: this.downloadDir,
         viewport: null,
-      });
+        locale: this.browserLocale,
+      };
+      if (this.browserChannel === 'chrome') {
+        launchOptions.channel = 'chrome';
+      }
+      this.context = await chromium.launchPersistentContext(this.profileDir, launchOptions);
       this.context.on('close', () => {
         this.context = null;
         this.page = null;
@@ -110,6 +157,9 @@ export class FlyGarminBrowserSession {
         throw this.error('GARMIN_PROFILE_LOCKED', 'Garmin browser profile is locked by another Chromium process.', { detail: this.safeText(message) });
       }
       this.browserState = 'FAILED';
+      if (this.browserChannel === 'chrome' && this.looksLikeMissingChrome(message)) {
+        throw this.error('GARMIN_BROWSER_CHANNEL_UNAVAILABLE', 'GARMIN_BROWSER_CHANNEL=chrome requires Google Chrome Stable on the worker host.', { detail: this.safeText(message) });
+      }
       throw this.error('GARMIN_BROWSER_RECOVERY_FAILED', 'Could not launch Garmin persistent browser context.', { detail: this.safeText(message) });
     }
   }
@@ -158,11 +208,27 @@ export class FlyGarminBrowserSession {
   }
 
   async testConnection() {
-    return this.enqueue('test-connection', 'test-connection', async () => this.probeAuthentication({ operationName: 'test-connection' }));
+    if (this.authInteractionActive) {
+      return this.authInteractionFailure('test-connection');
+    }
+    return this.enqueue('test-connection', 'test-connection', async () => this.probeAuthentication({
+      operationName: 'test-connection',
+      manualBackoffOverride: true,
+    }));
   }
 
   async verifyAuth() {
-    return this.enqueue('verify-auth', 'verify-auth', async () => this.probeAuthentication({ operationName: 'verify-auth' }));
+    if (this.authInteractionActive) {
+      if (this.authInteractionVerifyUsed) {
+        return this.authInteractionFailure('verify-auth', 'Complete Authentication has already performed its one allowed verification for this authentication session.');
+      }
+      this.authInteractionVerifyUsed = true;
+      this.authInteractionState = 'waiting_for_verification';
+    }
+    return this.enqueue('verify-auth', 'verify-auth', async () => this.probeAuthentication({
+      operationName: 'verify-auth',
+      manualBackoffOverride: true,
+    }));
   }
 
   browserStatus() {
@@ -176,21 +242,42 @@ export class FlyGarminBrowserSession {
     };
   }
 
-  async probeAuthentication({ operationName = 'status', timeoutMs = 20000 } = {}) {
+  authInteractionStart() {
+    this.authInteractionActive = true;
+    this.authInteractionVerifyUsed = false;
+    this.authInteractionState = 'admin_login_active';
+    this.authenticationState = AUTH_STATES.ADMIN_AUTHENTICATION_ACTIVE;
+    return this.workerOk('auth-interaction-start', 'authentication_paused', this.statusSnapshot());
+  }
+
+  authInteractionStop() {
+    this.authInteractionActive = false;
+    this.authInteractionVerifyUsed = false;
+    this.authInteractionState = 'inactive';
+    if (this.authenticationState === AUTH_STATES.ADMIN_AUTHENTICATION_ACTIVE) {
+      this.authenticationState = AUTH_STATES.UNKNOWN;
+    }
+    return this.workerOk('auth-interaction-stop', 'authentication_interaction_stopped', this.statusSnapshot());
+  }
+
+  async probeAuthentication({ operationName = 'status', timeoutMs = 20000, manualBackoffOverride = false } = {}) {
+    const backoff = this.backoffResult(operationName, manualBackoffOverride);
+    if (backoff) return backoff;
     const result = await this.fetchJson(this.logbookApi, { timeoutMs, expectedKeys: ['version', 'entries', 'settings'] });
     if (!result.ok) {
       this.authenticationState = this.authStateFromCode(result.error?.code);
       this.lastError = result.error;
       this.consecutiveFailureCount += 1;
+      this.applyBackoff(result.error?.code);
       return {
         ok: false,
         operation: operationName,
         provider: this.provider,
-        status: this.authenticationState,
+        status: this.publicAuthenticationState(),
         data: {
           browser_profile_present: this.browserProfilePresent(),
-          authentication_status: this.authenticationState,
-          reauthentication_required: this.authenticationState !== 'authenticated',
+          authentication_status: this.publicAuthenticationState(),
+          reauthentication_required: this.publicAuthenticationState() !== 'authenticated',
           response_status: result.response_status || null,
           response_content_type: result.response_content_type || null,
           final_url: result.final_url || null,
@@ -198,11 +285,14 @@ export class FlyGarminBrowserSession {
         error: result.error,
       };
     }
-    this.authenticationState = 'authenticated';
+    this.authenticationState = AUTH_STATES.AUTHENTICATED;
+    this.authInteractionActive = false;
+    this.authInteractionState = 'inactive';
     this.browserState = 'AUTHENTICATED';
     this.lastSuccessfulRequestAt = new Date().toISOString();
     this.lastError = null;
     this.consecutiveFailureCount = 0;
+    this.clearBackoff();
     return {
       ok: true,
       operation: operationName,
@@ -220,16 +310,23 @@ export class FlyGarminBrowserSession {
   }
 
   async sync(operation, cursor = null) {
+    if (this.authInteractionActive) {
+      return this.authInteractionFailure(operation);
+    }
+    const backoff = this.backoffResult(operation, false);
+    if (backoff) return backoff;
     return this.enqueue(operation, `${operation}:${cursor || ''}`, async () => {
       this.browserState = 'SYNCING';
       const url = cursor ? `${this.logbookApi}?version=${encodeURIComponent(cursor)}` : this.logbookApi;
       const result = await this.fetchJson(url, { expectedKeys: ['version', 'entries', 'settings'] });
       if (!result.ok) {
         this.browserState = 'READY';
+        this.applyBackoff(result.error?.code);
         return this.workerFailure(operation, result);
       }
       this.browserState = 'AUTHENTICATED';
-      this.authenticationState = 'authenticated';
+      this.authenticationState = AUTH_STATES.AUTHENTICATED;
+      this.clearBackoff();
       const entries = this.normalizeEntries(result.json);
       return this.workerOk(operation, 'succeeded', {
         entries,
@@ -245,6 +342,11 @@ export class FlyGarminBrowserSession {
         error: { code: 'GARMIN_SOURCE_UUID_MISSING', message: 'flightDataLogUUID is required.' },
       }, 'failed');
     }
+    if (this.authInteractionActive) {
+      return this.authInteractionFailure('download-source');
+    }
+    const backoff = this.backoffResult('download-source', false);
+    if (backoff) return backoff;
     return this.enqueue('download-source', `download-source:${flightDataLogUUID}`, async () => {
       this.browserState = 'DOWNLOADING';
       const candidates = [
@@ -256,6 +358,7 @@ export class FlyGarminBrowserSession {
       for (const url of candidates) {
         const result = await this.fetchBinary(url, { maxBytes: this.maxDownloadBytes, timeoutMs: 60000 });
         if (!result.ok) {
+          this.applyBackoff(result.error?.code);
           errors.push({ url: this.safeUrl(url), error: result.error, response_status: result.response_status || null });
           continue;
         }
@@ -266,7 +369,8 @@ export class FlyGarminBrowserSession {
         fs.renameSync(tmpPath, localPath);
         const sha256 = crypto.createHash('sha256').update(result.bytes).digest('hex');
         this.browserState = 'AUTHENTICATED';
-        this.authenticationState = 'authenticated';
+        this.authenticationState = AUTH_STATES.AUTHENTICATED;
+        this.clearBackoff();
         return this.workerOk('download-source', 'downloaded', {
           flightDataLogUUID,
           filename,
@@ -447,13 +551,19 @@ export class FlyGarminBrowserSession {
       return this.failureFromResponse('GARMIN_AUTHENTICATION_REQUIRED', 'Garmin returned an authentication status.', response, { body_shape: bodyShape });
     }
     if (response.status === 429) {
-      return this.failureFromResponse('GARMIN_WEB_ENDPOINT_ERROR', 'Garmin rate limited the request.', response, { body_shape: bodyShape });
+      return this.failureFromResponse('GARMIN_RATE_LIMITED', 'Garmin rate limited the request.', response, { body_shape: bodyShape });
     }
-    if (response.status >= 500) {
-      return this.failureFromResponse('GARMIN_WEB_ENDPOINT_ERROR', 'Garmin web endpoint returned a server error.', response, { body_shape: bodyShape });
+    if (this.looksLikeHumanVerification(response)) {
+      return this.failureFromResponse('GARMIN_HUMAN_VERIFICATION_REQUIRED', 'Garmin returned a human-verification challenge.', response, { body_shape: bodyShape });
+    }
+    if (this.looksLikeMfa(response)) {
+      return this.failureFromResponse('GARMIN_MFA_REQUIRED', 'Garmin returned an MFA challenge.', response, { body_shape: bodyShape });
     }
     if (this.looksLikeLogin(response)) {
       return this.failureFromResponse('GARMIN_LOGIN_HTML_RECEIVED', 'Garmin returned a login or MFA page.', response, { body_shape: bodyShape });
+    }
+    if (response.status >= 500) {
+      return this.failureFromResponse('GARMIN_WEB_ENDPOINT_ERROR', 'Garmin web endpoint returned a server error.', response, { body_shape: bodyShape });
     }
     if (!response.ok) {
       return this.failureFromResponse('GARMIN_WEB_ENDPOINT_ERROR', 'Garmin web endpoint returned an unexpected status.', response, { body_shape: bodyShape });
@@ -470,6 +580,29 @@ export class FlyGarminBrowserSession {
     const sample = String(response.text || '').slice(0, 500).toLowerCase();
     return finalUrl.includes('login') || finalUrl.includes('sso') || finalUrl.includes('signin') || (
       contentType.includes('html') && (sample.includes('password') || sample.includes('sign in') || sample.includes('multi-factor') || sample.includes('mfa'))
+    );
+  }
+
+  looksLikeHumanVerification(response) {
+    const contentType = String(response.contentType || '').toLowerCase();
+    const sample = String(response.text || '').slice(0, 800).toLowerCase();
+    return contentType.includes('html') && (
+      sample.includes('verify you are human') ||
+      sample.includes('human verification') ||
+      sample.includes('captcha') ||
+      sample.includes('cf-challenge')
+    );
+  }
+
+  looksLikeMfa(response) {
+    const contentType = String(response.contentType || '').toLowerCase();
+    const sample = String(response.text || '').slice(0, 800).toLowerCase();
+    return contentType.includes('html') && (
+      sample.includes('multi-factor') ||
+      sample.includes('two-factor') ||
+      sample.includes('verification code') ||
+      sample.includes('one-time code') ||
+      sample.includes('mfa')
     );
   }
 
@@ -496,11 +629,12 @@ export class FlyGarminBrowserSession {
     this.lastError = error;
     this.consecutiveFailureCount += 1;
     this.authenticationState = this.authStateFromCode(error.code);
+    this.applyBackoff(error.code);
     return {
       ok: false,
       operation,
       provider: this.provider,
-      status: status === 'failed' ? 'failed' : this.authenticationState,
+      status: status === 'failed' ? 'failed' : this.publicAuthenticationState(),
       data: result.data || {
         response_status: result.response_status || null,
         response_content_type: result.response_content_type || null,
@@ -514,7 +648,8 @@ export class FlyGarminBrowserSession {
     return this.enqueue('browser-recover', 'browser-recover', async () => {
       this.page = null;
       await this.ensureFlyGarminLoaded();
-      return this.probeAuthentication({ operationName: 'browser-recover' });
+      this.browserState = 'READY';
+      return this.workerOk('browser-recover', 'ready', this.statusSnapshot());
     });
   }
 
@@ -530,10 +665,111 @@ export class FlyGarminBrowserSession {
   }
 
   authStateFromCode(code) {
-    if (code === 'GARMIN_AUTHENTICATION_REQUIRED' || code === 'GARMIN_LOGIN_HTML_RECEIVED') {
-      return 'authentication_required';
+    if (code === 'GARMIN_HUMAN_VERIFICATION_REQUIRED') {
+      return AUTH_STATES.HUMAN_VERIFICATION_REQUIRED;
     }
-    return this.authenticationState === 'authenticated' ? 'authenticated' : 'unknown';
+    if (code === 'GARMIN_MFA_REQUIRED') {
+      return AUTH_STATES.MFA_REQUIRED;
+    }
+    if (code === 'GARMIN_LOGIN_HTML_RECEIVED') {
+      return AUTH_STATES.LOGIN_REQUIRED;
+    }
+    if (code === 'GARMIN_AUTHENTICATION_REQUIRED') {
+      return AUTH_STATES.LOGIN_REQUIRED;
+    }
+    return this.authenticationState === AUTH_STATES.AUTHENTICATED ? AUTH_STATES.AUTHENTICATED : AUTH_STATES.UNKNOWN;
+  }
+
+  publicAuthenticationState() {
+    if (this.authenticationState === AUTH_STATES.AUTHENTICATED) return 'authenticated';
+    if (this.authenticationState === AUTH_STATES.LOGIN_REQUIRED) return 'login_required';
+    if (this.authenticationState === AUTH_STATES.MFA_REQUIRED) return 'mfa_required';
+    if (this.authenticationState === AUTH_STATES.HUMAN_VERIFICATION_REQUIRED) return 'human_verification_required';
+    if (this.authenticationState === AUTH_STATES.ADMIN_AUTHENTICATION_ACTIVE) return 'admin_authentication_active';
+    return 'unknown';
+  }
+
+  normalizeBrowserChannel(value) {
+    const channel = String(value || 'chrome').trim().toLowerCase();
+    if (!['chrome', 'chromium'].includes(channel)) {
+      throw this.error('GARMIN_BROWSER_CHANNEL_INVALID', 'GARMIN_BROWSER_CHANNEL must be chrome or chromium.');
+    }
+    return channel;
+  }
+
+  normalizeBrowserLocale(value) {
+    const locale = String(value || 'en-US').trim();
+    if (!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(locale)) {
+      throw this.error('GARMIN_BROWSER_LOCALE_INVALID', 'GARMIN_BROWSER_LOCALE must be a stable locale such as en-US.');
+    }
+    return locale;
+  }
+
+  browserEngineLabel() {
+    return this.browserChannel === 'chrome' ? 'Google Chrome Stable' : 'Playwright Chromium';
+  }
+
+  chromeStableAvailable() {
+    for (const binary of ['google-chrome-stable', 'google-chrome']) {
+      const result = spawnSync(binary, ['--version'], { encoding: 'utf8' });
+      if (result.status === 0) return true;
+    }
+    return false;
+  }
+
+  looksLikeMissingChrome(message) {
+    const lower = String(message || '').toLowerCase();
+    return lower.includes('chrome') && (lower.includes('executable') || lower.includes('not found') || lower.includes('install'));
+  }
+
+  authInteractionFailure(operation, message = 'Automatic Garmin requests are paused while an administrator completes login, MFA, or human verification.') {
+    return {
+      ok: false,
+      operation,
+      provider: this.provider,
+      status: 'authentication_paused',
+      data: this.statusSnapshot(),
+      error: { code: 'GARMIN_AUTH_INTERACTION_ACTIVE', message },
+    };
+  }
+
+  backoffActive() {
+    return Date.now() < this.backoffUntilMs;
+  }
+
+  backoffResult(operation, manualBackoffOverride) {
+    if (!this.backoffActive()) return null;
+    if (manualBackoffOverride && !this.backoffManualOverrideUsed) {
+      this.backoffManualOverrideUsed = true;
+      return null;
+    }
+    return {
+      ok: false,
+      operation,
+      provider: this.provider,
+      status: 'authentication_backoff',
+      data: this.statusSnapshot(),
+      error: {
+        code: 'GARMIN_AUTH_BACKOFF_ACTIVE',
+        message: 'Garmin authentication backoff is active after a recent login, human-verification, authentication, or endpoint failure.',
+      },
+    };
+  }
+
+  applyBackoff(code) {
+    if (!BACKOFF_CODES.has(String(code || ''))) return;
+    this.backoffFailureCount += 1;
+    const minutes = this.backoffFailureCount === 1 ? 5 : (this.backoffFailureCount === 2 ? 10 : 30);
+    this.backoffUntilMs = Date.now() + minutes * 60 * 1000;
+    this.backoffLastCode = String(code || '');
+    this.backoffManualOverrideUsed = false;
+  }
+
+  clearBackoff() {
+    this.backoffUntilMs = 0;
+    this.backoffFailureCount = 0;
+    this.backoffLastCode = null;
+    this.backoffManualOverrideUsed = false;
   }
 
   normalizeEntries(payload) {
@@ -605,6 +841,7 @@ export class FlyGarminBrowserSession {
       length: String(text || '').length,
       has_html: sample.includes('<html') || sample.includes('<!doctype'),
       has_login_terms: sample.includes('password') || sample.includes('sign in') || sample.includes('mfa') || sample.includes('multi-factor'),
+      has_human_verification_terms: sample.includes('verify you are human') || sample.includes('human verification') || sample.includes('captcha'),
     };
   }
 
