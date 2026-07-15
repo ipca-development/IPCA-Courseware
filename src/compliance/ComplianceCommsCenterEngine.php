@@ -277,6 +277,9 @@ final class ComplianceCommsCenterEngine
         $subjectTemplate = trim((string)($template['subject_template'] ?? ''));
         $textTemplate = (string)($template['text_template'] ?? '');
         $htmlTemplate = (string)$template['html_template'];
+        if (self::emailTemplateLooksLikeBrokenComposeDraft($htmlTemplate)) {
+            $htmlTemplate = self::builtInOutboundEmailTemplateHtml();
+        }
         $htmlTemplate = self::removeUnusedObjectPillAnchors($htmlTemplate, $htmlVars);
 
         $renderedSubject = $subjectTemplate !== ''
@@ -292,6 +295,19 @@ final class ComplianceCommsCenterEngine
             'text_body' => $renderedText !== '' ? $renderedText : null,
             'html_body' => $renderedHtml !== '' ? $renderedHtml : null,
         );
+    }
+
+    private static function emailTemplateLooksLikeBrokenComposeDraft(string $htmlTemplate): bool
+    {
+        return stripos($htmlTemplate, '{{COMPLIANCE_OBJECT_TYPE_1}}') !== false
+            || stripos($htmlTemplate, '{{COMPLIANCE_OBJECT_CODE_1}}') !== false
+            || stripos($htmlTemplate, '{{COMPLIANCE_OBJECT_TYPE_2}}') !== false
+            || stripos($htmlTemplate, '{{COMPLIANCE_OBJECT_CODE_2}}') !== false;
+    }
+
+    private static function builtInOutboundEmailTemplateHtml(): string
+    {
+        return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#152235;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:28px 12px;"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border:1px solid #dfe6f1;border-radius:20px;overflow:hidden;"><tr><td style="padding:26px 30px;background:#0d1d34;color:#ffffff;"><div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.72);font-weight:700;">IPCA.training | Compliance</div><h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;color:#ffffff;">{{EMAIL_TITLE}}</h1><div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,0.72);">Thread reference: <strong style="color:#ffffff;">{{COMPLIANCE_THREAD_CODE}}</strong></div><div style="margin-top:18px;">{{COMPLIANCE_OBJECT_PILLS_HTML}}</div></td></tr><tr><td style="padding:30px;font-size:15px;line-height:1.65;color:#152235;">{{EMAIL_BODY_HTML}}<p style="margin:24px 0 0;">Sincerely,<br><br><strong>{{COMPLIANCE_MONITORING_MANAGER_NAME}}</strong><br><em>{{COMPLIANCE_MONITORING_MANAGER_TITLE}}</em><br>{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML}}</p></td></tr><tr><td style="padding:18px 30px;background:#f7f9fc;border-top:1px solid #e7edf5;color:#728198;font-size:12px;line-height:1.5;"><strong style="color:#152235;">IMPORTANT NOTES:</strong><br>Please keep the information in this email and any attachments strictly confidential. Compliance object references: {{COMPLIANCE_OBJECT_SUMMARY_TEXT}}<br>Message tracking reference: {{COMPLIANCE_THREAD_CODE}}</td></tr></table></td></tr></table></body></html>';
     }
 
     private static function complianceThreadCode(int $threadId): string

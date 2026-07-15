@@ -25,11 +25,15 @@ final class LocalArtifactStore {
     }
 
     func saveDownloadedSource(provider: String, entryID: String, sourceUUID: String, response: [String: JSONValue]) throws -> DownloadedArtifact {
+        if response["timeout"]?.bool == true {
+            throw GarminError.timeout("Garmin source download timed out for \(sourceUUID). Try Sync Now again.")
+        }
         if response["humanVerification"]?.bool == true { throw GarminError.humanVerification }
         if response["loginRequired"]?.bool == true { throw GarminError.loginRequired }
         let status = response["status"]?.int ?? 0
         guard (200...299).contains(status) else {
-            throw GarminError.downloadFailed("Garmin source download failed with HTTP \(status).")
+            let attempts = response["attempts"]?.array?.compactMap { $0.object?["status"]?.int }.map(String.init).joined(separator: ", ") ?? ""
+            throw GarminError.downloadFailed("Garmin source download failed with HTTP \(status).\(attempts.isEmpty ? "" : " Tried statuses: \(attempts).")")
         }
         guard let base64 = response["base64"]?.string,
               let bytes = Data(base64Encoded: base64),

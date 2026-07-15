@@ -305,10 +305,13 @@ final class SyncCoordinator {
         defer { isSyncing = false }
         do {
             state?.status = .syncing
+            state?.lastError = "Reading Garmin Logbook..."
             let entries = try await provider.discoverNewItems()
             state?.newEntriesFound = entries.count
+            state?.lastError = entries.isEmpty ? "No new Garmin entries with source files were found." : "Found \(entries.count) Garmin entr\(entries.count == 1 ? "y" : "ies"). Downloading source files..."
             for entry in entries {
                 state?.status = .downloading
+                state?.lastError = "Downloading Garmin sources for entry \(entry.entryID)..."
                 let artifacts = try await provider.download(item: entry)
                 state?.filesDownloaded += artifacts.count
                 for artifact in artifacts {
@@ -319,6 +322,7 @@ final class SyncCoordinator {
             if keychain.loadToken() == nil {
                 state?.lastError = "Garmin files were downloaded locally. Paste the IPCA Sync Agent device token to upload them."
             } else {
+                state?.lastError = "Uploading pending Garmin files to IPCA.training..."
                 for entry in entries {
                     try await api.uploadEntry(entry)
                 }

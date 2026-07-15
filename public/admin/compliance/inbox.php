@@ -359,7 +359,20 @@ cw_header('Compliance Mail');
   .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;cursor:text;}
   .mail-template-preview-wrap.is-visible{display:block;}
   .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
-  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;overflow:hidden;}
+  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;overflow:auto;padding:28px 12px;box-sizing:border-box;}
+  .mail-compose-template-card{max-width:720px;margin:0 auto;background:#fff;border:1px solid #dfe6f1;border-radius:20px;overflow:hidden;color:#152235;font-family:Arial,Helvetica,sans-serif;}
+  .mail-compose-template-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:22px;align-items:start;padding:26px 30px;background:#0d1d34;color:#fff;}
+  .mail-compose-template-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.72);font-weight:700;}
+  .mail-compose-template-title{margin:10px 0 0;font-size:24px;line-height:1.2;color:#fff;font-weight:850;}
+  .mail-compose-template-ref{margin-top:8px;font-size:12px;color:rgba(255,255,255,.72);}
+  .mail-compose-template-logo{font-size:32px;line-height:1;font-style:italic;font-weight:900;letter-spacing:-.06em;color:#fff;}
+  .mail-compose-template-logo span{display:block;margin-top:2px;font-size:8px;letter-spacing:.02em;font-style:normal;font-weight:700;color:rgba(255,255,255,.78);}
+  .mail-compose-template-pills{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .mail-compose-template-pills span{display:inline-flex;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.16);color:#fff;font-size:12px;font-weight:850;}
+  .mail-compose-template-body{padding:30px;font-size:15px;line-height:1.65;color:#152235;}
+  .mail-compose-template-signature{margin:24px 0 0;}
+  .mail-compose-template-footer{padding:18px 30px;background:#f7f9fc;border-top:1px solid #e7edf5;color:#728198;font-size:12px;line-height:1.5;}
+  .mail-compose-template-footer strong{color:#152235;}
   .mail-template-preview .mail-editor{min-height:120px;border:0;border-radius:0;padding:0;background:transparent;font:inherit;color:inherit;}
   .mail-template-preview .mail-editor:focus{outline:0;}
   .mail-template-preview .mail-editor:empty::before{content:"Type your message here...";color:#8a97aa;}
@@ -847,7 +860,6 @@ cw_header('Compliance Mail');
     data.append('action', action);
     return fetch('/admin/compliance/mail_api.php', {method: 'POST', body: data, headers: {'Accept': 'application/json'}}).then(function (r) { return r.json(); });
   }
-  var complianceTemplateHtml = <?= json_encode($emailTemplateHtml, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
   function renderTemplatePreview() {
     var style = document.getElementById('composeTemplateStyle').value || 'standard';
     var wrap = document.getElementById('composeTemplatePreviewWrap');
@@ -866,92 +878,35 @@ cw_header('Compliance Mail');
     plainBody.classList.add('is-hidden');
     editor.classList.add('mail-template-body-editor');
     var subject = document.getElementById('composeSubject').value || 'Compliance email';
-    var bodyText = editor.innerText || 'Compose your message here...';
-    var html = complianceTemplateHtml
-      .replaceAll('{{EMAIL_TITLE}}', escapeHtml(subject))
-      .replaceAll('{{RECIPIENT_NAME}}', 'Recipient')
-      .replaceAll('{{EMAIL_BODY_HTML}}', '<div data-template-body-slot></div>')
-      .replaceAll('{{EMAIL_BODY_TEXT}}', escapeHtml(bodyText).replace(/\n/g, '<br>'))
-      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_NAME}}', 'Compliance Monitoring Manager')
-      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_TITLE}}', 'Compliance')
-      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML}}', '')
-      .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT}}', '')
-      .replaceAll('{{COMPLIANCE_THREAD_CODE}}', 'CMP-THREAD')
-      .replaceAll('{{COMPLIANCE_OBJECT_SUMMARY_TEXT}}', 'Selected compliance objects')
-      .replaceAll('{{COMPLIANCE_OBJECT_PILLS_HTML}}', '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#eaf1fb;color:#1e3c72;font-size:12px;font-weight:700;">Compliance</span>');
-    preview.innerHTML = html;
-    var slot = preview.querySelector('[data-template-body-slot]');
-    var signature = findTemplateSignature(preview);
-    if (signature && signature.parentNode) {
-      if (slot) { removeTemplateBodySlot(slot); }
-      removeEmptyHeaderArtifacts(preview);
-      if (signature.tagName && signature.tagName.toLowerCase() === 'td') {
-        signature.insertBefore(editor, signature.firstChild);
-      } else {
-        signature.parentNode.insertBefore(editor, signature);
-      }
-    } else if (slot) {
-      slot.replaceWith(editor);
+    preview.innerHTML = buildComposeTemplateShell(subject);
+    var body = preview.querySelector('[data-compose-template-body]');
+    if (body) {
+      body.insertBefore(editor, body.firstChild);
     } else {
       preview.appendChild(editor);
     }
   }
-  function removeTemplateBodySlot(slot) {
-    var node = slot;
-    var parent = node.parentElement;
-    while (parent && parent.id !== 'composeTemplatePreview') {
-      var tag = (parent.tagName || '').toLowerCase();
-      var text = (parent.textContent || '').replace(/\s+/g, '').trim();
-      var hasMedia = !!parent.querySelector('img,svg,canvas,video');
-      var onlyChild = parent.children.length === 1;
-      if (text !== '' || hasMedia || !onlyChild) {
-        break;
-      }
-      if (['div', 'p', 'section', 'article', 'td', 'tr'].indexOf(tag) === -1) {
-        break;
-      }
-      node = parent;
-      parent = parent.parentElement;
-    }
-    if (node.parentNode) {
-      node.parentNode.removeChild(node);
-    }
-  }
-  function removeEmptyHeaderArtifacts(root) {
-    root.querySelectorAll('div, p, section, article, td').forEach(function (el) {
-      var text = (el.textContent || '').replace(/\s+/g, '').trim();
-      var hasContent = text !== '' || !!el.querySelector('img, svg, canvas, video, table, .mail-editor');
-      if (hasContent || !isInsideDarkTemplateHeader(el, root)) { return; }
-      var style = window.getComputedStyle(el);
-      var bg = style.backgroundColor || '';
-      var rect = el.getBoundingClientRect();
-      var isWhiteBlock = bg === 'rgb(255, 255, 255)' || bg === 'white' || bg.indexOf('255, 255, 255') !== -1;
-      if (isWhiteBlock || rect.height > 40) {
-        el.remove();
-      }
-    });
-  }
-  function isInsideDarkTemplateHeader(el, root) {
-    var node = el.parentElement;
-    while (node && node !== root) {
-      var styleAttr = (node.getAttribute('style') || '').toLowerCase();
-      var bg = window.getComputedStyle(node).backgroundColor || '';
-      if (styleAttr.indexOf('#0d1d34') !== -1 || bg === 'rgb(13, 29, 52)' || bg.indexOf('13, 29, 52') !== -1) {
-        return true;
-      }
-      node = node.parentElement;
-    }
-    return false;
-  }
-  function findTemplateSignature(root) {
-    var candidates = root.querySelectorAll('p, div, td');
-    for (var i = candidates.length - 1; i >= 0; i--) {
-      var text = (candidates[i].textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-      if (text.indexOf('sincerely,') === 0 || text.indexOf('sincerely, ') === 0) {
-        return candidates[i];
-      }
-    }
-    return null;
+  function buildComposeTemplateShell(subject) {
+    return [
+      '<div class="mail-compose-template-card">',
+        '<div class="mail-compose-template-hero">',
+          '<div>',
+            '<div class="mail-compose-template-kicker">IPCA.training | Compliance</div>',
+            '<div class="mail-compose-template-title">' + escapeHtml(subject) + '</div>',
+            '<div class="mail-compose-template-ref">Thread reference: <strong>CMP-THREAD</strong></div>',
+          '</div>',
+          '<div class="mail-compose-template-logo">IPCA<span>International Pilot Center Alliance</span></div>',
+          '<div class="mail-compose-template-pills">',
+            '<span>{{COMPLIANCE_OBJECT_TYPE_1}} · {{COMPLIANCE_OBJECT_CODE_1}}</span>',
+            '<span>{{COMPLIANCE_OBJECT_TYPE_2}} · {{COMPLIANCE_OBJECT_CODE_2}}</span>',
+          '</div>',
+        '</div>',
+        '<div class="mail-compose-template-body" data-compose-template-body>',
+          '<p class="mail-compose-template-signature">Sincerely,<br><br><strong>Compliance Monitoring Manager</strong><br><em>Compliance</em></p>',
+        '</div>',
+        '<div class="mail-compose-template-footer"><strong>IMPORTANT NOTES:</strong><br>Please keep the information in this email and any attachments strictly confidential. Compliance object references: Selected compliance objects<br>Message tracking reference: CMP-THREAD</div>',
+      '</div>'
+    ].join('');
   }
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (ch) {
