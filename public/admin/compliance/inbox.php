@@ -355,11 +355,10 @@ cw_header('Compliance Mail');
   .mail-format-btn:hover{background:#eaf1fb;color:#1e3c72;}
   .mail-compose-body{min-height:0;overflow:auto;padding:22px;}
   .mail-editor{min-height:180px;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:16px;line-height:1.55;outline:none;font-size:14px;color:#152235;background:#fff;}
-  .mail-editor:empty::before{content:"Compose your message here...";color:#9aa6b7;}
-  .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;}
+  .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;cursor:text;}
   .mail-template-preview-wrap.is-visible{display:block;}
   .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
-  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;}
+  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;pointer-events:none;}
   .mail-composer.is-dragging .mail-editor{border-color:#1e3c72;background:#f3f7ff;}
   .mail-compose-extras{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:14px 22px;border-top:1px solid rgba(15,23,42,.08);background:#fbfcfe;}
   .mail-compose-extras label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
@@ -559,9 +558,9 @@ cw_header('Compliance Mail');
     </div>
     <div class="mail-compose-body">
       <div class="mail-template-preview-head"><span>Message body</span><span>Type here</span></div>
-      <div id="composeEditor" class="mail-editor" contenteditable="true" aria-label="Message body"></div>
+      <div id="composeEditor" class="mail-editor" contenteditable="true" tabindex="0" aria-label="Message body"></div>
     </div>
-    <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap">
+    <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap" data-focus-compose-editor>
       <div class="mail-template-preview-head"><span>Standard Compliance Layout Preview</span><span>Final styling is applied when sent</span></div>
       <iframe class="mail-template-preview" id="composeTemplatePreview" title="Compliance template preview"></iframe>
     </div>
@@ -1025,6 +1024,22 @@ cw_header('Compliance Mail');
   document.addEventListener('fullscreenchange', updateFullscreenButton);
   document.querySelector('[data-compose-new]').addEventListener('click', function () { openComposer({thread_id: currentThreadId || 0}); });
   document.addEventListener('click', function (ev) {
+    if (ev.target.closest('[data-focus-compose-editor]')) {
+      var composeEditor = document.getElementById('composeEditor');
+      if (composeEditor) {
+        composeEditor.focus();
+        var range = document.createRange();
+        range.selectNodeContents(composeEditor);
+        range.collapse(false);
+        var sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+      ev.preventDefault();
+      return;
+    }
     var modalOpen = ev.target.closest('[data-compliance-modal-open]');
     if (modalOpen) {
       var modalId = modalOpen.getAttribute('data-compliance-modal-open');
