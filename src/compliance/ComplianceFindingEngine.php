@@ -645,7 +645,7 @@ final class ComplianceFindingEngine
 
     private static function capExecutionDate(array $cap): ?string
     {
-        foreach (array('verified_at', 'completed_at', 'updated_at') as $key) {
+        foreach (array('completed_at', 'verified_at', 'updated_at') as $key) {
             $value = trim((string)($cap[$key] ?? ''));
             if ($value !== '' && $value !== '0000-00-00' && $value !== '0000-00-00 00:00:00') {
                 return substr($value, 0, 10);

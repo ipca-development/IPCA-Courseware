@@ -231,19 +231,39 @@ final class GarminProvider: SyncProvider {
         let object = try objectValue(value)
         try validateProbe(object)
         let entries = object["entries"]?.array ?? []
-        let inspectedEntryCount = object["rawEntryCount"]?.int ?? entries.count
-        let responseVersion = object["cursor"]?.string
+        let result = Self.backfillDiscoveryResult(
+            fromEntries: entries,
+            rawEntryCount: object["rawEntryCount"]?.int,
+            responseVersion: object["cursor"]?.string,
+            provider: identifier,
+            skippingTrackUUIDs: skippedTrackUUIDs,
+            limit: limit,
+            sourceDescription: "GET /fly-garmin/api/logbook/ bare endpoint; verified live response returned 2601 entries spanning 2018-07-02 through 2026-07-13 with no top-level pagination fields."
+        )
+        LoggingService.shared.info("BACKFILL_LOGBOOK_RESPONSE source=bare-logbook status=\(object["status"]?.int ?? 0) contentType=\(object["contentType"]?.string ?? "n/a") bytes=\(object["responseByteCount"]?.int ?? 0) rawEntries=\(result.inspectedEntryCount) entriesWithTracks=\(result.entriesWithTracksCount) selectedTracks=\(result.selectedItemCount) skippedSeen=\(result.skippedSeenCount) skippedMissingTrack=\(result.skippedMissingTrackCount)")
+        return result
+    }
+
+    static func backfillDiscoveryResult(
+        fromEntries entries: [JSONValue],
+        rawEntryCount: Int?,
+        responseVersion: String?,
+        provider: String,
+        skippingTrackUUIDs skippedTrackUUIDs: Set<String>,
+        limit: Int,
+        sourceDescription: String
+    ) -> GarminBackfillDiscoveryResult {
         var entriesWithTracks = 0
         var skippedMissingTrackCount = 0
         var skippedSeenCount = 0
         var selected: [RemoteSyncItem] = []
         var seenTracks = Set<String>()
 
-        let sortedItems = Self.remoteItems(from: .object(["entries": .array(entries)]), provider: identifier, requireArtifacts: false)
+        let sortedItems = remoteItems(from: .object(["entries": .array(entries)]), provider: provider, requireArtifacts: false)
             .sorted { lhs, rhs in
                 let lhsDate = lhs.generatedTrackStart ?? lhs.generatedTrackStop ?? ""
                 let rhsDate = rhs.generatedTrackStart ?? rhs.generatedTrackStop ?? ""
-                if lhsDate == rhsDate { return lhs.entryID < rhs.entryID }
+                if lhsDate == rhsDate { return (lhs.trackUUIDs.first ?? lhs.entryID) < (rhs.trackUUIDs.first ?? rhs.entryID) }
                 return lhsDate > rhsDate
             }
 
@@ -279,20 +299,17 @@ final class GarminProvider: SyncProvider {
             }
         }
 
-        let remaining = max(0, seenTracks.count - skippedSeenCount - selected.count)
-        let result = GarminBackfillDiscoveryResult(
-            inspectedEntryCount: inspectedEntryCount,
+        return GarminBackfillDiscoveryResult(
+            inspectedEntryCount: rawEntryCount ?? entries.count,
             entriesWithTracksCount: entriesWithTracks,
             selectedItemCount: selected.count,
             skippedSeenCount: skippedSeenCount,
             skippedMissingTrackCount: skippedMissingTrackCount,
-            remainingEstimate: remaining,
+            remainingEstimate: max(0, seenTracks.count - skippedSeenCount - selected.count),
             items: selected,
-            sourceDescription: "GET /fly-garmin/api/logbook/ bare endpoint; verified live response returned 2601 entries spanning 2018-07-02 through 2026-07-13 with no top-level pagination fields.",
+            sourceDescription: sourceDescription,
             responseVersion: responseVersion
         )
-        LoggingService.shared.info("BACKFILL_LOGBOOK_RESPONSE source=bare-logbook status=\(object["status"]?.int ?? 0) contentType=\(object["contentType"]?.string ?? "n/a") bytes=\(object["responseByteCount"]?.int ?? 0) rawEntries=\(inspectedEntryCount) entriesWithTracks=\(entriesWithTracks) uniqueTracks=\(seenTracks.count) selectedTracks=\(selected.count) skippedSeen=\(skippedSeenCount) skippedMissingTrack=\(skippedMissingTrackCount)")
-        return result
     }
 
     func download(item: RemoteSyncItem) async throws -> [DownloadedArtifact] {
@@ -1205,6 +1222,12 @@ final class GarminProvider: SyncProvider {
         }
         for key in ["canonicalTrackUUID", "canonicalTrackUuid"] {
             add(entry[key])
+        }
+        for key in ["trackUUIDs", "trackUuids", "canonicalTrackUUIDs", "canonicalTrackUuids"] {
+            guard let array = entry[key]?.array else { continue }
+            for item in array {
+                add(item)
+            }
         }
         return values
     }

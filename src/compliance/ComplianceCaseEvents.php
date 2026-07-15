@@ -64,3 +64,29 @@ function compliance_log_case_event(
         $metaJson,
     ));
 }
+
+/**
+ * @return list<array<string,mixed>>
+ */
+function compliance_list_entity_events(PDO $pdo, string $entityType, int $entityId, int $limit = 100): array
+{
+    if ($entityId <= 0) {
+        return array();
+    }
+    $limit = max(1, min(250, $limit));
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT e.*, u.name AS actor_name, u.email AS actor_email
+               FROM ipca_compliance_case_events e
+          LEFT JOIN users u ON u.id = e.actor_user_id
+              WHERE e.entity_type = ? AND e.entity_id = ?
+              ORDER BY e.occurred_at DESC, e.id DESC
+              LIMIT ' . (int)$limit
+        );
+        $stmt->execute(array($entityType, $entityId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    } catch (Throwable) {
+        return array();
+    }
+}

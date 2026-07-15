@@ -342,4 +342,140 @@ final class IPCASyncAgentTests: XCTestCase {
         XCTAssertFalse(message.contains("Reload Garmin Logbook for Initial Sync"))
         XCTAssertTrue(message.contains("saved cursor remains valid"))
     }
+
+    func testVerifiedHistoricalSourceProducesRemoteSyncItems() {
+        let track = "12345678-1234-1234-1234-123456789abc"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object([
+                    "uuid": .string("entry-1"),
+                    "generatedTrackStart": .string("2026-07-13"),
+                    "canonicalTrackUUID": .string(track)
+                ])
+            ],
+            rawEntryCount: 1,
+            responseVersion: "diagnostic-version-only=",
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            limit: 25,
+            sourceDescription: "test historical source"
+        )
+
+        XCTAssertEqual(result.inspectedEntryCount, 1)
+        XCTAssertEqual(result.entriesWithTracksCount, 1)
+        XCTAssertEqual(result.selectedItemCount, 1)
+        XCTAssertEqual(result.items.first?.trackUUIDs, [track])
+        XCTAssertEqual(result.responseVersion, "diagnostic-version-only=")
+    }
+
+    func testEmptyHistoricalResponseIsSuccessfulZeroWorkResult() {
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [],
+            rawEntryCount: 0,
+            responseVersion: "diagnostic-version-only=",
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            limit: 25,
+            sourceDescription: "empty historical source"
+        )
+
+        XCTAssertEqual(result.inspectedEntryCount, 0)
+        XCTAssertEqual(result.selectedItemCount, 0)
+        XCTAssertTrue(result.items.isEmpty)
+    }
+
+    func testDuplicateTrackUUIDsAreSelectedOnlyOnce() {
+        let track = "12345678-1234-1234-1234-123456789abc"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object(["uuid": .string("entry-1"), "generatedTrackStart": .string("2026-07-13"), "canonicalTrackUUID": .string(track)]),
+                .object(["uuid": .string("entry-2"), "generatedTrackStart": .string("2026-07-12"), "canonicalTrackUUID": .string(track.uppercased())])
+            ],
+            rawEntryCount: 2,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            limit: 25,
+            sourceDescription: "duplicate source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 1)
+        XCTAssertEqual(result.skippedSeenCount, 1)
+    }
+
+    func testAlreadyQueuedOrCompletedTracksAreSkippedButFailedRemainEligible() {
+        let skippedTrack = "12345678-1234-1234-1234-123456789abc"
+        let failedTrack = "abcdefab-1234-1234-1234-abcdefabcdef"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object(["uuid": .string("entry-1"), "generatedTrackStart": .string("2026-07-13"), "canonicalTrackUUID": .string(skippedTrack)]),
+                .object(["uuid": .string("entry-2"), "generatedTrackStart": .string("2026-07-12"), "canonicalTrackUUID": .string(failedTrack)])
+            ],
+            rawEntryCount: 2,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [skippedTrack],
+            limit: 25,
+            sourceDescription: "skip source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 1)
+        XCTAssertEqual(result.items.first?.trackUUIDs, [failedTrack])
+        XCTAssertEqual(result.skippedSeenCount, 1)
+    }
+
+    func testOneEntryContainingMultipleTrackUUIDsProcessesEachUniqueTrack() {
+        let first = "12345678-1234-1234-1234-123456789abc"
+        let second = "abcdefab-1234-1234-1234-abcdefabcdef"
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: [
+                .object([
+                    "uuid": .string("entry-1"),
+                    "generatedTrackStart": .string("2026-07-13"),
+                    "trackUUIDs": .array([.string(first), .string(second), .string(first)])
+                ])
+            ],
+            rawEntryCount: 1,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            limit: 25,
+            sourceDescription: "multi-track source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 2)
+        XCTAssertEqual(result.skippedSeenCount, 1)
+        XCTAssertEqual(Set(result.items.flatMap(\.trackUUIDs)), Set([first, second]))
+    }
+
+    func testFirstBackfillRunProcessesNoMoreThanTwentyFiveTracks() {
+        let entries: [JSONValue] = (0..<30).map { index in
+            .object([
+                "uuid": .string("entry-\(index)"),
+                "generatedTrackStart": .string(String(format: "2026-07-%02d", max(1, 30 - index))),
+                "canonicalTrackUUID": .string(String(format: "00000000-0000-0000-0000-%012d", index))
+            ])
+        }
+
+        let result = GarminProvider.backfillDiscoveryResult(
+            fromEntries: entries,
+            rawEntryCount: 30,
+            responseVersion: nil,
+            provider: garminProviderID,
+            skippingTrackUUIDs: [],
+            limit: 25,
+            sourceDescription: "limit source"
+        )
+
+        XCTAssertEqual(result.selectedItemCount, 25)
+        XCTAssertEqual(result.items.count, 25)
+        XCTAssertEqual(result.remainingEstimate, 5)
+    }
+
+    func testBackfillDoesNotUseBootstrapRequiredStatusForEndpointFailureWithValidCursor() {
+        let message = SyncCoordinator.logbookEndpointUnavailableMessage(hasValidSavedCursor: true)
+
+        XCTAssertFalse(message.contains("valid initial Garmin sync cursor"))
+        XCTAssertTrue(message.contains("saved cursor remains valid"))
+    }
 }

@@ -177,6 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'effort' => (string)($_POST['effort'] ?? ''),
                 'responsible_name' => (string)($_POST['responsible_name'] ?? ''),
                 'due_date' => (string)($_POST['due_date'] ?? ''),
+                'closure_date' => (string)($_POST['closure_date'] ?? ''),
                 'closure_evidence_note' => (string)($_POST['closure_evidence_note'] ?? ''),
             ), $uid);
             cap_flash_set('success', 'Corrective action saved.');
@@ -456,6 +457,7 @@ if ($detailId > 0) {
         $submission = $submissionId > 0 ? ComplianceRcaCapSubmissionEngine::getById($pdo, $submissionId) : null;
         $capExtensions = ComplianceDeadlineExtensionEngine::listForCorrectiveAction($pdo, (int)$cap['id']);
         $capEvidence = ComplianceCapEngine::listEvidence($pdo, (int)$cap['id']);
+        $capAuditTrail = compliance_list_entity_events($pdo, 'corrective_action', (int)$cap['id'], 100);
         try {
             $findingDocumentsForEvidence = ComplianceAuthorityDocumentService::listFindingDocuments($pdo, $fidRow);
         } catch (Throwable) {
@@ -541,6 +543,13 @@ if ($detailId > 0) {
                   style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
                   <?= $capLocked ? 'disabled' : '' ?>>
               </label>
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Closure / execution date</span>
+                <input type="date" name="closure_date"
+                  value="<?= !empty($cap['completed_at']) ? h(substr((string)$cap['completed_at'], 0, 10)) : '' ?>"
+                  style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                  <?= $capLocked ? 'disabled' : '' ?>>
+              </label>
             </div>
 
             <label style="display:block;margin:16px 0;">
@@ -574,78 +583,59 @@ if ($detailId > 0) {
         </section>
         <section class="cmp-card">
           <div class="cmp-card-head">
-            <h2 class="cmp-card-title">Closure evidence</h2>
+            <h2 class="cmp-card-title">Corrective Action Evidence</h2>
+            <?php if (!$capLocked): ?>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="cap-evidence-upload-modal">
+                  Upload new Evidence Document
+                </button>
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="cap-evidence-attach-modal">
+                  Attach existing Finding Document
+                </button>
+              </div>
+            <?php endif; ?>
           </div>
-          <?php if (!$capLocked): ?>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px;">
-              <form method="post" enctype="multipart/form-data" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>" style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px;">
-                <input type="hidden" name="action" value="upload_cap_evidence">
-                <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
-                <h3 style="margin:0 0 10px;font-size:15px;">Upload evidence document</h3>
-                <label class="cmp-field">
-                  <span>Evidence title</span>
-                  <input name="evidence_title" placeholder="e.g. Procedure update confirmation">
-                </label>
-                <label class="cmp-field">
-                  <span>Evidence note</span>
-                  <textarea name="evidence_description" rows="3" placeholder="Briefly describe how this proves CAP closure."></textarea>
-                </label>
-                <label class="cmp-field">
-                  <span>PDF document *</span>
-                  <input type="file" name="evidence_file" accept="application/pdf,.pdf" required>
-                </label>
-                <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;">Upload evidence</button>
-              </form>
-
-              <form method="post" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>" style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px;">
-                <input type="hidden" name="action" value="attach_finding_document_evidence">
-                <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
-                <h3 style="margin:0 0 10px;font-size:15px;">Attach existing finding document</h3>
-                <label class="cmp-field">
-                  <span>Finding document *</span>
-                  <select name="finding_document_id" required>
-                    <option value="">— Select document —</option>
-                    <?php foreach ($findingDocumentsForEvidence as $doc): ?>
-                      <option value="<?= (int)$doc['id'] ?>">
-                        <?= h('#' . (string)$doc['id'] . ' · ' . (string)$doc['doc_kind'] . ' · ' . (string)$doc['original_name']) ?>
-                      </option>
-                    <?php endforeach; ?>
-                  </select>
-                </label>
-                <label class="cmp-field">
-                  <span>Attach note</span>
-                  <textarea name="attach_note" rows="3" placeholder="Why this finding document proves the corrective action closure."></textarea>
-                </label>
-                <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;" <?= $findingDocumentsForEvidence === array() ? 'disabled' : '' ?>>Attach document</button>
-                <?php if ($findingDocumentsForEvidence === array()): ?>
-                  <p style="margin:8px 0 0;color:#64748b;font-size:13px;">No finding documents are available yet. Upload one on the finding page or upload a CAP evidence PDF here.</p>
-                <?php endif; ?>
-              </form>
-            </div>
-          <?php endif; ?>
           <?php if ($capEvidence === array()): ?>
             <p style="color:#64748b;font-size:14px;margin:0;">No corrective-action evidence has been recorded yet. Add an evidence note when closing or verifying this CAP.</p>
           <?php else: ?>
             <div class="compliance-table-wrap">
               <table class="compliance-table">
-                <thead><tr><th>Type</th><th>Evidence</th><th>Recorded</th></tr></thead>
+                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th><th style="width:110px;">Actions</th></tr></thead>
                 <tbody>
                   <?php foreach ($capEvidence as $ev): ?>
+                    <?php
+                      $uploadedUrl = trim((string)($ev['storage_relpath'] ?? '')) !== ''
+                          ? '/admin/compliance/cap_evidence.php?id=' . (int)$ev['id']
+                          : '';
+                      $externalUrl = trim((string)($ev['external_url'] ?? ''));
+                      $openUrl = $uploadedUrl !== '' ? $uploadedUrl : $externalUrl;
+                    ?>
                     <tr>
-                      <td><?= compliance_badge((string)($ev['evidence_kind'] ?? 'NOTE')) ?></td>
                       <td>
-                        <strong><?= h((string)($ev['title'] ?? 'Evidence')) ?></strong>
-                        <?php if (trim((string)($ev['description'] ?? '')) !== ''): ?>
-                          <div style="margin-top:4px;color:#475569;"><?= nl2br(h((string)$ev['description'])) ?></div>
-                        <?php endif; ?>
-                        <?php if (trim((string)($ev['external_url'] ?? '')) !== ''): ?>
-                          <div style="margin-top:4px;"><a href="<?= h((string)$ev['external_url']) ?>" target="_blank" rel="noopener">Open external evidence</a></div>
-                        <?php endif; ?>
-                        <?php if (trim((string)($ev['storage_relpath'] ?? '')) !== ''): ?>
-                          <div style="margin-top:4px;"><a href="/admin/compliance/cap_evidence.php?id=<?= (int)$ev['id'] ?>" target="_blank" rel="noopener">Open uploaded evidence</a></div>
+                        <?php if ($openUrl !== ''): ?>
+                          <a href="<?= h($openUrl) ?>" target="_blank" rel="noopener"
+                            style="display:block;width:64px;height:78px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;overflow:hidden;text-decoration:none;">
+                            <object data="<?= h($openUrl) ?>#page=1&toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" width="64" height="78" style="pointer-events:none;">
+                              <span style="display:flex;align-items:center;justify-content:center;width:64px;height:78px;color:#b91c1c;font-size:11px;font-weight:900;">PDF</span>
+                            </object>
+                          </a>
+                        <?php else: ?>
+                          <span style="display:flex;align-items:center;justify-content:center;width:64px;height:78px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;font-weight:900;">NOTE</span>
                         <?php endif; ?>
                       </td>
+                      <td>
+                        <strong><?= h((string)($ev['title'] ?? 'Evidence')) ?></strong>
+                        <div style="font-size:12px;color:#64748b;margin-top:3px;"><?= h((string)($ev['evidence_kind'] ?? 'NOTE')) ?></div>
+                      </td>
                       <td class="cmp-mono"><?= h((string)($ev['uploaded_at'] ?? '')) ?></td>
+                      <td><?= trim((string)($ev['description'] ?? '')) !== '' ? nl2br(h((string)$ev['description'])) : '<span style="color:#94a3b8;">—</span>' ?></td>
+                      <td>
+                        <?php if ($openUrl !== ''): ?>
+                          <a class="cmp-btn-secondary cmp-btn-link" href="<?= h($openUrl) ?>" target="_blank" rel="noopener" style="height:30px;min-height:30px;padding:0 10px;font-size:12px;text-decoration:none;">Open</a>
+                        <?php else: ?>
+                          <span style="color:#94a3b8;font-size:12px;">—</span>
+                        <?php endif; ?>
+                      </td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
@@ -653,6 +643,112 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
+        <?php if (!$capLocked): ?>
+          <?php compliance_modal_open('cap-evidence-upload-modal', 'Upload new Evidence Document'); ?>
+            <form method="post" enctype="multipart/form-data" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>">
+              <input type="hidden" name="action" value="upload_cap_evidence">
+              <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
+              <label class="cmp-field">
+                <span>Evidence title</span>
+                <input name="evidence_title" placeholder="e.g. Procedure update confirmation">
+              </label>
+              <label class="cmp-field">
+                <span>Evidence note</span>
+                <textarea name="evidence_description" rows="3" placeholder="Briefly describe how this proves CAP closure."></textarea>
+              </label>
+              <label class="cmpdoc-dropzone" data-cmpdoc-dropzone style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:28px 16px;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;text-align:center;margin:12px 0;cursor:pointer;">
+                <strong>Drop PDF here or click to browse</strong>
+                <span style="font-size:12px;color:#64748b;">Corrective action evidence PDF, max 50 MiB.</span>
+                <input type="file" name="evidence_file" accept="application/pdf,.pdf" required style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+                <span data-cmpdoc-filename style="margin-top:8px;font-size:12px;font-weight:800;color:#1e3c72;">No file selected</span>
+              </label>
+              <div class="compliance-modal__footer">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+                <button type="submit">Upload document</button>
+              </div>
+            </form>
+          <?php compliance_modal_close(); ?>
+
+          <?php compliance_modal_open('cap-evidence-attach-modal', 'Attach existing Finding Document'); ?>
+            <form method="post" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>">
+              <input type="hidden" name="action" value="attach_finding_document_evidence">
+              <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
+              <label class="cmp-field">
+                <span>Finding document</span>
+                <select name="finding_document_id" required>
+                  <option value="">— Select document —</option>
+                  <?php foreach ($findingDocumentsForEvidence as $doc): ?>
+                    <option value="<?= (int)$doc['id'] ?>">
+                      <?= h('#' . (string)$doc['id'] . ' · ' . (string)$doc['doc_kind'] . ' · ' . (string)$doc['original_name']) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <?php if ($findingDocumentsForEvidence === array()): ?>
+                <p style="margin:0 0 12px;color:#64748b;font-size:13px;">No finding documents are available yet. Upload one on the finding page or upload a CAP evidence PDF here.</p>
+              <?php endif; ?>
+              <label class="cmp-field">
+                <span>Attach note</span>
+                <textarea name="attach_note" rows="3" placeholder="Why this finding document proves the corrective action closure."></textarea>
+              </label>
+              <div class="compliance-modal__footer">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+                <button type="submit" <?= $findingDocumentsForEvidence === array() ? 'disabled' : '' ?>>Attach document</button>
+              </div>
+            </form>
+          <?php compliance_modal_close(); ?>
+
+          <script>
+            (function () {
+              function openDialog(id) {
+                var dialog = document.getElementById(id);
+                if (!dialog) { return; }
+                if (typeof dialog.showModal === 'function') {
+                  dialog.showModal();
+                } else {
+                  dialog.setAttribute('open', 'open');
+                }
+              }
+              document.querySelectorAll('[data-compliance-modal-open^="cap-evidence-"]').forEach(function (btn) {
+                btn.addEventListener('click', function (ev) {
+                  ev.preventDefault();
+                  openDialog(btn.getAttribute('data-compliance-modal-open'));
+                });
+              });
+              document.querySelectorAll('dialog[id^="cap-evidence-"] [data-compliance-modal-close]').forEach(function (btn) {
+                btn.addEventListener('click', function (ev) {
+                  ev.preventDefault();
+                  var dialog = btn.closest('dialog');
+                  if (!dialog) { return; }
+                  if (typeof dialog.close === 'function') {
+                    dialog.close();
+                  }
+                  dialog.removeAttribute('open');
+                });
+              });
+              document.querySelectorAll('dialog[id^="cap-evidence-"] [data-cmpdoc-dropzone]').forEach(function (zone) {
+                var input = zone.querySelector('input[type="file"]');
+                var name = zone.querySelector('[data-cmpdoc-filename]');
+                if (!input) { return; }
+                zone.addEventListener('click', function () { input.click(); });
+                zone.addEventListener('dragover', function (ev) { ev.preventDefault(); zone.style.borderColor = '#1e3c72'; zone.style.background = '#eef4ff'; });
+                zone.addEventListener('dragleave', function () { zone.style.borderColor = '#cbd5e1'; zone.style.background = '#f8fafc'; });
+                zone.addEventListener('drop', function (ev) {
+                  ev.preventDefault();
+                  zone.style.borderColor = '#cbd5e1';
+                  zone.style.background = '#f8fafc';
+                  if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
+                    input.files = ev.dataTransfer.files;
+                    if (name) { name.textContent = ev.dataTransfer.files[0].name; }
+                  }
+                });
+                input.addEventListener('change', function () {
+                  if (name) { name.textContent = input.files && input.files[0] ? input.files[0].name : 'No file selected'; }
+                });
+              });
+            })();
+          </script>
+        <?php endif; ?>
         <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Lifecycle history</h2>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:14px;">
@@ -675,6 +771,51 @@ if ($detailId > 0) {
               <?php endif; ?>
             </div>
           </div>
+          <h3 style="margin:0 0 8px;font-size:16px;">Audit trail</h3>
+          <?php if ($capAuditTrail === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0 0 14px;">No audit trail events have been recorded for this corrective action yet.</p>
+          <?php else: ?>
+            <div class="compliance-table-wrap" style="margin-bottom:16px;">
+              <table class="compliance-table">
+                <thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Details</th></tr></thead>
+                <tbody>
+                  <?php foreach ($capAuditTrail as $event): ?>
+                    <?php
+                      $before = json_decode((string)($event['before_json'] ?? ''), true);
+                      $after = json_decode((string)($event['after_json'] ?? ''), true);
+                      $details = array();
+                      if (is_array($before) && is_array($after)) {
+                          foreach (array('status', 'title', 'action_type') as $field) {
+                              $old = array_key_exists($field, $before) ? (string)$before[$field] : '';
+                              $new = array_key_exists($field, $after) ? (string)$after[$field] : '';
+                              if ($old !== $new) {
+                                  $details[] = $field . ': ' . ($old !== '' ? $old : '—') . ' → ' . ($new !== '' ? $new : '—');
+                              }
+                          }
+                      }
+                      $actor = trim((string)($event['actor_name'] ?? ''));
+                      if ($actor === '') {
+                          $actor = trim((string)($event['actor_email'] ?? ''));
+                      }
+                    ?>
+                    <tr>
+                      <td class="cmp-mono"><?= h((string)($event['occurred_at'] ?? '')) ?></td>
+                      <td><?= compliance_badge((string)($event['event_kind'] ?? 'event')) ?></td>
+                      <td><?= $actor !== '' ? h($actor) : '<span style="color:#94a3b8;">System</span>' ?></td>
+                      <td>
+                        <strong><?= h((string)($event['summary'] ?? '')) ?></strong>
+                        <?php if ($details !== array()): ?>
+                          <div style="margin-top:4px;color:#475569;"><?= h(implode(' · ', $details)) ?></div>
+                        <?php endif; ?>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+
+          <h3 style="margin:0 0 8px;font-size:16px;">Deadline extensions</h3>
           <?php if ($capExtensions === array()): ?>
             <p style="color:#64748b;font-size:14px;margin:0;">No deadline extensions have been recorded for this corrective action.</p>
           <?php else: ?>

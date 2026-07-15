@@ -305,7 +305,15 @@ final class ComplianceCapEngine
             : (string)$row['status'];
         $oldStatus = self::normalizeStatus((string)($row['status'] ?? ''));
         $closureEvidenceNote = trim((string)($data['closure_evidence_note'] ?? ''));
-        if (self::isClosureStatus($status) && !self::isClosureStatus($oldStatus)) {
+        $closureDate = array_key_exists('closure_date', $data)
+            ? self::normalizeDate((string)$data['closure_date'])
+            : self::existingDate((string)($row['completed_at'] ?? ''));
+        if (self::isClosureStatus($status)) {
+            if ($closureDate === null) {
+                throw new RuntimeException('Corrective action closure requires a closure/execution date.');
+            }
+        }
+        if (self::isClosureStatus($status) && (!self::isClosureStatus($oldStatus) || !self::hasClosureEvidence($pdo, $id))) {
             if ($closureEvidenceNote === '' && !self::hasClosureEvidence($pdo, $id)) {
                 throw new RuntimeException('Corrective action closure requires an evidence note or existing corrective-action evidence document.');
             }
@@ -343,6 +351,7 @@ final class ComplianceCapEngine
                 effort = ?,
                 responsible_name = ?,
                 due_date = ?,
+                completed_at = ?,
                 updated_by = ?,
                 updated_at = NOW()
              WHERE id = ? LIMIT 1'
@@ -355,6 +364,7 @@ final class ComplianceCapEngine
             $effort,
             $respName,
             $dueDate,
+            $closureDate,
             $userId,
             $id,
         ));
@@ -598,6 +608,25 @@ final class ComplianceCapEngine
             }
         }
         return self::evidenceTablePresent($pdo);
+    }
+
+    private static function normalizeDate(string $date): ?string
+    {
+        $date = substr(trim($date), 0, 10);
+        if ($date === '') {
+            return null;
+        }
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d', $date);
+        return $dt ? $date : null;
+    }
+
+    private static function existingDate(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '0000-00-00' || $value === '0000-00-00 00:00:00') {
+            return null;
+        }
+        return substr($value, 0, 10);
     }
 
     /** @return array{relpath:string,original_name:string,mime_type:string,file_size:int,sha256:string} */
