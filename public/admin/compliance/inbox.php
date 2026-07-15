@@ -354,11 +354,14 @@ cw_header('Compliance Mail');
   .mail-format-btn{box-shadow:none;background:transparent;min-width:28px;height:28px;padding:0 8px;border-radius:9px;}
   .mail-format-btn:hover{background:#eaf1fb;color:#1e3c72;}
   .mail-compose-body{min-height:0;overflow:auto;padding:22px;}
+  .mail-compose-body.is-hidden{display:none;}
   .mail-editor{min-height:180px;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:16px;line-height:1.55;outline:none;font-size:14px;color:#152235;background:#fff;}
   .mail-template-preview-wrap{display:none;padding:0 22px 18px;background:#fff;cursor:text;}
   .mail-template-preview-wrap.is-visible{display:block;}
   .mail-template-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:#728198;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;}
-  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;pointer-events:none;}
+  .mail-template-preview{width:100%;min-height:320px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#f8fafc;overflow:hidden;}
+  .mail-template-preview .mail-editor{min-height:140px;border:0;border-radius:0;padding:0;background:transparent;}
+  .mail-template-preview .mail-editor:focus{outline:2px solid rgba(30,60,114,.18);outline-offset:8px;}
   .mail-composer.is-dragging .mail-editor{border-color:#1e3c72;background:#f3f7ff;}
   .mail-compose-extras{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;padding:14px 22px;border-top:1px solid rgba(15,23,42,.08);background:#fbfcfe;}
   .mail-compose-extras label{font-size:12px;text-transform:uppercase;color:#728198;font-weight:850;padding-top:10px;}
@@ -556,13 +559,13 @@ cw_header('Compliance Mail');
         <button type="button" class="mail-format-btn" data-format-cmd="insertOrderedList">1. list</button>
       </span>
     </div>
-    <div class="mail-compose-body">
+    <div class="mail-compose-body" id="composePlainBody">
       <div class="mail-template-preview-head"><span>Message body</span><span>Type here</span></div>
       <div id="composeEditor" class="mail-editor" contenteditable="true" tabindex="0" aria-label="Message body"></div>
     </div>
-    <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap" data-focus-compose-editor>
-      <div class="mail-template-preview-head"><span>Standard Compliance Layout Preview</span><span>Final styling is applied when sent</span></div>
-      <iframe class="mail-template-preview" id="composeTemplatePreview" title="Compliance template preview"></iframe>
+    <div class="mail-template-preview-wrap is-visible" id="composeTemplatePreviewWrap">
+      <div class="mail-template-preview-head"><span>Standard Compliance Layout</span><span>Type directly in the message area below</span></div>
+      <div class="mail-template-preview" id="composeTemplatePreview" aria-label="Editable compliance template"></div>
     </div>
     <div class="mail-compose-extras">
       <label for="composeAttachments">Attachments</label><input type="file" id="composeAttachments" name="attachments[]" multiple>
@@ -847,20 +850,24 @@ cw_header('Compliance Mail');
   function renderTemplatePreview() {
     var style = document.getElementById('composeTemplateStyle').value || 'standard';
     var wrap = document.getElementById('composeTemplatePreviewWrap');
-    var frame = document.getElementById('composeTemplatePreview');
-    if (!wrap || !frame) { return; }
+    var preview = document.getElementById('composeTemplatePreview');
+    var plainBody = document.getElementById('composePlainBody');
+    var editor = document.getElementById('composeEditor');
+    if (!wrap || !preview || !plainBody || !editor) { return; }
     wrap.classList.toggle('is-visible', style !== 'none');
     if (style === 'none') {
-      frame.removeAttribute('srcdoc');
+      plainBody.classList.remove('is-hidden');
+      plainBody.appendChild(editor);
+      preview.innerHTML = '';
       return;
     }
+    plainBody.classList.add('is-hidden');
     var subject = document.getElementById('composeSubject').value || 'Compliance email';
-    var bodyHtml = document.getElementById('composeEditor').innerHTML || '<p>Compose your message here...</p>';
-    var bodyText = document.getElementById('composeEditor').innerText || 'Compose your message here...';
+    var bodyText = editor.innerText || 'Compose your message here...';
     var html = complianceTemplateHtml
       .replaceAll('{{EMAIL_TITLE}}', escapeHtml(subject))
       .replaceAll('{{RECIPIENT_NAME}}', 'Recipient')
-      .replaceAll('{{EMAIL_BODY_HTML}}', bodyHtml)
+      .replaceAll('{{EMAIL_BODY_HTML}}', '<div data-template-body-slot></div>')
       .replaceAll('{{EMAIL_BODY_TEXT}}', escapeHtml(bodyText).replace(/\n/g, '<br>'))
       .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_NAME}}', 'Compliance Monitoring Manager')
       .replaceAll('{{COMPLIANCE_MONITORING_MANAGER_TITLE}}', 'Compliance')
@@ -869,7 +876,13 @@ cw_header('Compliance Mail');
       .replaceAll('{{COMPLIANCE_THREAD_CODE}}', 'CMP-THREAD')
       .replaceAll('{{COMPLIANCE_OBJECT_SUMMARY_TEXT}}', 'Selected compliance objects')
       .replaceAll('{{COMPLIANCE_OBJECT_PILLS_HTML}}', '<span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#eaf1fb;color:#1e3c72;font-size:12px;font-weight:700;">Compliance</span>');
-    frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#f8fafc;">' + html + '</body></html>';
+    preview.innerHTML = html;
+    var slot = preview.querySelector('[data-template-body-slot]');
+    if (slot) {
+      slot.appendChild(editor);
+    } else {
+      preview.appendChild(editor);
+    }
   }
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (ch) {
@@ -915,7 +928,6 @@ cw_header('Compliance Mail');
     var editor = document.getElementById('composeEditor');
     document.getElementById('composeHtmlBody').value = editor.innerHTML;
     document.getElementById('composeTextBody').value = editor.innerText;
-    renderTemplatePreview();
   }
   function maybeAutosave() {
     window.clearTimeout(autosaveTimer);
