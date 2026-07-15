@@ -884,6 +884,7 @@ cw_header('Compliance Mail');
     var signature = findTemplateSignature(preview);
     if (signature && signature.parentNode) {
       if (slot) { removeTemplateBodySlot(slot); }
+      removeEmptyHeaderArtifacts(preview);
       if (signature.tagName && signature.tagName.toLowerCase() === 'td') {
         signature.insertBefore(editor, signature.firstChild);
       } else {
@@ -915,6 +916,32 @@ cw_header('Compliance Mail');
     if (node.parentNode) {
       node.parentNode.removeChild(node);
     }
+  }
+  function removeEmptyHeaderArtifacts(root) {
+    root.querySelectorAll('div, p, section, article, td').forEach(function (el) {
+      var text = (el.textContent || '').replace(/\s+/g, '').trim();
+      var hasContent = text !== '' || !!el.querySelector('img, svg, canvas, video, table, .mail-editor');
+      if (hasContent || !isInsideDarkTemplateHeader(el, root)) { return; }
+      var style = window.getComputedStyle(el);
+      var bg = style.backgroundColor || '';
+      var rect = el.getBoundingClientRect();
+      var isWhiteBlock = bg === 'rgb(255, 255, 255)' || bg === 'white' || bg.indexOf('255, 255, 255') !== -1;
+      if (isWhiteBlock || rect.height > 40) {
+        el.remove();
+      }
+    });
+  }
+  function isInsideDarkTemplateHeader(el, root) {
+    var node = el.parentElement;
+    while (node && node !== root) {
+      var styleAttr = (node.getAttribute('style') || '').toLowerCase();
+      var bg = window.getComputedStyle(node).backgroundColor || '';
+      if (styleAttr.indexOf('#0d1d34') !== -1 || bg === 'rgb(13, 29, 52)' || bg.indexOf('13, 29, 52') !== -1) {
+        return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
   }
   function findTemplateSignature(root) {
     var candidates = root.querySelectorAll('p, div, td');

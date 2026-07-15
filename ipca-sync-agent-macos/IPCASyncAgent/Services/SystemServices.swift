@@ -121,7 +121,7 @@ final class LoggingService {
             if let data = line.data(using: .utf8) {
                 if FileManager.default.fileExists(atPath: self.fileURL.path),
                    let handle = try? FileHandle(forWritingTo: self.fileURL) {
-                    try? handle.seekToEnd()
+                    _ = try? handle.seekToEnd()
                     try? handle.write(contentsOf: data)
                     try? handle.close()
                 } else {

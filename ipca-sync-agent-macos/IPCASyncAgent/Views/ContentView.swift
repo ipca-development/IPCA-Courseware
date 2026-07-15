@@ -113,10 +113,16 @@ struct ContentView: View {
                 .toggleStyle(.switch)
                 HStack {
                     Text("Sync interval")
-                    Stepper("\(state.settings.syncIntervalMinutes) minutes", value: $state.settings.syncIntervalMinutes, in: 1...120)
+                    Stepper("\(state.settings.syncIntervalMinutes) minutes", value: Binding(
+                        get: { state.settings.syncIntervalMinutes },
+                        set: { state.settings.syncIntervalMinutes = $0 }
+                    ), in: 1...120)
                     Spacer()
                     Text("Retain uploads")
-                    Stepper("\(state.settings.retainUploadedArtifactsDays) days", value: $state.settings.retainUploadedArtifactsDays, in: 1...365)
+                    Stepper("\(state.settings.retainUploadedArtifactsDays) days", value: Binding(
+                        get: { state.settings.retainUploadedArtifactsDays },
+                        set: { state.settings.retainUploadedArtifactsDays = $0 }
+                    ), in: 1...365)
                 }
             }
         }

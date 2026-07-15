@@ -81,7 +81,8 @@ final class IPCAApiClient {
     private func jsonRequest(path: String, body: [String: Any]) async throws -> [String: Any] {
         guard let base = settings.validatedAPIBaseURL else { throw IPCAApiError.invalidBaseURL }
         guard let token = keychain.loadToken(), !token.isEmpty else { throw IPCAApiError.missingToken }
-        var request = URLRequest(url: base.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
+        guard let url = URL(string: path, relativeTo: base)?.absoluteURL else { throw IPCAApiError.invalidBaseURL }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -365,10 +366,16 @@ final class RepairService {
     }
 
     func repair() async -> RepairReport {
-        if state?.network.isOnline == false {
+        let snapshot = await MainActor.run {
+            (
+                isOnline: state?.network.isOnline ?? true,
+                hasToken: state?.keychain.loadToken() != nil
+            )
+        }
+        if snapshot.isOnline == false {
             return RepairReport(state: .offline, summary: "The Mac is offline.", recommendedAction: "Reconnect the Mac to the internet.")
         }
-        if state?.keychain.loadToken() == nil {
+        if !snapshot.hasToken {
             return RepairReport(state: .needsIPCAToken, summary: "No IPCA Sync Agent token is saved.", recommendedAction: "Paste the device token in Settings.")
         }
         if !queue.isHealthy() {

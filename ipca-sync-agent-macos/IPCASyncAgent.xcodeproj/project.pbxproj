@@ -1,0 +1,374 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* IPCASyncAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000001 /* IPCASyncAgentApp.swift */; };
+		100000000000000000000102 /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000002 /* SyncModels.swift */; };
+		100000000000000000000103 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000003 /* SystemServices.swift */; };
+		100000000000000000000104 /* BrowserServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000004 /* BrowserServices.swift */; };
+		100000000000000000000105 /* GarminProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* GarminProvider.swift */; };
+		100000000000000000000106 /* LocalStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000006 /* LocalStores.swift */; };
+		100000000000000000000107 /* SyncServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* SyncServices.swift */; };
+		100000000000000000000108 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* ContentView.swift */; };
+		100000000000000000000109 /* IPCASyncAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* IPCASyncAgentTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		100000000000000000000201 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000301 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000401;
+			remoteInfo = IPCASyncAgent;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000001 /* IPCASyncAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCASyncAgentApp.swift; sourceTree = "<group>"; };
+		100000000000000000000002 /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		100000000000000000000003 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
+		100000000000000000000004 /* BrowserServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserServices.swift; sourceTree = "<group>"; };
+		100000000000000000000005 /* GarminProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminProvider.swift; sourceTree = "<group>"; };
+		100000000000000000000006 /* LocalStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStores.swift; sourceTree = "<group>"; };
+		100000000000000000000007 /* SyncServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServices.swift; sourceTree = "<group>"; };
+		100000000000000000000008 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		100000000000000000000009 /* IPCASyncAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCASyncAgentTests.swift; sourceTree = "<group>"; };
+		100000000000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		100000000000000000000011 /* IPCASyncAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IPCASyncAgent.entitlements; sourceTree = "<group>"; };
+		100000000000000000000012 /* IPCA Sync Agent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "IPCA Sync Agent.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000013 /* IPCASyncAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IPCASyncAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000501 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		100000000000000000000502 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000601 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000602 /* IPCASyncAgent */,
+				100000000000000000000603 /* IPCASyncAgentTests */,
+				100000000000000000000604 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000602 /* IPCASyncAgent */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000001 /* IPCASyncAgentApp.swift */,
+				100000000000000000000605 /* Models */,
+				100000000000000000000606 /* Services */,
+				100000000000000000000607 /* Views */,
+				100000000000000000000010 /* Info.plist */,
+				100000000000000000000011 /* IPCASyncAgent.entitlements */,
+			);
+			path = IPCASyncAgent;
+			sourceTree = "<group>";
+		};
+		100000000000000000000603 /* IPCASyncAgentTests */ = {
+			isa = PBXGroup;
+			children = (100000000000000000000009 /* IPCASyncAgentTests.swift */);
+			path = IPCASyncAgentTests;
+			sourceTree = "<group>";
+		};
+		100000000000000000000604 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000012 /* IPCA Sync Agent.app */,
+				100000000000000000000013 /* IPCASyncAgentTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000605 /* Models */ = {
+			isa = PBXGroup;
+			children = (100000000000000000000002 /* SyncModels.swift */);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		100000000000000000000606 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000003 /* SystemServices.swift */,
+				100000000000000000000004 /* BrowserServices.swift */,
+				100000000000000000000005 /* GarminProvider.swift */,
+				100000000000000000000006 /* LocalStores.swift */,
+				100000000000000000000007 /* SyncServices.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		100000000000000000000607 /* Views */ = {
+			isa = PBXGroup;
+			children = (100000000000000000000008 /* ContentView.swift */);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000401 /* IPCASyncAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000701 /* Build configuration list for PBXNativeTarget "IPCASyncAgent" */;
+			buildPhases = (
+				100000000000000000000801 /* Sources */,
+				100000000000000000000501 /* Frameworks */,
+				100000000000000000000901 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = IPCASyncAgent;
+			productName = "IPCA Sync Agent";
+			productReference = 100000000000000000000012 /* IPCA Sync Agent.app */;
+			productType = "com.apple.product-type.application";
+		};
+		100000000000000000000402 /* IPCASyncAgentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000702 /* Build configuration list for PBXNativeTarget "IPCASyncAgentTests" */;
+			buildPhases = (
+				100000000000000000000802 /* Sources */,
+				100000000000000000000502 /* Frameworks */,
+				100000000000000000000902 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (100000000000000000000202 /* PBXTargetDependency */);
+			name = IPCASyncAgentTests;
+			productName = IPCASyncAgentTests;
+			productReference = 100000000000000000000013 /* IPCASyncAgentTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000301 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					100000000000000000000401 = {CreatedOnToolsVersion = 16.0;};
+					100000000000000000000402 = {CreatedOnToolsVersion = 16.0; TestTargetID = 100000000000000000000401;};
+				};
+			};
+			buildConfigurationList = 100000000000000000000700 /* Build configuration list for PBXProject "IPCASyncAgent" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 100000000000000000000601;
+			productRefGroup = 100000000000000000000604 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000401 /* IPCASyncAgent */,
+				100000000000000000000402 /* IPCASyncAgentTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000901 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		100000000000000000000902 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000801 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000101 /* IPCASyncAgentApp.swift in Sources */,
+				100000000000000000000102 /* SyncModels.swift in Sources */,
+				100000000000000000000103 /* SystemServices.swift in Sources */,
+				100000000000000000000104 /* BrowserServices.swift in Sources */,
+				100000000000000000000105 /* GarminProvider.swift in Sources */,
+				100000000000000000000106 /* LocalStores.swift in Sources */,
+				100000000000000000000107 /* SyncServices.swift in Sources */,
+				100000000000000000000108 /* ContentView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000802 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (100000000000000000000109 /* IPCASyncAgentTests.swift in Sources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		100000000000000000000202 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 100000000000000000000401 /* IPCASyncAgent */; targetProxy = 100000000000000000000201 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000000711 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)");
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		100000000000000000000712 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		100000000000000000000721 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = IPCASyncAgent/IPCASyncAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCASyncAgent/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.syncagent;
+				PRODUCT_NAME = "IPCA Sync Agent";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		100000000000000000000722 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = IPCASyncAgent/IPCASyncAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCASyncAgent/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.syncagent;
+				PRODUCT_NAME = "IPCA Sync Agent";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		100000000000000000000731 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.syncagent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Sync Agent.app/Contents/MacOS/IPCA Sync Agent";
+			};
+			name = Debug;
+		};
+		100000000000000000000732 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.syncagent.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Sync Agent.app/Contents/MacOS/IPCA Sync Agent";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000700 /* Build configuration list for PBXProject "IPCASyncAgent" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000711 /* Debug */, 100000000000000000000712 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		100000000000000000000701 /* Build configuration list for PBXNativeTarget "IPCASyncAgent" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000721 /* Debug */, 100000000000000000000722 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		100000000000000000000702 /* Build configuration list for PBXNativeTarget "IPCASyncAgentTests" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000731 /* Debug */, 100000000000000000000732 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000301 /* Project object */;
+}
