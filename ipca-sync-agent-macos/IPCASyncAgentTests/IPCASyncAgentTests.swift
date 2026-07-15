@@ -478,4 +478,14 @@ final class IPCASyncAgentTests: XCTestCase {
         XCTAssertFalse(message.contains("valid initial Garmin sync cursor"))
         XCTAssertTrue(message.contains("saved cursor remains valid"))
     }
+
+    func testBackfillTrackStateCanAdvanceToUploaded() throws {
+        let queue = try LocalQueueStore(inMemory: true)
+        let trackUUID = "12345678-1234-1234-1234-123456789abc"
+
+        try queue.markBackfillTrack(trackUUID: trackUUID, entryID: "entry-1", runID: "run-1", state: .queued)
+        try queue.updateBackfillTrackState(trackUUID: trackUUID, state: .uploaded)
+
+        XCTAssertEqual(try queue.backfillTrackState(trackUUID: trackUUID), .uploaded)
+    }
 }

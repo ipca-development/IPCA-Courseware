@@ -133,6 +133,41 @@ function cap_deadline_status_display(array $status, ?string $approvedDeadline): 
     return '<span class="cmp-pill compliance-badge ' . $class . '">' . h((string)$status['label']) . '</span>';
 }
 
+function cap_is_closed_status(string $status): bool
+{
+    return in_array(strtoupper(trim($status)), array('EXECUTED', 'COMPLETED', 'VERIFIED', 'CLOSED'), true);
+}
+
+function cap_closure_deadline_status_display(?string $deadline, ?string $closureDate, string $status): string
+{
+    $deadline = $deadline !== null ? substr(trim($deadline), 0, 10) : '';
+    if ($deadline === '') {
+        return '<span style="color:#64748b;">No deadline</span>';
+    }
+    if (!cap_is_closed_status($status)) {
+        return compliance_deadline_badge($deadline);
+    }
+    $closureDate = $closureDate !== null ? substr(trim($closureDate), 0, 10) : '';
+    if ($closureDate === '') {
+        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline) . ' · Closed, no closure date</span>';
+    }
+    try {
+        $due = new DateTimeImmutable($deadline);
+        $closed = new DateTimeImmutable($closureDate);
+        $days = (int)$due->diff($closed)->format('%r%a');
+    } catch (Throwable) {
+        return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline) . '</span>';
+    }
+    if ($days === 0) {
+        $label = 'Closed on deadline';
+    } elseif ($days > 0) {
+        $label = 'Closed ' . $days . 'd after deadline';
+    } else {
+        $label = 'Closed ' . abs($days) . 'd before deadline';
+    }
+    return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h($deadline . ' · ' . $label) . '</span>';
+}
+
 if (!empty($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && is_numeric($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && time() - (int)$_SESSION['_ipca_compliance_cap_suggest']['saved_at'] > 1800) {
@@ -763,7 +798,7 @@ if ($detailId > 0) {
             </div>
             <div style="padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
               <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Effective deadline</div>
-              <div><?= $effectiveDue !== null ? compliance_deadline_badge($effectiveDue) : '<span style="color:#64748b;">No deadline</span>' ?></div>
+              <div><?= cap_closure_deadline_status_display($effectiveDue, isset($cap['completed_at']) ? (string)$cap['completed_at'] : null, (string)$cap['status']) ?></div>
               <?php if (!$capLocked): ?>
                 <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="cap-extension-modal" style="margin-top:10px;">
                   Request extension
@@ -922,6 +957,9 @@ if ($detailId > 0) {
         $today = date('Y-m-d');
         $soon = date('Y-m-d', strtotime('+' . ComplianceDeadlineExtensionEngine::WARNING_THRESHOLD_DAYS . ' days'));
         $rows = array_values(array_filter($rows, static function (array $r) use ($filterDue, $today, $soon): bool {
+            if (cap_is_closed_status((string)($r['status'] ?? ''))) {
+                return false;
+            }
             $due = substr((string)($r['due_date'] ?? ''), 0, 10);
             if ($filterDue === 'no_due') {
                 return $due === '';
@@ -947,16 +985,23 @@ if ($detailId > 0) {
     foreach ($rows as $r) {
         $capIdForStatus = (int)$r['id'];
         $effectiveDueForStatus = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, $capIdForStatus, isset($r['due_date']) ? (string)$r['due_date'] : null);
-        $deadlineStatus = ComplianceDeadlineExtensionEngine::calculateDeadlineStatus($effectiveDueForStatus, $latestExtensionItems[$capIdForStatus] ?? null);
+        $isClosed = cap_is_closed_status((string)($r['status'] ?? ''));
+        $deadlineStatus = $isClosed
+            ? array(
+                'state' => 'closed',
+                'label' => strip_tags(cap_closure_deadline_status_display($effectiveDueForStatus, isset($r['completed_at']) ? (string)$r['completed_at'] : null, (string)$r['status'])),
+                'days' => null,
+                'item' => null,
+            )
+            : ComplianceDeadlineExtensionEngine::calculateDeadlineStatus($effectiveDueForStatus, $latestExtensionItems[$capIdForStatus] ?? null);
         $deadlineStatesByAction[$capIdForStatus] = array('effective_due' => $effectiveDueForStatus, 'status' => $deadlineStatus);
-        if ($deadlineStatus['state'] === 'warning') {
+        if (!$isClosed && $deadlineStatus['state'] === 'warning') {
             $approachingCount++;
-        } elseif ($deadlineStatus['state'] === 'overdue') {
+        } elseif (!$isClosed && $deadlineStatus['state'] === 'overdue') {
             $overdueCount++;
-        } elseif ($deadlineStatus['state'] === 'extension_pending') {
+        } elseif (!$isClosed && $deadlineStatus['state'] === 'extension_pending') {
             $pendingCount++;
         }
-        $isClosed = in_array(strtoupper((string)($r['status'] ?? '')), array('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED'), true);
         $eligible = $workflowStatus['batches'] && $workflowStatus['items'] && $workflowStatus['tokens']
             && !$isClosed
             && $effectiveDueForStatus !== null
@@ -1189,6 +1234,7 @@ if ($detailId > 0) {
                 $selectMeta = $extensionSelectionRows[(int)$r['id']] ?? array('eligible' => false, 'disabled_reason' => 'Not eligible for extension request');
                 $eff = cap_latest_effectiveness($pdo, (int)$r['id'], (string)$r['status']);
                 $findingRef = trim((string)($r['finding_reference'] ?? '')) !== '' ? (string)$r['finding_reference'] : (string)$r['finding_code'];
+                $rowClosed = cap_is_closed_status((string)$r['status']);
                 ?>
               <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-selector-cell">
@@ -1219,8 +1265,8 @@ if ($detailId > 0) {
                 <td><?= compliance_badge((string)$r['action_type']) ?></td>
                 <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td><?= compliance_badge($eff) ?></td>
-                <td><?= cap_deadline_display($effectiveDue) ?></td>
-                <td><?= cap_deadline_status_display($deadlineStatus, $effectiveDue) ?></td>
+                <td><?= $rowClosed ? '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . h((string)($effectiveDue ?? 'No deadline')) . '</span>' : cap_deadline_display($effectiveDue) ?></td>
+                <td><?= $rowClosed ? cap_closure_deadline_status_display($effectiveDue, isset($r['completed_at']) ? (string)$r['completed_at'] : null, (string)$r['status']) : cap_deadline_status_display($deadlineStatus, $effectiveDue) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

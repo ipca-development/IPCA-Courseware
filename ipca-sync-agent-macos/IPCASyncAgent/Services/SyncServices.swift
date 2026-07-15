@@ -619,8 +619,15 @@ final class SyncCoordinator {
                 try queue.markUploading(item.id)
                 let status = try await api.uploadSource(item)
                 try queue.markServerResult(item.id, status: status)
+                if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
+                    try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
+                    LoggingService.shared.info("BACKFILL_UPLOAD_RESULT track=\(item.sourceUUID) result=\(status)")
+                }
                 state?.filesUploaded += 1
             } catch {
+                if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
+                    try? queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .failed, error: error.localizedDescription)
+                }
                 try queue.markRetry(item.id, error: error.localizedDescription, attempts: item.attempts + 1)
                 LoggingService.shared.error("Upload retry scheduled for \(item.sourceUUID): \(error.localizedDescription)")
             }

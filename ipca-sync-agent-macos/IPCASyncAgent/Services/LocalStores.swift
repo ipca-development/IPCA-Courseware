@@ -434,6 +434,30 @@ final class LocalQueueStore {
         try execute(sql, [trackUUID.lowercased(), entryID, runID, state.rawValue, error as Any, now, now])
     }
 
+    func updateBackfillTrackState(trackUUID: String, state: GarminBackfillTrackState, error: String? = nil) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let sql = """
+        UPDATE garmin_backfill_tracks
+        SET state = ?,
+            last_error = ?,
+            updated_at = ?
+        WHERE track_uuid = ?
+        """
+        try execute(sql, [state.rawValue, error as Any, Date().timeIntervalSince1970, trackUUID.lowercased()])
+    }
+
+    func backfillTrackState(trackUUID: String) throws -> GarminBackfillTrackState? {
+        lock.lock()
+        defer { lock.unlock() }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT state FROM garmin_backfill_tracks WHERE track_uuid = ?", -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, trackUUID.lowercased(), -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return GarminBackfillTrackState(rawValue: text(statement, 0))
+    }
+
     func recordBackfillRun(runID: String, source: String, result: GarminBackfillDiscoveryResult?, status: String, error: String?) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -514,6 +538,30 @@ final class LocalQueueStore {
           error TEXT NULL,
           created_at REAL NOT NULL,
           updated_at REAL NOT NULL
+        )
+        """, [])
+        try reconcileUploadedBackfillTracks()
+    }
+
+    private func reconcileUploadedBackfillTracks() throws {
+        try execute("""
+        UPDATE garmin_backfill_tracks
+        SET state = 'uploaded',
+            last_error = NULL,
+            updated_at = (
+              SELECT COALESCE(upload_queue.completed_at, upload_queue.updated_at)
+              FROM upload_queue
+              WHERE upload_queue.source_uuid = garmin_backfill_tracks.track_uuid
+                AND upload_queue.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
+                AND upload_queue.state IN ('uploaded','already_exists','completed')
+              LIMIT 1
+            )
+        WHERE EXISTS (
+          SELECT 1
+          FROM upload_queue
+          WHERE upload_queue.source_uuid = garmin_backfill_tracks.track_uuid
+            AND upload_queue.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
+            AND upload_queue.state IN ('uploaded','already_exists','completed')
         )
         """, [])
     }
