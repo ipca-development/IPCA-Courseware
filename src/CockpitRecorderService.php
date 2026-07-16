@@ -320,9 +320,11 @@ final class CockpitRecorderService
     {
         $this->requireTables();
         $limit = max(1, min(250, $limit));
+        $where = $this->activeRecordingWhereClause();
         $stmt = $this->pdo->query("
             SELECT *
             FROM " . self::TABLE . "
+            {$where}
             ORDER BY COALESCE(started_at, created_at) DESC, id DESC
             LIMIT " . $limit
         );
@@ -337,13 +339,15 @@ final class CockpitRecorderService
     /**
      * @return list<array<string,mixed>>
      */
-    public function adminRecordings(int $limit = 100): array
+    public function adminRecordings(int $limit = 100, bool $includeDeleted = false): array
     {
         $this->requireTables();
         $limit = max(1, min(250, $limit));
+        $where = $includeDeleted ? '' : $this->activeRecordingWhereClause();
         $stmt = $this->pdo->query("
             SELECT *
             FROM " . self::TABLE . "
+            {$where}
             ORDER BY COALESCE(started_at, created_at) DESC, id DESC
             LIMIT " . $limit
         );
@@ -411,7 +415,7 @@ final class CockpitRecorderService
     /**
      * @return array<string,mixed>|null
      */
-    public function recordingByAnyId(string $id): ?array
+    public function recordingByAnyId(string $id, bool $includeDeleted = false): ?array
     {
         $this->requireTables();
         $id = trim($id);
@@ -419,11 +423,12 @@ final class CockpitRecorderService
             return null;
         }
 
+        $activeWhere = $includeDeleted ? '' : $this->activeRecordingPredicate('AND');
         if (ctype_digit($id)) {
-            $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE id = ? LIMIT 1');
+            $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE id = ? ' . $activeWhere . ' LIMIT 1');
             $stmt->execute(array((int)$id));
         } else {
-            $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE recording_uid = ? LIMIT 1');
+            $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE recording_uid = ? ' . $activeWhere . ' LIMIT 1');
             $stmt->execute(array($id));
         }
 
@@ -441,6 +446,60 @@ final class CockpitRecorderService
         $stmt->execute(array($uid));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @param list<int> $recordingIds
+     */
+    public function softDeleteRecordings(array $recordingIds, ?int $actorUserId, string $reason = ''): int
+    {
+        $this->requireTables();
+        $this->requireSoftDeleteColumns();
+        $ids = $this->normalizeRecordingIds($recordingIds);
+        if (!$ids) {
+            return 0;
+        }
+
+        $reason = substr(trim($reason), 0, 255);
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $params = array_merge(array($actorUserId, $reason), $ids);
+        $stmt = $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP),
+                deleted_by_user_id = ?,
+                delete_reason = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id IN ({$placeholders})
+              AND deleted_at IS NULL
+        ");
+        $stmt->execute($params);
+        return $stmt->rowCount();
+    }
+
+    /**
+     * @param list<int> $recordingIds
+     */
+    public function restoreRecordings(array $recordingIds): int
+    {
+        $this->requireTables();
+        $this->requireSoftDeleteColumns();
+        $ids = $this->normalizeRecordingIds($recordingIds);
+        if (!$ids) {
+            return 0;
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $stmt = $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET deleted_at = NULL,
+                deleted_by_user_id = NULL,
+                delete_reason = '',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id IN ({$placeholders})
+              AND deleted_at IS NOT NULL
+        ");
+        $stmt->execute($ids);
+        return $stmt->rowCount();
     }
 
     /**
@@ -1134,6 +1193,48 @@ final class CockpitRecorderService
         $stmt->execute(array(self::TABLE, $columnName));
         $cache[$columnName] = (int)$stmt->fetchColumn() > 0;
         return (bool)$cache[$columnName];
+    }
+
+    private function activeRecordingWhereClause(): string
+    {
+        return $this->activeRecordingPredicate('WHERE');
+    }
+
+    private function activeRecordingPredicate(string $prefix): string
+    {
+        if (!$this->hasColumn('deleted_at')) {
+            return '';
+        }
+        $prefix = strtoupper(trim($prefix));
+        if ($prefix !== 'AND' && $prefix !== 'WHERE') {
+            $prefix = 'AND';
+        }
+        return $prefix . ' deleted_at IS NULL';
+    }
+
+    private function requireSoftDeleteColumns(): void
+    {
+        foreach (array('deleted_at', 'deleted_by_user_id', 'delete_reason') as $column) {
+            if (!$this->hasColumn($column)) {
+                throw new RuntimeException('Apply scripts/sql/2026_07_16_cockpit_recorder_soft_delete.sql before hiding recordings.');
+            }
+        }
+    }
+
+    /**
+     * @param list<int> $recordingIds
+     * @return list<int>
+     */
+    private function normalizeRecordingIds(array $recordingIds): array
+    {
+        $ids = array();
+        foreach ($recordingIds as $id) {
+            $id = (int)$id;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        return array_values($ids);
     }
 
     /**
