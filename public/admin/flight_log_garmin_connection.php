@@ -486,18 +486,7 @@ cw_header('Garmin Sync Agent');
         <p class="garmin-muted">Server-side view of Garmin data uploaded by the native Mac IPCA Sync Agent. The old cloud-browser Garmin controls have been retired from this page.</p>
       </div>
       <div class="garmin-toolbar">
-        <form method="post" action="/admin/api/garmin_csv_summary_action.php">
-          <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
-          <input type="hidden" name="action" value="derive_missing_now">
-          <input type="hidden" name="limit" value="100">
-          <button type="submit">Process Garmin Summaries Now</button>
-        </form>
-        <form method="post" action="/admin/api/garmin_csv_summary_action.php">
-          <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
-          <input type="hidden" name="action" value="enqueue_missing">
-          <input type="hidden" name="limit" value="500">
-          <button class="secondary" type="submit">Queue Remaining Garmin Summaries</button>
-        </form>
+        <button type="button" data-summary-start>Resume Summary Processing</button>
         <a href="/admin/flight_records.php" class="secondary">Flight Records</a>
         <a href="/admin/cockpit_recorder.php" class="secondary">Cockpit Recorder</a>
       </div>
@@ -574,14 +563,7 @@ cw_header('Garmin Sync Agent');
               $reasons[] = 'No telemetry fields';
           }
           ?>
-          <tr data-flight-row
-              data-tail="<?= h(strtoupper((string)($summary['tail'] ?? ''))) ?>"
-              data-dep="<?= h(strtoupper((string)($summary['dep_airport'] ?? ''))) ?>"
-              data-arr="<?= h(strtoupper((string)($summary['arr_airport'] ?? ''))) ?>"
-              data-date="<?= h(substr((string)($summary['start_utc'] ?? ''), 0, 10)) ?>"
-              data-status="<?= h($statusLabel) ?>"
-              data-new="<?= $flight['is_new'] ? '1' : '0' ?>"
-              data-hidden="<?= trim((string)($track['hidden_at'] ?? '')) !== '' ? '1' : '0' ?>">
+          <tr>
             <td><div class="garmin-code"><?= h((string)$track['track_uuid']) ?></div><span class="garmin-muted">Entry <?= h((string)$track['garmin_entry_uuid']) ?></span></td>
             <td><?= h(implode(', ', $reasons)) ?></td>
             <td><span class="garmin-badge <?= garmin_sync_badge_class($status) ?>"><?= h($status) ?></span></td>
@@ -589,7 +571,6 @@ cw_header('Garmin Sync Agent');
             <td><?= h(garmin_sync_datetime((string)($track['last_seen_at'] ?? ''))) ?></td>
           </tr>
         <?php endforeach; ?>
-          <tr data-filter-empty style="display:none"><td colspan="13" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
     <?php endif; ?>
@@ -629,9 +610,9 @@ cw_header('Garmin Sync Agent');
       $doneSummaries = (int)($trackSummaryStats['summarized_track_artifacts'] ?? 0) + (int)($csvSummaryStats['summarized_csv_files'] ?? 0);
       $summaryPercent = $totalSummaries > 0 ? min(100, (int)round(($doneSummaries / $totalSummaries) * 100)) : 0;
     ?>
-    <div style="margin:12px 0">
-      <div class="garmin-muted">Summary processing <?= number_format($doneSummaries) ?> / <?= number_format($totalSummaries) ?> (<?= $summaryPercent ?>%)</div>
-      <div class="garmin-progress"><span style="width:<?= $summaryPercent ?>%"></span></div>
+    <div style="margin:12px 0" data-summary-progress>
+      <div class="garmin-muted" data-summary-progress-text>Summary processing <?= number_format($doneSummaries) ?> / <?= number_format($totalSummaries) ?> (<?= $summaryPercent ?>%)</div>
+      <div class="garmin-progress"><span data-summary-progress-bar style="width:<?= $summaryPercent ?>%"></span></div>
     </div>
 
     <?php if ($flightRows === array()): ?>
@@ -649,7 +630,14 @@ cw_header('Garmin Sync Agent');
             $statusLabel = (string)$flight['status_label'];
             $statusClass = $statusLabel === 'Complete' ? 'garmin-badge-ok' : ($statusLabel === 'GPS only' ? 'garmin-badge-danger' : 'garmin-badge-warn');
           ?>
-          <tr>
+          <tr data-flight-row
+              data-tail="<?= h(strtoupper((string)($summary['tail'] ?? ''))) ?>"
+              data-dep="<?= h(strtoupper((string)($summary['dep_airport'] ?? ''))) ?>"
+              data-arr="<?= h(strtoupper((string)($summary['arr_airport'] ?? ''))) ?>"
+              data-date="<?= h(substr((string)($summary['start_utc'] ?? ''), 0, 10)) ?>"
+              data-status="<?= h($statusLabel) ?>"
+              data-new="<?= $flight['is_new'] ? '1' : '0' ?>"
+              data-hidden="<?= trim((string)($track['hidden_at'] ?? '')) !== '' ? '1' : '0' ?>">
             <td><input form="garmin-bulk-form" name="track_artifact_ids[]" type="checkbox" data-flight-checkbox value="<?= (int)$track['id'] ?>"></td>
             <td><button class="garmin-row-button" type="button" data-modal-open="<?= h($modalId) ?>"><?= h($flightId) ?></button><?php if ($flight['is_new']): ?> <span class="garmin-badge garmin-badge-new">New</span><?php endif; ?></td>
             <td class="garmin-compact"><?= h((string)($summary['date_label'] ?? garmin_sync_date_label((string)($summary['start_utc'] ?? '')))) ?></td>
@@ -684,6 +672,7 @@ cw_header('Garmin Sync Agent');
             </div>
           <?php $flightModals[] = ob_get_clean(); ?>
         <?php endforeach; ?>
+          <tr data-filter-empty style="display:none"><td colspan="13" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
     <?php endif; ?>
@@ -743,6 +732,10 @@ cw_header('Garmin Sync Agent');
   const filterForm = document.querySelector('.garmin-filter');
   const rows = Array.from(document.querySelectorAll('[data-flight-row]'));
   const emptyRow = document.querySelector('[data-filter-empty]');
+  const summaryText = document.querySelector('[data-summary-progress-text]');
+  const summaryBar = document.querySelector('[data-summary-progress-bar]');
+  const summaryStart = document.querySelector('[data-summary-start]');
+  let summaryRunning = false;
   function current(name) {
     const field = filterForm ? filterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '').toUpperCase() : '';
@@ -817,6 +810,51 @@ cw_header('Garmin Sync Agent');
       }
     });
   }
+  function updateSummaryProgress(status, message) {
+    if (!status || !summaryText || !summaryBar) return;
+    const percent = Number(status.percent || 0);
+    summaryBar.style.width = percent + '%';
+    const prefix = message ? message + ' · ' : '';
+    summaryText.textContent = prefix + 'Summary processing ' + Number(status.done || 0).toLocaleString() + ' / ' + Number(status.total || 0).toLocaleString() + ' (' + percent + '%)';
+  }
+  async function postSummary(action, limit) {
+    const body = new FormData();
+    body.append('action', action);
+    body.append('format', 'json');
+    body.append('limit', String(limit || 20));
+    const response = await fetch('/admin/api/garmin_csv_summary_action.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body
+    });
+    if (!response.ok) throw new Error('Summary processor returned HTTP ' + response.status);
+    return response.json();
+  }
+  async function runSummaryLoop() {
+    if (summaryRunning) return;
+    summaryRunning = true;
+    if (summaryStart) summaryStart.textContent = 'Processing...';
+    try {
+      let statusResponse = await postSummary('status', 1);
+      updateSummaryProgress(statusResponse.status, 'Checking');
+      while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
+        const result = await postSummary('process_next', 20);
+        updateSummaryProgress(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more');
+        if (Number(result.processed || 0) === 0) break;
+        statusResponse = result;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      const finalStatus = await postSummary('status', 1);
+      updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Paused');
+    } catch (error) {
+      if (summaryText) summaryText.textContent = 'Summary processing paused: ' + error.message;
+    } finally {
+      summaryRunning = false;
+      if (summaryStart) summaryStart.textContent = 'Resume Summary Processing';
+    }
+  }
+  if (summaryStart) summaryStart.addEventListener('click', runSummaryLoop);
+  runSummaryLoop();
 })();
 </script>
 <?php cw_footer(); ?>
