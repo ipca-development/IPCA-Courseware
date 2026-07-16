@@ -383,9 +383,6 @@ foreach ($recentTracks as $track) {
     $statusLabel = garmin_sync_status_label($csvSummary, $classification);
     $uploadedAt = (string)($track['uploaded_at'] ?? $track['last_seen_at'] ?? '');
     $isNew = garmin_sync_is_new($uploadedAt);
-    if (trim((string)($track['hidden_at'] ?? '')) !== '' && !$showHidden) {
-        continue;
-    }
     $tail = strtoupper((string)($csvSummary['tail'] ?? 'Unknown tail'));
     $dep = strtoupper((string)($csvSummary['dep_airport'] ?? '--'));
     $arr = strtoupper((string)($csvSummary['arr_airport'] ?? '--'));
@@ -398,30 +395,6 @@ foreach ($recentTracks as $track) {
     }
     if ($arr !== '' && $arr !== '--') {
         $arrOptions[$arr] = $arr;
-    }
-    if (!$showIncomplete && $statusLabel !== 'Complete') {
-        continue;
-    }
-    if ($newOnly && !$isNew) {
-        continue;
-    }
-    if ($filterTail !== '' && !str_contains($tail, $filterTail)) {
-        continue;
-    }
-    if ($filterDep !== '' && $dep !== $filterDep) {
-        continue;
-    }
-    if ($filterArr !== '' && $arr !== $filterArr) {
-        continue;
-    }
-    if ($filterStatus !== '' && $statusLabel !== $filterStatus) {
-        continue;
-    }
-    if ($filterDateFrom !== '' && $startUtc !== '' && strtotime($startUtc) < strtotime($filterDateFrom . ' 00:00:00')) {
-        continue;
-    }
-    if ($filterDateTo !== '' && $startUtc !== '' && strtotime($startUtc) > strtotime($filterDateTo . ' 23:59:59')) {
-        continue;
     }
     $flightRows[] = array(
         'track' => $track,
@@ -503,7 +476,7 @@ if (isset($_GET['flights_reprocess_queued'])) {
 cw_header('Garmin Sync Agent');
 ?>
 <style>
-.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:9px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:90px 112px 112px 88px 88px 110px 120px 110px 90px;gap:6px;align-items:end}.garmin-filter input,.garmin-filter select{width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:4px 6px;font:inherit;font-size:10.5px;height:28px;background:#fff}.garmin-filter button{height:28px;padding:4px 8px;font-size:10.5px}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
+.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:9px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:flex;gap:5px;align-items:end;flex-wrap:wrap}.garmin-filter label{display:block;flex:0 0 auto}.garmin-filter input,.garmin-filter select{width:76px;min-width:0;border:1px solid #cbd5e1;border-radius:7px;padding:3px 5px;font:inherit;font-size:9.5px;height:24px;background:#fff}.garmin-filter input[type=date]{width:86px;max-width:86px;padding:3px 3px;font-size:9px}.garmin-filter select[name=status]{width:92px}.garmin-filter select[name=show_incomplete]{width:106px}.garmin-filter select[name=show_hidden]{width:98px}.garmin-filter button{height:24px;padding:3px 7px;font-size:9.5px}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -616,6 +589,7 @@ cw_header('Garmin Sync Agent');
             <td><?= h(garmin_sync_datetime((string)($track['last_seen_at'] ?? ''))) ?></td>
           </tr>
         <?php endforeach; ?>
+          <tr data-filter-empty style="display:none"><td colspan="13" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
     <?php endif; ?>
@@ -768,6 +742,7 @@ cw_header('Garmin Sync Agent');
   const boxes = Array.from(document.querySelectorAll('[data-flight-checkbox]'));
   const filterForm = document.querySelector('.garmin-filter');
   const rows = Array.from(document.querySelectorAll('[data-flight-row]'));
+  const emptyRow = document.querySelector('[data-filter-empty]');
   function current(name) {
     const field = filterForm ? filterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '').toUpperCase() : '';
@@ -782,6 +757,7 @@ cw_header('Garmin Sync Agent');
     const showIncomplete = filterForm ? String((filterForm.querySelector('[name="show_incomplete"]') || {}).value || '0') === '1' : false;
     const showHidden = filterForm ? String((filterForm.querySelector('[name="show_hidden"]') || {}).value || '0') === '1' : false;
     const newOnly = filterForm ? String((filterForm.querySelector('[name="new_only"]') || {}).value || '0') === '1' : false;
+    let visibleCount = 0;
     rows.forEach(row => {
       let visible = true;
       if (tail && row.dataset.tail !== tail) visible = false;
@@ -794,9 +770,11 @@ cw_header('Garmin Sync Agent');
       if (!showHidden && row.dataset.hidden === '1') visible = false;
       if (newOnly && row.dataset.new !== '1') visible = false;
       row.style.display = visible ? '' : 'none';
+      if (visible) visibleCount++;
       const box = row.querySelector('[data-flight-checkbox]');
       if (!visible && box) box.checked = false;
     });
+    if (emptyRow) emptyRow.style.display = visibleCount === 0 ? '' : 'none';
   }
   if (filterForm) {
     filterForm.addEventListener('submit', event => {
@@ -805,6 +783,7 @@ cw_header('Garmin Sync Agent');
     });
     filterForm.querySelectorAll('input,select').forEach(field => field.addEventListener('input', applyInstantFilters));
     filterForm.querySelectorAll('select').forEach(field => field.addEventListener('change', applyInstantFilters));
+    applyInstantFilters();
   }
   if (selectAll) {
     selectAll.addEventListener('change', () => boxes.forEach(box => {
