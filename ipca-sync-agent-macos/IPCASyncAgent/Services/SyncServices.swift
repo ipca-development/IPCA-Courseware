@@ -16,6 +16,33 @@ enum IPCAApiError: Error, LocalizedError {
     }
 }
 
+private final class ProgressRequestDelegate: NSObject, URLSessionDataDelegate {
+    private let progress: ((Double) -> Void)?
+    private var responseData = Data()
+    var completion: ((Result<(Data, URLResponse?), Error>) -> Void)?
+
+    init(progress: ((Double) -> Void)?) {
+        self.progress = progress
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        responseData.append(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        progress?(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            completion?(.failure(error))
+        } else {
+            completion?(.success((responseData, task.response)))
+        }
+    }
+}
+
 struct ServerUploadResponse: Decodable {
     var ok: Bool
     var status: String
@@ -47,7 +74,7 @@ final class IPCAApiClient {
         _ = try await jsonRequest(path: "/api/sync-agent/garmin_entries.php", body: body)
     }
 
-    func uploadSource(_ queueItem: UploadQueueItem) async throws -> String {
+    func uploadSource(_ queueItem: UploadQueueItem, progress: ((Double) -> Void)? = nil) async throws -> String {
         guard let fileData = FileManager.default.contents(atPath: queueItem.localPath) else {
             throw IPCAApiError.server("The downloaded Garmin source file is missing locally.")
         }
@@ -64,7 +91,7 @@ final class IPCAApiClient {
             "metadata": decodeMetadata(queueItem.metadataJSON),
             "content_base64": fileData.base64EncodedString()
         ]
-        let response = try await jsonRequest(path: "/api/sync-agent/garmin_source.php", body: body)
+        let response = try await jsonRequest(path: "/api/sync-agent/garmin_source.php", body: body, uploadProgress: progress)
         guard let status = response["status"] as? String else {
             throw IPCAApiError.server("IPCA.training returned an unexpected upload response.")
         }
@@ -82,7 +109,7 @@ final class IPCAApiClient {
         ])
     }
 
-    private func jsonRequest(path: String, body: [String: Any]) async throws -> [String: Any] {
+    private func jsonRequest(path: String, body: [String: Any], uploadProgress: ((Double) -> Void)? = nil) async throws -> [String: Any] {
         guard let base = settings.validatedAPIBaseURL else { throw IPCAApiError.invalidBaseURL }
         guard let token = keychain.loadToken(), !token.isEmpty else { throw IPCAApiError.missingToken }
         guard let url = URL(string: path, relativeTo: base)?.absoluteURL else { throw IPCAApiError.invalidBaseURL }
@@ -91,13 +118,39 @@ final class IPCAApiClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        if let uploadProgress {
+            (data, response) = try await dataForRequest(request, uploadProgress: uploadProgress)
+        } else {
+            (data, response) = try await URLSession.shared.data(for: request)
+        }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         let decoded = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200...299).contains(statusCode) else {
             throw IPCAApiError.server((decoded["error"] as? String) ?? "IPCA.training returned HTTP \(statusCode).")
         }
         return decoded
+    }
+
+    private func dataForRequest(_ request: URLRequest, uploadProgress: @escaping (Double) -> Void) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let delegate = ProgressRequestDelegate(progress: uploadProgress)
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            delegate.completion = { result in
+                session.finishTasksAndInvalidate()
+                switch result {
+                case .success(let (data, response)):
+                    guard let response else {
+                        continuation.resume(throwing: IPCAApiError.server("IPCA.training returned no response."))
+                        return
+                    }
+                    continuation.resume(returning: (data, response))
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            session.dataTask(with: request).resume()
+        }
     }
 
     private func encodeJSONObject(_ value: [String: JSONValue]) -> [String: Any] {
@@ -157,6 +210,12 @@ final class AppStateController: ObservableObject {
     @Published var uploadProgressDetail = "No upload queue loaded yet."
     @Published var backfillProgressDetail = "No backfill run in progress."
     @Published var currentWorkDetail = "Idle"
+    @Published var pauseRequested = false
+    @Published var isPaused = false
+    @Published var pauseStatus = "Running"
+    @Published var currentItemProgressPercent = 0
+    @Published var overallProgressPercent = 0
+    @Published var transferProgressDetail = "No active transfer."
     @Published var lastError = ""
     @Published var repairSummary = ""
     @Published var tokenInput = ""
@@ -259,6 +318,44 @@ final class AppStateController: ObservableObject {
         let ignored = backfillCounts[GarminBackfillTrackState.ignoredGPSOnly.rawValue, default: 0]
         let backfillFailed = backfillCounts[GarminBackfillTrackState.failed.rawValue, default: 0]
         backfillProgressDetail = "Tracks: uploaded \(backfillUploaded), queued \(backfillQueued), seen \(seen), GPS-only ignored \(ignored), failed \(backfillFailed)"
+    }
+
+    func updateTransferProgress(phase: String, itemProgress: Double, overallProgress: Double, detail: String) {
+        currentItemProgressPercent = Self.percentValue(itemProgress)
+        overallProgressPercent = Self.percentValue(overallProgress)
+        transferProgressDetail = "\(phase): item \(currentItemProgressPercent)%, overall \(overallProgressPercent)%"
+        currentWorkDetail = detail
+    }
+
+    func requestPause() {
+        pauseRequested = true
+        isPaused = false
+        pauseStatus = "Pause requested. Finishing the current item..."
+        currentWorkDetail = pauseStatus
+    }
+
+    func resumeTransfers() {
+        pauseRequested = false
+        isPaused = false
+        pauseStatus = "Running"
+        currentWorkDetail = "Resuming queued work..."
+        if garminBackfillStatus == "Paused" {
+            backfillGarminHistory()
+        } else {
+            syncNow()
+        }
+    }
+
+    func markPaused(_ message: String) {
+        pauseRequested = false
+        isPaused = true
+        pauseStatus = "Paused"
+        currentWorkDetail = message
+        status = .idle
+    }
+
+    private static func percentValue(_ fraction: Double) -> Int {
+        Int((min(1, max(0, fraction)) * 100).rounded())
     }
 
     func refreshGarminCursorStatus() {
@@ -408,6 +505,8 @@ final class SyncCoordinator {
         defer { isSyncing = false }
         do {
             state?.status = .syncing
+            state?.isPaused = false
+            state?.pauseStatus = "Running"
             state?.garminSyncStatus = GarminSyncState.checkingForUpdates.rawValue
             state?.lastError = "Preparing Garmin sync..."
             let entries: [RemoteSyncItem]
@@ -468,6 +567,10 @@ final class SyncCoordinator {
                     try await api.uploadEntry(entry)
                 }
                 try await uploadPending()
+                if state?.isPaused == true {
+                    LoggingService.shared.info("Sync run \(runID) paused during upload.")
+                    return
+                }
                 try await api.completeSync(provider: provider.identifier, cursor: cursorStore.cursor(provider: provider.identifier))
                 state?.lastError = ""
             }
@@ -503,6 +606,8 @@ final class SyncCoordinator {
             return
         }
         state?.isBackfillRunning = true
+        state?.isPaused = false
+        state?.pauseStatus = "Running"
         let runID = UUID().uuidString
         let cursorBefore = cursorStore.cursor(provider: provider.identifier)
         cursorStore.logCursor("BACKFILL_RUN_STARTED", provider: provider.identifier, value: cursorBefore, extra: "runID=\(runID)")
@@ -527,7 +632,12 @@ final class SyncCoordinator {
             for (index, item) in result.items.enumerated() {
                 let trackUUID = item.trackUUIDs.first ?? "unknown"
                 state?.garminBackfillStatus = "Downloading historical track \(index + 1) of \(result.items.count)"
-                state?.currentWorkDetail = "Downloading historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
+                state?.updateTransferProgress(
+                    phase: "Downloading",
+                    itemProgress: 0,
+                    overallProgress: Double(index) / Double(max(1, result.items.count)),
+                    detail: "Downloading historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
+                )
                 try queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .seen)
                 LoggingService.shared.info("BACKFILL_TRACK_SELECTED runID=\(runID) entry=\(item.entryID) track=\(trackUUID)")
                 do {
@@ -549,6 +659,21 @@ final class SyncCoordinator {
                     try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .failed, error: error.localizedDescription)
                     LoggingService.shared.error("BACKFILL_TRACK_FAILED runID=\(runID) entry=\(item.entryID) track=\(trackUUID) error=\(error.localizedDescription)")
                 }
+                state?.updateTransferProgress(
+                    phase: "Downloading",
+                    itemProgress: 1,
+                    overallProgress: Double(index + 1) / Double(max(1, result.items.count)),
+                    detail: "Finished historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
+                )
+                if state?.pauseRequested == true {
+                    try? queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "paused", error: nil)
+                    state?.garminBackfillStatus = "Paused"
+                    state?.garminBackfillLastResult = "Paused after track \(index + 1) of \(result.items.count). Click Resume to continue."
+                    state?.markPaused("Paused after finishing historical track \(index + 1) of \(result.items.count).")
+                    LoggingService.shared.info("BACKFILL_RUN_PAUSED runID=\(runID) completedTracks=\(index + 1) totalTracks=\(result.items.count)")
+                    state?.isBackfillRunning = false
+                    return
+                }
             }
             state?.pendingUploads = (try? queue.pendingCount()) ?? 0
             state?.refreshQueueProgress()
@@ -556,6 +681,7 @@ final class SyncCoordinator {
                 state?.garminBackfillStatus = "Uploading queued historical tracks"
                 try await uploadPending()
             }
+            let pausedDuringUpload = state?.isPaused == true
             let cursorAfter = cursorStore.cursor(provider: provider.identifier)
             cursorStore.logCursor("BACKFILL_CURSOR_AFTER", provider: provider.identifier, value: cursorAfter, extra: "runID=\(runID)")
             guard cursorBefore == cursorAfter else {
@@ -565,9 +691,11 @@ final class SyncCoordinator {
             }
             LoggingService.shared.info("BACKFILL_CURSOR_INVARIANT runID=\(runID) result=passed")
             try queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "completed", error: nil)
-            state?.garminBackfillStatus = "Completed"
+            state?.garminBackfillStatus = pausedDuringUpload ? "Completed; upload paused" : "Completed"
             state?.garminBackfillLastResult = "From 2025-01-01: inspected \(result.inspectedEntryCount), selected \(result.selectedItemCount), downloaded \(downloaded), queued \(queued), GPS-only ignored \(skippedGPSOnly), failed \(failed), skipped \(result.skippedSeenCount)."
-            state?.currentWorkDetail = "Backfill download complete. Upload queue is processing remaining files."
+            if !pausedDuringUpload {
+                state?.currentWorkDetail = "Backfill download complete. Upload queue is processing remaining files."
+            }
             state?.refreshQueueProgress()
             LoggingService.shared.info("BACKFILL_RUN_COMPLETED runID=\(runID) downloaded=\(downloaded) queued=\(queued) skippedGPSOnly=\(skippedGPSOnly) failed=\(failed)")
         } catch {
@@ -652,6 +780,10 @@ final class SyncCoordinator {
     @MainActor
     func uploadPending() async throws {
         state?.status = .uploading
+        state?.isPaused = false
+        state?.pauseStatus = "Running"
+        let initialPending = max(1, (try? queue.pendingCount()) ?? 1)
+        var processedThisRun = 0
         while true {
             let items = try queue.pending()
             guard !items.isEmpty else { break }
@@ -661,22 +793,52 @@ final class SyncCoordinator {
                 do {
                     try queue.markUploading(item.id)
                     state?.refreshQueueProgress()
-                    state?.currentWorkDetail = "Uploading \(item.artifactType) for track/source \(item.sourceUUID)."
-                    let status = try await api.uploadSource(item)
+                    let processedBeforeItem = processedThisRun
+                    let artifactType = item.artifactType
+                    let sourceUUID = item.sourceUUID
+                    state?.updateTransferProgress(
+                        phase: "Uploading",
+                        itemProgress: 0,
+                        overallProgress: Double(processedBeforeItem) / Double(initialPending),
+                        detail: "Uploading \(artifactType) for track/source \(sourceUUID)."
+                    )
+                    let status = try await api.uploadSource(item) { [weak state] progress in
+                        Task { @MainActor [weak state] in
+                            state?.updateTransferProgress(
+                                phase: "Uploading",
+                                itemProgress: progress,
+                                overallProgress: (Double(processedBeforeItem) + progress) / Double(initialPending),
+                                detail: "Uploading \(artifactType) for track/source \(sourceUUID)."
+                            )
+                        }
+                    }
                     try queue.markServerResult(item.id, status: status)
                     if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
                         try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
                         LoggingService.shared.info("BACKFILL_UPLOAD_RESULT track=\(item.sourceUUID) result=\(status)")
                     }
                     state?.filesUploaded += 1
+                    processedThisRun += 1
                     state?.refreshQueueProgress()
+                    state?.updateTransferProgress(
+                        phase: "Uploading",
+                        itemProgress: 1,
+                        overallProgress: Double(processedThisRun) / Double(initialPending),
+                        detail: "Uploaded \(processedThisRun) of \(initialPending) queued files in this run."
+                    )
                 } catch {
                     if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
                         try? queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .failed, error: error.localizedDescription)
                     }
                     try queue.markRetry(item.id, error: error.localizedDescription, attempts: item.attempts + 1)
+                    processedThisRun += 1
                     state?.refreshQueueProgress()
                     LoggingService.shared.error("Upload retry scheduled for \(item.sourceUUID): \(error.localizedDescription)")
+                }
+                if state?.pauseRequested == true {
+                    state?.markPaused("Paused after finishing the current upload. \(state?.pendingUploads ?? 0) uploads remain queued.")
+                    LoggingService.shared.info("UPLOAD_RUN_PAUSED processed=\(processedThisRun) remaining=\(state?.pendingUploads ?? 0)")
+                    return
                 }
             }
         }

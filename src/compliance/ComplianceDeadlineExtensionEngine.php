@@ -78,21 +78,32 @@ final class ComplianceDeadlineExtensionEngine
         }
         try {
             $hasDraftColumn = self::columnPresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_batches', 'email_draft_id');
-            $sql = $hasDraftColumn
-                ? "SELECT b.id, b.audit_id, b.request_reference, b.email_draft_id
-                     FROM ipca_compliance_corrective_action_deadline_extension_batches b
-                LEFT JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
-                    WHERE b.status IN ('draft','submitted','under_review')
-                      AND b.outbound_email_id IS NULL
-                      AND (
-                          b.email_draft_id IS NULL
-                          OR d.id IS NULL
-                          OR d.status <> 'draft'
-                      )"
-                : "SELECT b.id, b.audit_id, b.request_reference, NULL AS email_draft_id
-                     FROM ipca_compliance_corrective_action_deadline_extension_batches b
-                    WHERE b.status IN ('draft','submitted','under_review')
-                      AND b.outbound_email_id IS NULL";
+            if (!$hasDraftColumn) {
+                return 0;
+            }
+            if ($hasDraftColumn) {
+                $pdo->exec(
+                    "UPDATE ipca_compliance_corrective_action_deadline_extension_batches b
+                       JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
+                        SET b.email_thread_id = COALESCE(b.email_thread_id, d.thread_id),
+                            b.outbound_email_id = COALESCE(b.outbound_email_id, d.sent_email_id),
+                            b.updated_at = NOW()
+                      WHERE b.status IN ('draft','submitted','under_review')
+                        AND b.outbound_email_id IS NULL
+                        AND d.status = 'sent'
+                        AND d.sent_email_id IS NOT NULL"
+                );
+            }
+            $sql = "SELECT b.id, b.audit_id, b.request_reference, b.email_draft_id
+                      FROM ipca_compliance_corrective_action_deadline_extension_batches b
+                 LEFT JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
+                     WHERE b.status IN ('draft','submitted','under_review')
+                       AND b.outbound_email_id IS NULL
+                       AND (
+                           b.email_draft_id IS NULL
+                           OR d.id IS NULL
+                           OR d.status = 'cancelled'
+                       )";
             $st = $pdo->query($sql);
             $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
             if (!is_array($rows) || $rows === array()) {

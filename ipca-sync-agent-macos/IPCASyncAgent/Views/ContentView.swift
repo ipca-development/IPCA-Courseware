@@ -75,9 +75,23 @@ struct ContentView: View {
                 ("Pending uploads", "\(state.pendingUploads)"),
                 ("Upload progress", state.uploadProgressDetail),
                 ("Backfill progress", state.backfillProgressDetail),
+                ("Pause status", state.pauseStatus),
+                ("Current item", "\(state.currentItemProgressPercent)%"),
+                ("Overall progress", "\(state.overallProgressPercent)%"),
+                ("Transfer progress", state.transferProgressDetail),
                 ("Current work", state.currentWorkDetail),
                 ("Backfill result", state.garminBackfillLastResult)
             ])
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Current item")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProgressView(value: Double(state.currentItemProgressPercent), total: 100)
+                Text("Overall active run")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProgressView(value: Double(state.overallProgressPercent), total: 100)
+            }
         }
     }
 
@@ -105,6 +119,10 @@ struct ContentView: View {
                     Button("Sync Now") { state.syncNow() }
                     Button("Backfill Garmin History") { state.backfillGarminHistory() }
                         .disabled(state.isBackfillRunning)
+                    Button("Pause") { state.requestPause() }
+                        .disabled(state.pauseRequested || state.isPaused)
+                    Button("Resume") { state.resumeTransfers() }
+                        .disabled(!state.isPaused)
                     Button("Reconnect Garmin") { state.reconnectGarmin() }
                     Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
                 }
@@ -219,6 +237,8 @@ struct MenuBarContentView: View {
             Text("Garmin Backfill: \(state.garminBackfillStatus)")
             Text("Last Sync: \(state.lastSuccessfulSync?.formatted(date: .omitted, time: .shortened) ?? "Not yet")")
             Text("Pending Uploads: \(state.pendingUploads)")
+            Text("Pause: \(state.pauseStatus)")
+            Text("Item: \(state.currentItemProgressPercent)%  Overall: \(state.overallProgressPercent)%")
             Text(state.uploadProgressDetail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -229,6 +249,10 @@ struct MenuBarContentView: View {
             Button("Sync Now") { state.syncNow() }
             Button("Backfill Garmin History") { state.backfillGarminHistory() }
                 .disabled(state.isBackfillRunning)
+            Button("Pause") { state.requestPause() }
+                .disabled(state.pauseRequested || state.isPaused)
+            Button("Resume") { state.resumeTransfers() }
+                .disabled(!state.isPaused)
             Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
             Button("Open Window") { openWindow(id: "main") }
             Button("Open Logs") { LoggingService.shared.openLogs() }

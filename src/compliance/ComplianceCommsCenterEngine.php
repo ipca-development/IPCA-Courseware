@@ -1583,6 +1583,22 @@ final class ComplianceCommsCenterEngine
         }
     }
 
+    private static function markDeadlineExtensionDraftSent(PDO $pdo, int $draftId, int $emailId, int $threadId): void
+    {
+        try {
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET email_thread_id = COALESCE(email_thread_id, ?),
+                        outbound_email_id = COALESCE(outbound_email_id, ?),
+                        updated_at = NOW()
+                  WHERE email_draft_id = ?
+                    AND status IN ('draft','submitted','under_review')"
+            )->execute(array($threadId > 0 ? $threadId : null, $emailId > 0 ? $emailId : null, $draftId));
+        } catch (Throwable) {
+            // Deadline-extension tracking migration may not be installed.
+        }
+    }
+
     private static function logDeadlineExtensionCancellation(PDO $pdo, int $batchId, int $auditId, string $reference, ?int $uid, int $draftId): void
     {
         try {
@@ -1840,6 +1856,7 @@ final class ComplianceCommsCenterEngine
                     SET status = 'sent', sent_email_id = ?, approved_by = ?, approved_at = NOW()
                   WHERE id = ?"
             )->execute(array($emailId, $createdBy, $draftId));
+            self::markDeadlineExtensionDraftSent($pdo, $draftId, $emailId, $threadId);
             $idx = 0;
             foreach ($draftAttachments as $da) {
                 try {
