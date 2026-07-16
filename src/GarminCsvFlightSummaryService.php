@@ -497,7 +497,11 @@ final class GarminCsvFlightSummaryService
 
     private function displayTimeZone(): DateTimeZone
     {
-        return new DateTimeZone(date_default_timezone_get() ?: 'UTC');
+        $timezone = date_default_timezone_get();
+        if ($timezone === '' || strtoupper($timezone) === 'UTC') {
+            $timezone = 'America/Los_Angeles';
+        }
+        return new DateTimeZone($timezone);
     }
 
     private function firstNonBlank(string ...$values): string
