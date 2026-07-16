@@ -132,7 +132,7 @@ return [
             ],
             [
                 'key' => 'flight_log_garmin_connection',
-                'label' => 'Garmin Connection',
+                'label' => 'Garmin Sync Agent',
                 'icon' => 'flight',
                 'href' => '/admin/flight_log_garmin_connection.php',
                 'match_paths' => [
