@@ -55,6 +55,7 @@ final class FlightRecordViewService
                 v.exact_tacho_duration_ms,
                 v.readiness_status,
                 v.landing_event_count,
+                v.summary_json,
                 v.created_at AS version_created_at
             FROM ipca_operational_flight_records r
             INNER JOIN ipca_flight_sessions s ON s.id = r.session_id

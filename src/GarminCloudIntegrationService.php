@@ -338,6 +338,7 @@ final class GarminCloudIntegrationService
         $jobs = new AsyncJobService($this->pdo);
         $jobs->enqueue('GARMIN_SOURCE_GROUP_MATCH', 'ipca_garmin_source_groups', (string)$sourceGroupId, array('source_group_id' => $sourceGroupId));
         $jobs->enqueue('GARMIN_CSV_SESSION_MATCH', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId, 'garmin_source_id' => $sourceId, 'source_group_id' => $sourceGroupId));
+        $jobs->enqueue('FLIGHT_RECORD_DERIVATION', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId, 'garmin_source_id' => $sourceId, 'source_group_id' => $sourceGroupId), null, 120);
         $jobs->enqueue('GARMIN_SOURCE_ROLE_SELECTION', 'ipca_garmin_source_groups', (string)$sourceGroupId, array('source_group_id' => $sourceGroupId));
     }
 }

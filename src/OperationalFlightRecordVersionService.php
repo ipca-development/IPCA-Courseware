@@ -50,10 +50,12 @@ final class OperationalFlightRecordVersionService
             $insert = $this->pdo->prepare("
                 INSERT INTO ipca_operational_flight_record_versions
                   (flight_record_id, version_uuid, version_number, source, exact_hobbs_duration_ms,
-                   exact_tacho_duration_ms, summary_json)
+                   exact_tacho_duration_ms, total_night_duration_ms, cross_country_easa_qualified,
+                   cross_country_faa_qualified, landing_event_count, readiness_status, summary_json)
                 VALUES
                   (:flight_record_id, :version_uuid, :version_number, :source, :exact_hobbs_duration_ms,
-                   :exact_tacho_duration_ms, :summary_json)
+                   :exact_tacho_duration_ms, :total_night_duration_ms, :cross_country_easa_qualified,
+                   :cross_country_faa_qualified, :landing_event_count, :readiness_status, :summary_json)
             ");
             $insert->execute(array(
                 ':flight_record_id' => $flightRecordId,
@@ -62,6 +64,11 @@ final class OperationalFlightRecordVersionService
                 ':source' => substr($source, 0, 64),
                 ':exact_hobbs_duration_ms' => $summary['exact_hobbs_duration_ms'] ?? null,
                 ':exact_tacho_duration_ms' => $summary['exact_tacho_duration_ms'] ?? null,
+                ':total_night_duration_ms' => $summary['total_night_duration_ms'] ?? null,
+                ':cross_country_easa_qualified' => !empty($summary['cross_country_easa_qualified']) ? 1 : 0,
+                ':cross_country_faa_qualified' => !empty($summary['cross_country_faa_qualified']) ? 1 : 0,
+                ':landing_event_count' => (int)($summary['landing_event_count'] ?? 0),
+                ':readiness_status' => substr((string)($summary['readiness_status'] ?? 'not_ready'), 0, 32),
                 ':summary_json' => AuditEventService::jsonEncode($summary),
             ));
             $versionId = (int)$this->pdo->lastInsertId();
