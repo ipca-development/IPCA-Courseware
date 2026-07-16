@@ -76,6 +76,89 @@ function cockpit_admin_badge_class(string $value): string
     return '';
 }
 
+function cockpit_admin_table_exists(PDO $pdo, string $tableName): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $stmt->execute(array($tableName));
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function cockpit_admin_selected_garmin_sources(PDO $pdo, string $flightSessionUid): array
+{
+    $flightSessionUid = trim($flightSessionUid);
+    if ($flightSessionUid === '') {
+        return array('status' => 'no_session', 'message' => 'No Flight Session is linked to this recording yet.');
+    }
+    foreach (array('ipca_flight_sessions', 'ipca_garmin_source_groups', 'ipca_garmin_flight_data_sources', 'ipca_garmin_csv_files') as $table) {
+        if (!cockpit_admin_table_exists($pdo, $table)) {
+            return array('status' => 'schema_missing', 'message' => 'Garmin source selection tables are not available yet.');
+        }
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT
+            g.id AS source_group_id,
+            g.source_group_uuid,
+            g.group_match_status,
+            g.group_match_confidence,
+            g.source_selection_reason,
+            g.primary_operational_source_id,
+            g.primary_replay_source_id
+        FROM ipca_flight_sessions fs
+        LEFT JOIN ipca_garmin_source_groups g ON g.matched_flight_session_id = fs.id
+        WHERE fs.session_uuid = ?
+        ORDER BY g.updated_at DESC, g.id DESC
+        LIMIT 1
+    ");
+    $stmt->execute(array($flightSessionUid));
+    $group = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($group) || empty($group['source_group_id'])) {
+        return array('status' => 'not_matched', 'message' => 'No selected Garmin source group has been matched to this Flight Session yet.');
+    }
+
+    $sourceIds = array_values(array_unique(array_filter(array(
+        (int)($group['primary_operational_source_id'] ?? 0),
+        (int)($group['primary_replay_source_id'] ?? 0),
+    ))));
+    $sources = array();
+    if ($sourceIds) {
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $sourceStmt = $pdo->prepare("
+            SELECT
+                s.*,
+                f.csv_file_uuid,
+                f.original_filename,
+                f.import_profile,
+                f.aircraft_ident,
+                f.product,
+                f.valid_row_count,
+                f.file_size_bytes AS csv_file_size_bytes,
+                f.first_valid_sample_utc,
+                f.last_valid_sample_utc
+            FROM ipca_garmin_flight_data_sources s
+            LEFT JOIN ipca_garmin_csv_files f ON f.id = s.garmin_csv_file_id
+            WHERE s.id IN ({$placeholders})
+        ");
+        $sourceStmt->execute($sourceIds);
+        $rows = $sourceStmt->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                $sources[(int)$row['id']] = $row;
+            }
+        }
+    }
+
+    return array(
+        'status' => 'matched',
+        'group' => $group,
+        'operational' => isset($sources[(int)($group['primary_operational_source_id'] ?? 0)]) ? $sources[(int)$group['primary_operational_source_id']] : null,
+        'replay' => isset($sources[(int)($group['primary_replay_source_id'] ?? 0)]) ? $sources[(int)$group['primary_replay_source_id']] : null,
+    );
+}
+
 $error = trim((string)($_GET['error'] ?? ''));
 $notice = '';
 $pollRecordingId = 0;
@@ -192,6 +275,10 @@ cw_header('Cockpit Recordings');
             $flightSegmentIndex = max(1, (int)($row['flight_segment_index'] ?? 1));
             $previousSegmentUid = trim((string)($row['previous_segment_uid'] ?? ''));
             $sourceGapSummary = trim((string)($row['source_gap_summary'] ?? ''));
+            $selectedGarmin = cockpit_admin_selected_garmin_sources($pdo, $flightSessionUid);
+            $selectedOperationalSource = is_array($selectedGarmin['operational'] ?? null) ? $selectedGarmin['operational'] : null;
+            $selectedReplaySource = is_array($selectedGarmin['replay'] ?? null) ? $selectedGarmin['replay'] : null;
+            $hasAutoGarminSource = $selectedOperationalSource !== null || $selectedReplaySource !== null;
             $health = cockpit_admin_decode_json_field($row, 'health_summary_json');
             $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
             $healthAudio = isset($health['audio']) && is_array($health['audio']) ? $health['audio'] : array();
@@ -216,7 +303,6 @@ cw_header('Cockpit Recordings');
                 (string)($row['aircraft_type'] ?? '')
             );
             $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
-            $replayJsonUrl = '/api/recordings/replay.php?id=' . $id;
             $replayJsonV2Url = '/api/recordings/replay.php?id=' . $id . '&version=2';
             $debugBundleUrl = '/admin/cockpit_recorder_debug_bundle.php?id=' . $id;
             $g3xUrl = '/admin/cockpit_recorder_g3x.php?id=' . $id;
@@ -247,7 +333,7 @@ cw_header('Cockpit Recordings');
             <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($reconStatus)) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span><div class="cockpit-row-sub">Timeline: <span data-timeline-badge="<?= $id ?>"><?= h($timelineStatus) ?></span></div></td>
             <td>
               <div class="cockpit-row-sub">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></div>
-              <div class="cockpit-row-sub">Garmin <?= !empty($row['g3x_storage_path']) ? 'attached' : 'not attached' ?></div>
+              <div class="cockpit-row-sub">Garmin <?= $hasAutoGarminSource ? 'auto-linked' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked') ?></div>
               <div class="cockpit-row-sub">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></div>
             </td>
             <td>
@@ -341,25 +427,58 @@ cw_header('Cockpit Recordings');
                     </section>
 
                     <section class="cockpit-section">
-                      <h3>Garmin Evidence / Replay Source</h3>
-                      <div class="cockpit-info">Garmin files are the source of truth for attitude/AHRS-style replay data. Legacy phone/iPad AHRS is intentionally not shown or used for operational truth.</div>
-                      <?php if (!empty($row['g3x_storage_path'])): ?>
-                        <div class="cockpit-muted">Current Garmin CSV: <?= (int)($row['g3x_row_count'] ?? 0) ?> rows<?= !empty($row['g3x_file_size_bytes']) ? h(' · ' . cockpit_admin_fmt_bytes((int)$row['g3x_file_size_bytes'])) : '' ?><?= !empty($row['g3x_aircraft_ident']) ? h(' · ' . (string)$row['g3x_aircraft_ident']) : '' ?></div>
-                      <?php else: ?>
-                        <div class="cockpit-muted">No Garmin CSV attached to this recording yet.</div>
-                      <?php endif; ?>
-                      <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_g3x_upload.php" enctype="multipart/form-data">
-                        <input type="hidden" name="id" value="<?= $id ?>">
-                        <label>Import type<select class="cockpit-input" name="import_profile">
-                          <?php foreach ($importProfileOptions as $profile => $label): ?>
-                            <option value="<?= h($profile) ?>"<?= $profile === $defaultImportProfile ? ' selected' : '' ?>><?= h($label) ?></option>
+                      <h3>Garmin Source / Replay Evidence</h3>
+                      <div class="cockpit-info">Normally populated automatically from IPCA Sync Agent uploads. Garmin files are the source of truth for attitude, avionics, and replay calculations.</div>
+                      <?php if ($hasAutoGarminSource): ?>
+                        <div class="cockpit-grid">
+                          <?php foreach (array('Operational source' => $selectedOperationalSource, 'Replay source' => $selectedReplaySource) as $sourceLabel => $sourceRow): ?>
+                            <div class="cockpit-kv">
+                              <div class="cockpit-label"><?= h($sourceLabel) ?></div>
+                              <?php if (is_array($sourceRow)): ?>
+                                <div class="cockpit-value"><?= h((string)($sourceRow['source_filename'] ?: $sourceRow['original_filename'] ?: $sourceRow['flight_data_log_uuid'] ?? 'Garmin source')) ?></div>
+                                <div class="cockpit-muted">
+                                  <?= h((string)($sourceRow['data_log_type'] ?? 'unknown')) ?>
+                                  · <?= h((string)($sourceRow['validation_status'] ?? 'not validated')) ?>
+                                  <?php if (!empty($sourceRow['valid_row_count'])): ?> · <?= number_format((int)$sourceRow['valid_row_count']) ?> rows<?php endif; ?>
+                                  <?php if (!empty($sourceRow['csv_file_size_bytes'])): ?> · <?= h(cockpit_admin_fmt_bytes((int)$sourceRow['csv_file_size_bytes'])) ?><?php endif; ?>
+                                </div>
+                                <div class="cockpit-muted">Coverage <?= h(cockpit_admin_fmt_timestamp($sourceRow['csv_first_timestamp_utc'] ?? '')) ?> to <?= h(cockpit_admin_fmt_timestamp($sourceRow['csv_last_timestamp_utc'] ?? '')) ?></div>
+                                <div class="cockpit-code"><?= h((string)($sourceRow['csv_file_uuid'] ?? $sourceRow['flight_data_log_uuid'] ?? '')) ?></div>
+                              <?php else: ?>
+                                <div class="cockpit-muted">No <?= h(strtolower($sourceLabel)) ?> selected yet.</div>
+                              <?php endif; ?>
+                            </div>
                           <?php endforeach; ?>
-                        </select></label>
-                        <label>Garmin CSV file<input class="cockpit-input" type="file" name="g3x_csv" accept=".csv,text/csv" required></label>
-                        <button class="cockpit-button" type="submit">Attach Garmin CSV</button>
-                      </form>
+                        </div>
+                        <?php if (is_array($selectedGarmin['group'] ?? null)): ?>
+                          <div class="cockpit-muted">
+                            Source group <?= h((string)($selectedGarmin['group']['source_group_uuid'] ?? '')) ?>
+                            · Match <?= h((string)($selectedGarmin['group']['group_match_status'] ?? 'pending')) ?>
+                            <?php if (is_numeric($selectedGarmin['group']['group_match_confidence'] ?? null)): ?> · confidence <?= h(number_format((float)$selectedGarmin['group']['group_match_confidence'], 2)) ?><?php endif; ?>
+                          </div>
+                        <?php endif; ?>
+                      <?php else: ?>
+                        <div class="cockpit-muted"><?= h((string)($selectedGarmin['message'] ?? 'No auto-linked Garmin source selected yet.')) ?></div>
+                        <?php if (!empty($row['g3x_storage_path'])): ?>
+                          <div class="cockpit-muted">Legacy manual CSV attached: <?= (int)($row['g3x_row_count'] ?? 0) ?> rows<?= !empty($row['g3x_file_size_bytes']) ? h(' · ' . cockpit_admin_fmt_bytes((int)$row['g3x_file_size_bytes'])) : '' ?><?= !empty($row['g3x_aircraft_ident']) ? h(' · ' . (string)$row['g3x_aircraft_ident']) : '' ?></div>
+                        <?php endif; ?>
+                      <?php endif; ?>
+                      <details>
+                        <summary><strong>Manual correction: attach or replace Garmin CSV</strong></summary>
+                        <div class="cockpit-muted">Use this only if the Sync Agent did not auto-match the correct Garmin source. Import type is preserved for simulator, C172SP, and other Garmin profiles.</div>
+                        <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_g3x_upload.php" enctype="multipart/form-data">
+                          <input type="hidden" name="id" value="<?= $id ?>">
+                          <label>Import type<select class="cockpit-input" name="import_profile">
+                            <?php foreach ($importProfileOptions as $profile => $label): ?>
+                              <option value="<?= h($profile) ?>"<?= $profile === $defaultImportProfile ? ' selected' : '' ?>><?= h($label) ?></option>
+                            <?php endforeach; ?>
+                          </select></label>
+                          <label>Garmin CSV file<input class="cockpit-input" type="file" name="g3x_csv" accept=".csv,text/csv" required></label>
+                          <button class="cockpit-button" type="submit">Manually attach / replace Garmin source</button>
+                        </form>
+                      </details>
                       <div class="cockpit-link-grid">
-                        <a href="<?= h($g3xUrl) ?>">Download Garmin CSV</a>
+                        <?php if (!empty($row['g3x_storage_path'])): ?><a href="<?= h($g3xUrl) ?>">Download manual Garmin CSV</a><?php endif; ?>
                         <a href="<?= h($debugBundleUrl) ?>">Debug bundle</a>
                       </div>
                     </section>
@@ -389,15 +508,11 @@ cw_header('Cockpit Recordings');
                       <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_reconstruct.php?id=<?= $id ?>">
                         <input type="hidden" name="id" value="<?= $id ?>">
                         <input type="hidden" name="replay_source_mode" value="g3x_only">
-                        <div class="cockpit-muted">Reconstruction uses Garmin/G3X replay source mode. Own-device AHRS is not used as truth.</div>
-                        <label>Altimeter setting / QNH (optional, inHg)<input class="cockpit-input" type="number" name="altimeter_setting_inhg" min="25" max="33.5" step="0.01" placeholder="29.92"></label>
-                        <label>Airport field elevation (optional, ft)<input class="cockpit-input" type="number" name="airport_elevation_ft" min="-1500" max="30000" step="1" placeholder="115"></label>
-                        <label>OAT / temperature (optional, °C)<input class="cockpit-input" type="number" name="oat_c" min="-80" max="70" step="0.1" placeholder="35"></label>
-                        <button class="cockpit-button" type="submit">Reconstruct Replay</button>
+                        <div class="cockpit-muted">Manual fallback only. Normal replay/Flight Record derivation should come from the selected Garmin source uploaded by the Sync Agent.</div>
+                        <button class="cockpit-button" type="submit">Manually reconstruct replay</button>
                       </form>
                       <div class="cockpit-link-grid">
                         <a href="<?= h($replayUrl) ?>">Open replay player</a>
-                        <a href="<?= h($replayJsonUrl) ?>">Replay JSON</a>
                         <a href="<?= h($replayJsonV2Url) ?>">Replay JSON v2</a>
                       </div>
                     </section>

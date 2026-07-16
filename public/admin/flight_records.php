@@ -10,6 +10,12 @@ cw_require_admin();
 $user = cw_current_user($pdo) ?: array();
 $service = new FlightRecordViewService($pdo);
 $records = $service->recordsForUser($user);
+$notice = '';
+$error = trim((string)($_GET['error'] ?? ''));
+if ((string)($_GET['rederived'] ?? '') === '1') {
+    $notice = 'Flight Record preview recalculated.'
+        . (!empty($_GET['readiness']) ? ' Readiness: ' . (string)$_GET['readiness'] . '.' : '');
+}
 
 function fr_fmt_ms(mixed $ms): string
 {
@@ -29,13 +35,15 @@ cw_header('Flight Records');
 ?>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-.flight-record-page{display:grid;gap:18px}.flight-record-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.flight-record-muted{color:#64748b;font-size:13px}.flight-record-table-wrap{overflow-x:auto}.flight-record-table{width:100%;border-collapse:collapse;min-width:1040px}.flight-record-table th,.flight-record-table td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;vertical-align:top}.flight-record-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.flight-record-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;background:#e2e8f0;color:#334155}.flight-record-ready{background:#dcfce7;color:#166534}.flight-record-warning{background:#fef3c7;color:#92400e}.flight-record-exceptions{margin:5px 0 0;padding-left:17px;color:#92400e;font-size:12px}.flight-record-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.flight-record-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer}.flight-record-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.56);display:none;z-index:9999;padding:28px;overflow:auto}.flight-record-modal-backdrop.is-open{display:block}.flight-record-modal{max-width:1080px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.flight-record-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.flight-record-modal-body{padding:18px 20px;display:grid;gap:14px}.flight-record-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.flight-record-kv{border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:12px}.flight-record-label{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.flight-record-value{font-weight:800;margin-top:4px}.flight-record-map{height:260px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#f8fafc}.flight-record-section{border:1px solid #e2e8f0;border-radius:14px;padding:14px;display:grid;gap:10px}
+.flight-record-page{display:grid;gap:18px}.flight-record-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.flight-record-muted{color:#64748b;font-size:13px}.flight-record-table-wrap{overflow-x:auto}.flight-record-table{width:100%;border-collapse:collapse;min-width:1040px}.flight-record-table th,.flight-record-table td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;vertical-align:top}.flight-record-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.flight-record-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;background:#e2e8f0;color:#334155}.flight-record-ready{background:#dcfce7;color:#166534}.flight-record-warning{background:#fef3c7;color:#92400e}.flight-record-exceptions{margin:5px 0 0;padding-left:17px;color:#92400e;font-size:12px}.flight-record-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.flight-record-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer}.flight-record-button.secondary{background:#475569}.flight-record-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.flight-record-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.flight-record-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.flight-record-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.56);display:none;z-index:9999;padding:28px;overflow:auto}.flight-record-modal-backdrop.is-open{display:block}.flight-record-modal{max-width:1080px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.flight-record-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.flight-record-modal-body{padding:18px 20px;display:grid;gap:14px}.flight-record-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.flight-record-kv{border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:12px}.flight-record-label{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.flight-record-value{font-weight:800;margin-top:4px}.flight-record-map{height:260px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#f8fafc}.flight-record-section{border:1px solid #e2e8f0;border-radius:14px;padding:14px;display:grid;gap:10px}
 </style>
 <div class="flight-record-page">
   <section class="flight-record-card">
     <h2 style="margin-top:0">Operational Flight Records</h2>
     <p class="flight-record-muted">Admin view of versioned operational records produced from CVR evidence. Audio, transcript, and replay endpoints remain separate and unchanged.</p>
     <p><a href="/admin/flight_record_logbook_proposals.php">Review Flight Record logbook proposals</a></p>
+    <?php if ($notice !== ''): ?><div class="flight-record-notice"><?= h($notice) ?></div><?php endif; ?>
+    <?php if ($error !== ''): ?><div class="flight-record-error"><?= h($error) ?></div><?php endif; ?>
     <?php if (!$service->isReady()): ?>
       <p class="flight-record-badge flight-record-warning">Phase 1 database foundation has not been applied yet.</p>
     <?php endif; ?>
@@ -53,6 +61,7 @@ cw_header('Flight Records');
           $routeJson = json_encode($route, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
           $exceptions = isset($summary['exceptions']) && is_array($summary['exceptions']) ? array_slice($summary['exceptions'], 0, 3) : array();
           $modalId = 'flight-record-modal-' . (int)($row['id'] ?? 0);
+          $csvFileId = (int)($summary['csv_file_id'] ?? ($preview['csv_file']['id'] ?? 0));
         ?>
         <tr>
           <td><?= h((string)($row['session_uuid'] ?? '')) ?><br><span class="flight-record-muted"><?= h((string)($row['avionics_on_utc'] ?? '')) ?></span></td>
@@ -69,7 +78,16 @@ cw_header('Flight Records');
                 <?php foreach ($exceptions as $exception): ?><li><?= h((string)$exception) ?></li><?php endforeach; ?>
               </ul>
             <?php endif; ?>
-            <button class="flight-record-button" type="button" data-modal-open="<?= h($modalId) ?>">Details</button>
+            <div class="flight-record-actions">
+              <button class="flight-record-button" type="button" data-modal-open="<?= h($modalId) ?>">Details</button>
+              <?php if ($csvFileId > 0): ?>
+                <form method="post" action="/admin/api/flight_record_rederive.php" data-rederive-form>
+                  <input type="hidden" name="csv_file_id" value="<?= $csvFileId ?>">
+                  <input type="hidden" name="return" value="/admin/flight_records.php">
+                  <button class="flight-record-button secondary" type="submit">Recalculate</button>
+                </form>
+              <?php endif; ?>
+            </div>
           </td>
           <td><span class="flight-record-code"><?= h((string)($row['version_uuid'] ?? 'not derived')) ?></span></td>
         </tr>
@@ -93,6 +111,15 @@ cw_header('Flight Records');
                       <div class="flight-record-kv"><div class="flight-record-label">Night</div><div class="flight-record-value"><?= h(fr_fmt_ms($summary['total_night_duration_ms'] ?? null)) ?></div><div class="flight-record-muted"><?= h((string)($calculations['day_night']['verification_status'] ?? '--')) ?></div></div>
                       <div class="flight-record-kv"><div class="flight-record-label">Crew record</div><div class="flight-record-value">Pending assignment</div><div class="flight-record-muted">Crew version details will appear here when assigned.</div></div>
                     </div>
+                    <?php if ($csvFileId > 0): ?>
+                      <form method="post" action="/admin/api/flight_record_rederive.php" data-rederive-form>
+                        <input type="hidden" name="csv_file_id" value="<?= $csvFileId ?>">
+                        <input type="hidden" name="return" value="/admin/flight_records.php">
+                        <button class="flight-record-button secondary" type="submit">Recalculate Flight Record preview from Garmin file</button>
+                      </form>
+                    <?php else: ?>
+                      <div class="flight-record-muted">No Garmin CSV id is stored in this version summary yet, so this record cannot be recalculated from this action.</div>
+                    <?php endif; ?>
                   </section>
                   <section class="flight-record-section">
                     <h3 style="margin:0">Garmin Route Preview</h3>
@@ -164,6 +191,13 @@ cw_header('Flight Records');
 
   document.querySelectorAll('[data-modal-open]').forEach((button) => {
     button.addEventListener('click', () => openModal(button.getAttribute('data-modal-open') || ''));
+  });
+  document.querySelectorAll('[data-rederive-form]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      if (!window.confirm('Recalculate this Flight Record preview from the existing Garmin file? This creates a new version using the current calculation logic.')) {
+        event.preventDefault();
+      }
+    });
   });
   document.querySelectorAll('[data-modal-close]').forEach((button) => {
     button.addEventListener('click', () => closeModal(button.closest('.flight-record-modal-backdrop')));
