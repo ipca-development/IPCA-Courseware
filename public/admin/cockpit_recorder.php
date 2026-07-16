@@ -39,6 +39,26 @@ function cockpit_admin_fmt_timestamp(mixed $timestamp): string
     return $timestamp !== '' ? $timestamp : '--';
 }
 
+function cockpit_admin_fmt_date(mixed $timestamp): string
+{
+    $timestamp = trim((string)$timestamp);
+    if ($timestamp === '') {
+        return '--';
+    }
+    $time = strtotime($timestamp);
+    return $time !== false ? gmdate('Y-m-d', $time) : $timestamp;
+}
+
+function cockpit_admin_fmt_hours_between(mixed $start, mixed $end): string
+{
+    $startTs = strtotime(trim((string)$start));
+    $endTs = strtotime(trim((string)$end));
+    if ($startTs === false || $endTs === false || $endTs <= $startTs) {
+        return '--';
+    }
+    return number_format(($endTs - $startTs) / 3600, 1) . ' h';
+}
+
 function cockpit_admin_fmt_rate(mixed $rate): string
 {
     return is_numeric($rate) ? number_format((float)$rate, 2) . ' Hz' : '--';
@@ -86,19 +106,26 @@ function cockpit_admin_table_exists(PDO $pdo, string $tableName): bool
 /**
  * @return array<string,mixed>
  */
-function cockpit_admin_selected_garmin_sources(PDO $pdo, string $flightSessionUid): array
+function cockpit_admin_selected_garmin_sources(PDO $pdo, string $flightSessionUid, string $aircraftRegistration = '', string $recordingStartedAt = '', float $durationSeconds = 0.0): array
 {
     $flightSessionUid = trim($flightSessionUid);
-    if ($flightSessionUid === '') {
-        return array('status' => 'no_session', 'message' => 'No Flight Session is linked to this recording yet.');
-    }
     foreach (array('ipca_flight_sessions', 'ipca_garmin_source_groups', 'ipca_garmin_flight_data_sources', 'ipca_garmin_csv_files') as $table) {
         if (!cockpit_admin_table_exists($pdo, $table)) {
             return array('status' => 'schema_missing', 'message' => 'Garmin source selection tables are not available yet.');
         }
     }
 
-    $stmt = $pdo->prepare("
+    $session = null;
+    if ($flightSessionUid !== '') {
+        $sessionStmt = $pdo->prepare('SELECT * FROM ipca_flight_sessions WHERE session_uuid = ? LIMIT 1');
+        $sessionStmt->execute(array($flightSessionUid));
+        $sessionRow = $sessionStmt->fetch(PDO::FETCH_ASSOC);
+        $session = is_array($sessionRow) ? $sessionRow : null;
+    }
+
+    $group = null;
+    if ($session !== null) {
+        $stmt = $pdo->prepare("
         SELECT
             g.id AS source_group_id,
             g.source_group_uuid,
@@ -112,17 +139,18 @@ function cockpit_admin_selected_garmin_sources(PDO $pdo, string $flightSessionUi
         WHERE fs.session_uuid = ?
         ORDER BY g.updated_at DESC, g.id DESC
         LIMIT 1
-    ");
-    $stmt->execute(array($flightSessionUid));
-    $group = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!is_array($group) || empty($group['source_group_id'])) {
-        return array('status' => 'not_matched', 'message' => 'No selected Garmin source group has been matched to this Flight Session yet.');
+        ");
+        $stmt->execute(array($flightSessionUid));
+        $groupRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        $group = is_array($groupRow) && !empty($groupRow['source_group_id']) ? $groupRow : null;
     }
 
-    $sourceIds = array_values(array_unique(array_filter(array(
-        (int)($group['primary_operational_source_id'] ?? 0),
-        (int)($group['primary_replay_source_id'] ?? 0),
-    ))));
+    $sourceIds = $group !== null
+        ? array_values(array_unique(array_filter(array(
+            (int)($group['primary_operational_source_id'] ?? 0),
+            (int)($group['primary_replay_source_id'] ?? 0),
+        ))))
+        : array();
     $sources = array();
     if ($sourceIds) {
         $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
@@ -151,12 +179,109 @@ function cockpit_admin_selected_garmin_sources(PDO $pdo, string $flightSessionUi
         }
     }
 
+    $candidates = cockpit_admin_garmin_match_candidates($pdo, $session, $aircraftRegistration, $recordingStartedAt, $durationSeconds);
+    $status = $group !== null ? 'matched' : ($flightSessionUid === '' ? 'no_session' : 'not_matched');
+    $message = $status === 'no_session'
+        ? 'No Flight Session is linked to this recording yet.'
+        : 'No selected Garmin source group has been matched to this Flight Session yet.';
+
     return array(
-        'status' => 'matched',
+        'status' => $status,
+        'message' => $message,
+        'session' => $session,
         'group' => $group,
-        'operational' => isset($sources[(int)($group['primary_operational_source_id'] ?? 0)]) ? $sources[(int)$group['primary_operational_source_id']] : null,
-        'replay' => isset($sources[(int)($group['primary_replay_source_id'] ?? 0)]) ? $sources[(int)$group['primary_replay_source_id']] : null,
+        'operational' => $group !== null && isset($sources[(int)($group['primary_operational_source_id'] ?? 0)]) ? $sources[(int)$group['primary_operational_source_id']] : null,
+        'replay' => $group !== null && isset($sources[(int)($group['primary_replay_source_id'] ?? 0)]) ? $sources[(int)$group['primary_replay_source_id']] : null,
+        'candidates' => $candidates,
     );
+}
+
+/**
+ * @param array<string,mixed>|null $session
+ * @return list<array<string,mixed>>
+ */
+function cockpit_admin_garmin_match_candidates(PDO $pdo, ?array $session, string $aircraftRegistration, string $recordingStartedAt, float $durationSeconds): array
+{
+    $aircraftRegistration = strtoupper(trim($aircraftRegistration));
+    $windowStart = trim($recordingStartedAt);
+    $windowEnd = '';
+    if ($windowStart !== '') {
+        $startTs = strtotime($windowStart);
+        if ($startTs !== false && $durationSeconds > 0) {
+            $windowEnd = gmdate('Y-m-d H:i:s', $startTs + (int)round($durationSeconds));
+        }
+    }
+    if ($session !== null) {
+        $aircraftRegistration = strtoupper(trim((string)($session['aircraft_registration'] ?? $aircraftRegistration)));
+        $windowStart = trim((string)($session['avionics_on_utc'] ?? $windowStart));
+        $windowEnd = trim((string)($session['avionics_off_utc'] ?? $windowEnd));
+    }
+
+    $where = array();
+    $params = array();
+    if ($session !== null && (int)($session['id'] ?? 0) > 0) {
+        $where[] = 'g.matched_flight_session_id = ?';
+        $params[] = (int)$session['id'];
+    }
+    if ($aircraftRegistration !== '' && $windowStart !== '') {
+        $where[] = "(UPPER(e.aircraft_registration) = ? AND COALESCE(e.generated_track_start_utc, op.first_valid_sample_utc, rp.first_valid_sample_utc, e.entry_date) BETWEEN DATE_SUB(?, INTERVAL 12 HOUR) AND DATE_ADD(COALESCE(NULLIF(?, ''), ?), INTERVAL 12 HOUR))";
+        $params[] = $aircraftRegistration;
+        $params[] = $windowStart;
+        $params[] = $windowEnd;
+        $params[] = $windowStart;
+    }
+    if (!$where) {
+        return array();
+    }
+
+    $sql = "
+        SELECT
+            g.id AS source_group_id,
+            g.source_group_uuid,
+            g.group_match_status,
+            g.group_match_confidence,
+            g.primary_operational_source_id,
+            g.primary_replay_source_id,
+            e.garmin_entry_uuid,
+            e.entry_date,
+            e.aircraft_registration,
+            e.generated_track_start_utc,
+            e.generated_track_stop_utc,
+            e.canonical_track_uuid,
+            op.flight_data_log_uuid AS operational_log_uuid,
+            op.data_log_type AS operational_data_log_type,
+            op.validation_status AS operational_validation_status,
+            op.source_filename AS operational_source_filename,
+            op.valid_sample_count AS operational_valid_sample_count,
+            op.file_size_bytes AS operational_file_size_bytes,
+            op.csv_first_timestamp_utc AS operational_csv_start,
+            op.csv_last_timestamp_utc AS operational_csv_end,
+            op.source_role AS operational_source_role,
+            rp.flight_data_log_uuid AS replay_log_uuid,
+            rp.data_log_type AS replay_data_log_type,
+            rp.validation_status AS replay_validation_status,
+            rp.source_filename AS replay_source_filename,
+            rp.valid_sample_count AS replay_valid_sample_count,
+            rp.file_size_bytes AS replay_file_size_bytes,
+            rp.csv_first_timestamp_utc AS replay_csv_start,
+            rp.csv_last_timestamp_utc AS replay_csv_end,
+            rp.source_role AS replay_source_role
+        FROM ipca_garmin_source_groups g
+        LEFT JOIN ipca_garmin_logbook_entries e ON e.id = g.garmin_logbook_entry_id
+        LEFT JOIN ipca_garmin_flight_data_sources op ON op.id = g.primary_operational_source_id
+        LEFT JOIN ipca_garmin_flight_data_sources rp ON rp.id = g.primary_replay_source_id
+        WHERE " . implode(' OR ', array_map(static fn(string $clause): string => '(' . $clause . ')', $where)) . "
+        ORDER BY
+            (g.matched_flight_session_id IS NOT NULL) DESC,
+            ABS(TIMESTAMPDIFF(SECOND, COALESCE(e.generated_track_start_utc, op.csv_first_timestamp_utc, rp.csv_first_timestamp_utc, e.entry_date), ?)) ASC,
+            g.updated_at DESC
+        LIMIT 6
+    ";
+    $params[] = $windowStart !== '' ? $windowStart : gmdate('Y-m-d H:i:s');
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return is_array($rows) ? $rows : array();
 }
 
 $error = trim((string)($_GET['error'] ?? ''));
@@ -278,6 +403,7 @@ cw_header('Cockpit Recordings');
             $selectedGarmin = cockpit_admin_selected_garmin_sources($pdo, $flightSessionUid);
             $selectedOperationalSource = is_array($selectedGarmin['operational'] ?? null) ? $selectedGarmin['operational'] : null;
             $selectedReplaySource = is_array($selectedGarmin['replay'] ?? null) ? $selectedGarmin['replay'] : null;
+            $garminCandidates = isset($selectedGarmin['candidates']) && is_array($selectedGarmin['candidates']) ? $selectedGarmin['candidates'] : array();
             $hasAutoGarminSource = $selectedOperationalSource !== null || $selectedReplaySource !== null;
             $health = cockpit_admin_decode_json_field($row, 'health_summary_json');
             $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
@@ -463,6 +589,51 @@ cw_header('Cockpit Recordings');
                           <div class="cockpit-muted">Legacy manual CSV attached: <?= (int)($row['g3x_row_count'] ?? 0) ?> rows<?= !empty($row['g3x_file_size_bytes']) ? h(' · ' . cockpit_admin_fmt_bytes((int)$row['g3x_file_size_bytes'])) : '' ?><?= !empty($row['g3x_aircraft_ident']) ? h(' · ' . (string)$row['g3x_aircraft_ident']) : '' ?></div>
                         <?php endif; ?>
                       <?php endif; ?>
+                      <div class="cockpit-section" style="background:#f8fafc">
+                        <h3>Garmin Match Verification</h3>
+                        <div class="cockpit-muted">Compact Garmin flight facts for manual verification. Use this to confirm the Garmin source approximately matches the cockpit recording before relying on derived Flight Record values.</div>
+                        <?php if ($garminCandidates): ?>
+                          <div class="cockpit-grid">
+                            <?php foreach ($garminCandidates as $candidate): ?>
+                              <?php
+                                $candidateStart = (string)($candidate['generated_track_start_utc'] ?: $candidate['operational_csv_start'] ?: $candidate['replay_csv_start'] ?: '');
+                                $candidateEnd = (string)($candidate['generated_track_stop_utc'] ?: $candidate['operational_csv_end'] ?: $candidate['replay_csv_end'] ?: '');
+                                $candidateOperationalSelected = !empty($candidate['primary_operational_source_id']);
+                                $candidateReplaySelected = !empty($candidate['primary_replay_source_id']);
+                                $candidateRows = (int)($candidate['operational_valid_sample_count'] ?: $candidate['replay_valid_sample_count'] ?: 0);
+                                $candidateBytes = (int)($candidate['operational_file_size_bytes'] ?: $candidate['replay_file_size_bytes'] ?: 0);
+                              ?>
+                              <div class="cockpit-kv">
+                                <div class="cockpit-label">Garmin flight <?= h(cockpit_admin_fmt_date($candidate['entry_date'] ?: $candidateStart)) ?></div>
+                                <div class="cockpit-value"><?= h((string)($candidate['aircraft_registration'] ?: 'Unknown aircraft')) ?></div>
+                                <div class="cockpit-muted">
+                                  <?= h(cockpit_admin_fmt_timestamp($candidateStart)) ?> to <?= h(cockpit_admin_fmt_timestamp($candidateEnd)) ?>
+                                  · <?= h(cockpit_admin_fmt_hours_between($candidateStart, $candidateEnd)) ?>
+                                </div>
+                                <div class="cockpit-muted">
+                                  Operational: <?= h((string)($candidate['operational_data_log_type'] ?? 'none')) ?>
+                                  · Replay: <?= h((string)($candidate['replay_data_log_type'] ?? 'none')) ?>
+                                </div>
+                                <div class="cockpit-muted">
+                                  <?= $candidateRows > 0 ? h(number_format($candidateRows) . ' rows') : 'Rows unknown' ?>
+                                  <?= $candidateBytes > 0 ? h(' · ' . cockpit_admin_fmt_bytes($candidateBytes)) : '' ?>
+                                </div>
+                                <div class="cockpit-muted">
+                                  Match <?= h((string)($candidate['group_match_status'] ?? 'pending')) ?>
+                                  <?php if (is_numeric($candidate['group_match_confidence'] ?? null)): ?> · confidence <?= h(number_format((float)$candidate['group_match_confidence'], 2)) ?><?php endif; ?>
+                                </div>
+                                <div>
+                                  <?php if ($candidateOperationalSelected): ?><span class="cockpit-badge cockpit-badge-ready">PRIMARY_OPERATIONAL</span><?php endif; ?>
+                                  <?php if ($candidateReplaySelected): ?><span class="cockpit-badge cockpit-badge-progress">PRIMARY_REPLAY</span><?php endif; ?>
+                                </div>
+                                <div class="cockpit-code"><?= h((string)($candidate['garmin_entry_uuid'] ?: $candidate['canonical_track_uuid'] ?: $candidate['source_group_uuid'] ?: '')) ?></div>
+                              </div>
+                            <?php endforeach; ?>
+                          </div>
+                        <?php else: ?>
+                          <div class="cockpit-muted">No nearby Garmin candidate flights were found for this recording/session window.</div>
+                        <?php endif; ?>
+                      </div>
                       <details>
                         <summary><strong>Manual correction: attach or replace Garmin CSV</strong></summary>
                         <div class="cockpit-muted">Use this only if the Sync Agent did not auto-match the correct Garmin source. Import type is preserved for simulator, C172SP, and other Garmin profiles.</div>
