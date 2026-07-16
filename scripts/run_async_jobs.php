@@ -6,6 +6,7 @@ require_once __DIR__ . '/../src/AsyncJobService.php';
 require_once __DIR__ . '/../src/FlightRecordDerivationService.php';
 require_once __DIR__ . '/../src/GarminCsvSessionMatchService.php';
 require_once __DIR__ . '/../src/GarminCsvFlightSummaryService.php';
+require_once __DIR__ . '/../src/GarminTrackFlightSummaryService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupMatchService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupSelectionService.php';
 
@@ -68,6 +69,13 @@ function run_cvr_async_job(PDO $pdo, string $jobType, array $payload): array
             return array('ok' => true, 'message' => 'No source group id in payload.');
         }
         return (new GarminSourceGroupSelectionService($pdo))->selectForGroup($sourceGroupId);
+    }
+    if ($jobType === 'GARMIN_TRACK_FLIGHT_SUMMARY') {
+        $trackArtifactId = (int)($payload['track_artifact_id'] ?? 0);
+        if ($trackArtifactId <= 0) {
+            return array('ok' => true, 'message' => 'No track artifact id in payload.');
+        }
+        return (new GarminTrackFlightSummaryService($pdo))->deriveAndStore($trackArtifactId);
     }
     $csvFileId = (int)($payload['csv_file_id'] ?? 0);
     if ($csvFileId <= 0) {

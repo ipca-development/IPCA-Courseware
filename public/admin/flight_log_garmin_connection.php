@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
+require_once __DIR__ . '/../../src/GarminTrackFlightSummaryService.php';
 
 cw_require_admin();
 
@@ -101,7 +102,9 @@ $hasCsvFiles = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_files');
 $hasEntries = garmin_sync_table_exists($pdo, 'ipca_garmin_logbook_entries');
 $hasSourceGroups = garmin_sync_table_exists($pdo, 'ipca_garmin_source_groups');
 $hasCsvSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
+$hasTrackSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_track_flight_summaries');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
+$trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
@@ -146,6 +149,16 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     FROM ipca_garmin_csv_files f
     " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
+
+$trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
+    SELECT
+      COUNT(t.id) AS total_track_artifacts,
+      COUNT(s.track_artifact_id) AS summarized_track_artifacts,
+      SUM(CASE WHEN s.track_artifact_id IS NULL THEN 1 ELSE 0 END) AS missing_track_summaries
+    FROM ipca_garmin_normalized_track_artifacts t
+    " . ($hasTrackSummaries ? "LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id" : "LEFT JOIN (SELECT NULL AS track_artifact_id) s ON 1 = 0") . "
+    WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
+") : array('total_track_artifacts' => 0, 'summarized_track_artifacts' => 0, 'missing_track_summaries' => 0);
 
 $recentTracks = array();
 if ($hasTracks) {
@@ -277,7 +290,10 @@ if (!$hasTracks) {
 $error = trim((string)($_GET['error'] ?? ''));
 $notice = '';
 if (isset($_GET['summary_processed'])) {
-    $notice = 'Garmin CSV summaries processed: ' . (int)$_GET['summary_processed'] . '; failed: ' . (int)($_GET['summary_failed'] ?? 0) . '.';
+    $notice = 'Garmin summaries processed: ' . (int)$_GET['summary_processed']
+        . ' (CSV ' . (int)($_GET['csv_processed'] ?? 0)
+        . ', tracks ' . (int)($_GET['track_processed'] ?? 0)
+        . '); failed: ' . (int)($_GET['summary_failed'] ?? 0) . '.';
 }
 if (isset($_GET['summary_queued'])) {
     $notice = 'Garmin CSV summary jobs queued: ' . (int)$_GET['summary_queued'] . '.';
@@ -300,13 +316,13 @@ cw_header('Garmin Sync Agent');
           <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
           <input type="hidden" name="action" value="derive_missing_now">
           <input type="hidden" name="limit" value="100">
-          <button type="submit">Process CSV Summaries Now</button>
+          <button type="submit">Process Garmin Summaries Now</button>
         </form>
         <form method="post" action="/admin/api/garmin_csv_summary_action.php">
           <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
           <input type="hidden" name="action" value="enqueue_missing">
           <input type="hidden" name="limit" value="500">
-          <button class="secondary" type="submit">Queue Remaining Summaries</button>
+          <button class="secondary" type="submit">Queue Remaining Garmin Summaries</button>
         </form>
         <a href="/admin/flight_records.php" class="secondary">Flight Records</a>
         <a href="/admin/cockpit_recorder.php" class="secondary">Cockpit Recorder</a>
@@ -341,6 +357,8 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-kv"><div class="garmin-label">Last Track Upload</div><div class="garmin-value"><?= h(garmin_sync_datetime((string)($trackSummary['last_track_at'] ?? ''))) ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">CSV Summaries</div><div class="garmin-value"><?= number_format((int)($csvSummaryStats['summarized_csv_files'] ?? 0)) ?> / <?= number_format((int)($csvSummaryStats['total_csv_files'] ?? 0)) ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">Summaries Missing</div><div class="garmin-value"><?= number_format((int)($csvSummaryStats['missing_summaries'] ?? 0)) ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Track Summaries</div><div class="garmin-value"><?= number_format((int)($trackSummaryStats['summarized_track_artifacts'] ?? 0)) ?> / <?= number_format((int)($trackSummaryStats['total_track_artifacts'] ?? 0)) ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Track Summaries Missing</div><div class="garmin-value"><?= number_format((int)($trackSummaryStats['missing_track_summaries'] ?? 0)) ?></div></div>
     </div>
     <?php if ($classificationSummary !== array()): ?>
       <div style="margin-top:14px" class="garmin-grid">
@@ -416,6 +434,9 @@ cw_header('Garmin Sync Agent');
               'last_valid_sample_utc' => (string)($track['csv_last_valid_sample_utc'] ?? ''),
               'valid_row_count' => (int)($track['csv_valid_row_count'] ?? 0),
           )) : array();
+          if ($csvSummary === array() || (string)($csvSummary['status'] ?? '') === 'not_analyzed') {
+              $csvSummary = $trackSummaryService->summaryForTrackArtifact($track);
+          }
           ?>
           <tr>
             <td>

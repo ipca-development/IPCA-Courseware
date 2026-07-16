@@ -209,6 +209,30 @@ final class SyncAgentGarminIngestionService
             AuditEventService::jsonEncode($sourceDescriptors),
             AuditEventService::jsonEncode($metadata),
         ));
+        $trackArtifactId = (int)$this->pdo->lastInsertId();
+        if ($trackArtifactId <= 0) {
+            $lookup = $this->pdo->prepare("
+                SELECT id
+                FROM ipca_garmin_normalized_track_artifacts
+                WHERE provider_name = ?
+                  AND garmin_entry_uuid = ?
+                  AND track_uuid = ?
+                  AND sha256 = ?
+                LIMIT 1
+            ");
+            $lookup->execute(array($this->providerName, $entryUuid, $trackUuid, $sha256));
+            $trackArtifactId = (int)$lookup->fetchColumn();
+        }
+        if ($trackArtifactId > 0) {
+            (new AsyncJobService($this->pdo))->enqueue(
+                'GARMIN_TRACK_FLIGHT_SUMMARY',
+                'ipca_garmin_normalized_track_artifacts',
+                (string)$trackArtifactId,
+                array('track_artifact_id' => $trackArtifactId, 'entry_uuid' => $entryUuid, 'track_uuid' => $trackUuid),
+                null,
+                80
+            );
+        }
         $this->recordAcknowledgment((int)$token['id'], $idempotencyKey, $entryUuid, $trackUuid, $sha256, 'accepted', 0);
         return array('ok' => true, 'status' => 'accepted', 'artifact_type' => 'GARMIN_TRACK_NORMALIZED_JSON', 'track_uuid' => $trackUuid);
     }
