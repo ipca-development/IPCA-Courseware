@@ -98,7 +98,10 @@ $hasAcks = garmin_sync_table_exists($pdo, 'ipca_sync_agent_upload_acknowledgment
 $hasTracks = garmin_sync_table_exists($pdo, 'ipca_garmin_normalized_track_artifacts');
 $hasSources = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_sources');
 $hasCsvFiles = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_files');
-$summaryService = new GarminCsvFlightSummaryService();
+$hasEntries = garmin_sync_table_exists($pdo, 'ipca_garmin_logbook_entries');
+$hasSourceGroups = garmin_sync_table_exists($pdo, 'ipca_garmin_source_groups');
+$hasCsvSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
+$summaryService = new GarminCsvFlightSummaryService($pdo);
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
@@ -135,6 +138,15 @@ $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
     ORDER BY total DESC, classification ASC
 ") : array();
 
+$csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
+    SELECT
+      COUNT(f.id) AS total_csv_files,
+      COUNT(s.csv_file_id) AS summarized_csv_files,
+      SUM(CASE WHEN s.csv_file_id IS NULL THEN 1 ELSE 0 END) AS missing_summaries
+    FROM ipca_garmin_csv_files f
+    " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
+") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
+
 $recentTracks = array();
 if ($hasTracks) {
     $ackSelect = $hasAcks ? 'a.status AS upload_status, a.created_at AS uploaded_at' : 'NULL AS upload_status, NULL AS uploaded_at';
@@ -160,12 +172,28 @@ if ($hasTracks) {
           NULL AS csv_aircraft_ident, NULL AS csv_first_valid_sample_utc,
           NULL AS csv_last_valid_sample_utc, NULL AS csv_valid_row_count
     ";
+    $csvIdParts = array();
+    if ($hasAcks) {
+        $csvIdParts[] = 'a.garmin_csv_file_id';
+    }
+    $csvIdParts[] = 'direct_s.garmin_csv_file_id';
+    if ($hasEntries && $hasSourceGroups) {
+        $csvIdParts[] = 'group_s.garmin_csv_file_id';
+    }
+    $csvIdExpression = count($csvIdParts) > 1 ? 'COALESCE(' . implode(', ', $csvIdParts) . ')' : $csvIdParts[0];
     $sourceJoin = ($hasSources && $hasCsvFiles) ? "
-        LEFT JOIN ipca_garmin_flight_data_sources s
-          ON s.provider_name = t.provider_name
-         AND s.flight_data_log_uuid = t.track_uuid
+        " . ($hasEntries ? "LEFT JOIN ipca_garmin_logbook_entries e
+          ON e.provider_name = t.provider_name
+         AND e.garmin_entry_uuid = t.garmin_entry_uuid" : "") . "
+        " . ($hasEntries && $hasSourceGroups ? "LEFT JOIN ipca_garmin_source_groups g
+          ON g.garmin_logbook_entry_id = e.id" : "") . "
+        LEFT JOIN ipca_garmin_flight_data_sources direct_s
+          ON direct_s.provider_name = t.provider_name
+         AND direct_s.flight_data_log_uuid = t.track_uuid
+        " . ($hasEntries && $hasSourceGroups ? "LEFT JOIN ipca_garmin_flight_data_sources group_s
+          ON group_s.id = COALESCE(g.primary_operational_source_id, g.primary_replay_source_id)" : "") . "
         LEFT JOIN ipca_garmin_csv_files f
-          ON f.id = " . ($hasAcks ? 'COALESCE(a.garmin_csv_file_id, s.garmin_csv_file_id)' : 's.garmin_csv_file_id') . "
+          ON f.id = {$csvIdExpression}
     " : '';
     $recentTracks = garmin_sync_rows($pdo, "
         SELECT
@@ -246,10 +274,19 @@ if (!$hasTracks) {
     $missingTables[] = 'ipca_garmin_normalized_track_artifacts';
 }
 
+$error = trim((string)($_GET['error'] ?? ''));
+$notice = '';
+if (isset($_GET['summary_processed'])) {
+    $notice = 'Garmin CSV summaries processed: ' . (int)$_GET['summary_processed'] . '; failed: ' . (int)($_GET['summary_failed'] ?? 0) . '.';
+}
+if (isset($_GET['summary_queued'])) {
+    $notice = 'Garmin CSV summary jobs queued: ' . (int)$_GET['summary_queued'] . '.';
+}
+
 cw_header('Garmin Sync Agent');
 ?>
 <style>
-.garmin-page{display:grid;gap:18px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:13px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.garmin-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:4px}.garmin-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-table-wrap{overflow-x:auto}.garmin-table{width:100%;border-collapse:collapse;min-width:980px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;vertical-align:top}.garmin-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}.garmin-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a{border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:9px 12px;text-decoration:none}.garmin-toolbar a.secondary{background:#475569}.garmin-progress{height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}
+.garmin-page{display:grid;gap:18px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:13px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.garmin-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:4px}.garmin-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-table-wrap{overflow-x:auto}.garmin-table{width:100%;border-collapse:collapse;min-width:980px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;vertical-align:top}.garmin-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}.garmin-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:9px 12px;text-decoration:none;cursor:pointer}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -259,6 +296,18 @@ cw_header('Garmin Sync Agent');
         <p class="garmin-muted">Server-side view of Garmin data uploaded by the native Mac IPCA Sync Agent. The old cloud-browser Garmin controls have been retired from this page.</p>
       </div>
       <div class="garmin-toolbar">
+        <form method="post" action="/admin/api/garmin_csv_summary_action.php">
+          <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
+          <input type="hidden" name="action" value="derive_missing_now">
+          <input type="hidden" name="limit" value="100">
+          <button type="submit">Process CSV Summaries Now</button>
+        </form>
+        <form method="post" action="/admin/api/garmin_csv_summary_action.php">
+          <input type="hidden" name="return" value="/admin/flight_log_garmin_connection.php">
+          <input type="hidden" name="action" value="enqueue_missing">
+          <input type="hidden" name="limit" value="500">
+          <button class="secondary" type="submit">Queue Remaining Summaries</button>
+        </form>
         <a href="/admin/flight_records.php" class="secondary">Flight Records</a>
         <a href="/admin/cockpit_recorder.php" class="secondary">Cockpit Recorder</a>
       </div>
@@ -266,6 +315,8 @@ cw_header('Garmin Sync Agent');
     <?php if ($missingTables !== array()): ?>
       <p><span class="garmin-badge garmin-badge-danger">Missing tables</span> <?= h(implode(', ', $missingTables)) ?></p>
     <?php endif; ?>
+    <?php if ($error !== ''): ?><div class="garmin-error"><?= h($error) ?></div><?php endif; ?>
+    <?php if ($notice !== ''): ?><div class="garmin-notice"><?= h($notice) ?></div><?php endif; ?>
   </section>
 
   <section class="garmin-card">
@@ -288,6 +339,8 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-kv"><div class="garmin-label">Total Sessions</div><div class="garmin-value"><?= number_format((int)($trackSummary['total_sessions'] ?? 0)) ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">Total Fields</div><div class="garmin-value"><?= number_format((int)($trackSummary['total_fields'] ?? 0)) ?></div></div>
       <div class="garmin-kv"><div class="garmin-label">Last Track Upload</div><div class="garmin-value"><?= h(garmin_sync_datetime((string)($trackSummary['last_track_at'] ?? ''))) ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">CSV Summaries</div><div class="garmin-value"><?= number_format((int)($csvSummaryStats['summarized_csv_files'] ?? 0)) ?> / <?= number_format((int)($csvSummaryStats['total_csv_files'] ?? 0)) ?></div></div>
+      <div class="garmin-kv"><div class="garmin-label">Summaries Missing</div><div class="garmin-value"><?= number_format((int)($csvSummaryStats['missing_summaries'] ?? 0)) ?></div></div>
     </div>
     <?php if ($classificationSummary !== array()): ?>
       <div style="margin-top:14px" class="garmin-grid">

@@ -368,7 +368,7 @@ if (isset($_GET['recordings_restored'])) {
 $recordings = array();
 $service = null;
 $adsbService = null;
-$garminSummaryService = new GarminCsvFlightSummaryService();
+$garminSummaryService = new GarminCsvFlightSummaryService($pdo);
 $garminFlightOptions = array();
 $garminFlightOptionsByGroup = array();
 $importProfileOptions = GarminCsvImportProfile::options();

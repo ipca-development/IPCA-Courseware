@@ -5,6 +5,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/AsyncJobService.php';
 require_once __DIR__ . '/../src/FlightRecordDerivationService.php';
 require_once __DIR__ . '/../src/GarminCsvSessionMatchService.php';
+require_once __DIR__ . '/../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupMatchService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupSelectionService.php';
 
@@ -100,6 +101,9 @@ function run_cvr_async_job(PDO $pdo, string $jobType, array $payload): array
     }
     if ($jobType === 'GARMIN_CSV_DEEP_ANALYSIS') {
         return array('ok' => true, 'message' => 'Deep analysis placeholder completed for Phase 1.', 'csv_file_id' => $csvFileId);
+    }
+    if ($jobType === 'GARMIN_CSV_FLIGHT_SUMMARY') {
+        return (new GarminCsvFlightSummaryService($pdo))->deriveAndStore($csvFileId);
     }
     if ($jobType === 'FLIGHT_RECORD_DERIVATION') {
         return (new FlightRecordDerivationService($pdo))->deriveFromCsvFile($csvFileId);

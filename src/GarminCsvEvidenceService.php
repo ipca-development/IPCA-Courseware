@@ -333,6 +333,7 @@ final class GarminCsvEvidenceService
     {
         $jobs = new AsyncJobService($this->pdo);
         $jobs->enqueue('GARMIN_CSV_DEEP_ANALYSIS', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId));
+        $jobs->enqueue('GARMIN_CSV_FLIGHT_SUMMARY', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId), null, 80);
         $jobs->enqueue('GARMIN_CSV_SESSION_MATCH', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId));
         $jobs->enqueue('FLIGHT_RECORD_DERIVATION', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId));
     }
