@@ -94,6 +94,52 @@ function garmin_sync_metadata_value(?string $json, string $key): string
     return (string)$value;
 }
 
+function garmin_sync_flight_id(int $id): string
+{
+    return 'A-' . str_pad((string)$id, 5, '0', STR_PAD_LEFT);
+}
+
+function garmin_sync_date_label(string $value): string
+{
+    $timestamp = strtotime($value);
+    return $timestamp !== false ? date('D, M j Y', $timestamp) : '--';
+}
+
+function garmin_sync_status_label(array $summary, string $classification): string
+{
+    $classification = strtoupper(trim($classification));
+    if ($classification === 'GARMIN_GPS_ONLY') {
+        return 'GPS only';
+    }
+    if ($classification === 'GARMIN_UNKNOWN_TRACK' || $classification === '') {
+        return 'Needs review';
+    }
+    $hasRoute = (string)($summary['dep_airport'] ?? '--') !== '--' && (string)($summary['arr_airport'] ?? '--') !== '--';
+    $hasTime = (string)($summary['dep_time_lt'] ?? '--') !== '--' && (string)($summary['arr_time_lt'] ?? '--') !== '--';
+    $hasEngine = (string)($summary['hobbs_status'] ?? '') === 'ok' || (string)($summary['hobbs_out'] ?? '--') !== '--';
+    return $hasRoute && $hasTime && $hasEngine ? 'Complete' : 'Partial';
+}
+
+function garmin_sync_is_new(mixed $uploadedAt): bool
+{
+    $timestamp = strtotime(trim((string)$uploadedAt));
+    return $timestamp !== false && $timestamp >= (time() - 21600);
+}
+
+function garmin_sync_duration_label(array $summary): string
+{
+    $hoursText = trim((string)($summary['hobbs_hours'] ?? $summary['elapsed_time'] ?? ''));
+    if ($hoursText === '' || $hoursText === '--') {
+        return '--';
+    }
+    $hours = (float)preg_replace('/[^0-9.]+/', '', $hoursText);
+    if ($hours <= 0) {
+        return '--';
+    }
+    $minutes = (int)round($hours * 60);
+    return number_format($hours, 1) . ' (' . sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60) . ')';
+}
+
 $hasTokens = garmin_sync_table_exists($pdo, 'ipca_sync_agent_tokens');
 $hasAcks = garmin_sync_table_exists($pdo, 'ipca_sync_agent_upload_acknowledgments');
 $hasTracks = garmin_sync_table_exists($pdo, 'ipca_garmin_normalized_track_artifacts');
@@ -103,6 +149,7 @@ $hasEntries = garmin_sync_table_exists($pdo, 'ipca_garmin_logbook_entries');
 $hasSourceGroups = garmin_sync_table_exists($pdo, 'ipca_garmin_source_groups');
 $hasCsvSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
 $hasTrackSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_track_flight_summaries');
+$hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_states');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 
@@ -172,6 +219,20 @@ if ($hasTracks) {
     " : '';
     $tokenSelect = ($hasAcks && $hasTokens) ? 'tok.display_name AS device_name' : 'NULL AS device_name';
     $tokenJoin = ($hasAcks && $hasTokens) ? 'LEFT JOIN ipca_sync_agent_tokens tok ON tok.id = a.token_id' : '';
+    $entrySelect = $hasEntries ? "
+          e.aircraft_registration AS entry_aircraft_registration,
+          e.generated_track_start_utc AS entry_generated_track_start_utc,
+          e.generated_track_stop_utc AS entry_generated_track_stop_utc
+    " : "
+          NULL AS entry_aircraft_registration,
+          NULL AS entry_generated_track_start_utc,
+          NULL AS entry_generated_track_stop_utc
+    ";
+    $entryJoin = $hasEntries ? "
+        LEFT JOIN ipca_garmin_logbook_entries e
+          ON e.provider_name = t.provider_name
+         AND e.garmin_entry_uuid = t.garmin_entry_uuid
+    " : '';
     $csvSelect = ($hasSources && $hasCsvFiles) ? "
           f.id AS csv_file_id, f.csv_file_uuid, f.aircraft_registration AS csv_aircraft_registration,
           f.original_filename AS csv_original_filename, f.storage_path AS csv_storage_path,
@@ -194,10 +255,9 @@ if ($hasTracks) {
         $csvIdParts[] = 'group_s.garmin_csv_file_id';
     }
     $csvIdExpression = count($csvIdParts) > 1 ? 'COALESCE(' . implode(', ', $csvIdParts) . ')' : $csvIdParts[0];
+    $stateSelect = $hasFlightStates ? 'st.hidden_at AS hidden_at, st.hidden_reason AS hidden_reason' : 'NULL AS hidden_at, NULL AS hidden_reason';
+    $stateJoin = $hasFlightStates ? 'LEFT JOIN ipca_garmin_flight_artifact_states st ON st.track_artifact_id = t.id' : '';
     $sourceJoin = ($hasSources && $hasCsvFiles) ? "
-        " . ($hasEntries ? "LEFT JOIN ipca_garmin_logbook_entries e
-          ON e.provider_name = t.provider_name
-         AND e.garmin_entry_uuid = t.garmin_entry_uuid" : "") . "
         " . ($hasEntries && $hasSourceGroups ? "LEFT JOIN ipca_garmin_source_groups g
           ON g.garmin_logbook_entry_id = e.id" : "") . "
         LEFT JOIN ipca_garmin_flight_data_sources direct_s
@@ -213,11 +273,15 @@ if ($hasTracks) {
           t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
           t.raw_metadata_json, t.source_descriptors_json, t.first_seen_at, t.last_seen_at,
           {$ackSelect}, {$tokenSelect},
-          {$csvSelect}
+          {$entrySelect},
+          {$csvSelect},
+          {$stateSelect}
         FROM ipca_garmin_normalized_track_artifacts t
         {$ackJoin}
         {$tokenJoin}
+        {$entryJoin}
         {$sourceJoin}
+        {$stateJoin}
         ORDER BY t.last_seen_at DESC, t.id DESC
         LIMIT 100
     ");
@@ -243,6 +307,78 @@ if ($hasAcks && $hasTokens) {
         ORDER BY a.created_at DESC
         LIMIT 50
     ");
+}
+
+$filterTail = strtoupper(trim((string)($_GET['tail'] ?? '')));
+$filterDateFrom = trim((string)($_GET['date_from'] ?? ''));
+$filterDateTo = trim((string)($_GET['date_to'] ?? ''));
+$filterDep = strtoupper(trim((string)($_GET['dep'] ?? '')));
+$filterArr = strtoupper(trim((string)($_GET['arr'] ?? '')));
+$filterStatus = trim((string)($_GET['status'] ?? ''));
+$showIncomplete = in_array(strtolower(trim((string)($_GET['show_incomplete'] ?? ''))), array('1', 'true', 'yes'), true);
+$showHidden = in_array(strtolower(trim((string)($_GET['show_hidden'] ?? ''))), array('1', 'true', 'yes'), true);
+$newOnly = in_array(strtolower(trim((string)($_GET['new_only'] ?? ''))), array('1', 'true', 'yes'), true);
+
+$flightRows = array();
+foreach ($recentTracks as $track) {
+    $classification = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'trackClassification');
+    $sourceNames = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'sourceNames');
+    $csvSummary = !empty($track['csv_file_id']) ? $summaryService->summaryForCsvFile(array(
+        'id' => (int)$track['csv_file_id'],
+        'aircraft_registration' => (string)($track['csv_aircraft_registration'] ?? ''),
+        'aircraft_ident' => (string)($track['csv_aircraft_ident'] ?? ''),
+        'storage_path' => (string)($track['csv_storage_path'] ?? ''),
+        'import_profile' => (string)($track['csv_import_profile'] ?? ''),
+        'first_valid_sample_utc' => (string)($track['csv_first_valid_sample_utc'] ?? ''),
+        'last_valid_sample_utc' => (string)($track['csv_last_valid_sample_utc'] ?? ''),
+        'valid_row_count' => (int)($track['csv_valid_row_count'] ?? 0),
+    )) : array();
+    if ($csvSummary === array() || (string)($csvSummary['status'] ?? '') === 'not_analyzed') {
+        $csvSummary = $trackSummaryService->summaryForTrackArtifact($track);
+    }
+    $statusLabel = garmin_sync_status_label($csvSummary, $classification);
+    $uploadedAt = (string)($track['uploaded_at'] ?? $track['last_seen_at'] ?? '');
+    $isNew = garmin_sync_is_new($uploadedAt);
+    if (trim((string)($track['hidden_at'] ?? '')) !== '' && !$showHidden) {
+        continue;
+    }
+    $tail = strtoupper((string)($csvSummary['tail'] ?? 'Unknown tail'));
+    $dep = strtoupper((string)($csvSummary['dep_airport'] ?? '--'));
+    $arr = strtoupper((string)($csvSummary['arr_airport'] ?? '--'));
+    $startUtc = (string)($csvSummary['start_utc'] ?? $track['entry_generated_track_start_utc'] ?? '');
+    if (!$showIncomplete && $statusLabel !== 'Complete') {
+        continue;
+    }
+    if ($newOnly && !$isNew) {
+        continue;
+    }
+    if ($filterTail !== '' && !str_contains($tail, $filterTail)) {
+        continue;
+    }
+    if ($filterDep !== '' && $dep !== $filterDep) {
+        continue;
+    }
+    if ($filterArr !== '' && $arr !== $filterArr) {
+        continue;
+    }
+    if ($filterStatus !== '' && $statusLabel !== $filterStatus) {
+        continue;
+    }
+    if ($filterDateFrom !== '' && $startUtc !== '' && strtotime($startUtc) < strtotime($filterDateFrom . ' 00:00:00')) {
+        continue;
+    }
+    if ($filterDateTo !== '' && $startUtc !== '' && strtotime($startUtc) > strtotime($filterDateTo . ' 23:59:59')) {
+        continue;
+    }
+    $flightRows[] = array(
+        'track' => $track,
+        'summary' => $csvSummary,
+        'classification' => $classification,
+        'source_names' => $sourceNames,
+        'status_label' => $statusLabel,
+        'uploaded_at' => $uploadedAt,
+        'is_new' => $isNew,
+    );
 }
 
 $attentionRows = array();
@@ -298,11 +434,20 @@ if (isset($_GET['summary_processed'])) {
 if (isset($_GET['summary_queued'])) {
     $notice = 'Garmin CSV summary jobs queued: ' . (int)$_GET['summary_queued'] . '.';
 }
+if (isset($_GET['flights_hidden'])) {
+    $notice = (int)$_GET['flights_hidden'] . ' Garmin flight(s) hidden.';
+}
+if (isset($_GET['flights_restored'])) {
+    $notice = (int)$_GET['flights_restored'] . ' Garmin flight(s) restored.';
+}
+if (isset($_GET['flights_reprocess_queued'])) {
+    $notice = 'Garmin flight summary reprocess jobs queued: ' . (int)$_GET['flights_reprocess_queued'] . '.';
+}
 
 cw_header('Garmin Sync Agent');
 ?>
 <style>
-.garmin-page{display:grid;gap:18px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:13px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.garmin-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:4px}.garmin-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-table-wrap{overflow-x:auto}.garmin-table{width:100%;border-collapse:collapse;min-width:980px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;vertical-align:top}.garmin-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}.garmin-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:9px 12px;text-decoration:none;cursor:pointer}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}
+.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.035em;resize:horizontal;overflow:auto}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;align-items:end}.garmin-filter input,.garmin-filter select{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:6px 7px;font:inherit;font-size:12px}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -372,7 +517,9 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
   </section>
 
-  <section class="garmin-card garmin-table-wrap">
+  <details class="garmin-card">
+    <summary><strong>Technical Diagnostics</strong> <span class="garmin-muted">Raw sync artifacts, attention reasons, upload acknowledgments</span></summary>
+  <section class="garmin-table-wrap" style="margin-top:14px">
     <h3 style="margin-top:0">Items Needing Attention</h3>
     <?php if ($attentionRows === array()): ?>
       <div class="garmin-empty">No recent Garmin sync-agent items need attention.</div>
@@ -410,65 +557,104 @@ cw_header('Garmin Sync Agent');
       </table>
     <?php endif; ?>
   </section>
+  </details>
 
-  <section class="garmin-card garmin-table-wrap">
-    <h3 style="margin-top:0">Recent Garmin Tracks Uploaded by Sync Agent</h3>
-    <?php if ($recentTracks === array()): ?>
-      <div class="garmin-empty">No normalized Garmin track artifacts have been uploaded yet.</div>
+  <section class="garmin-card">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">Garmin Flights</h3>
+        <p class="garmin-muted">Complete avionics flights are shown by default. Raw identifiers and technical evidence are in each row's detail modal.</p>
+      </div>
+      <form class="garmin-actions" method="post" action="/admin/api/garmin_flights_bulk_action.php" id="garmin-bulk-form">
+        <input type="hidden" name="return" value="<?= h('/admin/flight_log_garmin_connection.php' . ($_SERVER['QUERY_STRING'] ? '?' . (string)$_SERVER['QUERY_STRING'] : '')) ?>">
+        <input type="hidden" name="reason" value="Hidden from Garmin flight dashboard">
+        <button type="submit" name="action" value="hide">Hide selected</button>
+        <button class="secondary" type="submit" name="action" value="restore">Restore selected</button>
+        <button class="secondary" type="submit" name="action" value="reprocess">Queue reprocess</button>
+      </form>
+    </div>
+
+    <form class="garmin-filter" method="get" action="/admin/flight_log_garmin_connection.php" style="margin-top:12px">
+      <label><span class="garmin-label">Tail</span><input type="text" name="tail" value="<?= h($filterTail) ?>" placeholder="N392EA"></label>
+      <label><span class="garmin-label">From</span><input type="date" name="date_from" value="<?= h($filterDateFrom) ?>"></label>
+      <label><span class="garmin-label">To</span><input type="date" name="date_to" value="<?= h($filterDateTo) ?>"></label>
+      <label><span class="garmin-label">Dep AD</span><input type="text" name="dep" value="<?= h($filterDep) ?>" placeholder="KTRM"></label>
+      <label><span class="garmin-label">Arr AD</span><input type="text" name="arr" value="<?= h($filterArr) ?>" placeholder="KPSP"></label>
+      <label><span class="garmin-label">Status</span><select name="status"><option value="">Any</option><?php foreach (array('Complete','Partial','GPS only','Needs review') as $option): ?><option value="<?= h($option) ?>"<?= $filterStatus === $option ? ' selected' : '' ?>><?= h($option) ?></option><?php endforeach; ?></select></label>
+      <label><span class="garmin-label">Visibility</span><select name="show_incomplete"><option value="0">Complete only</option><option value="1"<?= $showIncomplete ? ' selected' : '' ?>>Show incomplete</option></select></label>
+      <label><span class="garmin-label">Hidden</span><select name="show_hidden"><option value="0">Hide hidden</option><option value="1"<?= $showHidden ? ' selected' : '' ?>>Show hidden</option></select></label>
+      <label><span class="garmin-label">New</span><select name="new_only"><option value="0">All</option><option value="1"<?= $newOnly ? ' selected' : '' ?>>New only</option></select></label>
+      <div><button class="secondary" type="submit">Apply Filters</button></div>
+    </form>
+
+    <?php
+      $totalSummaries = (int)($trackSummaryStats['total_track_artifacts'] ?? 0) + (int)($csvSummaryStats['total_csv_files'] ?? 0);
+      $doneSummaries = (int)($trackSummaryStats['summarized_track_artifacts'] ?? 0) + (int)($csvSummaryStats['summarized_csv_files'] ?? 0);
+      $summaryPercent = $totalSummaries > 0 ? min(100, (int)round(($doneSummaries / $totalSummaries) * 100)) : 0;
+    ?>
+    <div style="margin:12px 0">
+      <div class="garmin-muted">Summary processing <?= number_format($doneSummaries) ?> / <?= number_format($totalSummaries) ?> (<?= $summaryPercent ?>%)</div>
+      <div class="garmin-progress"><span style="width:<?= $summaryPercent ?>%"></span></div>
+    </div>
+
+    <?php if ($flightRows === array()): ?>
+      <div class="garmin-empty">No Garmin flights match the current filters. Incomplete/GPS-only flights are hidden by default.</div>
     <?php else: ?>
       <table class="garmin-table">
-        <thead><tr><th>Flight</th><th>Route / Time</th><th>Hobbs</th><th>Status</th><th>Classification</th><th>Telemetry</th><th>Size</th><th>Device</th><th>Uploaded</th></tr></thead>
+        <thead><tr><th style="width:3%"><input type="checkbox" data-select-all-flights></th><th style="width:8%">Flight</th><th style="width:11%">Date</th><th style="width:7%">Tail</th><th style="width:7%">Dep AD</th><th style="width:8%">Dep LT</th><th style="width:8%">Hobbs Out</th><th style="width:8%">Tacho Out</th><th style="width:9%">Duration</th><th style="width:7%">Arr AD</th><th style="width:8%">Arr LT</th><th style="width:9%">Status</th><th style="width:17%">Uploaded</th></tr></thead>
         <tbody>
-        <?php foreach ($recentTracks as $track): ?>
+        <?php foreach ($flightRows as $flight): ?>
           <?php
-          $classification = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'trackClassification');
-          $sourceNames = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'sourceNames');
-          $status = (string)($track['upload_status'] ?? 'accepted');
-          $csvSummary = !empty($track['csv_file_id']) ? $summaryService->summaryForCsvFile(array(
-              'id' => (int)$track['csv_file_id'],
-              'aircraft_registration' => (string)($track['csv_aircraft_registration'] ?? ''),
-              'aircraft_ident' => (string)($track['csv_aircraft_ident'] ?? ''),
-              'storage_path' => (string)($track['csv_storage_path'] ?? ''),
-              'import_profile' => (string)($track['csv_import_profile'] ?? ''),
-              'first_valid_sample_utc' => (string)($track['csv_first_valid_sample_utc'] ?? ''),
-              'last_valid_sample_utc' => (string)($track['csv_last_valid_sample_utc'] ?? ''),
-              'valid_row_count' => (int)($track['csv_valid_row_count'] ?? 0),
-          )) : array();
-          if ($csvSummary === array() || (string)($csvSummary['status'] ?? '') === 'not_analyzed') {
-              $csvSummary = $trackSummaryService->summaryForTrackArtifact($track);
-          }
+            $track = $flight['track'];
+            $summary = $flight['summary'];
+            $flightId = garmin_sync_flight_id((int)$track['id']);
+            $modalId = 'garmin-flight-' . (int)$track['id'];
+            $statusLabel = (string)$flight['status_label'];
+            $statusClass = $statusLabel === 'Complete' ? 'garmin-badge-ok' : ($statusLabel === 'GPS only' ? 'garmin-badge-danger' : 'garmin-badge-warn');
           ?>
           <tr>
-            <td>
-              <strong><?= h((string)($csvSummary['date_label'] ?? '--')) ?></strong><br>
-              <?= h((string)($csvSummary['tail'] ?? 'Unknown tail')) ?><br>
-              <span class="garmin-muted"><?= h((string)($track['csv_original_filename'] ?? '')) ?></span>
-              <div class="garmin-code"><?= h((string)$track['track_uuid']) ?></div>
-            </td>
-            <td>
-              <?= h((string)($csvSummary['dep_airport'] ?? '--')) ?> <?= h((string)($csvSummary['dep_time_lt'] ?? '--')) ?> LT
-              - <?= h((string)($csvSummary['arr_airport'] ?? '--')) ?> <?= h((string)($csvSummary['arr_time_lt'] ?? '--')) ?> LT<br>
-              <span class="garmin-muted">ET <?= h((string)($csvSummary['elapsed_time'] ?? '--')) ?> · Entry <?= h((string)$track['garmin_entry_uuid']) ?></span>
-            </td>
-            <td>
-              <?= h((string)($csvSummary['hobbs_start_lt'] ?? '--')) ?> - <?= h((string)($csvSummary['hobbs_end_lt'] ?? '--')) ?> LT<br>
-              <span class="garmin-muted"><?= h((string)($csvSummary['hobbs_hours'] ?? '--')) ?> · <?= h((string)($csvSummary['hobbs_status'] ?? '')) ?></span>
-            </td>
-            <td><span class="garmin-badge <?= garmin_sync_badge_class($status) ?>"><?= h($status === '' ? 'stored' : $status) ?></span></td>
-            <td><?= h($classification === '' ? 'Unknown' : $classification) ?><br><span class="garmin-muted"><?= h($sourceNames) ?></span></td>
-            <td><?= number_format((int)$track['session_count']) ?> sessions<br><?= number_format((int)$track['field_count']) ?> fields</td>
-            <td><?= h(garmin_sync_bytes($track['file_size_bytes'] ?? 0)) ?></td>
-            <td><?= h((string)($track['device_name'] ?? 'Unknown device')) ?></td>
-            <td><?= h(garmin_sync_datetime((string)($track['uploaded_at'] ?? $track['last_seen_at'] ?? ''))) ?></td>
+            <td><input form="garmin-bulk-form" name="track_artifact_ids[]" type="checkbox" data-flight-checkbox value="<?= (int)$track['id'] ?>"></td>
+            <td><button class="garmin-row-button" type="button" data-modal-open="<?= h($modalId) ?>"><?= h($flightId) ?></button><?php if ($flight['is_new']): ?> <span class="garmin-badge garmin-badge-new">New</span><?php endif; ?></td>
+            <td class="garmin-compact"><?= h(garmin_sync_date_label((string)($summary['start_utc'] ?? ''))) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['tail'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['dep_airport'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['dep_time_lt'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['hobbs_out'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['tacho_out'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h(garmin_sync_duration_label($summary)) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['arr_airport'] ?? '--')) ?></td>
+            <td class="garmin-compact"><?= h((string)($summary['arr_time_lt'] ?? '--')) ?></td>
+            <td><span class="garmin-badge <?= h($statusClass) ?>"><?= h($statusLabel) ?></span></td>
+            <td><?= h((string)($track['device_name'] ?? 'Unknown device')) ?><br><span class="garmin-muted"><?= h(garmin_sync_datetime((string)$flight['uploaded_at'])) ?></span></td>
           </tr>
+          <tr style="display:none"><td colspan="13">
+            <div class="garmin-modal-backdrop" id="<?= h($modalId) ?>">
+              <div class="garmin-modal">
+                <div class="garmin-modal-header"><div><h3 style="margin:0"><?= h($flightId) ?> · <?= h((string)($summary['tail'] ?? 'Unknown tail')) ?></h3><div class="garmin-muted"><?= h((string)($summary['label'] ?? '')) ?></div></div><button class="garmin-row-button" type="button" data-modal-close>Close</button></div>
+                <div class="garmin-modal-body">
+                  <div class="garmin-detail-grid">
+                    <div class="garmin-kv"><div class="garmin-label">Full Track UUID</div><div class="garmin-code"><?= h((string)$track['track_uuid']) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Entry UUID</div><div class="garmin-code"><?= h((string)$track['garmin_entry_uuid']) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Classification</div><div><?= h((string)$flight['classification']) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Telemetry</div><div><?= number_format((int)$track['session_count']) ?> sessions · <?= number_format((int)$track['field_count']) ?> fields · <?= h(garmin_sync_bytes($track['file_size_bytes'] ?? 0)) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Identity Evidence</div><div>CSV ident <?= h((string)($summary['aircraft_ident_raw'] ?? '--')) ?> · system <?= h((string)($summary['system_id'] ?? '--')) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Upload</div><div><?= h((string)($track['device_name'] ?? 'Unknown device')) ?> at <?= h(garmin_sync_datetime((string)$flight['uploaded_at'])) ?></div></div>
+                  </div>
+                  <div><a href="/admin/api/garmin_artifact_raw.php?track_artifact_id=<?= (int)$track['id'] ?>" target="_blank" rel="noopener">Open full raw Garmin normalized JSON</a></div>
+                  <pre class="garmin-raw-block"><?= h(json_encode(array('summary' => $summary, 'source_names' => $flight['source_names'], 'sha256' => $track['sha256'] ?? ''), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) ?></pre>
+                </div>
+              </div>
+            </div>
+          </td></tr>
         <?php endforeach; ?>
         </tbody>
       </table>
     <?php endif; ?>
   </section>
 
-  <section class="garmin-card garmin-table-wrap">
-    <h3 style="margin-top:0">Recent Upload Acknowledgments</h3>
+  <details class="garmin-card">
+    <summary><strong>Recent Upload Acknowledgments</strong> <span class="garmin-muted">technical sync log</span></summary>
+  <section class="garmin-table-wrap" style="margin-top:14px">
     <?php if ($recentAcknowledgments === array()): ?>
       <div class="garmin-empty">No sync-agent upload acknowledgments yet.</div>
     <?php else: ?>
@@ -490,6 +676,7 @@ cw_header('Garmin Sync Agent');
       </table>
     <?php endif; ?>
   </section>
+  </details>
 
   <section class="garmin-card">
     <h3 style="margin-top:0">Sync Agent Devices</h3>
@@ -509,4 +696,39 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
   </section>
 </div>
+<script>
+(function(){
+  const selectAll = document.querySelector('[data-select-all-flights]');
+  const boxes = Array.from(document.querySelectorAll('[data-flight-checkbox]'));
+  if (selectAll) {
+    selectAll.addEventListener('change', () => boxes.forEach(box => { box.checked = selectAll.checked; }));
+  }
+  document.querySelectorAll('[data-modal-open]').forEach(button => {
+    button.addEventListener('click', () => {
+      const modal = document.getElementById(button.getAttribute('data-modal-open'));
+      if (modal) modal.classList.add('is-open');
+    });
+  });
+  document.querySelectorAll('[data-modal-close]').forEach(button => {
+    button.addEventListener('click', () => {
+      const modal = button.closest('.garmin-modal-backdrop');
+      if (modal) modal.classList.remove('is-open');
+    });
+  });
+  document.querySelectorAll('.garmin-modal-backdrop').forEach(backdrop => {
+    backdrop.addEventListener('click', event => {
+      if (event.target === backdrop) backdrop.classList.remove('is-open');
+    });
+  });
+  const bulkForm = document.getElementById('garmin-bulk-form');
+  if (bulkForm) {
+    bulkForm.addEventListener('submit', event => {
+      if (!boxes.some(box => box.checked)) {
+        event.preventDefault();
+        alert('Select at least one Garmin flight first.');
+      }
+    });
+  }
+})();
+</script>
 <?php cw_footer(); ?>

@@ -145,6 +145,8 @@ final class GarminTrackFlightSummaryService
         $summary['start_utc'] = $firstUtc?->format('Y-m-d H:i:s.v');
         $summary['end_utc'] = $lastUtc?->format('Y-m-d H:i:s.v');
         $summary['row_count'] = count($rows);
+        $summary['hobbs_out'] = $this->counterLabel($rows, 'Hobbs');
+        $summary['tacho_out'] = $this->counterLabel($rows, 'Tacho');
         $summary['hobbs_start_utc'] = (string)($hobbs['start_utc'] ?? '');
         $summary['hobbs_end_utc'] = (string)($hobbs['end_utc'] ?? '');
         $summary['hobbs_start_lt'] = $this->localTimeLabel($this->dateTimeOrNull($summary['hobbs_start_utc']));
@@ -197,6 +199,12 @@ final class GarminTrackFlightSummaryService
                 if (isset($indexes['rpm'])) {
                     $row['RPM'] = (string)($dataRow[$indexes['rpm']] ?? '');
                 }
+                if (isset($indexes['hobbs'])) {
+                    $row['Hobbs'] = (string)($dataRow[$indexes['hobbs']] ?? '');
+                }
+                if (isset($indexes['tacho'])) {
+                    $row['Tacho'] = (string)($dataRow[$indexes['tacho']] ?? '');
+                }
                 $rows[] = $row;
             }
         }
@@ -229,9 +237,27 @@ final class GarminTrackFlightSummaryService
                 $indexes['lon'] = (int)$index;
             } elseif (!isset($indexes['rpm']) && str_contains($type, 'rpm')) {
                 $indexes['rpm'] = (int)$index;
+            } elseif (!isset($indexes['hobbs']) && (str_contains($type, 'airframe') || str_contains($type, 'hobbs'))) {
+                $indexes['hobbs'] = (int)$index;
+            } elseif (!isset($indexes['tacho']) && (str_contains($type, 'engine_hours') || str_contains($type, 'enginehour') || str_contains($type, 'tacho'))) {
+                $indexes['tacho'] = (int)$index;
             }
         }
         return $indexes;
+    }
+
+    /**
+     * @param list<array<string,string>> $rows
+     */
+    private function counterLabel(array $rows, string $key): string
+    {
+        foreach ($rows as $row) {
+            $value = trim((string)($row[$key] ?? ''));
+            if ($value !== '' && is_numeric($value)) {
+                return number_format((float)$value, 1, '.', '');
+            }
+        }
+        return '--';
     }
 
     private function timestampFromValue(mixed $value): ?DateTimeImmutable
@@ -277,6 +303,8 @@ final class GarminTrackFlightSummaryService
             'start_utc' => '',
             'end_utc' => '',
             'row_count' => 0,
+            'hobbs_out' => '--',
+            'tacho_out' => '--',
             'hobbs_start_utc' => '',
             'hobbs_end_utc' => '',
             'hobbs_start_lt' => '--',
@@ -302,6 +330,12 @@ final class GarminTrackFlightSummaryService
      */
     private function tailFromTrack(array $track): string
     {
+        foreach (array('entry_aircraft_registration', 'csv_aircraft_registration', 'csv_aircraft_ident') as $key) {
+            $value = trim((string)($track[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
         $metadata = json_decode((string)($track['raw_metadata_json'] ?? '{}'), true);
         if (is_array($metadata)) {
             foreach (array('aircraftRegistration', 'aircraft_registration', 'tail') as $key) {
@@ -360,7 +394,8 @@ final class GarminTrackFlightSummaryService
             return null;
         }
         $exceptions = json_decode((string)($row['exception_json'] ?? '[]'), true);
-        return array(
+        $stored = json_decode((string)($row['summary_json'] ?? '{}'), true);
+        $summary = array(
             'status' => (string)($row['derivation_status'] ?? 'stored'),
             'tail' => (string)($row['tail_number'] ?? 'Unknown tail'),
             'date_label' => $this->dateLabel($this->dateTimeOrNull((string)($row['departure_time_utc'] ?? ''))),
@@ -382,6 +417,7 @@ final class GarminTrackFlightSummaryService
             'label' => (string)($row['display_label'] ?? ''),
             'exceptions' => is_array($exceptions) ? $exceptions : array(),
         );
+        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'tacho_out')))) : $summary;
     }
 
     /**

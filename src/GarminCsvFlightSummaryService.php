@@ -125,6 +125,7 @@ final class GarminCsvFlightSummaryService
         try {
             $expectedProfile = $this->expectedImportProfile((string)($csvFile['import_profile'] ?? ''));
             $parsed = G3XFlightStreamParser::parseFile($path, $expectedProfile);
+            $meta = $this->metaFromFirstLine($path);
             $rows = $parsed['rows'];
             $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($rows);
             $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($rows);
@@ -146,6 +147,10 @@ final class GarminCsvFlightSummaryService
             $summary['start_utc'] = $firstUtc?->format('Y-m-d H:i:s.v');
             $summary['end_utc'] = $lastUtc?->format('Y-m-d H:i:s.v');
             $summary['row_count'] = (int)($parsed['row_count'] ?? 0);
+            $summary['hobbs_out'] = isset($meta['airframe_hours']) && is_numeric($meta['airframe_hours']) ? number_format((float)$meta['airframe_hours'], 1, '.', '') : '--';
+            $summary['tacho_out'] = isset($meta['engine_hours']) && is_numeric($meta['engine_hours']) ? number_format((float)$meta['engine_hours'], 1, '.', '') : '--';
+            $summary['system_id'] = (string)($meta['system_id'] ?? '');
+            $summary['aircraft_ident_raw'] = (string)($meta['aircraft_ident'] ?? '');
             $summary['hobbs_start_utc'] = (string)($hobbs['start_utc'] ?? '');
             $summary['hobbs_end_utc'] = (string)($hobbs['end_utc'] ?? '');
             $summary['hobbs_start_lt'] = $this->localTimeLabel($this->dateTimeOrNull($summary['hobbs_start_utc']));
@@ -183,6 +188,10 @@ final class GarminCsvFlightSummaryService
             'start_utc' => $firstUtc?->format('Y-m-d H:i:s.v'),
             'end_utc' => $lastUtc?->format('Y-m-d H:i:s.v'),
             'row_count' => (int)($csvFile['valid_row_count'] ?? 0),
+            'hobbs_out' => '--',
+            'tacho_out' => '--',
+            'system_id' => '',
+            'aircraft_ident_raw' => '',
             'hobbs_start_utc' => '',
             'hobbs_end_utc' => '',
             'hobbs_start_lt' => '--',
@@ -233,6 +242,32 @@ final class GarminCsvFlightSummaryService
         return null;
     }
 
+    /**
+     * @return array<string,mixed>
+     */
+    private function metaFromFirstLine(string $path): array
+    {
+        $line = '';
+        $handle = fopen($path, 'rb');
+        if ($handle !== false) {
+            $line = (string)fgets($handle);
+            fclose($handle);
+        }
+        $meta = array();
+        foreach (str_getcsv($line) as $part) {
+            if (!is_string($part) || !str_contains($part, '=')) {
+                continue;
+            }
+            [$key, $value] = explode('=', $part, 2);
+            $key = trim($key);
+            $value = trim(trim($value), '"');
+            if ($key !== '') {
+                $meta[$key] = is_numeric($value) ? (float)$value : $value;
+            }
+        }
+        return $meta;
+    }
+
     private function expectedImportProfile(string $value): ?string
     {
         $value = strtolower(trim($value));
@@ -268,7 +303,8 @@ final class GarminCsvFlightSummaryService
             return null;
         }
         $exceptions = json_decode((string)($row['exception_json'] ?? '[]'), true);
-        return array(
+        $stored = json_decode((string)($row['summary_json'] ?? '{}'), true);
+        $summary = array(
             'status' => (string)($row['derivation_status'] ?? 'stored'),
             'tail' => (string)($row['tail_number'] ?? 'Unknown tail'),
             'date_label' => $this->dateLabel($this->dateTimeOrNull((string)($row['departure_time_utc'] ?? ''))),
@@ -290,6 +326,7 @@ final class GarminCsvFlightSummaryService
             'label' => (string)($row['display_label'] ?? ''),
             'exceptions' => is_array($exceptions) ? $exceptions : array(),
         );
+        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'tacho_out', 'system_id', 'aircraft_ident_raw')))) : $summary;
     }
 
     /**

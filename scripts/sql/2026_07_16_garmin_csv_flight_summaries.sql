@@ -55,3 +55,17 @@ CREATE TABLE IF NOT EXISTS ipca_garmin_track_flight_summaries (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Cached operational flight summary derived from normalized Garmin track JSON.';
+
+CREATE TABLE IF NOT EXISTS ipca_garmin_flight_artifact_states (
+  track_artifact_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  hidden_at DATETIME(3) NULL,
+  hidden_by_user_id BIGINT UNSIGNED NULL,
+  hidden_reason VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY idx_garmin_flight_artifact_hidden (hidden_at),
+  CONSTRAINT fk_garmin_flight_artifact_state
+    FOREIGN KEY (track_artifact_id) REFERENCES ipca_garmin_normalized_track_artifacts(id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Admin visibility state for Garmin normalized flight artifacts.';

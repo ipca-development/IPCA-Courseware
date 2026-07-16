@@ -376,12 +376,16 @@ try {
     $service = new CockpitRecorderService($pdo);
     $adsbService = new CockpitAdsbEnrichmentService($pdo);
     $recordings = $service->adminRecordings(100, $showDeleted);
+} catch (Throwable $e) {
+    $error = $error !== '' ? $error : $e->getMessage();
+}
+try {
     $garminFlightOptions = cockpit_admin_garmin_flight_options($pdo, $garminSummaryService);
     foreach ($garminFlightOptions as $garminFlightOption) {
         $garminFlightOptionsByGroup[(int)($garminFlightOption['source_group_id'] ?? 0)] = $garminFlightOption;
     }
 } catch (Throwable $e) {
-    $error = $error !== '' ? $error : $e->getMessage();
+    $error = $error !== '' ? $error : 'Garmin flight options could not be loaded: ' . $e->getMessage();
 }
 
 cw_header('Cockpit Recordings');
