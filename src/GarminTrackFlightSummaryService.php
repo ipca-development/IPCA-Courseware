@@ -5,6 +5,8 @@ require_once __DIR__ . '/AirportDetectionService.php';
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/HobbsCalculationService.php';
+require_once __DIR__ . '/TachoCalculationService.php';
+require_once __DIR__ . '/AircraftOperationalConfigService.php';
 
 final class GarminTrackFlightSummaryService
 {
@@ -65,7 +67,11 @@ final class GarminTrackFlightSummaryService
             SELECT t.id
             FROM ipca_garmin_normalized_track_artifacts t
             LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id
-            WHERE s.track_artifact_id IS NULL
+            WHERE (
+                s.track_artifact_id IS NULL
+                OR JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL
+                OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
+              )
               AND t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
               AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.raw_metadata_json, '$.trackClassification')), '') <> 'GARMIN_GPS_ONLY'
             ORDER BY t.last_seen_at DESC, t.id DESC
@@ -133,9 +139,14 @@ final class GarminTrackFlightSummaryService
         $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($rows);
         $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($rows);
         $airports = (new AirportDetectionService())->detect($rows);
-        $hobbs = (new HobbsCalculationService())->calculate($rows, array());
+        $tail = $this->tailFromTrack($track);
+        $config = $this->calculationConfigForTail($tail);
+        $hobbs = (new HobbsCalculationService())->calculate($rows, $config);
+        $tacho = (new TachoCalculationService())->calculate($rows, $config);
+        $hobbsCounterStart = $this->firstNumericCounter($rows, 'Hobbs');
+        $tachoCounterStart = $this->firstNumericCounter($rows, 'Tacho');
         $summary['status'] = 'ok';
-        $summary['tail'] = $this->tailFromTrack($track);
+        $summary['tail'] = $tail;
         $summary['date_label'] = $this->dateLabel($firstUtc);
         $summary['dep_airport'] = (string)($airports['departure_airport_code'] ?? '') ?: '--';
         $summary['arr_airport'] = (string)($airports['arrival_airport_code'] ?? '') ?: '--';
@@ -145,8 +156,8 @@ final class GarminTrackFlightSummaryService
         $summary['start_utc'] = $firstUtc?->format('Y-m-d H:i:s.v');
         $summary['end_utc'] = $lastUtc?->format('Y-m-d H:i:s.v');
         $summary['row_count'] = count($rows);
-        $summary['hobbs_out'] = $this->counterLabel($rows, 'Hobbs');
-        $summary['tacho_out'] = $this->counterLabel($rows, 'Tacho');
+        $summary['hobbs_out'] = $this->counterDisplay($hobbsCounterStart);
+        $summary['tacho_out'] = $this->counterDisplay($tachoCounterStart);
         $summary['hobbs_start_utc'] = (string)($hobbs['start_utc'] ?? '');
         $summary['hobbs_end_utc'] = (string)($hobbs['end_utc'] ?? '');
         $summary['hobbs_start_lt'] = $this->localTimeLabel($this->dateTimeOrNull($summary['hobbs_start_utc']));
@@ -154,6 +165,21 @@ final class GarminTrackFlightSummaryService
         $summary['hobbs_hours'] = is_numeric($hobbs['duration_hours_display'] ?? null) ? number_format((float)$hobbs['duration_hours_display'], 1) . ' h' : '--';
         $summary['hobbs_status'] = (string)($hobbs['status'] ?? '');
         $summary['hobbs_calculation_version'] = (string)($hobbs['calculation_version'] ?? HobbsCalculationService::VERSION);
+        $summary['hobbs_exact'] = $this->counterCalculationSummary($hobbsCounterStart, $hobbs);
+        $summary['tacho_exact'] = $this->counterCalculationSummary($tachoCounterStart, $tacho);
+        $summary['tacho_status'] = (string)($tacho['status'] ?? '');
+        $summary['tacho_calculation_version'] = (string)($tacho['calculation_version'] ?? TachoCalculationService::VERSION);
+        $summary['calculation_config'] = array(
+            'hobbs_engine_on_rpm_threshold' => $config['hobbs_engine_on_rpm_threshold'],
+            'hobbs_start_confirm_ms' => $config['hobbs_start_confirm_ms'],
+            'hobbs_stop_confirm_ms' => $config['hobbs_stop_confirm_ms'],
+            'tacho_rpm_threshold' => $config['tacho_rpm_threshold'],
+        );
+        $summary['exceptions'] = array_values(array_merge(
+            $summary['exceptions'] ?? array(),
+            $this->calculationExceptions('hobbs', $hobbs),
+            $this->calculationExceptions('tacho', $tacho)
+        ));
         $summary['label'] = $this->label($summary);
         return $summary;
     }
@@ -225,7 +251,14 @@ final class GarminTrackFlightSummaryService
             if (!is_array($field)) {
                 continue;
             }
-            $type = strtolower(trim((string)($field['fieldType'] ?? '')));
+            $typeParts = array();
+            foreach (array('fieldType', 'name', 'label', 'displayName', 'title', 'id') as $fieldKey) {
+                $candidate = strtolower(trim((string)($field[$fieldKey] ?? '')));
+                if ($candidate !== '') {
+                    $typeParts[] = $candidate;
+                }
+            }
+            $type = implode(' ', $typeParts);
             if ($type === '') {
                 continue;
             }
@@ -237,9 +270,9 @@ final class GarminTrackFlightSummaryService
                 $indexes['lon'] = (int)$index;
             } elseif (!isset($indexes['rpm']) && str_contains($type, 'rpm')) {
                 $indexes['rpm'] = (int)$index;
-            } elseif (!isset($indexes['hobbs']) && (str_contains($type, 'airframe') || str_contains($type, 'hobbs'))) {
+            } elseif (!isset($indexes['hobbs']) && (str_contains($type, 'airframe_hours') || str_contains($type, 'airframe') || str_contains($type, 'hobbs'))) {
                 $indexes['hobbs'] = (int)$index;
-            } elseif (!isset($indexes['tacho']) && (str_contains($type, 'engine_hours') || str_contains($type, 'enginehour') || str_contains($type, 'tacho'))) {
+            } elseif (!isset($indexes['tacho']) && (str_contains($type, 'engine_hours') || str_contains($type, 'enginehour') || str_contains($type, 'engine hours') || str_contains($type, 'tacho'))) {
                 $indexes['tacho'] = (int)$index;
             }
         }
@@ -249,15 +282,15 @@ final class GarminTrackFlightSummaryService
     /**
      * @param list<array<string,string>> $rows
      */
-    private function counterLabel(array $rows, string $key): string
+    private function firstNumericCounter(array $rows, string $key): ?float
     {
         foreach ($rows as $row) {
             $value = trim((string)($row[$key] ?? ''));
             if ($value !== '' && is_numeric($value)) {
-                return number_format((float)$value, 1, '.', '');
+                return (float)$value;
             }
         }
-        return '--';
+        return null;
     }
 
     private function timestampFromValue(mixed $value): ?DateTimeImmutable
@@ -312,6 +345,8 @@ final class GarminTrackFlightSummaryService
             'hobbs_hours' => '--',
             'hobbs_status' => '',
             'hobbs_calculation_version' => HobbsCalculationService::VERSION,
+            'tacho_status' => '',
+            'tacho_calculation_version' => TachoCalculationService::VERSION,
             'label' => '',
             'exceptions' => array(),
         );
@@ -417,7 +452,7 @@ final class GarminTrackFlightSummaryService
             'label' => (string)($row['display_label'] ?? ''),
             'exceptions' => is_array($exceptions) ? $exceptions : array(),
         );
-        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'tacho_out')))) : $summary;
+        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'tacho_out', 'hobbs_exact', 'tacho_exact', 'tacho_status', 'tacho_calculation_version', 'calculation_config')))) : $summary;
     }
 
     /**
@@ -584,5 +619,92 @@ final class GarminTrackFlightSummaryService
             $timezone = 'America/Los_Angeles';
         }
         return new DateTimeZone($timezone);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function calculationConfigForTail(string $tail): array
+    {
+        $tail = strtoupper(trim($tail));
+        $config = array(
+            'hobbs_engine_on_rpm_threshold' => 1000.0,
+            'hobbs_start_confirm_ms' => 1000,
+            'hobbs_stop_confirm_ms' => 5000,
+            'tacho_rpm_threshold' => null,
+        );
+        $aircraftId = $this->aircraftIdForTail($tail);
+        if ($aircraftId !== null && $this->pdo !== null) {
+            $stored = (new AircraftOperationalConfigService($this->pdo))->configForAircraft($aircraftId);
+            $config = array_merge($config, array_intersect_key($stored, $config));
+        }
+        if ($config['tacho_rpm_threshold'] === null && in_array($tail, array('N392EA', 'N397EA', 'N428EA'), true)) {
+            $config['tacho_rpm_threshold'] = 4000.0;
+        }
+        return $config;
+    }
+
+    private function aircraftIdForTail(string $tail): ?int
+    {
+        if ($this->pdo === null || $tail === '' || !$this->tableExists('ipca_aircraft_devices')) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT id FROM ipca_aircraft_devices WHERE UPPER(registration) = ? LIMIT 1');
+        $stmt->execute(array($tail));
+        $id = $stmt->fetchColumn();
+        return is_numeric($id) ? (int)$id : null;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        if ($this->pdo === null) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $stmt->execute(array($table));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private function counterDisplay(?float $value): string
+    {
+        return $value !== null ? number_format($value, 1, '.', '') : '--';
+    }
+
+    /**
+     * @param array<string,mixed> $calculation
+     * @return array<string,mixed>
+     */
+    private function counterCalculationSummary(?float $startCounter, array $calculation): array
+    {
+        $duration = is_numeric($calculation['duration_hours_exact'] ?? null) ? (float)$calculation['duration_hours_exact'] : null;
+        $end = $startCounter !== null && $duration !== null ? $startCounter + $duration : null;
+        return array(
+            'counter_start_exact' => $startCounter,
+            'counter_start_display' => $this->counterDisplay($startCounter),
+            'duration_hours_exact' => $duration,
+            'duration_hours_display' => $duration !== null ? round($duration, 1) : null,
+            'counter_end_exact' => $end,
+            'counter_end_display' => $this->counterDisplay($end),
+            'start_utc' => $calculation['start_utc'] ?? null,
+            'end_utc' => $calculation['end_utc'] ?? null,
+            'method' => $calculation['method'] ?? '',
+            'threshold_rpm' => $calculation['threshold_rpm'] ?? null,
+            'calculation_version' => $calculation['calculation_version'] ?? '',
+            'verification_status' => $calculation['verification_status'] ?? '',
+            'uncertainty_ms' => $calculation['uncertainty_ms'] ?? null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $calculation
+     * @return list<string>
+     */
+    private function calculationExceptions(string $label, array $calculation): array
+    {
+        $exceptions = array();
+        foreach (($calculation['exceptions'] ?? array()) as $exception) {
+            $exceptions[] = strtoupper($label) . ': ' . (string)$exception;
+        }
+        return $exceptions;
     }
 }

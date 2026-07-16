@@ -201,8 +201,18 @@ $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
 $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     SELECT
       COUNT(f.id) AS total_csv_files,
-      COUNT(s.csv_file_id) AS summarized_csv_files,
-      SUM(CASE WHEN s.csv_file_id IS NULL THEN 1 ELSE 0 END) AS missing_summaries
+      SUM(CASE
+        WHEN s.csv_file_id IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+        ELSE 1
+      END) AS summarized_csv_files,
+      SUM(CASE
+        WHEN s.csv_file_id IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
+        ELSE 0
+      END) AS missing_summaries
     FROM ipca_garmin_csv_files f
     " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
@@ -210,8 +220,18 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
 $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
     SELECT
       COUNT(t.id) AS total_track_artifacts,
-      COUNT(s.track_artifact_id) AS summarized_track_artifacts,
-      SUM(CASE WHEN s.track_artifact_id IS NULL THEN 1 ELSE 0 END) AS missing_track_summaries
+      SUM(CASE
+        WHEN s.track_artifact_id IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+        ELSE 1
+      END) AS summarized_track_artifacts,
+      SUM(CASE
+        WHEN s.track_artifact_id IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
+        ELSE 0
+      END) AS missing_track_summaries
     FROM ipca_garmin_normalized_track_artifacts t
     " . ($hasTrackSummaries ? "LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id" : "LEFT JOIN (SELECT NULL AS track_artifact_id) s ON 1 = 0") . "
     WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
@@ -309,7 +329,6 @@ if ($hasTracks) {
         {$sourceJoin}
         {$stateJoin}
         ORDER BY t.last_seen_at DESC, t.id DESC
-        LIMIT 100
     ");
 }
 
@@ -476,7 +495,7 @@ if (isset($_GET['flights_reprocess_queued'])) {
 cw_header('Garmin Sync Agent');
 ?>
 <style>
-.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:110px 132px 132px 110px 110px;gap:8px 10px;margin-top:12px;align-items:end;justify-content:start}.garmin-filter-control{display:grid;grid-template-rows:14px 32px;gap:3px;align-items:end}.garmin-filter-label{display:block;height:14px;color:#64748b;font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}.garmin-filter input,.garmin-filter select,.garmin-filter button{box-sizing:border-box;width:100%;height:32px;border-radius:8px;font:inherit;font-size:12px;line-height:1}.garmin-filter input,.garmin-filter select{border:1px solid #cbd5e1;background:#fff;padding:6px 8px}.garmin-filter button{border:0;background:#475569;color:#fff;font-weight:800;padding:6px 10px;cursor:pointer}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
+.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-flights-scroll{max-height:72vh;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}.garmin-flights-scroll .garmin-table th{position:sticky;top:0;z-index:2;background:#fff}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:#2563eb}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:110px 132px 132px 110px 110px;gap:8px 10px;margin-top:12px;align-items:end;justify-content:start}.garmin-filter-control{display:grid;grid-template-rows:14px 32px;gap:3px;align-items:end}.garmin-filter-label{display:block;height:14px;color:#64748b;font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}.garmin-filter input,.garmin-filter select,.garmin-filter button{box-sizing:border-box;width:100%;height:32px;border-radius:8px;font:inherit;font-size:12px;line-height:1}.garmin-filter input,.garmin-filter select{border:1px solid #cbd5e1;background:#fff;padding:6px 8px}.garmin-filter button{border:0;background:#475569;color:#fff;font-weight:800;padding:6px 10px;cursor:pointer}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -581,7 +600,7 @@ cw_header('Garmin Sync Agent');
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div>
         <h3 style="margin:0">Garmin Flights</h3>
-        <p class="garmin-muted">Complete avionics flights are shown by default. Raw identifiers and technical evidence are in each row's detail modal.</p>
+        <p class="garmin-muted">Showing <?= number_format(count($flightRows)) ?> Garmin flight artifact(s). Complete avionics flights are shown by default; raw identifiers and technical evidence are in each row's detail modal.</p>
       </div>
       <form class="garmin-actions" method="post" action="/admin/api/garmin_flights_bulk_action.php" id="garmin-bulk-form">
         <input type="hidden" name="return" value="<?= h('/admin/flight_log_garmin_connection.php' . ($_SERVER['QUERY_STRING'] ? '?' . (string)$_SERVER['QUERY_STRING'] : '')) ?>">
@@ -618,6 +637,7 @@ cw_header('Garmin Sync Agent');
     <?php if ($flightRows === array()): ?>
       <div class="garmin-empty">No Garmin flights match the current filters. Incomplete/GPS-only flights are hidden by default.</div>
     <?php else: ?>
+      <div class="garmin-flights-scroll">
       <table class="garmin-table">
         <thead><tr><th style="width:3%"><input type="checkbox" data-select-all-flights></th><th style="width:8%">Flight</th><th style="width:11%">Date</th><th style="width:7%">Tail</th><th style="width:7%">Dep AD</th><th style="width:8%">Dep LT</th><th style="width:8%">Hobbs Out</th><th style="width:8%">Tacho Out</th><th style="width:9%">Duration</th><th style="width:7%">Arr AD</th><th style="width:8%">Arr LT</th><th style="width:9%">Status</th><th style="width:17%">Uploaded</th></tr></thead>
         <tbody>
@@ -675,6 +695,7 @@ cw_header('Garmin Sync Agent');
           <tr data-filter-empty style="display:none"><td colspan="13" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
+      </div>
     <?php endif; ?>
   </section>
   <?php foreach ($flightModals as $modalHtml): ?>

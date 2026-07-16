@@ -39,7 +39,14 @@ function garmin_csv_summary_stats(PDO $pdo): array
     $csvDone = 0;
     if ($hasCsv) {
         $row = $pdo->query("
-            SELECT COUNT(f.id) AS total, COUNT(s.csv_file_id) AS done
+            SELECT
+              COUNT(f.id) AS total,
+              SUM(CASE
+                WHEN s.csv_file_id IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+                ELSE 1
+              END) AS done
             FROM ipca_garmin_csv_files f
             " . ($hasCsvSummary ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
         ")->fetch(PDO::FETCH_ASSOC) ?: array();
@@ -50,7 +57,14 @@ function garmin_csv_summary_stats(PDO $pdo): array
     $trackDone = 0;
     if ($hasTracks) {
         $row = $pdo->query("
-            SELECT COUNT(t.id) AS total, COUNT(s.track_artifact_id) AS done
+            SELECT
+              COUNT(t.id) AS total,
+              SUM(CASE
+                WHEN s.track_artifact_id IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+                ELSE 1
+              END) AS done
             FROM ipca_garmin_normalized_track_artifacts t
             " . ($hasTrackSummary ? "LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id" : "LEFT JOIN (SELECT NULL AS track_artifact_id) s ON 1 = 0") . "
             WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
