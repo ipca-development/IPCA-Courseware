@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
 
 cw_require_admin();
 
@@ -95,6 +96,9 @@ function garmin_sync_metadata_value(?string $json, string $key): string
 $hasTokens = garmin_sync_table_exists($pdo, 'ipca_sync_agent_tokens');
 $hasAcks = garmin_sync_table_exists($pdo, 'ipca_sync_agent_upload_acknowledgments');
 $hasTracks = garmin_sync_table_exists($pdo, 'ipca_garmin_normalized_track_artifacts');
+$hasSources = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_sources');
+$hasCsvFiles = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_files');
+$summaryService = new GarminCsvFlightSummaryService();
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
@@ -132,44 +136,47 @@ $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
 ") : array();
 
 $recentTracks = array();
-if ($hasTracks && $hasAcks && $hasTokens) {
-    $recentTracks = garmin_sync_rows($pdo, "
-        SELECT
-          t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
-          t.raw_metadata_json, t.source_descriptors_json, t.first_seen_at, t.last_seen_at,
-          a.status AS upload_status, a.created_at AS uploaded_at, tok.display_name AS device_name
-        FROM ipca_garmin_normalized_track_artifacts t
+if ($hasTracks) {
+    $ackSelect = $hasAcks ? 'a.status AS upload_status, a.created_at AS uploaded_at' : 'NULL AS upload_status, NULL AS uploaded_at';
+    $ackJoin = $hasAcks ? "
         LEFT JOIN ipca_sync_agent_upload_acknowledgments a
           ON a.provider_name = t.provider_name
          AND a.garmin_entry_uuid = t.garmin_entry_uuid
          AND a.flight_data_log_uuid = t.track_uuid
          AND a.sha256 = t.sha256
-        LEFT JOIN ipca_sync_agent_tokens tok ON tok.id = a.token_id
-        ORDER BY t.last_seen_at DESC, t.id DESC
-        LIMIT 100
-    ");
-} elseif ($hasTracks && $hasAcks) {
+    " : '';
+    $tokenSelect = ($hasAcks && $hasTokens) ? 'tok.display_name AS device_name' : 'NULL AS device_name';
+    $tokenJoin = ($hasAcks && $hasTokens) ? 'LEFT JOIN ipca_sync_agent_tokens tok ON tok.id = a.token_id' : '';
+    $csvSelect = ($hasSources && $hasCsvFiles) ? "
+          f.id AS csv_file_id, f.csv_file_uuid, f.aircraft_registration AS csv_aircraft_registration,
+          f.original_filename AS csv_original_filename, f.storage_path AS csv_storage_path,
+          f.import_profile AS csv_import_profile, f.aircraft_ident AS csv_aircraft_ident,
+          f.first_valid_sample_utc AS csv_first_valid_sample_utc,
+          f.last_valid_sample_utc AS csv_last_valid_sample_utc,
+          f.valid_row_count AS csv_valid_row_count
+    " : "
+          NULL AS csv_file_id, NULL AS csv_file_uuid, NULL AS csv_aircraft_registration,
+          NULL AS csv_original_filename, NULL AS csv_storage_path, NULL AS csv_import_profile,
+          NULL AS csv_aircraft_ident, NULL AS csv_first_valid_sample_utc,
+          NULL AS csv_last_valid_sample_utc, NULL AS csv_valid_row_count
+    ";
+    $sourceJoin = ($hasSources && $hasCsvFiles) ? "
+        LEFT JOIN ipca_garmin_flight_data_sources s
+          ON s.provider_name = t.provider_name
+         AND s.flight_data_log_uuid = t.track_uuid
+        LEFT JOIN ipca_garmin_csv_files f
+          ON f.id = " . ($hasAcks ? 'COALESCE(a.garmin_csv_file_id, s.garmin_csv_file_id)' : 's.garmin_csv_file_id') . "
+    " : '';
     $recentTracks = garmin_sync_rows($pdo, "
         SELECT
           t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
           t.raw_metadata_json, t.source_descriptors_json, t.first_seen_at, t.last_seen_at,
-          a.status AS upload_status, a.created_at AS uploaded_at, NULL AS device_name
+          {$ackSelect}, {$tokenSelect},
+          {$csvSelect}
         FROM ipca_garmin_normalized_track_artifacts t
-        LEFT JOIN ipca_sync_agent_upload_acknowledgments a
-          ON a.provider_name = t.provider_name
-         AND a.garmin_entry_uuid = t.garmin_entry_uuid
-         AND a.flight_data_log_uuid = t.track_uuid
-         AND a.sha256 = t.sha256
-        ORDER BY t.last_seen_at DESC, t.id DESC
-        LIMIT 100
-    ");
-} elseif ($hasTracks) {
-    $recentTracks = garmin_sync_rows($pdo, "
-        SELECT
-          t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
-          t.raw_metadata_json, t.source_descriptors_json, t.first_seen_at, t.last_seen_at,
-          NULL AS upload_status, NULL AS uploaded_at, NULL AS device_name
-        FROM ipca_garmin_normalized_track_artifacts t
+        {$ackJoin}
+        {$tokenJoin}
+        {$sourceJoin}
         ORDER BY t.last_seen_at DESC, t.id DESC
         LIMIT 100
     ");
@@ -339,16 +346,40 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-empty">No normalized Garmin track artifacts have been uploaded yet.</div>
     <?php else: ?>
       <table class="garmin-table">
-        <thead><tr><th>Track / Entry</th><th>Status</th><th>Classification</th><th>Telemetry</th><th>Size</th><th>Device</th><th>Uploaded</th></tr></thead>
+        <thead><tr><th>Flight</th><th>Route / Time</th><th>Hobbs</th><th>Status</th><th>Classification</th><th>Telemetry</th><th>Size</th><th>Device</th><th>Uploaded</th></tr></thead>
         <tbody>
         <?php foreach ($recentTracks as $track): ?>
           <?php
           $classification = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'trackClassification');
           $sourceNames = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'sourceNames');
           $status = (string)($track['upload_status'] ?? 'accepted');
+          $csvSummary = !empty($track['csv_file_id']) ? $summaryService->summaryForCsvFile(array(
+              'id' => (int)$track['csv_file_id'],
+              'aircraft_registration' => (string)($track['csv_aircraft_registration'] ?? ''),
+              'aircraft_ident' => (string)($track['csv_aircraft_ident'] ?? ''),
+              'storage_path' => (string)($track['csv_storage_path'] ?? ''),
+              'import_profile' => (string)($track['csv_import_profile'] ?? ''),
+              'first_valid_sample_utc' => (string)($track['csv_first_valid_sample_utc'] ?? ''),
+              'last_valid_sample_utc' => (string)($track['csv_last_valid_sample_utc'] ?? ''),
+              'valid_row_count' => (int)($track['csv_valid_row_count'] ?? 0),
+          )) : array();
           ?>
           <tr>
-            <td><div class="garmin-code"><?= h((string)$track['track_uuid']) ?></div><span class="garmin-muted">Entry <?= h((string)$track['garmin_entry_uuid']) ?></span></td>
+            <td>
+              <strong><?= h((string)($csvSummary['date_label'] ?? '--')) ?></strong><br>
+              <?= h((string)($csvSummary['tail'] ?? 'Unknown tail')) ?><br>
+              <span class="garmin-muted"><?= h((string)($track['csv_original_filename'] ?? '')) ?></span>
+              <div class="garmin-code"><?= h((string)$track['track_uuid']) ?></div>
+            </td>
+            <td>
+              <?= h((string)($csvSummary['dep_airport'] ?? '--')) ?> <?= h((string)($csvSummary['dep_time_lt'] ?? '--')) ?> LT
+              - <?= h((string)($csvSummary['arr_airport'] ?? '--')) ?> <?= h((string)($csvSummary['arr_time_lt'] ?? '--')) ?> LT<br>
+              <span class="garmin-muted">ET <?= h((string)($csvSummary['elapsed_time'] ?? '--')) ?> · Entry <?= h((string)$track['garmin_entry_uuid']) ?></span>
+            </td>
+            <td>
+              <?= h((string)($csvSummary['hobbs_start_lt'] ?? '--')) ?> - <?= h((string)($csvSummary['hobbs_end_lt'] ?? '--')) ?> LT<br>
+              <span class="garmin-muted"><?= h((string)($csvSummary['hobbs_hours'] ?? '--')) ?> · <?= h((string)($csvSummary['hobbs_status'] ?? '')) ?></span>
+            </td>
             <td><span class="garmin-badge <?= garmin_sync_badge_class($status) ?>"><?= h($status === '' ? 'stored' : $status) ?></span></td>
             <td><?= h($classification === '' ? 'Unknown' : $classification) ?><br><span class="garmin-muted"><?= h($sourceNames) ?></span></td>
             <td><?= number_format((int)$track['session_count']) ?> sessions<br><?= number_format((int)$track['field_count']) ?> fields</td>
