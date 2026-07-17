@@ -8,6 +8,7 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                automaticSyncOverview
                 connectionStatus
                 syncStatus
                 tokenSettings
@@ -49,6 +50,31 @@ struct ContentView: View {
         }
     }
 
+    private var automaticSyncOverview: some View {
+        statusCard(title: "Automatic Sync") {
+            HStack(alignment: .top, spacing: 18) {
+                statusPill(
+                    title: "Scheduler",
+                    value: "On",
+                    detail: "Checks Garmin every \(state.settings.syncIntervalMinutes) minutes."
+                )
+                statusPill(
+                    title: "Next Check",
+                    value: format(state.nextScheduledSync),
+                    detail: state.nextScheduledSync == nil ? "Waiting for scheduler startup." : "No action needed."
+                )
+                statusPill(
+                    title: "Queue",
+                    value: state.pendingUploads == 0 ? "Empty" : "\(state.pendingUploads) pending",
+                    detail: state.uploadProgressDetail
+                )
+            }
+            Text(state.currentWorkDetail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var connectionStatus: some View {
         statusCard(title: "Connection Status") {
             grid([
@@ -68,19 +94,12 @@ struct ContentView: View {
         statusCard(title: "Sync Status") {
             grid([
                 ("Last successful sync", format(state.lastSuccessfulSync)),
-                ("Next scheduled sync", format(state.nextScheduledSync)),
+                ("Next automatic check", format(state.nextScheduledSync)),
                 ("New entries found", "\(state.newEntriesFound)"),
                 ("Files downloaded", "\(state.filesDownloaded)"),
                 ("Files uploaded", "\(state.filesUploaded)"),
                 ("Pending uploads", "\(state.pendingUploads)"),
-                ("Upload progress", state.uploadProgressDetail),
-                ("Backfill progress", state.backfillProgressDetail),
-                ("Pause status", state.pauseStatus),
-                ("Current item", "\(state.currentItemProgressPercent)%"),
-                ("Overall progress", "\(state.overallProgressPercent)%"),
-                ("Transfer progress", state.transferProgressDetail),
-                ("Current work", state.currentWorkDetail),
-                ("Backfill result", state.garminBackfillLastResult)
+                ("Pause status", state.pauseStatus)
             ])
             VStack(alignment: .leading, spacing: 8) {
                 Text("Current item")
@@ -115,7 +134,6 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Button("Connect Garmin") { state.connectGarmin() }
-                    Button("I’m on the Garmin Logbook") { state.confirmGarminLogbook() }
                     Button("Sync Now") { state.syncNow() }
                     Button("Backfill Garmin History") { state.backfillGarminHistory() }
                         .disabled(state.isBackfillRunning)
@@ -123,17 +141,10 @@ struct ContentView: View {
                         .disabled(state.pauseRequested || state.isPaused)
                     Button("Resume") { state.resumeTransfers() }
                         .disabled(!state.isPaused)
-                    Button("Reconnect Garmin") { state.reconnectGarmin() }
-                    Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
                 }
-                HStack {
-                    Button("Repair Connection") { state.repairConnection() }
-                    Button("Open Downloads") { state.artifactStore.openDownloads() }
-                    Button("Open Logs") { LoggingService.shared.openLogs() }
-                    Button("Open Garmin Diagnostic") { LoggingService.shared.openGarminDiagnostic() }
-                    Button("Clear Logs") { LoggingService.shared.clearLogs() }
-                    Button("Quit") { NSApplication.shared.terminate(nil) }
-                }
+                Text("Automatic checks run every \(state.settings.syncIntervalMinutes) minutes. You only need Sync Now for an immediate check.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Toggle("Launch at Login", isOn: Binding(
                     get: { state.launchAtLogin.isEnabled },
                     set: { enabled in
@@ -142,21 +153,57 @@ struct ContentView: View {
                     }
                 ))
                 .toggleStyle(.switch)
-                HStack {
-                    Text("Sync interval")
-                    Stepper("\(state.settings.syncIntervalMinutes) minutes", value: Binding(
-                        get: { state.settings.syncIntervalMinutes },
-                        set: { state.settings.syncIntervalMinutes = $0 }
-                    ), in: 1...120)
-                    Spacer()
-                    Text("Retain uploads")
-                    Stepper("\(state.settings.retainUploadedArtifactsDays) days", value: Binding(
-                        get: { state.settings.retainUploadedArtifactsDays },
-                        set: { state.settings.retainUploadedArtifactsDays = $0 }
-                    ), in: 1...365)
+                DisclosureGroup("Advanced / Diagnostics") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Button("I’m on the Garmin Logbook") { state.confirmGarminLogbook() }
+                            Button("Reconnect Garmin") { state.reconnectGarmin() }
+                            Button("Reload Garmin Logbook for Initial Sync") { state.reloadGarminForInitialSync() }
+                            Button("Repair Connection") { state.repairConnection() }
+                        }
+                        HStack {
+                            Button("Open Downloads") { state.artifactStore.openDownloads() }
+                            Button("Open Logs") { LoggingService.shared.openLogs() }
+                            Button("Open Garmin Diagnostic") { LoggingService.shared.openGarminDiagnostic() }
+                            Button("Clear Logs") { LoggingService.shared.clearLogs() }
+                            Button("Quit") { NSApplication.shared.terminate(nil) }
+                        }
+                        HStack {
+                            Text("Sync interval")
+                            Stepper("\(state.settings.syncIntervalMinutes) minutes", value: Binding(
+                                get: { state.settings.syncIntervalMinutes },
+                                set: { state.settings.syncIntervalMinutes = $0 }
+                            ), in: 1...120)
+                            Spacer()
+                            Text("Retain uploads")
+                            Stepper("\(state.settings.retainUploadedArtifactsDays) days", value: Binding(
+                                get: { state.settings.retainUploadedArtifactsDays },
+                                set: { state.settings.retainUploadedArtifactsDays = $0 }
+                            ), in: 1...365)
+                        }
+                    }
+                    .padding(.top, 8)
                 }
             }
         }
+    }
+
+    private func statusPill(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value.isEmpty ? "Unknown" : value)
+                .font(.title3.bold())
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func statusCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {

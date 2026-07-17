@@ -904,7 +904,7 @@ cw_header('Garmin Sync Agent');
     const body = new FormData();
     body.append('action', action);
     body.append('format', 'json');
-    body.append('limit', String(limit || 20));
+    body.append('limit', String(limit || 250));
     const response = await fetch('/admin/api/garmin_csv_summary_action.php', {
       method: 'POST',
       credentials: 'same-origin',
@@ -921,11 +921,11 @@ cw_header('Garmin Sync Agent');
       let statusResponse = await postSummary('status', 1);
       updateSummaryProgress(statusResponse.status, 'Checking');
       while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
-        const result = await postSummary('process_next', 20);
+        const result = await postSummary('process_next', 250);
         updateSummaryProgress(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more', result);
         if (Number(result.processed || 0) === 0) break;
         statusResponse = result;
-        await new Promise(resolve => setTimeout(resolve, 250));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
       const finalStatus = await postSummary('status', 1);
       updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Paused');
