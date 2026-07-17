@@ -71,13 +71,12 @@ final class GarminTrackFlightSummaryService
                 s.track_artifact_id IS NULL
                 OR JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL
                 OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
-                OR JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL
-                OR JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL
-                OR s.tail_number IN ('', 'Unknown tail', 'Unknown')
-                OR JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL
-                OR JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
+                OR (
+                    s.tail_number IN ('', 'Unknown tail', 'Unknown')
+                    AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL
+                )
               )
               AND t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
               AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.raw_metadata_json, '$.trackClassification')), '') <> 'GARMIN_GPS_ONLY'

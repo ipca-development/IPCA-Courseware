@@ -73,9 +73,6 @@ final class GarminCsvFlightSummaryService
                OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
                OR JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL
                OR JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL
-               OR s.tail_number IN ('', 'Unknown tail', 'Unknown')
-               OR JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL
-               OR JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL
                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
             ORDER BY COALESCE(f.first_valid_sample_utc, f.created_at) DESC, f.id DESC

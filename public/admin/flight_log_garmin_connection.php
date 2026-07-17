@@ -210,9 +210,6 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
-        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         ELSE 1
@@ -223,9 +220,6 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 1
-        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         ELSE 0
@@ -241,26 +235,20 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         WHEN s.track_artifact_id IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
-        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 0
-        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
+          AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 0
         ELSE 1
       END) AS summarized_track_artifacts,
       SUM(CASE
         WHEN s.track_artifact_id IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 1
-        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 1
-        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
+          AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 1
         ELSE 0
       END) AS missing_track_summaries
     FROM ipca_garmin_normalized_track_artifacts t
