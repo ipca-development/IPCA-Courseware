@@ -458,7 +458,20 @@ $error = trim((string)($_GET['error'] ?? ''));
 $notice = '';
 $pollRecordingId = 0;
 $showDeleted = in_array(strtolower(trim((string)($_GET['show_deleted'] ?? ''))), array('1', 'true', 'yes'), true);
-$currentReturn = '/admin/cockpit_recorder.php' . ($showDeleted ? '?show_deleted=1' : '');
+$recordingPerPage = (int)($_GET['per_page'] ?? 100);
+if (!in_array($recordingPerPage, array(25, 50, 100, 250), true)) {
+    $recordingPerPage = 100;
+}
+$recordingPage = max(1, (int)($_GET['page'] ?? 1));
+$recordingOffset = ($recordingPage - 1) * $recordingPerPage;
+$currentReturnParams = array(
+    'page' => $recordingPage,
+    'per_page' => $recordingPerPage,
+);
+if ($showDeleted) {
+    $currentReturnParams['show_deleted'] = 1;
+}
+$currentReturn = '/admin/cockpit_recorder.php?' . http_build_query($currentReturnParams);
 if ((string)($_GET['reconstruction'] ?? '') === 'started') {
     $pollRecordingId = (int)($_GET['id'] ?? 0);
     $notice = 'Reconstruction started in the background. Progress updates automatically in the recording details.';
@@ -474,6 +487,9 @@ if (isset($_GET['recordings_restored'])) {
 }
 
 $recordings = array();
+$recordingCounts = array('total' => 0, 'active' => 0, 'hidden' => 0);
+$recordingVisibleTotal = 0;
+$recordingPageCount = 1;
 $service = null;
 $adsbService = null;
 $garminSummaryService = new GarminCsvFlightSummaryService($pdo);
@@ -486,7 +502,16 @@ $importProfileOptions = GarminCsvImportProfile::options();
 try {
     $service = new CockpitRecorderService($pdo);
     $adsbService = new CockpitAdsbEnrichmentService($pdo);
-    $recordings = $service->adminRecordings(100, $showDeleted);
+    $recordingCounts = $service->adminRecordingCounts();
+    $recordingVisibleTotal = $showDeleted ? (int)$recordingCounts['total'] : (int)$recordingCounts['active'];
+    $recordingPageCount = max(1, (int)ceil($recordingVisibleTotal / max(1, $recordingPerPage)));
+    if ($recordingPage > $recordingPageCount) {
+        $recordingPage = $recordingPageCount;
+        $recordingOffset = ($recordingPage - 1) * $recordingPerPage;
+        $currentReturnParams['page'] = $recordingPage;
+        $currentReturn = '/admin/cockpit_recorder.php?' . http_build_query($currentReturnParams);
+    }
+    $recordings = $service->adminRecordings($recordingPerPage, $showDeleted, $recordingOffset);
 } catch (Throwable $e) {
     $error = $error !== '' ? $error : $e->getMessage();
 }
@@ -508,7 +533,7 @@ cw_header('Cockpit Recordings');
 ?>
 <style>
 .cockpit-recorder-page{display:grid;gap:18px}.cockpit-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.cockpit-muted{color:#64748b;font-size:13px}.cockpit-table-wrap{overflow-x:auto}.cockpit-table{width:100%;border-collapse:collapse;min-width:900px}.cockpit-table th,.cockpit-table td{border-bottom:1px solid #e2e8f0;padding:12px 10px;text-align:left;vertical-align:middle}.cockpit-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-row-title{font-weight:800}.cockpit-row-sub{color:#64748b;font-size:12px;margin-top:3px}.cockpit-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.cockpit-badge-ready{background:#dcfce7;color:#166534}.cockpit-badge-progress{background:#dbeafe;color:#1d4ed8}.cockpit-badge-failed{background:#fee2e2;color:#991b1b}.cockpit-badge-warning{background:#fef3c7;color:#92400e}.cockpit-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}.cockpit-button.secondary{background:#475569}.cockpit-button.subtle{background:#e2e8f0;color:#0f172a}.cockpit-actions-row{display:flex;flex-wrap:wrap;gap:7px}.cockpit-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.cockpit-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.cockpit-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:10px;padding:12px}.cockpit-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.56);display:none;z-index:9999;padding:30px;overflow:auto}.cockpit-modal-backdrop.is-open{display:block}.cockpit-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.cockpit-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:20px 22px;border-bottom:1px solid #e2e8f0}.cockpit-modal-title{font-size:22px;font-weight:900;margin:0}.cockpit-modal-body{padding:20px 22px;display:grid;gap:16px}.cockpit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.cockpit-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.cockpit-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-value{font-weight:800;margin-top:4px}.cockpit-section{border:1px solid #e2e8f0;border-radius:14px;padding:14px;display:grid;gap:10px}.cockpit-section h3{margin:0}.cockpit-transcript{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;max-height:360px;overflow:auto}.cockpit-audio{width:100%;max-width:520px}.cockpit-form-grid{display:grid;gap:8px;max-width:360px}.cockpit-input{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;font:inherit;font-size:13px;background:#fff;color:#0f172a}.cockpit-link-grid{display:flex;flex-wrap:wrap;gap:7px 12px}.cockpit-recon-progress{display:grid;gap:8px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff}.cockpit-recon-progress[hidden]{display:none!important}.cockpit-recon-progress-bar{height:10px;border-radius:999px;background:#dbeafe;overflow:hidden}.cockpit-recon-progress-fill{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#1d4ed8);transition:width .35s ease}.cockpit-recon-progress-stage{font-size:12px;color:#1e3a8a}.cockpit-recon-progress-message{font-size:12px;color:#334155}.cockpit-recon-progress-times{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:11px;color:#64748b}.cockpit-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.cockpit-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}
-.cockpit-bulk-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;justify-content:space-between;margin-bottom:12px}.cockpit-bulk-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.cockpit-row-deleted{background:#f8fafc;color:#64748b}.cockpit-checkbox{width:16px;height:16px}.cockpit-danger{background:#b91c1c}.cockpit-filter-link{font-weight:800}
+.cockpit-bulk-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;justify-content:space-between;margin-bottom:12px}.cockpit-bulk-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.cockpit-pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:10px 0 14px}.cockpit-pager-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.cockpit-row-deleted{background:#f8fafc;color:#64748b}.cockpit-checkbox{width:16px;height:16px}.cockpit-danger{background:#b91c1c}.cockpit-filter-link{font-weight:800}
 </style>
 
 <div class="cockpit-recorder-page">
@@ -534,7 +559,10 @@ cw_header('Cockpit Recordings');
       <div class="cockpit-bulk-bar">
         <div>
           <strong><?= $showDeleted ? 'All recordings, including hidden' : 'Active recordings' ?></strong>
-          <div class="cockpit-muted">Hide keeps the evidence and replay data intact; it only removes recordings from the normal operational list.</div>
+          <div class="cockpit-muted">
+            <?= (int)$recordingCounts['active'] ?> active · <?= (int)$recordingCounts['hidden'] ?> hidden · <?= (int)$recordingCounts['total'] ?> total.
+            Hide keeps the evidence and replay data intact; it only removes recordings from the normal operational list.
+          </div>
         </div>
         <div class="cockpit-bulk-controls">
           <label class="cockpit-muted">Reason
@@ -544,10 +572,39 @@ cw_header('Cockpit Recordings');
           <?php if ($showDeleted): ?>
             <button class="cockpit-button secondary" type="submit" name="action" value="restore">Restore selected</button>
           <?php endif; ?>
-          <a class="cockpit-filter-link" href="/admin/cockpit_recorder.php<?= $showDeleted ? '' : '?show_deleted=1' ?>"><?= $showDeleted ? 'Show active only' : 'Show hidden too' ?></a>
+          <a class="cockpit-filter-link" href="/admin/cockpit_recorder.php?<?= h(http_build_query($showDeleted ? array('per_page' => $recordingPerPage) : array('show_deleted' => 1, 'per_page' => $recordingPerPage))) ?>"><?= $showDeleted ? 'Show active only' : 'Show hidden too' ?></a>
         </div>
       </div>
     </form>
+    <?php
+      $recordingFirst = $recordingVisibleTotal > 0 ? $recordingOffset + 1 : 0;
+      $recordingLast = min($recordingVisibleTotal, $recordingOffset + count($recordings));
+      $previousParams = $currentReturnParams;
+      $previousParams['page'] = max(1, $recordingPage - 1);
+      $nextParams = $currentReturnParams;
+      $nextParams['page'] = min($recordingPageCount, $recordingPage + 1);
+    ?>
+    <div class="cockpit-pager">
+      <div class="cockpit-muted">
+        Showing <?= (int)$recordingFirst ?>-<?= (int)$recordingLast ?> of <?= (int)$recordingVisibleTotal ?> <?= $showDeleted ? 'total' : 'active' ?> recordings.
+      </div>
+      <div class="cockpit-pager-controls">
+        <form method="get" class="cockpit-pager-controls">
+          <?php if ($showDeleted): ?><input type="hidden" name="show_deleted" value="1"><?php endif; ?>
+          <input type="hidden" name="page" value="1">
+          <label class="cockpit-muted">Rows
+            <select class="cockpit-input" name="per_page" onchange="this.form.submit()">
+              <?php foreach (array(25, 50, 100, 250) as $option): ?>
+                <option value="<?= $option ?>"<?= $recordingPerPage === $option ? ' selected' : '' ?>><?= $option ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+        </form>
+        <a class="cockpit-button subtle" href="/admin/cockpit_recorder.php?<?= h(http_build_query($previousParams)) ?>"<?= $recordingPage <= 1 ? ' aria-disabled="true"' : '' ?>>Previous</a>
+        <span class="cockpit-muted">Page <?= (int)$recordingPage ?> of <?= (int)$recordingPageCount ?></span>
+        <a class="cockpit-button subtle" href="/admin/cockpit_recorder.php?<?= h(http_build_query($nextParams)) ?>"<?= $recordingPage >= $recordingPageCount ? ' aria-disabled="true"' : '' ?>>Next</a>
+      </div>
+    </div>
     <div class="cockpit-table-wrap">
       <table class="cockpit-table">
         <thead>
@@ -674,6 +731,9 @@ cw_header('Cockpit Recordings');
             <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($reconStatus)) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span><div class="cockpit-row-sub">Timeline: <span data-timeline-badge="<?= $id ?>"><?= h($timelineStatus) ?></span></div></td>
             <td>
               <div class="cockpit-row-sub">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></div>
+              <?php if (!empty($row['storage_path'])): ?>
+                <div class="cockpit-link-grid"><a href="<?= h($audioUrl) ?>">Play audio</a><a href="<?= h($audioUrl) ?>&download=1">Download</a></div>
+              <?php endif; ?>
               <div class="cockpit-row-sub">Garmin <?= $hasCompleteGarminMatch ? 'complete match' : ($hasAutoGarminSource ? 'legacy link only' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked')) ?></div>
               <div class="cockpit-row-sub">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></div>
             </td>

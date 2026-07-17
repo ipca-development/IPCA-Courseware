@@ -339,20 +339,38 @@ final class CockpitRecorderService
     /**
      * @return list<array<string,mixed>>
      */
-    public function adminRecordings(int $limit = 100, bool $includeDeleted = false): array
+    public function adminRecordings(int $limit = 100, bool $includeDeleted = false, int $offset = 0): array
     {
         $this->requireTables();
         $limit = max(1, min(250, $limit));
+        $offset = max(0, $offset);
         $where = $includeDeleted ? '' : $this->activeRecordingWhereClause();
         $stmt = $this->pdo->query("
             SELECT *
             FROM " . self::TABLE . "
             {$where}
             ORDER BY COALESCE(started_at, created_at) DESC, id DESC
-            LIMIT " . $limit
+            LIMIT " . $limit . "
+            OFFSET " . $offset
         );
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return array{total:int, active:int, hidden:int}
+     */
+    public function adminRecordingCounts(): array
+    {
+        $this->requireTables();
+        $total = (int)$this->pdo->query("SELECT COUNT(*) FROM " . self::TABLE)->fetchColumn();
+        if (!$this->hasColumn('deleted_at')) {
+            return array('total' => $total, 'active' => $total, 'hidden' => 0);
+        }
+
+        $active = (int)$this->pdo->query("SELECT COUNT(*) FROM " . self::TABLE . " WHERE deleted_at IS NULL")->fetchColumn();
+        $hidden = (int)$this->pdo->query("SELECT COUNT(*) FROM " . self::TABLE . " WHERE deleted_at IS NOT NULL")->fetchColumn();
+        return array('total' => $total, 'active' => $active, 'hidden' => $hidden);
     }
 
     /**
