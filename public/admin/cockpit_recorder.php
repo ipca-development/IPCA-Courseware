@@ -377,7 +377,7 @@ function cockpit_admin_best_complete_garmin_match(PDO $pdo, string $aircraftRegi
           AND JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.status_label')) = 'Complete'
           AND UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tail')), f.aircraft_registration, '')) = ?
           AND s.departure_time_utc BETWEEN DATE_SUB(?, INTERVAL 6 HOUR) AND DATE_ADD(?, INTERVAL 6 HOUR)
-        ORDER BY overlap_seconds DESC, start_delta_seconds ASC, s.id DESC
+        ORDER BY overlap_seconds DESC, start_delta_seconds ASC, f.id DESC
         LIMIT 1
     ");
     $stmt->execute(array($windowStart, $windowStart, $windowEnd, $aircraftRegistration, $windowStart, $windowEnd));
