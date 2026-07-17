@@ -45,6 +45,10 @@ function garmin_csv_summary_stats(PDO $pdo): array
                 WHEN s.csv_file_id IS NULL THEN 0
                 WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
                 WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
+                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
                 ELSE 1
               END) AS done
             FROM ipca_garmin_csv_files f
@@ -63,6 +67,10 @@ function garmin_csv_summary_stats(PDO $pdo): array
                 WHEN s.track_artifact_id IS NULL THEN 0
                 WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
                 WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
+                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
+                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
                 ELSE 1
               END) AS done
             FROM ipca_garmin_normalized_track_artifacts t

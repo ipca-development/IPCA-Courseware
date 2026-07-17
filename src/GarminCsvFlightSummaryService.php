@@ -71,6 +71,10 @@ final class GarminCsvFlightSummaryService
             WHERE s.csv_file_id IS NULL
                OR JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL
                OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
+               OR JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL
+               OR JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL
+               OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
+               OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
             ORDER BY COALESCE(f.first_valid_sample_utc, f.created_at) DESC, f.id DESC
             LIMIT ?
         ");
@@ -129,22 +133,28 @@ final class GarminCsvFlightSummaryService
         try {
             $expectedProfile = $this->expectedImportProfile((string)($csvFile['import_profile'] ?? ''));
             $parsed = G3XFlightStreamParser::parseFile($path, $expectedProfile);
-            $meta = $this->metaFromFirstLine($path);
+            $meta = is_array($parsed['metadata'] ?? null) ? $parsed['metadata'] : $this->metaFromFirstLine($path);
             $rows = $parsed['rows'];
             $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($rows);
             $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($rows);
             $airports = (new AirportDetectionService())->detect($rows);
+            $systemId = $this->firstNonBlank(
+                (string)($csvFile['system_identifier'] ?? ''),
+                (string)($meta['system_id'] ?? ''),
+                (string)($meta['system_identifier'] ?? '')
+            );
             $tail = $this->firstNonBlank(
                 (string)($csvFile['aircraft_registration'] ?? ''),
                 (string)($csvFile['aircraft_ident'] ?? ''),
                 (string)($parsed['aircraft_ident'] ?? ''),
-                (string)($meta['aircraft_ident'] ?? '')
+                (string)($meta['aircraft_ident'] ?? ''),
+                $this->tailForSystemIdentifier($systemId)
             );
             $config = $this->calculationConfigForTail($tail);
             $hobbs = (new HobbsCalculationService())->calculate($rows, $config);
             $tacho = (new TachoCalculationService())->calculate($rows, $config);
-            $hobbsCounterStart = $this->numericOrNull($meta['airframe_hours'] ?? null);
-            $tachoCounterStart = $this->numericOrNull($meta['engine_hours'] ?? null);
+            $hobbsCounterStart = $this->numericOrNull($csvFile['airframe_hours_start'] ?? null) ?? $this->numericOrNull($meta['airframe_hours'] ?? null);
+            $tachoCounterStart = $this->numericOrNull($csvFile['engine_hours_start'] ?? null) ?? $this->numericOrNull($meta['engine_hours'] ?? null);
 
             $summary['status'] = 'ok';
             $summary['tail'] = $tail !== '' ? $tail : 'Unknown tail';
@@ -159,7 +169,7 @@ final class GarminCsvFlightSummaryService
             $summary['row_count'] = (int)($parsed['row_count'] ?? 0);
             $summary['hobbs_out'] = $this->counterDisplay($hobbsCounterStart);
             $summary['tacho_out'] = $this->counterDisplay($tachoCounterStart);
-            $summary['system_id'] = (string)($meta['system_id'] ?? '');
+            $summary['system_id'] = $systemId;
             $summary['aircraft_ident_raw'] = (string)($meta['aircraft_ident'] ?? '');
             $summary['hobbs_start_utc'] = (string)($hobbs['start_utc'] ?? '');
             $summary['hobbs_end_utc'] = (string)($hobbs['end_utc'] ?? '');
@@ -170,6 +180,11 @@ final class GarminCsvFlightSummaryService
             $summary['hobbs_calculation_version'] = (string)($hobbs['calculation_version'] ?? HobbsCalculationService::VERSION);
             $summary['hobbs_exact'] = $this->counterCalculationSummary($hobbsCounterStart, $hobbs);
             $summary['tacho_exact'] = $this->counterCalculationSummary($tachoCounterStart, $tacho);
+            $summary['hobbs_in'] = (string)($summary['hobbs_exact']['counter_end_display'] ?? '--');
+            $summary['tacho_in'] = (string)($summary['tacho_exact']['counter_end_display'] ?? '--');
+            $summary['hobbs_time'] = $this->durationDisplay($summary['hobbs_exact'] ?? array());
+            $summary['tacho_time'] = $this->durationDisplay($summary['tacho_exact'] ?? array());
+            $summary['tail_source'] = $this->tailSource($tail, $csvFile, $parsed, $meta, $systemId);
             $summary['tacho_status'] = (string)($tacho['status'] ?? '');
             $summary['tacho_calculation_version'] = (string)($tacho['calculation_version'] ?? TachoCalculationService::VERSION);
             $summary['calculation_config'] = array(
@@ -215,8 +230,13 @@ final class GarminCsvFlightSummaryService
             'row_count' => (int)($csvFile['valid_row_count'] ?? 0),
             'hobbs_out' => '--',
             'tacho_out' => '--',
+            'hobbs_in' => '--',
+            'tacho_in' => '--',
+            'hobbs_time' => '--',
+            'tacho_time' => '--',
             'system_id' => '',
             'aircraft_ident_raw' => '',
+            'tail_source' => '',
             'hobbs_start_utc' => '',
             'hobbs_end_utc' => '',
             'hobbs_start_lt' => '--',
@@ -353,7 +373,7 @@ final class GarminCsvFlightSummaryService
             'label' => (string)($row['display_label'] ?? ''),
             'exceptions' => is_array($exceptions) ? $exceptions : array(),
         );
-        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'tacho_out', 'hobbs_exact', 'tacho_exact', 'tacho_status', 'tacho_calculation_version', 'system_id', 'aircraft_ident_raw', 'calculation_config')))) : $summary;
+        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'hobbs_in', 'hobbs_time', 'tacho_out', 'tacho_in', 'tacho_time', 'hobbs_exact', 'tacho_exact', 'tacho_status', 'tacho_calculation_version', 'system_id', 'aircraft_ident_raw', 'tail_source', 'calculation_config')))) : $summary;
     }
 
     /**
@@ -597,6 +617,16 @@ final class GarminCsvFlightSummaryService
     }
 
     /**
+     * @param array<string,mixed> $counter
+     */
+    private function durationDisplay(array $counter): string
+    {
+        return is_numeric($counter['duration_hours_display'] ?? null)
+            ? number_format((float)$counter['duration_hours_display'], 1, '.', '')
+            : '--';
+    }
+
+    /**
      * @param array<string,mixed> $calculation
      * @return array<string,mixed>
      */
@@ -632,5 +662,48 @@ final class GarminCsvFlightSummaryService
             $exceptions[] = strtoupper($label) . ': ' . (string)$exception;
         }
         return $exceptions;
+    }
+
+    private function tailForSystemIdentifier(string $systemIdentifier): string
+    {
+        $systemIdentifier = trim($systemIdentifier);
+        if ($this->pdo === null || $systemIdentifier === '' || !$this->tableExists('ipca_garmin_system_identifier_mappings')) {
+            return '';
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT tail_number
+            FROM ipca_garmin_system_identifier_mappings
+            WHERE system_identifier = ?
+              AND (effective_to_utc IS NULL OR effective_to_utc > CURRENT_TIMESTAMP(3))
+            ORDER BY effective_from_utc DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array($systemIdentifier));
+        return trim((string)$stmt->fetchColumn());
+    }
+
+    /**
+     * @param array<string,mixed> $csvFile
+     * @param array<string,mixed> $parsed
+     * @param array<string,mixed> $meta
+     */
+    private function tailSource(string $tail, array $csvFile, array $parsed, array $meta, string $systemId): string
+    {
+        if ($tail === '' || stripos($tail, 'unknown') !== false) {
+            return 'unresolved';
+        }
+        if (trim((string)($csvFile['aircraft_registration'] ?? '')) === $tail) {
+            return 'csv_file_aircraft_registration';
+        }
+        if (trim((string)($csvFile['aircraft_ident'] ?? '')) === $tail) {
+            return 'csv_file_aircraft_ident';
+        }
+        if (trim((string)($parsed['aircraft_ident'] ?? '')) === $tail || trim((string)($meta['aircraft_ident'] ?? '')) === $tail) {
+            return 'g3x_aircraft_ident';
+        }
+        if ($systemId !== '' && $this->tailForSystemIdentifier($systemId) === $tail) {
+            return 'system_identifier_mapping';
+        }
+        return 'derived';
     }
 }

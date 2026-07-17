@@ -29,6 +29,11 @@ final class GarminFlightDataSourceClassificationService
             $report = $this->capabilityReport($headers, $rows, true);
             $report['aircraft_ident'] = $parsed['aircraft_ident'];
             $report['product'] = $parsed['product'];
+            $metadata = is_array($parsed['metadata'] ?? null) ? $parsed['metadata'] : array();
+            $report['system_identifier'] = (string)($metadata['system_id'] ?? $metadata['system_identifier'] ?? '');
+            $report['airframe_hours_start'] = is_numeric($metadata['airframe_hours'] ?? null) ? (float)$metadata['airframe_hours'] : null;
+            $report['engine_hours_start'] = is_numeric($metadata['engine_hours'] ?? null) ? (float)$metadata['engine_hours'] : null;
+            $report['airframe_info_metadata'] = $metadata;
             $report['parser_profile'] = $parsed['import_profile'];
             $report['valid_sample_count'] = (int)$parsed['row_count'];
             $report['first_timestamp_utc'] = $this->formatTimestamp(G3XFlightStreamParser::firstUtcTimestamp($parsed['rows']));

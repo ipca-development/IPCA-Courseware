@@ -347,8 +347,9 @@ final class SyncAgentGarminIngestionService
             INSERT INTO ipca_garmin_csv_files
               (csv_file_uuid, aircraft_registration, source, upload_source, provider_name, original_filename,
                storage_path, sha256, file_size_bytes, mime_type, import_profile, aircraft_ident, product,
+               system_identifier, airframe_hours_start, engine_hours_start,
                first_valid_sample_utc, last_valid_sample_utc, valid_row_count)
-            VALUES (?, ?, 'garmin_cloud', 'desktop_sync_agent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'garmin_cloud', 'desktop_sync_agent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute(array(
             AuditEventService::uuid(),
@@ -362,6 +363,9 @@ final class SyncAgentGarminIngestionService
             (string)($classification['parser_profile'] ?? 'desktop_sync_agent'),
             (string)($classification['aircraft_ident'] ?? ($entry['aircraft_registration'] ?? '')),
             (string)($classification['product'] ?? 'Garmin Sync Agent'),
+            (string)($classification['system_identifier'] ?? ''),
+            $classification['airframe_hours_start'] ?? null,
+            $classification['engine_hours_start'] ?? null,
             $classification['first_timestamp_utc'] ?? null,
             $classification['last_timestamp_utc'] ?? null,
             (int)($classification['valid_sample_count'] ?? 0),

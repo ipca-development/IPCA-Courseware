@@ -24,6 +24,7 @@ final class G3XFlightStreamParser
      * @return array{
      *   aircraft_ident: string,
      *   product: string,
+     *   metadata: array<string,string>,
      *   headers: list<string>,
      *   import_profile: string,
      *   rows: list<array<string,string>>,
@@ -110,6 +111,7 @@ final class G3XFlightStreamParser
         return array(
             'aircraft_ident' => $meta['aircraft_ident'],
             'product' => $meta['product'],
+            'metadata' => $meta['metadata'],
             'headers' => $headers,
             'import_profile' => $importProfile,
             'rows' => $rows,
@@ -189,7 +191,7 @@ final class G3XFlightStreamParser
     }
 
     /**
-     * @return array{aircraft_ident: string, product: string}
+     * @return array{aircraft_ident: string, product: string, metadata: array<string,string>}
      */
     private static function parseMetaLine(string $line): array
     {
@@ -228,6 +230,7 @@ final class G3XFlightStreamParser
         return array(
             'aircraft_ident' => $aircraft,
             'product' => $product,
+            'metadata' => $values,
         );
     }
 
