@@ -154,7 +154,7 @@ final class LocalArtifactStore {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    func saveDownloadedSource(provider: String, entryID: String, sourceUUID: String, response: [String: JSONValue]) throws -> DownloadedArtifact {
+    func saveDownloadedSource(provider: String, entryID: String, sourceUUID: String, response: [String: JSONValue], metadata extraMetadata: [String: JSONValue] = [:]) throws -> DownloadedArtifact {
         if response["timeout"]?.bool == true {
             throw GarminError.timeout("Garmin source download timed out for \(sourceUUID). Try Sync Now again.")
         }
@@ -173,9 +173,6 @@ final class LocalArtifactStore {
         let contentType = response["contentType"]?.string ?? "application/octet-stream"
         let originalFilename = safeFilename(response["filename"]?.string ?? "\(sourceUUID).bin")
         let classification = classifyDownloadedContent(bytes: bytes, contentType: contentType, filename: originalFilename)
-        if classification == "GPS_ONLY_GPX" {
-            throw GarminError.gpxOnly("Skipped Garmin GPX/track-only source \(sourceUUID).")
-        }
 
         let date = Date()
         let parts = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(secondsFromGMT: 0)!, from: date)
@@ -208,7 +205,14 @@ final class LocalArtifactStore {
             byteSize: bytes.count,
             sha256: sha256,
             sourceClassification: classification,
-            metadata: [:],
+            metadata: extraMetadata.merging([
+                "sourceClassification": .string(classification),
+                "finalUrl": response["finalUrl"] ?? .null,
+                "requestUrl": response["requestUrl"] ?? .null,
+                "responseStatus": .number(Double(status)),
+                "responseByteLength": .number(Double(bytes.count)),
+                "bodyPreview": response["bodyPreview"] ?? .null
+            ]) { current, _ in current },
             downloadedAt: date
         )
         let metadataURL = dir.appendingPathComponent("metadata.json")
@@ -289,6 +293,9 @@ final class LocalArtifactStore {
         let sample = String(data: bytes.prefix(2048), encoding: .utf8)?.lowercased() ?? ""
         if lowerContentType.contains("gpx") || lowerFilename.hasSuffix(".gpx") || sample.contains("<gpx") {
             return "GPS_ONLY_GPX"
+        }
+        if lowerContentType.contains("json") || lowerFilename.hasSuffix(".json") || sample.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
+            return "GARMIN_ORIGINAL_JSON"
         }
         if lowerContentType.contains("csv") || lowerFilename.hasSuffix(".csv") || sample.contains(",") {
             if sample.contains("engine") || sample.contains("rpm") || sample.contains("g3x") || sample.contains("fuel") || sample.contains("hobbs") {

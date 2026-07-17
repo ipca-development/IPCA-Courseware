@@ -630,16 +630,16 @@ final class SyncCoordinator {
             var failed = 0
             var skippedGPSOnly = 0
             for (index, item) in result.items.enumerated() {
-                let trackUUID = item.trackUUIDs.first ?? "unknown"
-                state?.garminBackfillStatus = "Downloading historical track \(index + 1) of \(result.items.count)"
+                let backfillKey = item.trackUUIDs.first ?? item.sourceUUIDs.first ?? item.entryID
+                state?.garminBackfillStatus = "Downloading historical Garmin artifact \(index + 1) of \(result.items.count)"
                 state?.updateTransferProgress(
                     phase: "Downloading",
                     itemProgress: 0,
                     overallProgress: Double(index) / Double(max(1, result.items.count)),
-                    detail: "Downloading historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
+                    detail: "Downloading historical Garmin artifact \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
                 )
-                try queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .seen)
-                LoggingService.shared.info("BACKFILL_TRACK_SELECTED runID=\(runID) entry=\(item.entryID) track=\(trackUUID)")
+                try queue.markBackfillTrack(trackUUID: backfillKey, entryID: item.entryID, runID: runID, state: .seen)
+                LoggingService.shared.info("BACKFILL_ARTIFACT_SELECTED runID=\(runID) entry=\(item.entryID) key=\(backfillKey) tracks=\(item.trackUUIDs.joined(separator: ",")) sources=\(item.sourceUUIDs.joined(separator: ","))")
                 do {
                     let artifacts = try await provider.download(item: item)
                     downloaded += artifacts.count
@@ -652,18 +652,18 @@ final class SyncCoordinator {
                     }
                 } catch GarminError.gpxOnly(let message) {
                     skippedGPSOnly += 1
-                    try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .ignoredGPSOnly, error: message)
-                    LoggingService.shared.info("BACKFILL_TRACK_IGNORED_GPS_ONLY runID=\(runID) entry=\(item.entryID) track=\(trackUUID) reason=\(message)")
+                    try? queue.markBackfillTrack(trackUUID: backfillKey, entryID: item.entryID, runID: runID, state: .ignoredGPSOnly, error: message)
+                    LoggingService.shared.info("BACKFILL_ARTIFACT_IGNORED_GPS_ONLY runID=\(runID) entry=\(item.entryID) key=\(backfillKey) reason=\(message)")
                 } catch {
                     failed += 1
-                    try? queue.markBackfillTrack(trackUUID: trackUUID, entryID: item.entryID, runID: runID, state: .failed, error: error.localizedDescription)
-                    LoggingService.shared.error("BACKFILL_TRACK_FAILED runID=\(runID) entry=\(item.entryID) track=\(trackUUID) error=\(error.localizedDescription)")
+                    try? queue.markBackfillTrack(trackUUID: backfillKey, entryID: item.entryID, runID: runID, state: .failed, error: error.localizedDescription)
+                    LoggingService.shared.error("BACKFILL_ARTIFACT_FAILED runID=\(runID) entry=\(item.entryID) key=\(backfillKey) error=\(error.localizedDescription)")
                 }
                 state?.updateTransferProgress(
                     phase: "Downloading",
                     itemProgress: 1,
                     overallProgress: Double(index + 1) / Double(max(1, result.items.count)),
-                    detail: "Finished historical track \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
+                    detail: "Finished historical Garmin artifact \(index + 1) of \(result.items.count). Downloaded \(downloaded), queued \(queued), failed \(failed)."
                 )
                 if state?.pauseRequested == true {
                     try? queue.recordBackfillRun(runID: runID, source: result.sourceDescription, result: result, status: "paused", error: nil)
@@ -816,6 +816,9 @@ final class SyncCoordinator {
                     if item.artifactType == "GARMIN_TRACK_NORMALIZED_JSON" {
                         try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
                         LoggingService.shared.info("BACKFILL_UPLOAD_RESULT track=\(item.sourceUUID) result=\(status)")
+                    } else if item.artifactType == "GARMIN_ORIGINAL_SOURCE" {
+                        try queue.updateBackfillTrackState(trackUUID: item.sourceUUID, state: .uploaded)
+                        LoggingService.shared.info("BACKFILL_UPLOAD_RESULT flightDataLogUUID=\(item.sourceUUID) result=\(status)")
                     }
                     state?.filesUploaded += 1
                     processedThisRun += 1

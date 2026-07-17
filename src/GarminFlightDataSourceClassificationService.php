@@ -34,6 +34,8 @@ final class GarminFlightDataSourceClassificationService
             $report['airframe_hours_start'] = is_numeric($metadata['airframe_hours'] ?? null) ? (float)$metadata['airframe_hours'] : null;
             $report['engine_hours_start'] = is_numeric($metadata['engine_hours'] ?? null) ? (float)$metadata['engine_hours'] : null;
             $report['airframe_info_metadata'] = $metadata;
+            $report['raw_header'] = (string)($parsed['raw_header'] ?? '');
+            $report['flightstream_header'] = (string)($parsed['flightstream_header'] ?? ($metadata['flightstream_header'] ?? ''));
             $report['parser_profile'] = $parsed['import_profile'];
             $report['valid_sample_count'] = (int)$parsed['row_count'];
             $report['first_timestamp_utc'] = $this->formatTimestamp(G3XFlightStreamParser::firstUtcTimestamp($parsed['rows']));
@@ -187,6 +189,9 @@ final class GarminFlightDataSourceClassificationService
             ),
             'parser_profile' => $isStrictG3x ? 'G3X_STRICT' : 'GENERIC_GARMIN_CSV',
             'parser_version' => 'garmin-source-classifier-v1',
+            'raw_header' => '',
+            'flightstream_header' => '',
+            'airframe_info_metadata' => array(),
             'valid_sample_count' => count($rows),
             'invalid_sample_count' => 0,
             'classification_reason' => $reason,
@@ -219,6 +224,9 @@ final class GarminFlightDataSourceClassificationService
             'field_coverage' => array('error_code' => $code),
             'parser_profile' => 'UNRECOGNIZED',
             'parser_version' => 'garmin-source-classifier-v1',
+            'raw_header' => '',
+            'flightstream_header' => '',
+            'airframe_info_metadata' => array(),
             'valid_sample_count' => 0,
             'invalid_sample_count' => 0,
             'classification_reason' => $reason,

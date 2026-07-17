@@ -415,7 +415,7 @@ final class GarminTrackFlightSummaryService
         if ($this->pdo === null) {
             return null;
         }
-        if ($this->tableExists('ipca_garmin_flight_data_sources') && $this->tableExists('ipca_garmin_csv_files')) {
+        if ($this->tableExists('ipca_garmin_flight_data_track_links') && $this->tableExists('ipca_garmin_csv_files')) {
             $stmt = $this->pdo->prepare("
                 SELECT
                   t.*,
@@ -425,11 +425,12 @@ final class GarminTrackFlightSummaryService
                   f.airframe_hours_start AS csv_airframe_hours_start,
                   f.engine_hours_start AS csv_engine_hours_start
                 FROM ipca_garmin_normalized_track_artifacts t
-                LEFT JOIN ipca_garmin_flight_data_sources s
-                  ON s.provider_name = t.provider_name
-                 AND s.flight_data_log_uuid = t.track_uuid
+                LEFT JOIN ipca_garmin_flight_data_track_links l
+                  ON l.provider_name = t.provider_name
+                 AND l.garmin_entry_uuid = t.garmin_entry_uuid
+                 AND l.canonical_track_uuid = t.track_uuid
                 LEFT JOIN ipca_garmin_csv_files f
-                  ON f.id = s.garmin_csv_file_id
+                  ON f.id = l.garmin_csv_file_id
                 WHERE t.id = ?
                 LIMIT 1
             ");

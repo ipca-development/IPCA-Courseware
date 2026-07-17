@@ -75,6 +75,17 @@ enum GarminRoutes {
         return url
     }
 
+    static func flightDataURL(flightDataLogUUID: String) throws -> URL {
+        guard flightDataLogUUID.range(of: #"^[A-Fa-f0-9-]{36}$"#, options: .regularExpression) != nil else {
+            throw GarminError.logbookEndpointUnavailable
+        }
+        guard let url = URL(string: "https://fly.garmin.com/fly-garmin/api/logbook/v1/flight-data/\(flightDataLogUUID)/"),
+              isValidLogbookAPIURL(url) else {
+            throw GarminError.logbookEndpointUnavailable
+        }
+        return url
+    }
+
     static func isValidLogbookAPIURL(_ url: URL) -> Bool {
         guard url.scheme == "https",
               url.host == "fly.garmin.com" else {
@@ -275,19 +286,21 @@ final class GarminProvider: SyncProvider {
             }
 
         for item in sortedItems {
-            if item.trackUUIDs.isEmpty {
+            if item.trackUUIDs.isEmpty && item.sourceUUIDs.isEmpty {
                 skippedMissingTrackCount += 1
                 continue
             }
-            entriesWithTracks += 1
-            for trackUUID in item.trackUUIDs.sorted() {
+            if !item.trackUUIDs.isEmpty { entriesWithTracks += 1 }
+            let trackCandidates = item.trackUUIDs.isEmpty ? [""] : item.trackUUIDs.sorted()
+            for trackUUID in trackCandidates {
                 let normalizedTrackUUID = trackUUID.lowercased()
                 if seenTracks.contains(normalizedTrackUUID) {
                     skippedSeenCount += 1
                     continue
                 }
-                seenTracks.insert(normalizedTrackUUID)
-                if skippedTrackUUIDs.contains(normalizedTrackUUID) {
+                if !normalizedTrackUUID.isEmpty { seenTracks.insert(normalizedTrackUUID) }
+                let trackAlreadyBackfilled = !normalizedTrackUUID.isEmpty && skippedTrackUUIDs.contains(normalizedTrackUUID)
+                if trackAlreadyBackfilled && item.sourceUUIDs.isEmpty {
                     skippedSeenCount += 1
                     continue
                 }
@@ -299,8 +312,8 @@ final class GarminProvider: SyncProvider {
                     aircraftRegistration: item.aircraftRegistration,
                     generatedTrackStart: item.generatedTrackStart,
                     generatedTrackStop: item.generatedTrackStop,
-                    sourceUUIDs: [],
-                    trackUUIDs: [normalizedTrackUUID],
+                    sourceUUIDs: item.sourceUUIDs,
+                    trackUUIDs: trackAlreadyBackfilled || normalizedTrackUUID.isEmpty ? [] : [normalizedTrackUUID],
                     rawEntry: item.rawEntry
                 ))
             }
@@ -333,35 +346,18 @@ final class GarminProvider: SyncProvider {
             }
         }
         for sourceUUID in item.sourceUUIDs {
-            let fallback = {
-                let response = try await self.downloadSourceWithURLSession(sourceUUID: sourceUUID)
-                return try self.artifactStore.saveDownloadedSource(
-                    provider: self.identifier,
-                    entryID: item.entryID,
-                    sourceUUID: sourceUUID,
-                    response: response
-                )
-            }
             do {
                 let value = try await withTimeout(seconds: 60, message: "Garmin source download timed out for \(sourceUUID).") {
-                    try await self.browser.evaluate(Self.sourceDownloadExpression(sourceUUID: sourceUUID))
+                    try await self.browser.evaluate(try Self.sourceDownloadExpression(sourceUUID: sourceUUID))
                 }
                 let artifact = try artifactStore.saveDownloadedSource(
                     provider: identifier,
                     entryID: item.entryID,
                     sourceUUID: sourceUUID,
-                    response: try objectValue(value)
+                    response: try objectValue(value),
+                    metadata: originalSourceMetadata(item: item, sourceUUID: sourceUUID)
                 )
                 artifacts.append(artifact)
-            } catch GarminError.timeout {
-                do { artifacts.append(try await fallback()) }
-                catch GarminError.gpxOnly(let message) { LoggingService.shared.info(message) }
-            } catch GarminError.loginRequired {
-                do { artifacts.append(try await fallback()) }
-                catch GarminError.gpxOnly(let message) { LoggingService.shared.info(message) }
-            } catch GarminError.downloadFailed {
-                do { artifacts.append(try await fallback()) }
-                catch GarminError.gpxOnly(let message) { LoggingService.shared.info(message) }
             } catch GarminError.gpxOnly(let message) {
                 LoggingService.shared.info(message)
                 continue
@@ -370,6 +366,17 @@ final class GarminProvider: SyncProvider {
             }
         }
         return artifacts
+    }
+
+    private func originalSourceMetadata(item: RemoteSyncItem, sourceUUID: String) -> [String: JSONValue] {
+        [
+            "artifactType": .string("GARMIN_ORIGINAL_SOURCE"),
+            "flightDataLogUUID": .string(sourceUUID),
+            "canonicalTrackUUIDs": .array(item.trackUUIDs.map { .string($0) }),
+            "canonicalTrackUUID": item.trackUUIDs.first.map { .string($0) } ?? .null,
+            "garminEntryUUID": .string(item.entryID),
+            "rawEntry": .object(item.rawEntry)
+        ]
     }
 
     private enum LogbookMode {
@@ -934,78 +941,6 @@ final class GarminProvider: SyncProvider {
         ]
         try? lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: String.Encoding.utf8)
         LoggingService.shared.error("Garmin raw track download failed entry=\(entryID) track=\(trackUUID) status=\(result["status"]?.int ?? 0) finalUrl=\(result["finalUrl"]?.string ?? "n/a") contentType=\(result["contentType"]?.string ?? "n/a") pageAuthenticated=\(result["pageAuthenticated"]?.bool == true ? "yes" : "no") error=\(result["browserEvaluationError"]?.string ?? "none")")
-    }
-
-    private func downloadSourceWithURLSession(sourceUUID: String) async throws -> [String: JSONValue] {
-        let cookieHeader = try await browser.garminCookieHeader()
-        guard !cookieHeader.isEmpty else { throw GarminError.loginRequired }
-        let candidates = [
-            "https://fly.garmin.com/fly-garmin/api/logbook/flight-data/\(sourceUUID)",
-            "https://fly.garmin.com/fly-garmin/api/logbook/flight-data/\(sourceUUID)/download",
-            "https://fly.garmin.com/fly-garmin/api/flight-data/\(sourceUUID)"
-        ]
-        var attempts: [JSONValue] = []
-        for candidate in candidates {
-            var request = URLRequest(url: URL(string: candidate)!)
-            request.timeoutInterval = 60
-            request.setValue("text/csv, application/octet-stream, */*", forHTTPHeaderField: "Accept")
-            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-            let data: Data
-            let response: URLResponse
-            do {
-                (data, response) = try await URLSession.shared.data(for: request)
-            } catch let error as URLError where error.code == .timedOut {
-                attempts.append(.object([
-                    "status": .number(0),
-                    "contentType": .string(""),
-                    "error": .string("timedOut"),
-                    "path": .string(URL(string: candidate)?.path ?? candidate)
-                ]))
-                continue
-            } catch {
-                attempts.append(.object([
-                    "status": .number(0),
-                    "contentType": .string(""),
-                    "error": .string(error.localizedDescription),
-                    "path": .string(URL(string: candidate)?.path ?? candidate)
-                ]))
-                continue
-            }
-            let http = response as? HTTPURLResponse
-            let status = http?.statusCode ?? 0
-            let contentType = http?.value(forHTTPHeaderField: "content-type") ?? ""
-            attempts.append(.object([
-                "status": .number(Double(status)),
-                "contentType": .string(contentType),
-                "path": .string(URL(string: candidate)?.path ?? candidate)
-            ]))
-            if status == 401 || status == 403 { continue }
-            if (200...299).contains(status), !data.isEmpty {
-                let disposition = http?.value(forHTTPHeaderField: "content-disposition") ?? ""
-                return [
-                    "status": .number(Double(status)),
-                    "ok": .bool(true),
-                    "contentType": .string(contentType),
-                    "contentDisposition": .string(disposition),
-                    "filename": .string(filenameFromDisposition(disposition) ?? "\(sourceUUID).bin"),
-                    "byteLength": .number(Double(data.count)),
-                    "base64": .string(data.base64EncodedString()),
-                    "attempts": .array(attempts),
-                    "loginRequired": .bool(false),
-                    "humanVerification": .bool(false)
-                ]
-            }
-        }
-        return [
-            "status": .number(Double(attempts.last?.object?["status"]?.int ?? 0)),
-            "ok": .bool(false),
-            "contentType": .string(""),
-            "filename": .string("\(sourceUUID).bin"),
-            "byteLength": .number(0),
-            "attempts": .array(attempts),
-            "loginRequired": .bool(attempts.contains { ($0.object?["status"]?.int ?? 0) == 401 || ($0.object?["status"]?.int ?? 0) == 403 }),
-            "humanVerification": .bool(false)
-        ]
     }
 
     private func downloadTrackJSON(entryID: String, trackUUID: String) async throws -> DownloadedArtifact {
@@ -1870,79 +1805,72 @@ final class GarminProvider: SyncProvider {
     }
     */
 
-    static func sourceDownloadExpression(sourceUUID: String) -> String {
-        let escaped = sourceUUID.replacingOccurrences(of: "'", with: "\\'")
+    static func sourceDownloadExpression(sourceUUID: String) throws -> String {
+        let url = try GarminRoutes.flightDataURL(flightDataLogUUID: sourceUUID)
+        let urlJSON = String(data: try JSONEncoder().encode(url.absoluteString), encoding: .utf8) ?? "\"\""
         return """
         (async () => {
-          const uuid = '\(escaped)';
-          const candidates = [
-            'https://fly.garmin.com/fly-garmin/api/logbook/flight-data/' + encodeURIComponent(uuid),
-            'https://fly.garmin.com/fly-garmin/api/logbook/flight-data/' + encodeURIComponent(uuid) + '/download',
-            'https://fly.garmin.com/fly-garmin/api/flight-data/' + encodeURIComponent(uuid)
-          ];
-          const attempts = [];
-          for (const url of candidates) {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 60000);
-            try {
-              const response = await fetch(url, {
-                method: 'GET',
-                credentials: 'include',
-                cache: 'no-store',
-                headers: { 'Accept': 'text/csv, application/octet-stream, */*' },
-                signal: controller.signal
-              });
-              const contentType = response.headers.get('content-type') || '';
-              const contentDisposition = response.headers.get('content-disposition') || '';
-              const buffer = await response.arrayBuffer();
-              const bytes = new Uint8Array(buffer);
-              let sample = '';
-              if (contentType.toLowerCase().includes('html') || response.status === 401 || response.status === 403) {
-                sample = new TextDecoder().decode(bytes.slice(0, 1200)).toLowerCase();
-              }
-              const loginRequired = response.status === 401 || response.status === 403 || sample.includes('password') || sample.includes('sign in') || sample.includes('multi-factor') || sample.includes('mfa') || sample.includes('verification code');
-              const humanVerification = sample.includes('verify you are human') || sample.includes('human verification') || sample.includes('captcha') || sample.includes('cf-challenge');
-              attempts.push({ url, status: response.status, contentType, loginRequired, humanVerification });
-              if (!response.ok || loginRequired || humanVerification || bytes.byteLength === 0) {
-                continue;
-              }
-              let binary = '';
-              const chunkSize = 0x8000;
-              for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-              }
-              const filenameMatch = contentDisposition.match(/filename\\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-              return {
-                status: response.status,
-                ok: response.ok,
-                finalUrl: response.url || url,
-                contentType,
-                contentDisposition,
-                filename: filenameMatch ? decodeURIComponent(filenameMatch[1]) : (uuid + '.bin'),
-                byteLength: bytes.byteLength,
-                base64: btoa(binary),
-                attempts,
-                loginRequired: false,
-                humanVerification: false
-              };
-            } catch (error) {
-              attempts.push({ url, status: 0, contentType: '', timeout: error?.name === 'AbortError', errorMessage: String(error?.message || 'Garmin download failed') });
-            } finally {
-              clearTimeout(timeout);
+          const requestUrl = \(urlJSON);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000);
+          try {
+            const response = await fetch(requestUrl, {
+              method: 'GET',
+              credentials: 'include',
+              cache: 'no-store',
+              headers: { 'Accept': 'text/csv, application/octet-stream, application/json, */*' },
+              signal: controller.signal
+            });
+            const contentType = response.headers.get('content-type') || '';
+            const contentDisposition = response.headers.get('content-disposition') || '';
+            const finalUrl = response.url || requestUrl;
+            const buffer = await response.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            const text = new TextDecoder().decode(bytes.slice(0, Math.min(bytes.length, 4096)));
+            const lowerSample = text.toLowerCase();
+            const loginRequired = response.status === 401 || response.status === 403 || lowerSample.includes('password') || lowerSample.includes('sign in') || lowerSample.includes('multi-factor') || lowerSample.includes('mfa') || lowerSample.includes('verification code');
+            const humanVerification = lowerSample.includes('verify you are human') || lowerSample.includes('human verification') || lowerSample.includes('captcha') || lowerSample.includes('cf-challenge');
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
             }
+            const filenameMatch = contentDisposition.match(/filename\\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+            const inferredExtension = contentType.toLowerCase().includes('json') ? '.json' : (contentType.toLowerCase().includes('gpx') || lowerSample.includes('<gpx') ? '.gpx' : '.csv');
+            return {
+              status: response.status,
+              ok: response.ok,
+              requestUrl,
+              finalUrl,
+              contentType,
+              contentDisposition,
+              filename: filenameMatch ? decodeURIComponent(filenameMatch[1]) : ('flight-data-' + requestUrl.split('/').filter(Boolean).pop() + inferredExtension),
+              byteLength: bytes.byteLength,
+              bodyPreview: text.replace(/[A-Za-z0-9_-]{24,}/g, '[redacted-token]').slice(0, 1200),
+              base64: response.ok ? btoa(binary) : null,
+              loginRequired,
+              humanVerification
+            };
+          } catch (error) {
+            return {
+              status: 0,
+              ok: false,
+              requestUrl,
+              finalUrl: requestUrl,
+              contentType: '',
+              contentDisposition: '',
+              filename: 'flight-data.bin',
+              byteLength: 0,
+              bodyPreview: '',
+              base64: null,
+              timeout: error?.name === 'AbortError',
+              loginRequired: false,
+              humanVerification: false,
+              errorMessage: String(error?.message || 'Garmin flight data download failed')
+            };
+          } finally {
+            clearTimeout(timeout);
           }
-          const last = attempts[attempts.length - 1] || { status: 0, contentType: '' };
-          return {
-            status: last.status || 0,
-            ok: false,
-            contentType: last.contentType || '',
-            filename: uuid + '.bin',
-            byteLength: 0,
-            attempts,
-            timeout: attempts.some((attempt) => attempt.timeout),
-            loginRequired: attempts.some((attempt) => attempt.loginRequired),
-            humanVerification: attempts.some((attempt) => attempt.humanVerification)
-          };
         })()
         """
     }

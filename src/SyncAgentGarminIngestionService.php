@@ -71,9 +71,16 @@ final class SyncAgentGarminIngestionService
             return array('ok' => false, 'status' => 'rejected', 'message' => 'SHA-256 mismatch.');
         }
 
-        $entryPayload = isset($payload['entry']) && is_array($payload['entry'])
+        $metadata = isset($payload['metadata']) && is_array($payload['metadata']) ? $payload['metadata'] : array();
+        $entryPayload = isset($metadata['rawEntry']) && is_array($metadata['rawEntry'])
+            ? $metadata['rawEntry']
+            : (isset($payload['entry']) && is_array($payload['entry'])
             ? $payload['entry']
-            : array('uuid' => $entryUuid, 'flightDataLogUUIDs' => array($sourceUuid));
+            : array(
+                'uuid' => $entryUuid,
+                'flightDataLogUUIDs' => array($sourceUuid),
+                'canonicalTrackUUID' => (string)($metadata['canonicalTrackUUID'] ?? ''),
+            ));
         (new GarminFlightDataSourceService($this->pdo, $this->providerName))->upsertEntryWithSources($entryPayload);
         $source = (new GarminFlightDataSourceService($this->pdo, $this->providerName))->sourceByUuid($sourceUuid);
         if (!is_array($source)) {
@@ -118,6 +125,7 @@ final class SyncAgentGarminIngestionService
             (int)$source['id'],
         ));
         $this->enqueueFollowupJobs((int)$source['id'], $csvFileId, $groupId);
+        $this->linkOriginalSourceToTrack($entryUuid, $sourceUuid, $csvFileId, $metadata, $classification);
         $this->recordAcknowledgment((int)$token['id'], $idempotencyKey, $entryUuid, $sourceUuid, $sha256, 'accepted', $csvFileId);
         return array('ok' => true, 'status' => 'accepted', 'csv_file_id' => $csvFileId, 'source_id' => (int)$source['id']);
     }
@@ -336,24 +344,30 @@ final class SyncAgentGarminIngestionService
      */
     private function ensureCsvFile(int $sourceId, array $source, string $path, string $sha256, int $fileSize, array $payload, array $classification): int
     {
-        $stmt = $this->pdo->prepare('SELECT id FROM ipca_garmin_csv_files WHERE sha256 = ? LIMIT 1');
-        $stmt->execute(array($sha256));
+        $this->ensureCsvEvidenceColumns();
+        $sourceUuid = strtolower((string)($source['flight_data_log_uuid'] ?? ($payload['source_uuid'] ?? '')));
+        $entry = $this->entryForSource($sourceId);
+        $canonicalTrackUuid = (string)($entry['canonical_track_uuid'] ?? (($payload['metadata']['canonicalTrackUUID'] ?? '') ?: ''));
+        $stmt = $this->pdo->prepare('SELECT id FROM ipca_garmin_csv_files WHERE provider_name = ? AND flight_data_log_uuid = ? AND sha256 = ? LIMIT 1');
+        $stmt->execute(array($this->providerName, $sourceUuid, $sha256));
         $existingId = (int)$stmt->fetchColumn();
         if ($existingId > 0) {
             return $existingId;
         }
-        $entry = $this->entryForSource($sourceId);
+        $aircraftRegistration = $this->aircraftRegistrationForEvidence($classification, $entry);
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_garmin_csv_files
               (csv_file_uuid, aircraft_registration, source, upload_source, provider_name, original_filename,
                storage_path, sha256, file_size_bytes, mime_type, import_profile, aircraft_ident, product,
                system_identifier, airframe_hours_start, engine_hours_start,
-               first_valid_sample_utc, last_valid_sample_utc, valid_row_count)
-            VALUES (?, ?, 'garmin_cloud', 'desktop_sync_agent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               first_valid_sample_utc, last_valid_sample_utc, valid_row_count,
+               flight_data_log_uuid, garmin_entry_uuid, canonical_track_uuid, source_type,
+               parser_version, raw_header, parsed_header_json, flightstream_header)
+            VALUES (?, ?, 'garmin_cloud', 'desktop_sync_agent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute(array(
             AuditEventService::uuid(),
-            (string)($entry['aircraft_registration'] ?? ''),
+            $aircraftRegistration,
             $this->providerName,
             (string)($payload['filename'] ?? (($source['flight_data_log_uuid'] ?? 'garmin') . '.csv')),
             $path,
@@ -369,8 +383,140 @@ final class SyncAgentGarminIngestionService
             $classification['first_timestamp_utc'] ?? null,
             $classification['last_timestamp_utc'] ?? null,
             (int)($classification['valid_sample_count'] ?? 0),
+            $sourceUuid,
+            (string)($entry['garmin_entry_uuid'] ?? ($payload['entry_id'] ?? '')),
+            $canonicalTrackUuid,
+            (string)($classification['data_log_type'] ?? 'UNKNOWN'),
+            (string)($classification['parser_version'] ?? ''),
+            (string)($classification['raw_header'] ?? ''),
+            AuditEventService::jsonEncode($classification['airframe_info_metadata'] ?? array()),
+            (string)($classification['flightstream_header'] ?? ''),
         ));
         return (int)$this->pdo->lastInsertId();
+    }
+
+    private function ensureCsvEvidenceColumns(): void
+    {
+        $columns = array(
+            'flight_data_log_uuid' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN flight_data_log_uuid CHAR(36) NULL AFTER provider_name",
+            'garmin_entry_uuid' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN garmin_entry_uuid CHAR(36) NULL AFTER flight_data_log_uuid",
+            'canonical_track_uuid' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN canonical_track_uuid CHAR(36) NULL AFTER garmin_entry_uuid",
+            'source_type' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN source_type VARCHAR(64) NOT NULL DEFAULT 'UNKNOWN' AFTER canonical_track_uuid",
+            'parser_version' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN parser_version VARCHAR(64) NOT NULL DEFAULT '' AFTER source_type",
+            'raw_header' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN raw_header TEXT NULL AFTER parser_version",
+            'parsed_header_json' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN parsed_header_json JSON NULL AFTER raw_header",
+            'flightstream_header' => "ALTER TABLE ipca_garmin_csv_files ADD COLUMN flightstream_header VARCHAR(255) NOT NULL DEFAULT '' AFTER parsed_header_json",
+        );
+        foreach ($columns as $column => $sql) {
+            if (!$this->columnExists('ipca_garmin_csv_files', $column)) {
+                $this->pdo->exec($sql);
+            }
+        }
+        if ($this->indexExists('ipca_garmin_csv_files', 'uk_ipca_garmin_csv_files_sha256')) {
+            $this->pdo->exec('ALTER TABLE ipca_garmin_csv_files DROP INDEX uk_ipca_garmin_csv_files_sha256');
+        }
+        if (!$this->indexExists('ipca_garmin_csv_files', 'idx_ipca_garmin_csv_files_sha256')) {
+            $this->pdo->exec('CREATE INDEX idx_ipca_garmin_csv_files_sha256 ON ipca_garmin_csv_files (sha256)');
+        }
+        if (!$this->indexExists('ipca_garmin_csv_files', 'uk_ipca_garmin_csv_files_source_sha')) {
+            $this->pdo->exec('CREATE UNIQUE INDEX uk_ipca_garmin_csv_files_source_sha ON ipca_garmin_csv_files (provider_name, flight_data_log_uuid, sha256)');
+        }
+    }
+
+    private function aircraftRegistrationForEvidence(array $classification, array $entry): string
+    {
+        $systemId = (string)($classification['system_identifier'] ?? '');
+        if ($systemId !== '' && $this->tableExists('ipca_garmin_system_identifier_mappings')) {
+            $stmt = $this->pdo->prepare("
+                SELECT tail_number
+                FROM ipca_garmin_system_identifier_mappings
+                WHERE system_identifier = ?
+                  AND effective_to_utc IS NULL
+                ORDER BY confidence = 'verified' DESC, id DESC
+                LIMIT 1
+            ");
+            $stmt->execute(array($systemId));
+            $tail = trim((string)$stmt->fetchColumn());
+            if ($tail !== '') {
+                return $tail;
+            }
+        }
+        return (string)($entry['aircraft_registration'] ?? '');
+    }
+
+    private function linkOriginalSourceToTrack(string $entryUuid, string $sourceUuid, int $csvFileId, array $metadata, array $classification): void
+    {
+        $trackUuid = (string)($metadata['canonicalTrackUUID'] ?? '');
+        if ($trackUuid === '') {
+            return;
+        }
+        $this->ensureFlightDataTrackLinkTable();
+        $this->pdo->prepare("
+            INSERT INTO ipca_garmin_flight_data_track_links
+              (provider_name, garmin_entry_uuid, canonical_track_uuid, flight_data_log_uuid, garmin_csv_file_id,
+               system_identifier, first_valid_sample_utc, last_valid_sample_utc, source_group_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              garmin_csv_file_id = VALUES(garmin_csv_file_id),
+              system_identifier = VALUES(system_identifier),
+              first_valid_sample_utc = VALUES(first_valid_sample_utc),
+              last_valid_sample_utc = VALUES(last_valid_sample_utc),
+              updated_at = CURRENT_TIMESTAMP(3)
+        ")->execute(array(
+            $this->providerName,
+            $entryUuid,
+            $trackUuid,
+            $sourceUuid,
+            $csvFileId,
+            (string)($classification['system_identifier'] ?? ''),
+            $classification['first_timestamp_utc'] ?? null,
+            $classification['last_timestamp_utc'] ?? null,
+            $entryUuid . ':' . $trackUuid,
+        ));
+        $stmt = $this->pdo->prepare("
+            SELECT id
+            FROM ipca_garmin_normalized_track_artifacts
+            WHERE provider_name = ?
+              AND garmin_entry_uuid = ?
+              AND track_uuid = ?
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array($this->providerName, $entryUuid, $trackUuid));
+        $trackArtifactId = (int)$stmt->fetchColumn();
+        if ($trackArtifactId > 0) {
+            (new AsyncJobService($this->pdo))->enqueue(
+                'GARMIN_TRACK_FLIGHT_SUMMARY',
+                'ipca_garmin_normalized_track_artifacts',
+                (string)$trackArtifactId,
+                array('track_artifact_id' => $trackArtifactId, 'entry_uuid' => $entryUuid, 'track_uuid' => $trackUuid, 'csv_file_id' => $csvFileId),
+                null,
+                80
+            );
+        }
+    }
+
+    private function ensureFlightDataTrackLinkTable(): void
+    {
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS ipca_garmin_flight_data_track_links (
+              id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              provider_name VARCHAR(64) NOT NULL,
+              garmin_entry_uuid CHAR(36) NOT NULL,
+              canonical_track_uuid CHAR(36) NOT NULL,
+              flight_data_log_uuid CHAR(36) NOT NULL,
+              garmin_csv_file_id BIGINT UNSIGNED NOT NULL,
+              system_identifier VARCHAR(128) NOT NULL DEFAULT '',
+              first_valid_sample_utc DATETIME(3) NULL,
+              last_valid_sample_utc DATETIME(3) NULL,
+              source_group_key VARCHAR(160) NOT NULL DEFAULT '',
+              created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+              updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+              UNIQUE KEY uk_ipca_garmin_fdtl_source (provider_name, flight_data_log_uuid, garmin_csv_file_id),
+              KEY idx_ipca_garmin_fdtl_track (provider_name, garmin_entry_uuid, canonical_track_uuid),
+              KEY idx_ipca_garmin_fdtl_csv (garmin_csv_file_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
     }
 
     /**
@@ -419,5 +565,43 @@ final class SyncAgentGarminIngestionService
             throw new RuntimeException("Missing required field: {$key}");
         }
         return $value;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+        ");
+        $stmt->execute(array($table));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ");
+        $stmt->execute(array($table, $column));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private function indexExists(string $table, string $index): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND INDEX_NAME = ?
+        ");
+        $stmt->execute(array($table, $index));
+        return (int)$stmt->fetchColumn() > 0;
     }
 }
