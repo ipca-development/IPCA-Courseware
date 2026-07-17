@@ -6,7 +6,7 @@ require_once __DIR__ . '/CockpitReplayPipeline.php';
 
 final class StandaloneG3XReplayBuilder
 {
-    public const VERSION = 'standalone_g3x_replay_v3';
+    public const VERSION = 'standalone_g3x_replay_v4';
 
     /**
      * @return array<string,mixed>
@@ -101,6 +101,15 @@ final class StandaloneG3XReplayBuilder
             'warnings' => $warnings,
             'phases' => array(),
             'events' => array(),
+            'traffic' => array(),
+            'traffic_meta' => array(
+                'available' => false,
+                'sample_count' => 0,
+                'range_nm' => 10.0,
+                'provider' => null,
+                'source' => 'standalone_csv_no_adsb_recording',
+                'fetch_error' => null,
+            ),
             'samples' => $samples,
         );
     }
@@ -145,7 +154,7 @@ final class StandaloneG3XReplayBuilder
     private function publicSamples(array $samples, ?DateTimeInterface $startedAt): array
     {
         $public = array();
-        $numericFields = array('t', 'replay_time_s', 'lat', 'lon', 'altitude_ft', 'altitude_ft_msl', 'gps_altitude_ft', 'baro_altitude_ft', 'heading_deg', 'pitch_deg', 'roll_deg', 'bank_deg', 'ground_speed_kt', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'vertical_speed_fpm', 'heading_deg_true', 'heading_deg_magnetic', 'heading_bug_deg', 'track_deg_true', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'altimeter_setting_inhg', 'altimeter_setting_hpa', 'altitude_bug_ft', 'selected_altitude_ft', 'sel_alt_ft', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'wind_direction_deg_true', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz', 'nav2_mhz', 'nav2_standby_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'estimated_slip_skid_g', 'slip_skid_g', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'raw_pitch_deg', 'raw_roll_deg');
+        $numericFields = array('t', 'replay_time_s', 'lat', 'lon', 'altitude_ft', 'altitude_ft_msl', 'gps_altitude_ft', 'baro_altitude_ft', 'heading_deg', 'pitch_deg', 'roll_deg', 'bank_deg', 'ground_speed_kt', 'ias_kt', 'tas_kt', 'rpm', 'manifold_pressure_inhg', 'fuel_flow_gph', 'oil_pressure_psi', 'oil_temp_f', 'fuel_pressure_psi', 'fuel_qty_gal', 'volts', 'amps', 'egt1_f', 'egt2_f', 'coolant1_f', 'coolant2_f', 'vertical_speed_fpm', 'heading_deg_true', 'heading_deg_magnetic', 'heading_bug_deg', 'track_deg_true', 'velocity_e_mps', 'velocity_n_mps', 'velocity_u_mps', 'nav_course_deg', 'nav_bearing_deg', 'nav_xtk_nm', 'hcdi', 'hcdi_full_scale_ft', 'hcdi_scale', 'vcdi', 'vcdi_full_scale_ft', 'vnav_cdi', 'vnav_altitude_ft', 'nav_distance_nm', 'sel_vspeed_fpm', 'sel_ias_kt', 'altimeter_setting_inhg', 'altimeter_setting_hpa', 'altitude_bug_ft', 'selected_altitude_ft', 'sel_alt_ft', 'oat_c', 'isa_deviation_c', 'density_altitude_ft', 'height_agl_ft', 'wind_speed_kt', 'wind_direction_deg', 'wind_direction_deg_true', 'elevator_trim_pct', 'fd_roll_command_deg', 'fd_pitch_command_deg', 'fd_altitude_ft', 'ap_roll_command_deg', 'ap_pitch_command_deg', 'ap_vs_command_fpm', 'ap_altitude_command_ft', 'ap_roll_torque_pct', 'ap_pitch_torque_pct', 'com1_mhz', 'com1_standby_mhz', 'com2_mhz', 'com2_standby_mhz', 'nav2_mhz', 'nav2_standby_mhz', 'lateral_acceleration_g', 'normal_acceleration_g', 'acceleration_g', 'estimated_slip_skid_g', 'slip_skid_g', 'magnetic_variation_deg', 'compass_deviation_deg', 'crab_angle_deg', 'raw_pitch_deg', 'raw_roll_deg');
         $stringFields = array('phase', 'position_quality', 'altitude_quality', 'attitude_quality', 'magnetic_variation_source', 'compass_deviation_source', 'heading_reference', 'track_reference', 'heading_source', 'heading_owner', 'heading_quality', 'track_source', 'track_quality', 'speed_source', 'speed_quality', 'position_source', 'altitude_source', 'position_quality_reason', 'altitude_quality_reason', 'attitude_quality_reason', 'heading_quality_reason', 'track_quality_reason', 'speed_quality_reason', 'raw_attitude_source', 'raw_attitude_quality', 'cas_alert', 'terrain_alert', 'transponder_code', 'transponder_mode', 'nav_source', 'nav_annunciation', 'nav_identifier', 'autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_name', 'com1_status', 'com1_standby_name', 'com2_name', 'com2_status', 'com2_standby_name', 'nav2_name', 'nav2_standby_name');
 
         foreach ($samples as $sample) {

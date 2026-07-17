@@ -7,6 +7,7 @@ require_once __DIR__ . '/TachoCalculationService.php';
 require_once __DIR__ . '/AirportDetectionService.php';
 require_once __DIR__ . '/AircraftOperationalConfigService.php';
 require_once __DIR__ . '/AuditEventService.php';
+require_once __DIR__ . '/GarminAvionicsAlertEventService.php';
 
 final class GarminCsvFlightSummaryService
 {
@@ -55,6 +56,11 @@ final class GarminCsvFlightSummaryService
             throw new RuntimeException('Stored Garmin CSV file is not available on this machine; existing summary was preserved.');
         }
         $this->storeSummary($csvFileId, $summary);
+        try {
+            (new GarminAvionicsAlertEventService($this->pdo))->extractForCsvFileId($csvFileId);
+        } catch (Throwable $e) {
+            // Alert extraction is safety-review evidence, but summary derivation must not be blocked by unknown Garmin alert columns.
+        }
         return $this->remember($csvFileId, $summary);
     }
 

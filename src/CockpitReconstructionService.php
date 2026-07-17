@@ -7,6 +7,8 @@ require_once __DIR__ . '/CockpitReconstructionProfiler.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/PfdProfileService.php';
 require_once __DIR__ . '/CockpitAircraftService.php';
+require_once __DIR__ . '/CockpitAdsbEnrichmentService.php';
+require_once __DIR__ . '/AdsbTrafficArchiveService.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -654,13 +656,36 @@ final class CockpitReconstructionService
             );
         }
 
-        $trafficRows = $this->loadAdsbTraffic($recordingId);
-        $trafficMeta = array(
-            'available' => $trafficRows !== array(),
-            'sample_count' => count($trafficRows),
-            'range_nm' => 10.0,
-            'provider' => tv_adsb_provider(),
-        );
+        $trafficFetchError = '';
+        $trafficPayload = null;
+        try {
+            $trafficPayload = $this->archiveTrafficForRecording($recording);
+        } catch (Throwable $e) {
+            $trafficFetchError = $e->getMessage();
+        }
+        $trafficRows = $trafficPayload !== null && ($trafficPayload['traffic'] ?? array()) !== array()
+            ? (array)$trafficPayload['traffic']
+            : $this->loadAdsbTraffic($recordingId);
+        $trafficIsArchive = $trafficPayload !== null && ($trafficPayload['traffic'] ?? array()) !== array();
+        if (!$trafficIsArchive && $trafficRows === array()) {
+            try {
+                $trafficRows = $this->ensureAdsbTrafficForReplay($recording);
+            } catch (Throwable $e) {
+                $trafficFetchError = $e->getMessage();
+                $trafficRows = $this->loadAdsbTraffic($recordingId);
+            }
+        }
+        $trafficMeta = is_array($trafficPayload['meta'] ?? null)
+            ? $trafficPayload['meta']
+            : array(
+                'available' => $trafficRows !== array(),
+                'sample_count' => count($trafficRows),
+                'range_nm' => 10.0,
+                'provider' => tv_adsb_provider(),
+                'source' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_rapidapi',
+                'coverage_status' => $trafficRows !== array() ? 'legacy_recording_cache' : 'missing',
+            );
+        $trafficMeta['fetch_error'] = $trafficFetchError !== '' ? $trafficFetchError : ($trafficMeta['fetch_error'] ?? null);
 
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
@@ -687,7 +712,7 @@ final class CockpitReconstructionService
             'sample_rate_hz' => (int)($diagnostics['sample_rate_hz'] ?? 10),
             'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
             'airports' => $this->replayEndpointAirports($recordingId),
-            'traffic' => array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
+            'traffic' => $trafficIsArchive ? $trafficRows : array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
             'traffic_meta' => $trafficMeta,
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
@@ -2016,7 +2041,7 @@ final class CockpitReconstructionService
         $tas = G3XFlightStreamParser::numericValue($row, 'True Airspeed (kt)');
         $latAc = G3XFlightStreamParser::numericValue($row, 'Lateral Acceleration (G)');
         $normAc = G3XFlightStreamParser::numericValue($row, 'Normal Acceleration (G)');
-        $oat = G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)');
+        $oat = G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'Outside Air Temperature (deg C)', 'Outside Air Temp', 'OAT (deg C)', 'OAT');
         $baro = G3XFlightStreamParser::numericValue($row, 'Baro Setting (inch Hg)');
         $windSpeed = G3XFlightStreamParser::numericValue($row, 'Wind Speed (kt)');
         $windDir = G3XFlightStreamParser::numericValue($row, 'Wind Direction (deg)');
@@ -2177,6 +2202,56 @@ final class CockpitReconstructionService
         $stmt->execute(array($recordingId));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array{traffic:list<array<string,mixed>>,meta:array<string,mixed>}|null
+     */
+    private function archiveTrafficForRecording(array $recording): ?array
+    {
+        $startedAt = trim((string)($recording['started_at'] ?? ''));
+        $durationSeconds = max(0, (int)round((float)($recording['duration_seconds'] ?? 0)));
+        if ($startedAt === '' || $durationSeconds <= 0) {
+            return null;
+        }
+        $start = (new DateTimeImmutable($startedAt, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->modify('-30 seconds');
+        $end = $start->modify('+' . ($durationSeconds + 60) . ' seconds');
+        $archive = new AdsbTrafficArchiveService($this->pdo);
+        $payload = $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+        $coverage = (string)($payload['meta']['coverage_status'] ?? '');
+        if (in_array($coverage, array('missing', 'queued'), true)) {
+            try {
+                $archive->scheduleKtrmCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+            } catch (Throwable) {
+                // Existing archive data is still usable; scheduling failure is reported by coverage status/admin tooling.
+            }
+        }
+        return $payload;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    private function ensureAdsbTrafficForReplay(array $recording): array
+    {
+        $recordingId = (int)($recording['id'] ?? 0);
+        if ($recordingId <= 0 || trim((string)($recording['aircraft_adsb_hex'] ?? '')) === '') {
+            return array();
+        }
+        if (!CockpitAdsbEnrichmentService::tablesPresent($this->pdo)) {
+            return array();
+        }
+
+        $status = (new CockpitAdsbEnrichmentService($this->pdo))->statusForRecording($recordingId);
+        $currentStatus = strtolower(trim((string)($status['status'] ?? '')));
+        if (in_array($currentStatus, array('ready', 'not_available'), true)) {
+            return $this->loadAdsbTraffic($recordingId);
+        }
+
+        (new CockpitAdsbEnrichmentService($this->pdo))->enrich((string)($recording['recording_uid'] ?? $recordingId));
+        return $this->loadAdsbTraffic($recordingId);
     }
 
     /**
@@ -4452,7 +4527,7 @@ final class CockpitReconstructionService
             'autopilot_armed_mode' => $txt($g3x, 'AP Armed Mode', 'Armed Mode', 'ALT Armed'),
             'wind_speed_kt' => $num($g3x, 'Wind Speed (kt)', 'WndSpd'),
             'wind_dir_deg' => $num($g3x, 'Wind Direction (deg)', 'WndDr'),
-            'oat_c' => $num($g3x, 'Outside Air Temp (deg C)', 'OAT'),
+            'oat_c' => $num($g3x, 'Outside Air Temp (deg C)', 'Outside Air Temperature (deg C)', 'Outside Air Temp', 'OAT (deg C)', 'OAT'),
             'baro_inhg' => $num($g3x, 'Baro Setting (inch Hg)', 'Baro'),
             'baro_alt_ft' => $num($g3x, 'Baro Altitude (ft)', 'AltInd'),
             'vs_fpm' => $num($g3x, 'Vertical Speed (ft/min)', 'VSpd'),

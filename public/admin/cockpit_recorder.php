@@ -518,7 +518,7 @@ cw_header('Cockpit Recordings');
     <div class="cockpit-info">
       <strong>Source-of-truth note:</strong> own phone/iPad AHRS is decommissioned for operational/replay truth. Garmin-derived evidence is the attitude/avionics source of truth. ADS-B is optional enrichment and must not block operational flight-record completion.
     </div>
-    <p><a href="/admin/cockpit_recorder_aircraft.php">Manage aircraft / ADS-B devices</a></p>
+    <p><a href="/admin/cockpit_recorder_aircraft.php">Manage aircraft / ADS-B devices</a> · <a href="/admin/adsb_traffic_archive.php">ADS-B Traffic Archive</a></p>
   </section>
 
   <?php if ($error !== ''): ?>

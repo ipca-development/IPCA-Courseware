@@ -900,7 +900,7 @@ final class CockpitReplayPipeline
                 'com2_standby_name' => trim((string)($row['COM2 Standby Name'] ?? '')),
                 'nav2_name' => trim((string)($row['NAV2 Name'] ?? ($row['NAV2 Active Name'] ?? ''))),
                 'nav2_standby_name' => trim((string)($row['NAV2 Standby Name'] ?? '')),
-                'oat_c' => G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'OAT'),
+                'oat_c' => G3XFlightStreamParser::numericValue($row, 'Outside Air Temp (deg C)', 'Outside Air Temperature (deg C)', 'Outside Air Temp', 'OAT (deg C)', 'OAT'),
                 'rpm' => G3XFlightStreamParser::numericValue($row, 'RPM', 'E1 RPM'),
                 'manifold_pressure_inhg' => G3XFlightStreamParser::numericValue($row, 'Manifold Press (inch Hg)', 'E1 MAP'),
                 'fuel_flow_gph' => G3XFlightStreamParser::numericValue($row, 'Fuel Flow (gal/hour)', 'E1 FFlow'),
