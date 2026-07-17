@@ -8,6 +8,10 @@ require_once __DIR__ . '/../../src/AdsbTrafficArchiveService.php';
 cw_require_admin();
 
 $error = trim((string)($_GET['error'] ?? ''));
+$providerConfigNotice = str_contains($error, 'ADS-B historical provider is not configured');
+if ($providerConfigNotice) {
+    $error = '';
+}
 $notice = '';
 if (isset($_GET['scheduled'])) {
     $notice = 'KTRM ADS-B archive tiles scheduled: ' . (int)$_GET['scheduled'] . '.';

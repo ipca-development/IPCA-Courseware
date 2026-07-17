@@ -11,6 +11,7 @@ final class AdsbTrafficArchiveService
     private const KTRM_LON = -116.160156;
     private const KTRM_RADIUS_NM = 15.0;
     private const DEFAULT_BUCKET_SECONDS = 300;
+    private const LIVE_SNAPSHOT_GRACE_SECONDS = 900;
 
     public function __construct(private PDO $pdo)
     {
@@ -86,6 +87,9 @@ final class AdsbTrafficArchiveService
     public function fetchNextPendingTile(): array
     {
         $this->ensureTables();
+        if (!$this->historicalProviderConfigured()) {
+            $this->markHistoricalTilesProviderNotConfigured();
+        }
         $this->pdo->beginTransaction();
         try {
             $row = $this->pdo->query("
@@ -264,8 +268,8 @@ final class AdsbTrafficArchiveService
         if ($historical !== null) {
             return $historical;
         }
-        $bucketEnd = strtotime((string)($tile['bucket_end_utc'] ?? '')) ?: 0;
-        if ($bucketEnd > 0 && $bucketEnd < time() - 120) {
+        $bucketStart = strtotime((string)($tile['bucket_start_utc'] ?? '')) ?: 0;
+        if ($bucketStart > 0 && $bucketStart < time() - self::LIVE_SNAPSHOT_GRACE_SECONDS) {
             throw new DomainException('ADS-B historical provider is not configured; refusing to fill historical archive bucket with a live snapshot.');
         }
         $result = tv_adsb_fetch_near_point_result($lat, $lon, $radiusNm);
@@ -335,6 +339,19 @@ final class AdsbTrafficArchiveService
             ?: getenv('ADSBEXCHANGE_API_KEY')
             ?: ''
         )) !== '';
+    }
+
+    private function markHistoricalTilesProviderNotConfigured(): void
+    {
+        $cutoff = gmdate('Y-m-d H:i:s', time() - self::LIVE_SNAPSHOT_GRACE_SECONDS);
+        $this->pdo->prepare("
+            UPDATE ipca_adsb_coverage_tiles
+            SET status = 'provider_not_configured',
+                last_error = 'Historical ADS-B provider is not configured; this tile is too old for live ADS-B snapshot archiving.',
+                updated_at = CURRENT_TIMESTAMP(3)
+            WHERE status IN ('pending', 'failed')
+              AND bucket_start_utc < ?
+        ")->execute(array($cutoff));
     }
 
     /**
