@@ -41,6 +41,34 @@ function cockpit_admin_fmt_timestamp(mixed $timestamp): string
     return $timestamp !== '' ? $timestamp : '--';
 }
 
+function cockpit_admin_local_timezone(): string
+{
+    $timezone = trim((string)(getenv('CW_COCKPIT_TIMEZONE') ?: getenv('CW_APP_TIMEZONE') ?: 'America/Los_Angeles'));
+    return $timezone !== '' ? $timezone : 'America/Los_Angeles';
+}
+
+/**
+ * @return array{date:string,time:string,full:string}
+ */
+function cockpit_admin_local_time_parts(mixed $timestamp): array
+{
+    $raw = trim((string)$timestamp);
+    if ($raw === '') {
+        return array('date' => '--', 'time' => '--', 'full' => '--');
+    }
+
+    try {
+        $local = (new DateTimeImmutable($raw, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone(cockpit_admin_local_timezone()));
+        return array(
+            'date' => $local->format('D M j, Y'),
+            'time' => $local->format('H:i'),
+            'full' => $local->format('D M j, Y H:i') . ' LT',
+        );
+    } catch (Throwable $e) {
+        return array('date' => $raw, 'time' => '--', 'full' => $raw);
+    }
+}
+
 function cockpit_admin_fmt_date(mixed $timestamp): string
 {
     $timestamp = trim((string)$timestamp);
@@ -59,6 +87,27 @@ function cockpit_admin_fmt_hours_between(mixed $start, mixed $end): string
         return '--';
     }
     return number_format(($endTs - $startTs) / 3600, 1) . ' h';
+}
+
+function cockpit_admin_garmin_candidate_time(array $candidate): string
+{
+    foreach (array('generated_track_start_utc', 'operational_csv_start', 'replay_csv_start', 'entry_date') as $key) {
+        $value = trim((string)($candidate[$key] ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    return '';
+}
+
+function cockpit_admin_garmin_candidate_route(array $candidate): string
+{
+    $tail = trim((string)($candidate['aircraft_registration'] ?? ''));
+    $entry = trim((string)($candidate['garmin_entry_uuid'] ?? ''));
+    if ($tail !== '' && $entry !== '') {
+        return $tail . ' · Entry ' . substr($entry, 0, 8);
+    }
+    return $tail !== '' ? $tail : ($entry !== '' ? 'Entry ' . substr($entry, 0, 8) : 'Garmin flight');
 }
 
 function cockpit_admin_fmt_rate(mixed $rate): string
@@ -226,7 +275,7 @@ function cockpit_admin_garmin_match_candidates(PDO $pdo, ?array $session, string
         $params[] = (int)$session['id'];
     }
     if ($aircraftRegistration !== '' && $windowStart !== '') {
-        $where[] = "(UPPER(e.aircraft_registration) = ? AND COALESCE(e.generated_track_start_utc, op.first_valid_sample_utc, rp.first_valid_sample_utc, e.entry_date) BETWEEN DATE_SUB(?, INTERVAL 12 HOUR) AND DATE_ADD(COALESCE(NULLIF(?, ''), ?), INTERVAL 12 HOUR))";
+        $where[] = "(UPPER(e.aircraft_registration) = ? AND COALESCE(e.generated_track_start_utc, op.csv_first_timestamp_utc, rp.csv_first_timestamp_utc, e.entry_date) BETWEEN DATE_SUB(?, INTERVAL 12 HOUR) AND DATE_ADD(COALESCE(NULLIF(?, ''), ?), INTERVAL 12 HOUR))";
         $params[] = $aircraftRegistration;
         $params[] = $windowStart;
         $params[] = $windowEnd;
@@ -532,8 +581,9 @@ try {
 cw_header('Cockpit Recordings');
 ?>
 <style>
-.cockpit-recorder-page{display:grid;gap:18px}.cockpit-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.cockpit-muted{color:#64748b;font-size:13px}.cockpit-table-wrap{overflow-x:auto}.cockpit-table{width:100%;border-collapse:collapse;min-width:900px}.cockpit-table th,.cockpit-table td{border-bottom:1px solid #e2e8f0;padding:12px 10px;text-align:left;vertical-align:middle}.cockpit-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-row-title{font-weight:800}.cockpit-row-sub{color:#64748b;font-size:12px;margin-top:3px}.cockpit-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.cockpit-badge-ready{background:#dcfce7;color:#166534}.cockpit-badge-progress{background:#dbeafe;color:#1d4ed8}.cockpit-badge-failed{background:#fee2e2;color:#991b1b}.cockpit-badge-warning{background:#fef3c7;color:#92400e}.cockpit-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}.cockpit-button.secondary{background:#475569}.cockpit-button.subtle{background:#e2e8f0;color:#0f172a}.cockpit-actions-row{display:flex;flex-wrap:wrap;gap:7px}.cockpit-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.cockpit-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.cockpit-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:10px;padding:12px}.cockpit-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.56);display:none;z-index:9999;padding:30px;overflow:auto}.cockpit-modal-backdrop.is-open{display:block}.cockpit-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.cockpit-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:20px 22px;border-bottom:1px solid #e2e8f0}.cockpit-modal-title{font-size:22px;font-weight:900;margin:0}.cockpit-modal-body{padding:20px 22px;display:grid;gap:16px}.cockpit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.cockpit-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.cockpit-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-value{font-weight:800;margin-top:4px}.cockpit-section{border:1px solid #e2e8f0;border-radius:14px;padding:14px;display:grid;gap:10px}.cockpit-section h3{margin:0}.cockpit-transcript{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;max-height:360px;overflow:auto}.cockpit-audio{width:100%;max-width:520px}.cockpit-form-grid{display:grid;gap:8px;max-width:360px}.cockpit-input{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;font:inherit;font-size:13px;background:#fff;color:#0f172a}.cockpit-link-grid{display:flex;flex-wrap:wrap;gap:7px 12px}.cockpit-recon-progress{display:grid;gap:8px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff}.cockpit-recon-progress[hidden]{display:none!important}.cockpit-recon-progress-bar{height:10px;border-radius:999px;background:#dbeafe;overflow:hidden}.cockpit-recon-progress-fill{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#1d4ed8);transition:width .35s ease}.cockpit-recon-progress-stage{font-size:12px;color:#1e3a8a}.cockpit-recon-progress-message{font-size:12px;color:#334155}.cockpit-recon-progress-times{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:11px;color:#64748b}.cockpit-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.cockpit-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}
+.cockpit-recorder-page{display:grid;gap:18px}.cockpit-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.cockpit-muted{color:#64748b;font-size:13px}.cockpit-table-wrap{overflow-x:auto}.cockpit-table{width:100%;border-collapse:collapse;min-width:1220px}.cockpit-table th,.cockpit-table td{border-bottom:1px solid #e2e8f0;padding:14px 10px;text-align:left;vertical-align:middle}.cockpit-table th{color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-row-title{font-weight:800}.cockpit-row-sub{color:#64748b;font-size:12px;margin-top:3px}.cockpit-badge{display:inline-flex;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800;background:#e2e8f0;color:#334155}.cockpit-badge-ready{background:#dcfce7;color:#166534}.cockpit-badge-progress{background:#dbeafe;color:#1d4ed8}.cockpit-badge-failed{background:#fee2e2;color:#991b1b}.cockpit-badge-warning{background:#fef3c7;color:#92400e}.cockpit-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}.cockpit-button.secondary{background:#475569}.cockpit-button.subtle{background:#e2e8f0;color:#0f172a}.cockpit-actions-row{display:flex;flex-wrap:wrap;gap:7px}.cockpit-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.cockpit-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.cockpit-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:10px;padding:12px}.cockpit-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.56);display:none;z-index:9999;padding:30px;overflow:auto}.cockpit-modal-backdrop.is-open{display:block}.cockpit-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.cockpit-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:20px 22px;border-bottom:1px solid #e2e8f0}.cockpit-modal-title{font-size:22px;font-weight:900;margin:0}.cockpit-modal-body{padding:20px 22px;display:grid;gap:16px}.cockpit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.cockpit-kv{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc}.cockpit-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}.cockpit-value{font-weight:800;margin-top:4px}.cockpit-section{border:1px solid #e2e8f0;border-radius:14px;padding:14px;display:grid;gap:10px}.cockpit-section h3{margin:0}.cockpit-transcript{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;max-height:360px;overflow:auto}.cockpit-audio{width:100%;max-width:520px}.cockpit-form-grid{display:grid;gap:8px;max-width:360px}.cockpit-input{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;font:inherit;font-size:13px;background:#fff;color:#0f172a}.cockpit-link-grid{display:flex;flex-wrap:wrap;gap:7px 12px}.cockpit-recon-progress{display:grid;gap:8px;padding:10px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff}.cockpit-recon-progress[hidden]{display:none!important}.cockpit-recon-progress-bar{height:10px;border-radius:999px;background:#dbeafe;overflow:hidden}.cockpit-recon-progress-fill{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#1d4ed8);transition:width .35s ease}.cockpit-recon-progress-stage{font-size:12px;color:#1e3a8a}.cockpit-recon-progress-message{font-size:12px;color:#334155}.cockpit-recon-progress-times{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:11px;color:#64748b}.cockpit-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.cockpit-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;word-break:break-all}
 .cockpit-bulk-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;justify-content:space-between;margin-bottom:12px}.cockpit-bulk-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.cockpit-pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:10px 0 14px}.cockpit-pager-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.cockpit-row-deleted{background:#f8fafc;color:#64748b}.cockpit-checkbox{width:16px;height:16px}.cockpit-danger{background:#b91c1c}.cockpit-filter-link{font-weight:800}
+.cockpit-recording-time{display:grid;gap:3px}.cockpit-recording-date{font-weight:950;color:#0f172a;font-size:14px}.cockpit-recording-clock{font-weight:900;color:#1d4ed8;font-size:18px}.cockpit-recording-meta{color:#64748b;font-size:11px}.cockpit-pill-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.cockpit-pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:900;background:#e2e8f0;color:#334155;white-space:nowrap}.cockpit-pill-good{background:#dcfce7;color:#166534}.cockpit-pill-warn{background:#fef3c7;color:#92400e}.cockpit-pill-bad{background:#fee2e2;color:#991b1b}.cockpit-pill-info{background:#dbeafe;color:#1d4ed8}.cockpit-match-card{border:1px solid #e2e8f0;border-radius:13px;background:#f8fafc;padding:9px;min-width:230px}.cockpit-match-card.good{border-color:#86efac;background:#f0fdf4}.cockpit-match-card.warn{border-color:#fde68a;background:#fffbeb}.cockpit-match-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:900}.cockpit-match-main{font-weight:950;color:#0f172a;margin-top:3px}.cockpit-evidence-box{display:grid;gap:6px;min-width:160px}.cockpit-audio-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}.cockpit-audio-actions a{font-weight:900}
 </style>
 
 <div class="cockpit-recorder-page">
@@ -727,41 +777,77 @@ cw_header('Cockpit Recordings');
             $adsbNormalizedUrl = '/admin/cockpit_recorder_adsb.php?id=' . $id . '&type=normalized';
             $aircraftDisplay = trim((string)($row['aircraft_display_name'] ?: ($row['aircraft_registration'] ?? '')));
             $aircraftDisplay = $aircraftDisplay !== '' ? $aircraftDisplay : 'Not selected';
+            $startedLocal = cockpit_admin_local_time_parts($startedAt);
+            $uploadedLocal = cockpit_admin_local_time_parts($uploadedAt);
+            $matchSummary = $hasCompleteGarminMatch && is_array($completeGarminMatch['summary'] ?? null) ? $completeGarminMatch['summary'] : array();
+            $candidate = !$hasCompleteGarminMatch && isset($garminCandidates[0]) && is_array($garminCandidates[0]) ? $garminCandidates[0] : null;
+            $candidateLocal = $candidate !== null ? cockpit_admin_local_time_parts(cockpit_admin_garmin_candidate_time($candidate)) : array('date' => '--', 'time' => '--', 'full' => '--');
           ?>
           <tr class="<?= $isDeleted ? 'cockpit-row-deleted' : '' ?>">
             <td><input class="cockpit-checkbox" type="checkbox" name="ids[]" value="<?= $id ?>" form="cockpit-bulk-form" data-recording-checkbox aria-label="Select recording <?= $id ?>"></td>
             <td>
-              <div class="cockpit-row-title"><?= h($startedAt) ?></div>
-              <div class="cockpit-row-sub">Uploaded <?= h($uploadedAt !== '' ? $uploadedAt : 'not recorded') ?></div>
+              <div class="cockpit-recording-time">
+                <div class="cockpit-recording-date"><?= h($startedLocal['date']) ?></div>
+                <div class="cockpit-recording-clock"><?= h($startedLocal['time']) ?> <span class="cockpit-recording-meta">Local</span></div>
+                <div class="cockpit-recording-meta">Uploaded <?= h($uploadedAt !== '' ? $uploadedLocal['full'] : 'not recorded') ?></div>
+              </div>
               <?php if ($isTestRecording): ?><span class="cockpit-badge cockpit-badge-warning">TEST</span><?php endif; ?>
               <?php if ($isDeleted): ?><span class="cockpit-badge cockpit-badge-warning">Hidden</span><div class="cockpit-row-sub">Hidden <?= h($deletedAt) ?></div><?php endif; ?>
             </td>
             <td>
               <div class="cockpit-row-title"><?= h($aircraftDisplay) ?></div>
               <div class="cockpit-row-sub"><?= h((string)($row['aircraft_type'] ?? '')) ?></div>
+              <div class="cockpit-pill-row">
+                <?php if (!empty($row['aircraft_registration'])): ?><span class="cockpit-pill cockpit-pill-info"><?= h((string)$row['aircraft_registration']) ?></span><?php endif; ?>
+                <?php if (!empty($row['aircraft_adsb_hex'])): ?><span class="cockpit-pill">ADS-B <?= h((string)$row['aircraft_adsb_hex']) ?></span><?php endif; ?>
+              </div>
             </td>
-            <td><?= h(cockpit_admin_fmt_duration((float)($row['duration_seconds'] ?? 0))) ?><div class="cockpit-row-sub"><?= h(cockpit_admin_fmt_bytes((int)($row['file_size_bytes'] ?? 0))) ?></div></td>
-            <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($upload)) ?>"><?= h($upload) ?></span></td>
-            <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($transcription)) ?>"><?= h($transcription) ?></span><div class="cockpit-row-sub"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div></td>
+            <td><div class="cockpit-recording-clock"><?= h(cockpit_admin_fmt_duration((float)($row['duration_seconds'] ?? 0))) ?></div><div class="cockpit-row-sub"><?= h(cockpit_admin_fmt_bytes((int)($row['file_size_bytes'] ?? 0))) ?></div></td>
+            <td><span class="cockpit-pill <?= h(cockpit_admin_badge_class($upload) === 'cockpit-badge-ready' ? 'cockpit-pill-good' : (cockpit_admin_badge_class($upload) === 'cockpit-badge-failed' ? 'cockpit-pill-bad' : 'cockpit-pill-info')) ?>"><?= h($upload) ?></span></td>
+            <td><span class="cockpit-pill <?= h(cockpit_admin_badge_class($transcription) === 'cockpit-badge-ready' ? 'cockpit-pill-good' : (cockpit_admin_badge_class($transcription) === 'cockpit-badge-failed' ? 'cockpit-pill-bad' : 'cockpit-pill-info')) ?>"><?= h($transcription) ?></span><div class="cockpit-row-sub"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div></td>
             <td>
               <?php if ($hasCompleteGarminMatch): ?>
-                <?php $matchSummary = is_array($completeGarminMatch['summary'] ?? null) ? $completeGarminMatch['summary'] : array(); ?>
-                <span class="cockpit-badge cockpit-badge-ready">complete</span>
-                <div class="cockpit-row-sub"><?= h((string)($matchSummary['tail'] ?? $completeGarminMatch['aircraft_registration'] ?? '')) ?> · <?= h((string)($matchSummary['dep_airport'] ?? '--')) ?>-<?= h((string)($matchSummary['arr_airport'] ?? '--')) ?></div>
-                <div class="cockpit-row-sub">confidence <?= h(number_format((float)($completeGarminMatch['match_confidence'] ?? 0), 2)) ?></div>
+                <div class="cockpit-match-card good">
+                  <div class="cockpit-match-title">Garmin flight allocated</div>
+                  <div class="cockpit-match-main"><?= h((string)($matchSummary['tail'] ?? $completeGarminMatch['aircraft_registration'] ?? '')) ?> · <?= h((string)($matchSummary['dep_airport'] ?? '--')) ?>-<?= h((string)($matchSummary['arr_airport'] ?? '--')) ?></div>
+                  <div class="cockpit-row-sub"><?= h((string)($matchSummary['dep_time_lt'] ?? '--')) ?>-<?= h((string)($matchSummary['arr_time_lt'] ?? '--')) ?> Local · <?= h((string)($matchSummary['elapsed_time'] ?? '--')) ?></div>
+                  <div class="cockpit-pill-row"><span class="cockpit-pill cockpit-pill-good">Complete</span><span class="cockpit-pill">Confidence <?= h(number_format((float)($completeGarminMatch['match_confidence'] ?? 0), 2)) ?></span></div>
+                </div>
+              <?php elseif ($candidate !== null): ?>
+                <div class="cockpit-match-card warn">
+                  <div class="cockpit-match-title">Possible Garmin flight</div>
+                  <div class="cockpit-match-main"><?= h(cockpit_admin_garmin_candidate_route($candidate)) ?></div>
+                  <div class="cockpit-row-sub"><?= h($candidateLocal['full']) ?></div>
+                  <div class="cockpit-pill-row">
+                    <span class="cockpit-pill cockpit-pill-warn">Needs allocation</span>
+                    <?php if (!empty($candidate['group_match_confidence'])): ?><span class="cockpit-pill">Confidence <?= h(number_format((float)$candidate['group_match_confidence'], 2)) ?></span><?php endif; ?>
+                  </div>
+                </div>
               <?php else: ?>
-                <span class="cockpit-badge cockpit-badge-warning">no complete match</span>
-                <div class="cockpit-row-sub">Incomplete/GPS-only Garmin flights are ignored.</div>
+                <div class="cockpit-match-card warn">
+                  <div class="cockpit-match-title">No complete Garmin flight</div>
+                  <div class="cockpit-row-sub">No complete Garmin CSV flight is close enough to this audio recording yet.</div>
+                  <div class="cockpit-pill-row"><span class="cockpit-pill cockpit-pill-warn">Not allocated</span></div>
+                </div>
               <?php endif; ?>
             </td>
-            <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($reconStatus)) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span><div class="cockpit-row-sub">Timeline: <span data-timeline-badge="<?= $id ?>"><?= h($timelineStatus) ?></span></div></td>
             <td>
-              <div class="cockpit-row-sub">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></div>
-              <?php if (!empty($row['storage_path'])): ?>
-                <div class="cockpit-link-grid"><a href="<?= h($audioUrl) ?>">Play audio</a><a href="<?= h($audioUrl) ?>&download=1">Download</a></div>
-              <?php endif; ?>
-              <div class="cockpit-row-sub">Garmin <?= $hasCompleteGarminMatch ? 'complete match' : ($hasAutoGarminSource ? 'legacy link only' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked')) ?></div>
-              <div class="cockpit-row-sub">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></div>
+              <div class="cockpit-pill-row">
+                <span class="cockpit-pill <?= h(cockpit_admin_badge_class($reconStatus) === 'cockpit-badge-ready' ? 'cockpit-pill-good' : (cockpit_admin_badge_class($reconStatus) === 'cockpit-badge-failed' ? 'cockpit-pill-bad' : 'cockpit-pill-info')) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span>
+                <span class="cockpit-pill" data-timeline-badge="<?= $id ?>">Timeline <?= h($timelineStatus) ?></span>
+              </div>
+            </td>
+            <td>
+              <div class="cockpit-evidence-box">
+                <div class="cockpit-pill-row">
+                  <span class="cockpit-pill <?= !empty($row['storage_path']) ? 'cockpit-pill-good' : 'cockpit-pill-bad' ?>">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></span>
+                  <span class="cockpit-pill <?= !empty($row['gps_storage_path']) ? 'cockpit-pill-good' : 'cockpit-pill-warn' ?>">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></span>
+                  <span class="cockpit-pill <?= $hasCompleteGarminMatch ? 'cockpit-pill-good' : ($hasAutoGarminSource || !empty($row['g3x_storage_path']) ? 'cockpit-pill-warn' : '') ?>">Garmin <?= $hasCompleteGarminMatch ? 'complete' : ($hasAutoGarminSource ? 'legacy' : (!empty($row['g3x_storage_path']) ? 'manual' : 'not linked')) ?></span>
+                </div>
+                <?php if (!empty($row['storage_path'])): ?>
+                  <div class="cockpit-audio-actions"><a href="<?= h($audioUrl) ?>">Play audio</a><a href="<?= h($audioUrl) ?>&download=1">Download</a></div>
+                <?php endif; ?>
+              </div>
               <?php if ($rowWarnings): ?><div class="cockpit-row-sub">Details warning: <?= h($rowWarnings[0]) ?></div><?php endif; ?>
             </td>
             <td>
