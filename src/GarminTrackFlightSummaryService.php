@@ -73,6 +73,9 @@ final class GarminTrackFlightSummaryService
                 OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
                 OR JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL
                 OR JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL
+                OR s.tail_number IN ('', 'Unknown tail', 'Unknown')
+                OR JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL
+                OR JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
               )
@@ -176,6 +179,11 @@ final class GarminTrackFlightSummaryService
         $summary['hobbs_time'] = $this->durationDisplay($summary['hobbs_exact'] ?? array());
         $summary['tacho_time'] = $this->durationDisplay($summary['tacho_exact'] ?? array());
         $summary['system_id'] = $this->systemIdentifierFromTrack($track);
+        $systemMapping = $this->systemIdentifierMapping((string)$summary['system_id']);
+        $summary['avionics_family'] = (string)($systemMapping['avionics_family'] ?? '');
+        $summary['default_quality'] = (string)($systemMapping['default_quality'] ?? '');
+        $summary['provides_full_avionics'] = !empty($systemMapping['provides_full_avionics']);
+        $summary['provides_counter_headers'] = !empty($systemMapping['provides_counter_headers']);
         $summary['tail_source'] = $this->tailSource($tail, $track, $summary['system_id']);
         $summary['tacho_status'] = (string)($tacho['status'] ?? '');
         $summary['tacho_calculation_version'] = (string)($tacho['calculation_version'] ?? TachoCalculationService::VERSION);
@@ -329,6 +337,10 @@ final class GarminTrackFlightSummaryService
             'hobbs_time' => '--',
             'tacho_time' => '--',
             'system_id' => '',
+            'avionics_family' => '',
+            'default_quality' => '',
+            'provides_full_avionics' => false,
+            'provides_counter_headers' => false,
             'tail_source' => '',
             'hobbs_start_utc' => '',
             'hobbs_end_utc' => '',
@@ -358,16 +370,16 @@ final class GarminTrackFlightSummaryService
     private function tailFromTrack(array $track): string
     {
         foreach (array('entry_aircraft_registration', 'csv_aircraft_registration', 'csv_aircraft_ident') as $key) {
-            $value = trim((string)($track[$key] ?? ''));
-            if ($value !== '') {
+            $value = strtoupper(trim((string)($track[$key] ?? '')));
+            if ($this->looksLikeTailNumber($value)) {
                 return $value;
             }
         }
         $metadata = json_decode((string)($track['raw_metadata_json'] ?? '{}'), true);
         if (is_array($metadata)) {
             foreach (array('aircraftRegistration', 'aircraft_registration', 'tail') as $key) {
-                $value = trim((string)($metadata[$key] ?? ''));
-                if ($value !== '') {
+                $value = strtoupper(trim((string)($metadata[$key] ?? '')));
+                if ($this->looksLikeTailNumber($value)) {
                     return $value;
                 }
             }
@@ -472,7 +484,7 @@ final class GarminTrackFlightSummaryService
             'label' => (string)($row['display_label'] ?? ''),
             'exceptions' => is_array($exceptions) ? $exceptions : array(),
         );
-        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'hobbs_in', 'hobbs_time', 'tacho_out', 'tacho_in', 'tacho_time', 'hobbs_exact', 'tacho_exact', 'tacho_status', 'tacho_calculation_version', 'system_id', 'tail_source', 'calculation_config')))) : $summary;
+        return is_array($stored) ? array_merge($summary, array_intersect_key($stored, array_flip(array('hobbs_out', 'hobbs_in', 'hobbs_time', 'tacho_out', 'tacho_in', 'tacho_time', 'hobbs_exact', 'tacho_exact', 'tacho_status', 'tacho_calculation_version', 'system_id', 'avionics_family', 'default_quality', 'provides_full_avionics', 'provides_counter_headers', 'tail_source', 'calculation_config')))) : $summary;
     }
 
     /**
@@ -776,18 +788,61 @@ final class GarminTrackFlightSummaryService
                     return $value;
                 }
             }
+            foreach (array('sourceNames') as $key) {
+                if (is_array($metadata[$key] ?? null)) {
+                    $systemId = $this->systemIdentifierFromSourceNames($metadata[$key]);
+                    if ($systemId !== '') {
+                        return $systemId;
+                    }
+                }
+            }
+        }
+        $sourceDescriptors = json_decode((string)($track['source_descriptors_json'] ?? '[]'), true);
+        if (is_array($sourceDescriptors)) {
+            $names = array();
+            foreach ($sourceDescriptors as $descriptor) {
+                if (is_array($descriptor)) {
+                    $names[] = (string)($descriptor['name'] ?? '');
+                }
+            }
+            $systemId = $this->systemIdentifierFromSourceNames($names);
+            if ($systemId !== '') {
+                return $systemId;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * @param list<mixed> $names
+     */
+    private function systemIdentifierFromSourceNames(array $names): string
+    {
+        foreach ($names as $name) {
+            if (preg_match('/Flight Data Log System ID:\\s*([A-Z0-9]+)/i', (string)$name, $matches) === 1) {
+                return strtoupper((string)$matches[1]);
+            }
         }
         return '';
     }
 
     private function tailForSystemIdentifier(string $systemIdentifier): string
     {
-        $systemIdentifier = trim($systemIdentifier);
+        $mapping = $this->systemIdentifierMapping($systemIdentifier);
+        return trim((string)($mapping['tail_number'] ?? ''));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function systemIdentifierMapping(string $systemIdentifier): array
+    {
+        $systemIdentifier = strtoupper(trim($systemIdentifier));
         if ($this->pdo === null || $systemIdentifier === '' || !$this->tableExists('ipca_garmin_system_identifier_mappings')) {
-            return '';
+            return array();
         }
         $stmt = $this->pdo->prepare("
-            SELECT tail_number
+            SELECT *
             FROM ipca_garmin_system_identifier_mappings
             WHERE system_identifier = ?
               AND (effective_to_utc IS NULL OR effective_to_utc > CURRENT_TIMESTAMP(3))
@@ -795,7 +850,8 @@ final class GarminTrackFlightSummaryService
             LIMIT 1
         ");
         $stmt->execute(array($systemIdentifier));
-        return trim((string)$stmt->fetchColumn());
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : array();
     }
 
     /**
@@ -807,14 +863,14 @@ final class GarminTrackFlightSummaryService
             return 'unresolved';
         }
         foreach (array('entry_aircraft_registration', 'csv_aircraft_registration', 'csv_aircraft_ident') as $key) {
-            if (trim((string)($track[$key] ?? '')) === $tail) {
+            if ($this->looksLikeTailNumber((string)($track[$key] ?? '')) && strtoupper(trim((string)($track[$key] ?? ''))) === $tail) {
                 return $key;
             }
         }
         $metadata = json_decode((string)($track['raw_metadata_json'] ?? '{}'), true);
         if (is_array($metadata)) {
             foreach (array('aircraftRegistration', 'aircraft_registration', 'tail') as $key) {
-                if (trim((string)($metadata[$key] ?? '')) === $tail) {
+                if ($this->looksLikeTailNumber((string)($metadata[$key] ?? '')) && strtoupper(trim((string)($metadata[$key] ?? ''))) === $tail) {
                     return 'metadata_' . $key;
                 }
             }
@@ -823,5 +879,10 @@ final class GarminTrackFlightSummaryService
             return 'system_identifier_mapping';
         }
         return 'derived';
+    }
+
+    private function looksLikeTailNumber(string $value): bool
+    {
+        return preg_match('/^N[0-9A-Z]{2,6}$/', strtoupper(trim($value))) === 1;
     }
 }

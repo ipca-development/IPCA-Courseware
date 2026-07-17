@@ -210,6 +210,9 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         ELSE 1
@@ -220,6 +223,9 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 1
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         ELSE 0
@@ -237,6 +243,9 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 0
+        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         ELSE 1
@@ -247,6 +256,9 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 1
+        WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown') THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.system_id') IS NULL THEN 1
+        WHEN JSON_EXTRACT(s.summary_json, '$.avionics_family') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         ELSE 0
@@ -713,6 +725,7 @@ cw_header('Garmin Sync Agent');
                     <div class="garmin-kv"><div class="garmin-label">Classification</div><div><?= h((string)$flight['classification']) ?></div></div>
                     <div class="garmin-kv"><div class="garmin-label">Telemetry</div><div><?= number_format((int)$track['session_count']) ?> sessions · <?= number_format((int)$track['field_count']) ?> fields · <?= h(garmin_sync_bytes($track['file_size_bytes'] ?? 0)) ?></div></div>
                     <div class="garmin-kv"><div class="garmin-label">Identity Evidence</div><div>CSV ident <?= h((string)($summary['aircraft_ident_raw'] ?? '--')) ?> · system <?= h((string)($summary['system_id'] ?? '--')) ?> · tail source <?= h((string)($summary['tail_source'] ?? '--')) ?></div></div>
+                    <div class="garmin-kv"><div class="garmin-label">Source Quality</div><div><?= h((string)($summary['avionics_family'] ?? '--')) ?> · <?= h((string)($summary['default_quality'] ?? '--')) ?> · counters <?= !empty($summary['provides_counter_headers']) ? 'yes' : 'no' ?></div></div>
                     <div class="garmin-kv"><div class="garmin-label">Hobbs</div><div>Out <?= h((string)($summary['hobbs_out'] ?? '--')) ?> · In <?= h((string)($summary['hobbs_in'] ?? '--')) ?> · Time <?= h((string)($summary['hobbs_time'] ?? '--')) ?></div></div>
                     <div class="garmin-kv"><div class="garmin-label">Tacho</div><div>Out <?= h((string)($summary['tacho_out'] ?? '--')) ?> · In <?= h((string)($summary['tacho_in'] ?? '--')) ?> · Time <?= h((string)($summary['tacho_time'] ?? '--')) ?></div></div>
                     <div class="garmin-kv"><div class="garmin-label">Upload</div><div><?= h((string)($track['device_name'] ?? 'Unknown device')) ?> at <?= h(garmin_sync_datetime((string)$flight['uploaded_at'])) ?></div></div>
