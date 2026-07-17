@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/TachoCalculationService.php';
+
 final class GarminProcessingStatusService
 {
     /** @var list<string> */
@@ -109,6 +111,12 @@ final class GarminProcessingStatusService
         return min(99.9, round(($done / $total) * 100, 1));
     }
 
+    private function tachoVersionSql(): string
+    {
+        $quoted = $this->pdo->quote(TachoCalculationService::VERSION);
+        return is_string($quoted) ? $quoted : "'" . str_replace("'", "''", TachoCalculationService::VERSION) . "'";
+    }
+
     /**
      * @return array<string,int>
      */
@@ -118,6 +126,7 @@ final class GarminProcessingStatusService
             return array('done' => 0, 'total' => 0, 'remaining' => 0);
         }
         $hasSummary = $this->tableExists('ipca_garmin_csv_flight_summaries');
+        $version = $this->tachoVersionSql();
         $row = $this->row("
             SELECT
               COUNT(f.id) AS total,
@@ -129,6 +138,7 @@ final class GarminProcessingStatusService
                 WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$version} THEN 0
                 ELSE 1
               END) AS done
             FROM ipca_garmin_csv_files f
@@ -147,6 +157,7 @@ final class GarminProcessingStatusService
         if (!$this->tableExists('ipca_garmin_flight_data_track_links') || !$this->tableExists('ipca_garmin_csv_flight_summaries')) {
             return array('done' => 0, 'total' => 0, 'remaining' => 0);
         }
+        $version = $this->tachoVersionSql();
         $row = $this->row("
             SELECT
               COUNT(DISTINCT l.id) AS total,
@@ -158,6 +169,7 @@ final class GarminProcessingStatusService
                 WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$version} THEN 0
                 ELSE 1
               END) AS done
             FROM ipca_garmin_flight_data_track_links l
@@ -179,6 +191,7 @@ final class GarminProcessingStatusService
         $hasTrackSummary = $this->tableExists('ipca_garmin_track_flight_summaries');
         $hasLinks = $this->tableExists('ipca_garmin_flight_data_track_links');
         $hasCsvSummary = $this->tableExists('ipca_garmin_csv_flight_summaries');
+        $version = $this->tachoVersionSql();
         $csvJoin = ($hasLinks && $hasCsvSummary) ? "
             LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
               ON track_csv_l.provider_name = t.provider_name
@@ -194,7 +207,8 @@ final class GarminProcessingStatusService
               AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
               AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
               AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
-              AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0 THEN 1
+              AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_calculation_version')), '') = {$version} THEN 1
         " : "";
         $row = $this->row("
             SELECT
@@ -206,6 +220,7 @@ final class GarminProcessingStatusService
                 WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
                 WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$version} THEN 0
                 WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
                   AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 0
                 ELSE 1

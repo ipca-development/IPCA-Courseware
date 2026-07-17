@@ -51,6 +51,9 @@ final class GarminCsvFlightSummaryService
             throw new RuntimeException('Garmin CSV file not found.');
         }
         $summary = $this->deriveSummaryForCsvFile($csvFile);
+        if ((string)($summary['status'] ?? '') === 'missing_csv_file' && $this->storedSummaryForCsvFileId($csvFileId) !== null) {
+            throw new RuntimeException('Stored Garmin CSV file is not available on this machine; existing summary was preserved.');
+        }
         $this->storeSummary($csvFileId, $summary);
         return $this->remember($csvFileId, $summary);
     }
@@ -75,10 +78,12 @@ final class GarminCsvFlightSummaryService
                OR JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL
                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
+               OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> ?
             ORDER BY COALESCE(f.first_valid_sample_utc, f.created_at) DESC, f.id DESC
             LIMIT ?
         ");
-        $stmt->bindValue(1, max(1, min(1000, $limit)), PDO::PARAM_INT);
+        $stmt->bindValue(1, TachoCalculationService::VERSION, PDO::PARAM_STR);
+        $stmt->bindValue(2, max(1, min(1000, $limit)), PDO::PARAM_INT);
         $stmt->execute();
         $ids = array();
         foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: array() as $id) {

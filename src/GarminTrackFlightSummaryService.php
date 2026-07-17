@@ -50,6 +50,9 @@ final class GarminTrackFlightSummaryService
             throw new RuntimeException('Garmin normalized track artifact not found.');
         }
         $summary = $this->deriveSummaryForTrack($track);
+        if ((string)($summary['status'] ?? '') === 'missing_track_json' && $this->storedSummaryForTrackArtifactId($trackArtifactId) !== null) {
+            throw new RuntimeException('Stored Garmin normalized Track JSON is not available on this machine; existing summary was preserved.');
+        }
         $this->storeSummary($trackArtifactId, $summary);
         return $this->remember($trackArtifactId, $summary);
     }
@@ -65,6 +68,10 @@ final class GarminTrackFlightSummaryService
         $this->ensureTable();
         $hasCsvLinks = $this->tableExists('ipca_garmin_flight_data_track_links');
         $hasCsvSummaries = $this->tableExists('ipca_garmin_csv_flight_summaries');
+        $currentTachoVersionSql = $this->pdo->quote(TachoCalculationService::VERSION);
+        if (!is_string($currentTachoVersionSql)) {
+            $currentTachoVersionSql = "'" . str_replace("'", "''", TachoCalculationService::VERSION) . "'";
+        }
         $csvSummaryJoin = ($hasCsvLinks && $hasCsvSummaries) ? "
             LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
               ON track_csv_l.provider_name = t.provider_name
@@ -82,6 +89,7 @@ final class GarminTrackFlightSummaryService
                 AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
                 AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
                 AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+                AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_calculation_version')), '') = {$currentTachoVersionSql}
             )
         " : "";
         $stmt = $this->pdo->prepare("
@@ -95,6 +103,7 @@ final class GarminTrackFlightSummaryService
                 OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
                 OR CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0
+                OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> ?
                 OR (
                     s.tail_number IN ('', 'Unknown tail', 'Unknown')
                     AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL
@@ -106,7 +115,8 @@ final class GarminTrackFlightSummaryService
             ORDER BY t.last_seen_at DESC, t.id DESC
             LIMIT ?
         ");
-        $stmt->bindValue(1, max(1, min(1000, $limit)), PDO::PARAM_INT);
+        $stmt->bindValue(1, TachoCalculationService::VERSION, PDO::PARAM_STR);
+        $stmt->bindValue(2, max(1, min(1000, $limit)), PDO::PARAM_INT);
         $stmt->execute();
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: array());
     }

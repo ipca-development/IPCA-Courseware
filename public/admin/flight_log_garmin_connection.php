@@ -214,6 +214,11 @@ $trackSummary = $hasTracks ? garmin_sync_row($pdo, "
     FROM ipca_garmin_normalized_track_artifacts
 ") : array('total_tracks' => 0, 'total_bytes' => 0, 'total_sessions' => 0, 'total_fields' => 0, 'last_track_at' => null);
 
+$currentTachoVersionSql = $pdo->quote(TachoCalculationService::VERSION);
+if (!is_string($currentTachoVersionSql)) {
+    $currentTachoVersionSql = "'" . str_replace("'", "''", TachoCalculationService::VERSION) . "'";
+}
+
 $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
     SELECT
       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(raw_metadata_json, '$.trackClassification')), 'UNKNOWN') AS classification,
@@ -234,6 +239,7 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+        WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$currentTachoVersionSql} THEN 0
         ELSE 1
       END) AS summarized_csv_files,
       SUM(CASE
@@ -244,6 +250,7 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
+        WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$currentTachoVersionSql} THEN 1
         ELSE 0
       END) AS missing_summaries
     FROM ipca_garmin_csv_files f
@@ -265,7 +272,8 @@ $csvTrackCompleteCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
           AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
           AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
           AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
-          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0 THEN 1
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+          AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_calculation_version')), '') = {$currentTachoVersionSql} THEN 1
 " : "";
 $csvTrackMissingCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
         WHEN csv_s.csv_file_id IS NOT NULL
@@ -274,7 +282,8 @@ $csvTrackMissingCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
           AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
           AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
           AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
-          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0 THEN 0
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+          AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_calculation_version')), '') = {$currentTachoVersionSql} THEN 0
 " : "";
 $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
     SELECT
@@ -286,6 +295,7 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
+        WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$currentTachoVersionSql} THEN 0
         WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
           AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 0
         ELSE 1
@@ -297,6 +307,7 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
         WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 1
+        WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$currentTachoVersionSql} THEN 1
         WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
           AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 1
         ELSE 0
