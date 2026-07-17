@@ -82,6 +82,52 @@ final class AdsbTrafficArchiveService
     }
 
     /**
+     * @param list<array{lat:float,lon:float}> $points
+     * @return array<string,mixed>
+     */
+    public function schedulePathCoverage(string $startUtc, string $endUtc, array $points, string $sourceRefType, int $sourceRefId, float $radiusNm = 25.0, int $bucketSeconds = self::DEFAULT_BUCKET_SECONDS): array
+    {
+        $this->ensureTables();
+        $points = $this->representativePoints($points, 8);
+        if ($points === array()) {
+            return array('ok' => false, 'tiles_created' => 0, 'message' => 'No valid path points for ADS-B corridor coverage.');
+        }
+        $start = $this->utcDate($startUtc);
+        $end = $this->utcDate($endUtc);
+        if ($end <= $start) {
+            throw new RuntimeException('ADS-B coverage end time must be after start time.');
+        }
+        $radiusNm = max(1.0, min(25.0, $radiusNm));
+        $bucketSeconds = max(60, min(900, $bucketSeconds));
+        $jobUuid = AuditEventService::uuid();
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_adsb_coverage_jobs
+              (job_uuid, scope, status, center_latitude, center_longitude, radius_nm, query_start_utc, query_end_utc, bucket_seconds, source_ref_type, source_ref_id)
+            VALUES (?, 'flight_corridor', 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $first = $points[0];
+        $stmt->execute(array(
+            $jobUuid,
+            $first['lat'],
+            $first['lon'],
+            $radiusNm,
+            $this->mysqlDate($start),
+            $this->mysqlDate($end),
+            $bucketSeconds,
+            substr($sourceRefType, 0, 64),
+            $sourceRefId > 0 ? $sourceRefId : null,
+        ));
+        $jobId = (int)$this->pdo->lastInsertId();
+        $created = 0;
+        foreach ($points as $point) {
+            $created += $this->createTilesForJob($jobId, 'flight_corridor', (float)$point['lat'], (float)$point['lon'], $radiusNm, $start, $end, $bucketSeconds);
+        }
+        $this->pdo->prepare('UPDATE ipca_adsb_coverage_jobs SET tile_count = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?')
+            ->execute(array($created, $jobId));
+        return array('ok' => true, 'job_id' => $jobId, 'job_uuid' => $jobUuid, 'tiles_created' => $created, 'path_points' => count($points));
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public function fetchNextPendingTile(): array
@@ -301,6 +347,57 @@ final class AdsbTrafficArchiveService
                 'provider' => tv_adsb_provider(),
                 'source' => 'adsb_archive',
                 'coverage_status' => $this->coverageStatus($start, $end, $centerLat, $centerLon, $radiusNm),
+            ),
+        );
+    }
+
+    /**
+     * @param list<array{lat:float,lon:float}> $points
+     * @return array{traffic:list<array<string,mixed>>,meta:array<string,mixed>}
+     */
+    public function trafficForReplayPath(string $startUtc, string $endUtc, array $points, float $radiusNm = 25.0): array
+    {
+        $this->ensureTables();
+        $points = $this->representativePoints($points, 20);
+        if ($points === array()) {
+            return array('traffic' => array(), 'meta' => array('available' => false, 'sample_count' => 0, 'range_nm' => $radiusNm, 'provider' => tv_adsb_provider(), 'source' => 'adsb_archive_flight_corridor', 'coverage_status' => 'missing'));
+        }
+        $start = $this->mysqlDate($this->utcDate($startUtc));
+        $end = $this->mysqlDate($this->utcDate($endUtc));
+        $radiusNm = max(1.0, min(25.0, $radiusNm));
+        $lats = array_map(static fn(array $p): float => (float)$p['lat'], $points);
+        $lons = array_map(static fn(array $p): float => (float)$p['lon'], $points);
+        $centerLat = array_sum($lats) / max(1, count($lats));
+        $latDelta = $radiusNm / 60.0;
+        $lonDelta = $radiusNm / max(1.0, 60.0 * cos(deg2rad($centerLat)));
+        $stmt = $this->pdo->prepare("
+            SELECT id, sample_time_utc, aircraft_hex, callsign, latitude, longitude, altitude_ft, groundspeed_kt, track_deg, vertical_speed_fpm
+            FROM ipca_adsb_traffic_samples
+            WHERE sample_time_utc BETWEEN ? AND ?
+              AND latitude BETWEEN ? AND ?
+              AND longitude BETWEEN ? AND ?
+            ORDER BY sample_time_utc ASC
+            LIMIT 30000
+        ");
+        $stmt->execute(array($start, $end, min($lats) - $latDelta, max($lats) + $latDelta, min($lons) - $lonDelta, max($lons) + $lonDelta));
+        $traffic = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $distance = $this->nearestPathDistanceNm((float)$row['latitude'], (float)$row['longitude'], $points);
+            if ($distance <= $radiusNm) {
+                $row['distance_nm'] = $distance;
+                $traffic[] = $this->compactTrafficSample($row, strtotime($start) ?: null);
+            }
+        }
+        return array(
+            'traffic' => $traffic,
+            'meta' => array(
+                'available' => $traffic !== array(),
+                'sample_count' => count($traffic),
+                'range_nm' => $radiusNm,
+                'provider' => tv_adsb_provider(),
+                'source' => 'adsb_archive_flight_corridor',
+                'coverage_status' => $this->pathCoverageStatus($start, $end, $points, $radiusNm),
+                'path_point_count' => count($points),
             ),
         );
     }
@@ -623,6 +720,90 @@ final class AdsbTrafficArchiveService
             return 'complete';
         }
         return $ready > 0 ? 'partial' : 'queued';
+    }
+
+    /**
+     * @param list<array{lat:float,lon:float}> $points
+     */
+    private function pathCoverageStatus(string $start, string $end, array $points, float $radiusNm): string
+    {
+        $points = $this->representativePoints($points, 8);
+        if ($points === array()) {
+            return 'missing';
+        }
+        $total = 0;
+        $ready = 0;
+        foreach ($points as $point) {
+            $stmt = $this->pdo->prepare("
+                SELECT COUNT(*) AS total, SUM(status = 'ready') AS ready
+                FROM ipca_adsb_coverage_tiles
+                WHERE scope = 'flight_corridor'
+                  AND bucket_start_utc < ?
+                  AND bucket_end_utc > ?
+                  AND ABS(center_latitude - ?) < 0.01
+                  AND ABS(center_longitude - ?) < 0.01
+                  AND radius_nm >= ?
+            ");
+            $stmt->execute(array($end, $start, (float)$point['lat'], (float)$point['lon'], $radiusNm));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+            $total += (int)($row['total'] ?? 0);
+            $ready += (int)($row['ready'] ?? 0);
+        }
+        if ($total === 0) {
+            return 'missing';
+        }
+        if ($ready >= $total) {
+            return 'complete';
+        }
+        return $ready > 0 ? 'partial' : 'queued';
+    }
+
+    /**
+     * @param list<array{lat:float,lon:float}> $points
+     * @return list<array{lat:float,lon:float}>
+     */
+    private function representativePoints(array $points, int $maxPoints): array
+    {
+        $valid = array_values(array_filter(array_map(static function (array $point): ?array {
+            $lat = $point['lat'] ?? null;
+            $lon = $point['lon'] ?? null;
+            if (!is_numeric($lat) || !is_numeric($lon)) {
+                return null;
+            }
+            $lat = (float)$lat;
+            $lon = (float)$lon;
+            if ($lat < -90 || $lat > 90 || $lon < -180 || $lon > 180) {
+                return null;
+            }
+            return array('lat' => $lat, 'lon' => $lon);
+        }, $points)));
+        $count = count($valid);
+        if ($count <= $maxPoints) {
+            return $valid;
+        }
+        $out = array();
+        for ($i = 0; $i < $maxPoints; $i++) {
+            $index = (int)round($i * ($count - 1) / max(1, $maxPoints - 1));
+            $out[] = $valid[$index];
+        }
+        $deduped = array();
+        foreach ($out as $point) {
+            $key = round($point['lat'], 3) . ',' . round($point['lon'], 3);
+            $deduped[$key] = $point;
+        }
+        return array_values($deduped);
+    }
+
+    /**
+     * @param list<array{lat:float,lon:float}> $points
+     */
+    private function nearestPathDistanceNm(float $lat, float $lon, array $points): float
+    {
+        $best = INF;
+        foreach ($points as $point) {
+            $best = min($best, tv_adsb_haversine_nm($lat, $lon, (float)$point['lat'], (float)$point['lon']));
+        }
+        return is_finite($best) ? $best : INF;
     }
 
     /**

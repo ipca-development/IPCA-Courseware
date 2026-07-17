@@ -52,6 +52,19 @@ try {
         adsb_archive_redirect($return . $separator . 'batch_processed=' . $processed . '&samples=' . $samples);
     }
 
+    if ($action === 'schedule_recording_corridor') {
+        $recordingId = (int)($_POST['recording_id'] ?? 0);
+        if ($recordingId <= 0) {
+            throw new RuntimeException('Recording id is required.');
+        }
+        require_once __DIR__ . '/../../../src/CockpitReconstructionService.php';
+        $payload = (new CockpitReconstructionService($pdo))->replayPayloadV2Metadata((string)$recordingId);
+        if (empty($payload['ok'])) {
+            throw new RuntimeException((string)($payload['error'] ?? 'Replay metadata is not available for this recording.'));
+        }
+        adsb_archive_redirect($return . $separator . 'corridor_requested=' . $recordingId);
+    }
+
     throw new RuntimeException('Unknown ADS-B archive action.');
 } catch (Throwable $e) {
     adsb_archive_redirect('/admin/adsb_traffic_archive.php?error=' . urlencode($e->getMessage()));

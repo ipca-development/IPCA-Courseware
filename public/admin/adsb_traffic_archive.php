@@ -22,6 +22,9 @@ if (isset($_GET['processed'])) {
 if (isset($_GET['batch_processed'])) {
     $notice = 'ADS-B archive batch processed: ' . (int)$_GET['batch_processed'] . ' tile(s), samples ' . (int)($_GET['samples'] ?? 0) . '.';
 }
+if (isset($_GET['corridor_requested'])) {
+    $notice = 'Flight corridor ADS-B coverage requested for recording ' . (int)$_GET['corridor_requested'] . '. Process pending tiles to fetch available traffic.';
+}
 
 $status = array();
 $recentTraffic = array();
@@ -81,6 +84,11 @@ cw_header('ADS-B Traffic Archive');
       <button type="submit" name="action" value="process_tile">Process Next Tile</button>
       <label class="adsb-muted">Batch size<br><input type="number" name="limit" min="1" max="25" value="5"></label>
       <button class="secondary" type="submit" name="action" value="process_batch">Process Batch</button>
+    </form>
+    <form class="adsb-actions" method="post" action="/admin/api/adsb_archive_action.php" style="margin-top:10px">
+      <input type="hidden" name="return" value="/admin/adsb_traffic_archive.php">
+      <label class="adsb-muted">Recording ID<br><input type="number" name="recording_id" min="1" placeholder="Cockpit recording id"></label>
+      <button class="secondary" type="submit" name="action" value="schedule_recording_corridor">Request Flight Corridor Coverage</button>
     </form>
   </section>
 

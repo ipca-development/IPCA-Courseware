@@ -2218,16 +2218,63 @@ final class CockpitReconstructionService
         $start = (new DateTimeImmutable($startedAt, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->modify('-30 seconds');
         $end = $start->modify('+' . ($durationSeconds + 60) . ' seconds');
         $archive = new AdsbTrafficArchiveService($this->pdo);
-        $payload = $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+        $pathPoints = $this->replayPathPoints($recordingId);
+        $payload = $pathPoints !== array()
+            ? $archive->trafficForReplayPath($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM), $pathPoints, 25.0)
+            : $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
         $coverage = (string)($payload['meta']['coverage_status'] ?? '');
         if (in_array($coverage, array('missing', 'queued'), true)) {
             try {
-                $archive->scheduleKtrmCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+                if ($pathPoints !== array()) {
+                    $archive->schedulePathCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM), $pathPoints, 'cockpit_recording', $recordingId, 25.0);
+                } else {
+                    $archive->scheduleKtrmCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+                }
             } catch (Throwable) {
                 // Existing archive data is still usable; scheduling failure is reported by coverage status/admin tooling.
             }
         }
+        if (($payload['traffic'] ?? array()) === array() && $pathPoints !== array()) {
+            $fallback = $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
+            if (($fallback['traffic'] ?? array()) !== array()) {
+                return $fallback;
+            }
+        }
         return $payload;
+    }
+
+    /**
+     * @return list<array{lat:float,lon:float}>
+     */
+    private function replayPathPoints(int $recordingId): array
+    {
+        if ($recordingId <= 0 || !self::replaySamplesTablePresent($this->pdo)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT latitude, longitude
+            FROM ' . self::REPLAY_SAMPLE_TABLE . '
+            WHERE recording_id = ?
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY sample_index ASC
+        ');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === array()) {
+            return array();
+        }
+        $count = count($rows);
+        $maxPoints = 24;
+        $points = array();
+        for ($i = 0; $i < min($maxPoints, $count); $i++) {
+            $index = (int)round($i * ($count - 1) / max(1, min($maxPoints, $count) - 1));
+            $row = $rows[$index];
+            if (is_numeric($row['latitude'] ?? null) && is_numeric($row['longitude'] ?? null)) {
+                $points[] = array('lat' => (float)$row['latitude'], 'lon' => (float)$row['longitude']);
+            }
+        }
+        return $points;
     }
 
     /**
