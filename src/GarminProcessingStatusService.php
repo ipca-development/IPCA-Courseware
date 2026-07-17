@@ -15,16 +15,45 @@ final class GarminProcessingStatusService
      */
     public function status(): array
     {
-        $csv = $this->csvSummaryStatus();
-        $linked = $this->linkedCsvTrackStatus();
-        $tracks = $this->trackSummaryStatus();
-        $jobs = $this->jobStatus();
-        $needsReview = $this->needsReviewRecords(10);
+        $errors = array();
+        try {
+            $csv = $this->csvSummaryStatus();
+        } catch (Throwable $e) {
+            $errors[] = 'CSV status: ' . $e->getMessage();
+            $csv = array('done' => 0, 'total' => 0, 'remaining' => 0);
+        }
+        try {
+            $linked = $this->linkedCsvTrackStatus();
+        } catch (Throwable $e) {
+            $errors[] = 'Linked Track status: ' . $e->getMessage();
+            $linked = array('done' => 0, 'total' => 0, 'remaining' => 0);
+        }
+        try {
+            $tracks = $this->trackSummaryStatus();
+        } catch (Throwable $e) {
+            $errors[] = 'Track status: ' . $e->getMessage();
+            $tracks = array('done' => 0, 'total' => 0, 'remaining' => 0);
+        }
+        try {
+            $jobs = $this->jobStatus();
+        } catch (Throwable $e) {
+            $errors[] = 'Job status: ' . $e->getMessage();
+            $jobs = $this->emptyJobStatus();
+        }
+        try {
+            $needsReview = $this->needsReviewRecords(10);
+        } catch (Throwable $e) {
+            $errors[] = 'Review status: ' . $e->getMessage();
+            $needsReview = array();
+        }
         $remaining = max(0, (int)$csv['remaining'] + (int)$tracks['remaining']);
         $state = 'idle';
         $message = 'Garmin processing is idle.';
 
-        if ($remaining === 0) {
+        if ($errors !== array()) {
+            $state = 'failed';
+            $message = 'Could not load complete Garmin processing status: ' . implode(' | ', array_slice($errors, 0, 3));
+        } elseif ($remaining === 0) {
             $state = 'complete';
             $message = 'All Garmin processing is complete.';
         } elseif ((int)$jobs['failed'] > 0) {
@@ -58,6 +87,7 @@ final class GarminProcessingStatusService
                 'total' => count($needsReview),
                 'sample' => $needsReview,
             ),
+            'errors' => $errors,
             'total' => $total,
             'done' => $done,
             'remaining' => max(0, $total - $done),
@@ -183,9 +213,8 @@ final class GarminProcessingStatusService
      */
     private function jobStatus(): array
     {
-        $empty = array('queued' => 0, 'pending' => 0, 'retry_wait' => 0, 'claimed' => 0, 'running' => 0, 'failed' => 0, 'dead_letter' => 0, 'succeeded' => 0, 'last_activity_at' => null, 'last_error' => null);
         if (!$this->tableExists('ipca_async_jobs')) {
-            return $empty;
+            return $this->emptyJobStatus();
         }
         $placeholders = implode(',', array_fill(0, count($this->summaryJobTypes), '?'));
         $rows = $this->rows("
@@ -194,7 +223,7 @@ final class GarminProcessingStatusService
             WHERE job_type IN ({$placeholders})
             GROUP BY status
         ", $this->summaryJobTypes);
-        $status = $empty;
+        $status = $this->emptyJobStatus();
         foreach ($rows as $row) {
             $key = (string)($row['status'] ?? '');
             $total = (int)($row['total'] ?? 0);
@@ -226,6 +255,14 @@ final class GarminProcessingStatusService
     }
 
     /**
+     * @return array<string,int|string|null>
+     */
+    private function emptyJobStatus(): array
+    {
+        return array('queued' => 0, 'pending' => 0, 'retry_wait' => 0, 'claimed' => 0, 'running' => 0, 'failed' => 0, 'dead_letter' => 0, 'succeeded' => 0, 'last_activity_at' => null, 'last_error' => null);
+    }
+
+    /**
      * @return list<array<string,string>>
      */
     private function needsReviewRecords(int $limit): array
@@ -233,6 +270,7 @@ final class GarminProcessingStatusService
         if (!$this->tableExists('ipca_garmin_normalized_track_artifacts')) {
             return array();
         }
+        $limit = max(1, min(100, $limit));
         $hasTrackSummary = $this->tableExists('ipca_garmin_track_flight_summaries');
         $rows = $this->rows("
             SELECT t.track_uuid, t.garmin_entry_uuid,
@@ -248,8 +286,8 @@ final class GarminProcessingStatusService
                 OR JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL
               )
             ORDER BY t.last_seen_at DESC, t.id DESC
-            LIMIT ?
-        ", array($limit));
+            LIMIT {$limit}
+        ");
         $out = array();
         foreach ($rows as $row) {
             $exceptions = json_decode((string)($row['exception_json'] ?? '[]'), true);
