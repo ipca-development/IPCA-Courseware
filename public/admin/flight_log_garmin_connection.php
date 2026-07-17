@@ -904,12 +904,15 @@ cw_header('Garmin Sync Agent');
     const body = new FormData();
     body.append('action', action);
     body.append('format', 'json');
-    body.append('limit', String(limit || 250));
+    body.append('limit', String(limit || 50));
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     const response = await fetch('/admin/api/garmin_csv_summary_action.php', {
       method: 'POST',
       credentials: 'same-origin',
-      body
-    });
+      body,
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeout));
     if (!response.ok) throw new Error('Summary processor returned HTTP ' + response.status);
     return response.json();
   }
@@ -919,13 +922,26 @@ cw_header('Garmin Sync Agent');
     if (summaryStart) summaryStart.textContent = 'Processing...';
     try {
       let statusResponse = await postSummary('status', 1);
+      let batchLimit = 50;
       updateSummaryProgress(statusResponse.status, 'Checking');
       while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
-        const result = await postSummary('process_next', 250);
+        if (summaryStart) summaryStart.textContent = 'Processing ' + batchLimit + ' at a time...';
+        let result;
+        try {
+          result = await postSummary('process_next', batchLimit);
+        } catch (error) {
+          if (batchLimit > 10) {
+            batchLimit = Math.max(10, Math.floor(batchLimit / 2));
+            if (summaryText) summaryText.textContent = 'Server was busy. Retrying smaller batches of ' + batchLimit + '...';
+            await new Promise(resolve => setTimeout(resolve, 750));
+            continue;
+          }
+          throw error;
+        }
         updateSummaryProgress(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more', result);
         if (Number(result.processed || 0) === 0) break;
         statusResponse = result;
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
       const finalStatus = await postSummary('status', 1);
       updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Paused');
