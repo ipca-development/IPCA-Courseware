@@ -167,7 +167,26 @@ $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_s
 $hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
-$processingStatus = (new GarminProcessingStatusService($pdo))->status();
+$processingStatusError = '';
+try {
+    $processingStatus = (new GarminProcessingStatusService($pdo))->status();
+} catch (Throwable $e) {
+    $processingStatusError = $e->getMessage();
+    $processingStatus = array(
+        'state' => 'failed',
+        'message' => 'Could not load Garmin processing status: ' . $processingStatusError,
+        'csv' => array('done' => 0, 'total' => 0, 'remaining' => 0),
+        'tracks' => array('done' => 0, 'total' => 0, 'remaining' => 0),
+        'linked_csv_tracks' => array('done' => 0, 'total' => 0, 'remaining' => 0),
+        'jobs' => array('queued' => 0, 'running' => 0, 'failed' => 0),
+        'needs_review' => array('total' => 0, 'sample' => array()),
+        'total' => 0,
+        'done' => 0,
+        'remaining' => 0,
+        'percent' => 0,
+        'updated_at' => gmdate('c'),
+    );
+}
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
