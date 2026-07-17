@@ -50,6 +50,8 @@ final class GarminProcessingStatusService
         $state = 'idle';
         $message = 'Garmin processing is idle.';
 
+        $reviewCount = count($needsReview);
+
         if ($errors !== array()) {
             $state = 'failed';
             $message = 'Could not load complete Garmin processing status: ' . implode(' | ', array_slice($errors, 0, 3));
@@ -62,12 +64,12 @@ final class GarminProcessingStatusService
         } elseif ((int)$jobs['running'] > 0 || (int)$jobs['claimed'] > 0) {
             $state = 'processing';
             $message = 'Garmin processing is running in the background.';
-        } elseif ($remaining > 0 && ((int)$jobs['queued'] > 0 || (int)$jobs['retry_wait'] > 0)) {
-            $state = 'queued';
-            $message = 'Garmin processing is queued and waiting for the worker.';
-        } elseif ($remaining > 0 && $needsReview !== array()) {
+        } elseif ($remaining > 0 && $reviewCount > 0 && $reviewCount >= $remaining) {
             $state = 'needs_review';
             $message = 'Some Garmin records need review before they can be completed.';
+        } elseif ($remaining > 0 && ((int)$jobs['queued'] > 0 || (int)$jobs['retry_wait'] > 0)) {
+            $state = 'queued';
+            $message = 'Garmin processing is queued. If this does not change, use Process Garmin Data to run the remaining work inline.';
         } else {
             $state = 'processing_required';
             $message = 'Garmin records are ready to process.';
@@ -91,9 +93,20 @@ final class GarminProcessingStatusService
             'total' => $total,
             'done' => $done,
             'remaining' => max(0, $total - $done),
-            'percent' => $total > 0 ? min(100, (int)round(($done / $total) * 100)) : 100,
+            'percent' => $this->percent($done, $total),
             'updated_at' => gmdate('c'),
         );
+    }
+
+    private function percent(int $done, int $total): float
+    {
+        if ($total <= 0) {
+            return 100.0;
+        }
+        if ($done >= $total) {
+            return 100.0;
+        }
+        return min(99.9, round(($done / $total) * 100, 1));
     }
 
     /**

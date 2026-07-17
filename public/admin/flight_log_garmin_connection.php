@@ -614,7 +614,7 @@ cw_header('Garmin Sync Agent');
       <button type="button" class="garmin-primary-action" data-process-garmin>Process Garmin Data</button>
     </div>
     <div style="margin-top:14px">
-      <div class="garmin-progress"><span data-processing-bar style="width:<?= (int)$processingStatus['percent'] ?>%"></span><strong data-processing-percent><?= (int)$processingStatus['percent'] ?>%</strong></div>
+      <div class="garmin-progress"><span data-processing-bar style="width:<?= h((string)$processingStatus['percent']) ?>%"></span><strong data-processing-percent><?= h((string)$processingStatus['percent']) ?>%</strong></div>
       <div class="garmin-muted" style="margin-top:6px" data-processing-detail>
         <?= number_format((int)$processingStatus['done']) ?> / <?= number_format((int)$processingStatus['total']) ?> processed ·
         CSV <?= number_format((int)$processingStatus['csv']['done']) ?>/<?= number_format((int)$processingStatus['csv']['total']) ?> ·
@@ -1000,6 +1000,12 @@ cw_header('Garmin Sync Agent');
       }
     }
   }
+  function setReviewAction() {
+    if (!processButton) return;
+    processButton.textContent = 'Show Records Needing Review';
+    processButton.dataset.action = 'review';
+    processButton.disabled = false;
+  }
   async function getProcessingStatus() {
     const response = await fetch('/admin/api/garmin_processing_status.php', { credentials: 'same-origin' });
     if (!response.ok) throw new Error('Status returned HTTP ' + response.status);
@@ -1069,6 +1075,7 @@ cw_header('Garmin Sync Agent');
           stagnantBatches++;
           if (stagnantBatches >= 2) {
             renderProcessingStatus(result.status, 'Stopped: remaining records need review.');
+            setReviewAction();
             break;
           }
         } else {
@@ -1079,6 +1086,7 @@ cw_header('Garmin Sync Agent');
       }
       const finalStatus = await getProcessingStatus();
       renderProcessingStatus(finalStatus.status, Number(finalStatus.status?.remaining || 0) === 0 ? 'Complete.' : 'Processing stopped before completion.');
+      if (finalStatus.status?.state === 'needs_review') setReviewAction();
     } catch (error) {
       if (processingMessage) processingMessage.textContent = 'Processing failed: ' + error.message;
       if (processButton) {
