@@ -229,10 +229,37 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
 
+$csvTrackJoin = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
+    LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+      ON track_csv_l.provider_name = t.provider_name
+     AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
+     AND track_csv_l.canonical_track_uuid = t.track_uuid
+    LEFT JOIN ipca_garmin_csv_flight_summaries csv_s
+      ON csv_s.csv_file_id = track_csv_l.garmin_csv_file_id
+" : "";
+$csvTrackCompleteCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
+        WHEN csv_s.csv_file_id IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0 THEN 1
+" : "";
+$csvTrackMissingCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
+        WHEN csv_s.csv_file_id IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
+          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0 THEN 0
+" : "";
 $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
     SELECT
       COUNT(t.id) AS total_track_artifacts,
       SUM(CASE
+        {$csvTrackCompleteCase}
         WHEN s.track_artifact_id IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
@@ -243,6 +270,7 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
         ELSE 1
       END) AS summarized_track_artifacts,
       SUM(CASE
+        {$csvTrackMissingCase}
         WHEN s.track_artifact_id IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 1
         WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 1
@@ -254,6 +282,7 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
       END) AS missing_track_summaries
     FROM ipca_garmin_normalized_track_artifacts t
     " . ($hasTrackSummaries ? "LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id" : "LEFT JOIN (SELECT NULL AS track_artifact_id) s ON 1 = 0") . "
+    {$csvTrackJoin}
     WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
 ") : array('total_track_artifacts' => 0, 'summarized_track_artifacts' => 0, 'missing_track_summaries' => 0);
 
@@ -923,9 +952,12 @@ cw_header('Garmin Sync Agent');
     try {
       let statusResponse = await postSummary('status', 1);
       let batchLimit = 50;
+      let stagnantBatches = 0;
       updateSummaryProgress(statusResponse.status, 'Checking');
       while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
         if (summaryStart) summaryStart.textContent = 'Processing ' + batchLimit + ' at a time...';
+        const beforeRemaining = Number(statusResponse.status.remaining || 0);
+        const beforeDone = Number(statusResponse.status.done || 0);
         let result;
         try {
           result = await postSummary('process_next', batchLimit);
@@ -940,11 +972,23 @@ cw_header('Garmin Sync Agent');
         }
         updateSummaryProgress(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more', result);
         if (Number(result.processed || 0) === 0) break;
+        const afterRemaining = Number(result.status?.remaining || beforeRemaining);
+        const afterDone = Number(result.status?.done || beforeDone);
+        if (afterRemaining >= beforeRemaining && afterDone <= beforeDone) {
+          stagnantBatches++;
+          if (stagnantBatches >= 2) {
+            updateSummaryProgress(result.status, 'Stopped: remaining records need review', result);
+            if (summaryDetail) summaryDetail.textContent += ' · These records recalculated but still do not meet the complete-summary criteria.';
+            break;
+          }
+        } else {
+          stagnantBatches = 0;
+        }
         statusResponse = result;
         await new Promise(resolve => setTimeout(resolve, 150));
       }
       const finalStatus = await postSummary('status', 1);
-      updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Paused');
+      updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Needs review');
     } catch (error) {
       if (summaryText) summaryText.textContent = 'Summary processing paused: ' + error.message;
       if (summaryDetail) summaryDetail.textContent = 'The processor stopped before completion. Last update ' + new Date().toLocaleTimeString();

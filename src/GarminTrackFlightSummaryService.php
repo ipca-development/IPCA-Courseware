@@ -63,10 +63,32 @@ final class GarminTrackFlightSummaryService
             return array();
         }
         $this->ensureTable();
+        $hasCsvLinks = $this->tableExists('ipca_garmin_flight_data_track_links');
+        $hasCsvSummaries = $this->tableExists('ipca_garmin_csv_flight_summaries');
+        $csvSummaryJoin = ($hasCsvLinks && $hasCsvSummaries) ? "
+            LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+              ON track_csv_l.provider_name = t.provider_name
+             AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
+             AND track_csv_l.canonical_track_uuid = t.track_uuid
+            LEFT JOIN ipca_garmin_csv_flight_summaries csv_s
+              ON csv_s.csv_file_id = track_csv_l.garmin_csv_file_id
+        " : "";
+        $csvSummaryComplete = ($hasCsvLinks && $hasCsvSummaries) ? "
+            AND NOT (
+                csv_s.csv_file_id IS NOT NULL
+                AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact') IS NOT NULL
+                AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact') IS NOT NULL
+                AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
+                AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
+                AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+                AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
+            )
+        " : "";
         $stmt = $this->pdo->prepare("
             SELECT t.id
             FROM ipca_garmin_normalized_track_artifacts t
             LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id
+            {$csvSummaryJoin}
             WHERE (
                 s.track_artifact_id IS NULL
                 OR JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL
@@ -80,6 +102,7 @@ final class GarminTrackFlightSummaryService
               )
               AND t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
               AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.raw_metadata_json, '$.trackClassification')), '') <> 'GARMIN_GPS_ONLY'
+              {$csvSummaryComplete}
             ORDER BY t.last_seen_at DESC, t.id DESC
             LIMIT ?
         ");
