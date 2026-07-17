@@ -194,6 +194,55 @@ final class AdsbTrafficArchiveService
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    public function recentTrafficSamples(int $limit = 200): array
+    {
+        $this->ensureTables();
+        $limit = max(1, min(1000, $limit));
+        $stmt = $this->pdo->prepare("
+            SELECT
+              sample_time_utc,
+              aircraft_hex,
+              callsign,
+              latitude,
+              longitude,
+              altitude_ft,
+              groundspeed_kt,
+              track_deg,
+              vertical_speed_fpm,
+              source_distance_nm,
+              (3440.065 * 2 * ASIN(SQRT(
+                POWER(SIN(RADIANS(latitude - ?) / 2), 2)
+                + COS(RADIANS(?)) * COS(RADIANS(latitude))
+                * POWER(SIN(RADIANS(longitude - ?) / 2), 2)
+              ))) AS distance_nm
+            FROM ipca_adsb_traffic_samples
+            WHERE sample_time_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+              AND latitude BETWEEN ? AND ?
+              AND longitude BETWEEN ? AND ?
+            HAVING distance_nm <= ?
+            ORDER BY sample_time_utc DESC, distance_nm ASC
+            LIMIT {$limit}
+        ");
+        $radiusNm = self::KTRM_RADIUS_NM;
+        $latDelta = $radiusNm / 60.0;
+        $lonDelta = $radiusNm / max(1.0, 60.0 * cos(deg2rad(self::KTRM_LAT)));
+        $stmt->execute(array(
+            self::KTRM_LAT,
+            self::KTRM_LAT,
+            self::KTRM_LON,
+            self::KTRM_LAT - $latDelta,
+            self::KTRM_LAT + $latDelta,
+            self::KTRM_LON - $lonDelta,
+            self::KTRM_LON + $lonDelta,
+            $radiusNm,
+        ));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
      * @return array{traffic:list<array<string,mixed>>,meta:array<string,mixed>}
      */
     public function trafficForReplay(string $startUtc, string $endUtc, float $centerLat = self::KTRM_LAT, float $centerLon = self::KTRM_LON, float $radiusNm = self::KTRM_RADIUS_NM): array
