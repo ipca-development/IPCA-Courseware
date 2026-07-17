@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../src/CockpitReconstructionService.php';
 require_once __DIR__ . '/../../src/CockpitAdsbEnrichmentService.php';
 require_once __DIR__ . '/../../src/GarminCsvImportProfile.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
+require_once __DIR__ . '/../../src/GarminCsvReplayPayloadService.php';
 
 cw_require_admin();
 
@@ -286,6 +287,62 @@ function cockpit_admin_garmin_match_candidates(PDO $pdo, ?array $session, string
 }
 
 /**
+ * @return array<string,mixed>|null
+ */
+function cockpit_admin_best_complete_garmin_match(PDO $pdo, string $aircraftRegistration, string $recordingStartedAt, float $durationSeconds): ?array
+{
+    foreach (array('ipca_garmin_csv_files', 'ipca_garmin_csv_flight_summaries') as $table) {
+        if (!cockpit_admin_table_exists($pdo, $table)) {
+            return null;
+        }
+    }
+    $aircraftRegistration = strtoupper(trim($aircraftRegistration));
+    $startTs = strtotime(trim($recordingStartedAt));
+    if ($aircraftRegistration === '' || $startTs === false || $durationSeconds <= 0) {
+        return null;
+    }
+    $windowStart = gmdate('Y-m-d H:i:s', $startTs);
+    $windowEnd = gmdate('Y-m-d H:i:s', $startTs + (int)round($durationSeconds));
+    $stmt = $pdo->prepare("
+        SELECT
+          f.id AS csv_file_id,
+          f.csv_file_uuid,
+          f.aircraft_registration,
+          f.system_identifier,
+          f.valid_row_count,
+          s.departure_time_utc,
+          s.arrival_time_utc,
+          s.summary_json,
+          ABS(TIMESTAMPDIFF(SECOND, s.departure_time_utc, ?)) AS start_delta_seconds,
+          GREATEST(
+            0,
+            TIMESTAMPDIFF(
+              SECOND,
+              GREATEST(s.departure_time_utc, ?),
+              LEAST(s.arrival_time_utc, ?)
+            )
+          ) AS overlap_seconds
+        FROM ipca_garmin_csv_flight_summaries s
+        INNER JOIN ipca_garmin_csv_files f ON f.id = s.csv_file_id
+        WHERE s.derivation_status = 'ok'
+          AND JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.status_label')) = 'Complete'
+          AND UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tail')), f.aircraft_registration, '')) = ?
+          AND s.departure_time_utc BETWEEN DATE_SUB(?, INTERVAL 6 HOUR) AND DATE_ADD(?, INTERVAL 6 HOUR)
+        ORDER BY overlap_seconds DESC, start_delta_seconds ASC, s.id DESC
+        LIMIT 1
+    ");
+    $stmt->execute(array($windowStart, $windowStart, $windowEnd, $aircraftRegistration, $windowStart, $windowEnd));
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($row)) {
+        return null;
+    }
+    $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
+    $row['summary'] = is_array($summary) ? $summary : array();
+    $row['match_confidence'] = (float)min(1.0, max(0.25, ((int)($row['overlap_seconds'] ?? 0) / max(1.0, $durationSeconds))));
+    return $row;
+}
+
+/**
  * @return list<array<string,mixed>>
  */
 function cockpit_admin_garmin_flight_options(PDO $pdo, GarminCsvFlightSummaryService $summaryService): array
@@ -340,6 +397,9 @@ function cockpit_admin_garmin_flight_options(PDO $pdo, GarminCsvFlightSummarySer
             'valid_row_count' => (int)($row['valid_row_count'] ?? 0),
         ));
         $row['summary'] = $summary;
+        if ((string)($summary['status_label'] ?? '') !== 'Complete') {
+            continue;
+        }
         $row['dropdown_label'] = (string)$summary['label'] . ' · Hobbs ' . (string)$summary['hobbs_start_lt'] . '-' . (string)$summary['hobbs_end_lt'] . ' LT';
         $options[] = $row;
     }
@@ -417,9 +477,11 @@ $recordings = array();
 $service = null;
 $adsbService = null;
 $garminSummaryService = new GarminCsvFlightSummaryService($pdo);
+$garminReplayPayloadService = new GarminCsvReplayPayloadService($pdo);
 $garminFlightOptions = array();
 $garminFlightOptionsByGroup = array();
 $garminReplayOptions = array();
+$garminReplayPayloadsByCsvFileId = array();
 $importProfileOptions = GarminCsvImportProfile::options();
 try {
     $service = new CockpitRecorderService($pdo);
@@ -431,6 +493,10 @@ try {
 try {
     $garminFlightOptions = cockpit_admin_garmin_flight_options($pdo, $garminSummaryService);
     $garminReplayOptions = cockpit_admin_garmin_replay_options($pdo, 100);
+    $garminReplayPayloadsByCsvFileId = $garminReplayPayloadService->payloadsForCsvFileIds(array_map(
+        static fn(array $row): int => (int)($row['csv_file_id'] ?? 0),
+        $garminReplayOptions
+    ));
     foreach ($garminFlightOptions as $garminFlightOption) {
         $garminFlightOptionsByGroup[(int)($garminFlightOption['source_group_id'] ?? 0)] = $garminFlightOption;
     }
@@ -463,77 +529,6 @@ cw_header('Cockpit Recordings');
   <?php endif; ?>
 
   <section class="cockpit-card">
-    <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap">
-      <div>
-        <h3 style="margin:0">Garmin Flights Available for Replay</h3>
-        <p class="cockpit-muted">Flights uploaded by IPCA Sync Agent. These do not require a phone cockpit-recorder upload; the replay is built from the stored original Garmin CSV evidence.</p>
-      </div>
-      <a class="cockpit-button secondary" href="/admin/flight_log_garmin_connection.php">Garmin Dashboard</a>
-    </div>
-    <?php if ($garminReplayOptions === array()): ?>
-      <div class="cockpit-empty">No Garmin CSV evidence is available for replay yet.</div>
-    <?php else: ?>
-      <div class="cockpit-table-wrap">
-        <table class="cockpit-table">
-          <thead>
-            <tr>
-              <th>Date / Time</th>
-              <th>Aircraft</th>
-              <th>Route</th>
-              <th>Hobbs</th>
-              <th>Tacho</th>
-              <th>Evidence</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($garminReplayOptions as $garminReplay): ?>
-            <?php
-              $summary = is_array($garminReplay['summary'] ?? null) ? $garminReplay['summary'] : array();
-              $tail = (string)($summary['tail'] ?? $garminReplay['aircraft_registration'] ?? 'Unknown tail');
-              $dateLabel = (string)($summary['date_label'] ?? cockpit_admin_fmt_date($garminReplay['departure_time_utc'] ?? $garminReplay['first_valid_sample_utc'] ?? ''));
-              $dep = (string)($summary['dep_airport'] ?? '--');
-              $arr = (string)($summary['arr_airport'] ?? '--');
-              $depTime = (string)($summary['dep_time_lt'] ?? cockpit_admin_fmt_timestamp($garminReplay['departure_time_utc'] ?? ''));
-              $arrTime = (string)($summary['arr_time_lt'] ?? cockpit_admin_fmt_timestamp($garminReplay['arrival_time_utc'] ?? ''));
-            ?>
-            <tr>
-              <td>
-                <div class="cockpit-row-title"><?= h($dateLabel) ?></div>
-                <div class="cockpit-row-sub"><?= h($depTime) ?> LT - <?= h($arrTime) ?> LT · <?= h((string)($summary['elapsed_time'] ?? '--')) ?></div>
-              </td>
-              <td>
-                <div class="cockpit-row-title"><?= h($tail) ?></div>
-                <div class="cockpit-row-sub"><?= h((string)($garminReplay['system_identifier'] ?? '')) ?></div>
-              </td>
-              <td><?= h($dep) ?> - <?= h($arr) ?></td>
-              <td>
-                <div class="cockpit-row-sub">Out <?= h((string)($summary['hobbs_out'] ?? '--')) ?> · In <?= h((string)($summary['hobbs_in'] ?? '--')) ?></div>
-                <strong><?= h((string)($summary['hobbs_time'] ?? '--')) ?></strong>
-              </td>
-              <td>
-                <div class="cockpit-row-sub">Out <?= h((string)($summary['tacho_out'] ?? '--')) ?> · In <?= h((string)($summary['tacho_in'] ?? '--')) ?></div>
-                <strong><?= h((string)($summary['tacho_time'] ?? '--')) ?></strong>
-              </td>
-              <td>
-                <div class="cockpit-row-sub"><?= number_format((int)($garminReplay['valid_row_count'] ?? 0)) ?> rows · <?= h(cockpit_admin_fmt_bytes((int)($garminReplay['file_size_bytes'] ?? 0))) ?></div>
-                <div class="cockpit-code"><?= h((string)($garminReplay['canonical_track_uuid'] ?: $garminReplay['garmin_entry_uuid'] ?: $garminReplay['csv_file_uuid'] ?? '')) ?></div>
-              </td>
-              <td>
-                <form method="post" action="/admin/api/cockpit_recorder_garmin_replay_action.php">
-                  <input type="hidden" name="csv_file_id" value="<?= (int)($garminReplay['csv_file_id'] ?? 0) ?>">
-                  <button class="cockpit-button" type="submit">Build Replay</button>
-                </form>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-    <?php endif; ?>
-  </section>
-
-  <section class="cockpit-card">
     <form id="cockpit-bulk-form" method="post" action="/admin/api/cockpit_recorder_bulk_action.php" data-bulk-form>
       <input type="hidden" name="return" value="<?= h($currentReturn) ?>">
       <div class="cockpit-bulk-bar">
@@ -563,6 +558,7 @@ cw_header('Cockpit Recordings');
             <th>Duration</th>
             <th>Upload</th>
             <th>Transcript</th>
+            <th>Garmin Match</th>
             <th>Replay</th>
             <th>Evidence</th>
             <th>Actions</th>
@@ -570,7 +566,7 @@ cw_header('Cockpit Recordings');
         </thead>
         <tbody>
         <?php if (!$recordings): ?>
-          <tr><td colspan="9" class="cockpit-empty">No cockpit recorder uploads yet.</td></tr>
+          <tr><td colspan="10" class="cockpit-empty">No cockpit recorder uploads yet.</td></tr>
         <?php endif; ?>
         <?php foreach ($recordings as $row): ?>
           <?php
@@ -601,10 +597,17 @@ cw_header('Cockpit Recordings');
                 $startedAt,
                 (float)($row['duration_seconds'] ?? 0)
             );
+            $completeGarminMatch = cockpit_admin_best_complete_garmin_match(
+                $pdo,
+                (string)($row['aircraft_registration'] ?? ''),
+                $startedAt,
+                (float)($row['duration_seconds'] ?? 0)
+            );
             $selectedOperationalSource = is_array($selectedGarmin['operational'] ?? null) ? $selectedGarmin['operational'] : null;
             $selectedReplaySource = is_array($selectedGarmin['replay'] ?? null) ? $selectedGarmin['replay'] : null;
             $garminCandidates = isset($selectedGarmin['candidates']) && is_array($selectedGarmin['candidates']) ? $selectedGarmin['candidates'] : array();
             $hasAutoGarminSource = $selectedOperationalSource !== null || $selectedReplaySource !== null;
+            $hasCompleteGarminMatch = is_array($completeGarminMatch);
             $selectedGarminGroupId = is_array($selectedGarmin['group'] ?? null) ? (int)($selectedGarmin['group']['source_group_id'] ?? 0) : 0;
             $health = cockpit_admin_decode_json_field($row, 'health_summary_json');
             $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
@@ -657,10 +660,21 @@ cw_header('Cockpit Recordings');
             <td><?= h(cockpit_admin_fmt_duration((float)($row['duration_seconds'] ?? 0))) ?><div class="cockpit-row-sub"><?= h(cockpit_admin_fmt_bytes((int)($row['file_size_bytes'] ?? 0))) ?></div></td>
             <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($upload)) ?>"><?= h($upload) ?></span></td>
             <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($transcription)) ?>"><?= h($transcription) ?></span><div class="cockpit-row-sub"><?= (int)($row['transcription_progress'] ?? 0) ?>%</div></td>
+            <td>
+              <?php if ($hasCompleteGarminMatch): ?>
+                <?php $matchSummary = is_array($completeGarminMatch['summary'] ?? null) ? $completeGarminMatch['summary'] : array(); ?>
+                <span class="cockpit-badge cockpit-badge-ready">complete</span>
+                <div class="cockpit-row-sub"><?= h((string)($matchSummary['tail'] ?? $completeGarminMatch['aircraft_registration'] ?? '')) ?> · <?= h((string)($matchSummary['dep_airport'] ?? '--')) ?>-<?= h((string)($matchSummary['arr_airport'] ?? '--')) ?></div>
+                <div class="cockpit-row-sub">confidence <?= h(number_format((float)($completeGarminMatch['match_confidence'] ?? 0), 2)) ?></div>
+              <?php else: ?>
+                <span class="cockpit-badge cockpit-badge-warning">no complete match</span>
+                <div class="cockpit-row-sub">Incomplete/GPS-only Garmin flights are ignored.</div>
+              <?php endif; ?>
+            </td>
             <td><span class="cockpit-badge <?= h(cockpit_admin_badge_class($reconStatus)) ?>" data-recon-badge="<?= $id ?>"><?= h($reconStatus) ?></span><div class="cockpit-row-sub">Timeline: <span data-timeline-badge="<?= $id ?>"><?= h($timelineStatus) ?></span></div></td>
             <td>
               <div class="cockpit-row-sub">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></div>
-              <div class="cockpit-row-sub">Garmin <?= $hasAutoGarminSource ? 'auto-linked' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked') ?></div>
+              <div class="cockpit-row-sub">Garmin <?= $hasCompleteGarminMatch ? 'complete match' : ($hasAutoGarminSource ? 'legacy link only' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked')) ?></div>
               <div class="cockpit-row-sub">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></div>
             </td>
             <td>
@@ -668,6 +682,11 @@ cw_header('Cockpit Recordings');
                 <button class="cockpit-button" type="button" data-modal-open="recording-modal-<?= $id ?>">Details</button>
                 <?php if (!$isDeleted): ?>
                   <a class="cockpit-button secondary" href="<?= h($replayUrl) ?>">Replay</a>
+                  <form method="post" action="/admin/api/cockpit_recorder_reconstruct.php?id=<?= $id ?>">
+                    <input type="hidden" name="id" value="<?= $id ?>">
+                    <input type="hidden" name="replay_source_mode" value="g3x_only">
+                    <button class="cockpit-button" type="submit"<?= $hasCompleteGarminMatch ? '' : ' disabled' ?>>Build/Update Replay</button>
+                  </form>
                   <form method="post" action="/admin/api/cockpit_recorder_bulk_action.php" data-single-delete-form>
                     <input type="hidden" name="return" value="<?= h($currentReturn) ?>">
                     <input type="hidden" name="id" value="<?= $id ?>">
@@ -686,7 +705,7 @@ cw_header('Cockpit Recordings');
           </tr>
 
           <tr class="cockpit-modal-host">
-            <td colspan="9" style="padding:0;border:0">
+            <td colspan="10" style="padding:0;border:0">
               <div class="cockpit-modal-backdrop" id="recording-modal-<?= $id ?>" aria-hidden="true">
                 <div class="cockpit-modal" role="dialog" aria-modal="true" aria-labelledby="recording-title-<?= $id ?>">
                   <div class="cockpit-modal-header">
@@ -943,6 +962,96 @@ cw_header('Cockpit Recordings');
       </table>
     </div>
   </section>
+  <details class="cockpit-card">
+    <summary><strong>Advanced / Garmin-only Replay Test</strong> <span class="cockpit-muted">CSV-only replay builds from IPCA Sync Agent evidence; audio recordings remain the primary view above.</span></summary>
+    <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-top:14px">
+      <div>
+        <h3 style="margin:0">Garmin Flights Available for Replay</h3>
+        <p class="cockpit-muted">Manual test tool for standalone Garmin CSV replay payloads. Use the Garmin dashboard for normal bulk rebuilds.</p>
+      </div>
+      <a class="cockpit-button secondary" href="/admin/flight_log_garmin_connection.php">Garmin Dashboard</a>
+    </div>
+    <?php if ($garminReplayOptions === array()): ?>
+      <div class="cockpit-empty">No Garmin CSV evidence is available for replay yet.</div>
+    <?php else: ?>
+      <div class="cockpit-table-wrap">
+        <table class="cockpit-table">
+          <thead>
+            <tr>
+              <th>Date / Time</th>
+              <th>Aircraft</th>
+              <th>Route</th>
+              <th>Hobbs</th>
+              <th>Tacho</th>
+              <th>Evidence</th>
+              <th>Replay Payload</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+          <?php foreach ($garminReplayOptions as $garminReplay): ?>
+            <?php
+              $summary = is_array($garminReplay['summary'] ?? null) ? $garminReplay['summary'] : array();
+              $tail = (string)($summary['tail'] ?? $garminReplay['aircraft_registration'] ?? 'Unknown tail');
+              $dateLabel = (string)($summary['date_label'] ?? cockpit_admin_fmt_date($garminReplay['departure_time_utc'] ?? $garminReplay['first_valid_sample_utc'] ?? ''));
+              $dep = (string)($summary['dep_airport'] ?? '--');
+              $arr = (string)($summary['arr_airport'] ?? '--');
+              $depTime = (string)($summary['dep_time_lt'] ?? cockpit_admin_fmt_timestamp($garminReplay['departure_time_utc'] ?? ''));
+              $arrTime = (string)($summary['arr_time_lt'] ?? cockpit_admin_fmt_timestamp($garminReplay['arrival_time_utc'] ?? ''));
+              $csvFileId = (int)($garminReplay['csv_file_id'] ?? 0);
+              $payloadRow = $csvFileId > 0 && isset($garminReplayPayloadsByCsvFileId[$csvFileId]) ? $garminReplayPayloadsByCsvFileId[$csvFileId] : null;
+              $payloadReady = is_array($payloadRow) && (string)($payloadRow['build_status'] ?? '') === 'ready' && trim((string)($payloadRow['replay_key'] ?? '')) !== '';
+            ?>
+            <tr>
+              <td>
+                <div class="cockpit-row-title"><?= h($dateLabel) ?></div>
+                <div class="cockpit-row-sub"><?= h($depTime) ?> LT - <?= h($arrTime) ?> LT · <?= h((string)($summary['elapsed_time'] ?? '--')) ?></div>
+              </td>
+              <td>
+                <div class="cockpit-row-title"><?= h($tail) ?></div>
+                <div class="cockpit-row-sub"><?= h((string)($garminReplay['system_identifier'] ?? '')) ?></div>
+              </td>
+              <td><?= h($dep) ?> - <?= h($arr) ?></td>
+              <td>
+                <div class="cockpit-row-sub">Out <?= h((string)($summary['hobbs_out'] ?? '--')) ?> · In <?= h((string)($summary['hobbs_in'] ?? '--')) ?></div>
+                <strong><?= h((string)($summary['hobbs_time'] ?? '--')) ?></strong>
+              </td>
+              <td>
+                <div class="cockpit-row-sub">Out <?= h((string)($summary['tacho_out'] ?? '--')) ?> · In <?= h((string)($summary['tacho_in'] ?? '--')) ?></div>
+                <strong><?= h((string)($summary['tacho_time'] ?? '--')) ?></strong>
+              </td>
+              <td>
+                <div class="cockpit-row-sub"><?= number_format((int)($garminReplay['valid_row_count'] ?? 0)) ?> rows · <?= h(cockpit_admin_fmt_bytes((int)($garminReplay['file_size_bytes'] ?? 0))) ?></div>
+                <div class="cockpit-code"><?= h((string)($garminReplay['canonical_track_uuid'] ?: $garminReplay['garmin_entry_uuid'] ?: $garminReplay['csv_file_uuid'] ?? '')) ?></div>
+              </td>
+              <td>
+                <?php if ($payloadReady): ?>
+                  <span class="cockpit-badge cockpit-badge-ready">ready</span>
+                  <div class="cockpit-row-sub"><?= number_format((int)($payloadRow['sample_count'] ?? 0)) ?> samples</div>
+                <?php elseif (is_array($payloadRow) && (string)($payloadRow['build_status'] ?? '') === 'failed'): ?>
+                  <span class="cockpit-badge cockpit-badge-failed">failed</span>
+                  <div class="cockpit-row-sub"><?= h((string)($payloadRow['last_error'] ?? '')) ?></div>
+                <?php else: ?>
+                  <span class="cockpit-badge cockpit-badge-progress">not built</span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <div class="cockpit-actions-row">
+                  <?php if ($payloadReady): ?><a class="cockpit-button secondary" href="/admin/cockpit_recorder_replay.php?standalone=<?= h((string)$payloadRow['replay_key']) ?>">Open</a><?php endif; ?>
+                  <form method="post" action="/admin/api/cockpit_recorder_garmin_replay_action.php">
+                    <input type="hidden" name="csv_file_id" value="<?= $csvFileId ?>">
+                    <?php if ($payloadReady): ?><input type="hidden" name="force" value="1"><?php endif; ?>
+                    <button class="cockpit-button" type="submit"><?= $payloadReady ? 'Rebuild' : 'Build' ?> Replay</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+  </details>
 </div>
 
 <script>

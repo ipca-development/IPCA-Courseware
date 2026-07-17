@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminTrackFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminProcessingStatusService.php';
+require_once __DIR__ . '/../../src/GarminCsvReplayPayloadService.php';
 
 cw_require_admin();
 
@@ -230,6 +231,7 @@ $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_s
 $hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
+$replayPayloadService = new GarminCsvReplayPayloadService($pdo);
 $processingStatusError = '';
 try {
     $processingStatus = (new GarminProcessingStatusService($pdo))->status();
@@ -598,6 +600,17 @@ foreach ($recentTracks as $track) {
 sort($tailOptions);
 sort($depOptions);
 sort($arrOptions);
+$visibleCsvFileIds = array_values(array_unique(array_filter(array_map(
+    static fn(array $flight): int => (int)($flight['track']['csv_file_id'] ?? 0),
+    $flightRows
+))));
+$replayPayloadsByCsvFileId = array();
+$replayPayloadStatusError = '';
+try {
+    $replayPayloadsByCsvFileId = $replayPayloadService->payloadsForCsvFileIds($visibleCsvFileIds);
+} catch (Throwable $e) {
+    $replayPayloadStatusError = 'Garmin replay payload status could not be loaded: ' . $e->getMessage();
+}
 
 $attentionRows = array();
 foreach ($recentTracks as $track) {
@@ -642,6 +655,9 @@ if (!$hasTracks) {
 }
 
 $error = trim((string)($_GET['error'] ?? ''));
+if ($error === '' && $replayPayloadStatusError !== '') {
+    $error = $replayPayloadStatusError;
+}
 $notice = '';
 if (isset($_GET['summary_processed'])) {
     $notice = 'Garmin summaries processed: ' . (int)$_GET['summary_processed']
@@ -660,6 +676,9 @@ if (isset($_GET['flights_restored'])) {
 }
 if (isset($_GET['flights_reprocess_queued'])) {
     $notice = 'Garmin flight summary reprocess jobs queued: ' . (int)$_GET['flights_reprocess_queued'] . '.';
+}
+if (isset($_GET['replays_rebuilt'])) {
+    $notice = 'Garmin replay payloads rebuilt: ' . (int)$_GET['replays_rebuilt'] . '.';
 }
 
 cw_header('Garmin Sync Agent');
@@ -807,6 +826,7 @@ cw_header('Garmin Sync Agent');
         <button type="submit" name="action" value="hide">Hide selected</button>
         <button class="secondary" type="submit" name="action" value="restore">Restore selected</button>
         <button class="secondary" type="submit" name="action" value="reprocess">Queue reprocess</button>
+        <button class="secondary" type="submit" name="action" value="rebuild_replay">Rebuild replay</button>
       </form>
     </div>
 
@@ -828,7 +848,7 @@ cw_header('Garmin Sync Agent');
     <?php else: ?>
       <div class="garmin-flights-scroll">
       <table class="garmin-table">
-        <thead><tr><th style="width:3%"><input type="checkbox" data-select-all-flights></th><th style="width:7%">Flight</th><th style="width:9%">Date</th><th style="width:7%">Tail</th><th style="width:6%">Dep AD</th><th style="width:7%">Dep LT</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs Time</th><th style="width:7%">Tacho Out</th><th style="width:7%">Tacho In</th><th style="width:7%">Tacho Time</th><th style="width:6%">Arr AD</th><th style="width:7%">Arr LT</th><th style="width:8%">Status</th><th style="width:13%">Uploaded</th></tr></thead>
+        <thead><tr><th style="width:3%"><input type="checkbox" data-select-all-flights></th><th style="width:7%">Flight</th><th style="width:9%">Date</th><th style="width:7%">Tail</th><th style="width:6%">Dep AD</th><th style="width:7%">Dep LT</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs Time</th><th style="width:7%">Tacho Out</th><th style="width:7%">Tacho In</th><th style="width:7%">Tacho Time</th><th style="width:6%">Arr AD</th><th style="width:7%">Arr LT</th><th style="width:8%">Status</th><th style="width:13%">Uploaded</th><th style="width:10%">Replay</th></tr></thead>
         <tbody>
         <?php foreach ($flightRows as $flight): ?>
           <?php
@@ -840,6 +860,9 @@ cw_header('Garmin Sync Agent');
             $statusClass = $statusLabel === 'Complete' ? 'garmin-badge-ok' : ($statusLabel === 'GPS only' ? 'garmin-badge-danger' : 'garmin-badge-warn');
             $qualityScore = garmin_sync_quality_score($summary, $statusLabel);
             $qualityClass = $qualityScore >= 80 ? 'good' : ($qualityScore >= 50 ? 'warn' : 'bad');
+            $csvFileId = (int)($track['csv_file_id'] ?? 0);
+            $replayPayload = $csvFileId > 0 && isset($replayPayloadsByCsvFileId[$csvFileId]) ? $replayPayloadsByCsvFileId[$csvFileId] : null;
+            $replayReady = is_array($replayPayload) && (string)($replayPayload['build_status'] ?? '') === 'ready' && trim((string)($replayPayload['replay_key'] ?? '')) !== '';
           ?>
           <tr data-flight-row
               data-tail="<?= h(strtoupper((string)($summary['tail'] ?? ''))) ?>"
@@ -865,6 +888,24 @@ cw_header('Garmin Sync Agent');
             <td class="garmin-compact"><?= h((string)($summary['arr_time_lt'] ?? '--')) ?></td>
             <td><span class="garmin-badge <?= h($statusClass) ?>"><?= h($statusLabel) ?></span></td>
             <td><span class="garmin-upload-pill">IPCA</span><br><span class="garmin-muted"><?= h(garmin_sync_datetime((string)$flight['uploaded_at'])) ?></span></td>
+            <td>
+              <?php if ($csvFileId > 0 && $statusLabel === 'Complete'): ?>
+                <div class="garmin-actions" style="gap:5px">
+                  <?php if ($replayReady): ?>
+                    <a class="garmin-row-button" href="/admin/cockpit_recorder_replay.php?standalone=<?= h((string)$replayPayload['replay_key']) ?>">Open</a>
+                  <?php endif; ?>
+                  <form method="post" action="/admin/api/cockpit_recorder_garmin_replay_action.php">
+                    <input type="hidden" name="csv_file_id" value="<?= $csvFileId ?>">
+                    <?php if ($replayReady): ?><input type="hidden" name="force" value="1"><?php endif; ?>
+                    <button class="garmin-row-button" type="submit"><?= $replayReady ? 'Rebuild' : 'Build' ?></button>
+                  </form>
+                </div>
+              <?php elseif ($csvFileId > 0): ?>
+                <span class="garmin-muted">Complete flight required</span>
+              <?php else: ?>
+                <span class="garmin-muted">No CSV</span>
+              <?php endif; ?>
+            </td>
           </tr>
           <?php ob_start(); ?>
             <div class="garmin-modal-backdrop" id="<?= h($modalId) ?>">
@@ -950,7 +991,7 @@ cw_header('Garmin Sync Agent');
             </div>
           <?php $flightModals[] = ob_get_clean(); ?>
         <?php endforeach; ?>
-          <tr data-filter-empty style="display:none"><td colspan="16" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
+          <tr data-filter-empty style="display:none"><td colspan="17" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
       </div>

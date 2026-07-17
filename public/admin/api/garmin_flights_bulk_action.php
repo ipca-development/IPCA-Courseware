@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/AsyncJobService.php';
+require_once __DIR__ . '/../../../src/GarminCsvReplayPayloadService.php';
 
 cw_require_admin();
 
@@ -81,6 +82,34 @@ try {
             }
         }
         garmin_flights_redirect($return . $separator . 'flights_reprocess_queued=' . $queued);
+    }
+
+    if ($action === 'rebuild_replay') {
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT c.id AS csv_file_id
+            FROM ipca_garmin_normalized_track_artifacts t
+            JOIN (
+                SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
+                FROM ipca_garmin_flight_data_track_links
+                GROUP BY provider_name, garmin_entry_uuid, canonical_track_uuid
+            ) link
+              ON link.provider_name = t.provider_name
+             AND link.garmin_entry_uuid = t.garmin_entry_uuid
+             AND link.canonical_track_uuid = t.track_uuid
+            JOIN ipca_garmin_csv_files c ON c.id = link.garmin_csv_file_id
+            LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id
+            WHERE t.id IN ({$placeholders})
+              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.status_label')), '') = 'Complete'
+        ");
+        $stmt->execute($ids);
+        $csvIds = array_values(array_unique(array_filter(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)))));
+        $service = new GarminCsvReplayPayloadService($pdo);
+        $rebuilt = 0;
+        foreach ($csvIds as $csvId) {
+            $service->buildForCsvFileId($csvId, true);
+            $rebuilt++;
+        }
+        garmin_flights_redirect($return . $separator . 'replays_rebuilt=' . $rebuilt);
     }
 
     throw new RuntimeException('Unknown bulk action.');
