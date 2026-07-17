@@ -23,7 +23,7 @@ final class GarminAvionicsAlertEventService
               canonical_track_uuid VARCHAR(80) NOT NULL DEFAULT '',
               sample_time_utc DATETIME(3) NULL,
               replay_time_s DECIMAL(12,3) NULL,
-              row_number INT UNSIGNED NULL,
+              csv_row_number INT UNSIGNED NULL,
               alert_type VARCHAR(32) NOT NULL DEFAULT 'unknown',
               raw_column_name VARCHAR(128) NOT NULL DEFAULT '',
               raw_alert_text TEXT NOT NULL,
@@ -65,7 +65,7 @@ final class GarminAvionicsAlertEventService
         $stmt = $this->pdo->prepare("
             INSERT IGNORE INTO ipca_garmin_avionics_alert_events
               (event_uuid, provider_name, garmin_csv_file_id, garmin_entry_uuid, canonical_track_uuid, sample_time_utc, replay_time_s,
-               row_number, alert_type, raw_column_name, raw_alert_text, normalized_alert_text, latitude, longitude, altitude_ft, alert_hash)
+               csv_row_number, alert_type, raw_column_name, raw_alert_text, normalized_alert_text, latitude, longitude, altitude_ft, alert_hash)
             VALUES
               (:event_uuid, 'GARMIN', :csv_file_id, :entry_uuid, :track_uuid, :sample_time_utc, :replay_time_s,
                :row_number, :alert_type, :raw_column_name, :raw_alert_text, :normalized_alert_text, :latitude, :longitude, :altitude_ft, :alert_hash)

@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS ipca_garmin_avionics_alert_events (
   canonical_track_uuid VARCHAR(80) NOT NULL DEFAULT '',
   sample_time_utc DATETIME(3) NULL,
   replay_time_s DECIMAL(12,3) NULL,
-  row_number INT UNSIGNED NULL,
+  csv_row_number INT UNSIGNED NULL,
   alert_type VARCHAR(32) NOT NULL DEFAULT 'unknown',
   raw_column_name VARCHAR(128) NOT NULL DEFAULT '',
   raw_alert_text TEXT NOT NULL,
@@ -161,10 +161,6 @@ CREATE TABLE IF NOT EXISTS ipca_adsb_hazard_events (
   UNIQUE KEY uk_ipca_adsb_hazard_uuid (hazard_uuid),
   KEY idx_ipca_adsb_hazard_source (source_ref_type, source_ref_id, replay_time_s),
   KEY idx_ipca_adsb_hazard_severity (severity, cpa_time_utc),
-  CONSTRAINT fk_ipca_adsb_hazard_garmin_alert
-    FOREIGN KEY (garmin_alert_event_id) REFERENCES ipca_garmin_avionics_alert_events(id)
-    ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT fk_ipca_adsb_hazard_traffic_sample
-    FOREIGN KEY (traffic_sample_id) REFERENCES ipca_adsb_traffic_samples(id)
-    ON DELETE SET NULL ON UPDATE CASCADE
+  KEY idx_ipca_adsb_hazard_garmin_alert (garmin_alert_event_id),
+  KEY idx_ipca_adsb_hazard_traffic_sample (traffic_sample_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
