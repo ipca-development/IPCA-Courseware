@@ -160,7 +160,7 @@ final class GarminProcessingStatusService
         $version = $this->tachoVersionSql();
         $row = $this->row("
             SELECT
-              COUNT(DISTINCT l.id) AS total,
+              COUNT(*) AS total,
               SUM(CASE
                 WHEN s.csv_file_id IS NULL THEN 0
                 WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
@@ -172,7 +172,11 @@ final class GarminProcessingStatusService
                 WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_calculation_version')), '') <> {$version} THEN 0
                 ELSE 1
               END) AS done
-            FROM ipca_garmin_flight_data_track_links l
+            FROM (
+              SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
+              FROM ipca_garmin_flight_data_track_links
+              GROUP BY provider_name, garmin_entry_uuid, canonical_track_uuid
+            ) l
             LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = l.garmin_csv_file_id
         ");
         $total = (int)($row['total'] ?? 0);
@@ -193,7 +197,11 @@ final class GarminProcessingStatusService
         $hasCsvSummary = $this->tableExists('ipca_garmin_csv_flight_summaries');
         $version = $this->tachoVersionSql();
         $csvJoin = ($hasLinks && $hasCsvSummary) ? "
-            LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+            LEFT JOIN (
+              SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
+              FROM ipca_garmin_flight_data_track_links
+              GROUP BY provider_name, garmin_entry_uuid, canonical_track_uuid
+            ) track_csv_l
               ON track_csv_l.provider_name = t.provider_name
              AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
              AND track_csv_l.canonical_track_uuid = t.track_uuid

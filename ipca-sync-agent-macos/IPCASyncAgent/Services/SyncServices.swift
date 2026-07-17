@@ -299,6 +299,14 @@ final class AppStateController: ObservableObject {
         refreshGarminCursorStatus()
     }
 
+    func updateSyncInterval(minutes: Int) {
+        let clamped = max(1, min(120, minutes))
+        settings.syncIntervalMinutes = clamped
+        nextScheduledSync = Date().addingTimeInterval(TimeInterval(clamped * 60))
+        scheduler.start()
+        LoggingService.shared.info("Sync interval updated to \(clamped) minute(s). Scheduler restarted.")
+    }
+
     func refreshQueueProgress() {
         let uploadCounts = (try? queue.uploadQueueStateCounts()) ?? [:]
         let backfillCounts = (try? queue.backfillTrackStateCounts()) ?? [:]

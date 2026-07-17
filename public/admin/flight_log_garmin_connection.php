@@ -321,7 +321,11 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
 
 $csvTrackJoin = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
-    LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+    LEFT JOIN (
+      SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
+      FROM ipca_garmin_flight_data_track_links
+      GROUP BY provider_name, garmin_entry_uuid, canonical_track_uuid
+    ) track_csv_l
       ON track_csv_l.provider_name = t.provider_name
      AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
      AND track_csv_l.canonical_track_uuid = t.track_uuid
@@ -459,7 +463,11 @@ if ($hasTracks) {
     $stateSelect = $hasFlightStates ? 'st.hidden_at AS hidden_at, st.hidden_reason AS hidden_reason' : 'NULL AS hidden_at, NULL AS hidden_reason';
     $stateJoin = $hasFlightStates ? 'LEFT JOIN ipca_garmin_flight_artifact_states st ON st.track_artifact_id = t.id' : '';
     $sourceJoin = $hasCsvJoinPath ? "
-        " . ($hasTrackCsvLinks ? "LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+        " . ($hasTrackCsvLinks ? "LEFT JOIN (
+          SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
+          FROM ipca_garmin_flight_data_track_links
+          GROUP BY provider_name, garmin_entry_uuid, canonical_track_uuid
+        ) track_csv_l
           ON track_csv_l.provider_name = t.provider_name
          AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
          AND track_csv_l.canonical_track_uuid = t.track_uuid" : "") . "

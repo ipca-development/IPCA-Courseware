@@ -145,6 +145,19 @@ struct ContentView: View {
                 Text("Automatic checks run every \(state.settings.syncIntervalMinutes) minutes. You only need Sync Now for an immediate check.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("Sync every")
+                    Button("1 min") { state.updateSyncInterval(minutes: 1) }
+                    Button("2 min") { state.updateSyncInterval(minutes: 2) }
+                    Button("5 min") { state.updateSyncInterval(minutes: 5) }
+                    Button("10 min") { state.updateSyncInterval(minutes: 10) }
+                    Stepper("\(state.settings.syncIntervalMinutes) minutes", value: Binding(
+                        get: { state.settings.syncIntervalMinutes },
+                        set: { state.updateSyncInterval(minutes: $0) }
+                    ), in: 1...120)
+                    .frame(maxWidth: 180)
+                }
+                .font(.callout)
                 Toggle("Launch at Login", isOn: Binding(
                     get: { state.launchAtLogin.isEnabled },
                     set: { enabled in
@@ -172,7 +185,7 @@ struct ContentView: View {
                             Text("Sync interval")
                             Stepper("\(state.settings.syncIntervalMinutes) minutes", value: Binding(
                                 get: { state.settings.syncIntervalMinutes },
-                                set: { state.settings.syncIntervalMinutes = $0 }
+                                set: { state.updateSyncInterval(minutes: $0) }
                             ), in: 1...120)
                             Spacer()
                             Text("Retain uploads")

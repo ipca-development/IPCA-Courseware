@@ -347,14 +347,12 @@ final class GarminProvider: SyncProvider {
         }
         for sourceUUID in item.sourceUUIDs {
             do {
-                let value = try await withTimeout(seconds: 60, message: "Garmin source download timed out for \(sourceUUID).") {
-                    try await self.browser.evaluate(try Self.sourceDownloadExpression(sourceUUID: sourceUUID))
-                }
+                let response = try await downloadOriginalSourceResponse(sourceUUID: sourceUUID)
                 let artifact = try artifactStore.saveDownloadedSource(
                     provider: identifier,
                     entryID: item.entryID,
                     sourceUUID: sourceUUID,
-                    response: try objectValue(value),
+                    response: response,
                     metadata: originalSourceMetadata(item: item, sourceUUID: sourceUUID)
                 )
                 artifacts.append(artifact)
@@ -366,6 +364,49 @@ final class GarminProvider: SyncProvider {
             }
         }
         return artifacts
+    }
+
+    private func downloadOriginalSourceResponse(sourceUUID: String) async throws -> [String: JSONValue] {
+        let preparedValue = try await withTimeout(seconds: 60, message: "Garmin source download timed out for \(sourceUUID).") {
+            try await self.browser.evaluate(try Self.sourceDownloadPrepareExpression(sourceUUID: sourceUUID))
+        }
+        var response = try objectValue(preparedValue)
+        guard response["ok"]?.bool == true else {
+            return response
+        }
+        guard let token = response["downloadToken"]?.string, !token.isEmpty else {
+            throw GarminError.downloadFailed("Garmin source download did not return a transfer token.")
+        }
+
+        let byteLength = response["byteLength"]?.int ?? 0
+        let chunkSize = 384 * 1024
+        var offset = 0
+        var chunks: [String] = []
+        do {
+            while offset < byteLength {
+                let chunkValue = try await withTimeout(seconds: 30, message: "Garmin source transfer timed out for \(sourceUUID).") {
+                    try await self.browser.evaluate(Self.sourceDownloadChunkExpression(token: token, offset: offset, length: chunkSize))
+                }
+                let chunk = try objectValue(chunkValue)
+                guard chunk["ok"]?.bool == true,
+                      let base64 = chunk["base64"]?.string else {
+                    throw GarminError.downloadFailed(chunk["errorMessage"]?.string ?? "Garmin source transfer chunk failed.")
+                }
+                chunks.append(base64)
+                let nextOffset = chunk["nextOffset"]?.int ?? (offset + chunkSize)
+                guard nextOffset > offset else {
+                    throw GarminError.downloadFailed("Garmin source transfer made no progress.")
+                }
+                offset = nextOffset
+            }
+            response["base64"] = .string(chunks.joined())
+            LoggingService.shared.info("Garmin original source transferred in \(chunks.count) chunk(s). source=\(sourceUUID) bytes=\(byteLength)")
+            _ = try? await browser.evaluate(Self.sourceDownloadCleanupExpression(token: token))
+            return response
+        } catch {
+            _ = try? await browser.evaluate(Self.sourceDownloadCleanupExpression(token: token))
+            throw error
+        }
     }
 
     private func originalSourceMetadata(item: RemoteSyncItem, sourceUUID: String) -> [String: JSONValue] {
@@ -1805,7 +1846,7 @@ final class GarminProvider: SyncProvider {
     }
     */
 
-    static func sourceDownloadExpression(sourceUUID: String) throws -> String {
+    static func sourceDownloadPrepareExpression(sourceUUID: String) throws -> String {
         let url = try GarminRoutes.flightDataURL(flightDataLogUUID: sourceUUID)
         let urlJSON = String(data: try JSONEncoder().encode(url.absoluteString), encoding: .utf8) ?? "\"\""
         return """
@@ -1830,13 +1871,13 @@ final class GarminProvider: SyncProvider {
             const lowerSample = text.toLowerCase();
             const loginRequired = response.status === 401 || response.status === 403 || lowerSample.includes('password') || lowerSample.includes('sign in') || lowerSample.includes('multi-factor') || lowerSample.includes('mfa') || lowerSample.includes('verification code');
             const humanVerification = lowerSample.includes('verify you are human') || lowerSample.includes('human verification') || lowerSample.includes('captcha') || lowerSample.includes('cf-challenge');
-            let binary = '';
-            const chunkSize = 0x8000;
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-            }
             const filenameMatch = contentDisposition.match(/filename\\*?=(?:UTF-8'')?"?([^";]+)"?/i);
             const inferredExtension = contentType.toLowerCase().includes('json') ? '.json' : (contentType.toLowerCase().includes('gpx') || lowerSample.includes('<gpx') ? '.gpx' : '.csv');
+            const token = 'ipca-flight-data-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+            window.__ipcaGarminFlightDataDownloads = window.__ipcaGarminFlightDataDownloads || {};
+            if (response.ok) {
+              window.__ipcaGarminFlightDataDownloads[token] = bytes;
+            }
             return {
               status: response.status,
               ok: response.ok,
@@ -1847,7 +1888,8 @@ final class GarminProvider: SyncProvider {
               filename: filenameMatch ? decodeURIComponent(filenameMatch[1]) : ('flight-data-' + requestUrl.split('/').filter(Boolean).pop() + inferredExtension),
               byteLength: bytes.byteLength,
               bodyPreview: text.replace(/[A-Za-z0-9_-]{24,}/g, '[redacted-token]').slice(0, 1200),
-              base64: response.ok ? btoa(binary) : null,
+              base64: null,
+              downloadToken: response.ok ? token : null,
               loginRequired,
               humanVerification
             };
@@ -1873,5 +1915,54 @@ final class GarminProvider: SyncProvider {
           }
         })()
         """
+    }
+
+    static func sourceDownloadChunkExpression(token: String, offset: Int, length: Int) -> String {
+        let tokenJSON = String(data: (try? JSONEncoder().encode(token)) ?? Data("".utf8), encoding: .utf8) ?? "\"\""
+        let safeOffset = max(0, offset)
+        let safeLength = max(1, min(length, 1024 * 1024))
+        return """
+        (() => {
+          const token = \(tokenJSON);
+          const store = window.__ipcaGarminFlightDataDownloads || {};
+          const bytes = store[token];
+          if (!bytes) {
+            return { ok: false, base64: null, nextOffset: \(safeOffset), byteLength: 0, errorMessage: 'Garmin source transfer buffer is missing.' };
+          }
+          const offset = Math.max(0, \(safeOffset));
+          const length = Math.max(1, \(safeLength));
+          const end = Math.min(bytes.byteLength, offset + length);
+          const slice = bytes.subarray(offset, end);
+          let binary = '';
+          const step = 0x8000;
+          for (let i = 0; i < slice.length; i += step) {
+            binary += String.fromCharCode(...slice.subarray(i, i + step));
+          }
+          return {
+            ok: true,
+            base64: btoa(binary),
+            offset,
+            nextOffset: end,
+            byteLength: bytes.byteLength
+          };
+        })()
+        """
+    }
+
+    static func sourceDownloadCleanupExpression(token: String) -> String {
+        let tokenJSON = String(data: (try? JSONEncoder().encode(token)) ?? Data("".utf8), encoding: .utf8) ?? "\"\""
+        return """
+        (() => {
+          const token = \(tokenJSON);
+          if (window.__ipcaGarminFlightDataDownloads) {
+            delete window.__ipcaGarminFlightDataDownloads[token];
+          }
+          return { ok: true };
+        })()
+        """
+    }
+
+    static func sourceDownloadExpression(sourceUUID: String) throws -> String {
+        try sourceDownloadPrepareExpression(sourceUUID: sourceUUID)
     }
 }
