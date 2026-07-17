@@ -163,6 +163,7 @@ $hasSourceGroups = garmin_sync_table_exists($pdo, 'ipca_garmin_source_groups');
 $hasCsvSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
 $hasTrackSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_track_flight_summaries');
 $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_states');
+$hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 
@@ -298,7 +299,8 @@ if ($hasTracks) {
           ON e.provider_name = t.provider_name
          AND e.garmin_entry_uuid = t.garmin_entry_uuid
     " : '';
-    $csvSelect = ($hasSources && $hasCsvFiles) ? "
+    $hasCsvJoinPath = $hasCsvFiles && ($hasTrackCsvLinks || $hasSources);
+    $csvSelect = $hasCsvJoinPath ? "
           f.id AS csv_file_id, f.csv_file_uuid, f.aircraft_registration AS csv_aircraft_registration,
           f.original_filename AS csv_original_filename, f.storage_path AS csv_storage_path,
           f.import_profile AS csv_import_profile, f.aircraft_ident AS csv_aircraft_ident,
@@ -317,22 +319,31 @@ if ($hasTracks) {
           NULL AS csv_last_valid_sample_utc, NULL AS csv_valid_row_count
     ";
     $csvIdParts = array();
+    if ($hasTrackCsvLinks) {
+        $csvIdParts[] = 'track_csv_l.garmin_csv_file_id';
+    }
     if ($hasAcks) {
         $csvIdParts[] = 'a.garmin_csv_file_id';
     }
-    $csvIdParts[] = 'direct_s.garmin_csv_file_id';
+    if ($hasSources) {
+        $csvIdParts[] = 'direct_s.garmin_csv_file_id';
+    }
     if ($hasEntries && $hasSourceGroups) {
         $csvIdParts[] = 'group_s.garmin_csv_file_id';
     }
     $csvIdExpression = count($csvIdParts) > 1 ? 'COALESCE(' . implode(', ', $csvIdParts) . ')' : $csvIdParts[0];
     $stateSelect = $hasFlightStates ? 'st.hidden_at AS hidden_at, st.hidden_reason AS hidden_reason' : 'NULL AS hidden_at, NULL AS hidden_reason';
     $stateJoin = $hasFlightStates ? 'LEFT JOIN ipca_garmin_flight_artifact_states st ON st.track_artifact_id = t.id' : '';
-    $sourceJoin = ($hasSources && $hasCsvFiles) ? "
+    $sourceJoin = $hasCsvJoinPath ? "
+        " . ($hasTrackCsvLinks ? "LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
+          ON track_csv_l.provider_name = t.provider_name
+         AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
+         AND track_csv_l.canonical_track_uuid = t.track_uuid" : "") . "
         " . ($hasEntries && $hasSourceGroups ? "LEFT JOIN ipca_garmin_source_groups g
           ON g.garmin_logbook_entry_id = e.id" : "") . "
-        LEFT JOIN ipca_garmin_flight_data_sources direct_s
+        " . ($hasSources ? "LEFT JOIN ipca_garmin_flight_data_sources direct_s
           ON direct_s.provider_name = t.provider_name
-         AND direct_s.flight_data_log_uuid = t.track_uuid
+         AND direct_s.flight_data_log_uuid = t.track_uuid" : "") . "
         " . ($hasEntries && $hasSourceGroups ? "LEFT JOIN ipca_garmin_flight_data_sources group_s
           ON group_s.id = COALESCE(g.primary_operational_source_id, g.primary_replay_source_id)" : "") . "
         LEFT JOIN ipca_garmin_csv_files f
