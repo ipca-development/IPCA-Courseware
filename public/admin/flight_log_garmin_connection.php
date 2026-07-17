@@ -572,7 +572,7 @@ cw_header('Garmin Sync Agent');
         <p class="garmin-muted">Server-side view of Garmin data uploaded by the native Mac IPCA Sync Agent. The old cloud-browser Garmin controls have been retired from this page.</p>
       </div>
       <div class="garmin-toolbar">
-        <button type="button" data-summary-start>Resume Summary Processing</button>
+        <button type="button" data-summary-start data-idle-label="Check Summary Processing">Check Summary Processing</button>
         <a href="/admin/flight_records.php" class="secondary">Flight Records</a>
         <a href="/admin/cockpit_recorder.php" class="secondary">Cockpit Recorder</a>
       </div>
@@ -833,6 +833,11 @@ cw_header('Garmin Sync Agent');
   const summaryDetail = document.querySelector('[data-summary-progress-detail]');
   const summaryStart = document.querySelector('[data-summary-start]');
   let summaryRunning = false;
+  function setSummaryButton(label, disabled) {
+    if (!summaryStart) return;
+    summaryStart.textContent = label;
+    summaryStart.disabled = !!disabled;
+  }
   function current(name) {
     const field = filterForm ? filterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '').toUpperCase() : '';
@@ -948,14 +953,19 @@ cw_header('Garmin Sync Agent');
   async function runSummaryLoop() {
     if (summaryRunning) return;
     summaryRunning = true;
-    if (summaryStart) summaryStart.textContent = 'Processing...';
+    setSummaryButton('Checking...', true);
     try {
       let statusResponse = await postSummary('status', 1);
       let batchLimit = 50;
       let stagnantBatches = 0;
       updateSummaryProgress(statusResponse.status, 'Checking');
+      if (!statusResponse.status || Number(statusResponse.status.remaining || 0) === 0) {
+        updateSummaryProgress(statusResponse.status, 'Complete');
+        setSummaryButton('All summaries processed', true);
+        return;
+      }
       while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
-        if (summaryStart) summaryStart.textContent = 'Processing ' + batchLimit + ' at a time...';
+        setSummaryButton('Processing ' + batchLimit + ' at a time...', true);
         const beforeRemaining = Number(statusResponse.status.remaining || 0);
         const beforeDone = Number(statusResponse.status.done || 0);
         let result;
@@ -989,12 +999,16 @@ cw_header('Garmin Sync Agent');
       }
       const finalStatus = await postSummary('status', 1);
       updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Needs review');
+      setSummaryButton(Number(finalStatus.status?.remaining || 0) === 0 ? 'All summaries processed' : 'Check Summary Processing', Number(finalStatus.status?.remaining || 0) === 0);
     } catch (error) {
       if (summaryText) summaryText.textContent = 'Summary processing paused: ' + error.message;
       if (summaryDetail) summaryDetail.textContent = 'The processor stopped before completion. Last update ' + new Date().toLocaleTimeString();
+      setSummaryButton('Retry Summary Processing', false);
     } finally {
       summaryRunning = false;
-      if (summaryStart) summaryStart.textContent = 'Resume Summary Processing';
+      if (summaryStart && !summaryStart.disabled && summaryStart.textContent.indexOf('Retry') !== 0) {
+        summaryStart.textContent = summaryStart.getAttribute('data-idle-label') || 'Check Summary Processing';
+      }
     }
   }
   if (summaryStart) summaryStart.addEventListener('click', runSummaryLoop);
