@@ -70,7 +70,13 @@ final class AdsbTrafficArchiveService
     public function scheduleRecentKtrmCoverage(int $lookbackMinutes = 180, int $bucketSeconds = self::DEFAULT_BUCKET_SECONDS): array
     {
         $end = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $start = $end->modify('-' . max(5, min(1440, $lookbackMinutes)) . ' minutes');
+        $minutes = max(5, min(1440, $lookbackMinutes));
+        if (!$this->historicalProviderConfigured()) {
+            // With the existing TV/radar ADS-B variables we can archive live KTRM snapshots going forward.
+            // Older backfill still needs a historical/corridor provider to avoid fabricating history.
+            $minutes = max(1, (int)ceil($bucketSeconds / 60));
+        }
+        $start = $end->modify('-' . $minutes . ' minutes');
         return $this->scheduleKtrmCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM), $bucketSeconds);
     }
 
@@ -122,6 +128,14 @@ final class AdsbTrafficArchiveService
             ")->execute(array($rawPayloadId, count($samples), count($samples) === 0 ? 1 : 0, (int)$row['id']));
             $this->refreshJobStats((int)($row['job_id'] ?? 0));
             return array('ok' => true, 'status' => 'ready', 'tile_id' => (int)$row['id'], 'samples' => count($samples), 'inserted' => $inserted);
+        } catch (DomainException $e) {
+            $this->pdo->prepare("
+                UPDATE ipca_adsb_coverage_tiles
+                SET status = 'provider_not_configured', last_error = ?, updated_at = CURRENT_TIMESTAMP(3)
+                WHERE id = ?
+            ")->execute(array($e->getMessage(), (int)$row['id']));
+            $this->refreshJobStats((int)($row['job_id'] ?? 0));
+            return array('ok' => false, 'status' => 'provider_not_configured', 'tile_id' => (int)$row['id'], 'samples' => 0, 'message' => $e->getMessage());
         } catch (Throwable $e) {
             $this->pdo->prepare("
                 UPDATE ipca_adsb_coverage_tiles
@@ -144,7 +158,7 @@ final class AdsbTrafficArchiveService
             FROM ipca_adsb_coverage_tiles
             GROUP BY status
         ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
-        $coverage = array('pending' => 0, 'fetching' => 0, 'ready' => 0, 'failed' => 0, 'samples' => 0);
+        $coverage = array('pending' => 0, 'fetching' => 0, 'ready' => 0, 'failed' => 0, 'provider_not_configured' => 0, 'samples' => 0);
         foreach ($tileRows as $row) {
             $status = (string)($row['status'] ?? '');
             if ($status !== '') {
@@ -156,6 +170,15 @@ final class AdsbTrafficArchiveService
         return array(
             'ok' => true,
             'provider' => tv_adsb_provider(),
+            'historical_provider' => $this->historicalProviderConfigured()
+                ? array('configured' => true, 'base_url' => rtrim((string)getenv('CW_ADSB_EXCHANGE_BASE_URL'), '/'))
+                : array(
+                    'configured' => false,
+                    'live_configured' => $this->liveProviderConfigured(),
+                    'live_env' => array('CW_ADSBEXCHANGE_API_KEY', 'CW_RAPIDAPI_KEY', 'RAPIDAPI_KEY', 'ADSBEXCHANGE_API_KEY'),
+                    'historical_env' => array('CW_ADSB_EXCHANGE_BASE_URL', 'CW_ADSB_EXCHANGE_API_KEY or CW_ADSBEXCHANGE_API_KEY'),
+                    'message' => 'Live ADS-B archiving can use the existing TV/radar ADSBExchange variables. Older historical backfill still needs a historical area/corridor provider.',
+                ),
             'ktrm' => array(
                 'center_latitude' => self::KTRM_LAT,
                 'center_longitude' => self::KTRM_LON,
@@ -243,7 +266,7 @@ final class AdsbTrafficArchiveService
         }
         $bucketEnd = strtotime((string)($tile['bucket_end_utc'] ?? '')) ?: 0;
         if ($bucketEnd > 0 && $bucketEnd < time() - 120) {
-            throw new RuntimeException('ADS-B historical provider is not configured; refusing to fill historical archive bucket with a live snapshot.');
+            throw new DomainException('ADS-B historical provider is not configured; refusing to fill historical archive bucket with a live snapshot.');
         }
         $result = tv_adsb_fetch_near_point_result($lat, $lon, $radiusNm);
         return array(
@@ -295,6 +318,23 @@ final class AdsbTrafficArchiveService
         $decoded['fetch_mode'] = 'historical_corridor';
         $decoded['path'] = $url;
         return $decoded;
+    }
+
+    private function historicalProviderConfigured(): bool
+    {
+        return rtrim((string)getenv('CW_ADSB_EXCHANGE_BASE_URL'), '/') !== ''
+            && trim((string)(getenv('CW_ADSB_EXCHANGE_API_KEY') ?: getenv('CW_ADSBEXCHANGE_API_KEY') ?: '')) !== '';
+    }
+
+    private function liveProviderConfigured(): bool
+    {
+        return trim((string)(
+            getenv('CW_ADSBEXCHANGE_API_KEY')
+            ?: getenv('CW_RAPIDAPI_KEY')
+            ?: getenv('RAPIDAPI_KEY')
+            ?: getenv('ADSBEXCHANGE_API_KEY')
+            ?: ''
+        )) !== '';
     }
 
     /**
@@ -475,7 +515,7 @@ final class AdsbTrafficArchiveService
               COUNT(*) AS total,
               SUM(status = 'ready') AS ready,
               COALESCE(SUM(sample_count), 0) AS samples,
-              SUM(status IN ('pending', 'fetching', 'failed')) AS remaining
+              SUM(status IN ('pending', 'fetching', 'failed', 'provider_not_configured')) AS remaining
             FROM ipca_adsb_coverage_tiles
             WHERE job_id = ?
         ");
