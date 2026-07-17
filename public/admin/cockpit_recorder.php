@@ -647,19 +647,30 @@ cw_header('Cockpit Recordings');
             $flightSegmentIndex = max(1, (int)($row['flight_segment_index'] ?? 1));
             $previousSegmentUid = trim((string)($row['previous_segment_uid'] ?? ''));
             $sourceGapSummary = trim((string)($row['source_gap_summary'] ?? ''));
-            $selectedGarmin = cockpit_admin_selected_garmin_sources(
-                $pdo,
-                $flightSessionUid,
-                (string)($row['aircraft_registration'] ?? ''),
-                $startedAt,
-                (float)($row['duration_seconds'] ?? 0)
-            );
-            $completeGarminMatch = cockpit_admin_best_complete_garmin_match(
-                $pdo,
-                (string)($row['aircraft_registration'] ?? ''),
-                $startedAt,
-                (float)($row['duration_seconds'] ?? 0)
-            );
+            $rowWarnings = array();
+            try {
+                $selectedGarmin = cockpit_admin_selected_garmin_sources(
+                    $pdo,
+                    $flightSessionUid,
+                    (string)($row['aircraft_registration'] ?? ''),
+                    $startedAt,
+                    (float)($row['duration_seconds'] ?? 0)
+                );
+            } catch (Throwable $e) {
+                $selectedGarmin = array('status' => 'error', 'message' => $e->getMessage());
+                $rowWarnings[] = 'Garmin source lookup failed: ' . $e->getMessage();
+            }
+            try {
+                $completeGarminMatch = cockpit_admin_best_complete_garmin_match(
+                    $pdo,
+                    (string)($row['aircraft_registration'] ?? ''),
+                    $startedAt,
+                    (float)($row['duration_seconds'] ?? 0)
+                );
+            } catch (Throwable $e) {
+                $completeGarminMatch = null;
+                $rowWarnings[] = 'Garmin match lookup failed: ' . $e->getMessage();
+            }
             $selectedOperationalSource = is_array($selectedGarmin['operational'] ?? null) ? $selectedGarmin['operational'] : null;
             $selectedReplaySource = is_array($selectedGarmin['replay'] ?? null) ? $selectedGarmin['replay'] : null;
             $garminCandidates = isset($selectedGarmin['candidates']) && is_array($selectedGarmin['candidates']) ? $selectedGarmin['candidates'] : array();
@@ -670,7 +681,12 @@ cw_header('Cockpit Recordings');
             $healthWarnings = isset($health['warnings']) && is_array($health['warnings']) ? $health['warnings'] : array();
             $healthAudio = isset($health['audio']) && is_array($health['audio']) ? $health['audio'] : array();
             $healthGps = isset($health['gps']) && is_array($health['gps']) ? $health['gps'] : array();
-            $chunks = $service instanceof CockpitRecorderService ? $service->adminTranscriptionChunks($id) : array();
+            try {
+                $chunks = $service instanceof CockpitRecorderService ? $service->adminTranscriptionChunks($id) : array();
+            } catch (Throwable $e) {
+                $chunks = array();
+                $rowWarnings[] = 'Transcript chunk lookup failed: ' . $e->getMessage();
+            }
             $chunkReady = 0;
             $chunkFailed = 0;
             foreach ($chunks as $chunkForCount) {
@@ -684,16 +700,26 @@ cw_header('Cockpit Recordings');
             $sourceAlignment = isset($reconSummary['source_alignment']) && is_array($reconSummary['source_alignment']) ? $reconSummary['source_alignment'] : array();
             $alignmentSources = isset($sourceAlignment['sources']) && is_array($sourceAlignment['sources']) ? $sourceAlignment['sources'] : array();
             $alignmentWarnings = isset($sourceAlignment['warnings']) && is_array($sourceAlignment['warnings']) ? $sourceAlignment['warnings'] : array();
-            $defaultImportProfile = GarminCsvImportProfile::forAircraft(
-                (string)($row['aircraft_registration'] ?? ''),
-                (string)($row['aircraft_display_name'] ?? ''),
-                (string)($row['aircraft_type'] ?? '')
-            );
+            try {
+                $defaultImportProfile = GarminCsvImportProfile::forAircraft(
+                    (string)($row['aircraft_registration'] ?? ''),
+                    (string)($row['aircraft_display_name'] ?? ''),
+                    (string)($row['aircraft_type'] ?? '')
+                );
+            } catch (Throwable $e) {
+                $defaultImportProfile = '';
+                $rowWarnings[] = 'Import profile lookup failed: ' . $e->getMessage();
+            }
             $replayUrl = '/admin/cockpit_recorder_replay.php?id=' . $id;
             $replayJsonV2Url = '/api/recordings/replay.php?id=' . $id . '&version=2';
             $debugBundleUrl = '/admin/cockpit_recorder_debug_bundle.php?id=' . $id;
             $g3xUrl = '/admin/cockpit_recorder_g3x.php?id=' . $id;
-            $adsbDetail = $adsbService instanceof CockpitAdsbEnrichmentService ? $adsbService->statusForRecording($id) : array();
+            try {
+                $adsbDetail = $adsbService instanceof CockpitAdsbEnrichmentService ? $adsbService->statusForRecording($id) : array();
+            } catch (Throwable $e) {
+                $adsbDetail = array('status' => $adsbStatus, 'error_message' => $e->getMessage());
+                $rowWarnings[] = 'ADS-B status lookup failed: ' . $e->getMessage();
+            }
             $adsbDisplayStatus = (string)($adsbDetail['status'] ?? $adsbStatus);
             $adsbOwnshipCount = (int)($adsbDetail['ownship_sample_count'] ?? 0);
             $adsbError = trim((string)($adsbDetail['error_message'] ?? ''));
@@ -736,6 +762,7 @@ cw_header('Cockpit Recordings');
               <?php endif; ?>
               <div class="cockpit-row-sub">Garmin <?= $hasCompleteGarminMatch ? 'complete match' : ($hasAutoGarminSource ? 'legacy link only' : (!empty($row['g3x_storage_path']) ? 'manual attached' : 'not linked')) ?></div>
               <div class="cockpit-row-sub">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></div>
+              <?php if ($rowWarnings): ?><div class="cockpit-row-sub">Details warning: <?= h($rowWarnings[0]) ?></div><?php endif; ?>
             </td>
             <td>
               <div class="cockpit-actions-row">
