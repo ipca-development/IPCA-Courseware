@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/AsyncJobService.php';
 require_once __DIR__ . '/../../../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../../../src/GarminTrackFlightSummaryService.php';
+require_once __DIR__ . '/../../../src/GarminProcessingStatusService.php';
 
 cw_require_admin();
 
@@ -31,90 +32,7 @@ function garmin_csv_summary_table_exists(PDO $pdo, string $table): bool
 
 function garmin_csv_summary_stats(PDO $pdo): array
 {
-    $hasCsv = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_csv_files');
-    $hasCsvSummary = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
-    $hasTracks = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_normalized_track_artifacts');
-    $hasTrackSummary = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_track_flight_summaries');
-    $hasCsvLinks = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
-    $hasCsvSummaryForTracks = garmin_csv_summary_table_exists($pdo, 'ipca_garmin_csv_flight_summaries');
-    $csvTotal = 0;
-    $csvDone = 0;
-    if ($hasCsv) {
-        $row = $pdo->query("
-            SELECT
-              COUNT(f.id) AS total,
-              SUM(CASE
-                WHEN s.csv_file_id IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_in') IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_in') IS NULL THEN 0
-                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
-                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
-                ELSE 1
-              END) AS done
-            FROM ipca_garmin_csv_files f
-            " . ($hasCsvSummary ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
-        ")->fetch(PDO::FETCH_ASSOC) ?: array();
-        $csvTotal = (int)($row['total'] ?? 0);
-        $csvDone = (int)($row['done'] ?? 0);
-    }
-    $trackTotal = 0;
-    $trackDone = 0;
-    if ($hasTracks) {
-        $csvTrackJoin = ($hasCsvLinks && $hasCsvSummaryForTracks) ? "
-            LEFT JOIN ipca_garmin_flight_data_track_links track_csv_l
-              ON track_csv_l.provider_name = t.provider_name
-             AND track_csv_l.garmin_entry_uuid = t.garmin_entry_uuid
-             AND track_csv_l.canonical_track_uuid = t.track_uuid
-            LEFT JOIN ipca_garmin_csv_flight_summaries csv_s
-              ON csv_s.csv_file_id = track_csv_l.garmin_csv_file_id
-        " : "";
-        $csvTrackCompleteSql = ($hasCsvLinks && $hasCsvSummaryForTracks) ? "
-        WHEN csv_s.csv_file_id IS NOT NULL
-          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact') IS NOT NULL
-          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact') IS NOT NULL
-          AND JSON_EXTRACT(csv_s.summary_json, '$.hobbs_in') IS NOT NULL
-          AND JSON_EXTRACT(csv_s.summary_json, '$.tacho_in') IS NOT NULL
-          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
-          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
-          THEN 1
-        " : "";
-        $row = $pdo->query("
-            SELECT
-              COUNT(t.id) AS total,
-              SUM(CASE
-                {$csvTrackCompleteSql}
-                WHEN s.track_artifact_id IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.hobbs_exact') IS NULL THEN 0
-                WHEN JSON_EXTRACT(s.summary_json, '$.tacho_exact') IS NULL THEN 0
-                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
-                WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) < 0 THEN 0
-                WHEN s.tail_number IN ('', 'Unknown tail', 'Unknown')
-                  AND JSON_SEARCH(t.source_descriptors_json, 'one', 'Flight Data Log System ID:%') IS NOT NULL THEN 0
-                ELSE 1
-              END) AS done
-            FROM ipca_garmin_normalized_track_artifacts t
-            " . ($hasTrackSummary ? "LEFT JOIN ipca_garmin_track_flight_summaries s ON s.track_artifact_id = t.id" : "LEFT JOIN (SELECT NULL AS track_artifact_id) s ON 1 = 0") . "
-            {$csvTrackJoin}
-            WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.raw_metadata_json, '$.trackClassification')), '') <> 'GARMIN_GPS_ONLY'
-        ")->fetch(PDO::FETCH_ASSOC) ?: array();
-        $trackTotal = (int)($row['total'] ?? 0);
-        $trackDone = (int)($row['done'] ?? 0);
-    }
-    $total = $csvTotal + $trackTotal;
-    $done = $csvDone + $trackDone;
-    return array(
-        'total' => $total,
-        'done' => $done,
-        'remaining' => max(0, $total - $done),
-        'percent' => $total > 0 ? min(100, (int)round(($done / $total) * 100)) : 100,
-        'csv_total' => $csvTotal,
-        'csv_done' => $csvDone,
-        'track_total' => $trackTotal,
-        'track_done' => $trackDone,
-    );
+    return (new GarminProcessingStatusService($pdo))->status();
 }
 
 $return = trim((string)($_POST['return'] ?? '/admin/flight_log_garmin_connection.php'));

@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminTrackFlightSummaryService.php';
+require_once __DIR__ . '/../../src/GarminProcessingStatusService.php';
 
 cw_require_admin();
 
@@ -166,6 +167,7 @@ $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_s
 $hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
+$processingStatus = (new GarminProcessingStatusService($pdo))->status();
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
@@ -562,7 +564,7 @@ if (isset($_GET['flights_reprocess_queued'])) {
 cw_header('Garmin Sync Agent');
 ?>
 <style>
-.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-table-wrap{overflow-x:visible}.garmin-flights-scroll{max-height:72vh;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}.garmin-flights-scroll .garmin-table th{position:sticky;top:0;z-index:2;background:#fff}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{position:relative;height:18px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#0ea5e9)}.garmin-progress strong{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#0f172a;font-size:11px;font-weight:900;text-shadow:0 1px 0 rgba(255,255,255,.75)}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:110px 132px 132px 110px 110px;gap:8px 10px;margin-top:12px;align-items:end;justify-content:start}.garmin-filter-control{display:grid;grid-template-rows:14px 32px;gap:3px;align-items:end}.garmin-filter-label{display:block;height:14px;color:#64748b;font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}.garmin-filter input,.garmin-filter select,.garmin-filter button{box-sizing:border-box;width:100%;height:32px;border-radius:8px;font:inherit;font-size:12px;line-height:1}.garmin-filter input,.garmin-filter select{border:1px solid #cbd5e1;background:#fff;padding:6px 8px}.garmin-filter button{border:0;background:#475569;color:#fff;font-weight:800;padding:6px 10px;cursor:pointer}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
+.garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-state-badge{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.garmin-state-complete{background:#dcfce7;color:#166534}.garmin-state-processing,.garmin-state-queued,.garmin-state-processing_required{background:#dbeafe;color:#1d4ed8}.garmin-state-needs_review{background:#fef3c7;color:#92400e}.garmin-state-failed{background:#fee2e2;color:#991b1b}.garmin-operational-grid{display:grid;grid-template-columns:1.4fr repeat(3,minmax(135px,1fr));gap:12px;align-items:stretch}.garmin-primary-action{border:0;border-radius:12px;background:#0f172a;color:#fff;font-weight:900;padding:11px 15px;cursor:pointer;font-size:13px}.garmin-primary-action[disabled]{background:#94a3b8;cursor:not-allowed}.garmin-table-wrap{overflow-x:visible}.garmin-flights-scroll{max-height:72vh;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}.garmin-flights-scroll .garmin-table th{position:sticky;top:0;z-index:2;background:#fff}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{position:relative;height:18px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#0ea5e9)}.garmin-progress strong{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#0f172a;font-size:11px;font-weight:900;text-shadow:0 1px 0 rgba(255,255,255,.75)}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:110px 132px 132px 110px 110px;gap:8px 10px;margin-top:12px;align-items:end;justify-content:start}.garmin-filter-control{display:grid;grid-template-rows:14px 32px;gap:3px;align-items:end}.garmin-filter-label{display:block;height:14px;color:#64748b;font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}.garmin-filter input,.garmin-filter select,.garmin-filter button{box-sizing:border-box;width:100%;height:32px;border-radius:8px;font:inherit;font-size:12px;line-height:1}.garmin-filter input,.garmin-filter select{border:1px solid #cbd5e1;background:#fff;padding:6px 8px}.garmin-filter button{border:0;background:#475569;color:#fff;font-weight:800;padding:6px 10px;cursor:pointer}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -572,7 +574,6 @@ cw_header('Garmin Sync Agent');
         <p class="garmin-muted">Server-side view of Garmin data uploaded by the native Mac IPCA Sync Agent. The old cloud-browser Garmin controls have been retired from this page.</p>
       </div>
       <div class="garmin-toolbar">
-        <button type="button" data-summary-start data-idle-label="Check Summary Processing">Check Summary Processing</button>
         <a href="/admin/flight_records.php" class="secondary">Flight Records</a>
         <a href="/admin/cockpit_recorder.php" class="secondary">Cockpit Recorder</a>
       </div>
@@ -582,6 +583,34 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
     <?php if ($error !== ''): ?><div class="garmin-error"><?= h($error) ?></div><?php endif; ?>
     <?php if ($notice !== ''): ?><div class="garmin-notice"><?= h($notice) ?></div><?php endif; ?>
+  </section>
+
+  <section class="garmin-card" data-processing-card>
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <div class="garmin-label">Operational status</div>
+        <h2 style="margin:4px 0 6px"><span class="garmin-state-badge garmin-state-<?= h((string)$processingStatus['state']) ?>" data-processing-state><?= h(str_replace('_', ' ', strtoupper((string)$processingStatus['state']))) ?></span></h2>
+        <div class="garmin-muted" data-processing-message><?= h((string)$processingStatus['message']) ?></div>
+      </div>
+      <button type="button" class="garmin-primary-action" data-process-garmin>Process Garmin Data</button>
+    </div>
+    <div style="margin-top:14px">
+      <div class="garmin-progress"><span data-processing-bar style="width:<?= (int)$processingStatus['percent'] ?>%"></span><strong data-processing-percent><?= (int)$processingStatus['percent'] ?>%</strong></div>
+      <div class="garmin-muted" style="margin-top:6px" data-processing-detail>
+        <?= number_format((int)$processingStatus['done']) ?> / <?= number_format((int)$processingStatus['total']) ?> processed ·
+        CSV <?= number_format((int)$processingStatus['csv']['done']) ?>/<?= number_format((int)$processingStatus['csv']['total']) ?> ·
+        Tracks <?= number_format((int)$processingStatus['tracks']['done']) ?>/<?= number_format((int)$processingStatus['tracks']['total']) ?> ·
+        Linked CSV tracks <?= number_format((int)$processingStatus['linked_csv_tracks']['done']) ?>/<?= number_format((int)$processingStatus['linked_csv_tracks']['total']) ?> ·
+        Jobs <?= number_format((int)$processingStatus['jobs']['queued']) ?> queued, <?= number_format((int)$processingStatus['jobs']['running']) ?> running, <?= number_format((int)$processingStatus['jobs']['failed']) ?> failed ·
+        Updated <?= h((string)$processingStatus['updated_at']) ?>
+      </div>
+    </div>
+    <div data-processing-review style="<?= ((int)$processingStatus['needs_review']['total'] > 0) ? 'margin-top:12px' : 'display:none;margin-top:12px' ?>">
+      <div class="garmin-label">Needs review</div>
+      <div class="garmin-muted" data-processing-review-text>
+        <?= number_format((int)$processingStatus['needs_review']['total']) ?> record(s) need review.
+      </div>
+    </div>
   </section>
 
   <section class="garmin-card">
@@ -690,17 +719,6 @@ cw_header('Garmin Sync Agent');
       <label class="garmin-filter-control"><span class="garmin-filter-label">New</span><select name="new_only"><option value="0">All</option><option value="1"<?= $newOnly ? ' selected' : '' ?>>New only</option></select></label>
       <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button class="secondary" type="submit">Apply</button></div>
     </form>
-
-    <?php
-      $totalSummaries = (int)($trackSummaryStats['total_track_artifacts'] ?? 0) + (int)($csvSummaryStats['total_csv_files'] ?? 0);
-      $doneSummaries = (int)($trackSummaryStats['summarized_track_artifacts'] ?? 0) + (int)($csvSummaryStats['summarized_csv_files'] ?? 0);
-      $summaryPercent = $totalSummaries > 0 ? min(100, (int)round(($doneSummaries / $totalSummaries) * 100)) : 0;
-    ?>
-    <div style="margin:12px 0" data-summary-progress>
-      <div class="garmin-muted" data-summary-progress-text>Summary processing <?= number_format($doneSummaries) ?> / <?= number_format($totalSummaries) ?> (<?= $summaryPercent ?>%)</div>
-      <div class="garmin-progress"><span data-summary-progress-bar style="width:<?= $summaryPercent ?>%"></span><strong data-summary-progress-percent><?= $summaryPercent ?>%</strong></div>
-      <div class="garmin-muted" data-summary-progress-detail style="margin-top:6px">Waiting for processor status...</div>
-    </div>
 
     <?php if ($flightRows === array()): ?>
       <div class="garmin-empty">No Garmin flights match the current filters. Incomplete/GPS-only flights are hidden by default.</div>
@@ -827,17 +845,15 @@ cw_header('Garmin Sync Agent');
   const filterForm = document.querySelector('.garmin-filter');
   const rows = Array.from(document.querySelectorAll('[data-flight-row]'));
   const emptyRow = document.querySelector('[data-filter-empty]');
-  const summaryText = document.querySelector('[data-summary-progress-text]');
-  const summaryBar = document.querySelector('[data-summary-progress-bar]');
-  const summaryPercentLabel = document.querySelector('[data-summary-progress-percent]');
-  const summaryDetail = document.querySelector('[data-summary-progress-detail]');
-  const summaryStart = document.querySelector('[data-summary-start]');
-  let summaryRunning = false;
-  function setSummaryButton(label, disabled) {
-    if (!summaryStart) return;
-    summaryStart.textContent = label;
-    summaryStart.disabled = !!disabled;
-  }
+  const processButton = document.querySelector('[data-process-garmin]');
+  const processingState = document.querySelector('[data-processing-state]');
+  const processingMessage = document.querySelector('[data-processing-message]');
+  const processingBar = document.querySelector('[data-processing-bar]');
+  const processingPercent = document.querySelector('[data-processing-percent]');
+  const processingDetail = document.querySelector('[data-processing-detail]');
+  const processingReview = document.querySelector('[data-processing-review]');
+  const processingReviewText = document.querySelector('[data-processing-review-text]');
+  let processingRunning = false;
   function current(name) {
     const field = filterForm ? filterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '').toUpperCase() : '';
@@ -912,27 +928,63 @@ cw_header('Garmin Sync Agent');
       }
     });
   }
-  function updateSummaryProgress(status, message, batch) {
-    if (!status || !summaryText || !summaryBar) return;
+  function stateLabel(state) {
+    return String(state || 'idle').replace(/_/g, ' ').toUpperCase();
+  }
+  function renderProcessingStatus(status, actionMessage) {
+    if (!status) return;
     const percent = Number(status.percent || 0);
-    const csvRemaining = Math.max(0, Number(status.csv_total || 0) - Number(status.csv_done || 0));
-    const trackRemaining = Math.max(0, Number(status.track_total || 0) - Number(status.track_done || 0));
-    summaryBar.style.width = percent + '%';
-    if (summaryPercentLabel) summaryPercentLabel.textContent = percent + '% done';
-    const prefix = message ? message + ' · ' : '';
-    summaryText.textContent = prefix + 'Summary processing ' + Number(status.done || 0).toLocaleString() + ' / ' + Number(status.total || 0).toLocaleString() + ' (' + percent + '%)';
-    if (summaryDetail) {
-      const parts = [
-        'Remaining ' + Number(status.remaining || 0).toLocaleString(),
-        'CSV ' + Number(status.csv_done || 0).toLocaleString() + '/' + Number(status.csv_total || 0).toLocaleString() + ' (' + csvRemaining.toLocaleString() + ' left)',
-        'Tracks ' + Number(status.track_done || 0).toLocaleString() + '/' + Number(status.track_total || 0).toLocaleString() + ' (' + trackRemaining.toLocaleString() + ' left)'
-      ];
-      if (batch) {
-        parts.push('Last batch +' + Number(batch.processed || 0).toLocaleString() + ', failed ' + Number(batch.failed || 0).toLocaleString());
-      }
-      parts.push('Updated ' + new Date().toLocaleTimeString());
-      summaryDetail.textContent = parts.join(' · ');
+    if (processingState) {
+      processingState.className = 'garmin-state-badge garmin-state-' + String(status.state || 'idle');
+      processingState.textContent = stateLabel(status.state);
     }
+    if (processingMessage) processingMessage.textContent = actionMessage || status.message || '';
+    if (processingBar) processingBar.style.width = percent + '%';
+    if (processingPercent) processingPercent.textContent = percent + '%';
+    if (processingDetail) {
+      const parts = [
+        Number(status.done || 0).toLocaleString() + ' / ' + Number(status.total || 0).toLocaleString() + ' processed',
+        'CSV ' + Number(status.csv?.done || 0).toLocaleString() + '/' + Number(status.csv?.total || 0).toLocaleString(),
+        'Tracks ' + Number(status.tracks?.done || 0).toLocaleString() + '/' + Number(status.tracks?.total || 0).toLocaleString(),
+        'CSV-linked tracks ' + Number(status.linked_csv_tracks?.done || 0).toLocaleString() + '/' + Number(status.linked_csv_tracks?.total || 0).toLocaleString(),
+        'Jobs ' + Number(status.jobs?.queued || 0).toLocaleString() + ' queued, ' + Number(status.jobs?.running || 0).toLocaleString() + ' running, ' + Number(status.jobs?.failed || 0).toLocaleString() + ' failed',
+        'Updated ' + new Date().toLocaleTimeString()
+      ];
+      if (status.jobs?.last_error) parts.push('Last error: ' + status.jobs.last_error);
+      processingDetail.textContent = parts.join(' · ');
+    }
+    const reviewCount = Number(status.needs_review?.total || 0);
+    if (processingReview) processingReview.style.display = reviewCount > 0 ? 'block' : 'none';
+    if (processingReviewText) {
+      const sample = Array.isArray(status.needs_review?.sample) ? status.needs_review.sample : [];
+      processingReviewText.textContent = reviewCount > 0
+        ? reviewCount.toLocaleString() + ' record(s) need review. ' + sample.slice(0, 3).map(item => item.reason || item.track_uuid).join(' | ')
+        : 'No review items.';
+    }
+    if (processButton && !processingRunning) {
+      if (status.state === 'complete') {
+        processButton.textContent = 'All Garmin Data Processed';
+        processButton.dataset.action = 'complete';
+        processButton.disabled = true;
+      } else if (status.state === 'failed') {
+        processButton.textContent = 'Retry Processing';
+        processButton.dataset.action = 'process';
+        processButton.disabled = false;
+      } else if (status.state === 'needs_review') {
+        processButton.textContent = 'Show Records Needing Review';
+        processButton.dataset.action = 'review';
+        processButton.disabled = false;
+      } else {
+        processButton.textContent = 'Process Garmin Data';
+        processButton.dataset.action = 'process';
+        processButton.disabled = false;
+      }
+    }
+  }
+  async function getProcessingStatus() {
+    const response = await fetch('/admin/api/garmin_processing_status.php', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Status returned HTTP ' + response.status);
+    return response.json();
   }
   async function postSummary(action, limit) {
     const body = new FormData();
@@ -950,22 +1002,32 @@ cw_header('Garmin Sync Agent');
     if (!response.ok) throw new Error('Summary processor returned HTTP ' + response.status);
     return response.json();
   }
-  async function runSummaryLoop() {
-    if (summaryRunning) return;
-    summaryRunning = true;
-    setSummaryButton('Checking...', true);
+  async function processGarminData() {
+    if (processingRunning) return;
+    if (processButton && processButton.dataset.action === 'review') {
+      const statusField = filterForm ? filterForm.querySelector('[name="status"]') : null;
+      const incompleteField = filterForm ? filterForm.querySelector('[name="show_incomplete"]') : null;
+      if (statusField) statusField.value = 'Needs review';
+      if (incompleteField) incompleteField.value = '1';
+      applyInstantFilters();
+      return;
+    }
+    processingRunning = true;
+    if (processButton) {
+      processButton.textContent = 'Processing...';
+      processButton.disabled = true;
+    }
     try {
-      let statusResponse = await postSummary('status', 1);
+      let statusResponse = await getProcessingStatus();
       let batchLimit = 50;
       let stagnantBatches = 0;
-      updateSummaryProgress(statusResponse.status, 'Checking');
+      renderProcessingStatus(statusResponse.status, 'Checking Garmin processing status...');
       if (!statusResponse.status || Number(statusResponse.status.remaining || 0) === 0) {
-        updateSummaryProgress(statusResponse.status, 'Complete');
-        setSummaryButton('All summaries processed', true);
+        renderProcessingStatus(statusResponse.status);
         return;
       }
       while (statusResponse.status && Number(statusResponse.status.remaining || 0) > 0) {
-        setSummaryButton('Processing ' + batchLimit + ' at a time...', true);
+        if (processButton) processButton.textContent = 'Processing ' + batchLimit + ' at a time...';
         const beforeRemaining = Number(statusResponse.status.remaining || 0);
         const beforeDone = Number(statusResponse.status.done || 0);
         let result;
@@ -974,21 +1036,20 @@ cw_header('Garmin Sync Agent');
         } catch (error) {
           if (batchLimit > 10) {
             batchLimit = Math.max(10, Math.floor(batchLimit / 2));
-            if (summaryText) summaryText.textContent = 'Server was busy. Retrying smaller batches of ' + batchLimit + '...';
+            renderProcessingStatus(statusResponse.status, 'Server was busy. Retrying smaller batches of ' + batchLimit + '...');
             await new Promise(resolve => setTimeout(resolve, 750));
             continue;
           }
           throw error;
         }
-        updateSummaryProgress(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more', result);
+        renderProcessingStatus(result.status, 'Processed ' + Number(result.processed || 0).toLocaleString() + ' more. Failed ' + Number(result.failed || 0).toLocaleString() + '.');
         if (Number(result.processed || 0) === 0) break;
         const afterRemaining = Number(result.status?.remaining || beforeRemaining);
         const afterDone = Number(result.status?.done || beforeDone);
         if (afterRemaining >= beforeRemaining && afterDone <= beforeDone) {
           stagnantBatches++;
           if (stagnantBatches >= 2) {
-            updateSummaryProgress(result.status, 'Stopped: remaining records need review', result);
-            if (summaryDetail) summaryDetail.textContent += ' · These records recalculated but still do not meet the complete-summary criteria.';
+            renderProcessingStatus(result.status, 'Stopped: remaining records need review.');
             break;
           }
         } else {
@@ -997,22 +1058,24 @@ cw_header('Garmin Sync Agent');
         statusResponse = result;
         await new Promise(resolve => setTimeout(resolve, 150));
       }
-      const finalStatus = await postSummary('status', 1);
-      updateSummaryProgress(finalStatus.status, Number(finalStatus.status.remaining || 0) === 0 ? 'Complete' : 'Needs review');
-      setSummaryButton(Number(finalStatus.status?.remaining || 0) === 0 ? 'All summaries processed' : 'Check Summary Processing', Number(finalStatus.status?.remaining || 0) === 0);
+      const finalStatus = await getProcessingStatus();
+      renderProcessingStatus(finalStatus.status, Number(finalStatus.status?.remaining || 0) === 0 ? 'Complete.' : 'Processing stopped before completion.');
     } catch (error) {
-      if (summaryText) summaryText.textContent = 'Summary processing paused: ' + error.message;
-      if (summaryDetail) summaryDetail.textContent = 'The processor stopped before completion. Last update ' + new Date().toLocaleTimeString();
-      setSummaryButton('Retry Summary Processing', false);
-    } finally {
-      summaryRunning = false;
-      if (summaryStart && !summaryStart.disabled && summaryStart.textContent.indexOf('Retry') !== 0) {
-        summaryStart.textContent = summaryStart.getAttribute('data-idle-label') || 'Check Summary Processing';
+      if (processingMessage) processingMessage.textContent = 'Processing failed: ' + error.message;
+      if (processButton) {
+        processButton.textContent = 'Retry Processing';
+        processButton.disabled = false;
       }
+    } finally {
+      processingRunning = false;
+      try {
+        const latest = await getProcessingStatus();
+        renderProcessingStatus(latest.status);
+      } catch (_) {}
     }
   }
-  if (summaryStart) summaryStart.addEventListener('click', runSummaryLoop);
-  runSummaryLoop();
+  if (processButton) processButton.addEventListener('click', processGarminData);
+  getProcessingStatus().then(payload => renderProcessingStatus(payload.status)).catch(() => {});
 })();
 </script>
 <?php cw_footer(); ?>
