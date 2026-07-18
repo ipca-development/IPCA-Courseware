@@ -38,6 +38,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private var recoveredPreviousSegmentID: String?
     private var recoveredNextSegmentIndex = 1
     private var recoveredPreviousSegmentEndedAt: Date?
+    private var recoveredAudioPrelude: RecoveredAudioPrelude?
 
     func bind(
         audio: AudioRecorderManager,
@@ -239,7 +240,7 @@ final class CVRUnitCoordinator: ObservableObject {
             activeRecorderToken = Self.randomRecorderToken()
             activeSegmentIndex = recoveredNextSegmentIndex
             activePreviousSegmentID = recoveredPreviousSegmentID
-            activeRecordingEvents = []
+            activeRecordingEvents = recoveredAudioPrelude?.events ?? []
             if let previousEnded = recoveredPreviousSegmentEndedAt,
                let startedAt = audio.activeRecordingStartedAt {
                 let gap = max(0, startedAt.timeIntervalSince(previousEnded))
@@ -286,11 +287,43 @@ final class CVRUnitCoordinator: ObservableObject {
             recording.aircraftType = aircraft.aircraftType
             recording.aircraftADSBHex = aircraft.adsbHex
         }
+        var mergedRecoveredPrelude = false
+        if let prelude = recoveredAudioPrelude {
+            do {
+                let currentURL = URL(fileURLWithPath: recording.filePath)
+                let combinedURL = currentURL.deletingLastPathComponent().appendingPathComponent("\(recording.id).combined.m4a")
+                let gap = max(0, recording.startedAt.timeIntervalSince(prelude.startedAt.addingTimeInterval(prelude.duration)))
+                let combinedDuration = try await AudioRecorderManager.mergeAudioFiles(
+                    [
+                        (URL(fileURLWithPath: prelude.filePath), 0),
+                        (currentURL, prelude.duration + gap)
+                    ],
+                    outputURL: combinedURL
+                )
+                try? FileManager.default.removeItem(at: currentURL)
+                try FileManager.default.moveItem(at: combinedURL, to: currentURL)
+                recording.startedAt = prelude.startedAt
+                recording.duration = combinedDuration
+                recording.fileSize = (try? currentURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? recording.fileSize
+                recording.inputDeviceName = "Recovered continuous session"
+                recording.segmentIndex = 1
+                recording.previousSegmentID = nil
+                recording.sourceGapSummary = String(format: "App was closed/restarted; generated %.1f seconds of silence between recovered audio and resumed recording.", gap)
+                recordEvent(severity: "info", type: "audio_session_merged", message: "Merged recovered pre-close audio, generated silence gap, and resumed audio into one upload.", durationSeconds: gap)
+                mergedRecoveredPrelude = true
+            } catch {
+                recording.lastError = "Could not merge recovered audio session: \(error.localizedDescription)"
+                recordEvent(severity: "error", type: "audio_session_merge_failed", message: recording.lastError)
+            }
+            recoveredAudioPrelude = nil
+        }
         recording.gpsSamplesPath = gps?.stopCaptureAndSave(recordingID: recording.id)
         recording.flightSessionID = sessionID ?? recording.id
-        recording.segmentIndex = activeSegmentIndex
-        recording.previousSegmentID = activePreviousSegmentID
-        recording.sourceGapSummary = activeSourceGapSummary
+        if !mergedRecoveredPrelude {
+            recording.segmentIndex = activeSegmentIndex
+            recording.previousSegmentID = activePreviousSegmentID
+            recording.sourceGapSummary = activeSourceGapSummary
+        }
         recording.beaconDiagnosticsPath = beacon?.saveDiagnostics(
             recordingID: recording.id,
             recordingSessionID: recording.flightSessionID,
@@ -439,7 +472,6 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     private func recoverInterruptedRecordingIfNeeded() async {
-        guard let store, let settings else { return }
         do {
             let url = try Self.activeManifestURL()
             guard FileManager.default.fileExists(atPath: url.path) else { return }
@@ -461,62 +493,25 @@ final class CVRUnitCoordinator: ObservableObject {
                 CVRRecordingEvent(severity: "error", type: "app_restart", message: "Cockpit Recorder app restarted while an active recording manifest existed."),
                 CVRRecordingEvent(severity: "warning", type: "audio_gap", message: "Audio after app termination is missing and must be represented as generated silence in replay.")
             ]
-            let eventsPath = saveRecoveredEvents(recordingID: manifest.recordingID, events: events)
-            var recovered = Recording(
+            recoveredAudioPrelude = RecoveredAudioPrelude(
                 id: manifest.recordingID,
-                serverID: nil,
                 startedAt: manifest.startedAt,
                 duration: duration,
                 filePath: audioURL.path,
-                inputDeviceName: "Recovered audio segment",
-                aircraftID: manifest.aircraftID ?? settings.selectedAircraft?.id,
-                aircraftRegistration: manifest.aircraftRegistration ?? settings.selectedAircraft?.registration,
-                aircraftDisplayName: manifest.aircraftDisplayName ?? settings.selectedAircraft?.displayName,
-                aircraftType: manifest.aircraftType ?? settings.selectedAircraft?.aircraftType,
-                aircraftADSBHex: manifest.aircraftADSBHex ?? settings.selectedAircraft?.adsbHex,
                 fileSize: size,
-                uploadStatus: .pending,
-                transcriptStatus: .pending,
-                uploadProgress: 0,
-                transcriptProgress: 0,
-                language: settings.language,
-                transcript: "",
-                lastError: "Recovered after app restart. Missing interval after this segment must be filled with generated silence.",
-                recordingEventsPath: eventsPath,
-                flightSessionID: manifest.sessionID,
+                sessionID: manifest.sessionID,
                 segmentIndex: manifest.segmentIndex,
-                previousSegmentID: manifest.previousSegmentID,
-                sourceGapSummary: "App was closed before this recording could be finalized normally."
+                events: events
             )
-            recovered.beaconDiagnosticsPath = beacon?.saveDiagnostics(
-                recordingID: recovered.id,
-                recordingSessionID: recovered.flightSessionID,
-                recordingEndReason: "Recovered after app restart"
-            )
-            store.add(recovered)
             recoveredContinuationSessionID = manifest.sessionID
             recoveredPreviousSegmentID = manifest.recordingID
             recoveredNextSegmentIndex = manifest.segmentIndex + 1
             recoveredPreviousSegmentEndedAt = manifest.startedAt.addingTimeInterval(duration)
             clearActiveManifest()
-            log("Recovered interrupted recording segment: \(manifest.recordingID)")
+            log("Recovered interrupted recording prelude for later merge: \(manifest.recordingID)")
         } catch {
             log("Active recording recovery failed: \(error.localizedDescription)")
             clearActiveManifest()
-        }
-    }
-
-    private func saveRecoveredEvents(recordingID: String, events: [CVRRecordingEvent]) -> String? {
-        do {
-            let directory = try RecordingStore.recordingsDirectory()
-            let url = directory.appendingPathComponent("\(recordingID).events.json")
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(events).write(to: url, options: [.atomic])
-            return url.path
-        } catch {
-            return nil
         }
     }
 
@@ -558,4 +553,15 @@ private struct ActiveRecordingManifest: Codable {
     var aircraftDisplayName: String?
     var aircraftType: String?
     var aircraftADSBHex: String?
+}
+
+private struct RecoveredAudioPrelude {
+    var id: String
+    var startedAt: Date
+    var duration: TimeInterval
+    var filePath: String
+    var fileSize: Int64
+    var sessionID: String
+    var segmentIndex: Int
+    var events: [CVRRecordingEvent]
 }

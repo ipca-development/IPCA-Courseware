@@ -445,6 +445,55 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
     }
 
+    static func mergeAudioFiles(_ files: [(url: URL, startOffset: TimeInterval)], outputURL: URL) async throws -> TimeInterval {
+        let validFiles = files
+            .filter { FileManager.default.fileExists(atPath: $0.url.path) }
+            .sorted { $0.startOffset < $1.startOffset }
+        guard !validFiles.isEmpty else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "No audio files are available for merge."])
+        }
+
+        try? FileManager.default.removeItem(at: outputURL)
+        let composition = AVMutableComposition()
+        guard let compositionTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Could not create audio composition track."])
+        }
+
+        var finalDuration: TimeInterval = 0
+        for file in validFiles {
+            let asset = AVURLAsset(url: file.url)
+            guard let track = asset.tracks(withMediaType: .audio).first else { continue }
+            let start = CMTime(seconds: max(0, file.startOffset), preferredTimescale: 600)
+            try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: track, at: start)
+            let seconds = CMTimeGetSeconds(asset.duration)
+            if seconds.isFinite {
+                finalDuration = max(finalDuration, max(0, file.startOffset) + seconds)
+            }
+        }
+
+        guard finalDuration > 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Merged audio duration is zero."])
+        }
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Could not create audio export session."])
+        }
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .m4a
+        try await withCheckedThrowingContinuation { continuation in
+            exporter.exportAsynchronously {
+                switch exporter.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(throwing: exporter.error ?? CocoaError(.fileWriteUnknown))
+                default:
+                    continuation.resume(throwing: CocoaError(.fileWriteUnknown))
+                }
+            }
+        }
+        return finalDuration
+    }
+
     private static func normalizedPowerLevel(_ decibels: Float) -> Float {
         if decibels < -60 { return 0 }
         if decibels >= 0 { return 1 }
