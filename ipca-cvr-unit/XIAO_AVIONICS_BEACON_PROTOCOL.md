@@ -2,11 +2,15 @@
 
 ## Purpose
 
-The Seeed Studio XIAO ESP32-C3 acts as a dedicated avionics-power presence beacon for the IPCA CVR Unit iPhone app. It is powered from the aircraft's switched USB-C outlet through a USB-C splitter.
+The Seeed Studio XIAO ESP32-C3 is a deterministic avionics-power hardware beacon for the IPCA CVR Unit iPhone app. It is powered from the aircraft switched USB-C outlet through a USB-C splitter.
 
-- Aircraft USB/avionics power ON: the XIAO receives power and advertises.
-- Aircraft USB/avionics power OFF: the XIAO loses power and disappears.
-- The iPhone app uses advertisement presence as the avionics ON/OFF signal after Admin connects the beacon trigger.
+Ownership boundaries:
+
+- ESP32 reports hardware/contact facts only.
+- iPhone owns recording sessions, audio, GPS, timeouts, reconnection, segmentation, and upload.
+- Backend owns aircraft matching, Garmin association, replay generation, flight determination, merging/splitting, classification, and logbook creation.
+
+The beacon is not a flight computer and must not contain business logic.
 
 Arduino sketch: `firmware/ipca_avionics_beacon/ipca_avionics_beacon.ino`
 
@@ -16,57 +20,197 @@ Required Arduino setup:
 - Library: NimBLE-Arduino.
 - Pairing: not required.
 
-## BLE Advertisement
+## BLE Architecture
+
+Use advertisements for discovery and reconnect hints. Use GATT for the active communication relationship once the iPhone discovers the beacon.
+
+iOS background scans may coalesce duplicate advertisements, so advertisement continuity is not an authoritative heartbeat. While GATT is connected and active, advertisement delivery is secondary diagnostics only.
+
+## UUIDs
 
 - Service UUID: `7A2D5E01-9F83-4C0A-BA18-4B39A2D2E001`
+- Beacon Status characteristic: `7A2D5E02-9F83-4C0A-BA18-4B39A2D2E001`
+- Recorder Contact characteristic: `7A2D5E03-9F83-4C0A-BA18-4B39A2D2E001`
 - Advertised local name: `IPCA-AVIONICS`
-- Behavior: advertising only
-- Pairing: not required
-- GATT connection: not required
-- Recommended advertising interval: approximately 250 to 500 ms
 
-The iPhone app identifies the beacon primarily by the custom service UUID, not by the local name or iOS `CBPeripheral.identifier`.
+## Advertisement Payload
 
-The Arduino sketch places the 128-bit service UUID in the primary advertisement and the local name in the scan response. This avoids exceeding the 31-byte BLE legacy advertising payload.
+The primary advertisement must remain small and connectable.
 
-## Expected Boot Behavior
+Required:
 
-After switched USB-C power is applied, the XIAO should boot and begin advertising as quickly as practical. The app confirms avionics ON after the first matching advertisement is received. This is intentional because iOS may not deliver duplicate advertisements reliably while the iPhone is locked.
+- Custom service UUID
 
-When power is removed, the XIAO stops advertising immediately because it is no longer powered.
+Optional scan response/local name:
 
-## Future Manufacturer Data
+- Local name `IPCA-AVIONICS`
 
-Manufacturer data is optional for the first test. A future format can include:
+Do not place full diagnostic values in advertisements. Full values are exposed through `BeaconStatus`.
 
-- Protocol version
-- Aircraft/unit identifier
+Recommended advertising interval: approximately 250 to 500 ms.
+
+## Binary Encoding
+
+Version 1 uses fixed-size binary characteristics with little-endian integer fields. Do not use JSON inside BLE characteristics.
+
+Malformed writes are ignored. They must not change recorder token, contact uptime, boot values, or advertising state.
+
+Unknown future protocol versions must be rejected by the parser unless explicitly supported.
+
+## Beacon Status Characteristic
+
+Readable and optionally notifiable.
+
+Length: 60 bytes.
+
+Byte layout:
+
+| Offset | Size | Type | Field |
+| --- | ---: | --- | --- |
+| 0 | 1 | UInt8 | Protocol version, currently `1` |
+| 1 | 4 | UInt32 LE | Persistent boot counter |
+| 5 | 16 | Bytes | Per-boot random boot UUID |
+| 21 | 4 | UInt32 LE | Advertisement counter |
+| 25 | 1 | UInt8 | Reset reason |
+| 26 | 1 | UInt8 | Firmware major |
+| 27 | 1 | UInt8 | Firmware minor |
+| 28 | 1 | UInt8 | Firmware patch |
+| 29 | 4 | UInt32 LE | Uptime seconds |
+| 33 | 16 | Bytes | Current opaque recorder token, all zero when none has been written this boot |
+| 49 | 4 | UInt32 LE | Last recorder contact uptime seconds, `0xFFFFFFFF` when never contacted |
+| 53 | 1 | UInt8 | USB diagnostic kind |
+| 54 | 2 | UInt16 LE | USB diagnostic value |
+| 56 | 4 | UInt32 LE | Reserved, zero in v1 |
+
+Reset reason values:
+
+- `0`: `unknown`
+- `1`: `power_on`
+- `2`: `brownout`
+- `3`: `watchdog`
+- `4`: `software_restart`
+- `5`: `panic`
+- `6`: `deep_sleep`
+
+USB diagnostic:
+
+- Kind `0`: unavailable, value `0`
+- Kind `1`: USB present boolean, value `0` or `1`
+- Kind `2`: millivolts, value is measured mV
+
+Notifications: event-driven only. Notify after boot initialization, after a valid recorder contact write, and when a connected central subscribes. Periodic notifications are not required.
+
+## Recorder Contact Characteristic
+
+Writable without response or with response.
+
+Length: 26 bytes.
+
+Byte layout:
+
+| Offset | Size | Type | Field |
+| --- | ---: | --- | --- |
+| 0 | 1 | UInt8 | Protocol version, currently `1` |
+| 1 | 16 | Bytes | Opaque recorder token |
+| 17 | 4 | UInt32 LE | Recorder write sequence |
+| 21 | 1 | UInt8 | Recorder app major |
+| 22 | 1 | UInt8 | Recorder app minor |
+| 23 | 1 | UInt8 | Recorder app patch |
+| 24 | 2 | UInt16 LE | Reserved, zero in v1 |
+
+Recorder token rules:
+
+- Randomly generated by the iPhone.
+- Fixed size: 128 bits.
+- Unique per iPhone-owned `RecordingSessionUUID`.
+- Stable across temporary BLE reconnections during that recording session.
+- Rewritten after beacon reboot if the iPhone continues the existing session.
+- Stored only in beacon RAM.
+- Included in `beacon.json`.
+- Never interpreted by the beacon.
+
+Empty token representation: all 16 bytes zero. The iPhone should not write an empty token during active recording. If received, the beacon records contact uptime and stores the zero token as opaque bytes.
+
+## Beacon Persistent and Volatile Data
+
+Persistent:
+
+- Boot counter only.
+
+Volatile, reset on every boot:
+
+- Boot UUID
+- Advertisement counter
+- Current recorder token
+- Last recorder contact uptime
+
+The beacon does not store `RecordingSessionUUID`, aircraft tail number, audio state, GPS state, flight status, or upload state.
+
+## Firmware Model
+
+The firmware should conceptually fit on one whiteboard:
+
+1. Power on.
+2. Increment boot counter.
+3. Generate boot UUID.
+4. Capture reset reason.
+5. Start connectable advertising.
+6. Accept GATT connections.
+7. Store latest recorder token if a valid write arrives.
+8. Record last recorder contact uptime.
+9. Expose diagnostics.
+10. Power off.
+
+No firmware state such as `ACTIVE`, `STALE`, `UNASSIGNED`, or `RECORDING_SESSION_ACTIVE` is used in v1. The iPhone derives those interpretations from contact timing and its own recording state.
+
+## iPhone Recording Logic
+
+The iPhone:
+
+- Starts or resumes a `RecordingSessionUUID`.
+- Generates one opaque recorder token per session.
+- Writes the token after GATT connection.
+- Refreshes recorder contact every 5 to 10 seconds when execution allows.
+- Treats successful GATT connection/activity as the primary health signal.
+- Uses contact-write age as diagnostics, not a real-time watchdog.
+- Does not finalize only because a 5 to 10 second write was delayed.
+- Applies the 60-second finalization window for true communication loss.
+
+## Diagnostics Sidecar
+
+The iPhone stores `beacon.json` with each recording/segment. Include:
+
+- Beacon UUID
+- Boot counter at start/end
+- Boot UUID at start/end
+- Reset reason
+- Advertisement counter first/last/high-water mark
+- Recorder token
+- Last advertisement UTC
+- Last GATT contact UTC
+- Last recorder contact uptime
 - Firmware version
-- Boot counter
-- Uptime seconds
-- Checksum
+- Protocol version
+- Uptime samples or last uptime
+- USB diagnostic when available
+- Reconnect events
+- Reboot detected events
+- Recording end reason
 
-The iPhone diagnostic already logs manufacturer data as hexadecimal when present.
+The backend stores the sidecar and can evolve interpretation later without schema churn.
 
-## iOS Timing Logic
+## Required Bench Tests Before Aircraft Use
 
-Initial diagnostic thresholds:
-
-- Beacon ON confirmation: first matching advertisement
-- Temporarily missing: no advertisement for more than 5 seconds
-- Avionics OFF confirmation: no advertisement for more than 15 seconds
-
-Diagnostic interpretation:
-
-- Bluetooth unavailable: `UNKNOWN`
-- Beacon confirmed and last seen <= 5 seconds: `AVIONICS ON`
-- Beacon previously seen and last seen > 15 seconds: `AVIONICS OFF`
-- Beacon never seen: `UNKNOWN`
-
-These values are constants in the iPhone diagnostic and can be adjusted after real aircraft testing.
-
-## iOS Background Note
-
-The iPhone app declares Bluetooth central background mode, uses CoreBluetooth state restoration, and keeps listening after Admin enables Connect Beacon. A matching ESP-32 advertisement can trigger recording even when the iPhone is locked.
-
-iOS background BLE scanning can still be throttled by the operating system. Aircraft testing should verify that the app sees power-on transitions reliably with the iPhone locked and unlocked. If the user force-quits the app, iOS generally will not relaunch it for Bluetooth events until the app is opened again.
+- Lock the iPhone while connected.
+- Leave it locked for an extended recording.
+- Briefly block Bluetooth reception.
+- Turn Bluetooth off and back on.
+- Power-cycle the ESP32 for 5, 30, and 50 seconds.
+- Keep the ESP32 powered off beyond 60 seconds.
+- Restart the app during recording.
+- Restart the iPhone during recording.
+- Force an audio-engine restart while BLE remains connected.
+- Operate two beacon/iPhone pairs next to one another.
+- Attempt to connect the wrong recorder to the wrong beacon.
+- Confirm the token survives reconnection but not beacon power cycling.
+- Confirm no temporary interruption creates a second recording session.

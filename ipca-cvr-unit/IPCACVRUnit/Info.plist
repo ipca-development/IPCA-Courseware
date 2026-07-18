@@ -24,11 +24,14 @@
 	<string>IPCA CVR Unit uses Bluetooth to monitor aircraft trigger devices and test the IPCA avionics-power BLE beacon.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>IPCA CVR Unit records cockpit audio from the connected USB-C EarPods or external audio input for transcription testing.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>IPCA CVR Unit logs GPS UTC timestamps during cockpit recording to align audio with flight data.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>bluetooth-central</string>
 		<string>fetch</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

@@ -20,15 +20,19 @@ final class CVRUnitCoordinator: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private weak var audio: AudioRecorderManager?
     private weak var beacon: AvionicsBeaconManager?
+    private weak var gps: GPSLocationManager?
     private weak var network: NetworkMonitor?
     private weak var remoteIPads: RemoteIPadLinkManager?
     private weak var store: RecordingStore?
     private weak var settings: SettingsStore?
     private weak var uploadManager: UploadManager?
+    private var activeRecordingSessionID: String?
+    private var activeRecorderToken: Data?
 
     func bind(
         audio: AudioRecorderManager,
         beacon: AvionicsBeaconManager,
+        gps: GPSLocationManager,
         network: NetworkMonitor,
         remoteIPads: RemoteIPadLinkManager,
         store: RecordingStore,
@@ -38,6 +42,7 @@ final class CVRUnitCoordinator: ObservableObject {
         guard self.audio == nil else { return }
         self.audio = audio
         self.beacon = beacon
+        self.gps = gps
         self.network = network
         self.remoteIPads = remoteIPads
         self.store = store
@@ -72,6 +77,16 @@ final class CVRUnitCoordinator: ObservableObject {
         beacon.onMatchingBeaconAdvertisement = { [weak self] in
             Task { @MainActor in
                 await self?.handleMatchingBeaconAdvertisement()
+            }
+        }
+        beacon.onBeaconRelationshipAvailable = { [weak self] in
+            Task { @MainActor in
+                self?.refreshBeaconRecorderToken(reason: "Beacon GATT relationship available.")
+            }
+        }
+        beacon.onBeaconCommunicationLost = { [weak self] in
+            Task { @MainActor in
+                self?.log("Beacon GATT relationship lost. Continuing recording during reconnection window.")
             }
         }
 
@@ -138,13 +153,17 @@ final class CVRUnitCoordinator: ObservableObject {
             await startRecording()
         case .off:
             guard audio?.isRecording == true else { return }
-            stopRecording(reason: "Avionics beacon OFF.")
+            stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
         }
     }
 
     private func handleMatchingBeaconAdvertisement() async {
         guard settings?.isBeaconTriggerEnabled == true else { return }
-        guard audio?.isRecording != true, mode != .starting else { return }
+        if audio?.isRecording == true {
+            refreshBeaconRecorderToken(reason: "Beacon rediscovered during active recording.")
+            return
+        }
+        guard mode != .starting else { return }
         log("ESP-32 beacon advertisement received. Starting recording.")
         await startRecording()
     }
@@ -157,6 +176,12 @@ final class CVRUnitCoordinator: ObservableObject {
 
         let started = await audio.startRecording(language: settings.language)
         if started {
+            activeRecordingSessionID = audio.activeRecordingID
+            activeRecorderToken = Self.randomRecorderToken()
+            refreshBeaconRecorderToken(reason: "Recording started.")
+            if let recordingID = audio.activeRecordingID, let startedAt = audio.activeRecordingStartedAt {
+                gps?.startCapture(recordingID: recordingID, startedAt: startedAt)
+            }
             mode = .recording
             log("Recording started: \(audio.activeRecordingID ?? "unknown").")
             handleAudioWarningChanged(audio.isInternalMicWarning)
@@ -168,6 +193,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     private func stopRecording(reason: String) {
         guard let audio, let store, let settings else { return }
+        let sessionID = activeRecordingSessionID
         mode = .stopping
         log("\(reason) Stopping and storing cockpit voice recording.")
         UIApplication.shared.isIdleTimerDisabled = false
@@ -184,8 +210,17 @@ final class CVRUnitCoordinator: ObservableObject {
             recording.aircraftType = aircraft.aircraftType
             recording.aircraftADSBHex = aircraft.adsbHex
         }
-        recording.flightSessionID = recording.id
+        recording.gpsSamplesPath = gps?.stopCaptureAndSave(recordingID: recording.id)
+        recording.flightSessionID = sessionID ?? recording.id
         recording.segmentIndex = 1
+        recording.beaconDiagnosticsPath = beacon?.saveDiagnostics(
+            recordingID: recording.id,
+            recordingSessionID: recording.flightSessionID,
+            recordingEndReason: reason
+        )
+        activeRecordingSessionID = nil
+        activeRecorderToken = nil
+        beacon?.setRecorderToken(nil)
 
         store.add(recording)
         log("Stored audio permanently on iPhone: \(recording.id).")
@@ -222,6 +257,16 @@ final class CVRUnitCoordinator: ObservableObject {
         let message = "Audio source is \(audio.selectedInputName). Reset USB-C EarPods audio path."
         remoteIPads?.publishAudioSourceWarning(message)
         log(message)
+    }
+
+    private func refreshBeaconRecorderToken(reason: String) {
+        guard audio?.isRecording == true, let activeRecorderToken else { return }
+        beacon?.setRecorderToken(activeRecorderToken)
+        log("\(reason) Refreshed opaque recorder token with beacon.")
+    }
+
+    private static func randomRecorderToken() -> Data {
+        Data((0..<16).map { _ in UInt8.random(in: UInt8.min...UInt8.max) })
     }
 
     private func log(_ message: String) {

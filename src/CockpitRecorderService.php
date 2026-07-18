@@ -42,6 +42,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/g3x';
     }
 
+    public static function beaconRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/beacon';
+    }
+
     public static function uploadSessionRoot(): string
     {
         return self::projectRoot() . '/storage/cockpit_recorder/upload_sessions';
@@ -103,6 +108,7 @@ final class CockpitRecorderService
             $gpsFile,
             null,
             null,
+            null,
             null
         );
     }
@@ -111,13 +117,13 @@ final class CockpitRecorderService
      * @param array<string,mixed> $metadata
      * @return array<string,mixed>
      */
-    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null, ?string $g3xPath = null): array
+    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null, ?string $g3xPath = null, ?string $beaconPath = null): array
     {
         $this->requireTables();
         if (!is_file($audioPath)) {
             throw new RuntimeException('Assembled audio file is missing.');
         }
-        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath, $g3xPath);
+        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath, $g3xPath, $beaconPath);
     }
 
     /**
@@ -161,7 +167,8 @@ final class CockpitRecorderService
         ?array $gpsFile,
         ?string $ahrsPath,
         ?string $gpsPath,
-        ?string $g3xPath = null
+        ?string $g3xPath = null,
+        ?string $beaconPath = null
     ): array {
         $recordingUid = self::normalizeRecordingUid((string)($metadata['recording_id'] ?? ''));
         if ($recordingUid === '') {
@@ -298,6 +305,11 @@ final class CockpitRecorderService
 
         if ($g3xPath !== null && is_file($g3xPath)) {
             $this->storeLocalG3X((int)$recording['id'], $recordingUid, $g3xPath, $this->resolveImportProfile((string)($metadata['import_profile'] ?? ''), $recording));
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($beaconPath !== null && is_file($beaconPath)) {
+            $this->storeLocalBeaconDiagnostics((int)$recording['id'], $recordingUid, $beaconPath);
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -892,6 +904,9 @@ final class CockpitRecorderService
             'gps_available' => trim((string)($recording['gps_storage_path'] ?? '')) !== '',
             'gps_file_size' => (int)($recording['gps_file_size_bytes'] ?? 0),
             'gps_sample_count' => (int)($recording['gps_sample_count'] ?? 0),
+            'beacon_available' => trim((string)($recording['beacon_storage_path'] ?? '')) !== '',
+            'beacon_file_size' => (int)($recording['beacon_file_size_bytes'] ?? 0),
+            'beacon_event_count' => (int)($recording['beacon_event_count'] ?? 0),
             'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
             'g3x_file_size' => (int)($recording['g3x_file_size_bytes'] ?? 0),
             'g3x_row_count' => (int)($recording['g3x_row_count'] ?? 0),
@@ -1049,6 +1064,55 @@ final class CockpitRecorderService
             return;
         }
         $this->storeLocalSensorJson($recordingId, $recordingUid, $path, 'GPS', self::relativeGPSPath($recordingUid), 'gps_storage_path', 'gps_file_size_bytes', 'gps_sample_count');
+    }
+
+    private function storeLocalBeaconDiagnostics(int $recordingId, string $recordingUid, string $path): void
+    {
+        if (!$this->hasColumn('beacon_storage_path')) {
+            return;
+        }
+        if (!is_file($path)) {
+            return;
+        }
+        $size = (int)filesize($path);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 5 * 1024 * 1024) {
+            throw new RuntimeException('Beacon diagnostics JSON is too large (max 5 MB).');
+        }
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Could not read beacon diagnostics JSON.');
+        }
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new RuntimeException('Invalid beacon diagnostics JSON: ' . $e->getMessage());
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Beacon diagnostics JSON must be an object.');
+        }
+
+        $eventCount = isset($decoded['events']) && is_array($decoded['events']) ? count($decoded['events']) : 0;
+        $relativePath = self::relativeBeaconPath($recordingUid);
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+        if (!copy($path, $absolutePath)) {
+            throw new RuntimeException('Could not store beacon diagnostics JSON.');
+        }
+
+        $sets = array('beacon_storage_path = ?', 'beacon_file_size_bytes = ?');
+        $values = array($relativePath, $size);
+        if ($this->hasColumn('beacon_event_count')) {
+            $sets[] = 'beacon_event_count = ?';
+            $values[] = $eventCount;
+        }
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $values[] = $recordingId;
+
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->execute($values);
     }
 
     /**
@@ -2206,6 +2270,12 @@ final class CockpitRecorderService
     {
         $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
         return 'storage/cockpit_recorder/gps/' . gmdate('Y/m/d') . '/' . $safeUid . '.gps.json';
+    }
+
+    private static function relativeBeaconPath(string $recordingUid): string
+    {
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
+        return 'storage/cockpit_recorder/beacon/' . gmdate('Y/m/d') . '/' . $safeUid . '.beacon.json';
     }
 
     private static function relativeG3XPath(string $recordingUid): string

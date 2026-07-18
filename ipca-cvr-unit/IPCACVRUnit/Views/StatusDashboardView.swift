@@ -7,6 +7,7 @@ struct StatusDashboardView: View {
     @EnvironmentObject private var network: NetworkMonitor
     @EnvironmentObject private var system: SystemMonitor
     @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @EnvironmentObject private var gps: GPSLocationManager
     @EnvironmentObject private var remoteIPads: RemoteIPadLinkManager
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @Binding var adminUnlocked: Bool
@@ -46,6 +47,19 @@ struct StatusDashboardView: View {
                         StatusLine(label: "Timer", value: format(duration: audio.elapsed), color: IPCATheme.navy)
                         ProgressView(value: Double(audio.level))
                             .tint(audio.recordingSignalActive ? IPCATheme.success : IPCATheme.warning)
+                    }
+
+                    IPCACard(title: "GPS Time", systemImage: "location.circle") {
+                        StatusLine(label: "Status", value: gpsStatusText, color: gpsStatusColor)
+                        StatusLine(label: "Last UTC", value: gpsTimestampText, color: gps.latestSample == nil ? IPCATheme.secondaryText : IPCATheme.navy)
+                        StatusLine(label: "Samples", value: activeUpload?.gpsSamplesPath == nil ? "Not saved yet" : "Saved", color: activeUpload?.gpsSamplesPath == nil ? IPCATheme.secondaryText : IPCATheme.success)
+                        if gps.state == .permissionNeeded {
+                            Button("Request GPS Permission") {
+                                gps.requestPermission()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(IPCATheme.brightBlue)
+                        }
                     }
 
                     IPCACard(title: "Audio Source", systemImage: "earbuds") {
@@ -161,6 +175,42 @@ struct StatusDashboardView: View {
 
     private var operationalBeaconStatus: AvionicsBeaconOperationalStatus {
         beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement)
+    }
+
+    private var gpsStatusText: String {
+        switch gps.state {
+        case .permissionNeeded:
+            return "Permission Needed"
+        case .ready:
+            return "Ready"
+        case .recording:
+            return "Recording"
+        case .denied:
+            return "Denied"
+        case .unavailable:
+            return "Unavailable"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private var gpsStatusColor: Color {
+        switch gps.state {
+        case .ready, .recording:
+            return IPCATheme.success
+        case .permissionNeeded, .unavailable:
+            return IPCATheme.warning
+        case .denied, .failed:
+            return IPCATheme.danger
+        }
+    }
+
+    private var gpsTimestampText: String {
+        guard let sample = gps.latestSample else { return "--" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: sample.timestamp)
     }
 
     private func percent(_ value: Double) -> String {

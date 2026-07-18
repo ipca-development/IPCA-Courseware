@@ -97,27 +97,54 @@ final class UploadManager: ObservableObject {
             recordingID: recording.id,
             fallbackFilename: "\(recording.id).m4a"
         )
-        let audioSize = try fileSize(audioURL)
-        let totalBytes = max(1, audioSize)
+        var files: [(type: String, url: URL, filename: String, mime: String, size: Int64)] = [
+            ("audio", audioURL, audioURL.lastPathComponent, mimeType(for: audioURL), try fileSize(audioURL))
+        ]
+
+        if let gpsPath = recording.gpsSamplesPath {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: gpsPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).gps.json"
+            ) {
+                files.append(("gps", url, url.lastPathComponent, "application/json", try fileSize(url)))
+            }
+        }
+
+        if let beaconPath = recording.beaconDiagnosticsPath {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: beaconPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).beacon.json"
+            ) {
+                files.append(("beacon", url, url.lastPathComponent, "application/json", try fileSize(url)))
+            }
+        }
+
+        let totalBytes = max(1, files.reduce(Int64(0)) { $0 + max(0, $1.size) })
+        var uploadedBytes: Int64 = 0
 
         await MainActor.run {
             store.update(recording.id) {
                 $0.uploadProgress = 0.01
-                $0.lastError = "Preparing chunked audio upload..."
+                $0.lastError = "Preparing chunked upload..."
             }
         }
 
-        _ = try await uploadFileChunks(
-            recording: recording,
-            client: client,
-            fileURL: audioURL,
-            originalFilename: audioURL.lastPathComponent,
-            mimeType: mimeType(for: audioURL),
-            fileSize: audioSize,
-            uploadedBytes: 0,
-            totalBytes: totalBytes,
-            store: store
-        )
+        for file in files where file.size > 0 {
+            uploadedBytes = try await uploadFileChunks(
+                recording: recording,
+                client: client,
+                fileType: file.type,
+                fileURL: file.url,
+                originalFilename: file.filename,
+                mimeType: file.mime,
+                fileSize: file.size,
+                uploadedBytes: uploadedBytes,
+                totalBytes: totalBytes,
+                store: store
+            )
+        }
 
         await MainActor.run {
             store.update(recording.id) {
@@ -134,6 +161,7 @@ final class UploadManager: ObservableObject {
     private func uploadFileChunks(
         recording: Recording,
         client: APIClient,
+        fileType: String,
         fileURL: URL,
         originalFilename: String,
         mimeType: String,
@@ -147,7 +175,7 @@ final class UploadManager: ObservableObject {
         var receivedChunks = Set<Int>()
 
         do {
-            let status = try await client.chunkUploadStatus(recordingID: recording.id, fileType: "audio")
+            let status = try await client.chunkUploadStatus(recordingID: recording.id, fileType: fileType)
             if status.ok, let chunks = status.receivedChunks {
                 receivedChunks = Set(chunks)
             }
@@ -166,7 +194,7 @@ final class UploadManager: ObservableObject {
             await MainActor.run {
                 store.update(recording.id) {
                     $0.uploadProgress = min(0.98, Double(completedBytes) / Double(totalBytes) * 0.98)
-                    $0.lastError = "Resuming audio upload at chunk \(startIndex + 1)/\(totalChunks)..."
+                    $0.lastError = "Resuming \(fileType) upload at chunk \(startIndex + 1)/\(totalChunks)..."
                 }
             }
         }
@@ -178,7 +206,7 @@ final class UploadManager: ObservableObject {
 
             let request = client.chunkUploadRequest(
                 recording: recording,
-                fileType: "audio",
+                fileType: fileType,
                 chunkIndex: chunkIndex,
                 totalChunks: totalChunks,
                 totalSize: fileSize,
@@ -191,7 +219,7 @@ final class UploadManager: ObservableObject {
                 store.update(recording.id) {
                     let baseProgress = Double(completedBytes) / Double(totalBytes) * 0.98
                     $0.uploadProgress = max(0.01, min(0.98, baseProgress))
-                    $0.lastError = "Uploading audio chunk \(chunkIndex + 1)/\(totalChunks)..."
+                    $0.lastError = "Uploading \(fileType) chunk \(chunkIndex + 1)/\(totalChunks)..."
                 }
             }
 
@@ -211,7 +239,7 @@ final class UploadManager: ObservableObject {
                         let delayNs = UInt64(min(30, attempt * attempt * 2)) * 1_000_000_000
                         await MainActor.run {
                             store.update(recording.id) {
-                                $0.lastError = "Retrying audio chunk \(chunkIndex + 1)/\(totalChunks) (attempt \(attempt + 1)/\(maxChunkAttempts)): \(error.localizedDescription)"
+                                $0.lastError = "Retrying \(fileType) chunk \(chunkIndex + 1)/\(totalChunks) (attempt \(attempt + 1)/\(maxChunkAttempts)): \(error.localizedDescription)"
                             }
                         }
                         try await Task.sleep(nanoseconds: delayNs)
@@ -220,8 +248,16 @@ final class UploadManager: ObservableObject {
             }
 
             if let lastError {
+                if fileType == "beacon", isUnsupportedOptionalSidecar(error: lastError) {
+                    await MainActor.run {
+                        store.update(recording.id) {
+                            $0.lastError = "Server does not accept beacon diagnostics yet. Continuing without beacon.json."
+                        }
+                    }
+                    return uploadedBytes
+                }
                 throw APIClientError.badResponse(
-                    "Failed audio chunk \(chunkIndex + 1)/\(totalChunks): \(lastError.localizedDescription)"
+                    "Failed \(fileType) chunk \(chunkIndex + 1)/\(totalChunks): \(lastError.localizedDescription)"
                 )
             }
 
@@ -229,7 +265,7 @@ final class UploadManager: ObservableObject {
             await MainActor.run {
                 store.update(recording.id) {
                     $0.uploadProgress = min(0.98, Double(completedBytes) / Double(totalBytes) * 0.98)
-                    $0.lastError = "Uploaded audio chunk \(chunkIndex + 1)/\(totalChunks)"
+                    $0.lastError = "Uploaded \(fileType) chunk \(chunkIndex + 1)/\(totalChunks)"
                 }
             }
         }
@@ -245,9 +281,14 @@ final class UploadManager: ObservableObject {
         return totalChunks
     }
 
+    private func isUnsupportedOptionalSidecar(error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("invalid file type") || message.contains("unsupported file type")
+    }
+
     private func send(request: URLRequest, body: Data) async throws -> (Data, URLResponse) {
         let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ipca-cvr-audio-chunk-\(UUID().uuidString).bin")
+            .appendingPathComponent("ipca-cvr-upload-chunk-\(UUID().uuidString).bin")
         try body.write(to: tempURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -294,7 +335,7 @@ final class UploadManager: ObservableObject {
         let data = try handle.read(upToCount: count) ?? Data()
         if data.count != count {
             throw APIClientError.badResponse(
-                "Could not read audio chunk \(chunkIndex + 1). Expected \(count) bytes, got \(data.count)."
+                "Could not read chunk \(chunkIndex + 1). Expected \(count) bytes, got \(data.count)."
             )
         }
         return data

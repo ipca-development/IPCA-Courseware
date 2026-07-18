@@ -144,6 +144,7 @@ try {
     $ahrsPath = cockpit_finalize_assemble($sessionDir, 'ahrs', 'json');
     $gpsPath = cockpit_finalize_assemble($sessionDir, 'gps', 'json');
     $g3xPath = cockpit_finalize_assemble($sessionDir, 'g3x', 'csv');
+    $beaconPath = cockpit_finalize_assemble($sessionDir, 'beacon', 'json');
 
     $metadata = array(
         'recording_id' => $recordingUid,
@@ -174,7 +175,8 @@ try {
         (string)($audioMeta['mime_type'] ?? 'audio/mp4'),
         $ahrsPath,
         $gpsPath,
-        $g3xPath
+        $g3xPath,
+        $beaconPath
     );
 
     cockpit_finalize_remove_tree($sessionDir);

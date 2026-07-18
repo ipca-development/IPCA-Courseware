@@ -170,12 +170,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
 
         let finalSize = fileSizeFor(url: recordingURL)
         fileSize = finalSize
+        let recordedDuration = recorder.currentTime > 0 ? recorder.currentTime : elapsed
 
         return Recording(
             id: recordingID,
             serverID: nil,
             startedAt: startedAt,
-            duration: max(elapsed, recorder.currentTime),
+            duration: recordedDuration,
             filePath: recordingURL.path,
             inputDeviceName: selectedInputName,
             aircraftID: nil,

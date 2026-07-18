@@ -77,6 +77,8 @@ struct Recording: Identifiable, Codable, Equatable {
     var language: String
     var transcript: String
     var lastError: String
+    var gpsSamplesPath: String?
+    var beaconDiagnosticsPath: String?
     var flightSessionID: String
     var segmentIndex: Int
     var previousSegmentID: String?
@@ -103,6 +105,8 @@ struct Recording: Identifiable, Codable, Equatable {
         language: String,
         transcript: String,
         lastError: String,
+        gpsSamplesPath: String? = nil,
+        beaconDiagnosticsPath: String? = nil,
         flightSessionID: String? = nil,
         segmentIndex: Int = 1,
         previousSegmentID: String? = nil,
@@ -128,6 +132,8 @@ struct Recording: Identifiable, Codable, Equatable {
         self.language = language
         self.transcript = transcript
         self.lastError = lastError
+        self.gpsSamplesPath = gpsSamplesPath
+        self.beaconDiagnosticsPath = beaconDiagnosticsPath
         self.flightSessionID = flightSessionID ?? id
         self.segmentIndex = max(1, segmentIndex)
         self.previousSegmentID = previousSegmentID
@@ -164,6 +170,28 @@ struct Recording: Identifiable, Codable, Equatable {
     var needsUploadRetry: Bool {
         uploadStatus == .pending || uploadStatus == .failed || uploadStatus == .uploading
     }
+}
+
+enum GPSConnectionState: String {
+    case permissionNeeded
+    case ready
+    case recording
+    case denied
+    case unavailable
+    case failed
+}
+
+struct GPSSample: Codable, Equatable {
+    var timestamp: Date
+    var secondsSinceRecordingStart: Double
+    var latitude: Double
+    var longitude: Double
+    var altitude: Double
+    var speedMetersPerSecond: Double
+    var speedKnots: Double
+    var course: Double
+    var horizontalAccuracy: Double
+    var verticalAccuracy: Double
 }
 
 struct AudioInputInfo: Identifiable, Equatable {

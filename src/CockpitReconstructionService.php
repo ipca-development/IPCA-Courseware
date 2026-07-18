@@ -1864,6 +1864,8 @@ final class CockpitReconstructionService
             return array();
         }
 
+        $this->assertG3XAircraftMatchesRecording($recording, (string)$parsed['aircraft_ident']);
+
         $offsetSeconds = $this->computeG3XOffsetSeconds($recording, $gps, $parsed['rows'], $startedAt);
         $this->lastG3XAlignment = array(
             'available' => true,
@@ -1871,6 +1873,7 @@ final class CockpitReconstructionService
             'aircraft_ident' => (string)$parsed['aircraft_ident'],
             'import_profile' => (string)($parsed['import_profile'] ?? ''),
             'offset_seconds' => $offsetSeconds,
+            'offset_source' => (string)($this->lastG3XAlignment['offset_source'] ?? 'fallback'),
             'source' => $this->lastG3XSource !== '' ? $this->lastG3XSource : (isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload'),
             'path' => $path,
         );
@@ -1889,6 +1892,24 @@ final class CockpitReconstructionService
         }
         usort($normalized, fn(array $a, array $b): int => ((float)$a['seconds']) <=> ((float)$b['seconds']));
         return $normalized;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function assertG3XAircraftMatchesRecording(array $recording, string $g3xAircraftIdent): void
+    {
+        $recordingRegistration = $this->normalizeAircraftIdent((string)($recording['aircraft_registration'] ?? ''));
+        $g3xIdent = $this->normalizeAircraftIdent($g3xAircraftIdent);
+        if ($recordingRegistration === '' || $g3xIdent === '' || $recordingRegistration === $g3xIdent) {
+            return;
+        }
+        throw new RuntimeException('Garmin CSV aircraft ident ' . $g3xIdent . ' does not match recording aircraft ' . $recordingRegistration . '.');
+    }
+
+    private function normalizeAircraftIdent(string $value): string
+    {
+        return strtoupper((string)preg_replace('/[^A-Z0-9]/i', '', trim($value)));
     }
 
     /**
@@ -1986,16 +2007,24 @@ final class CockpitReconstructionService
      */
     private function computeG3XOffsetSeconds(array $recording, array $gps, array $g3xRows, DateTimeImmutable $startedAt): float
     {
+        $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($g3xRows);
+        if ($firstUtc === null) {
+            $this->lastG3XAlignment['offset_source'] = 'no_g3x_utc';
+            return 0.0;
+        }
+
+        $gpsUtcOffset = $this->computeGpsUtcG3XOffsetSeconds($gps, $startedAt);
+        if ($gpsUtcOffset !== null) {
+            $this->lastG3XAlignment['offset_source'] = 'gps_utc';
+            return $gpsUtcOffset;
+        }
+
         $stored = isset($recording['g3x_time_offset_seconds']) && is_numeric($recording['g3x_time_offset_seconds'])
             ? (float)$recording['g3x_time_offset_seconds']
             : null;
         if ($stored !== null) {
+            $this->lastG3XAlignment['offset_source'] = 'recording_stored_offset';
             return $stored;
-        }
-
-        $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($g3xRows);
-        if ($firstUtc === null) {
-            return 0.0;
         }
 
         $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
@@ -2006,6 +2035,7 @@ final class CockpitReconstructionService
             $sourceDuration = max(0.0, (float)($lastUtc->getTimestamp() - $firstUtc->getTimestamp()));
             $leadingSourceSeconds = max(0.0, $sourceDuration - $duration);
             if ($leadingSourceSeconds > 30.0) {
+                $this->lastG3XAlignment['offset_source'] = 'allocated_csv_audio_window';
                 return ($startedAt->getTimestamp() - $firstUtc->getTimestamp()) - $leadingSourceSeconds;
             }
         }
@@ -2049,9 +2079,55 @@ final class CockpitReconstructionService
             $baseOffset = count($deltas) % 2 === 1
                 ? (float)$deltas[$mid]
                 : (((float)$deltas[$mid - 1] + (float)$deltas[$mid]) / 2.0);
+            $this->lastG3XAlignment['offset_source'] = 'gps_spatial_match';
+        } else {
+            $this->lastG3XAlignment['offset_source'] = 'g3x_first_utc';
         }
 
         return $baseOffset + ($startedAt->getTimestamp() - $firstUtc->getTimestamp());
+    }
+
+    /**
+     * GPS UTC is the authoritative audio clock when present. The timestamp must
+     * include the calendar date as well as time, because California flights often
+     * cross the UTC day boundary during a normal local flying day.
+     *
+     * @param list<array<string,mixed>> $gps
+     */
+    private function computeGpsUtcG3XOffsetSeconds(array $gps, DateTimeImmutable $startedAt): ?float
+    {
+        $offsets = array();
+        foreach ($gps as $gpsRow) {
+            if (!isset($gpsRow['seconds'], $gpsRow['timestamp']) || !is_numeric($gpsRow['seconds'])) {
+                continue;
+            }
+            $seconds = (float)$gpsRow['seconds'];
+            if ($seconds < -5.0) {
+                continue;
+            }
+            $timestampRaw = (string)$gpsRow['timestamp'];
+            if (!self::hasExplicitDateAndTime($timestampRaw)) {
+                continue;
+            }
+            $timestamp = self::dateTime($timestampRaw);
+            if ($timestamp === null) {
+                continue;
+            }
+            $offsets[] = $seconds - ((float)$timestamp->format('U.u') - (float)$startedAt->format('U.u'));
+        }
+        if (!$offsets) {
+            return null;
+        }
+        sort($offsets, SORT_NUMERIC);
+        $mid = intdiv(count($offsets), 2);
+        return count($offsets) % 2 === 1
+            ? (float)$offsets[$mid]
+            : (((float)$offsets[$mid - 1] + (float)$offsets[$mid]) / 2.0);
+    }
+
+    private static function hasExplicitDateAndTime(string $value): bool
+    {
+        return preg_match('/\b\d{4}-\d{2}-\d{2}[T\s]+\d{2}:\d{2}:\d{2}/', trim($value)) === 1;
     }
 
     /**
@@ -3874,6 +3950,14 @@ final class CockpitReconstructionService
         $speeds = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['groundspeed_kt']) ? (float)$s['groundspeed_kt'] : null, $samples), fn($v): bool => $v !== null));
         $rolls = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['roll_deg']) ? abs((float)$s['roll_deg']) : null, $samples), fn($v): bool => $v !== null));
         $pitches = array_values(array_filter(array_map(fn(array $s): ?float => isset($s['pitch_deg']) ? abs((float)$s['pitch_deg']) : null, $samples), fn($v): bool => $v !== null));
+        $g3xAlignment = $this->lastG3XAlignment;
+        if (isset($g3xAlignment['available']) && (bool)$g3xAlignment['available']) {
+            $offsetSource = (string)($g3xAlignment['offset_source'] ?? '');
+            $g3xAlignment['utc_authoritative'] = $offsetSource === 'gps_utc';
+            if ($offsetSource !== 'gps_utc') {
+                $g3xAlignment['warnings'] = array('G3X/audio alignment is not GPS UTC-authoritative; sync uses fallback source ' . ($offsetSource !== '' ? $offsetSource : 'unknown') . '.');
+            }
+        }
 
         return array(
             'recording_uid' => (string)($recording['recording_uid'] ?? ''),
@@ -3895,7 +3979,7 @@ final class CockpitReconstructionService
             'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
             'adsb_sample_count' => $this->countRows(self::ADSB_OWNSHIP_TABLE, (int)($recording['id'] ?? 0)),
             'source_alignment' => $this->lastSourceAlignment,
-            'g3x_alignment' => $this->lastG3XAlignment,
+            'g3x_alignment' => $g3xAlignment,
             'ahrs_calibration' => $this->lastAhrsCalibration,
             'derived_replay_values' => array(
                 'gps_altitude_primary' => true,

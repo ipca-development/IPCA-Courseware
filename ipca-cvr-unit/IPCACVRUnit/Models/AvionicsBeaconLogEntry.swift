@@ -34,6 +34,52 @@ enum AvionicsPowerState: String, Codable, Equatable {
     case off
 }
 
+enum AvionicsBeaconResetReason: String, Codable, Equatable {
+    case unknown
+    case powerOn
+    case brownout
+    case watchdog
+    case softwareRestart
+    case panic
+    case deepSleep
+
+    init(code: UInt8) {
+        switch code {
+        case 1: self = .powerOn
+        case 2: self = .brownout
+        case 3: self = .watchdog
+        case 4: self = .softwareRestart
+        case 5: self = .panic
+        case 6: self = .deepSleep
+        default: self = .unknown
+        }
+    }
+}
+
+struct AvionicsBeaconStatusPacket: Codable, Equatable {
+    static let expectedLength = 60
+
+    var protocolVersion: UInt8
+    var bootCounter: UInt32
+    var bootUUID: String
+    var advertisementCounter: UInt32
+    var resetReason: AvionicsBeaconResetReason
+    var firmwareVersion: String
+    var uptimeSeconds: UInt32
+    var recorderTokenHex: String
+    var lastRecorderContactUptimeSeconds: UInt32?
+    var usbDiagnosticKind: UInt8
+    var usbDiagnosticValue: UInt16
+
+    var hasRecorderToken: Bool {
+        recorderTokenHex != String(repeating: "0", count: 32)
+    }
+
+    var label: String {
+        "boot \(bootCounter), uptime \(uptimeSeconds)s, reset \(resetReason.rawValue)"
+    }
+}
+
 enum AvionicsBeaconOperationalSeverity {
     case nominal
     case warning

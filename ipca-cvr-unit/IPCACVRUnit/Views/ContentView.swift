@@ -72,12 +72,14 @@ private struct PostflightWorkflowView: View {
                             PostflightStatusLine(label: "Started", value: recording.startedAt.formatted(date: .abbreviated, time: .shortened), color: IPCATheme.navy)
                             PostflightStatusLine(label: "Duration", value: format(duration: recording.duration), color: IPCATheme.navy)
                             PostflightStatusLine(label: "Audio", value: recording.inputDeviceName, color: recording.inputDeviceName.localizedCaseInsensitiveContains("iPhone") ? IPCATheme.warning : IPCATheme.success)
+                            PostflightStatusLine(label: "GPS", value: recording.gpsSamplesPath == nil ? "Not saved" : "Saved", color: recording.gpsSamplesPath == nil ? IPCATheme.warning : IPCATheme.success)
                             PostflightStatusLine(label: "Upload", value: uploadLabel(for: recording), color: uploadColor(for: recording))
                             PostflightStatusLine(label: "Transcript", value: transcriptLabel(for: recording), color: transcriptColor(for: recording))
                         }
 
                         IPCACard(title: "Readiness", systemImage: "airplane.departure") {
                             PostflightStep(title: "Audio saved permanently", isComplete: recording.fileSize > 0, detail: ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file))
+                            PostflightStep(title: "GPS UTC evidence saved", isComplete: recording.gpsSamplesPath != nil, detail: recording.gpsSamplesPath == nil ? "No GPS sidecar" : "GPS sidecar ready for upload")
                             PostflightStep(title: "Upload completed", isComplete: recording.uploadStatus == .uploaded, detail: uploadLabel(for: recording))
                             PostflightStep(title: "Transcript ready", isComplete: recording.transcriptStatus == .ready, detail: transcriptLabel(for: recording))
 
@@ -237,6 +239,7 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var audio: AudioRecorderManager
+    @EnvironmentObject private var gps: GPSLocationManager
 
     var body: some View {
         NavigationStack {
@@ -302,6 +305,24 @@ private struct AdminSettingsView: View {
                     Text(audio.sourceSummary)
                 }
 
+                Section("GPS Time") {
+                    LabeledContent("Status") {
+                        Text(gpsStatusText)
+                            .foregroundStyle(gpsStatusColor)
+                    }
+                    LabeledContent("Last UTC", value: gpsTimestampText)
+                    if gps.state == .permissionNeeded {
+                        Button("Request GPS Permission") {
+                            gps.requestPermission()
+                        }
+                    }
+                    if !gps.lastError.isEmpty {
+                        Text(gps.lastError)
+                            .font(.caption)
+                            .foregroundStyle(IPCATheme.danger)
+                    }
+                }
+
                 Section("Security") {
                     SecureField("Admin PIN", text: $settings.adminPIN)
                         .keyboardType(.numberPad)
@@ -326,5 +347,41 @@ private struct AdminSettingsView: View {
         case .inactive:
             return IPCATheme.secondaryText
         }
+    }
+
+    private var gpsStatusText: String {
+        switch gps.state {
+        case .permissionNeeded:
+            return "Permission Needed"
+        case .ready:
+            return "Ready"
+        case .recording:
+            return "Recording"
+        case .denied:
+            return "Denied"
+        case .unavailable:
+            return "Unavailable"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private var gpsStatusColor: Color {
+        switch gps.state {
+        case .ready, .recording:
+            return IPCATheme.success
+        case .permissionNeeded, .unavailable:
+            return IPCATheme.warning
+        case .denied, .failed:
+            return IPCATheme.danger
+        }
+    }
+
+    private var gpsTimestampText: String {
+        guard let sample = gps.latestSample else { return "--" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: sample.timestamp)
     }
 }
