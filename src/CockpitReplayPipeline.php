@@ -1576,6 +1576,12 @@ final class CockpitReplayPipeline
         };
     }
 
+    private function trustedReplayPositionSource(string $source): bool
+    {
+        $source = strtolower(trim($source));
+        return $source !== '' && str_contains($source, 'g3x') && !str_contains($source, 'gps');
+    }
+
     private function combineAttitudeSources(string $pitchSource, string $rollSource): string
     {
         if ($pitchSource === $rollSource) {
@@ -2254,6 +2260,7 @@ final class CockpitReplayPipeline
                 : 0.0;
             $ground = $this->isGroundPhase($phase) || $speed < self::GROUND_SPEED_MAX_KT;
             $groundStep = $ground || ($lastSpeed !== null && min($lastSpeed, $speed) < self::GROUND_SPEED_MAX_KT);
+            $trustedPositionSource = $this->trustedReplayPositionSource((string)($sample['position_source'] ?? ''));
 
             $rawDelta = 0.0;
             if ($lastSpeed !== null) {
@@ -2283,7 +2290,7 @@ final class CockpitReplayPipeline
                 $takeoffTransition = $this->isTakeoffTransition($prevPhase, $phase, $lastSpeed, $speed);
                 $absurdPositionDiscontinuity = $impliedSpeed > self::POSITION_ABSURD_IMPLIED_SPEED_KT
                     || $mismatch > self::POSITION_ABSURD_MISMATCH_KT;
-                if ($groundStep && ($impliedSpeed > 40.0 || $mismatch > 10.0)) {
+                if (!$trustedPositionSource && $groundStep && ($impliedSpeed > 40.0 || $mismatch > 10.0)) {
                     $countPositionOutliers++;
                     $projected = $this->projectPositionFromSpeed($prev, $sample, $speed, $dt);
                     $corrected = false;
@@ -2303,7 +2310,7 @@ final class CockpitReplayPipeline
                         $sample['position_quality_reason'] = 'position_correction_unreliable_or_impossible';
                         $this->diagnostics['count_position_corrections_low']++;
                     }
-                } elseif ($absurdPositionDiscontinuity && ($groundStep || $takeoffTransition)) {
+                } elseif (!$trustedPositionSource && $absurdPositionDiscontinuity && ($groundStep || $takeoffTransition)) {
                     $countPositionOutliers++;
                     if ($takeoffTransition) {
                         $countTakeoffTransitionPositionCorrections++;
