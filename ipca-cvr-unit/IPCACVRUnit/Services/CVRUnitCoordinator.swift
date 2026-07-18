@@ -66,6 +66,21 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        uploadManager.$activeUploads
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshModeFromCurrentState()
+            }
+            .store(in: &cancellables)
+
+        store.$recordings
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshModeFromCurrentState()
+            }
+            .store(in: &cancellables)
+
         settings.$isBeaconTriggerEnabled
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -297,15 +312,25 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             return
         }
-        let hasPending = !store.pendingUploadIDs().isEmpty
+        refreshModeFromCurrentState()
+        uploadManager.uploadPending(store: store, settings: settings, network: network)
+    }
+
+    private func refreshModeFromCurrentState() {
+        guard mode != .starting, mode != .stopping, mode != .error else { return }
         if audio?.isRecording == true {
             mode = .recording
-        } else if hasPending {
-            mode = .uploading
-        } else if mode != .error {
-            mode = .standby
+            return
         }
-        uploadManager.uploadPending(store: store, settings: settings, network: network)
+        if uploadManager?.activeUploads.isEmpty == false {
+            mode = .uploading
+            return
+        }
+        if store?.pendingUploadIDs().isEmpty == false {
+            mode = .pendingUpload
+            return
+        }
+        mode = .standby
     }
 
     private func handleAudioWarningChanged(_ warning: Bool) {
