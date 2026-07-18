@@ -88,9 +88,18 @@ final class CockpitAdsbEnrichmentService
             $samples = $validation['samples'];
             if (!$samples) {
                 $this->clearOwnshipSamples($recordingId);
-                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, 'No ADS-B trace samples passed UTC plus GPS same-time validation. Spatial fallback is disabled for altitude/vertical-speed because it can misalign repeated or nearby track segments.', $validation['stats']);
+                $traffic = $this->enrichTrafficFromGps($recordingId, $hex, $recording, $window);
+                $note = (int)($traffic['sample_count'] ?? 0) > 0
+                    ? 'Ownship ADS-B trace did not pass UTC plus GPS same-time validation. Nearby traffic was still derived from the iPhone GPS corridor.'
+                    : 'No ADS-B trace samples passed UTC plus GPS same-time validation. Spatial fallback is disabled for altitude/vertical-speed because it can misalign repeated or nearby track segments.';
+                $diagnostics = $this->traceDiagnostics($raw, $recording, $window, 0, 0, $note, $validation['stats']);
+                $diagnostics['traffic'] = $traffic;
                 $diagnosticsPath = $this->storeJson($recording, 'normalized', $diagnostics);
                 $message = $this->diagnosticMessage($diagnostics);
+                if ((int)($traffic['sample_count'] ?? 0) > 0) {
+                    $this->setStatus($recordingId, 'ready', $hex, $window['start_mysql'], $window['end_mysql'], 0, (int)$traffic['sample_count'], $message, $rawPath, $diagnosticsPath);
+                    return array('ok' => true, 'status' => 'ready', 'ownship_sample_count' => 0, 'traffic_sample_count' => (int)$traffic['sample_count'], 'warning' => $message, 'raw_storage_path' => $rawPath, 'normalized_storage_path' => $diagnosticsPath);
+                }
                 $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $message, $rawPath, $diagnosticsPath);
                 return array('ok' => false, 'status' => 'not_available', 'error' => $message, 'raw_storage_path' => $rawPath, 'normalized_storage_path' => $diagnosticsPath);
             }
@@ -1012,35 +1021,73 @@ final class CockpitAdsbEnrichmentService
         array $recording,
         array $window
     ): array {
+        return $this->enrichTrafficWithAnchors($recordingId, $ownshipHex, $ownshipSamples, $recording, $window, 'ownship_adsb');
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return array<string,mixed>
+     */
+    private function enrichTrafficFromGps(int $recordingId, string $ownshipHex, array $recording, array $window): array
+    {
+        $gpsRows = $this->gpsAlignmentRows($recording);
+        if ($gpsRows === array()) {
+            $this->clearTrafficSamples($recordingId);
+            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => 'phone_gps', 'note' => 'No phone GPS anchors for traffic correlation.');
+        }
+
+        $anchorSamples = array();
+        foreach ($gpsRows as $row) {
+            $timestamp = trim((string)($row['timestamp'] ?? ''));
+            if ($timestamp === '') {
+                continue;
+            }
+            $anchorSamples[] = array(
+                'seconds_since_start' => (float)($row['seconds'] ?? 0),
+                'sample_time_utc' => $timestamp,
+                'latitude' => $row['latitude'] ?? null,
+                'longitude' => $row['longitude'] ?? null,
+                'baro_altitude_ft' => $row['altitude_ft'] ?? null,
+            );
+        }
+
+        return $this->enrichTrafficWithAnchors($recordingId, $ownshipHex, $anchorSamples, $recording, $window, 'phone_gps');
+    }
+
+    /**
+     * @param list<array<string,mixed>> $anchorSamples
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return array<string,mixed>
+     */
+    private function enrichTrafficWithAnchors(
+        int $recordingId,
+        string $ownshipHex,
+        array $anchorSamples,
+        array $recording,
+        array $window,
+        string $anchorSource
+    ): array {
         $this->clearTrafficSamples($recordingId);
 
-        $anchors = $this->trafficAnchors($ownshipSamples);
+        $anchors = $this->trafficAnchors($anchorSamples);
         if ($anchors === array()) {
-            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'note' => 'No ownship anchors for traffic correlation.');
+            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => $anchorSource, 'note' => 'No anchors for traffic correlation.');
         }
 
         $candidates = $this->discoverTrafficCandidateHexes($ownshipHex, $anchors, $recording, $window);
         if ($candidates === array()) {
-            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
+            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => $anchorSource, 'anchor_count' => count($anchors), 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
         }
 
-        $dates = $this->traceDatesForWindow($window);
         $candidateTraces = array();
+        $traceSources = array();
         foreach ($candidates as $candidateHex) {
-            $epochSamples = array();
-            foreach ($dates as $day) {
-                try {
-                    $payload = $this->fetchHistoricalTraceForDate($candidateHex, $day);
-                } catch (Throwable) {
-                    continue;
-                }
-                if (!isset($payload['trace']) || !is_array($payload['trace'])) {
-                    continue;
-                }
-                $epochSamples = array_merge($epochSamples, $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']));
-            }
-            if ($epochSamples !== array()) {
-                $candidateTraces[$candidateHex] = $epochSamples;
+            $traceResult = $this->trafficCandidateEpochSamples($candidateHex, $window);
+            if (($traceResult['samples'] ?? array()) !== array()) {
+                $candidateTraces[$candidateHex] = $traceResult['samples'];
+                $traceSources[$candidateHex] = $traceResult['source'] ?? 'unknown';
             }
         }
 
@@ -1084,11 +1131,58 @@ final class CockpitAdsbEnrichmentService
         return array(
             'sample_count' => count($rows),
             'provider' => tv_adsb_provider(),
+            'anchor_source' => $anchorSource,
             'anchor_count' => count($anchors),
             'candidate_count' => count($candidates),
             'trace_count' => count($candidateTraces),
+            'trace_sources' => $traceSources,
             'range_nm' => self::TRAFFIC_RANGE_NM,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $window
+     * @return array{samples:list<array<string,mixed>>,source:string}
+     */
+    private function trafficCandidateEpochSamples(string $candidateHex, array $window): array
+    {
+        $dates = $this->traceDatesForWindow($window);
+        $epochSamples = array();
+        foreach ($dates as $day) {
+            try {
+                $payload = $this->fetchHistoricalTraceForDate($candidateHex, $day);
+            } catch (Throwable) {
+                continue;
+            }
+            if (!isset($payload['trace']) || !is_array($payload['trace'])) {
+                continue;
+            }
+            $epochSamples = array_merge($epochSamples, $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']));
+        }
+        if ($epochSamples !== array()) {
+            return array('samples' => $epochSamples, 'source' => 'historical');
+        }
+
+        $folder = substr($candidateHex, -2);
+        foreach (array(
+            '/traces/' . rawurlencode($folder) . '/trace_full_' . rawurlencode($candidateHex) . '.json',
+            '/traces/' . rawurlencode($folder) . '/trace_recent_' . rawurlencode($candidateHex) . '.json',
+        ) as $path) {
+            try {
+                $payload = tv_adsb_request($path);
+            } catch (Throwable) {
+                continue;
+            }
+            if (!isset($payload['trace']) || !is_array($payload['trace'])) {
+                continue;
+            }
+            $samples = $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']);
+            if ($samples !== array()) {
+                return array('samples' => $samples, 'source' => str_contains($path, 'trace_recent') ? 'recent' : 'current_full');
+            }
+        }
+
+        return array('samples' => array(), 'source' => 'none');
     }
 
     /**
