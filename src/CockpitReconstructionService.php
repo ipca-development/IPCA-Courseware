@@ -1998,6 +1998,18 @@ final class CockpitReconstructionService
             return 0.0;
         }
 
+        $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
+            ? max(0.0, (float)$recording['duration_seconds'])
+            : 0.0;
+        $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($g3xRows);
+        if ($this->lastG3XSource === 'allocated_garmin_csv' && !$gps && $lastUtc !== null && $duration > 0.0) {
+            $sourceDuration = max(0.0, (float)($lastUtc->getTimestamp() - $firstUtc->getTimestamp()));
+            $leadingSourceSeconds = max(0.0, $sourceDuration - $duration);
+            if ($leadingSourceSeconds > 30.0) {
+                return ($startedAt->getTimestamp() - $firstUtc->getTimestamp()) - $leadingSourceSeconds;
+            }
+        }
+
         $baseOffset = 0.0;
         $deltas = array();
         foreach ($gps as $gpsRow) {
