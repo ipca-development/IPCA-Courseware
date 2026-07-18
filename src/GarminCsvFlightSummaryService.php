@@ -169,6 +169,7 @@ final class GarminCsvFlightSummaryService
             $tachoCounterStart = $this->numericOrNull($csvFile['engine_hours_start'] ?? null) ?? $this->numericOrNull($meta['engine_hours'] ?? null);
 
             $summary['status'] = 'ok';
+            $summary['status_label'] = 'Complete';
             $summary['tail'] = $tail !== '' ? $tail : 'Unknown tail';
             $summary['date_label'] = $this->dateLabel($firstUtc);
             $summary['dep_airport'] = (string)($airports['departure_airport_code'] ?? '') ?: '--';

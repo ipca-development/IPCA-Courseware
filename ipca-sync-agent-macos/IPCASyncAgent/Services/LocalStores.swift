@@ -402,8 +402,22 @@ final class LocalQueueStore {
         try updateState(id, state: .retryWait, error: error, serverStatus: nil, nextRetryAt: Date().addingTimeInterval(TimeInterval(delay)))
     }
 
+    func recoverInterruptedUploads() throws -> Int {
+        let count = try scalarInt("SELECT COUNT(*) FROM upload_queue WHERE state = 'uploading'")
+        guard count > 0 else { return 0 }
+        try execute("""
+        UPDATE upload_queue
+        SET state = 'retry_wait',
+            next_retry_at = NULL,
+            last_error = 'Recovered after app restart while upload was in progress.',
+            updated_at = ?
+        WHERE state = 'uploading'
+        """, [Date().timeIntervalSince1970])
+        return count
+    }
+
     func pendingCount() throws -> Int {
-        try scalarInt("SELECT COUNT(*) FROM upload_queue WHERE state NOT IN ('uploaded','already_exists','completed')")
+        try scalarInt("SELECT COUNT(*) FROM upload_queue WHERE state NOT IN ('uploaded','already_exists','completed','review_required')")
     }
 
     func uploadQueueStateCounts() throws -> [String: Int] {

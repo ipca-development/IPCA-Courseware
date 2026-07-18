@@ -259,6 +259,14 @@ final class AppStateController: ObservableObject {
                 fatalError("IPCA Sync Agent could not create a local queue: \(error.localizedDescription)")
             }
         }
+        do {
+            let recoveredUploads = try localQueue.recoverInterruptedUploads()
+            if recoveredUploads > 0 {
+                LoggingService.shared.info("Recovered \(recoveredUploads) interrupted upload queue item(s).")
+            }
+        } catch {
+            LoggingService.shared.error("Interrupted upload recovery failed: \(error.localizedDescription)")
+        }
 
         let localAPI = IPCAApiClient(settings: settings, keychain: keychain)
         let localGarminProvider = GarminProvider(browser: browser, artifactStore: artifactStore, cursorStore: cursorStore)
@@ -316,7 +324,8 @@ final class AppStateController: ObservableObject {
         let failed = uploadCounts[QueueState.failed.rawValue, default: 0]
         let uploaded = uploadCounts[QueueState.uploaded.rawValue, default: 0] +
             uploadCounts[QueueState.alreadyExists.rawValue, default: 0] +
-            uploadCounts[QueueState.completed.rawValue, default: 0]
+            uploadCounts[QueueState.completed.rawValue, default: 0] +
+            uploadCounts[QueueState.reviewRequired.rawValue, default: 0]
         pendingUploads = queued + uploading + retrying + failed
         uploadProgressDetail = "Uploaded \(uploaded) / remaining \(pendingUploads) (queued \(queued), uploading \(uploading), retry \(retrying), failed \(failed))"
 
@@ -532,6 +541,7 @@ final class SyncCoordinator {
                     state?.refreshGarminCursorStatus()
                 }
                 if keychain.loadToken() != nil {
+                    try await reconcileRecentGarminFlightData()
                     try await uploadPending()
                 }
                 state?.lastSuccessfulSync = Date()
@@ -604,6 +614,53 @@ final class SyncCoordinator {
                 state?.setError(error.localizedDescription)
             }
         }
+    }
+
+    @MainActor
+    private func reconcileRecentGarminFlightData() async throws {
+        let skipTracks = try queue.backfillSkipTrackUUIDs().union(queue.ignoredGPSOnlyBackfillTrackUUIDs())
+        let fromDate = Calendar(identifier: .gregorian).date(byAdding: .day, value: -14, to: Date()) ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        let fromDateString = formatter.string(from: fromDate)
+
+        state?.currentWorkDetail = "Checking recent FlyGarmin records for newly available CSV/Flight Data sources..."
+        LoggingService.shared.info("RECENT_RECONCILE_STARTED fromDate=\(fromDateString)")
+        let result = try await provider.discoverHistoricalBackfill(skippingTrackUUIDs: skipTracks, fromDate: fromDateString, limit: 20)
+        guard !result.items.isEmpty else {
+            LoggingService.shared.info("RECENT_RECONCILE_COMPLETED selected=0")
+            return
+        }
+
+        var queued = 0
+        for item in result.items {
+            guard !item.sourceUUIDs.isEmpty else { continue }
+            try await api.uploadEntry(item)
+            let artifacts = try await provider.download(item: RemoteSyncItem(
+                provider: item.provider,
+                entryID: item.entryID,
+                version: item.version,
+                aircraftRegistration: item.aircraftRegistration,
+                generatedTrackStart: item.generatedTrackStart,
+                generatedTrackStop: item.generatedTrackStop,
+                sourceUUIDs: item.sourceUUIDs,
+                trackUUIDs: [],
+                rawEntry: item.rawEntry
+            ))
+            for artifact in artifacts where artifact.artifactType == "GARMIN_ORIGINAL_SOURCE" {
+                try queue.enqueue(artifact)
+                queued += 1
+            }
+        }
+        if queued > 0 {
+            state?.pendingUploads = (try? queue.pendingCount()) ?? 0
+            state?.refreshQueueProgress()
+            state?.lastError = "Found \(queued) recent Garmin CSV/Flight Data source\(queued == 1 ? "" : "s"). Uploading..."
+        }
+        LoggingService.shared.info("RECENT_RECONCILE_COMPLETED selected=\(result.items.count) queuedSources=\(queued)")
     }
 
     @MainActor

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/AsyncJobService.php';
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/GarminCsvValidationService.php';
+require_once __DIR__ . '/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/GarminFlightDataSourceClassificationService.php';
 require_once __DIR__ . '/GarminFlightDataSourceService.php';
 require_once __DIR__ . '/GarminSourceGroupSelectionService.php';
@@ -126,6 +127,7 @@ final class SyncAgentGarminIngestionService
         ));
         $this->enqueueFollowupJobs((int)$source['id'], $csvFileId, $groupId);
         $this->linkOriginalSourceToTrack($entryUuid, $sourceUuid, $csvFileId, $metadata, $classification);
+        $this->deriveCsvSummaryNow($csvFileId);
         $this->recordAcknowledgment((int)$token['id'], $idempotencyKey, $entryUuid, $sourceUuid, $sha256, 'accepted', $csvFileId);
         return array('ok' => true, 'status' => 'accepted', 'csv_file_id' => $csvFileId, 'source_id' => (int)$source['id']);
     }
@@ -559,6 +561,15 @@ final class SyncAgentGarminIngestionService
         $jobs->enqueue('GARMIN_CSV_FLIGHT_SUMMARY', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId, 'garmin_source_id' => $sourceId, 'source_group_id' => $sourceGroupId), null, 80);
         $jobs->enqueue('GARMIN_CSV_SESSION_MATCH', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId, 'garmin_source_id' => $sourceId, 'source_group_id' => $sourceGroupId));
         $jobs->enqueue('FLIGHT_RECORD_DERIVATION', 'ipca_garmin_csv_files', (string)$csvFileId, array('csv_file_id' => $csvFileId, 'garmin_source_id' => $sourceId, 'source_group_id' => $sourceGroupId), null, 120);
+    }
+
+    private function deriveCsvSummaryNow(int $csvFileId): void
+    {
+        try {
+            (new GarminCsvFlightSummaryService($this->pdo))->deriveAndStore($csvFileId);
+        } catch (Throwable $e) {
+            error_log('[sync-agent garmin ingestion] CSV summary derivation deferred for csv_file_id=' . $csvFileId . ': ' . $e->getMessage());
+        }
     }
 
     /**
