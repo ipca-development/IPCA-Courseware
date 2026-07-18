@@ -42,6 +42,7 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     var onMatchingBeaconAdvertisement: (() -> Void)?
     var onBeaconRelationshipAvailable: (() -> Void)?
     var onBeaconCommunicationLost: (() -> Void)?
+    var onBeaconRebootDetected: ((UInt32, UInt32, AvionicsBeaconResetReason) -> Void)?
 
     private var centralManager: CBCentralManager?
     private var timer: Timer?
@@ -410,6 +411,7 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
         guard let lastKnownBootCounter, let lastKnownBootUUID else { return }
         if lastKnownBootCounter != packet.bootCounter || lastKnownBootUUID != packet.bootUUID {
             logEvent("beacon reboot detected: boot \(lastKnownBootCounter)/\(lastKnownBootUUID) -> \(packet.bootCounter)/\(packet.bootUUID)")
+            onBeaconRebootDetected?(lastKnownBootCounter, packet.bootCounter, packet.resetReason)
         }
     }
 

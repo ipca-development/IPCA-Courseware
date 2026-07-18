@@ -6,6 +6,7 @@ final class UploadManager: ObservableObject {
     @Published private(set) var activeUploads: Set<String> = []
     private let chunkSize = 512 * 1024
     private let maxChunkAttempts = 8
+    private var retryTasks: [String: Task<Void, Never>] = [:]
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -28,12 +29,23 @@ final class UploadManager: ObservableObject {
             store.update(recordingID) {
                 $0.uploadStatus = .failed
                 $0.lastError = "Server URL is not configured."
+                scheduleRetryFields(recording: &$0, reason: $0.lastError)
             }
+            scheduleRetry(recordingID: recordingID, store: store, settings: settings)
             return
         }
 
         guard !activeUploads.contains(recordingID) else { return }
+        if let recording = store.recording(id: recordingID),
+           recording.uploadStatus == .failed,
+           let next = recording.nextUploadRetryAt,
+           next > Date() {
+            scheduleRetry(recordingID: recordingID, store: store, settings: settings)
+            return
+        }
 
+        retryTasks[recordingID]?.cancel()
+        retryTasks[recordingID] = nil
         activeUploads.insert(recordingID)
         store.update(recordingID) {
             if $0.uploadStatus != .uploaded {
@@ -57,9 +69,34 @@ final class UploadManager: ObservableObject {
                 await MainActor.run {
                     store.update(recordingID) {
                         $0.uploadStatus = .failed
-                        $0.lastError = error.localizedDescription
+                        scheduleRetryFields(recording: &$0, reason: error.localizedDescription)
                     }
+                    self.scheduleRetry(recordingID: recordingID, store: store, settings: settings)
                 }
+            }
+        }
+    }
+
+    private func scheduleRetryFields(recording: inout Recording, reason: String) {
+        let nextCount = (recording.uploadRetryCount ?? 0) + 1
+        let delay = min(120, max(30, 30 * (1 << min(nextCount - 1, 2))))
+        recording.uploadRetryCount = nextCount
+        recording.nextUploadRetryAt = Date().addingTimeInterval(TimeInterval(delay))
+        recording.lastError = "\(reason) Retrying in \(delay)s."
+    }
+
+    private func scheduleRetry(recordingID: String, store: RecordingStore, settings: SettingsStore) {
+        retryTasks[recordingID]?.cancel()
+        guard let recording = store.recording(id: recordingID),
+              recording.uploadStatus == .failed,
+              let nextUploadRetryAt = recording.nextUploadRetryAt else { return }
+        let delay = max(1, nextUploadRetryAt.timeIntervalSinceNow)
+        retryTasks[recordingID] = Task { [weak self, weak store, weak settings] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await MainActor.run {
+                guard let self, let store, let settings else { return }
+                self.retryTasks[recordingID] = nil
+                self.upload(recordingID: recordingID, store: store, settings: settings)
             }
         }
     }
@@ -84,6 +121,8 @@ final class UploadManager: ObservableObject {
                 $0.uploadProgress = 1
                 $0.transcriptStatus = .transcribing
                 $0.transcriptProgress = uploadResponse.recording?.progress ?? 0
+                $0.uploadRetryCount = nil
+                $0.nextUploadRetryAt = nil
                 $0.lastError = ""
             }
         }
@@ -118,6 +157,16 @@ final class UploadManager: ObservableObject {
                 fallbackFilename: "\(recording.id).beacon.json"
             ) {
                 files.append(("beacon", url, url.lastPathComponent, "application/json", try fileSize(url)))
+            }
+        }
+
+        if let eventsPath = recording.recordingEventsPath {
+            if let url = try? RecordingStore.resolvedFileURL(
+                preferredPath: eventsPath,
+                recordingID: recording.id,
+                fallbackFilename: "\(recording.id).events.json"
+            ) {
+                files.append(("events", url, url.lastPathComponent, "application/json", try fileSize(url)))
             }
         }
 
@@ -248,10 +297,10 @@ final class UploadManager: ObservableObject {
             }
 
             if let lastError {
-                if fileType == "beacon", isUnsupportedOptionalSidecar(error: lastError) {
+                if (fileType == "beacon" || fileType == "events"), isUnsupportedOptionalSidecar(error: lastError) {
                     await MainActor.run {
                         store.update(recording.id) {
-                            $0.lastError = "Server does not accept beacon diagnostics yet. Continuing without beacon.json."
+                            $0.lastError = "Server does not accept \(fileType) diagnostics yet. Continuing without \(fileType).json."
                         }
                     }
                     return uploadedBytes

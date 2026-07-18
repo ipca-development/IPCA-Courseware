@@ -52,7 +52,7 @@ final class RecordingStore: ObservableObject {
 
     func pendingUploadIDs() -> [String] {
         recordings
-            .filter { $0.needsUploadRetry }
+            .filter { $0.shouldAttemptUpload() }
             .sorted { $0.startedAt < $1.startedAt }
             .map(\.id)
     }

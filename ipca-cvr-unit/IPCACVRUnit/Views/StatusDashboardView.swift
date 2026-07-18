@@ -118,7 +118,7 @@ struct StatusDashboardView: View {
                 Text("IPCA CVR Unit")
                     .font(.title.weight(.bold))
                     .foregroundStyle(.white)
-                Text("Dedicated iPhone cockpit voice recorder")
+                Text(headerSubtitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
             }
@@ -134,6 +134,40 @@ struct StatusDashboardView: View {
             ),
             in: RoundedRectangle(cornerRadius: 24)
         )
+    }
+
+    private var headerSubtitle: String {
+        if audio.isRecording {
+            return "Recording \(format(duration: audio.elapsed)) · \(uploadSummary)"
+        }
+        return uploadSummary
+    }
+
+    private var uploadSummary: String {
+        guard let activeUpload else { return "Dedicated iPhone cockpit voice recorder" }
+        switch activeUpload.uploadStatus {
+        case .uploading:
+            return "Uploading \(percent(activeUpload.uploadProgress))"
+        case .failed:
+            if let retryAt = activeUpload.nextUploadRetryAt {
+                let seconds = max(0, Int(retryAt.timeIntervalSinceNow.rounded()))
+                return "Upload failed · retrying in \(seconds)s"
+            }
+            return "Upload failed"
+        case .uploaded:
+            switch activeUpload.transcriptStatus {
+            case .ready:
+                return "Upload successful · transcript ready"
+            case .transcribing:
+                return "Upload successful · transcribing \(activeUpload.transcriptProgress)%"
+            case .failed:
+                return "Upload successful · transcription failed"
+            case .pending:
+                return "Upload successful"
+            }
+        case .pending:
+            return "Upload pending"
+        }
     }
 
     private var batteryColor: Color {

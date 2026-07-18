@@ -73,6 +73,7 @@ private struct PostflightWorkflowView: View {
                             PostflightStatusLine(label: "Duration", value: format(duration: recording.duration), color: IPCATheme.navy)
                             PostflightStatusLine(label: "Audio", value: recording.inputDeviceName, color: recording.inputDeviceName.localizedCaseInsensitiveContains("iPhone") ? IPCATheme.warning : IPCATheme.success)
                             PostflightStatusLine(label: "GPS", value: recording.gpsSamplesPath == nil ? "Not saved" : "Saved", color: recording.gpsSamplesPath == nil ? IPCATheme.warning : IPCATheme.success)
+                            PostflightStatusLine(label: "Events", value: recording.recordingEventsPath == nil ? "Not saved" : "Saved", color: recording.recordingEventsPath == nil ? IPCATheme.secondaryText : IPCATheme.success)
                             PostflightStatusLine(label: "Upload", value: uploadLabel(for: recording), color: uploadColor(for: recording))
                             PostflightStatusLine(label: "Transcript", value: transcriptLabel(for: recording), color: transcriptColor(for: recording))
                         }
@@ -80,8 +81,14 @@ private struct PostflightWorkflowView: View {
                         IPCACard(title: "Readiness", systemImage: "airplane.departure") {
                             PostflightStep(title: "Audio saved permanently", isComplete: recording.fileSize > 0, detail: ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file))
                             PostflightStep(title: "GPS UTC evidence saved", isComplete: recording.gpsSamplesPath != nil, detail: recording.gpsSamplesPath == nil ? "No GPS sidecar" : "GPS sidecar ready for upload")
+                            PostflightStep(title: "Operational events saved", isComplete: recording.recordingEventsPath != nil, detail: recording.recordingEventsPath == nil ? "No event sidecar" : "Event sidecar ready for upload")
                             PostflightStep(title: "Upload completed", isComplete: recording.uploadStatus == .uploaded, detail: uploadLabel(for: recording))
                             PostflightStep(title: "Transcript ready", isComplete: recording.transcriptStatus == .ready, detail: transcriptLabel(for: recording))
+                            if let sourceGapSummary = recording.sourceGapSummary, !sourceGapSummary.isEmpty {
+                                Text(sourceGapSummary)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(IPCATheme.danger)
+                            }
 
                             Button("Retry Upload Now") {
                                 uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
@@ -110,6 +117,10 @@ private struct PostflightWorkflowView: View {
         case .uploading:
             return "\(Int((recording.uploadProgress * 100).rounded()))%"
         case .failed:
+            if let next = recording.nextUploadRetryAt {
+                let seconds = max(0, Int(next.timeIntervalSinceNow.rounded()))
+                return "Failed · retrying in \(seconds)s"
+            }
             return "Failed"
         case .pending:
             return "Pending"

@@ -25,6 +25,8 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var backgroundRecordingStatus = "Idle"
     @Published var lastError: String = ""
 
+    var onAudioEvent: ((CVRRecordingEvent) -> Void)?
+
     var sourceSummary: String {
         if isUSBActive {
             return "Audio source: USB-C audio input"
@@ -328,6 +330,15 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             updateInputState()
             if isRecording {
                 recordingSignalActive = recorder?.isRecording == true
+                onAudioEvent?(CVRRecordingEvent(
+                    severity: isAcceptedExternalInputActive ? "info" : "warning",
+                    type: "audio_route_changed",
+                    message: "Audio route changed to \(selectedInputName)",
+                    metadata: [
+                        "input": selectedInputName,
+                        "port_type": selectedInputPortType
+                    ]
+                ))
             }
         }
     }
@@ -356,6 +367,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                 recordingSignalActive = false
                 backgroundRecordingStatus = "Audio recording interrupted"
                 lastError = backgroundRecordingStatus
+                onAudioEvent?(CVRRecordingEvent(severity: "warning", type: "audio_interruption_began", message: backgroundRecordingStatus))
             case .ended:
                 let rawOptions = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
                 let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
@@ -365,9 +377,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                     recorder.record()
                     recordingSignalActive = recorder.isRecording
                     backgroundRecordingStatus = recordingSignalActive ? "Recording resumed after interruption" : "Recorder did not resume after interruption"
+                    onAudioEvent?(CVRRecordingEvent(severity: recordingSignalActive ? "info" : "error", type: "audio_interruption_ended", message: backgroundRecordingStatus))
                 } else if shouldResumeAfterInterruption {
                     backgroundRecordingStatus = "Audio interruption ended, reset audio path may be needed"
                     lastError = backgroundRecordingStatus
+                    onAudioEvent?(CVRRecordingEvent(severity: "warning", type: "audio_interruption_ended", message: backgroundRecordingStatus))
                 }
                 shouldResumeAfterInterruption = false
             @unknown default:

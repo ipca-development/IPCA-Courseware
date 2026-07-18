@@ -690,6 +690,7 @@ cw_header('Cockpit Recordings');
             $isDeleted = $deletedAt !== '';
             $audioUrl = '/admin/cockpit_recorder_audio.php?id=' . $id;
             $gpsUrl = '/admin/cockpit_recorder_gps.php?id=' . $id;
+            $eventsUrl = '/admin/cockpit_recorder_events.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
             $rowError = trim((string)($row['error_message'] ?? ''));
             $isTestRecording = !empty($row['is_test_recording']);
@@ -697,6 +698,9 @@ cw_header('Cockpit Recordings');
             $flightSegmentIndex = max(1, (int)($row['flight_segment_index'] ?? 1));
             $previousSegmentUid = trim((string)($row['previous_segment_uid'] ?? ''));
             $sourceGapSummary = trim((string)($row['source_gap_summary'] ?? ''));
+            $recordingEventCount = (int)($row['recording_event_count'] ?? 0);
+            $recordingWarningCount = (int)($row['recording_warning_count'] ?? 0);
+            $recordingErrorCount = (int)($row['recording_error_count'] ?? 0);
             $rowWarnings = array();
             try {
                 $selectedGarmin = cockpit_admin_selected_garmin_sources(
@@ -842,10 +846,14 @@ cw_header('Cockpit Recordings');
                 <div class="cockpit-pill-row">
                   <span class="cockpit-pill <?= !empty($row['storage_path']) ? 'cockpit-pill-good' : 'cockpit-pill-bad' ?>">Audio <?= !empty($row['storage_path']) ? 'saved' : 'missing' ?></span>
                   <span class="cockpit-pill <?= !empty($row['gps_storage_path']) ? 'cockpit-pill-good' : 'cockpit-pill-warn' ?>">GPS <?= !empty($row['gps_storage_path']) ? 'saved' : 'missing' ?></span>
+                  <span class="cockpit-pill <?= $recordingErrorCount > 0 ? 'cockpit-pill-bad' : ($recordingWarningCount > 0 ? 'cockpit-pill-warn' : ($recordingEventCount > 0 ? 'cockpit-pill-info' : '')) ?>">Events <?= $recordingEventCount > 0 ? h((string)$recordingEventCount) : 'none' ?></span>
                   <span class="cockpit-pill <?= $hasCompleteGarminMatch ? 'cockpit-pill-good' : ($hasAutoGarminSource || !empty($row['g3x_storage_path']) ? 'cockpit-pill-warn' : '') ?>">Garmin <?= $hasCompleteGarminMatch ? 'complete' : ($hasAutoGarminSource ? 'legacy' : (!empty($row['g3x_storage_path']) ? 'manual' : 'not linked')) ?></span>
                 </div>
                 <?php if (!empty($row['storage_path'])): ?>
                   <div class="cockpit-audio-actions"><a href="<?= h($audioUrl) ?>">Play audio</a><a href="<?= h($audioUrl) ?>&download=1">Download</a></div>
+                <?php endif; ?>
+                <?php if (!empty($row['recording_events_storage_path'])): ?>
+                  <div class="cockpit-row-sub">Operational events: <?= h((string)$recordingEventCount) ?> total, <?= h((string)$recordingWarningCount) ?> warnings, <?= h((string)$recordingErrorCount) ?> errors</div>
                 <?php endif; ?>
               </div>
               <?php if ($rowWarnings): ?><div class="cockpit-row-sub">Details warning: <?= h($rowWarnings[0]) ?></div><?php endif; ?>
@@ -1124,6 +1132,23 @@ cw_header('Cockpit Recordings');
                         <?php if (!empty($adsbDetail['raw_storage_path'])): ?><a href="<?= h($adsbRawUrl) ?>">Raw ADS-B JSON</a><?php endif; ?>
                         <?php if (!empty($adsbDetail['normalized_storage_path'])): ?><a href="<?= h($adsbNormalizedUrl) ?>">Normalized ADS-B JSON</a><?php endif; ?>
                       </div>
+                    </section>
+
+                    <section class="cockpit-section">
+                      <h3>Recording Event Log</h3>
+                      <?php if (!empty($row['recording_events_storage_path'])): ?>
+                        <div class="cockpit-grid">
+                          <div><strong>Total events</strong><div><?= h((string)$recordingEventCount) ?></div></div>
+                          <div><strong>Warnings</strong><div><?= h((string)$recordingWarningCount) ?></div></div>
+                          <div><strong>Errors</strong><div><?= h((string)$recordingErrorCount) ?></div></div>
+                        </div>
+                        <?php if ($sourceGapSummary !== ''): ?><div class="cockpit-error"><?= h($sourceGapSummary) ?></div><?php endif; ?>
+                        <div class="cockpit-link-grid">
+                          <a href="<?= h($eventsUrl) ?>">Download events.json</a>
+                        </div>
+                      <?php else: ?>
+                        <div class="cockpit-muted">No structured event sidecar was uploaded for this recording.</div>
+                      <?php endif; ?>
                     </section>
                   </div>
                 </div>

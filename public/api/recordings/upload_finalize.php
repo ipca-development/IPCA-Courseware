@@ -145,6 +145,7 @@ try {
     $gpsPath = cockpit_finalize_assemble($sessionDir, 'gps', 'json');
     $g3xPath = cockpit_finalize_assemble($sessionDir, 'g3x', 'csv');
     $beaconPath = cockpit_finalize_assemble($sessionDir, 'beacon', 'json');
+    $eventsPath = cockpit_finalize_assemble($sessionDir, 'events', 'json');
 
     $metadata = array(
         'recording_id' => $recordingUid,
@@ -176,7 +177,8 @@ try {
         $ahrsPath,
         $gpsPath,
         $g3xPath,
-        $beaconPath
+        $beaconPath,
+        $eventsPath
     );
 
     cockpit_finalize_remove_tree($sessionDir);

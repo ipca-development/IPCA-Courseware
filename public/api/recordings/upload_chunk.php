@@ -32,7 +32,7 @@ function cockpit_chunk_uid(string $value): string
 function cockpit_chunk_file_type(string $value): string
 {
     $value = strtolower(trim($value));
-    return in_array($value, array('audio', 'ahrs', 'gps', 'g3x', 'beacon'), true) ? $value : '';
+    return in_array($value, array('audio', 'ahrs', 'gps', 'g3x', 'beacon', 'events'), true) ? $value : '';
 }
 
 function cockpit_chunk_session_dir(string $recordingUid): string

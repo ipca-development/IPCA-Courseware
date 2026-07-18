@@ -47,6 +47,11 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/beacon';
     }
 
+    public static function eventsRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/events';
+    }
+
     public static function uploadSessionRoot(): string
     {
         return self::projectRoot() . '/storage/cockpit_recorder/upload_sessions';
@@ -109,6 +114,7 @@ final class CockpitRecorderService
             null,
             null,
             null,
+            null,
             null
         );
     }
@@ -117,13 +123,13 @@ final class CockpitRecorderService
      * @param array<string,mixed> $metadata
      * @return array<string,mixed>
      */
-    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null, ?string $g3xPath = null, ?string $beaconPath = null): array
+    public function storeAssembledRecording(string $audioPath, array $metadata, string $originalName, string $mimeType, ?string $ahrsPath = null, ?string $gpsPath = null, ?string $g3xPath = null, ?string $beaconPath = null, ?string $eventsPath = null): array
     {
         $this->requireTables();
         if (!is_file($audioPath)) {
             throw new RuntimeException('Assembled audio file is missing.');
         }
-        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath, $g3xPath, $beaconPath);
+        return $this->storeRecordingFromLocalPaths($audioPath, false, $metadata, $originalName, $mimeType, null, null, $ahrsPath, $gpsPath, $g3xPath, $beaconPath, $eventsPath);
     }
 
     /**
@@ -168,7 +174,8 @@ final class CockpitRecorderService
         ?string $ahrsPath,
         ?string $gpsPath,
         ?string $g3xPath = null,
-        ?string $beaconPath = null
+        ?string $beaconPath = null,
+        ?string $eventsPath = null
     ): array {
         $recordingUid = self::normalizeRecordingUid((string)($metadata['recording_id'] ?? ''));
         if ($recordingUid === '') {
@@ -310,6 +317,11 @@ final class CockpitRecorderService
 
         if ($beaconPath !== null && is_file($beaconPath)) {
             $this->storeLocalBeaconDiagnostics((int)$recording['id'], $recordingUid, $beaconPath);
+            $recording = $this->recordingByUid($recordingUid) ?: $recording;
+        }
+
+        if ($eventsPath !== null && is_file($eventsPath)) {
+            $this->storeLocalRecordingEvents((int)$recording['id'], $recordingUid, $eventsPath);
             $recording = $this->recordingByUid($recordingUid) ?: $recording;
         }
 
@@ -546,6 +558,14 @@ final class CockpitRecorderService
     public function gpsFileForRecording(string $id): ?array
     {
         return $this->storedEvidenceFileForRecording($id, 'gps_storage_path', self::gpsRoot(), '.gps.json', 'application/json');
+    }
+
+    /**
+     * @return array{path:string,mime:string,filename:string}|null
+     */
+    public function recordingEventsFileForRecording(string $id): ?array
+    {
+        return $this->storedEvidenceFileForRecording($id, 'recording_events_storage_path', self::eventsRoot(), '.events.json', 'application/json');
     }
 
     /**
@@ -907,6 +927,10 @@ final class CockpitRecorderService
             'beacon_available' => trim((string)($recording['beacon_storage_path'] ?? '')) !== '',
             'beacon_file_size' => (int)($recording['beacon_file_size_bytes'] ?? 0),
             'beacon_event_count' => (int)($recording['beacon_event_count'] ?? 0),
+            'recording_events_available' => trim((string)($recording['recording_events_storage_path'] ?? '')) !== '',
+            'recording_event_count' => (int)($recording['recording_event_count'] ?? 0),
+            'recording_warning_count' => (int)($recording['recording_warning_count'] ?? 0),
+            'recording_error_count' => (int)($recording['recording_error_count'] ?? 0),
             'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
             'g3x_file_size' => (int)($recording['g3x_file_size_bytes'] ?? 0),
             'g3x_row_count' => (int)($recording['g3x_row_count'] ?? 0),
@@ -1107,6 +1131,78 @@ final class CockpitRecorderService
         if ($this->hasColumn('beacon_event_count')) {
             $sets[] = 'beacon_event_count = ?';
             $values[] = $eventCount;
+        }
+        $sets[] = 'updated_at = CURRENT_TIMESTAMP';
+        $values[] = $recordingId;
+
+        $stmt = $this->pdo->prepare('UPDATE ' . self::TABLE . ' SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->execute($values);
+    }
+
+    private function storeLocalRecordingEvents(int $recordingId, string $recordingUid, string $path): void
+    {
+        if (!$this->hasColumn('recording_events_storage_path')) {
+            return;
+        }
+        if (!is_file($path)) {
+            return;
+        }
+        $size = (int)filesize($path);
+        if ($size <= 0) {
+            return;
+        }
+        if ($size > 5 * 1024 * 1024) {
+            throw new RuntimeException('Recording events JSON is too large (max 5 MB).');
+        }
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Could not read recording events JSON.');
+        }
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new RuntimeException('Invalid recording events JSON: ' . $e->getMessage());
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Recording events JSON must be an array of event objects.');
+        }
+
+        $eventCount = 0;
+        $warningCount = 0;
+        $errorCount = 0;
+        foreach ($decoded as $event) {
+            if (!is_array($event)) {
+                continue;
+            }
+            $eventCount++;
+            $severity = strtolower(trim((string)($event['severity'] ?? '')));
+            if ($severity === 'warning') {
+                $warningCount++;
+            } elseif ($severity === 'error') {
+                $errorCount++;
+            }
+        }
+
+        $relativePath = self::relativeEventsPath($recordingUid);
+        $absolutePath = self::projectRoot() . '/' . $relativePath;
+        self::ensureDirectory(dirname($absolutePath));
+        if (!copy($path, $absolutePath)) {
+            throw new RuntimeException('Could not store recording events JSON.');
+        }
+
+        $sets = array('recording_events_storage_path = ?', 'recording_events_file_size_bytes = ?');
+        $values = array($relativePath, $size);
+        if ($this->hasColumn('recording_event_count')) {
+            $sets[] = 'recording_event_count = ?';
+            $values[] = $eventCount;
+        }
+        if ($this->hasColumn('recording_warning_count')) {
+            $sets[] = 'recording_warning_count = ?';
+            $values[] = $warningCount;
+        }
+        if ($this->hasColumn('recording_error_count')) {
+            $sets[] = 'recording_error_count = ?';
+            $values[] = $errorCount;
         }
         $sets[] = 'updated_at = CURRENT_TIMESTAMP';
         $values[] = $recordingId;
@@ -2276,6 +2372,12 @@ final class CockpitRecorderService
     {
         $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
         return 'storage/cockpit_recorder/beacon/' . gmdate('Y/m/d') . '/' . $safeUid . '.beacon.json';
+    }
+
+    private static function relativeEventsPath(string $recordingUid): string
+    {
+        $safeUid = self::normalizeRecordingUid($recordingUid) ?: bin2hex(random_bytes(8));
+        return 'storage/cockpit_recorder/events/' . gmdate('Y/m/d') . '/' . $safeUid . '.events.json';
     }
 
     private static function relativeG3XPath(string $recordingUid): string

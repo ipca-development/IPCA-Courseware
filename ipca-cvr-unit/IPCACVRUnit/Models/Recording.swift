@@ -32,6 +32,34 @@ enum TranscriptStatus: String, Codable, CaseIterable {
     }
 }
 
+struct CVRRecordingEvent: Identifiable, Codable, Equatable {
+    var id: String
+    var timestamp: Date
+    var severity: String
+    var type: String
+    var message: String
+    var durationSeconds: Double?
+    var metadata: [String: String]
+
+    init(
+        id: String = UUID().uuidString,
+        timestamp: Date = Date(),
+        severity: String,
+        type: String,
+        message: String,
+        durationSeconds: Double? = nil,
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.severity = severity
+        self.type = type
+        self.message = message
+        self.durationSeconds = durationSeconds
+        self.metadata = metadata
+    }
+}
+
 struct CockpitAircraft: Identifiable, Codable, Equatable {
     var id: Int
     var registration: String
@@ -79,11 +107,14 @@ struct Recording: Identifiable, Codable, Equatable {
     var lastError: String
     var gpsSamplesPath: String?
     var beaconDiagnosticsPath: String?
+    var recordingEventsPath: String?
     var flightSessionID: String
     var segmentIndex: Int
     var previousSegmentID: String?
     var isTestRecording: Bool
     var sourceGapSummary: String?
+    var uploadRetryCount: Int?
+    var nextUploadRetryAt: Date?
 
     init(
         id: String,
@@ -107,11 +138,14 @@ struct Recording: Identifiable, Codable, Equatable {
         lastError: String,
         gpsSamplesPath: String? = nil,
         beaconDiagnosticsPath: String? = nil,
+        recordingEventsPath: String? = nil,
         flightSessionID: String? = nil,
         segmentIndex: Int = 1,
         previousSegmentID: String? = nil,
         isTestRecording: Bool = false,
-        sourceGapSummary: String? = nil
+        sourceGapSummary: String? = nil,
+        uploadRetryCount: Int? = nil,
+        nextUploadRetryAt: Date? = nil
     ) {
         self.id = id
         self.serverID = serverID
@@ -134,11 +168,14 @@ struct Recording: Identifiable, Codable, Equatable {
         self.lastError = lastError
         self.gpsSamplesPath = gpsSamplesPath
         self.beaconDiagnosticsPath = beaconDiagnosticsPath
+        self.recordingEventsPath = recordingEventsPath
         self.flightSessionID = flightSessionID ?? id
         self.segmentIndex = max(1, segmentIndex)
         self.previousSegmentID = previousSegmentID
         self.isTestRecording = isTestRecording
         self.sourceGapSummary = sourceGapSummary
+        self.uploadRetryCount = uploadRetryCount
+        self.nextUploadRetryAt = nextUploadRetryAt
     }
 
     var fileURL: URL {
@@ -169,6 +206,18 @@ struct Recording: Identifiable, Codable, Equatable {
 
     var needsUploadRetry: Bool {
         uploadStatus == .pending || uploadStatus == .failed || uploadStatus == .uploading
+    }
+
+    func shouldAttemptUpload(now: Date = Date()) -> Bool {
+        switch uploadStatus {
+        case .pending, .uploading:
+            return true
+        case .failed:
+            guard let nextUploadRetryAt else { return true }
+            return nextUploadRetryAt <= now
+        case .uploaded:
+            return false
+        }
     }
 }
 
