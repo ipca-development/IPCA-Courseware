@@ -58,6 +58,8 @@ final class CockpitReconstructionService
     /** @var array<string,mixed> */
     private array $lastG3XAlignment = array();
 
+    private string $lastG3XSource = '';
+
     /** @var list<string> */
     private const G3X_COLUMNS = array(
         'Date (yyyy-mm-dd)',
@@ -1869,7 +1871,7 @@ final class CockpitReconstructionService
             'aircraft_ident' => (string)$parsed['aircraft_ident'],
             'import_profile' => (string)($parsed['import_profile'] ?? ''),
             'offset_seconds' => $offsetSeconds,
-            'source' => isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload',
+            'source' => $this->lastG3XSource !== '' ? $this->lastG3XSource : (isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload'),
             'path' => $path,
         );
 
@@ -1895,19 +1897,86 @@ final class CockpitReconstructionService
      */
     private function g3xCsvPathForReconstruction(array $recording, array $options): ?string
     {
+        $this->lastG3XSource = '';
         $override = trim((string)($options['g3x_csv_path'] ?? ''));
         if ($override !== '') {
             $real = realpath($override);
             if ($real === false || !is_file($real)) {
                 throw new RuntimeException('G3X CSV override file not found.');
             }
+            $this->lastG3XSource = 'local_override';
             return $real;
         }
 
-        if (!$this->columnPresent(self::RECORDINGS_TABLE, 'g3x_storage_path')) {
+        if ($this->columnPresent(self::RECORDINGS_TABLE, 'g3x_storage_path')) {
+            $recordingPath = $this->safeStoredPath((string)($recording['g3x_storage_path'] ?? ''), CockpitRecorderService::g3xRoot());
+            if ($recordingPath !== null) {
+                $this->lastG3XSource = 'recording_upload';
+                return $recordingPath;
+            }
+        }
+
+        $garminCsv = $this->allocatedGarminCsvPathForRecording($recording);
+        if ($garminCsv !== null) {
+            $this->lastG3XSource = 'allocated_garmin_csv';
+        }
+        return $garminCsv;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function allocatedGarminCsvPathForRecording(array $recording): ?string
+    {
+        foreach (array('ipca_garmin_csv_files', 'ipca_garmin_csv_flight_summaries') as $table) {
+            if (!$this->tablePresent($table)) {
+                return null;
+            }
+        }
+        $aircraftRegistration = strtoupper(trim((string)($recording['aircraft_registration'] ?? '')));
+        $startedAt = self::dateTime((string)($recording['started_at'] ?? ''));
+        $durationSeconds = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
+            ? max(0.0, (float)$recording['duration_seconds'])
+            : 0.0;
+        if ($aircraftRegistration === '' || $startedAt === null || $durationSeconds <= 0.0) {
             return null;
         }
-        return $this->safeStoredPath((string)($recording['g3x_storage_path'] ?? ''), CockpitRecorderService::g3xRoot());
+        $windowStart = $startedAt->format('Y-m-d H:i:s');
+        $windowEnd = $startedAt->modify('+' . (string)((int)round($durationSeconds)) . ' seconds')->format('Y-m-d H:i:s');
+        $stmt = $this->pdo->prepare("
+            SELECT f.storage_path
+            FROM ipca_garmin_csv_flight_summaries s
+            INNER JOIN ipca_garmin_csv_files f ON f.id = s.csv_file_id
+            WHERE s.derivation_status = 'ok'
+              AND JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.status_label')) = 'Complete'
+              AND UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tail')), f.aircraft_registration, '')) = ?
+              AND s.departure_time_utc BETWEEN DATE_SUB(?, INTERVAL 6 HOUR) AND DATE_ADD(?, INTERVAL 6 HOUR)
+            ORDER BY
+              GREATEST(0, TIMESTAMPDIFF(SECOND, GREATEST(s.departure_time_utc, ?), LEAST(s.arrival_time_utc, ?))) DESC,
+              ABS(TIMESTAMPDIFF(SECOND, s.departure_time_utc, ?)) ASC,
+              f.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array($aircraftRegistration, $windowStart, $windowEnd, $windowStart, $windowEnd, $windowStart));
+        $path = trim((string)$stmt->fetchColumn());
+        return $this->safeGarminCsvEvidencePath($path);
+    }
+
+    private function safeGarminCsvEvidencePath(string $path): ?string
+    {
+        $path = trim($path);
+        if ($path === '') {
+            return null;
+        }
+        $candidate = str_starts_with($path, '/')
+            ? $path
+            : CockpitRecorderService::projectRoot() . '/' . ltrim($path, '/');
+        $real = realpath($candidate);
+        $storageRoot = realpath(CockpitRecorderService::projectRoot() . '/storage');
+        if ($real === false || $storageRoot === false || !str_starts_with($real, $storageRoot) || !is_file($real)) {
+            return null;
+        }
+        return $real;
     }
 
     /**
