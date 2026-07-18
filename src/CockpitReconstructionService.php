@@ -1997,21 +1997,6 @@ final class CockpitReconstructionService
         if ($firstUtc === null) {
             return 0.0;
         }
-        $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($g3xRows);
-        $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
-            ? max(0.0, (float)$recording['duration_seconds'])
-            : 0.0;
-        if ($lastUtc !== null && $duration > 0.0) {
-            $recordingStart = $startedAt->getTimestamp();
-            $recordingEnd = $recordingStart + $duration;
-            $g3xStart = $firstUtc->getTimestamp();
-            $g3xEnd = $lastUtc->getTimestamp();
-            $overlapSeconds = min($recordingEnd, $g3xEnd) - max($recordingStart, $g3xStart);
-            $expectedOverlap = min($duration, max(0, $g3xEnd - $g3xStart));
-            if ($overlapSeconds >= min(60.0, max(1.0, $expectedOverlap * 0.25))) {
-                return 0.0;
-            }
-        }
 
         $baseOffset = 0.0;
         $deltas = array();
