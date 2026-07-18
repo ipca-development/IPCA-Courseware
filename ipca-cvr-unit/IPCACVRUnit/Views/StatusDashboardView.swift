@@ -76,6 +76,7 @@ struct StatusDashboardView: View {
 
                     IPCACard(title: "Internet & Upload", systemImage: "icloud.and.arrow.up") {
                         StatusLine(label: "Internet", value: network.statusText, color: network.canUpload(allowCellular: settings.allowCellularUpload) ? IPCATheme.success : IPCATheme.warning)
+                        StatusLine(label: "Recording ID", value: activeUpload.map { shortID($0.id) } ?? "--", color: IPCATheme.secondaryText)
                         StatusLine(label: "Upload", value: percent(activeUpload?.uploadProgress ?? 0), color: uploadColor)
                         StatusLine(label: "Transcript", value: "\(activeUpload?.transcriptProgress ?? 0)%", color: transcriptColor)
                     }
@@ -249,6 +250,10 @@ struct StatusDashboardView: View {
 
     private func percent(_ value: Double) -> String {
         "\(Int((value * 100).rounded()))%"
+    }
+
+    private func shortID(_ value: String) -> String {
+        String(value.prefix(8))
     }
 
     private func format(duration: TimeInterval) -> String {

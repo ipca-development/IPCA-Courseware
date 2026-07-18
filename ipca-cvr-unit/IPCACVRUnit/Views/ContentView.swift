@@ -69,6 +69,7 @@ private struct PostflightWorkflowView: View {
 
                     if let recording = latestRecording {
                         IPCACard(title: "Latest Recording", systemImage: "waveform.badge.checkmark") {
+                            PostflightStatusLine(label: "Recording ID", value: shortID(recording.id), color: IPCATheme.secondaryText)
                             PostflightStatusLine(label: "Started", value: recording.startedAt.formatted(date: .abbreviated, time: .shortened), color: IPCATheme.navy)
                             PostflightStatusLine(label: "Duration", value: format(duration: recording.duration), color: IPCATheme.navy)
                             PostflightStatusLine(label: "Audio", value: recording.inputDeviceName, color: recording.inputDeviceName.localizedCaseInsensitiveContains("iPhone") ? IPCATheme.warning : IPCATheme.success)
@@ -90,11 +91,11 @@ private struct PostflightWorkflowView: View {
                                     .foregroundStyle(IPCATheme.danger)
                             }
 
-                            Button("Retry Upload Now") {
+                            Button(recording.uploadStatus == .uploaded ? "Upload Complete" : "Retry Upload Now") {
                                 uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!network.canUpload(allowCellular: settings.allowCellularUpload))
+                            .disabled(recording.uploadStatus == .uploaded || !network.canUpload(allowCellular: settings.allowCellularUpload))
                         }
                     } else {
                         IPCACard(title: "No Recording Yet", systemImage: "record.circle") {
@@ -164,6 +165,10 @@ private struct PostflightWorkflowView: View {
         let minutes = (total % 3600) / 60
         let seconds = total % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    private func shortID(_ value: String) -> String {
+        String(value.prefix(8))
     }
 }
 

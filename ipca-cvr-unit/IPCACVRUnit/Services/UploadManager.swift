@@ -67,11 +67,20 @@ final class UploadManager: ObservableObject {
                 try await performUpload(recordingID: recordingID, store: store, settings: settings)
             } catch {
                 await MainActor.run {
-                    store.update(recordingID) {
-                        $0.uploadStatus = .failed
-                        scheduleRetryFields(recording: &$0, reason: error.localizedDescription)
+                    if store.recording(id: recordingID)?.uploadStatus == .uploaded {
+                        store.update(recordingID) {
+                            $0.transcriptStatus = .failed
+                            $0.lastError = "Upload is complete. Transcript follow-up failed: \(error.localizedDescription)"
+                            $0.uploadRetryCount = nil
+                            $0.nextUploadRetryAt = nil
+                        }
+                    } else {
+                        store.update(recordingID) {
+                            $0.uploadStatus = .failed
+                            scheduleRetryFields(recording: &$0, reason: error.localizedDescription)
+                        }
+                        self.scheduleRetry(recordingID: recordingID, store: store, settings: settings)
                     }
-                    self.scheduleRetry(recordingID: recordingID, store: store, settings: settings)
                 }
             }
         }
@@ -127,7 +136,20 @@ final class UploadManager: ObservableObject {
             }
         }
 
-        try await pollTranscript(recordingID: recordingID, serverRecordingID: serverRecordingID, store: store, client: client)
+        do {
+            try await pollTranscript(recordingID: recordingID, serverRecordingID: serverRecordingID, store: store, client: client)
+        } catch {
+            await MainActor.run {
+                store.update(recordingID) {
+                    $0.uploadStatus = .uploaded
+                    $0.uploadProgress = 1
+                    $0.transcriptStatus = .failed
+                    $0.lastError = "Upload complete. Transcript follow-up failed: \(error.localizedDescription)"
+                    $0.uploadRetryCount = nil
+                    $0.nextUploadRetryAt = nil
+                }
+            }
+        }
     }
 
     private func performChunkedUpload(recording: Recording, language: String, client: APIClient, store: RecordingStore) async throws -> UploadResponse {
