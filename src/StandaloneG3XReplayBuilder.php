@@ -6,7 +6,7 @@ require_once __DIR__ . '/CockpitReplayPipeline.php';
 
 final class StandaloneG3XReplayBuilder
 {
-    public const VERSION = 'standalone_g3x_replay_v4';
+    public const VERSION = 'standalone_g3x_replay_v5_restored';
 
     /**
      * @return array<string,mixed>

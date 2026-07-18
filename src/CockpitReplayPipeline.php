@@ -273,7 +273,7 @@ final class CockpitReplayPipeline
             $this->lastTime($positionKnotsEnu),
             $this->lastTime($headingKnots)
         );
-        $duration = $sourceDuration > 0.0 ? $sourceDuration : $recordingDuration;
+        $duration = $recordingDuration > 0.0 ? $recordingDuration : $sourceDuration;
         if ($duration <= 0.0) {
             throw new RuntimeException('Recording duration is zero; cannot build replay timeline.');
         }
@@ -333,7 +333,7 @@ final class CockpitReplayPipeline
                 'replay_duration_s' => round($duration, 3),
                 'recording_duration_s' => round($recordingDuration, 3),
                 'source_duration_s' => round($sourceDuration, 3),
-                'timeline_duration_source' => $sourceDuration > 0.0 ? 'source_data' : 'recording_audio',
+                'timeline_duration_source' => $recordingDuration > 0.0 ? 'recording_audio' : 'source_data',
                 'max_raw_gps_gap_s' => round($maxRawGpsGap, 3),
                 'max_replay_dt_s' => round($maxReplayDt, 3),
                 'profiling' => $this->profiling,

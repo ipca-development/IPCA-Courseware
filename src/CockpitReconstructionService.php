@@ -692,7 +692,6 @@ final class CockpitReconstructionService
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
-        $audioSegments = $this->replayAudioSegments($recording, $summary, $diagnostics);
 
         return array(
             'ok' => true,
@@ -717,7 +716,6 @@ final class CockpitReconstructionService
             'airports' => $this->replayEndpointAirports($recordingId),
             'traffic' => $trafficIsArchive ? $trafficRows : array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
             'traffic_meta' => $trafficMeta,
-            'audio_segments' => $audioSegments,
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
             'replay_sample_count' => $sampleCount,
@@ -728,126 +726,6 @@ final class CockpitReconstructionService
             'phases' => $this->phaseRows($recordingId),
             'events' => $this->eventRows($recordingId),
         );
-    }
-
-    /**
-     * @param array<string,mixed> $recording
-     * @param array<string,mixed> $summary
-     * @param array<string,mixed> $diagnostics
-     * @return list<array<string,mixed>>
-     */
-    private function replayAudioSegments(array $recording, array $summary, array $diagnostics): array
-    {
-        $alignment = isset($summary['g3x_alignment']) && is_array($summary['g3x_alignment'])
-            ? $summary['g3x_alignment']
-            : array();
-        $timelineZeroText = trim((string)($alignment['timeline_zero_utc'] ?? $alignment['first_utc'] ?? ''));
-        $timelineZero = $timelineZeroText !== '' ? self::dateTime($timelineZeroText) : null;
-        if ($timelineZero === null) {
-            $timelineZero = self::dateTime((string)($recording['started_at'] ?? ''));
-        }
-        if ($timelineZero === null) {
-            return array();
-        }
-
-        $replayDuration = isset($diagnostics['replay_duration_s']) && is_numeric($diagnostics['replay_duration_s'])
-            ? max(0.0, (float)$diagnostics['replay_duration_s'])
-            : 0.0;
-        if ($replayDuration <= 0.0 && isset($diagnostics['source_duration_s']) && is_numeric($diagnostics['source_duration_s'])) {
-            $replayDuration = max(0.0, (float)$diagnostics['source_duration_s']);
-        }
-        if ($replayDuration <= 0.0) {
-            $replayDuration = max(0.0, (float)($recording['duration_seconds'] ?? 0.0));
-        }
-        if ($replayDuration <= 0.0) {
-            return array();
-        }
-
-        $aircraftRegistration = strtoupper(trim((string)($recording['aircraft_registration'] ?? '')));
-        if ($aircraftRegistration === '') {
-            return $this->singleReplayAudioSegment($recording, $timelineZero);
-        }
-
-        $windowStart = $timelineZero->modify('-10 minutes');
-        $windowEnd = $timelineZero->modify('+' . (string)((int)ceil($replayDuration + 600.0)) . ' seconds');
-        $stmt = $this->pdo->prepare('
-            SELECT id, recording_uid, started_at, duration_seconds, storage_path, original_filename
-            FROM ' . self::RECORDINGS_TABLE . '
-            WHERE deleted_at IS NULL
-              AND upload_status = ?
-              AND storage_path IS NOT NULL
-              AND storage_path <> ?
-              AND UPPER(COALESCE(aircraft_registration, ?)) = ?
-              AND started_at BETWEEN ? AND ?
-            ORDER BY started_at ASC, id ASC
-        ');
-        $stmt->execute(array(
-            'uploaded',
-            '',
-            '',
-            $aircraftRegistration,
-            $windowStart->format('Y-m-d H:i:s'),
-            $windowEnd->format('Y-m-d H:i:s'),
-        ));
-
-        $segments = array();
-        $replayStart = $timelineZero->getTimestamp();
-        $replayEnd = $replayStart + $replayDuration;
-        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
-            $startedAt = self::dateTime((string)($row['started_at'] ?? ''));
-            $duration = isset($row['duration_seconds']) && is_numeric($row['duration_seconds'])
-                ? max(0.0, (float)$row['duration_seconds'])
-                : 0.0;
-            if ($startedAt === null || $duration <= 0.0) {
-                continue;
-            }
-            $audioStart = (float)($startedAt->getTimestamp() - $replayStart);
-            $audioEnd = $audioStart + $duration;
-            if ($audioEnd < 0.0 || $audioStart > ($replayEnd - $replayStart)) {
-                continue;
-            }
-            if ($this->safeStoredPath((string)($row['storage_path'] ?? ''), CockpitRecorderService::audioRoot()) === null) {
-                continue;
-            }
-            $segments[] = array(
-                'id' => (int)$row['id'],
-                'recording_id' => (string)($row['recording_uid'] ?? ''),
-                'url' => '/admin/cockpit_recorder_audio.php?id=' . (int)$row['id'],
-                'replay_start_s' => round($audioStart, 3),
-                'replay_end_s' => round($audioEnd, 3),
-                'duration_s' => round($duration, 3),
-                'started_at' => $startedAt->format(DateTimeInterface::ATOM),
-                'label' => (string)($row['original_filename'] ?? ('Recording ' . (int)$row['id'])),
-            );
-        }
-
-        return $segments !== array() ? $segments : $this->singleReplayAudioSegment($recording, $timelineZero);
-    }
-
-    /**
-     * @param array<string,mixed> $recording
-     * @return list<array<string,mixed>>
-     */
-    private function singleReplayAudioSegment(array $recording, DateTimeImmutable $timelineZero): array
-    {
-        $startedAt = self::dateTime((string)($recording['started_at'] ?? ''));
-        $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
-            ? max(0.0, (float)$recording['duration_seconds'])
-            : 0.0;
-        if ($startedAt === null || $duration <= 0.0) {
-            return array();
-        }
-        $audioStart = (float)($startedAt->getTimestamp() - $timelineZero->getTimestamp());
-        return array(array(
-            'id' => (int)($recording['id'] ?? 0),
-            'recording_id' => (string)($recording['recording_uid'] ?? ''),
-            'url' => '/admin/cockpit_recorder_audio.php?id=' . (int)($recording['id'] ?? 0),
-            'replay_start_s' => round($audioStart, 3),
-            'replay_end_s' => round($audioStart + $duration, 3),
-            'duration_s' => round($duration, 3),
-            'started_at' => $startedAt->format(DateTimeInterface::ATOM),
-            'label' => (string)($recording['original_filename'] ?? ('Recording ' . (int)($recording['id'] ?? 0))),
-        ));
     }
 
     public function streamReplayPayloadV2Json(string $id, bool $compact = false, int $sampleStride = 1): void
@@ -1986,8 +1864,6 @@ final class CockpitReconstructionService
             return array();
         }
 
-        $firstUtc = G3XFlightStreamParser::firstUtcTimestamp($parsed['rows']);
-        $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($parsed['rows']);
         $offsetSeconds = $this->computeG3XOffsetSeconds($recording, $gps, $parsed['rows'], $startedAt);
         $this->lastG3XAlignment = array(
             'available' => true,
@@ -1995,9 +1871,6 @@ final class CockpitReconstructionService
             'aircraft_ident' => (string)$parsed['aircraft_ident'],
             'import_profile' => (string)($parsed['import_profile'] ?? ''),
             'offset_seconds' => $offsetSeconds,
-            'first_utc' => $firstUtc !== null ? $firstUtc->format(DateTimeInterface::ATOM) : null,
-            'last_utc' => $lastUtc !== null ? $lastUtc->format(DateTimeInterface::ATOM) : null,
-            'timeline_zero_utc' => $firstUtc !== null ? $firstUtc->format(DateTimeInterface::ATOM) : null,
             'source' => $this->lastG3XSource !== '' ? $this->lastG3XSource : (isset($options['g3x_csv_path']) ? 'local_override' : 'recording_upload'),
             'path' => $path,
         );
@@ -2124,7 +1997,6 @@ final class CockpitReconstructionService
         if ($firstUtc === null) {
             return 0.0;
         }
-        $g3xTimelineOffset = (float)($startedAt->getTimestamp() - $firstUtc->getTimestamp());
         $lastUtc = G3XFlightStreamParser::lastUtcTimestamp($g3xRows);
         $duration = isset($recording['duration_seconds']) && is_numeric($recording['duration_seconds'])
             ? max(0.0, (float)$recording['duration_seconds'])
@@ -2137,7 +2009,7 @@ final class CockpitReconstructionService
             $overlapSeconds = min($recordingEnd, $g3xEnd) - max($recordingStart, $g3xStart);
             $expectedOverlap = min($duration, max(0, $g3xEnd - $g3xStart));
             if ($overlapSeconds >= min(60.0, max(1.0, $expectedOverlap * 0.25))) {
-                return $g3xTimelineOffset;
+                return 0.0;
             }
         }
 
@@ -2182,7 +2054,7 @@ final class CockpitReconstructionService
                 : (((float)$deltas[$mid - 1] + (float)$deltas[$mid]) / 2.0);
         }
 
-        return $baseOffset + $g3xTimelineOffset;
+        return $baseOffset + ($startedAt->getTimestamp() - $firstUtc->getTimestamp());
     }
 
     /**
@@ -2579,10 +2451,7 @@ final class CockpitReconstructionService
                 $onProgress(self::STAGE_CANONICAL, 18, 'Building G3X-only canonical timeline');
             }
 
-            $duration = 0.0;
-            foreach ($g3xSamples as $g3xSample) {
-                $duration = max($duration, (float)($g3xSample['seconds'] ?? 0.0));
-            }
+            $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
             $g3xRowsForSamples = array();
             $samples = array();
             foreach ($g3xSamples as $g3xSample) {
