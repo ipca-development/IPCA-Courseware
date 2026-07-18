@@ -2178,6 +2178,8 @@ cw_header('Cockpit Recorder Replay');
   let standalonePlaying = false;
   let standaloneStartedMs = 0;
   let standaloneStartedT = 0;
+  let sessionAudioSegments = [];
+  let sessionAudioState = { playing: false, startedMs: 0, startedT: 0, currentSegmentId: null };
 
   const CAMERA_DEFAULTS = {
     rangeM: 125,
@@ -6073,6 +6075,9 @@ cw_header('Cockpit Recorder Replay');
     if (standaloneReplay && standalonePlaying) {
       standaloneStartedMs = performance.now();
       standaloneStartedT = activeT;
+    } else if (sessionAudioState.playing) {
+      sessionAudioState.startedMs = performance.now();
+      sessionAudioState.startedT = activeT;
     } else if (visualFallbackPlaying) {
       visualFallbackStartedMs = performance.now();
       visualFallbackStartedT = activeT;
@@ -6083,10 +6088,52 @@ cw_header('Cockpit Recorder Replay');
     }
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
-    if (!standaloneReplay && syncAudio && Number.isFinite(audio.duration)) {
+    if (!standaloneReplay && syncAudio && sessionAudioSegments.length > 1) {
+      syncSessionAudio(activeT, sessionAudioState.playing);
+    } else if (!standaloneReplay && syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
     safeRenderCesium(snap);
+  }
+
+  function segmentAt(seconds) {
+    const t = Number(seconds) || 0;
+    return sessionAudioSegments.find((segment) => {
+      const start = Number(segment.start_offset_seconds) || 0;
+      const duration = Number(segment.duration_seconds) || 0;
+      return t >= start && t < start + duration;
+    }) || null;
+  }
+
+  function syncSessionAudio(seconds, shouldPlay) {
+    const segment = segmentAt(seconds);
+    if (!segment) {
+      audio.pause();
+      sessionAudioState.currentSegmentId = null;
+      return;
+    }
+    const source = String(segment.audio_url || '');
+    const segmentId = String(segment.id || segment.recording_id || source);
+    if (sessionAudioState.currentSegmentId !== segmentId || audio.getAttribute('src') !== source) {
+      audio.pause();
+      audio.setAttribute('src', source);
+      audio.load();
+      sessionAudioState.currentSegmentId = segmentId;
+    }
+    const localT = Math.max(0, (Number(seconds) || 0) - (Number(segment.start_offset_seconds) || 0));
+    if (Number.isFinite(audio.duration)) {
+      audio.currentTime = Math.min(localT, audio.duration || localT);
+    } else {
+      audio.currentTime = localT;
+    }
+    if (shouldPlay && audio.paused) {
+      try {
+        const promise = audio.play();
+        if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+      } catch (err) {
+        audio.pause();
+      }
+    }
   }
 
   function updateCockpitPlayback() {
@@ -6096,6 +6143,15 @@ cw_header('Cockpit Recorder Replay');
       activeT = Math.max(0, Math.min(maxT, standaloneStartedT + elapsed));
       if (activeT >= maxT) {
         standalonePlaying = false;
+        playButton.textContent = 'Play';
+      }
+    } else if (sessionAudioState.playing) {
+      const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
+      activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed));
+      syncSessionAudio(activeT, true);
+      if (activeT >= maxT) {
+        sessionAudioState.playing = false;
+        audio.pause();
         playButton.textContent = 'Play';
       }
     } else if (visualFallbackPlaying) {
@@ -6138,6 +6194,26 @@ cw_header('Cockpit Recorder Replay');
       } else if (animationFrame !== null) {
         cancelAnimationFrame(animationFrame);
         animationFrame = null;
+      }
+      return;
+    }
+    if (sessionAudioSegments.length > 1) {
+      sessionAudioState.playing = !sessionAudioState.playing;
+      playButton.textContent = sessionAudioState.playing ? 'Pause' : 'Play';
+      if (sessionAudioState.playing) {
+        sessionAudioState.startedMs = performance.now();
+        sessionAudioState.startedT = activeT;
+        syncSessionAudio(activeT, true);
+        lastRenderMs = null;
+        if (animationFrame === null) {
+          animationFrame = requestAnimationFrame(animatePlayback);
+        }
+      } else {
+        audio.pause();
+        if (animationFrame !== null) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = null;
+        }
       }
       return;
     }
@@ -6458,6 +6534,7 @@ cw_header('Cockpit Recorder Replay');
   }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
+    if (sessionAudioSegments.length > 1) return;
     if (!standaloneReplay && audio.paused) {
       seek(audio.currentTime, false, true);
     }
@@ -6472,6 +6549,7 @@ cw_header('Cockpit Recorder Replay');
     togglePlayback();
   });
   audio.addEventListener('pause', () => {
+    if (sessionAudioState.playing) return;
     if (visualFallbackPlaying) return;
     playButton.textContent = 'Play';
     if (animationFrame !== null) {
@@ -6488,7 +6566,7 @@ cw_header('Cockpit Recorder Replay');
   });
 
   function animatePlayback() {
-    if (!payload || (standaloneReplay ? !standalonePlaying : (audio.paused && !visualFallbackPlaying))) {
+    if (!payload || (standaloneReplay ? !standalonePlaying : (audio.paused && !visualFallbackPlaying && !sessionAudioState.playing))) {
       animationFrame = null;
       return;
     }
@@ -6568,8 +6646,17 @@ cw_header('Cockpit Recorder Replay');
     }));
 
     payload = { ...data, samples };
+    sessionAudioSegments.splice(0, sessionAudioSegments.length, ...((payload.recording && Array.isArray(payload.recording.audio_segments)) ? payload.recording.audio_segments : []));
+    if (sessionAudioSegments.length > 1) {
+      const firstSegment = sessionAudioSegments.find((segment) => Number(segment.start_offset_seconds) === 0) || sessionAudioSegments[0];
+      if (firstSegment && firstSegment.audio_url) {
+        audio.setAttribute('src', String(firstSegment.audio_url));
+        audio.load();
+      }
+    }
     positionKeyframes = buildPositionKeyframes(payload.samples || []);
-    const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), 1);
+    const audioSegmentMaxT = sessionAudioSegments.reduce((max, segment) => Math.max(max, (Number(segment.start_offset_seconds) || 0) + (Number(segment.duration_seconds) || 0)), 0);
+    const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), audioSegmentMaxT, 1);
     timeline.max = String(maxT);
     setReplayLoadProgress(97, 'starting visual engine');
     try {

@@ -600,6 +600,7 @@ final class CockpitReconstructionService
                     'adsb_hex' => (string)($recording['aircraft_adsb_hex'] ?? ''),
                 ),
                 'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $recordingId,
+                'audio_segments' => $this->sessionAudioSegments($recording),
                 'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
                 'timeline_status' => (string)($recording['timeline_status'] ?? 'not_started'),
                 'adsb_status' => (string)($recording['adsb_status'] ?? 'not_started'),
@@ -708,6 +709,7 @@ final class CockpitReconstructionService
                     'adsb_hex' => (string)($recording['aircraft_adsb_hex'] ?? ''),
                 ),
                 'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $recordingId,
+                'audio_segments' => $this->sessionAudioSegments($recording),
                 'reconstruction_status' => (string)($recording['reconstruction_status'] ?? 'not_started'),
                 'g3x_available' => trim((string)($recording['g3x_storage_path'] ?? '')) !== '',
             ),
@@ -770,6 +772,67 @@ final class CockpitReconstructionService
             echo json_encode($sample, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         }
         echo ']}';
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    private function sessionAudioSegments(array $recording): array
+    {
+        $recordingId = (int)($recording['id'] ?? 0);
+        $sessionUid = trim((string)($recording['flight_session_uid'] ?? ''));
+        $baseTs = strtotime(trim((string)($recording['started_at'] ?? '')));
+        if ($recordingId <= 0 || $baseTs === false) {
+            return array();
+        }
+
+        if ($sessionUid === '') {
+            return array(array(
+                'id' => $recordingId,
+                'recording_id' => (string)($recording['recording_uid'] ?? ''),
+                'segment_index' => (int)($recording['flight_segment_index'] ?? 1),
+                'start_offset_seconds' => 0.0,
+                'duration_seconds' => (float)($recording['duration_seconds'] ?? 0),
+                'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $recordingId,
+                'source_gap_summary' => (string)($recording['source_gap_summary'] ?? ''),
+            ));
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT id, recording_uid, started_at, duration_seconds, flight_segment_index, previous_segment_uid, source_gap_summary
+            FROM " . self::RECORDINGS_TABLE . "
+            WHERE flight_session_uid = ?
+              AND deleted_at IS NULL
+              AND storage_path IS NOT NULL
+              AND storage_path <> ''
+            ORDER BY flight_segment_index ASC, started_at ASC, id ASC
+        ");
+        $stmt->execute(array($sessionUid));
+
+        $segments = array();
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $segmentTs = strtotime((string)($row['started_at'] ?? ''));
+            if ($segmentTs === false) {
+                continue;
+            }
+            $id = (int)($row['id'] ?? 0);
+            $segments[] = array(
+                'id' => $id,
+                'recording_id' => (string)($row['recording_uid'] ?? ''),
+                'segment_index' => (int)($row['flight_segment_index'] ?? 1),
+                'start_offset_seconds' => (float)($segmentTs - $baseTs),
+                'duration_seconds' => (float)($row['duration_seconds'] ?? 0),
+                'audio_url' => '/admin/cockpit_recorder_audio.php?id=' . $id,
+                'previous_segment_uid' => (string)($row['previous_segment_uid'] ?? ''),
+                'source_gap_summary' => (string)($row['source_gap_summary'] ?? ''),
+            );
+        }
+
+        return $segments;
     }
 
     /**

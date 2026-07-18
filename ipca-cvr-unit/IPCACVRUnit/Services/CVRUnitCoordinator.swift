@@ -141,6 +141,14 @@ final class CVRUnitCoordinator: ObservableObject {
                 self?.appendEvent(event)
             }
         }
+        audio.onAudioSegmentsChanged = { [weak self] segments, activePath in
+            Task { @MainActor in
+                guard let self,
+                      let recordingID = audio.activeRecordingID,
+                      let startedAt = audio.activeRecordingStartedAt else { return }
+                self.saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: segments, activeSegmentPath: activePath)
+            }
+        }
 
         remoteIPads.$resetCommandRequestedAt
             .compactMap { $0 }
@@ -152,8 +160,10 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        handleBeaconTriggerEnabled(settings.isBeaconTriggerEnabled)
-        recoverInterruptedRecordingIfNeeded()
+        Task { @MainActor in
+            await recoverInterruptedRecordingIfNeeded()
+            handleBeaconTriggerEnabled(settings.isBeaconTriggerEnabled)
+        }
     }
 
     func appBecameActive() {
@@ -201,7 +211,7 @@ final class CVRUnitCoordinator: ObservableObject {
             await startRecording()
         case .off:
             guard audio?.isRecording == true else { return }
-            stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
+            await stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
         }
     }
 
@@ -246,7 +256,7 @@ final class CVRUnitCoordinator: ObservableObject {
             refreshBeaconRecorderToken(reason: "Recording started.")
             if let recordingID = audio.activeRecordingID, let startedAt = audio.activeRecordingStartedAt {
                 gps?.startCapture(recordingID: recordingID, startedAt: startedAt)
-                saveActiveManifest(recordingID: recordingID, startedAt: startedAt)
+                saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: [], activeSegmentPath: nil)
             }
             mode = .recording
             log("Recording started: \(audio.activeRecordingID ?? "unknown").")
@@ -257,14 +267,14 @@ final class CVRUnitCoordinator: ObservableObject {
         }
     }
 
-    private func stopRecording(reason: String) {
+    private func stopRecording(reason: String) async {
         guard let audio, let store, let settings else { return }
         let sessionID = activeRecordingSessionID
         mode = .stopping
         log("\(reason) Stopping and storing cockpit voice recording.")
         UIApplication.shared.isIdleTimerDisabled = false
 
-        guard var recording = audio.stopRecording(language: settings.language) else {
+        guard var recording = await audio.stopRecording(language: settings.language) else {
             mode = .standby
             return
         }
@@ -398,7 +408,7 @@ final class CVRUnitCoordinator: ObservableObject {
         }
     }
 
-    private func saveActiveManifest(recordingID: String, startedAt: Date) {
+    private func saveActiveManifest(recordingID: String, startedAt: Date, finalizedSegments: [AudioRecordingSegment], activeSegmentPath: String?) {
         guard let settings else { return }
         do {
             let manifest = ActiveRecordingManifest(
@@ -409,6 +419,8 @@ final class CVRUnitCoordinator: ObservableObject {
                 recorderTokenHex: activeRecorderToken?.map { String(format: "%02X", $0) }.joined() ?? "",
                 startedAt: startedAt,
                 filePath: try RecordingStore.recordingsDirectory().appendingPathComponent("\(recordingID).m4a").path,
+                finalizedSegments: finalizedSegments,
+                activeSegmentPath: activeSegmentPath,
                 aircraftID: settings.selectedAircraft?.id,
                 aircraftRegistration: settings.selectedAircraft?.registration,
                 aircraftDisplayName: settings.selectedAircraft?.displayName,
@@ -426,7 +438,7 @@ final class CVRUnitCoordinator: ObservableObject {
         }
     }
 
-    private func recoverInterruptedRecordingIfNeeded() {
+    private func recoverInterruptedRecordingIfNeeded() async {
         guard let store, let settings else { return }
         do {
             let url = try Self.activeManifestURL()
@@ -435,18 +447,17 @@ final class CVRUnitCoordinator: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let manifest = try decoder.decode(ActiveRecordingManifest.self, from: data)
-            let audioURL = try RecordingStore.resolvedFileURL(
-                preferredPath: manifest.filePath,
-                recordingID: manifest.recordingID,
-                fallbackFilename: "\(manifest.recordingID).m4a"
-            )
-            let size = (try? audioURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-            guard size > 0 else {
+            let finalizedSegments = (manifest.finalizedSegments ?? []).filter { FileManager.default.fileExists(atPath: $0.filePath) && $0.duration > 0 }
+            guard !finalizedSegments.isEmpty else {
                 clearActiveManifest()
+                log("Interrupted recording had no finalized segments to recover.")
                 return
             }
-            let duration = Self.audioDuration(url: audioURL)
-            var events = [
+            let audioURL = try RecordingStore.recordingsDirectory().appendingPathComponent("\(manifest.recordingID).m4a")
+            try await AudioRecorderManager.mergeSegments(finalizedSegments, outputURL: audioURL)
+            let size = (try? audioURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+            let duration = finalizedSegments.reduce(0) { $0 + max(0, $1.duration) }
+            let events = [
                 CVRRecordingEvent(severity: "error", type: "app_restart", message: "Cockpit Recorder app restarted while an active recording manifest existed."),
                 CVRRecordingEvent(severity: "warning", type: "audio_gap", message: "Audio after app termination is missing and must be represented as generated silence in replay.")
             ]
@@ -488,7 +499,6 @@ final class CVRUnitCoordinator: ObservableObject {
             recoveredNextSegmentIndex = manifest.segmentIndex + 1
             recoveredPreviousSegmentEndedAt = manifest.startedAt.addingTimeInterval(duration)
             clearActiveManifest()
-            events.removeAll()
             log("Recovered interrupted recording segment: \(manifest.recordingID)")
         } catch {
             log("Active recording recovery failed: \(error.localizedDescription)")
@@ -523,12 +533,6 @@ final class CVRUnitCoordinator: ObservableObject {
         return dir.appendingPathComponent("active-recording-manifest.json")
     }
 
-    private static func audioDuration(url: URL) -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        let seconds = CMTimeGetSeconds(asset.duration)
-        return seconds.isFinite && seconds > 0 ? seconds : 0
-    }
-
     private func log(_ message: String) {
         let formatter = ISO8601DateFormatter()
         let line = "\(formatter.string(from: Date())) \(message)"
@@ -547,6 +551,8 @@ private struct ActiveRecordingManifest: Codable {
     var recorderTokenHex: String
     var startedAt: Date
     var filePath: String
+    var finalizedSegments: [AudioRecordingSegment]?
+    var activeSegmentPath: String?
     var aircraftID: Int?
     var aircraftRegistration: String?
     var aircraftDisplayName: String?

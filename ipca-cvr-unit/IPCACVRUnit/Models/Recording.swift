@@ -60,6 +60,14 @@ struct CVRRecordingEvent: Identifiable, Codable, Equatable {
     }
 }
 
+struct AudioRecordingSegment: Codable, Equatable {
+    var index: Int
+    var filePath: String
+    var startedAt: Date
+    var duration: TimeInterval
+    var fileSize: Int64
+}
+
 struct CockpitAircraft: Identifiable, Codable, Equatable {
     var id: Int
     var registration: String
