@@ -434,15 +434,13 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-immersive.is-panel-layout .replay-engine-pane {
   display: flex;
-  flex-direction: column;
   left: 0;
   top: 0;
   bottom: 0;
   width: var(--panel-engine-width);
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 14px;
-  padding: 86px 6px 13px;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 58px;
   box-sizing: border-box;
   background: linear-gradient(90deg, rgba(15, 23, 42, .68), rgba(15, 23, 42, .50));
   border-right: 1px solid rgba(226, 232, 240, .16);
@@ -742,6 +740,9 @@ cw_header('Cockpit Recorder Replay');
 .replay-engine-sidebar-title,
 .replay-engine-sidebar-clock {
   display: none;
+  position: absolute;
+  left: 8px;
+  right: 8px;
   color: rgba(248, 250, 252, .98);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-weight: 900;
@@ -755,33 +756,34 @@ cw_header('Cockpit Recorder Replay');
   display: block;
 }
 .replay-engine-sidebar-title {
-  min-height: 38px;
-  font-size: clamp(26px, 3.4vw, 42px);
+  top: 60px;
+  font-size: clamp(14px, 1.6vw, 21px);
   line-height: 1;
 }
 .replay-engine-sidebar-clock {
-  margin-top: auto;
-  padding: 4px 2px 0;
+  bottom: 42px;
+  padding: 0 2px;
 }
 .replay-engine-date {
-  font-size: clamp(14px, 1.7vw, 24px);
-  line-height: 1.2;
+  font-size: clamp(8px, .72vw, 11px);
+  line-height: 1;
+  white-space: nowrap;
 }
 .replay-engine-local-time {
-  margin-top: 12px;
-  font-size: clamp(14px, 1.65vw, 23px);
+  margin-top: 5px;
+  font-size: clamp(8px, .72vw, 11px);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .replay-engine-utc-time {
-  margin-top: 7px;
+  margin-top: 4px;
   color: rgba(248, 250, 252, .46);
-  font-size: clamp(10px, 1.15vw, 17px);
+  font-size: clamp(7px, .62vw, 9px);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .engine-gauge {
-  margin: 0 2px 16px;
+  margin: 0 2px 20px;
 }
 .engine-row-head {
   display: flex;
@@ -1553,9 +1555,9 @@ cw_header('Cockpit Recorder Replay');
   width: min(56vw, 620px);
   transform: translate(-50%, -50%);
   opacity: .11;
-  mix-blend-mode: screen;
-  filter: invert(1) saturate(.25) drop-shadow(0 2px 18px rgba(255, 255, 255, .10));
+  display: none;
 }
+.replay-immersive.is-replay-started .replay-ipca-watermark { display: block; }
 .replay-ipca-watermark img {
   display: block;
   width: 100%;
@@ -4929,6 +4931,7 @@ cw_header('Cockpit Recorder Replay');
     playButton.textContent = isPlaying ? 'Ⅱ' : '▶';
     playButton.setAttribute('aria-label', isPlaying ? 'Pause replay' : 'Play replay');
     playButton.classList.toggle('is-playing', isPlaying);
+    if (isPlaying && root) root.classList.add('is-replay-started');
   }
 
   function syncPlaybackSpeed() {
