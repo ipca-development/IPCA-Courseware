@@ -7,8 +7,8 @@ require_once __DIR__ . '/CockpitReconstructionProfiler.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/PfdProfileService.php';
 require_once __DIR__ . '/CockpitAircraftService.php';
-require_once __DIR__ . '/CockpitAdsbEnrichmentService.php';
 require_once __DIR__ . '/AdsbTrafficArchiveService.php';
+require_once __DIR__ . '/LocalTrafficArchiveRepository.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -671,14 +671,6 @@ final class CockpitReconstructionService
             ? (array)$trafficPayload['traffic']
             : $this->loadAdsbTraffic($recordingId);
         $trafficIsArchive = $trafficPayload !== null && ($trafficPayload['traffic'] ?? array()) !== array();
-        if (!$trafficIsArchive && $trafficRows === array()) {
-            try {
-                $trafficRows = $this->ensureAdsbTrafficForReplay($recording);
-            } catch (Throwable $e) {
-                $trafficFetchError = $e->getMessage();
-                $trafficRows = $this->loadAdsbTraffic($recordingId);
-            }
-        }
         $trafficAircraft = $this->loadAdsbTrafficAircraft($recordingId);
         $trafficMeta = is_array($trafficPayload['meta'] ?? null)
             ? $trafficPayload['meta']
@@ -2482,25 +2474,14 @@ final class CockpitReconstructionService
         if ($startedAt === '' || $durationSeconds <= 0) {
             return null;
         }
+        $recordingId = (int)($recording['id'] ?? 0);
         $start = (new DateTimeImmutable($startedAt, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->modify('-30 seconds');
         $end = $start->modify('+' . ($durationSeconds + 60) . ' seconds');
-        $archive = new AdsbTrafficArchiveService($this->pdo);
+        $archive = new LocalTrafficArchiveRepository($this->pdo);
         $pathPoints = $this->replayPathPoints($recordingId);
         $payload = $pathPoints !== array()
             ? $archive->trafficForReplayPath($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM), $pathPoints, 25.0)
             : $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
-        $coverage = (string)($payload['meta']['coverage_status'] ?? '');
-        if (in_array($coverage, array('missing', 'queued'), true)) {
-            try {
-                if ($pathPoints !== array()) {
-                    $archive->schedulePathCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM), $pathPoints, 'cockpit_recording', $recordingId, 25.0);
-                } else {
-                    $archive->scheduleKtrmCoverage($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
-                }
-            } catch (Throwable) {
-                // Existing archive data is still usable; scheduling failure is reported by coverage status/admin tooling.
-            }
-        }
         if (($payload['traffic'] ?? array()) === array() && $pathPoints !== array()) {
             $fallback = $archive->trafficForReplay($start->format(DateTimeInterface::ATOM), $end->format(DateTimeInterface::ATOM));
             if (($fallback['traffic'] ?? array()) !== array()) {
@@ -2542,30 +2523,6 @@ final class CockpitReconstructionService
             }
         }
         return $points;
-    }
-
-    /**
-     * @param array<string,mixed> $recording
-     * @return list<array<string,mixed>>
-     */
-    private function ensureAdsbTrafficForReplay(array $recording): array
-    {
-        $recordingId = (int)($recording['id'] ?? 0);
-        if ($recordingId <= 0) {
-            return array();
-        }
-        if (!CockpitAdsbEnrichmentService::tablesPresent($this->pdo)) {
-            return array();
-        }
-
-        $status = (new CockpitAdsbEnrichmentService($this->pdo))->statusForRecording($recordingId);
-        $currentStatus = strtolower(trim((string)($status['status'] ?? '')));
-        if (in_array($currentStatus, array('ready', 'not_available'), true)) {
-            return $this->loadAdsbTraffic($recordingId);
-        }
-
-        (new CockpitAdsbEnrichmentService($this->pdo))->enrich((string)($recording['recording_uid'] ?? $recordingId));
-        return $this->loadAdsbTraffic($recordingId);
     }
 
     /**

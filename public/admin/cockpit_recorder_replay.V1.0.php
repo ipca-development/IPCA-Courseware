@@ -388,8 +388,8 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive {
   position: relative;
   width: 100%;
-  height: calc(100vh - 128px);
-  min-height: 440px;
+  height: calc(100vh - 88px);
+  min-height: 480px;
   background: #000;
   overflow: hidden;
   --attitude-center-x: 50%;
@@ -408,15 +408,10 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-timelineContainer,
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
-.replay-immersive:fullscreen,
-.replay-immersive:-webkit-full-screen {
-  height: 100vh;
-  min-height: 100vh;
-}
 .replay-immersive.is-panel-layout {
   --panel-engine-width: clamp(118px, 13.5vw, 150px);
   --panel-bottom-band: calc(clamp(104px, 17vh, 152px) + 50px);
-  --panel-playback-height: 34px;
+  --panel-playback-height: 38px;
 }
 .replay-engine-pane,
 .replay-bottom-instrument-pane {
@@ -1497,134 +1492,25 @@ cw_header('Cockpit Recorder Replay');
   line-height: 1.25;
   text-align: left;
 }
-.replay-ipca-watermark {
-  position: absolute;
-  top: 18px;
-  right: 20px;
-  z-index: 18;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  opacity: .34;
-  color: rgba(255, 255, 255, .86);
-  font: 900 15px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, .62);
-}
-.replay-ipca-watermark::before {
-  content: "";
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .78), rgba(255, 255, 255, 0) 34%),
-    linear-gradient(135deg, rgba(20, 184, 166, .78), rgba(37, 99, 235, .62), rgba(15, 23, 42, .08));
-  box-shadow: 0 0 18px rgba(45, 212, 191, .20);
-}
 .replay-dock {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 24;
+  z-index: 20;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: 12px 34px;
-  column-gap: 12px;
-  row-gap: 3px;
+  grid-template-columns: auto auto auto auto auto minmax(0, 1fr) max-content;
+  gap: 10px;
   align-items: center;
-  padding: 20px 14px 7px;
-  background: linear-gradient(0deg, rgba(0, 0, 0, .78) 0%, rgba(0, 0, 0, .44) 58%, rgba(0, 0, 0, 0) 100%);
-  pointer-events: none;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(6px);
 }
-.replay-control-cluster {
-  grid-column: 1 / 2;
-  grid-row: 2 / 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  pointer-events: auto;
-}
-.replay-settings-cluster {
-  grid-column: 2 / 3;
-  grid-row: 2 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  pointer-events: auto;
-}
-.replay-dock a { color: #f8fafc; text-decoration: none; white-space: nowrap; }
+.replay-dock a { color: #e2e8f0; font-size: 13px; text-decoration: none; white-space: nowrap; }
 .replay-dock a:hover { color: #fff; }
-.replay-button,
-.replay-icon-button,
-.replay-speed-button {
-  width: 30px;
-  height: 30px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, .28);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, .18);
-  color: rgba(255, 255, 255, .92);
-  font: 800 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  cursor: pointer;
-  box-shadow: 0 1px 7px rgba(0, 0, 0, .22), inset 0 0 0 1px rgba(255, 255, 255, .04);
-}
-.replay-button:hover,
-.replay-icon-button:hover,
-.replay-speed-button:hover,
-.replay-settings-button.is-active {
-  background: rgba(255, 255, 255, .18);
-  color: #fff;
-}
-.replay-skip-button {
-  position: relative;
-  font-size: 10px;
-  letter-spacing: -.02em;
-}
-.replay-play-button {
-  background: rgba(255, 255, 255, .14);
-  font-size: 12px;
-}
-.replay-speed-button {
-  width: 42px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.replay-settings-button {
-  font-size: 15px;
-}
-.replay-range {
-  grid-column: 1 / 3;
-  grid-row: 1 / 2;
-  width: 100%;
-  min-width: 0;
-  accent-color: #38bdf8;
-  margin: 0;
-  pointer-events: auto;
-}
-.replay-range::-webkit-slider-runnable-track {
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .46);
-}
-.replay-range::-webkit-slider-thumb {
-  width: 11px;
-  height: 11px;
-  margin-top: -4px;
-}
-.replay-time {
-  min-width: 8ch;
-  color: rgba(255, 255, 255, .94);
-  font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, .62);
-}
+.replay-button { border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 700; padding: 8px 14px; cursor: pointer; }
+.replay-range { width: 100%; min-width: 0; accent-color: #60a5fa; margin: 0; }
+.replay-time { min-width: 5.5ch; color: #e2e8f0; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .replay-load { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; color: #e2e8f0; background: #0f172a; font-size: 14px; }
 .replay-load-card {
   width: min(460px, 78vw);
@@ -1660,7 +1546,14 @@ cw_header('Cockpit Recorder Replay');
 }
 .cesium-unavailable { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: #0f172a; text-align: center; padding: 28px; z-index: 10; }
 .replay-select { border: 1px solid rgba(226, 232, 240, .45); border-radius: 8px; background: rgba(15, 23, 42, .9); color: #e2e8f0; padding: 7px 9px; }
-.replay-menu { display: none; }
+.replay-menu {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 21;
+  display: flex;
+  gap: 8px;
+}
 .replay-menu-button {
   border: 1px solid rgba(226, 232, 240, .32);
   border-radius: 999px;
@@ -1747,55 +1640,6 @@ cw_header('Cockpit Recorder Replay');
   border-radius: 10px;
   padding: 10px;
   font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-.replay-settings-panel {
-  right: 12px;
-  bottom: 52px;
-  width: min(760px, calc(100vw - 24px));
-  max-height: min(76vh, 760px);
-  overflow: auto;
-  background: rgba(6, 12, 24, .74);
-}
-.replay-settings-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.replay-settings-tab-button {
-  border: 1px solid rgba(226, 232, 240, .25);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, .64);
-  color: #dbeafe;
-  padding: 7px 12px;
-  font: 800 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  cursor: pointer;
-}
-.replay-settings-tab-button.is-active {
-  background: rgba(37, 99, 235, .76);
-  color: #fff;
-}
-.replay-settings-content[hidden] {
-  display: none !important;
-}
-.replay-settings-content {
-  display: grid;
-  gap: 10px;
-}
-.replay-settings-panel .replay-camera-panel,
-.replay-settings-panel .replay-calibration-panel,
-.replay-settings-panel .replay-debug {
-  position: static;
-  width: auto;
-  max-height: none;
-  box-shadow: none;
-}
-.replay-settings-panel .replay-camera-panel {
-  background: rgba(15, 23, 42, .46);
-}
-.replay-settings-panel .replay-calibration-panel,
-.replay-settings-panel .replay-debug {
-  border-color: rgba(226, 232, 240, .18);
-  background: rgba(15, 23, 42, .34);
 }
 .replay-camera-panel-title {
   font-weight: 800;
@@ -1965,7 +1809,6 @@ cw_header('Cockpit Recorder Replay');
     </div>
     <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
-    <div class="replay-ipca-watermark" aria-hidden="true">IPCA</div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
@@ -2020,13 +1863,9 @@ cw_header('Cockpit Recorder Replay');
         <div id="temperatureBox" class="temperature-box">OAT --°C<br>ISA --°C</div>
       </div>
     </div>
-    <div id="settingsPanel" class="replay-modal replay-settings-panel" aria-label="Replay settings" hidden>
-      <div class="replay-settings-tabs" role="tablist" aria-label="Replay settings tabs">
-        <button class="replay-settings-tab-button is-active" type="button" id="settingsCameraTabButton" data-settings-tab="camera" role="tab" aria-selected="true">Camera</button>
-        <button class="replay-settings-tab-button" type="button" id="settingsDebugTabButton" data-settings-tab="debug" role="tab" aria-selected="false">Debug</button>
-      </div>
-      <div id="settingsCameraTab" class="replay-settings-content" role="tabpanel" aria-labelledby="settingsCameraTabButton"></div>
-      <div id="settingsDebugTab" class="replay-settings-content" role="tabpanel" aria-labelledby="settingsDebugTabButton" hidden></div>
+    <div class="replay-menu" aria-label="Replay overlay menu">
+      <button class="replay-menu-button" type="button" id="calibrationToggle">Camera</button>
+      <button class="replay-menu-button" type="button" id="debugToggle">Debug</button>
     </div>
     <div id="replayDebug" class="replay-modal replay-debug" hidden>Replay debug initializing...</div>
     <div id="cameraPanel" class="replay-camera-panel" aria-label="Replay camera controls" hidden>
@@ -2170,26 +2009,19 @@ cw_header('Cockpit Recorder Replay');
       <div id="calibrationValues" class="replay-calibration-values">F +0.0m | R +0.0m | U +0.0m</div>
     </div>
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
-    <div class="replay-dock" aria-label="Replay controls">
-      <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
-      <div class="replay-control-cluster">
-        <a class="replay-icon-button" href="/admin/cockpit_recorder.php" aria-label="Back to cockpit recorder">←</a>
-        <button class="replay-icon-button" type="button" id="fullscreenButton" aria-label="Toggle full screen">⛶</button>
-        <button class="replay-button replay-skip-button" type="button" id="rewindButton" aria-label="Rewind 10 seconds">↶10</button>
-        <button class="replay-button replay-play-button" type="button" id="playButton" aria-label="Play replay">▶</button>
-        <button class="replay-button replay-skip-button" type="button" id="forwardButton" aria-label="Forward 10 seconds">10↷</button>
-        <button class="replay-speed-button" type="button" id="speedButton" aria-label="Replay speed">1x</button>
-        <span id="timeLabel" class="replay-time">00:00:00</span>
-      </div>
-      <div class="replay-settings-cluster">
-        <select class="replay-select" id="cameraMode" aria-label="Camera mode">
+    <div class="replay-dock">
+      <a href="/admin/cockpit_recorder.php">← Back</a>
+      <button class="replay-button" type="button" id="rewindButton">−10s</button>
+      <button class="replay-button" type="button" id="playButton">Play</button>
+      <button class="replay-button" type="button" id="forwardButton">+10s</button>
+      <select class="replay-select" id="cameraMode" aria-label="Camera mode">
         <option value="synthetic_vision" selected>Garmin SVT</option>
         <option value="chase">Chase</option>
         <option value="north_up">North up</option>
         <option value="free">Orbit / free</option>
-        </select>
-        <button class="replay-icon-button replay-settings-button" type="button" id="settingsButton" aria-label="Open replay settings">⚙</button>
-      </div>
+      </select>
+      <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0">
+      <span id="timeLabel" class="replay-time">0:00</span>
     </div>
   </div>
 <?php endif; ?>
@@ -2214,13 +2046,6 @@ cw_header('Cockpit Recorder Replay');
   const playButton = document.getElementById('playButton');
   const rewindButton = document.getElementById('rewindButton');
   const forwardButton = document.getElementById('forwardButton');
-  const fullscreenButton = document.getElementById('fullscreenButton');
-  const speedButton = document.getElementById('speedButton');
-  const settingsButton = document.getElementById('settingsButton');
-  const settingsPanel = document.getElementById('settingsPanel');
-  const settingsCameraTab = document.getElementById('settingsCameraTab');
-  const settingsDebugTab = document.getElementById('settingsDebugTab');
-  const settingsTabButtons = Array.from(document.querySelectorAll('[data-settings-tab]'));
   const cameraModeSelect = document.getElementById('cameraMode');
   const debugOverlay = document.getElementById('replayDebug');
   const radioStackGroup = document.getElementById('radioStackGroup');
@@ -2355,7 +2180,6 @@ cw_header('Cockpit Recorder Replay');
   let standaloneStartedT = 0;
   let sessionAudioSegments = [];
   let sessionAudioState = { playing: false, startedMs: 0, startedT: 0, currentSegmentId: null };
-  let replaySpeed = 1;
 
   const CAMERA_DEFAULTS = {
     rangeM: 125,
@@ -2413,7 +2237,6 @@ cw_header('Cockpit Recorder Replay');
   const INSET_MAP_SIZE = 240;
   const INSET_MAP_PADDING = 18;
   const INSET_MAP_MAGENTA = '#ff00df';
-  const REPLAY_SPEEDS = [1, 2, 5, 10];
   const AIRCRAFT_SILHOUETTE_PATH = 'M 0.0 -30.4 L 0.7 -29.5 L 1.3 -28.6 L 1.8 -27.7 L 2.4 -26.8 L 2.9 -25.9 L 3.3 -24.9 L 3.7 -24.0 L 3.9 -23.1 L 4.2 -22.2 L 4.5 -21.3 L 4.7 -20.3 L 4.9 -19.4 L 5.0 -18.5 L 5.1 -17.6 L 5.2 -16.7 L 28.5 -15.7 L 42.0 -14.8 L 47.8 -13.9 L 48.6 -13.0 L 49.2 -12.1 L 49.6 -11.2 L 49.9 -10.2 L 50.0 -9.3 L 50.0 -8.4 L 49.9 -7.5 L 21.8 -6.6 L 4.7 -5.6 L 4.5 -4.7 L 4.2 -3.8 L 3.9 -2.9 L 3.7 -2.0 L 3.4 -1.0 L 3.3 -0.1 L 3.0 0.8 L 2.8 1.7 L 2.5 2.6 L 2.4 3.5 L 2.1 4.5 L 2.0 5.4 L 1.8 6.3 L 1.7 7.2 L 1.6 8.1 L 1.6 9.1 L 1.4 10.0 L 1.3 10.9 L 1.3 11.8 L 1.3 12.7 L 1.2 13.6 L 1.2 14.6 L 1.2 15.5 L 1.0 16.4 L 1.0 17.3 L 1.0 18.2 L 1.0 19.2 L 1.0 20.1 L 1.0 21.0 L 1.0 21.9 L 1.0 22.8 L 2.2 23.8 L 8.0 24.7 L 10.8 25.6 L 11.3 26.5 L 11.5 27.4 L 11.4 28.3 L 11.0 29.3 L 3.8 30.2 L -1.0 30.4 L -1.4 30.4 L -4.7 30.2 L -11.2 29.3 L -11.4 28.3 L -11.5 27.4 L -11.3 26.5 L -10.6 25.6 L -7.3 24.7 L -1.7 23.8 L -1.0 22.8 L -1.0 21.9 L -1.0 21.0 L -1.0 20.1 L -1.0 19.2 L -1.0 18.2 L -1.0 17.3 L -1.0 16.4 L -1.0 15.5 L -1.0 14.6 L -1.0 13.6 L -1.2 12.7 L -1.3 11.8 L -1.3 10.9 L -1.4 10.0 L -1.6 9.1 L -1.6 8.1 L -1.7 7.2 L -1.8 6.3 L -2.0 5.4 L -2.1 4.5 L -2.4 3.5 L -2.5 2.6 L -2.8 1.7 L -3.0 0.8 L -3.3 -0.1 L -3.4 -1.0 L -3.7 -2.0 L -3.9 -2.9 L -4.2 -3.8 L -4.5 -4.7 L -4.7 -5.6 L -30.8 -6.6 L -49.9 -7.5 L -50.0 -8.4 L -50.0 -9.3 L -49.9 -10.2 L -49.6 -11.2 L -49.2 -12.1 L -48.6 -13.0 L -47.6 -13.9 L -40.7 -14.8 L -26.6 -15.7 L -5.2 -16.7 L -5.1 -17.6 L -5.0 -18.5 L -4.9 -19.4 L -4.7 -20.3 L -4.5 -21.3 L -4.2 -22.2 L -3.9 -23.1 L -3.5 -24.0 L -3.1 -24.9 L -2.8 -25.9 L -2.4 -26.8 L -1.8 -27.7 L -1.2 -28.6 L -0.5 -29.5 L 0.0 -30.4 Z';
   let cameraSettings = null;
   let cameraCalibration = null;
@@ -2423,7 +2246,7 @@ cw_header('Cockpit Recorder Replay');
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
   };
 
   const feetToMeters = (feet) => Number(feet || 0) * 0.3048;
@@ -4748,102 +4571,6 @@ cw_header('Cockpit Recorder Replay');
     setModalOpen(panel, button, panel ? panel.hidden : false);
   }
 
-  function installSettingsTabs() {
-    if (settingsCameraTab) {
-      if (cameraPanel && cameraPanel.parentElement !== settingsCameraTab) settingsCameraTab.appendChild(cameraPanel);
-      if (calibrationPanel && calibrationPanel.parentElement !== settingsCameraTab) settingsCameraTab.appendChild(calibrationPanel);
-      if (calibrationPanel) calibrationPanel.hidden = false;
-    }
-    if (settingsDebugTab && debugOverlay && debugOverlay.parentElement !== settingsDebugTab) {
-      settingsDebugTab.appendChild(debugOverlay);
-      debugOverlay.hidden = false;
-    }
-  }
-
-  function setSettingsTab(tab) {
-    const activeTab = tab === 'debug' ? 'debug' : 'camera';
-    if (settingsCameraTab) settingsCameraTab.hidden = activeTab !== 'camera';
-    if (settingsDebugTab) settingsDebugTab.hidden = activeTab !== 'debug';
-    settingsTabButtons.forEach((button) => {
-      const selected = button.getAttribute('data-settings-tab') === activeTab;
-      button.classList.toggle('is-active', selected);
-      button.setAttribute('aria-selected', selected ? 'true' : 'false');
-    });
-  }
-
-  function setSettingsOpen(open, tab = null) {
-    if (!settingsPanel) return;
-    if (tab) setSettingsTab(tab);
-    settingsPanel.hidden = open !== true;
-    if (settingsButton) settingsButton.classList.toggle('is-active', open === true);
-  }
-
-  function toggleSettings(tab = null) {
-    if (!settingsPanel) return;
-    const willOpen = settingsPanel.hidden || tab !== null;
-    setSettingsOpen(willOpen, tab);
-  }
-
-  function isPlaybackActive() {
-    return standalonePlaying || sessionAudioState.playing || visualFallbackPlaying || (audio && !audio.paused);
-  }
-
-  function setPlayButtonState(isPlaying) {
-    if (!playButton) return;
-    playButton.textContent = isPlaying ? 'Ⅱ' : '▶';
-    playButton.setAttribute('aria-label', isPlaying ? 'Pause replay' : 'Play replay');
-    playButton.classList.toggle('is-playing', isPlaying);
-  }
-
-  function syncPlaybackSpeed() {
-    if (speedButton) speedButton.textContent = `${replaySpeed}x`;
-    if (audio) audio.playbackRate = replaySpeed;
-  }
-
-  function setReplaySpeed(nextSpeed) {
-    const speed = REPLAY_SPEEDS.includes(Number(nextSpeed)) ? Number(nextSpeed) : 1;
-    if (speed === replaySpeed) return;
-    if (standalonePlaying) {
-      standaloneStartedT = activeT;
-      standaloneStartedMs = performance.now();
-    }
-    if (visualFallbackPlaying) {
-      visualFallbackStartedT = activeT;
-      visualFallbackStartedMs = performance.now();
-    }
-    if (sessionAudioState.playing) {
-      sessionAudioState.startedT = activeT;
-      sessionAudioState.startedMs = performance.now();
-    }
-    replaySpeed = speed;
-    syncPlaybackSpeed();
-  }
-
-  function cycleReplaySpeed() {
-    const currentIndex = REPLAY_SPEEDS.indexOf(replaySpeed);
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % REPLAY_SPEEDS.length : 0;
-    setReplaySpeed(REPLAY_SPEEDS[nextIndex]);
-  }
-
-  function toggleFullscreen() {
-    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fullscreenElement) {
-      const exit = document.exitFullscreen || document.webkitExitFullscreen;
-      if (exit) exit.call(document);
-      return;
-    }
-    if (!root) return;
-    const request = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (request) request.call(root);
-  }
-
-  function syncFullscreenButton() {
-    if (!fullscreenButton) return;
-    const isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
-    fullscreenButton.classList.toggle('is-active', isFullscreen);
-    fullscreenButton.setAttribute('aria-label', isFullscreen ? 'Exit full screen' : 'Toggle full screen');
-  }
-
   function updateCameraControlLabels() {
     if (!cameraSettings) return;
     if (cameraRangeValue) cameraRangeValue.textContent = `${Math.round(cameraSettings.rangeM)} m`;
@@ -6485,7 +6212,6 @@ cw_header('Cockpit Recorder Replay');
       audio.load();
       sessionAudioState.currentSegmentId = segmentId;
     }
-    audio.playbackRate = replaySpeed;
     const localT = Math.max(0, (Number(seconds) || 0) - (Number(segment.start_offset_seconds) || 0));
     if (Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(localT, audio.duration || localT);
@@ -6506,26 +6232,26 @@ cw_header('Cockpit Recorder Replay');
     const maxT = Number(timeline.max) || 0;
     if (standaloneReplay) {
       const elapsed = Math.max(0, (performance.now() - standaloneStartedMs) / 1000);
-      activeT = Math.max(0, Math.min(maxT, standaloneStartedT + elapsed * replaySpeed));
+      activeT = Math.max(0, Math.min(maxT, standaloneStartedT + elapsed));
       if (activeT >= maxT) {
         standalonePlaying = false;
-        setPlayButtonState(false);
+        playButton.textContent = 'Play';
       }
     } else if (sessionAudioState.playing) {
       const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
-      activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed * replaySpeed));
+      activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed));
       syncSessionAudio(activeT, true);
       if (activeT >= maxT) {
         sessionAudioState.playing = false;
         audio.pause();
-        setPlayButtonState(false);
+        playButton.textContent = 'Play';
       }
     } else if (visualFallbackPlaying) {
       const elapsed = Math.max(0, (performance.now() - visualFallbackStartedMs) / 1000);
-      activeT = Math.max(0, Math.min(maxT, visualFallbackStartedT + elapsed * replaySpeed));
+      activeT = Math.max(0, Math.min(maxT, visualFallbackStartedT + elapsed));
       if (activeT >= maxT) {
         visualFallbackPlaying = false;
-        setPlayButtonState(false);
+        playButton.textContent = 'Play';
       }
     } else {
       activeT = Math.max(0, Math.min(maxT, Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : activeT));
@@ -6539,7 +6265,7 @@ cw_header('Cockpit Recorder Replay');
     visualFallbackPlaying = true;
     visualFallbackStartedMs = performance.now();
     visualFallbackStartedT = activeT;
-    setPlayButtonState(true);
+    playButton.textContent = 'Pause';
     lastRenderMs = null;
     if (animationFrame === null) {
       animationFrame = requestAnimationFrame(animatePlayback);
@@ -6549,7 +6275,7 @@ cw_header('Cockpit Recorder Replay');
   function togglePlayback() {
     if (standaloneReplay) {
       standalonePlaying = !standalonePlaying;
-      setPlayButtonState(standalonePlaying);
+      playButton.textContent = standalonePlaying ? 'Pause' : 'Play';
       if (standalonePlaying) {
         standaloneStartedMs = performance.now();
         standaloneStartedT = activeT;
@@ -6565,7 +6291,7 @@ cw_header('Cockpit Recorder Replay');
     }
     if (sessionAudioSegments.length > 1) {
       sessionAudioState.playing = !sessionAudioState.playing;
-      setPlayButtonState(sessionAudioState.playing);
+      playButton.textContent = sessionAudioState.playing ? 'Pause' : 'Play';
       if (sessionAudioState.playing) {
         sessionAudioState.startedMs = performance.now();
         sessionAudioState.startedT = activeT;
@@ -6589,7 +6315,7 @@ cw_header('Cockpit Recorder Replay');
         cancelAnimationFrame(animationFrame);
         animationFrame = null;
       }
-      setPlayButtonState(false);
+      playButton.textContent = 'Play';
       return;
     }
     if (audio.paused) {
@@ -6600,7 +6326,7 @@ cw_header('Cockpit Recorder Replay');
         startVisualFallbackPlayback();
         return;
       }
-      setPlayButtonState(true);
+      playButton.textContent = 'Pause';
       if (animationFrame === null) {
         animationFrame = requestAnimationFrame(animatePlayback);
       }
@@ -6616,7 +6342,7 @@ cw_header('Cockpit Recorder Replay');
     } else {
       audio.pause();
       visualFallbackPlaying = false;
-      setPlayButtonState(false);
+      playButton.textContent = 'Play';
     }
   }
 
@@ -6747,11 +6473,6 @@ cw_header('Cockpit Recorder Replay');
     playFromInsetMap();
   }
 
-  installSettingsTabs();
-  setSettingsTab('camera');
-  setPlayButtonState(false);
-  syncPlaybackSpeed();
-
   cameraModeSelect.addEventListener('change', () => {
     cameraMode = cameraModeSelect.value || 'synthetic_vision';
     applyCameraModeControls();
@@ -6763,32 +6484,6 @@ cw_header('Cockpit Recorder Replay');
   }
   if (debugToggle) {
     debugToggle.addEventListener('click', () => toggleModal(debugOverlay, debugToggle));
-  }
-  if (settingsButton) {
-    settingsButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      toggleSettings();
-    });
-  }
-  settingsTabButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      setSettingsOpen(true, button.getAttribute('data-settings-tab') || 'camera');
-    });
-  });
-  if (fullscreenButton) {
-    fullscreenButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      toggleFullscreen();
-    });
-  }
-  if (speedButton) {
-    speedButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      cycleReplaySpeed();
-    });
   }
   if (cameraRangeInput) {
     cameraRangeInput.addEventListener('input', () => updateCameraSetting('rangeM', cameraRangeInput.value));
@@ -6940,7 +6635,7 @@ cw_header('Cockpit Recorder Replay');
   rewindButton.addEventListener('click', () => skipBy(-10));
   forwardButton.addEventListener('click', () => skipBy(10));
   root.addEventListener('click', (event) => {
-    if (event.target.closest('.replay-dock, .replay-menu, .replay-settings-panel, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer, .replay-inset-map')) {
+    if (event.target.closest('.replay-dock, .replay-menu, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer, .replay-inset-map')) {
       return;
     }
     togglePlayback();
@@ -6948,28 +6643,18 @@ cw_header('Cockpit Recorder Replay');
   audio.addEventListener('pause', () => {
     if (sessionAudioState.playing) return;
     if (visualFallbackPlaying) return;
-    setPlayButtonState(false);
+    playButton.textContent = 'Play';
     if (animationFrame !== null) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
     }
   });
   audio.addEventListener('play', () => {
-    setPlayButtonState(true);
+    playButton.textContent = 'Pause';
     lastRenderMs = null;
     if (animationFrame === null) {
       animationFrame = requestAnimationFrame(animatePlayback);
     }
-  });
-  document.addEventListener('fullscreenchange', syncFullscreenButton);
-  document.addEventListener('webkitfullscreenchange', syncFullscreenButton);
-  window.addEventListener('keydown', (event) => {
-    if (event.code !== 'Space' && event.key !== ' ') return;
-    const target = event.target;
-    const tagName = target && target.tagName ? String(target.tagName).toLowerCase() : '';
-    if (target && (target.isContentEditable || ['input', 'select', 'textarea', 'button'].includes(tagName))) return;
-    event.preventDefault();
-    togglePlayback();
   });
 
   function animatePlayback() {
