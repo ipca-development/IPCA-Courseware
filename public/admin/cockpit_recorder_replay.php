@@ -193,6 +193,7 @@ cw_header('Cockpit Recorder Replay');
   letter-spacing: .08em;
   text-transform: uppercase;
   overflow: hidden;
+  border-radius: 14px 14px 0 0;
 }
 .replay-avionics-brand {
   display: none;
@@ -392,6 +393,7 @@ cw_header('Cockpit Recorder Replay');
   min-height: 440px;
   background: #000;
   overflow: hidden;
+  border-radius: 0 0 14px 14px;
   --attitude-center-x: 50%;
   --panel-engine-width: clamp(0px, 0vw, 0px);
   --panel-bottom-band: 0px;
@@ -412,6 +414,7 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive:-webkit-full-screen {
   height: 100vh;
   min-height: 100vh;
+  border-radius: 0;
 }
 .replay-immersive.is-panel-layout {
   --panel-engine-width: clamp(118px, 13.5vw, 150px);
@@ -433,7 +436,7 @@ cw_header('Cockpit Recorder Replay');
   display: flex;
   left: 0;
   top: 0;
-  bottom: var(--panel-playback-height);
+  bottom: 0;
   width: var(--panel-engine-width);
   align-items: flex-start;
   justify-content: center;
@@ -1499,29 +1502,20 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-ipca-watermark {
   position: absolute;
-  top: 18px;
-  right: 20px;
+  left: 50%;
+  top: 24%;
   z-index: 18;
   pointer-events: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  opacity: .34;
-  color: rgba(255, 255, 255, .86);
-  font: 900 15px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, .62);
+  width: min(56vw, 620px);
+  transform: translate(-50%, -50%);
+  opacity: .11;
+  mix-blend-mode: screen;
+  filter: invert(1) saturate(.25) drop-shadow(0 2px 18px rgba(255, 255, 255, .10));
 }
-.replay-ipca-watermark::before {
-  content: "";
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .78), rgba(255, 255, 255, 0) 34%),
-    linear-gradient(135deg, rgba(20, 184, 166, .78), rgba(37, 99, 235, .62), rgba(15, 23, 42, .08));
-  box-shadow: 0 0 18px rgba(45, 212, 191, .20);
+.replay-ipca-watermark img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 .replay-dock {
   position: absolute;
@@ -1531,9 +1525,7 @@ cw_header('Cockpit Recorder Replay');
   z-index: 24;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: 12px 34px;
   column-gap: 12px;
-  row-gap: 3px;
   align-items: center;
   padding: 20px 14px 7px;
   background: linear-gradient(0deg, rgba(0, 0, 0, .78) 0%, rgba(0, 0, 0, .44) 58%, rgba(0, 0, 0, 0) 100%);
@@ -1541,7 +1533,6 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-control-cluster {
   grid-column: 1 / 2;
-  grid-row: 2 / 3;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1550,7 +1541,6 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-settings-cluster {
   grid-column: 2 / 3;
-  grid-row: 2 / 3;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1599,9 +1589,8 @@ cw_header('Cockpit Recorder Replay');
   font-size: 15px;
 }
 .replay-range {
-  grid-column: 1 / 3;
-  grid-row: 1 / 2;
-  width: 100%;
+  flex: 1 1 260px;
+  width: auto;
   min-width: 0;
   accent-color: #38bdf8;
   margin: 0;
@@ -1965,7 +1954,9 @@ cw_header('Cockpit Recorder Replay');
     </div>
     <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
-    <div class="replay-ipca-watermark" aria-hidden="true">IPCA</div>
+    <div class="replay-ipca-watermark" aria-hidden="true">
+      <img src="/assets/ipca_logo_watermark.png" alt="">
+    </div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
@@ -2171,7 +2162,6 @@ cw_header('Cockpit Recorder Replay');
     </div>
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock" aria-label="Replay controls">
-      <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
       <div class="replay-control-cluster">
         <a class="replay-icon-button" href="/admin/cockpit_recorder.php" aria-label="Back to cockpit recorder">←</a>
         <button class="replay-icon-button" type="button" id="fullscreenButton" aria-label="Toggle full screen">⛶</button>
@@ -2180,14 +2170,10 @@ cw_header('Cockpit Recorder Replay');
         <button class="replay-button replay-skip-button" type="button" id="forwardButton" aria-label="Forward 10 seconds">10↷</button>
         <button class="replay-speed-button" type="button" id="speedButton" aria-label="Replay speed">1x</button>
         <span id="timeLabel" class="replay-time">00:00:00</span>
+        <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
       </div>
       <div class="replay-settings-cluster">
-        <select class="replay-select" id="cameraMode" aria-label="Camera mode">
-        <option value="synthetic_vision" selected>Garmin SVT</option>
-        <option value="chase">Chase</option>
-        <option value="north_up">North up</option>
-        <option value="free">Orbit / free</option>
-        </select>
+        <input type="hidden" id="cameraMode" value="synthetic_vision">
         <button class="replay-icon-button replay-settings-button" type="button" id="settingsButton" aria-label="Open replay settings">⚙</button>
       </div>
     </div>
