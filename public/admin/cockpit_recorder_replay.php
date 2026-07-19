@@ -756,12 +756,13 @@ cw_header('Cockpit Recorder Replay');
   display: block;
 }
 .replay-engine-sidebar-title {
-  top: 60px;
-  font-size: clamp(14px, 1.6vw, 21px);
+  top: 44px;
+  z-index: 26;
+  font-size: clamp(12px, 1.25vw, 17px);
   line-height: 1;
 }
 .replay-engine-sidebar-clock {
-  bottom: 42px;
+  bottom: 58px;
   padding: 0 2px;
 }
 .replay-engine-date {
@@ -1552,9 +1553,9 @@ cw_header('Cockpit Recorder Replay');
   top: 24%;
   z-index: 18;
   pointer-events: none;
-  width: min(56vw, 620px);
+  width: min(44vw, 480px);
   transform: translate(-50%, -50%);
-  opacity: .11;
+  opacity: .08;
   display: none;
 }
 .replay-immersive.is-replay-started .replay-ipca-watermark { display: block; }
