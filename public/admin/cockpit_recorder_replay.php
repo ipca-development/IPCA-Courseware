@@ -434,13 +434,15 @@ cw_header('Cockpit Recorder Replay');
 }
 .replay-immersive.is-panel-layout .replay-engine-pane {
   display: flex;
+  flex-direction: column;
   left: 0;
   top: 0;
   bottom: 0;
   width: var(--panel-engine-width);
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 58px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 86px 6px 13px;
   box-sizing: border-box;
   background: linear-gradient(90deg, rgba(15, 23, 42, .68), rgba(15, 23, 42, .50));
   border-right: 1px solid rgba(226, 232, 240, .16);
@@ -731,13 +733,55 @@ cw_header('Cockpit Recorder Replay');
 }
 .engine-panel {
   width: calc(100% - 10px);
+  margin: 0 auto;
   color: #f8fafc;
   text-transform: none;
   letter-spacing: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+.replay-engine-sidebar-title,
+.replay-engine-sidebar-clock {
+  display: none;
+  color: rgba(248, 250, 252, .98);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 900;
+  letter-spacing: .01em;
+  text-align: center;
+  text-transform: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .70);
+}
+.replay-immersive.is-panel-layout .replay-engine-sidebar-title,
+.replay-immersive.is-panel-layout .replay-engine-sidebar-clock {
+  display: block;
+}
+.replay-engine-sidebar-title {
+  min-height: 38px;
+  font-size: clamp(26px, 3.4vw, 42px);
+  line-height: 1;
+}
+.replay-engine-sidebar-clock {
+  margin-top: auto;
+  padding: 4px 2px 0;
+}
+.replay-engine-date {
+  font-size: clamp(14px, 1.7vw, 24px);
+  line-height: 1.2;
+}
+.replay-engine-local-time {
+  margin-top: 12px;
+  font-size: clamp(14px, 1.65vw, 23px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.replay-engine-utc-time {
+  margin-top: 7px;
+  color: rgba(248, 250, 252, .46);
+  font-size: clamp(10px, 1.15vw, 17px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .engine-gauge {
-  margin: 0 2px 20px;
+  margin: 0 2px 16px;
 }
 .engine-row-head {
   display: flex;
@@ -1950,7 +1994,13 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div class="replay-engine-pane" aria-hidden="true">
+      <div id="engineAircraftRegistration" class="replay-engine-sidebar-title">----</div>
       <div id="enginePanel" class="engine-panel" aria-label="Engine instruments"></div>
+      <div class="replay-engine-sidebar-clock" aria-label="Flight GPS time">
+        <div id="engineFlightDate" class="replay-engine-date">---</div>
+        <div id="engineFlightLocalTime" class="replay-engine-local-time">--:--:-- (LT)</div>
+        <div id="engineFlightUtcTime" class="replay-engine-utc-time">--:--:-- (UTC)</div>
+      </div>
     </div>
     <div class="replay-bottom-instrument-pane" aria-hidden="true"><span class="replay-pane-label">Compass / HSI reserved</span></div>
     <div id="cesiumReplay" class="cesium-cockpit"></div>
@@ -2224,6 +2274,10 @@ cw_header('Cockpit Recorder Replay');
   const insetMapZoomIn = document.getElementById('insetMapZoomIn');
   const insetMapZoomOut = document.getElementById('insetMapZoomOut');
   const enginePanel = document.getElementById('enginePanel');
+  const engineAircraftRegistration = document.getElementById('engineAircraftRegistration');
+  const engineFlightDate = document.getElementById('engineFlightDate');
+  const engineFlightLocalTime = document.getElementById('engineFlightLocalTime');
+  const engineFlightUtcTime = document.getElementById('engineFlightUtcTime');
   const airspeedTape = document.getElementById('airspeedTape');
   const airspeedTapeBody = document.getElementById('airspeedTapeBody');
   const airspeedTapeScale = document.getElementById('airspeedTapeScale');
@@ -3646,6 +3700,101 @@ cw_header('Cockpit Recorder Replay');
     return numeric > 0 ? `+${text}` : text;
   }
 
+  function parseReplayDateMs(value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value > 100000000000 ? value : value * 1000;
+    }
+    const raw = String(value).trim();
+    if (raw === '') return null;
+    if (/^\d+(\.\d+)?$/.test(raw)) {
+      const numeric = Number(raw);
+      return numeric > 100000000000 ? numeric : numeric * 1000;
+    }
+    const normalized = raw.includes('T')
+      ? raw
+      : raw.replace(' ', 'T');
+    const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
+    const ms = Date.parse(withZone);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function sampleGpsTimeMs(sample) {
+    if (!sample) return null;
+    const candidates = [
+      sample.gps_time_utc,
+      sample.gps_timestamp_utc,
+      sample.timestamp_utc,
+      sample.sample_time_utc,
+      sample.recorded_at_utc,
+      sample.datetime_utc,
+      sample.time_utc,
+      sample.gps_time,
+      sample.gps_timestamp,
+      sample.timestamp,
+      sample.recorded_at,
+      sample.created_at,
+      sample.g3x && sample.g3x.gps_time_utc,
+      sample.g3x && sample.g3x.timestamp_utc,
+    ];
+    for (const candidate of candidates) {
+      const ms = parseReplayDateMs(candidate);
+      if (ms !== null) return ms;
+    }
+    const startMs = parseReplayDateMs(payload && payload.recording && payload.recording.started_at);
+    return startMs === null ? null : startMs + Math.max(0, Number(sample.t ?? activeT) || 0) * 1000;
+  }
+
+  function flightRegistrationText() {
+    const recording = payload && payload.recording ? payload.recording : {};
+    const aircraft = recording && recording.aircraft ? recording.aircraft : {};
+    return String(
+      aircraft.registration ||
+      aircraft.display_name ||
+      recording.aircraft_registration ||
+      recording.tail_number ||
+      recording.registration ||
+      ''
+    ).trim().toUpperCase();
+  }
+
+  function formatFlightDate(date) {
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    }).format(date).replace(',', '').toUpperCase();
+  }
+
+  function formatClockTime(date, timeZone = undefined) {
+    const options = {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    };
+    if (timeZone) options.timeZone = timeZone;
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
+
+  function updateEngineSidebar(sample) {
+    if (engineAircraftRegistration) {
+      engineAircraftRegistration.textContent = flightRegistrationText() || '----';
+    }
+    const ms = sampleGpsTimeMs(sample);
+    if (ms === null) {
+      if (engineFlightDate) engineFlightDate.textContent = '---';
+      if (engineFlightLocalTime) engineFlightLocalTime.textContent = '--:--:-- (LT)';
+      if (engineFlightUtcTime) engineFlightUtcTime.textContent = '--:--:-- (UTC)';
+      return;
+    }
+    const date = new Date(ms);
+    if (engineFlightDate) engineFlightDate.textContent = formatFlightDate(date);
+    if (engineFlightLocalTime) engineFlightLocalTime.textContent = `${formatClockTime(date)} (LT)`;
+    if (engineFlightUtcTime) engineFlightUtcTime.textContent = `${formatClockTime(date, 'UTC')} (UTC)`;
+  }
+
   function engineRangesForInstrument(instrument) {
     if (String(instrument && instrument.key || '').toLowerCase() === 'volts') {
       return [
@@ -3892,6 +4041,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function updateEnginePanel(sample, dtSec = 1 / 60, snap = false) {
+    updateEngineSidebar(sample);
     if (!enginePanel) return;
     const instruments = engineProfileInstruments();
     if (!sample || instruments.length === 0 || !instrumentEnabled('engine_instrument_stack')) {
