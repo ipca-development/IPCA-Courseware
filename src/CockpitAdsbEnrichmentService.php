@@ -20,11 +20,22 @@ final class CockpitAdsbEnrichmentService
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
     private const TRAFFIC_TABLE = 'ipca_cockpit_adsb_traffic_samples';
+    private const CANDIDATE_TABLE = 'ipca_cockpit_adsb_candidate_observations';
+    private const RAW_TRACE_TABLE = 'ipca_cockpit_adsb_raw_traces';
+    private const AIRCRAFT_SAMPLE_TABLE = 'ipca_cockpit_adsb_traffic_aircraft_samples';
     private const MAX_ADSB_GPS_DISTANCE_NM = 1.0;
     private const MAX_ADSB_GPS_SPEED_DELTA_KT = 45.0;
     private const MAX_ADSB_GPS_TRACK_DELTA_DEG = 60.0;
     private const TRAFFIC_RANGE_NM = 10.0;
-    private const TRAFFIC_ANCHOR_INTERVAL_S = 30.0;
+    private const TRAFFIC_DISPLAY_RANGE_NM = 15.0;
+    private const TRAFFIC_DISCOVERY_RANGE_NM = 50.0;
+    private const TRAFFIC_ANCHOR_INTERVAL_S = 5.0;
+    private const TRAFFIC_DISCOVERY_INTERVAL_S = 10.0;
+    private const TRAFFIC_WINDOW_MARGIN_S = 120.0;
+    private const TRAFFIC_PREFERRED_SAMPLE_GAP_S = 15.0;
+    private const TRAFFIC_HARD_SAMPLE_GAP_S = 30.0;
+    private const TRAFFIC_MAX_JUMP_NM = 8.0;
+    private const TRAFFIC_MAX_SPEED_KT = 320.0;
     private const TRAFFIC_NEARBY_AIRPORT_NM = 30.0;
     private const MAX_CANDIDATE_HEXES = 80;
 
@@ -72,13 +83,26 @@ final class CockpitAdsbEnrichmentService
 
         $recordingId = (int)$recording['id'];
         $hex = tv_adsb_normalize_hex((string)($recording['aircraft_adsb_hex'] ?? ''));
-        if ($hex === '') {
-            $this->setStatus($recordingId, 'not_available', '', null, null, 0, 0, 'Recording has no aircraft ADS-B hex.');
-            return array('ok' => false, 'status' => 'not_available', 'error' => 'Recording has no aircraft ADS-B hex.');
-        }
-
         $window = $this->recordingWindow($recording);
         $this->setStatus($recordingId, 'fetching', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, null);
+
+        if ($hex === '') {
+            $this->clearOwnshipSamples($recordingId);
+            $traffic = $this->enrichTrafficFromGps($recordingId, '', $recording, $window);
+            $diagnosticsPath = $this->storeJson($recording, 'normalized', array(
+                'provider' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_trace',
+                'recording_id' => (string)$recording['recording_uid'],
+                'query_start_utc' => $window['start_iso'],
+                'query_end_utc' => $window['end_iso'],
+                'alignment' => 'gps_or_garmin_ownship_corridor_only',
+                'traffic' => $traffic,
+                'note' => 'Recording has no ownship ADS-B hex; traffic discovery used the authoritative GPS/Garmin corridor only.',
+            ));
+            $status = (int)($traffic['sample_count'] ?? 0) > 0 ? 'ready' : 'not_available';
+            $message = (int)($traffic['sample_count'] ?? 0) > 0 ? null : 'No traffic candidates produced usable historical traces.';
+            $this->setStatus($recordingId, $status, '', $window['start_mysql'], $window['end_mysql'], 0, (int)($traffic['sample_count'] ?? 0), $message, null, $diagnosticsPath);
+            return array('ok' => $status === 'ready', 'status' => $status, 'ownship_sample_count' => 0, 'traffic_sample_count' => (int)($traffic['sample_count'] ?? 0), 'normalized_storage_path' => $diagnosticsPath);
+        }
 
         try {
             $raw = $this->fetchTrace($hex, $window);
@@ -118,7 +142,7 @@ final class CockpitAdsbEnrichmentService
             );
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
             $this->storeOwnshipSamples($recordingId, $samples);
-            $traffic = $this->enrichTraffic($recordingId, $hex, $samples, $recording, $window);
+            $traffic = $this->enrichTrafficFromGps($recordingId, $hex, $recording, $window);
             $normalized['traffic'] = $traffic;
             $normalizedPath = $this->storeJson($recording, 'normalized', $normalized);
             $this->setStatus($recordingId, 'ready', $hex, $window['start_mysql'], $window['end_mysql'], count($samples), (int)($traffic['sample_count'] ?? 0), null, $rawPath, $normalizedPath);
@@ -134,17 +158,23 @@ final class CockpitAdsbEnrichmentService
             );
         } catch (CockpitAdsbTraceNotAvailable $e) {
             $this->clearOwnshipSamples($recordingId);
-            $diagnosticsPath = $this->storeJson($recording, 'raw', array(
+            $traffic = $this->enrichTrafficFromGps($recordingId, $hex, $recording, $window);
+            $diagnosticsPath = $this->storeJson($recording, 'normalized', array(
                 'provider' => tv_adsb_provider() === 'gateway' ? 'adsbexchange_gateway' : 'adsbexchange_trace',
                 'hex' => $hex,
                 'recording_id' => (string)$recording['recording_uid'],
                 'query_start_utc' => $window['start_iso'],
                 'query_end_utc' => $window['end_iso'],
-                'status' => 'not_available',
+                'status' => (int)($traffic['sample_count'] ?? 0) > 0 ? 'ready' : 'not_available',
                 'error' => $e->getMessage(),
+                'traffic' => $traffic,
             ));
-            $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $e->getMessage(), $diagnosticsPath, null);
-            return array('ok' => false, 'status' => 'not_available', 'error' => $e->getMessage(), 'raw_storage_path' => $diagnosticsPath);
+            if ((int)($traffic['sample_count'] ?? 0) > 0) {
+                $this->setStatus($recordingId, 'ready', $hex, $window['start_mysql'], $window['end_mysql'], 0, (int)$traffic['sample_count'], $e->getMessage(), null, $diagnosticsPath);
+                return array('ok' => true, 'status' => 'ready', 'ownship_sample_count' => 0, 'traffic_sample_count' => (int)$traffic['sample_count'], 'warning' => $e->getMessage(), 'normalized_storage_path' => $diagnosticsPath);
+            }
+            $this->setStatus($recordingId, 'not_available', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $e->getMessage(), null, $diagnosticsPath);
+            return array('ok' => false, 'status' => 'not_available', 'error' => $e->getMessage(), 'normalized_storage_path' => $diagnosticsPath);
         } catch (Throwable $e) {
             $this->setStatus($recordingId, 'failed', $hex, $window['start_mysql'], $window['end_mysql'], 0, 0, $e->getMessage());
             throw $e;
@@ -203,9 +233,10 @@ final class CockpitAdsbEnrichmentService
         if ($startRaw === '') {
             throw new RuntimeException('Recording start time is missing.');
         }
-        $start = (new DateTimeImmutable($startRaw, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'));
+        $actualStart = (new DateTimeImmutable($startRaw, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'));
+        $start = $actualStart->modify('-' . (int)self::TRAFFIC_WINDOW_MARGIN_S . ' seconds');
         $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
-        $end = $start->modify('+' . (string)max(1, (int)ceil($duration)) . ' seconds');
+        $end = $actualStart->modify('+' . (string)max(1, (int)ceil($duration)) . ' seconds')->modify('+' . (int)self::TRAFFIC_WINDOW_MARGIN_S . ' seconds');
 
         $window = array(
             'start_epoch' => (float)$start->format('U.u'),
@@ -258,8 +289,8 @@ final class CockpitAdsbEnrichmentService
             return null;
         }
         usort($times, fn(DateTimeImmutable $a, DateTimeImmutable $b): int => ((float)$a->format('U.u')) <=> ((float)$b->format('U.u')));
-        $start = $times[0]->modify('-30 seconds');
-        $end = $times[count($times) - 1]->modify('+30 seconds');
+        $start = $times[0]->modify('-' . (int)self::TRAFFIC_WINDOW_MARGIN_S . ' seconds');
+        $end = $times[count($times) - 1]->modify('+' . (int)self::TRAFFIC_WINDOW_MARGIN_S . ' seconds');
         if ((float)$end->format('U.u') <= (float)$start->format('U.u')) {
             return null;
         }
@@ -300,6 +331,43 @@ final class CockpitAdsbEnrichmentService
         ');
         $stmt->execute(array($table, $column));
         return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private function tablePresent(string $table): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $stmt->execute(array($table));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private static function normalizeAircraftIdentifier(string $value): string
+    {
+        $value = strtolower(trim($value));
+        if ($value === '') {
+            return '';
+        }
+        if (str_starts_with($value, '~')) {
+            $suffix = preg_replace('/[^a-z0-9]/', '', substr($value, 1)) ?? '';
+            return $suffix !== '' ? '~' . substr($suffix, 0, 24) : '';
+        }
+        $hex = preg_replace('/[^a-f0-9]/', '', $value) ?? '';
+        return $hex !== '' ? substr($hex, 0, 6) : '';
+    }
+
+    /**
+     * @param array<string,mixed> $aircraft
+     */
+    private static function aircraftIdentifierFromPayload(array $aircraft): string
+    {
+        foreach (array('hex', 'icao', 'id', 'aircraft_id') as $key) {
+            if (isset($aircraft[$key]) && is_scalar($aircraft[$key])) {
+                $id = self::normalizeAircraftIdentifier((string)$aircraft[$key]);
+                if ($id !== '') {
+                    return $id;
+                }
+            }
+        }
+        return '';
     }
 
     /**
@@ -393,9 +461,13 @@ final class CockpitAdsbEnrichmentService
      */
     private function fetchHistoricalTraceForDate(string $hex, DateTimeImmutable $day): array
     {
-        if (tv_adsb_provider() === 'gateway') {
+        $identifier = self::normalizeAircraftIdentifier($hex);
+        if ($identifier === '') {
+            return array();
+        }
+        if (tv_adsb_provider() === 'gateway' && !str_starts_with($identifier, '~')) {
             try {
-                return tv_adsb_fetch_historical_trace($hex, $day);
+                return tv_adsb_fetch_historical_trace($identifier, $day);
             } catch (Throwable $e) {
                 if (!str_contains($e->getMessage(), 'HTTP 403')) {
                     throw $e;
@@ -403,9 +475,9 @@ final class CockpitAdsbEnrichmentService
             }
         }
 
-        $folder = substr($hex, -2);
+        $folder = substr(preg_replace('/[^a-z0-9]/', '', $identifier) ?: $identifier, -2);
         $base = rtrim((string)(getenv('CW_ADSBEXCHANGE_HISTORY_BASE') ?: 'https://globe.adsbexchange.com/globe_history'), '/');
-        $url = $base . '/' . $day->format('Y/m/d') . '/traces/' . rawurlencode($folder) . '/trace_full_' . rawurlencode($hex) . '.json';
+        $url = $base . '/' . $day->format('Y/m/d') . '/traces/' . rawurlencode($folder) . '/trace_full_' . rawurlencode($identifier) . '.json';
         $ch = curl_init($url);
         if ($ch === false) {
             throw new RuntimeException('Could not initialize ADS-B history request.');
@@ -1033,8 +1105,13 @@ final class CockpitAdsbEnrichmentService
     {
         $gpsRows = $this->gpsAlignmentRows($recording);
         if ($gpsRows === array()) {
-            $this->clearTrafficSamples($recordingId);
-            return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => 'phone_gps', 'note' => 'No phone GPS anchors for traffic correlation.');
+            $replayAnchors = $this->replayOwnshipAnchorSamples($recordingId);
+            if ($replayAnchors === array()) {
+                $this->clearTrafficSamples($recordingId);
+                $this->clearTrafficAircraftSamples($recordingId);
+                return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => 'phone_gps', 'note' => 'No phone GPS or Garmin/replay anchors for traffic correlation.');
+            }
+            return $this->enrichTrafficWithAnchors($recordingId, $ownshipHex, $replayAnchors, $recording, $window, 'garmin_or_replay_ownship');
         }
 
         $anchorSamples = array();
@@ -1053,6 +1130,28 @@ final class CockpitAdsbEnrichmentService
         }
 
         return $this->enrichTrafficWithAnchors($recordingId, $ownshipHex, $anchorSamples, $recording, $window, 'phone_gps');
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function replayOwnshipAnchorSamples(int $recordingId): array
+    {
+        if ($recordingId <= 0 || !$this->tablePresent('ipca_cockpit_replay_samples')) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT sample_time_utc, seconds_since_start, latitude, longitude, baro_altitude_ft, altitude_ft_msl, track_deg, heading_deg
+            FROM ipca_cockpit_replay_samples
+            WHERE recording_id = ?
+              AND sample_time_utc IS NOT NULL
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY seconds_since_start ASC
+        ');
+        $stmt->execute(array($recordingId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
     }
 
     /**
@@ -1076,25 +1175,30 @@ final class CockpitAdsbEnrichmentService
             return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => $anchorSource, 'note' => 'No anchors for traffic correlation.');
         }
 
-        $candidates = $this->discoverTrafficCandidateHexes($ownshipHex, $anchors, $recording, $window);
+        $candidates = $this->discoverTrafficCandidates($recordingId, $ownshipHex, $anchors, $recording, $window);
         if ($candidates === array()) {
             return array('sample_count' => 0, 'provider' => tv_adsb_provider(), 'anchor_source' => $anchorSource, 'anchor_count' => count($anchors), 'candidate_count' => 0, 'note' => 'No traffic candidate hexes discovered.');
         }
 
+        $this->clearTrafficAircraftSamples($recordingId);
         $candidateTraces = array();
         $traceSources = array();
-        foreach ($candidates as $candidateHex) {
-            $traceResult = $this->trafficCandidateEpochSamples($candidateHex, $window);
+        $diagnosticsByAircraft = array();
+        foreach (array_keys($candidates) as $candidateId) {
+            $traceResult = $this->trafficCandidateEpochSamples($candidateId, $window);
             if (($traceResult['samples'] ?? array()) !== array()) {
-                $candidateTraces[$candidateHex] = $traceResult['samples'];
-                $traceSources[$candidateHex] = $traceResult['source'] ?? 'unknown';
+                $segmented = $this->segmentTrafficSamples((array)$traceResult['samples']);
+                $candidateTraces[$candidateId] = $segmented['samples'];
+                $traceSources[$candidateId] = $traceResult['source'] ?? 'unknown';
+                $diagnosticsByAircraft[$candidateId] = $this->trafficAircraftDiagnostics($candidateId, $candidates[$candidateId], (array)$traceResult['raw_samples'], $segmented);
             }
         }
 
         $rows = array();
+        $enteredRange = array();
         foreach ($anchors as $anchor) {
-            foreach ($candidateTraces as $candidateHex => $epochSamples) {
-                $position = tv_adsb_interpolate_trace_at_epoch($epochSamples, (float)$anchor['epoch']);
+            foreach ($candidateTraces as $candidateId => $epochSamples) {
+                $position = $this->interpolateTrafficAtEpoch($epochSamples, (float)$anchor['epoch'], self::TRAFFIC_HARD_SAMPLE_GAP_S);
                 if ($position === null || !isset($position['latitude'], $position['longitude']) || !is_numeric($position['latitude']) || !is_numeric($position['longitude'])) {
                     continue;
                 }
@@ -1102,22 +1206,23 @@ final class CockpitAdsbEnrichmentService
                 $lat = (float)$position['latitude'];
                 $lon = (float)$position['longitude'];
                 $distanceNm = self::distanceNm((float)$anchor['latitude'], (float)$anchor['longitude'], $lat, $lon);
-                if ($distanceNm > self::TRAFFIC_RANGE_NM) {
+                if ($distanceNm > self::TRAFFIC_DISPLAY_RANGE_NM) {
                     continue;
                 }
+                $enteredRange[$candidateId] = true;
 
                 $ownshipAlt = isset($anchor['baro_altitude_ft']) && is_numeric($anchor['baro_altitude_ft']) ? (float)$anchor['baro_altitude_ft'] : null;
-                $trafficAlt = isset($position['baro_altitude_ft']) && is_numeric($position['baro_altitude_ft']) ? (float)$position['baro_altitude_ft'] : null;
+                $trafficAlt = isset($position['altitude_baro_ft']) && is_numeric($position['altitude_baro_ft']) ? (float)$position['altitude_baro_ft'] : null;
                 $rows[] = array(
                     'sample_time_utc' => self::epochIso((float)$anchor['epoch']),
                     'seconds_since_start' => (float)$anchor['seconds_since_start'],
-                    'aircraft_hex' => $candidateHex,
+                    'aircraft_hex' => str_starts_with($candidateId, '~') ? '' : substr($candidateId, 0, 6),
                     'callsign' => tv_adsb_normalize_label((string)($position['callsign'] ?? '')),
                     'latitude' => $lat,
                     'longitude' => $lon,
                     'altitude_ft' => $trafficAlt,
                     'groundspeed_kt' => isset($position['groundspeed_kt']) && is_numeric($position['groundspeed_kt']) ? (float)$position['groundspeed_kt'] : null,
-                    'track_deg' => isset($position['track_deg']) && is_numeric($position['track_deg']) ? (float)$position['track_deg'] : null,
+                    'track_deg' => isset($position['track_true_deg']) && is_numeric($position['track_true_deg']) ? (float)$position['track_true_deg'] : null,
                     'distance_nm' => round($distanceNm, 2),
                     'bearing_deg' => round(tv_adsb_bearing((float)$anchor['latitude'], (float)$anchor['longitude'], $lat, $lon), 1),
                     'relative_altitude_ft' => $ownshipAlt !== null && $trafficAlt !== null ? round($trafficAlt - $ownshipAlt, 1) : null,
@@ -1127,6 +1232,9 @@ final class CockpitAdsbEnrichmentService
         }
 
         $this->storeTrafficSamples($recordingId, $rows);
+        foreach ($candidateTraces as $candidateId => $samples) {
+            $this->storeTrafficAircraftSamples($recordingId, $candidateId, $samples, (bool)($enteredRange[$candidateId] ?? false));
+        }
 
         return array(
             'sample_count' => count($rows),
@@ -1136,7 +1244,10 @@ final class CockpitAdsbEnrichmentService
             'candidate_count' => count($candidates),
             'trace_count' => count($candidateTraces),
             'trace_sources' => $traceSources,
-            'range_nm' => self::TRAFFIC_RANGE_NM,
+            'range_nm' => self::TRAFFIC_DISPLAY_RANGE_NM,
+            'discovery_range_nm' => self::TRAFFIC_DISCOVERY_RANGE_NM,
+            'aircraft_entered_range_count' => count($enteredRange),
+            'aircraft' => $diagnosticsByAircraft,
         );
     }
 
@@ -1148,19 +1259,22 @@ final class CockpitAdsbEnrichmentService
     {
         $dates = $this->traceDatesForWindow($window);
         $epochSamples = array();
+        $rawSamples = array();
         foreach ($dates as $day) {
             try {
-                $payload = $this->fetchHistoricalTraceForDate($candidateHex, $day);
+                $payload = $this->fetchTraceForAircraftDate($candidateHex, $day);
             } catch (Throwable) {
                 continue;
             }
             if (!isset($payload['trace']) || !is_array($payload['trace'])) {
                 continue;
             }
-            $epochSamples = array_merge($epochSamples, $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']));
+            $normalized = $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']);
+            $epochSamples = array_merge($epochSamples, $normalized);
+            $rawSamples = array_merge($rawSamples, $normalized);
         }
         if ($epochSamples !== array()) {
-            return array('samples' => $epochSamples, 'source' => 'historical');
+            return array('samples' => $epochSamples, 'raw_samples' => $rawSamples, 'source' => 'historical');
         }
 
         $folder = substr($candidateHex, -2);
@@ -1178,11 +1292,125 @@ final class CockpitAdsbEnrichmentService
             }
             $samples = $this->normalizeTraceEpochSamples($payload, (float)$window['start_epoch'], (float)$window['end_epoch']);
             if ($samples !== array()) {
-                return array('samples' => $samples, 'source' => str_contains($path, 'trace_recent') ? 'recent' : 'current_full');
+                return array('samples' => $samples, 'raw_samples' => $samples, 'source' => str_contains($path, 'trace_recent') ? 'recent' : 'current_full');
             }
         }
 
-        return array('samples' => array(), 'source' => 'none');
+        return array('samples' => array(), 'raw_samples' => array(), 'source' => 'none');
+    }
+
+    /**
+     * @param list<array<string,mixed>> $anchors
+     * @param array<string,mixed> $recording
+     * @param array<string,mixed> $window
+     * @return array<string,array<string,mixed>>
+     */
+    private function discoverTrafficCandidates(int $recordingId, string $ownshipHex, array $anchors, array $recording, array $window): array
+    {
+        $this->clearCandidateObservations($recordingId);
+        $seen = array();
+        $candidates = array();
+        $addCandidate = function (string $id, array $evidence) use (&$seen, &$candidates, $ownshipHex, $recordingId): void {
+            $id = self::normalizeAircraftIdentifier($id);
+            if ($id === '' || $id === $ownshipHex || isset($seen[$id])) {
+                return;
+            }
+            $seen[$id] = true;
+            $candidates[$id] = $evidence + array('aircraft_identifier' => $id);
+            $this->storeCandidateObservation($recordingId, $id, $evidence);
+        };
+
+        if (CockpitAircraftService::tablesPresent($this->pdo)) {
+            foreach ((new CockpitAircraftService($this->pdo))->activeAircraft() as $aircraft) {
+                $hex = self::normalizeAircraftIdentifier((string)($aircraft['adsb_hex'] ?? ''));
+                if ($hex === '' || $hex === $ownshipHex) {
+                    continue;
+                }
+                $addCandidate($hex, array(
+                    'callsign' => (string)($aircraft['registration'] ?? ''),
+                    'source_type' => 'fleet',
+                    'discovery_utc' => $window['start_iso'] ?? gmdate('c'),
+                ));
+            }
+        }
+
+        $nextDiscoveryAt = -self::TRAFFIC_DISCOVERY_INTERVAL_S;
+        foreach ($anchors as $anchor) {
+            $seconds = (float)($anchor['seconds_since_start'] ?? 0);
+            if ($seconds < $nextDiscoveryAt || !isset($anchor['latitude'], $anchor['longitude'], $anchor['epoch'])) {
+                continue;
+            }
+            $nextDiscoveryAt = $seconds + self::TRAFFIC_DISCOVERY_INTERVAL_S;
+            foreach ($this->fetchHistoricalSnapshotNearAnchor($anchor) as $aircraft) {
+                if (!is_array($aircraft)) {
+                    continue;
+                }
+                $id = self::aircraftIdentifierFromPayload($aircraft);
+                if ($id === '' || $id === $ownshipHex) {
+                    continue;
+                }
+                $position = tv_adsb_position($aircraft);
+                if ($position === null) {
+                    continue;
+                }
+                $distance = self::distanceNm((float)$anchor['latitude'], (float)$anchor['longitude'], (float)$position['lat'], (float)$position['lon']);
+                if ($distance > self::TRAFFIC_DISCOVERY_RANGE_NM) {
+                    continue;
+                }
+                $addCandidate($id, array(
+                    'callsign' => tv_adsb_normalize_label((string)($aircraft['flight'] ?? $aircraft['callsign'] ?? '')),
+                    'source_type' => (string)($aircraft['type'] ?? $aircraft['source'] ?? 'historical_snapshot'),
+                    'discovery_utc' => self::epochIso((float)$anchor['epoch']) ?? gmdate('c'),
+                    'discovery_latitude' => (float)$position['lat'],
+                    'discovery_longitude' => (float)$position['lon'],
+                    'ownship_latitude' => (float)$anchor['latitude'],
+                    'ownship_longitude' => (float)$anchor['longitude'],
+                    'discovery_distance_nm' => round($distance, 2),
+                    'raw' => $aircraft,
+                ));
+            }
+            if (count($candidates) >= self::MAX_CANDIDATE_HEXES) {
+                break;
+            }
+        }
+
+        return array_slice($candidates, 0, self::MAX_CANDIDATE_HEXES, true);
+    }
+
+    /**
+     * @param array<string,mixed> $anchor
+     * @return list<array<string,mixed>>
+     */
+    private function fetchHistoricalSnapshotNearAnchor(array $anchor): array
+    {
+        $baseUrl = rtrim((string)getenv('CW_ADSB_EXCHANGE_BASE_URL'), '/');
+        $apiKey = trim((string)(getenv('CW_ADSB_EXCHANGE_API_KEY') ?: getenv('CW_ADSBEXCHANGE_API_KEY') ?: ''));
+        if ($baseUrl === '' || $apiKey === '') {
+            return array();
+        }
+        $epoch = (float)($anchor['epoch'] ?? 0);
+        $query = http_build_query(array(
+            'start' => gmdate('Y-m-d\TH:i:s\Z', (int)floor($epoch - 2)),
+            'end' => gmdate('Y-m-d\TH:i:s\Z', (int)ceil($epoch + 2)),
+            'lat' => (string)$anchor['latitude'],
+            'lon' => (string)$anchor['longitude'],
+            'radius_nm' => (string)self::TRAFFIC_DISCOVERY_RANGE_NM,
+        ));
+        $url = $baseUrl . '/historical/corridor?' . $query;
+        $context = stream_context_create(array('http' => array(
+            'method' => 'GET',
+            'header' => "Authorization: Bearer {$apiKey}\r\nAccept: application/json\r\n",
+            'timeout' => 20,
+        )));
+        $raw = @file_get_contents($url, false, $context);
+        if ($raw === false || trim($raw) === '') {
+            return array();
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+        return is_array($decoded['aircraft'] ?? null) ? $decoded['aircraft'] : (is_array($decoded['samples'] ?? null) ? $decoded['samples'] : array());
     }
 
     /**
@@ -1339,10 +1567,53 @@ final class CockpitAdsbEnrichmentService
         $start = new DateTimeImmutable((string)$window['start_iso']);
         $end = new DateTimeImmutable((string)$window['end_iso']);
         $dates = array();
-        for ($day = $start->setTime(0, 0); $day <= $end->setTime(0, 0); $day = $day->modify('+1 day')) {
+        for ($day = $start->setTime(0, 0)->modify('-1 day'); $day <= $end->setTime(0, 0)->modify('+1 day'); $day = $day->modify('+1 day')) {
             $dates[] = $day;
         }
         return $dates;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function fetchTraceForAircraftDate(string $aircraftId, DateTimeImmutable $day): array
+    {
+        $payload = $this->fetchHistoricalTraceForDate($aircraftId, $day);
+        if ($payload !== array()) {
+            $this->storeRawTraceEvidence($aircraftId, $day, '/traces-hist/' . $day->format('Y/m/d') . '/trace_full_' . rawurlencode($aircraftId), $payload);
+        }
+        return $payload;
+    }
+
+    private function storeRawTraceEvidence(string $aircraftId, DateTimeImmutable $day, string $route, array $payload): ?int
+    {
+        if (!$this->tablePresent(self::RAW_TRACE_TABLE)) {
+            return null;
+        }
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($body === false) {
+            return null;
+        }
+        $sha = hash('sha256', $body);
+        $dir = CockpitRecorderService::projectRoot() . '/storage/cockpit_recorder/adsb_traces/' . $day->format('Y/m/d');
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+        $relativePath = 'storage/cockpit_recorder/adsb_traces/' . $day->format('Y/m/d') . '/' . self::safeStorageName($aircraftId) . '-' . $sha . '.json';
+        $absolutePath = CockpitRecorderService::projectRoot() . '/' . $relativePath;
+        if (!is_file($absolutePath)) {
+            file_put_contents($absolutePath, $body);
+        }
+        $stmt = $this->pdo->prepare('
+            INSERT IGNORE INTO ' . self::RAW_TRACE_TABLE . '
+              (provider, aircraft_identifier, trace_date_utc, request_route, http_status, content_type, sha256, storage_path, byte_size)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute(array(tv_adsb_provider(), $aircraftId, $day->format('Y-m-d'), $route, 200, 'application/json', $sha, $relativePath, strlen($body)));
+        $idStmt = $this->pdo->prepare('SELECT id FROM ' . self::RAW_TRACE_TABLE . ' WHERE sha256 = ? LIMIT 1');
+        $idStmt->execute(array($sha));
+        $id = (int)$idStmt->fetchColumn();
+        return $id > 0 ? $id : null;
     }
 
     /**
@@ -1367,20 +1638,78 @@ final class CockpitAdsbEnrichmentService
             if ($epoch < $startEpoch - 60 || $epoch > $endEpoch + 60) {
                 continue;
             }
+            $flags = $this->decodeTraceFlags($row);
             $alt = $row[3] ?? null;
+            $geomAlt = null;
+            foreach ($row as $value) {
+                if (is_array($value)) {
+                    foreach (array('alt_geom', 'geom_altitude', 'altitude_geom', 'geom_altitude_ft') as $key) {
+                        if (isset($value[$key]) && is_numeric($value[$key])) {
+                            $geomAlt = (float)$value[$key];
+                            break 2;
+                        }
+                    }
+                }
+            }
             $samples[] = array(
                 'epoch' => $epoch,
                 'latitude' => (float)$row[1],
                 'longitude' => (float)$row[2],
-                'baro_altitude_ft' => is_numeric($alt) ? (float)$alt : null,
+                'altitude_baro_ft' => is_numeric($alt) ? (float)$alt : null,
+                'altitude_geom_ft' => $geomAlt,
                 'groundspeed_kt' => isset($row[4]) && is_numeric($row[4]) ? (float)$row[4] : null,
-                'track_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
+                'track_true_deg' => isset($row[5]) && is_numeric($row[5]) ? (float)$row[5] : null,
+                'vertical_rate_baro_fpm' => isset($row[6]) && is_numeric($row[6]) ? (float)$row[6] : (isset($row[7]) && is_numeric($row[7]) && !$flags['geometric_vertical_rate'] ? (float)$row[7] : null),
+                'vertical_rate_geom_fpm' => isset($row[7]) && is_numeric($row[7]) && $flags['geometric_vertical_rate'] ? (float)$row[7] : null,
                 'callsign' => $callsign,
+                'on_ground' => is_string($alt) && strtolower($alt) === 'ground',
+                'stale' => $flags['stale_position'],
+                'new_leg' => $flags['new_leg'],
+                'altitude_source' => $flags['geometric_altitude'] ? 'geometric' : (is_numeric($alt) ? 'baro' : ''),
+                'vertical_rate_source' => $flags['geometric_vertical_rate'] ? 'geometric' : (isset($row[6]) || isset($row[7]) ? 'baro' : ''),
+                'raw' => $row,
             );
         }
 
         usort($samples, fn(array $a, array $b): int => ((float)$a['epoch']) <=> ((float)$b['epoch']));
         return $samples;
+    }
+
+    /**
+     * @param array<int,mixed> $row
+     * @return array{stale_position:bool,new_leg:bool,geometric_vertical_rate:bool,geometric_altitude:bool}
+     */
+    private function decodeTraceFlags(array $row): array
+    {
+        $flagValue = null;
+        foreach ($row as $value) {
+            if (is_array($value)) {
+                foreach (array('flags', 'trace_flags', 'status') as $key) {
+                    if (isset($value[$key]) && is_numeric($value[$key])) {
+                        $flagValue = (int)$value[$key];
+                        break 2;
+                    }
+                }
+                if (!empty($value['stale']) || !empty($value['stale_position'])) {
+                    $flagValue = ($flagValue ?? 0) | 1;
+                }
+                if (!empty($value['new_leg'])) {
+                    $flagValue = ($flagValue ?? 0) | 2;
+                }
+            }
+        }
+        foreach (array(8, 9) as $index) {
+            if ($flagValue === null && isset($row[$index]) && is_numeric($row[$index]) && (int)$row[$index] >= 0 && (int)$row[$index] <= 255) {
+                $flagValue = (int)$row[$index];
+            }
+        }
+        $flagValue = $flagValue ?? 0;
+        return array(
+            'stale_position' => (bool)($flagValue & 1),
+            'new_leg' => (bool)($flagValue & 2),
+            'geometric_vertical_rate' => (bool)($flagValue & 4),
+            'geometric_altitude' => (bool)($flagValue & 8),
+        );
     }
 
     /**
@@ -1422,6 +1751,216 @@ final class CockpitAdsbEnrichmentService
     private function clearTrafficSamples(int $recordingId): void
     {
         $this->pdo->prepare('DELETE FROM ' . self::TRAFFIC_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
+    }
+
+    private function clearTrafficAircraftSamples(int $recordingId): void
+    {
+        if ($this->tablePresent(self::AIRCRAFT_SAMPLE_TABLE)) {
+            $this->pdo->prepare('DELETE FROM ' . self::AIRCRAFT_SAMPLE_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
+        }
+    }
+
+    private function clearCandidateObservations(int $recordingId): void
+    {
+        if ($this->tablePresent(self::CANDIDATE_TABLE)) {
+            $this->pdo->prepare('DELETE FROM ' . self::CANDIDATE_TABLE . ' WHERE recording_id = ?')->execute(array($recordingId));
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $evidence
+     */
+    private function storeCandidateObservation(int $recordingId, string $aircraftId, array $evidence): void
+    {
+        if (!$this->tablePresent(self::CANDIDATE_TABLE)) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('
+            INSERT INTO ' . self::CANDIDATE_TABLE . '
+              (recording_id, aircraft_identifier, callsign, discovery_utc, discovery_latitude, discovery_longitude,
+               ownship_latitude, ownship_longitude, discovery_distance_nm, source_type, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute(array(
+            $recordingId,
+            $aircraftId,
+            substr((string)($evidence['callsign'] ?? ''), 0, 32),
+            self::mysqlDateTimeMillis((string)($evidence['discovery_utc'] ?? gmdate('c'))),
+            $evidence['discovery_latitude'] ?? null,
+            $evidence['discovery_longitude'] ?? null,
+            $evidence['ownship_latitude'] ?? null,
+            $evidence['ownship_longitude'] ?? null,
+            $evidence['discovery_distance_nm'] ?? null,
+            substr((string)($evidence['source_type'] ?? ''), 0, 64),
+            isset($evidence['raw']) ? json_encode($evidence['raw'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null,
+        ));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return array{samples:list<array<string,mixed>>,leg_count:int,rejected:int,discontinuities:int}
+     */
+    private function segmentTrafficSamples(array $samples): array
+    {
+        usort($samples, fn(array $a, array $b): int => ((float)($a['epoch'] ?? 0)) <=> ((float)($b['epoch'] ?? 0)));
+        $result = array();
+        $last = null;
+        $leg = 1;
+        $rejected = 0;
+        $discontinuities = 0;
+        $seen = array();
+        foreach ($samples as $sample) {
+            if (!isset($sample['epoch'], $sample['latitude'], $sample['longitude']) || !is_numeric($sample['epoch']) || !is_numeric($sample['latitude']) || !is_numeric($sample['longitude'])) {
+                $rejected++;
+                continue;
+            }
+            if (!empty($sample['stale'])) {
+                $rejected++;
+                continue;
+            }
+            $key = sprintf('%.3f|%.7f|%.7f', (float)$sample['epoch'], (float)$sample['latitude'], (float)$sample['longitude']);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            if ($last !== null) {
+                $dt = (float)$sample['epoch'] - (float)$last['epoch'];
+                $jumpNm = self::distanceNm((float)$last['latitude'], (float)$last['longitude'], (float)$sample['latitude'], (float)$sample['longitude']);
+                $speedKt = $dt > 0 ? ($jumpNm / ($dt / 3600.0)) : PHP_FLOAT_MAX;
+                if (!empty($sample['new_leg']) || $dt <= 0 || $dt > self::TRAFFIC_HARD_SAMPLE_GAP_S || $jumpNm > self::TRAFFIC_MAX_JUMP_NM || $speedKt > self::TRAFFIC_MAX_SPEED_KT) {
+                    $leg++;
+                    $discontinuities++;
+                }
+            }
+            $sample['leg_id'] = $leg;
+            $result[] = $sample;
+            $last = $sample;
+        }
+        return array('samples' => $result, 'leg_count' => $leg, 'rejected' => $rejected, 'discontinuities' => $discontinuities);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     * @return array<string,mixed>|null
+     */
+    private function interpolateTrafficAtEpoch(array $samples, float $epoch, float $maxGap): ?array
+    {
+        $before = null;
+        $after = null;
+        foreach ($samples as $sample) {
+            $sampleEpoch = (float)($sample['epoch'] ?? 0);
+            if ($sampleEpoch <= $epoch) {
+                $before = $sample;
+                continue;
+            }
+            $after = $sample;
+            break;
+        }
+        if ($before === null || $after === null) {
+            $nearest = $before ?? $after;
+            return $nearest !== null && abs((float)$nearest['epoch'] - $epoch) <= 2.0 ? $nearest : null;
+        }
+        $gap = (float)$after['epoch'] - (float)$before['epoch'];
+        if ($gap <= 0 || $gap > $maxGap || (int)($before['leg_id'] ?? 0) !== (int)($after['leg_id'] ?? -1)) {
+            return null;
+        }
+        $ratio = max(0.0, min(1.0, ($epoch - (float)$before['epoch']) / $gap));
+        return array(
+            'epoch' => $epoch,
+            'latitude' => self::lerpNullable($before['latitude'] ?? null, $after['latitude'] ?? null, $ratio),
+            'longitude' => self::lerpNullable($before['longitude'] ?? null, $after['longitude'] ?? null, $ratio),
+            'altitude_baro_ft' => self::lerpNullable($before['altitude_baro_ft'] ?? null, $after['altitude_baro_ft'] ?? null, $ratio),
+            'altitude_geom_ft' => self::lerpNullable($before['altitude_geom_ft'] ?? null, $after['altitude_geom_ft'] ?? null, $ratio),
+            'groundspeed_kt' => self::lerpNullable($before['groundspeed_kt'] ?? null, $after['groundspeed_kt'] ?? null, $ratio),
+            'track_true_deg' => self::lerpAngleNullable($before['track_true_deg'] ?? null, $after['track_true_deg'] ?? null, $ratio),
+            'vertical_rate_baro_fpm' => self::lerpNullable($before['vertical_rate_baro_fpm'] ?? null, $after['vertical_rate_baro_fpm'] ?? null, $ratio),
+            'vertical_rate_geom_fpm' => self::lerpNullable($before['vertical_rate_geom_fpm'] ?? null, $after['vertical_rate_geom_fpm'] ?? null, $ratio),
+            'callsign' => (string)($before['callsign'] ?? $after['callsign'] ?? ''),
+            'leg_id' => (int)($before['leg_id'] ?? 1),
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $samples
+     */
+    private function storeTrafficAircraftSamples(int $recordingId, string $aircraftId, array $samples, bool $enteredRange): void
+    {
+        if (!$this->tablePresent(self::AIRCRAFT_SAMPLE_TABLE) || $samples === array()) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('
+            INSERT IGNORE INTO ' . self::AIRCRAFT_SAMPLE_TABLE . '
+              (recording_id, aircraft_identifier, sample_time_utc, seconds_since_start, latitude, longitude,
+               altitude_baro_ft, altitude_geom_ft, groundspeed_kt, track_true_deg, vertical_rate_baro_fpm,
+               vertical_rate_geom_fpm, callsign, source_type, on_ground, stale_position, new_leg, leg_id,
+               altitude_source, vertical_rate_source, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ');
+        $startStmt = $this->pdo->prepare('SELECT started_at FROM ipca_cockpit_recordings WHERE id = ? LIMIT 1');
+        $startStmt->execute(array($recordingId));
+        $startEpoch = strtotime((string)$startStmt->fetchColumn());
+        foreach ($samples as $sample) {
+            $epoch = (float)($sample['epoch'] ?? 0);
+            $stmt->execute(array(
+                $recordingId,
+                $aircraftId,
+                self::mysqlDateTimeMillis(self::epochIso($epoch) ?? gmdate('c', (int)$epoch)),
+                $startEpoch !== false ? max(0, $epoch - (float)$startEpoch) : 0,
+                $sample['latitude'] ?? null,
+                $sample['longitude'] ?? null,
+                $sample['altitude_baro_ft'] ?? null,
+                $sample['altitude_geom_ft'] ?? null,
+                $sample['groundspeed_kt'] ?? null,
+                $sample['track_true_deg'] ?? null,
+                $sample['vertical_rate_baro_fpm'] ?? null,
+                $sample['vertical_rate_geom_fpm'] ?? null,
+                substr((string)($sample['callsign'] ?? ''), 0, 32),
+                'adsbexchange_trace',
+                !empty($sample['on_ground']) ? 1 : 0,
+                !empty($sample['stale']) ? 1 : 0,
+                !empty($sample['new_leg']) ? 1 : 0,
+                (int)($sample['leg_id'] ?? 1),
+                (string)($sample['altitude_source'] ?? ''),
+                (string)($sample['vertical_rate_source'] ?? ''),
+                isset($sample['raw']) ? json_encode($sample['raw'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null,
+            ));
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $candidate
+     * @param list<array<string,mixed>> $rawSamples
+     * @param array{samples:list<array<string,mixed>>,leg_count:int,rejected:int,discontinuities:int} $segmented
+     * @return array<string,mixed>
+     */
+    private function trafficAircraftDiagnostics(string $aircraftId, array $candidate, array $rawSamples, array $segmented): array
+    {
+        $samples = $segmented['samples'];
+        $epochs = array_values(array_map(static fn(array $s): float => (float)($s['epoch'] ?? 0), $samples));
+        $gaps = array();
+        for ($i = 1; $i < count($epochs); $i++) {
+            $gaps[] = max(0.0, $epochs[$i] - $epochs[$i - 1]);
+        }
+        sort($gaps);
+        return array(
+            'aircraft_identifier' => $aircraftId,
+            'callsigns_observed' => array_values(array_unique(array_filter(array_map(static fn(array $s): string => trim((string)($s['callsign'] ?? '')), $samples)))),
+            'source_types_observed' => array_values(array_unique(array_filter(array((string)($candidate['source_type'] ?? ''))))),
+            'first_sample_utc' => $epochs !== array() ? self::epochIso(min($epochs)) : null,
+            'last_sample_utc' => $epochs !== array() ? self::epochIso(max($epochs)) : null,
+            'raw_sample_count' => count($rawSamples),
+            'normalized_sample_count' => count($samples),
+            'usable_sample_count' => count($samples),
+            'rejected_sample_count' => (int)$segmented['rejected'],
+            'leg_count' => (int)$segmented['leg_count'],
+            'minimum_sample_gap_s' => $gaps !== array() ? min($gaps) : null,
+            'median_sample_gap_s' => $gaps !== array() ? $gaps[(int)floor(count($gaps) / 2)] : null,
+            'maximum_sample_gap_s' => $gaps !== array() ? max($gaps) : null,
+            'discovery_distance_nm' => $candidate['discovery_distance_nm'] ?? null,
+            'renderable' => count($samples) >= 2,
+            'not_renderable_reason' => count($samples) >= 2 ? null : (count($samples) === 1 ? 'only_one_usable_sample' : 'no_usable_trace'),
+            'discontinuities_detected' => (int)$segmented['discontinuities'],
+        );
     }
 
     private function setStatus(

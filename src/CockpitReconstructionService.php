@@ -34,6 +34,7 @@ final class CockpitReconstructionService
     private const ADSB_TABLE = 'ipca_cockpit_adsb_enrichments';
     private const ADSB_OWNSHIP_TABLE = 'ipca_cockpit_adsb_ownship_samples';
     private const ADSB_TRAFFIC_TABLE = 'ipca_cockpit_adsb_traffic_samples';
+    private const ADSB_TRAFFIC_AIRCRAFT_TABLE = 'ipca_cockpit_adsb_traffic_aircraft_samples';
 
     public const STAGE_QUEUED = 'queued';
     public const STAGE_LOADING = 'loading_raw';
@@ -678,6 +679,7 @@ final class CockpitReconstructionService
                 $trafficRows = $this->loadAdsbTraffic($recordingId);
             }
         }
+        $trafficAircraft = $this->loadAdsbTrafficAircraft($recordingId);
         $trafficMeta = is_array($trafficPayload['meta'] ?? null)
             ? $trafficPayload['meta']
             : array(
@@ -717,6 +719,7 @@ final class CockpitReconstructionService
             'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
             'airports' => $this->replayEndpointAirports($recordingId),
             'traffic' => $trafficIsArchive ? $trafficRows : array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
+            'trafficAircraft' => $trafficAircraft,
             'traffic_meta' => $trafficMeta,
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
@@ -2410,6 +2413,65 @@ final class CockpitReconstructionService
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    private function loadAdsbTrafficAircraft(int $recordingId): array
+    {
+        if (!$this->tablePresent(self::ADSB_TRAFFIC_AIRCRAFT_TABLE)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT *
+            FROM ' . self::ADSB_TRAFFIC_AIRCRAFT_TABLE . '
+            WHERE recording_id = ?
+            ORDER BY aircraft_identifier ASC, sample_time_utc ASC
+        ');
+        $stmt->execute(array($recordingId));
+        $groups = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $id = strtolower(trim((string)($row['aircraft_identifier'] ?? '')));
+            if ($id === '') {
+                continue;
+            }
+            if (!isset($groups[$id])) {
+                $groups[$id] = array(
+                    'id' => $id,
+                    'callsign' => '',
+                    'registration' => '',
+                    'aircraftType' => '',
+                    'sourceTypes' => array(),
+                    'samples' => array(),
+                );
+            }
+            $callsign = trim((string)($row['callsign'] ?? ''));
+            if ($callsign !== '') {
+                $groups[$id]['callsign'] = $callsign;
+            }
+            $source = trim((string)($row['source_type'] ?? ''));
+            if ($source !== '' && !in_array($source, $groups[$id]['sourceTypes'], true)) {
+                $groups[$id]['sourceTypes'][] = $source;
+            }
+            $groups[$id]['samples'][] = array(
+                'utc' => isset($row['sample_time_utc']) ? (string)$row['sample_time_utc'] : null,
+                't' => isset($row['seconds_since_start']) ? (float)$row['seconds_since_start'] : null,
+                'lat' => isset($row['latitude']) && is_numeric($row['latitude']) ? (float)$row['latitude'] : null,
+                'lon' => isset($row['longitude']) && is_numeric($row['longitude']) ? (float)$row['longitude'] : null,
+                'altBaroFt' => isset($row['altitude_baro_ft']) && is_numeric($row['altitude_baro_ft']) ? (float)$row['altitude_baro_ft'] : null,
+                'altGeomFt' => isset($row['altitude_geom_ft']) && is_numeric($row['altitude_geom_ft']) ? (float)$row['altitude_geom_ft'] : null,
+                'groundSpeedKt' => isset($row['groundspeed_kt']) && is_numeric($row['groundspeed_kt']) ? (float)$row['groundspeed_kt'] : null,
+                'trackTrueDeg' => isset($row['track_true_deg']) && is_numeric($row['track_true_deg']) ? (float)$row['track_true_deg'] : null,
+                'verticalRateBaroFpm' => isset($row['vertical_rate_baro_fpm']) && is_numeric($row['vertical_rate_baro_fpm']) ? (float)$row['vertical_rate_baro_fpm'] : null,
+                'verticalRateGeomFpm' => isset($row['vertical_rate_geom_fpm']) && is_numeric($row['vertical_rate_geom_fpm']) ? (float)$row['vertical_rate_geom_fpm'] : null,
+                'onGround' => isset($row['on_ground']) ? (bool)$row['on_ground'] : null,
+                'stale' => !empty($row['stale_position']),
+                'newLeg' => !empty($row['new_leg']),
+                'legId' => isset($row['leg_id']) ? (int)$row['leg_id'] : 1,
+            );
+        }
+        return array_values($groups);
+    }
+
+    /**
      * @param array<string,mixed> $recording
      * @return array{traffic:list<array<string,mixed>>,meta:array<string,mixed>}|null
      */
@@ -2489,7 +2551,7 @@ final class CockpitReconstructionService
     private function ensureAdsbTrafficForReplay(array $recording): array
     {
         $recordingId = (int)($recording['id'] ?? 0);
-        if ($recordingId <= 0 || trim((string)($recording['aircraft_adsb_hex'] ?? '')) === '') {
+        if ($recordingId <= 0) {
             return array();
         }
         if (!CockpitAdsbEnrichmentService::tablesPresent($this->pdo)) {

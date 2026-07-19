@@ -4715,10 +4715,23 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function insetTrafficTargetsAt(t) {
-    const rows = payload && Array.isArray(payload.traffic) ? payload.traffic : [];
-    if (!rows.length || !instrumentEnabled('traffic')) return [];
+    if (!instrumentEnabled('traffic')) return [];
+    const aircraft = payload && Array.isArray(payload.trafficAircraft) ? payload.trafficAircraft : [];
     const ownshipHex = insetOwnshipHex();
     const activeT = finiteNumber(t) || 0;
+    const ownship = sampleAt(activeT);
+    const ownshipLat = finiteNumber(ownship && ownship.lat);
+    const ownshipLon = finiteNumber(ownship && ownship.lon);
+    const ownshipAlt = finiteNumber(ownship && (ownship.baro_altitude_ft ?? ownship.altitude_ft_msl ?? ownship.altitude_ft));
+    if (aircraft.length && ownshipLat !== null && ownshipLon !== null) {
+      return aircraft
+        .map((target) => interpolateTrafficAircraftAt(target, activeT, ownshipLat, ownshipLon, ownshipAlt))
+        .filter(Boolean)
+        .sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
+    }
+
+    const rows = payload && Array.isArray(payload.traffic) ? payload.traffic : [];
+    if (!rows.length) return [];
     const windowS = 20;
     const nearestByHex = new Map();
     rows.forEach((row) => {
@@ -4743,6 +4756,81 @@ cw_header('Cockpit Recorder Replay');
       }
     });
     return Array.from(nearestByHex.values()).sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
+  }
+
+  function interpolateTrafficAircraftAt(aircraft, activeT, ownshipLat, ownshipLon, ownshipAlt) {
+    const id = String((aircraft && aircraft.id) || '').trim().toLowerCase();
+    if (!id || (insetOwnshipHex() && id === insetOwnshipHex())) return null;
+    const samples = aircraft && Array.isArray(aircraft.samples) ? aircraft.samples : [];
+    if (!samples.length) return null;
+    let before = null;
+    let after = null;
+    for (const sample of samples) {
+      const sampleT = finiteNumber(sample && sample.t);
+      if (sampleT === null) continue;
+      if (sampleT <= activeT) {
+        before = sample;
+        continue;
+      }
+      after = sample;
+      break;
+    }
+    if (!before || !after) {
+      const nearest = before || after;
+      const nearestT = finiteNumber(nearest && nearest.t);
+      if (nearestT === null || Math.abs(nearestT - activeT) > 2) return null;
+      return trafficTargetFromSample(aircraft, nearest, ownshipLat, ownshipLon, ownshipAlt);
+    }
+    const beforeT = finiteNumber(before.t);
+    const afterT = finiteNumber(after.t);
+    const gap = beforeT !== null && afterT !== null ? afterT - beforeT : null;
+    if (gap === null || gap <= 0 || gap > 30) return null;
+    if ((before.legId ?? 1) !== (after.legId ?? 1) || before.newLeg || after.newLeg || before.stale || after.stale) return null;
+    const ratio = clamp((activeT - beforeT) / gap, 0, 1);
+    const lerp = (a, b) => {
+      const av = finiteNumber(a);
+      const bv = finiteNumber(b);
+      if (av === null || bv === null) return av ?? bv ?? null;
+      return av + (bv - av) * ratio;
+    };
+    const lerpAngle = (a, b) => {
+      const av = finiteNumber(a);
+      const bv = finiteNumber(b);
+      if (av === null || bv === null) return av ?? bv ?? null;
+      const delta = ((bv - av + 540) % 360) - 180;
+      return (av + delta * ratio + 360) % 360;
+    };
+    return trafficTargetFromSample(aircraft, {
+      t: activeT,
+      lat: lerp(before.lat, after.lat),
+      lon: lerp(before.lon, after.lon),
+      altBaroFt: lerp(before.altBaroFt, after.altBaroFt),
+      altGeomFt: lerp(before.altGeomFt, after.altGeomFt),
+      groundSpeedKt: lerp(before.groundSpeedKt, after.groundSpeedKt),
+      trackTrueDeg: lerpAngle(before.trackTrueDeg, after.trackTrueDeg),
+      verticalRateBaroFpm: lerp(before.verticalRateBaroFpm, after.verticalRateBaroFpm),
+      legId: before.legId ?? 1,
+    }, ownshipLat, ownshipLon, ownshipAlt);
+  }
+
+  function trafficTargetFromSample(aircraft, sample, ownshipLat, ownshipLon, ownshipAlt) {
+    const lat = finiteNumber(sample && sample.lat);
+    const lon = finiteNumber(sample && sample.lon);
+    if (lat === null || lon === null) return null;
+    const dist = haversineM(ownshipLat, ownshipLon, lat, lon) / 1852;
+    if (dist > 15) return null;
+    const alt = finiteNumber(sample && (sample.altBaroFt ?? sample.altGeomFt));
+    return {
+      t: finiteNumber(sample && sample.t),
+      hex: String((aircraft && aircraft.id) || '').trim().toLowerCase(),
+      cs: String((aircraft && aircraft.callsign) || '').trim().toUpperCase(),
+      lat,
+      lon,
+      trk: finiteNumber(sample && sample.trackTrueDeg) || 0,
+      alt,
+      dist,
+      rel_alt: ownshipAlt !== null && alt !== null ? alt - ownshipAlt : null,
+    };
   }
 
   function insetProjector(track, sample, extraPoints = []) {
