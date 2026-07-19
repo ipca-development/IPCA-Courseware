@@ -4784,8 +4784,11 @@ cw_header('Cockpit Recorder Replay');
     const beforeT = finiteNumber(before.t);
     const afterT = finiteNumber(after.t);
     const gap = beforeT !== null && afterT !== null ? afterT - beforeT : null;
-    if (gap === null || gap <= 0 || gap > 30) return null;
-    if ((before.legId ?? 1) !== (after.legId ?? 1) || before.newLeg || after.newLeg || before.stale || after.stale) return null;
+    const groundPair = Boolean(before.onGround && after.onGround);
+    const maxGap = groundPair ? 300 : 30;
+    if (gap === null || gap <= 0 || gap > maxGap) return null;
+    if ((before.legId ?? 1) !== (after.legId ?? 1) || before.newLeg || after.newLeg) return null;
+    if (!groundPair && (before.stale || after.stale)) return null;
     const ratio = clamp((activeT - beforeT) / gap, 0, 1);
     const lerp = (a, b) => {
       const av = finiteNumber(a);
@@ -4810,6 +4813,7 @@ cw_header('Cockpit Recorder Replay');
       trackTrueDeg: lerpAngle(before.trackTrueDeg, after.trackTrueDeg),
       verticalRateBaroFpm: lerp(before.verticalRateBaroFpm, after.verticalRateBaroFpm),
       legId: before.legId ?? 1,
+      onGround: groundPair,
     }, ownshipLat, ownshipLon, ownshipAlt);
   }
 

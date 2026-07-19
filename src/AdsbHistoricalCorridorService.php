@@ -101,32 +101,7 @@ final class AdsbHistoricalCorridorService
      */
     private function fetchProvider(array $request): array
     {
-        $baseUrl = rtrim((string)getenv('CW_ADSB_EXCHANGE_BASE_URL'), '/');
-        $apiKey = trim((string)getenv('CW_ADSB_EXCHANGE_API_KEY'));
-        if ($baseUrl === '' || $apiKey === '') {
-            throw new RuntimeException('ADS-B provider credentials are not configured.');
-        }
-        $query = http_build_query(array(
-            'start' => (string)$request['query_start_utc'],
-            'end' => (string)$request['query_end_utc'],
-            'lat' => (string)($request['center_latitude'] ?? ''),
-            'lon' => (string)($request['center_longitude'] ?? ''),
-            'radius_nm' => (string)$request['search_radius_nm'],
-        ));
-        $context = stream_context_create(array('http' => array(
-            'method' => 'GET',
-            'header' => "Authorization: Bearer {$apiKey}\r\nAccept: application/json\r\n",
-            'timeout' => 30,
-        )));
-        $raw = file_get_contents($baseUrl . '/historical/corridor?' . $query, false, $context);
-        if ($raw === false || trim($raw) === '') {
-            throw new RuntimeException('ADS-B provider returned no data.');
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            throw new RuntimeException('ADS-B provider returned invalid JSON.');
-        }
-        return $decoded;
+        throw new RuntimeException('Historical geographical ADS-B corridor discovery is not configured with a verified provider endpoint.');
     }
 
     /**

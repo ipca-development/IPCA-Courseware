@@ -74,7 +74,7 @@ final class AdsbTrafficArchiveService
         $minutes = max(5, min(1440, $lookbackMinutes));
         if (!$this->historicalProviderConfigured()) {
             // With the existing TV/radar ADS-B variables we can archive live KTRM snapshots going forward.
-            // Older backfill still needs a historical/corridor provider to avoid fabricating history.
+            // Older backfill needs a verified historical snapshot provider to avoid fabricating history.
             $minutes = max(1, (int)ceil($bucketSeconds / 60));
         }
         $start = $end->modify('-' . $minutes . ' minutes');
@@ -438,36 +438,7 @@ final class AdsbTrafficArchiveService
      */
     private function fetchHistoricalProviderTile(array $tile): ?array
     {
-        $baseUrl = rtrim((string)getenv('CW_ADSB_EXCHANGE_BASE_URL'), '/');
-        $apiKey = trim((string)(getenv('CW_ADSB_EXCHANGE_API_KEY') ?: getenv('CW_ADSBEXCHANGE_API_KEY') ?: ''));
-        if ($baseUrl === '' || $apiKey === '') {
-            return null;
-        }
-        $query = http_build_query(array(
-            'start' => (string)$tile['bucket_start_utc'],
-            'end' => (string)$tile['bucket_end_utc'],
-            'lat' => (string)$tile['center_latitude'],
-            'lon' => (string)$tile['center_longitude'],
-            'radius_nm' => (string)$tile['radius_nm'],
-        ));
-        $url = $baseUrl . '/historical/corridor?' . $query;
-        $context = stream_context_create(array('http' => array(
-            'method' => 'GET',
-            'header' => "Authorization: Bearer {$apiKey}\r\nAccept: application/json\r\n",
-            'timeout' => 30,
-        )));
-        $raw = file_get_contents($url, false, $context);
-        if ($raw === false || trim($raw) === '') {
-            throw new RuntimeException('ADS-B historical provider returned no data.');
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            throw new RuntimeException('ADS-B historical provider returned invalid JSON.');
-        }
-        $decoded['provider'] = tv_adsb_provider();
-        $decoded['fetch_mode'] = 'historical_corridor';
-        $decoded['path'] = $url;
-        return $decoded;
+        return null;
     }
 
     private function historicalProviderConfigured(): bool

@@ -779,6 +779,9 @@ cw_header('Cockpit Recordings');
             $adsbError = trim((string)($adsbDetail['error_message'] ?? ''));
             $adsbRawUrl = '/admin/cockpit_recorder_adsb.php?id=' . $id . '&type=raw';
             $adsbNormalizedUrl = '/admin/cockpit_recorder_adsb.php?id=' . $id . '&type=normalized';
+            $adsbDiagnosticUrl = '/admin/api/cockpit_recorder_adsb_diagnostic.php?id=' . $id;
+            $adsbHistoricalVerified = !empty($adsbDetail['historical_geographical_discovery_verified']);
+            $adsbHistoricalError = trim((string)($adsbDetail['historical_geographical_discovery_error'] ?? ''));
             $aircraftDisplay = trim((string)($row['aircraft_display_name'] ?: ($row['aircraft_registration'] ?? '')));
             $aircraftDisplay = $aircraftDisplay !== '' ? $aircraftDisplay : 'Not selected';
             $startedLocal = cockpit_admin_local_time_parts($startedAt);
@@ -1122,15 +1125,15 @@ cw_header('Cockpit Recordings');
                       <div class="cockpit-info">ADS-B is optional replay/debrief enrichment. Per the workflow expansion, it must be replaced by a provider adapter/job layer before it is considered production-grade, and it does not block operational record finalization.</div>
                       <div class="cockpit-grid">
                         <div><strong>Phone GPS evidence</strong><div><?= !empty($row['gps_storage_path']) ? h((int)($row['gps_sample_count'] ?? 0) . ' samples · ' . cockpit_admin_fmt_bytes((int)($row['gps_file_size_bytes'] ?? 0))) : 'No GPS JSON uploaded' ?></div><?php if (!empty($row['gps_storage_path'])): ?><a href="<?= h($gpsUrl) ?>">Download GPS JSON</a><?php endif; ?></div>
-                        <div><strong>ADS-B status</strong><div><span class="cockpit-badge <?= h(cockpit_admin_badge_class($adsbDisplayStatus)) ?>"><?= h($adsbDisplayStatus) ?></span></div><div class="cockpit-muted">Ownship samples: <?= $adsbOwnshipCount ?></div></div>
+                        <div><strong>ADS-B status</strong><div><span class="cockpit-badge <?= h(cockpit_admin_badge_class($adsbDisplayStatus)) ?>"><?= h($adsbDisplayStatus) ?></span></div><div class="cockpit-muted">Ownship samples: <?= $adsbOwnshipCount ?></div><div class="cockpit-muted">Historical ADS-B candidates: <?= (int)($adsbDetail['adsbx_historical_candidate_count'] ?? 0) ?> · Fleet supplement: <?= (int)($adsbDetail['local_fleet_candidate_count'] ?? 0) ?></div></div>
                       </div>
+                      <?php if (!$adsbHistoricalVerified): ?><div class="cockpit-error">Complete historical nearby-traffic discovery is unavailable with the configured ADS-B provider access. Only aircraft identifiers known from supplemental sources can have historical traces retrieved.<?= $adsbHistoricalError !== '' ? h(' ' . $adsbHistoricalError) : '' ?></div><?php endif; ?>
                       <?php if ($adsbError !== ''): ?><div class="cockpit-error"><?= h($adsbError) ?></div><?php endif; ?>
                       <div class="cockpit-actions-row">
-                        <?php if (!empty($row['aircraft_adsb_hex'])): ?>
-                          <form method="post" action="/admin/api/cockpit_recorder_adsb_enrich.php"><input type="hidden" name="id" value="<?= $id ?>"><button class="cockpit-button secondary" type="submit">Fetch legacy ADS-B enrichment</button></form>
-                        <?php endif; ?>
+                        <form method="post" action="/admin/api/cockpit_recorder_adsb_enrich.php"><input type="hidden" name="id" value="<?= $id ?>"><button class="cockpit-button secondary" type="submit">Fetch ADS-B trace enrichment</button></form>
                         <?php if (!empty($adsbDetail['raw_storage_path'])): ?><a href="<?= h($adsbRawUrl) ?>">Raw ADS-B JSON</a><?php endif; ?>
                         <?php if (!empty($adsbDetail['normalized_storage_path'])): ?><a href="<?= h($adsbNormalizedUrl) ?>">Normalized ADS-B JSON</a><?php endif; ?>
+                        <a href="<?= h($adsbDiagnosticUrl) ?>">ADS-B Diagnostic JSON</a>
                       </div>
                     </section>
 
