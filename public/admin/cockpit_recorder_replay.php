@@ -454,7 +454,6 @@ cw_header('Cockpit Recorder Replay');
   align-items: center;
   justify-content: center;
   background: linear-gradient(180deg, rgba(15, 23, 42, .00), rgba(15, 23, 42, .14));
-  border-top: 1px solid rgba(226, 232, 240, .06);
 }
 .replay-immersive.is-panel-layout .replay-bottom-instrument-pane .replay-pane-label {
   display: none;
@@ -756,7 +755,7 @@ cw_header('Cockpit Recorder Replay');
   display: block;
 }
 .replay-engine-sidebar-title {
-  top: 44px;
+  top: 24px;
   z-index: 26;
   font-size: clamp(12px, 1.25vw, 17px);
   line-height: 1;
