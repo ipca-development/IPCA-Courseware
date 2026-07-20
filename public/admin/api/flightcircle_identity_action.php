@@ -29,14 +29,22 @@ try {
         }
         $created = array();
         $failed = array();
+        $createdCount = 0;
+        $mappedExistingCount = 0;
         foreach ($mappingIds as $id) {
             try {
-                $created[] = $service->createUserForIdentityMapping($id, $actorId);
+                $result = $service->createUserForIdentityMapping($id, $actorId);
+                $created[] = $result;
+                if ((string)($result['status'] ?? '') === 'created_user') {
+                    $createdCount++;
+                } elseif (in_array((string)($result['status'] ?? ''), array('confirmed', 'matched_existing_user'), true)) {
+                    $mappedExistingCount++;
+                }
             } catch (Throwable $e) {
                 $failed[] = array('mapping_id' => $id, 'error' => $e->getMessage());
             }
         }
-        flightcircle_identity_json(200, array('ok' => true, 'created_count' => count($created), 'failed_count' => count($failed), 'created' => $created, 'failed' => $failed));
+        flightcircle_identity_json(200, array('ok' => true, 'created_count' => $createdCount, 'mapped_existing_count' => $mappedExistingCount, 'failed_count' => count($failed), 'created' => $created, 'failed' => $failed));
     }
     if ($action === 'create_user') {
         flightcircle_identity_json(200, $service->createUserForIdentityMapping($mappingId, $actorId));

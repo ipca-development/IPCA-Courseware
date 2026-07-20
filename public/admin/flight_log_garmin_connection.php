@@ -1631,7 +1631,9 @@ cw_header('Garmin Sync Agent');
       if (fcIdentityMessage) fcIdentityMessage.textContent = 'Creating ' + ids.length.toLocaleString() + ' users...';
       try {
         const result = await postFlightCircleIdentity('bulk_create_users', ids);
-        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Created ' + Number(result.created_count || 0).toLocaleString() + ' users. Failed ' + Number(result.failed_count || 0).toLocaleString() + '. Refreshing...';
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Created ' + Number(result.created_count || 0).toLocaleString()
+          + ', mapped existing ' + Number(result.mapped_existing_count || 0).toLocaleString()
+          + ', failed ' + Number(result.failed_count || 0).toLocaleString() + '. Refreshing...';
         setTimeout(() => window.location.reload(), 900);
       } catch (error) {
         if (fcIdentityMessage) fcIdentityMessage.textContent = 'Bulk create failed: ' + error.message;

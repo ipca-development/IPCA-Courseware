@@ -167,10 +167,16 @@ final class FlightCircleHistoricalImportService
         if ((int)($mapping['ipca_user_id'] ?? 0) > 0) {
             return $this->mapIdentityToExistingUser($mappingId, (int)$mapping['ipca_user_id'], $actorUserId);
         }
+        $sourceName = trim((string)($mapping['source_name'] ?? ''));
+        $existing = $this->findUserByName($sourceName);
+        if ((int)$existing['user_id'] > 0) {
+            $result = $this->mapIdentityToExistingUser($mappingId, (int)$existing['user_id'], $actorUserId);
+            $result['status'] = 'matched_existing_user';
+            return $result;
+        }
         $firstName = trim((string)($mapping['parsed_first_name'] ?? ''));
         $middleName = trim((string)($mapping['parsed_middle_name'] ?? ''));
         $lastName = trim((string)($mapping['parsed_last_name'] ?? ''));
-        $sourceName = trim((string)($mapping['source_name'] ?? ''));
         if ($firstName === '' && $lastName === '') {
             $parts = $this->parseName($sourceName);
             $firstName = $parts['first'];
@@ -195,10 +201,9 @@ final class FlightCircleHistoricalImportService
                 confidence_score = 100.00,
                 confirmed_by_user_id = ?,
                 confirmed_at = CURRENT_TIMESTAMP(3),
-                evidence_json = JSON_SET(COALESCE(evidence_json, JSON_OBJECT()), '$.created_user_email', ?),
                 updated_at = CURRENT_TIMESTAMP(3)
             WHERE id = ?
-        ")->execute(array($userId, $actorUserId, $email, $mappingId));
+        ")->execute(array($userId, $actorUserId, $mappingId));
         $this->applyIdentityMapping($sourceName, $userId);
         return array('ok' => true, 'mapping_id' => $mappingId, 'user_id' => $userId, 'email' => $email, 'status' => 'created_user');
     }
