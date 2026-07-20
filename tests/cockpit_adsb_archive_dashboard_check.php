@@ -55,11 +55,24 @@ $checks = array(
         && str_contains($files['page'], 'adsb_archive_dashboard.php'),
     'admin UI renders aircraft symbols and low-altitude filtering' =>
         str_contains($files['page'], 'aircraftIcon')
-        && str_contains($files['page'], 'aircraftSizeClass')
+        && str_contains($files['page'], 'aircraftDisplayType')
+        && str_contains($files['page'], 'aircraftShape')
+        && str_contains($files['page'], 'Large Jet Airplane')
+        && str_contains($files['page'], 'Business Jet Airplane')
+        && str_contains($files['page'], 'Small Prop Airplane')
+        && str_contains($files['page'], 'Helicopter Traffic')
+        && str_contains($files['page'], 'Possible Military Traffic')
+        && str_contains($files['page'], 'Traffic symbol legend')
         && str_contains($files['page'], 'L.divIcon')
         && str_contains($files['page'], 'Show &lt; 10,000 ft only')
         && str_contains($files['archive'], 'category')
         && str_contains($files['archive'], 'NULL AS category'),
+    'admin UI interpolates aircraft movement and can toggle labels' =>
+        str_contains($files['page'], 'interpolatedSample')
+        && str_contains($files['page'], 'lerpAngle')
+        && str_contains($files['page'], 'bearingDegrees')
+        && str_contains($files['page'], 'adsbTrafficLabelsToggle')
+        && str_contains($files['page'], 'Aircraft labels'),
     'admin UI renders Leaflet map without provider-side calls' =>
         str_contains($files['page'], 'leaflet@1.9.4')
         && str_contains($files['page'], 'L.map')

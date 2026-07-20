@@ -47,7 +47,7 @@ cw_header('ADS-B Traffic Archive');
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input,.adsb-actions select,.adsb-control{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;background:#fff}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}.adsb-map-layout{display:grid;grid-template-columns:minmax(320px,1.7fr) minmax(260px,.8fr);gap:14px}.adsb-map{height:520px;border:1px solid #cbd5e1;border-radius:14px;overflow:hidden;background:#e2e8f0}.adsb-target-maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.adsb-target-map{height:240px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#e2e8f0}.adsb-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}.adsb-timeline{width:100%;accent-color:#2563eb}.adsb-growth{height:84px;display:flex;align-items:end;gap:2px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px}.adsb-growth-bar{flex:1;min-width:2px;background:#2563eb;border-radius:3px 3px 0 0}.adsb-target-list{display:grid;gap:8px;max-height:180px;overflow:auto}.adsb-aircraft-list{display:grid;gap:6px;max-height:240px;overflow:auto}.adsb-pill{border:1px solid #e2e8f0;border-radius:999px;padding:5px 8px;background:#f8fafc;font-size:12px}.adsb-live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}@media(max-width:960px){.adsb-map-layout{grid-template-columns:1fr}.adsb-map{height:420px}}
-.adsb-aircraft-symbol{display:grid;place-items:center;transform-origin:center}.adsb-aircraft-symbol svg{filter:drop-shadow(0 1px 2px rgba(15,23,42,.38))}.adsb-aircraft-symbol-small{width:26px;height:26px}.adsb-aircraft-symbol-large{width:38px;height:38px}.adsb-aircraft-symbol-small svg{width:24px;height:24px}.adsb-aircraft-symbol-large svg{width:36px;height:36px}
+.adsb-aircraft-symbol{position:relative;display:grid;place-items:center;transform-origin:center}.adsb-aircraft-symbol svg{filter:drop-shadow(0 1px 2px rgba(15,23,42,.38))}.adsb-aircraft-symbol-large-jet,.adsb-aircraft-symbol-military{width:42px;height:42px}.adsb-aircraft-symbol-business-jet{width:36px;height:36px}.adsb-aircraft-symbol-small-prop,.adsb-aircraft-symbol-helicopter{width:30px;height:30px}.adsb-aircraft-symbol-plane{display:block;transform-origin:center}.adsb-aircraft-label{position:absolute;left:34px;top:-8px;white-space:nowrap;background:rgba(255,255,255,.92);border:1px solid rgba(15,23,42,.16);border-radius:8px;padding:2px 5px;color:#0f172a;font-size:11px;font-weight:800;line-height:1.2;box-shadow:0 2px 6px rgba(15,23,42,.12);pointer-events:none}.adsb-aircraft-symbol-large-jet .adsb-aircraft-label,.adsb-aircraft-symbol-military .adsb-aircraft-label{left:46px}.adsb-aircraft-symbol-business-jet .adsb-aircraft-label{left:40px}.adsb-symbol-legend{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}.adsb-symbol-legend span{display:inline-flex;align-items:center;gap:5px;border:1px solid #e2e8f0;border-radius:999px;background:#f8fafc;padding:4px 8px;font-size:12px;color:#475569}.adsb-legend-dot{width:12px;height:12px;border-radius:3px;border:1px solid #111827;display:inline-block}.adsb-legend-airplane{background:#facc15}.adsb-legend-helicopter{background:#2f9e5d}.adsb-legend-military{background:#64748b}
 </style>
 <div class="adsb-page">
   <section class="adsb-card">
@@ -109,6 +109,7 @@ cw_header('ADS-B Traffic Archive');
       <label class="adsb-muted">Target<br><select class="adsb-control" id="adsbTargetSelect"></select></label>
       <label class="adsb-muted">Lookback hours<br><input class="adsb-control" id="adsbHoursInput" type="number" min="1" max="168" value="1"></label>
       <label class="adsb-muted" style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input id="adsbBelow10000Filter" type="checkbox"> Show &lt; 10,000 ft only</label>
+      <label class="adsb-muted" style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input id="adsbTrafficLabelsToggle" type="checkbox" checked> Aircraft labels</label>
       <button class="adsb-button" type="button" id="adsbReloadButton">Reload Target</button>
       <button class="adsb-button secondary" type="button" id="adsbNewestButton">Jump To Newest</button>
       <span class="adsb-muted" id="adsbTargetSummary">--</span>
@@ -134,6 +135,11 @@ cw_header('ADS-B Traffic Archive');
         <h4>Defined Targets</h4>
         <div class="adsb-target-list" id="adsbTargetList"></div>
         <h4>Aircraft At Selected Time</h4>
+        <div class="adsb-symbol-legend" aria-label="Traffic symbol legend">
+          <span><i class="adsb-legend-dot adsb-legend-airplane"></i>Airplanes</span>
+          <span><i class="adsb-legend-dot adsb-legend-helicopter"></i>Helicopters</span>
+          <span><i class="adsb-legend-dot adsb-legend-military"></i>Possible military</span>
+        </div>
         <div class="adsb-aircraft-list" id="adsbAircraftList"></div>
       </div>
     </div>
@@ -243,6 +249,7 @@ VALUES
     const n = finite(epoch);
     return n === null ? '--' : new Date(n * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   };
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
   const epochFromMysqlUtc = (value) => {
     if (!value) return null;
     const parsed = Date.parse(String(value).replace(' ', 'T') + 'Z');
@@ -255,32 +262,89 @@ VALUES
     return `hsl(${Math.abs(hash) % 360} 82% 45%)`;
   }
 
-  function aircraftSizeClass(item, sample) {
+  function lerp(a, b, ratio) {
+    const left = finite(a);
+    const right = finite(b);
+    if (left === null) return right;
+    if (right === null) return left;
+    return left + ((right - left) * ratio);
+  }
+
+  function lerpAngle(a, b, ratio) {
+    const left = finite(a);
+    const right = finite(b);
+    if (left === null) return right;
+    if (right === null) return left;
+    const delta = ((((right - left) % 360) + 540) % 360) - 180;
+    return (left + (delta * ratio) + 360) % 360;
+  }
+
+  function bearingDegrees(from, to) {
+    const lat1 = finite(from && from.lat);
+    const lon1 = finite(from && from.lon);
+    const lat2 = finite(to && to.lat);
+    const lon2 = finite(to && to.lon);
+    if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return null;
+    const phi1 = lat1 * Math.PI / 180;
+    const phi2 = lat2 * Math.PI / 180;
+    const lambda = (lon2 - lon1) * Math.PI / 180;
+    const y = Math.sin(lambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambda);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function aircraftDisplayType(item, sample) {
     const category = String((sample && sample.category) || '').toUpperCase();
     const callsign = String((item && item.callsign) || '').toUpperCase();
     const alt = finite(sample && sample.altitude_ft);
     const gs = finite(sample && sample.groundspeed_kt);
-    if (/^(A3|A4|A5|B3|B4|B5|C3|C4|C5)/.test(category)) return 'large';
-    if (/^(A1|A2|B1|B2|C1|C2)/.test(category)) return 'small';
-    if (/^(AAL|DAL|UAL|SWA|ASA|SKW|ENY|FDX|UPS|BAW|DLH|JBU|NKS|FFT|ACA|KLM|AFR|QTR|UAE|SIA)/.test(callsign)) return 'large';
-    if (alt !== null && alt >= 10000) return 'large';
-    if (gs !== null && gs >= 230) return 'large';
-    return 'small';
+    if (/^(A7|H)/.test(category) || /(HELI|COPTER|LIFE|MEDEVAC|AIRMED|NIGHT|STAR|CHOPPER)/.test(callsign)) {
+      return { key: 'helicopter', label: 'Helicopter Traffic', color: '#2f9e5d', size: 32, viewBox: '0 0 48 48' };
+    }
+    if (/^(RCH|REACH|CNV|JOSA|PAT|VV|VM|NAVY|ARMY|USAF|AF|MARINE|COAST|GUARD|NATO|GAF|RAF|FNF|BAF|CAF|LAGR|TANKR|TORCH|MACE|HAWK|VIPER|RAVEN|EAGLE|DRAGO|SHELL)/.test(callsign)) {
+      return { key: 'military', label: 'Possible Military Traffic', color: '#64748b', size: 42, viewBox: '0 0 64 64' };
+    }
+    if (/^(AAL|DAL|UAL|SWA|ASA|SKW|ENY|FDX|UPS|BAW|DLH|JBU|NKS|FFT|ACA|KLM|AFR|QTR|UAE|SIA)/.test(callsign) || /^(A4|A5|B4|B5|C4|C5)/.test(category) || (gs !== null && gs >= 300)) {
+      return { key: 'large-jet', label: 'Large Jet Airplane', color: '#2563eb', size: 42, viewBox: '0 0 64 64' };
+    }
+    if (/^(A3|A6|B3|B6|C3|C6)/.test(category) || (gs !== null && gs >= 220) || (alt !== null && alt >= 14000)) {
+      return { key: 'business-jet', label: 'Business Jet Airplane', color: '#f8fafc', size: 36, viewBox: '0 0 56 56' };
+    }
+    return { key: 'small-prop', label: 'Small Prop Airplane', color: '#facc15', size: 30, viewBox: '0 0 48 48' };
   }
 
-  function aircraftIcon(item, sample, color) {
-    const sizeClass = aircraftSizeClass(item, sample);
+  function aircraftShape(displayType) {
+    switch (displayType.key) {
+      case 'large-jet':
+        return '<path d="M31 4c4 0 5 8 5 18l21 12v6l-21-5-3 20 8 5v4l-10-3-10 3v-4l8-5-3-20-21 5v-6l21-12C26 12 27 4 31 4z"/><rect x="13" y="31" width="6" height="8" rx="1"/><rect x="45" y="31" width="6" height="8" rx="1"/>';
+      case 'business-jet':
+        return '<path d="M27 3c4 0 5 8 5 19l18 14v5l-18-6-2 13 7 4v4l-10-3-10 3v-4l7-4-2-13-18 6v-5l18-14C22 11 23 3 27 3z"/><rect x="16" y="34" width="5" height="8" rx="1"/><rect x="35" y="34" width="5" height="8" rx="1"/>';
+      case 'helicopter':
+        return '<path d="M23 17h2v-7h-2z"/><path d="M4 8h40v4H4z"/><path d="M22 40h4v6h-4z"/><path d="M10 44h28v3H10z"/><path d="M16 38h16l6-10-7-10H17l-7 10z"/><path d="M7 27H1v-3h6zm40 0h-6v-3h6z"/><path d="M15 17 5 7l3-3 12 12zm18 0L43 7l-3-3-12 12z"/>';
+      case 'military':
+        return '<path d="M31 3 41 24l19 11-16 7 2 14-15-6-15 6 2-14-16-7 19-11z"/><path d="M31 9 37 28l11 7-11 4 1 8-7-4-7 4 1-8-11-4 11-7z" fill="rgba(15,23,42,.28)"/>';
+      default:
+        return '<path d="M23 5c3 0 4 6 4 15l16 4v6l-16-1-2 12 6 3v3l-8-2-8 2v-3l6-3-2-12-16 1v-6l16-4C19 11 20 5 23 5z"/><path d="M13 22h22v4H13z"/>';
+    }
+  }
+
+  function aircraftLabel(item, sample, displayType) {
+    const label = String((item && item.callsign) || (item && item.hex) || '').trim().toUpperCase();
+    const altitude = finite(sample && sample.altitude_ft);
+    return `${escapeHtml(label || 'UNKNOWN')} ${escapeHtml(displayType.label)} ${altitude !== null ? `${Math.round(altitude).toLocaleString()} ft` : '--'}`;
+  }
+
+  function aircraftIcon(item, sample, color, showLabels) {
+    const displayType = aircraftDisplayType(item, sample);
     const heading = finite(sample && sample.track_deg) ?? 0;
-    const largePath = 'M16 1 L21 14 L34 17 L34 21 L21 20 L18 34 L14 34 L11 20 L0 21 L0 17 L11 14 Z';
-    const smallPath = 'M12 1 L16 11 L24 13 L24 16 L16 15 L14 24 L10 24 L8 15 L0 16 L0 13 L8 11 Z';
-    const path = sizeClass === 'large' ? largePath : smallPath;
-    const viewBox = sizeClass === 'large' ? '0 0 34 34' : '0 0 24 24';
-    const size = sizeClass === 'large' ? 38 : 26;
+    const size = displayType.size;
+    const stroke = displayType.key === 'business-jet' ? '#0f172a' : '#111827';
+    const fill = displayType.color || color;
     return L.divIcon({
       className: '',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
-      html: `<div class="adsb-aircraft-symbol adsb-aircraft-symbol-${sizeClass}" style="transform:rotate(${heading}deg)"><svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}" fill="${color}" stroke="#111827" stroke-width="1.4"/></svg></div>`
+      html: `<div class="adsb-aircraft-symbol adsb-aircraft-symbol-${displayType.key}"><svg class="adsb-aircraft-symbol-plane" viewBox="${displayType.viewBox}" aria-hidden="true" style="transform:rotate(${heading}deg)"><g fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round">${aircraftShape(displayType)}</g></svg>${showLabels ? `<div class="adsb-aircraft-label">${aircraftLabel(item, sample, displayType)}</div>` : ''}</div>`
     });
   }
 
@@ -327,7 +391,7 @@ VALUES
     select.value = targets.some((target) => String(target.id) === current) ? current : ((data.selected_target && data.selected_target.id) || 'ktrm_live');
     el('adsbTargetList').innerHTML = targets.map((target) => {
       const radius = finite(target.radius_nm);
-      return `<div class="adsb-pill"><strong>${String(target.label || target.id)}</strong><br><span class="adsb-muted">${Number(target.lat).toFixed(5)}, ${Number(target.lon).toFixed(5)} · ${radius !== null ? radius.toFixed(1) : '--'} NM · ${String(target.source || '')}</span></div>`;
+      return `<div class="adsb-pill"><strong>${escapeHtml(target.label || target.id)}</strong><br><span class="adsb-muted">${Number(target.lat).toFixed(5)}, ${Number(target.lon).toFixed(5)} · ${radius !== null ? radius.toFixed(1) : '--'} NM</span></div>`;
     }).join('') || '<div class="adsb-muted">No target definitions available.</div>';
   }
 
@@ -364,8 +428,8 @@ VALUES
     targetMapsSignature = signature;
     container.innerHTML = targets.map((target, index) => `
       <div class="adsb-kv">
-        <strong>${String(target.label || target.id)}</strong>
-        <div class="adsb-muted">${Number(target.lat).toFixed(6)}, ${Number(target.lon).toFixed(6)} · ${Number(target.radius_nm).toFixed(1)} NM · ${String(target.source || '')}</div>
+        <strong>${escapeHtml(target.label || target.id)}</strong>
+        <div class="adsb-muted">${Number(target.lat).toFixed(6)}, ${Number(target.lon).toFixed(6)} · ${Number(target.radius_nm).toFixed(1)} NM</div>
         <div class="adsb-target-map" id="adsbTargetMiniMap${index}"></div>
       </div>
     `).join('');
@@ -474,6 +538,51 @@ VALUES
     return bestDelta <= 300 ? best : null;
   }
 
+  function interpolatedSample(samples, epoch) {
+    const valid = (Array.isArray(samples) ? samples : [])
+      .filter((sample) => finite(sample && sample.epoch) !== null && finite(sample && sample.lat) !== null && finite(sample && sample.lon) !== null)
+      .sort((a, b) => Number(a.epoch) - Number(b.epoch));
+    if (valid.length === 0) return null;
+
+    let before = null;
+    let after = null;
+    for (const sample of valid) {
+      const sampleEpoch = finite(sample.epoch);
+      if (sampleEpoch === null) continue;
+      if (sampleEpoch <= epoch) before = sample;
+      if (sampleEpoch >= epoch) {
+        after = sample;
+        break;
+      }
+    }
+
+    if (before && after) {
+      const beforeEpoch = finite(before.epoch);
+      const afterEpoch = finite(after.epoch);
+      if (beforeEpoch === null || afterEpoch === null) return nearestSample(valid, epoch);
+      if (beforeEpoch === afterEpoch) return { ...before, interpolated: false };
+      const gap = afterEpoch - beforeEpoch;
+      if (gap > 900) return nearestSample(valid, epoch);
+      const ratio = Math.max(0, Math.min(1, (epoch - beforeEpoch) / gap));
+      const derivedTrack = bearingDegrees(before, after);
+      const track = lerpAngle(before.track_deg ?? derivedTrack, after.track_deg ?? derivedTrack, ratio);
+      return {
+        ...before,
+        epoch,
+        utc: utcLabel(epoch),
+        lat: lerp(before.lat, after.lat, ratio),
+        lon: lerp(before.lon, after.lon, ratio),
+        altitude_ft: lerp(before.altitude_ft, after.altitude_ft, ratio),
+        groundspeed_kt: lerp(before.groundspeed_kt, after.groundspeed_kt, ratio),
+        track_deg: track,
+        category: before.category || after.category || null,
+        interpolated: ratio > 0 && ratio < 1
+      };
+    }
+
+    return nearestSample(valid, epoch);
+  }
+
   function renderAtTime(epoch) {
     const timeline = dashboard && dashboard.target_timeline ? dashboard.target_timeline : {};
     const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
@@ -484,8 +593,9 @@ VALUES
     }
     currentLayer.clearLayers();
     const visible = [];
+    const showLabels = Boolean(el('adsbTrafficLabelsToggle') && el('adsbTrafficLabelsToggle').checked);
     aircraft.forEach((item) => {
-      const sample = nearestSample(item.samples, epoch);
+      const sample = interpolatedSample(item.samples, epoch);
       if (!sample) return;
       const alt = finite(sample.altitude_ft);
       if (belowOnly && (alt === null || alt >= 10000)) return;
@@ -494,16 +604,16 @@ VALUES
       if (lat === null || lon === null) return;
       const label = String(item.callsign || item.hex || '').trim().toUpperCase();
       const color = colorFor(item.hex);
-      L.marker([lat, lon], { icon: aircraftIcon(item, sample, color) })
+      L.marker([lat, lon], { icon: aircraftIcon(item, sample, color, showLabels) })
         .addTo(currentLayer);
-      visible.push({ label, sample, sizeClass: aircraftSizeClass(item, sample) });
+      visible.push({ label, sample, displayType: aircraftDisplayType(item, sample) });
     });
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
     el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft${belowOnly ? ' below 10,000 ft' : ''} near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
     el('adsbAircraftList').innerHTML = visible
       .sort((a, b) => String(a.label).localeCompare(String(b.label)))
-      .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong> <span class="adsb-muted">${entry.sizeClass}</span><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
-      .join('') || '<div class="adsb-muted">No aircraft sample within 5 minutes of selected time.</div>';
+      .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong> <span class="adsb-muted">${entry.displayType.label}</span><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
+      .join('') || '<div class="adsb-muted">No aircraft sample near selected time.</div>';
   }
 
   function applyDashboard(data) {
@@ -540,6 +650,9 @@ VALUES
     renderAtTime(Number(input.value || 0));
   });
   el('adsbBelow10000Filter').addEventListener('change', () => {
+    renderAtTime(Number(el('adsbTimeline').value || 0));
+  });
+  el('adsbTrafficLabelsToggle').addEventListener('change', () => {
     renderAtTime(Number(el('adsbTimeline').value || 0));
   });
   el('adsbAirportSearchButton').addEventListener('click', () => {
