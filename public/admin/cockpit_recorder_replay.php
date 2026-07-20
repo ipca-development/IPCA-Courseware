@@ -591,7 +591,7 @@ cw_header('Cockpit Recorder Replay');
   stroke-width: .7;
 }
 .hsi-overlay .hsi-rmi-bearing {
-  stroke: #7fefff;
+  stroke: #10d510;
   stroke-width: 2;
   stroke-linecap: butt;
   fill: none;
@@ -599,11 +599,15 @@ cw_header('Cockpit Recorder Replay');
 }
 .hsi-overlay .hsi-rmi-bearing-arrow {
   fill: none;
-  stroke: #7fefff;
+  stroke: #10d510;
   stroke-width: 2;
   stroke-linecap: butt;
   stroke-linejoin: miter;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .36));
+}
+.hsi-overlay .hsi-rmi-bearing.is-gps,
+.hsi-overlay .hsi-rmi-bearing-arrow.is-gps {
+  stroke: #d84cff;
 }
 .hsi-overlay .hsi-nav-text {
   fill: #10d510;
@@ -1639,6 +1643,9 @@ cw_header('Cockpit Recorder Replay');
 .system-warning-line.is-warning { color: #ff2317; }
 .system-warning-line.is-caution { color: #ffd92f; }
 .system-warning-line.is-info { color: #fff; }
+.system-warning-line.is-oil-press {
+  color: #ff2317;
+}
 .system-warning-line.is-flashing {
   animation: system-warning-flash .8s steps(2, start) infinite;
 }
@@ -3628,7 +3635,7 @@ cw_header('Cockpit Recorder Replay');
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth, bottom: window.innerHeight };
     const profileRect = insetMapProfile && !elementIsHidden(insetMapProfile) ? insetMapProfile.getBoundingClientRect() : null;
     const anchorBottom = profileRect && profileRect.height > 0 ? profileRect.bottom : altimeterRect.bottom;
-    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left - 20));
+    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left - 10));
     const bottomPx = Math.max(72, Math.round(rootRect.bottom - anchorBottom));
     systemWarningBox.style.left = `${leftPx}px`;
     systemWarningBox.style.right = 'auto';
@@ -3646,8 +3653,8 @@ cw_header('Cockpit Recorder Replay');
     }
     systemWarningBox.innerHTML = alerts
       .map((alert) => {
-        const isOilPressWarning = alert.severity === 'warning' && /\bOIL\s+PRESS\b/i.test(alert.text);
-        return `<div class="system-warning-line is-${escapeHtml(alert.severity)}${isOilPressWarning ? ' is-flashing' : ''}">${escapeHtml(alert.text)}</div>`;
+        const isOilPress = /\bOIL\s+PRESS\b/i.test(alert.text);
+        return `<div class="system-warning-line is-${escapeHtml(alert.severity)}${isOilPress ? ' is-oil-press is-flashing' : ''}">${escapeHtml(alert.text)}</div>`;
       })
       .join('');
     setElementHidden(systemWarningBox, false);
@@ -4447,7 +4454,7 @@ cw_header('Cockpit Recorder Replay');
     );
   }
 
-  function hsiRmiBearingHtml(bearingDeg, headingDeg, innerR, outerR) {
+  function hsiRmiBearingHtml(bearingDeg, headingDeg, innerR, outerR, isGps = false) {
     if (bearingDeg === null) return '';
     const rotation = normalizeSignedDeg(Number(bearingDeg) - Number(headingDeg));
     const tickBoundary = outerR - 12;
@@ -4455,11 +4462,12 @@ cw_header('Cockpit Recorder Replay');
     const topInner = -innerR;
     const bottomInner = innerR;
     const bottomOuter = tickBoundary;
+    const colorClass = isGps ? ' is-gps' : '';
     return `
       <g transform="rotate(${rotation.toFixed(2)})">
-        <line class="hsi-rmi-bearing" x1="0" y1="${topInner.toFixed(1)}" x2="0" y2="${topOuter.toFixed(1)}"></line>
-        <path class="hsi-rmi-bearing-arrow" d="M -9 ${(topOuter + 15).toFixed(1)} L 0 ${topOuter.toFixed(1)} L 9 ${(topOuter + 15).toFixed(1)}"></path>
-        <line class="hsi-rmi-bearing" x1="0" y1="${bottomInner.toFixed(1)}" x2="0" y2="${bottomOuter.toFixed(1)}"></line>
+        <line class="hsi-rmi-bearing${colorClass}" x1="0" y1="${topInner.toFixed(1)}" x2="0" y2="${topOuter.toFixed(1)}"></line>
+        <path class="hsi-rmi-bearing-arrow${colorClass}" d="M -9 ${(topOuter + 15).toFixed(1)} L 0 ${topOuter.toFixed(1)} L 9 ${(topOuter + 15).toFixed(1)}"></path>
+        <line class="hsi-rmi-bearing${colorClass}" x1="0" y1="${bottomInner.toFixed(1)}" x2="0" y2="${bottomOuter.toFixed(1)}"></line>
       </g>`;
   }
 
@@ -4710,7 +4718,7 @@ cw_header('Cockpit Recorder Replay');
     const turnMarkRadius = r - 1;
     const trendHtml = hsiHeadingTrendHtml(sample, turnMarkRadius);
     const turnRateMarksHtml = hsiTurnRateMarksHtml(turnMarkRadius);
-    const rmiBearingHtml = hsiRmiBearingHtml(displayHsiRmiBearingDeg, displayHsiHeadingDeg, innerR, r);
+    const rmiBearingHtml = hsiRmiBearingHtml(displayHsiRmiBearingDeg, displayHsiHeadingDeg, innerR, r, navDisplay.isGps);
     const headingText = String(Math.round(displayHsiHeadingDeg)).padStart(3, '0') + '°';
     const hdgBugText = displayHsiHeadingBugDeg === null ? '---' : `${String(Math.round(displayHsiHeadingBugDeg)).padStart(3, '0')}°`;
     const crsText = courseDeg === null ? '---' : `${String(Math.round(courseDeg)).padStart(3, '0')}°`;

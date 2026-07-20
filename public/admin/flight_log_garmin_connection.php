@@ -197,6 +197,28 @@ function garmin_sync_status_label(array $summary, string $classification): strin
     return $hasRoute && $hasTime && $hasCounters ? 'Complete' : 'Partial';
 }
 
+function garmin_sync_number_or_null(mixed $value): ?float
+{
+    $clean = preg_replace('/[^0-9.\-]+/', '', trim((string)$value));
+    if ($clean === '' || !is_numeric($clean)) {
+        return null;
+    }
+    return (float)$clean;
+}
+
+function garmin_sync_is_zero_hobbs_avionics_row(array $summary): bool
+{
+    $hobbsOut = garmin_sync_number_or_null($summary['hobbs_out'] ?? null);
+    $hobbsIn = garmin_sync_number_or_null($summary['hobbs_in'] ?? null);
+    if ($hobbsOut === null || $hobbsIn === null || abs($hobbsIn - $hobbsOut) > 0.01) {
+        return false;
+    }
+    $hobbsTime = garmin_sync_number_or_null($summary['hobbs_time'] ?? null);
+    $hobbsHours = garmin_sync_number_or_null($summary['hobbs_hours'] ?? null);
+    return ($hobbsTime !== null && $hobbsTime <= 0.01)
+        || ($hobbsHours !== null && $hobbsHours <= 0.01);
+}
+
 function garmin_sync_is_new(mixed $uploadedAt): bool
 {
     $timestamp = strtotime(trim((string)$uploadedAt));
@@ -355,6 +377,7 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
 $garminImportRows = array();
 $garminImportTailOptions = array();
 $garminImportSourceOptions = array();
+$garminImportHiddenAvionicsOnlyCount = 0;
 if ($hasCsvFiles) {
     $historicalJoin = $hasHistoricalBackfill ? "
         LEFT JOIN ipca_garmin_historical_backfill_files hf ON hf.csv_file_id = f.id
@@ -439,9 +462,15 @@ if ($hasCsvFiles) {
         ORDER BY COALESCE(s.departure_time_utc, f.first_valid_sample_utc, f.created_at) DESC, f.id DESC
         LIMIT 1500
     ");
+    $visibleGarminImportRows = array();
     foreach ($garminImportRows as $row) {
         $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
         $summary = is_array($summary) ? $summary : array();
+        if (garmin_sync_is_zero_hobbs_avionics_row($summary)) {
+            $garminImportHiddenAvionicsOnlyCount++;
+            continue;
+        }
+        $visibleGarminImportRows[] = $row;
         $tail = strtoupper(trim((string)($row['summary_tail_number'] ?? '')));
         if ($tail === '' || $tail === 'UNKNOWN' || $tail === 'UNKNOWN TAIL') {
             $tail = strtoupper(trim((string)($row['aircraft_registration'] ?: $row['aircraft_ident'])));
@@ -454,6 +483,7 @@ if ($hasCsvFiles) {
             : 'IPCA Sync App';
         $garminImportSourceOptions[$sourceLabel] = $sourceLabel;
     }
+    $garminImportRows = $visibleGarminImportRows;
     sort($garminImportTailOptions);
     sort($garminImportSourceOptions);
 }
@@ -1254,6 +1284,11 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-muted" style="margin-top:8px" data-garmin-import-count>
         Showing <?= number_format(count($garminImportRows)) ?> import(s), newest first.
       </div>
+      <?php if ($garminImportHiddenAvionicsOnlyCount > 0): ?>
+        <div class="garmin-muted" style="margin-top:4px">
+          Hidden from this operational list: <?= number_format($garminImportHiddenAvionicsOnlyCount) ?> avionics on/off row(s) with Hobbs Out equal to Hobbs In and 0.0 Hobbs time.
+        </div>
+      <?php endif; ?>
       <div class="garmin-progress" data-import-bulk-progress style="display:none;margin-top:8px"><span style="width:0%"></span><strong>0%</strong></div>
       <div class="garmin-muted" style="margin-top:4px" data-import-bulk-message></div>
       <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">

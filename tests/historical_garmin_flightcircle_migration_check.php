@@ -115,7 +115,9 @@ $checks = array(
         && str_contains($files['admin_page'], 'Hobbs continuity gap')
         && str_contains($files['admin_page'], 'FC row')
         && str_contains($files['admin_page'], 'FC Hobbs')
-        && str_contains($files['admin_page'], 'selected Garmin row(s)'),
+        && str_contains($files['admin_page'], 'selected Garmin row(s)')
+        && str_contains($files['admin_page'], 'garmin_sync_is_zero_hobbs_avionics_row')
+        && str_contains($files['admin_page'], 'avionics on/off row(s)'),
 );
 
 $failed = array();
