@@ -529,6 +529,7 @@ final class AdsbTrafficArchiveService
         $sampleSchema = $this->columnsForTable('ipca_adsb_traffic_samples');
         $sourceModeSelect = !empty($sampleSchema['source_mode']) ? 'source_mode' : "'UNKNOWN' AS source_mode";
         $providerSelect = !empty($sampleSchema['provider']) ? 'provider' : "'' AS provider";
+        $categorySelect = !empty($sampleSchema['category']) ? 'category' : "NULL AS category";
         $lat = (float)($target['lat'] ?? self::KTRM_LAT);
         $lon = (float)($target['lon'] ?? self::KTRM_LON);
         $radiusNm = max(0.5, min(100.0, (float)($target['radius_nm'] ?? 25.0)));
@@ -543,6 +544,7 @@ final class AdsbTrafficArchiveService
                    altitude_ft,
                    groundspeed_kt,
                    track_deg,
+                   {$categorySelect},
                    {$sourceModeSelect},
                    {$providerSelect},
                    (3440.065 * 2 * ASIN(SQRT(
@@ -598,6 +600,7 @@ final class AdsbTrafficArchiveService
                 'altitude_ft' => is_numeric($row['altitude_ft'] ?? null) ? (float)$row['altitude_ft'] : null,
                 'groundspeed_kt' => is_numeric($row['groundspeed_kt'] ?? null) ? (float)$row['groundspeed_kt'] : null,
                 'track_deg' => is_numeric($row['track_deg'] ?? null) ? (float)$row['track_deg'] : null,
+                'category' => isset($row['category']) ? (string)$row['category'] : null,
                 'distance_nm' => is_numeric($row['distance_nm'] ?? null) ? (float)$row['distance_nm'] : null,
             );
         }

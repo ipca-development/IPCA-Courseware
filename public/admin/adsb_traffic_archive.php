@@ -47,6 +47,7 @@ cw_header('ADS-B Traffic Archive');
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input,.adsb-actions select,.adsb-control{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;background:#fff}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}.adsb-map-layout{display:grid;grid-template-columns:minmax(320px,1.7fr) minmax(260px,.8fr);gap:14px}.adsb-map{height:520px;border:1px solid #cbd5e1;border-radius:14px;overflow:hidden;background:#e2e8f0}.adsb-target-maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.adsb-target-map{height:240px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#e2e8f0}.adsb-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}.adsb-timeline{width:100%;accent-color:#2563eb}.adsb-growth{height:84px;display:flex;align-items:end;gap:2px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px}.adsb-growth-bar{flex:1;min-width:2px;background:#2563eb;border-radius:3px 3px 0 0}.adsb-target-list{display:grid;gap:8px;max-height:180px;overflow:auto}.adsb-aircraft-list{display:grid;gap:6px;max-height:240px;overflow:auto}.adsb-pill{border:1px solid #e2e8f0;border-radius:999px;padding:5px 8px;background:#f8fafc;font-size:12px}.adsb-live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}@media(max-width:960px){.adsb-map-layout{grid-template-columns:1fr}.adsb-map{height:420px}}
+.adsb-aircraft-symbol{display:grid;place-items:center;transform-origin:center}.adsb-aircraft-symbol svg{filter:drop-shadow(0 1px 2px rgba(15,23,42,.38))}.adsb-aircraft-symbol-small{width:26px;height:26px}.adsb-aircraft-symbol-large{width:38px;height:38px}.adsb-aircraft-symbol-small svg{width:24px;height:24px}.adsb-aircraft-symbol-large svg{width:36px;height:36px}
 </style>
 <div class="adsb-page">
   <section class="adsb-card">
@@ -107,6 +108,7 @@ cw_header('ADS-B Traffic Archive');
     <div class="adsb-toolbar">
       <label class="adsb-muted">Target<br><select class="adsb-control" id="adsbTargetSelect"></select></label>
       <label class="adsb-muted">Lookback hours<br><input class="adsb-control" id="adsbHoursInput" type="number" min="1" max="168" value="1"></label>
+      <label class="adsb-muted" style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input id="adsbBelow10000Filter" type="checkbox"> Show &lt; 10,000 ft only</label>
       <button class="adsb-button" type="button" id="adsbReloadButton">Reload Target</button>
       <button class="adsb-button secondary" type="button" id="adsbNewestButton">Jump To Newest</button>
       <span class="adsb-muted" id="adsbTargetSummary">--</span>
@@ -251,6 +253,35 @@ VALUES
     let hash = 0;
     String(hex || '').split('').forEach((ch) => { hash = ((hash << 5) - hash) + ch.charCodeAt(0); hash |= 0; });
     return `hsl(${Math.abs(hash) % 360} 82% 45%)`;
+  }
+
+  function aircraftSizeClass(item, sample) {
+    const category = String((sample && sample.category) || '').toUpperCase();
+    const callsign = String((item && item.callsign) || '').toUpperCase();
+    const alt = finite(sample && sample.altitude_ft);
+    const gs = finite(sample && sample.groundspeed_kt);
+    if (/^(A3|A4|A5|B3|B4|B5|C3|C4|C5)/.test(category)) return 'large';
+    if (/^(A1|A2|B1|B2|C1|C2)/.test(category)) return 'small';
+    if (/^(AAL|DAL|UAL|SWA|ASA|SKW|ENY|FDX|UPS|BAW|DLH|JBU|NKS|FFT|ACA|KLM|AFR|QTR|UAE|SIA)/.test(callsign)) return 'large';
+    if (alt !== null && alt >= 10000) return 'large';
+    if (gs !== null && gs >= 230) return 'large';
+    return 'small';
+  }
+
+  function aircraftIcon(item, sample, color) {
+    const sizeClass = aircraftSizeClass(item, sample);
+    const heading = finite(sample && sample.track_deg) ?? 0;
+    const largePath = 'M16 1 L21 14 L34 17 L34 21 L21 20 L18 34 L14 34 L11 20 L0 21 L0 17 L11 14 Z';
+    const smallPath = 'M12 1 L16 11 L24 13 L24 16 L16 15 L14 24 L10 24 L8 15 L0 16 L0 13 L8 11 Z';
+    const path = sizeClass === 'large' ? largePath : smallPath;
+    const viewBox = sizeClass === 'large' ? '0 0 34 34' : '0 0 24 24';
+    const size = sizeClass === 'large' ? 38 : 26;
+    return L.divIcon({
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      html: `<div class="adsb-aircraft-symbol adsb-aircraft-symbol-${sizeClass}" style="transform:rotate(${heading}deg)"><svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}" fill="${color}" stroke="#111827" stroke-width="1.4"/></svg></div>`
+    });
   }
 
   function updateGrowth(data) {
@@ -446,6 +477,7 @@ VALUES
   function renderAtTime(epoch) {
     const timeline = dashboard && dashboard.target_timeline ? dashboard.target_timeline : {};
     const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
+    const belowOnly = Boolean(el('adsbBelow10000Filter') && el('adsbBelow10000Filter').checked);
     if (!currentLayer) {
       el('adsbMapStatus').textContent = 'Map layer is not ready yet.';
       return;
@@ -455,20 +487,22 @@ VALUES
     aircraft.forEach((item) => {
       const sample = nearestSample(item.samples, epoch);
       if (!sample) return;
+      const alt = finite(sample.altitude_ft);
+      if (belowOnly && (alt === null || alt >= 10000)) return;
       const lat = finite(sample.lat);
       const lon = finite(sample.lon);
       if (lat === null || lon === null) return;
       const label = String(item.callsign || item.hex || '').trim().toUpperCase();
       const color = colorFor(item.hex);
-      L.circleMarker([lat, lon], { radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 2 })
+      L.marker([lat, lon], { icon: aircraftIcon(item, sample, color) })
         .addTo(currentLayer);
-      visible.push({ label, sample });
+      visible.push({ label, sample, sizeClass: aircraftSizeClass(item, sample) });
     });
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
-    el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
+    el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft${belowOnly ? ' below 10,000 ft' : ''} near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
     el('adsbAircraftList').innerHTML = visible
       .sort((a, b) => String(a.label).localeCompare(String(b.label)))
-      .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
+      .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong> <span class="adsb-muted">${entry.sizeClass}</span><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
       .join('') || '<div class="adsb-muted">No aircraft sample within 5 minutes of selected time.</div>';
   }
 
@@ -504,6 +538,9 @@ VALUES
     const input = el('adsbTimeline');
     input.value = input.max || input.value;
     renderAtTime(Number(input.value || 0));
+  });
+  el('adsbBelow10000Filter').addEventListener('change', () => {
+    renderAtTime(Number(el('adsbTimeline').value || 0));
   });
   el('adsbAirportSearchButton').addEventListener('click', () => {
     searchAirports().catch((error) => {

@@ -50,8 +50,16 @@ $checks = array(
         && str_contains($files['page'], 'adsbTargetMaps')
         && str_contains($files['page'], 'adsbMapStatus')
         && str_contains($files['page'], 'adsbTimeline')
+        && str_contains($files['page'], 'adsbBelow10000Filter')
         && str_contains($files['page'], 'adsbNewestButton')
         && str_contains($files['page'], 'adsb_archive_dashboard.php'),
+    'admin UI renders aircraft symbols and low-altitude filtering' =>
+        str_contains($files['page'], 'aircraftIcon')
+        && str_contains($files['page'], 'aircraftSizeClass')
+        && str_contains($files['page'], 'L.divIcon')
+        && str_contains($files['page'], 'Show &lt; 10,000 ft only')
+        && str_contains($files['archive'], 'category')
+        && str_contains($files['archive'], 'NULL AS category'),
     'admin UI renders Leaflet map without provider-side calls' =>
         str_contains($files['page'], 'leaflet@1.9.4')
         && str_contains($files['page'], 'L.map')
