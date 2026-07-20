@@ -19,9 +19,19 @@ $checks = array(
     'live recorder schedules configurable point coverage into existing archive jobs' =>
         str_contains($files['archive'], 'scheduleRecentLivePointCoverage')
         && str_contains($files['archive'], 'scheduleRecentLiveTargetCoverage')
+        && str_contains($files['archive'], 'scheduleLivePointSnapshotCoverage')
+        && str_contains($files['archive'], 'scheduleLiveTargetSnapshotCoverage')
         && str_contains($files['archive'], 'ipca_adsb_coverage_jobs')
         && str_contains($files['archive'], 'createTilesForJob')
         && str_contains($files['archive'], "'live_adsb_recorder'"),
+    'home airport uses high-resolution live snapshot capture' =>
+        str_contains($files['archive'], 'HOME_LIVE_RESOLUTION_SECONDS = 10')
+        && str_contains($files['archive'], "'priority' => 'home'")
+        && str_contains($files['archive'], "'resolution_seconds' => self::HOME_LIVE_RESOLUTION_SECONDS")
+        && str_contains($files['archive'], 'targetIsHighResolution')
+        && str_contains($files['live_cli'], "'mode' => 'home_high_resolution'")
+        && str_contains($files['live_cli'], 'CW_ADSB_HOME_LIVE_INTERVAL_SECONDS')
+        && str_contains($files['live_cli'], 'CW_ADSB_HOME_LIVE_CYCLES'),
     'live recorder remains bounded to ADS-B Exchange near-point capability' =>
         str_contains($files['archive'], 'min(25.0, $radiusNm)')
         && str_contains($files['live_cli'], 'CW_ADSB_LIVE_RADIUS_NM')
@@ -31,6 +41,7 @@ $checks = array(
         && str_contains($files['live_cli'], "schedule-live all")
         && str_contains($files['live_cli'], "fetch-next")
         && str_contains($files['live_cli'], "run-once")
+        && str_contains($files['live_cli'], "run-snapshot")
         && str_contains($files['live_cli'], "loop")
         && str_contains($files['live_cli'], 'scheduleRecentLiveTargetCoverage'),
     'live CLI does not create a parallel ADS-B archive' =>

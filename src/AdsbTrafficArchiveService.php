@@ -11,6 +11,8 @@ final class AdsbTrafficArchiveService
     private const KTRM_LON = -116.160156;
     private const KTRM_RADIUS_NM = 15.0;
     private const DEFAULT_BUCKET_SECONDS = 300;
+    private const HOME_LIVE_RESOLUTION_SECONDS = 10;
+    private const STANDARD_LIVE_RESOLUTION_SECONDS = 60;
     private const LIVE_SNAPSHOT_GRACE_SECONDS = 900;
     private const SOURCE_MODE_LIVE = 'LIVE';
 
@@ -125,6 +127,81 @@ final class AdsbTrafficArchiveService
             'bucket_seconds' => $bucketSeconds,
             'tiles_created' => $created,
         );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function scheduleLivePointSnapshotCoverage(float $lat, float $lon, float $radiusNm, int $bucketSeconds = self::STANDARD_LIVE_RESOLUTION_SECONDS, string $scope = 'live_point'): array
+    {
+        $this->ensureTables();
+        $radiusNm = max(0.5, min(25.0, $radiusNm));
+        $bucketSeconds = max(10, min(900, $bucketSeconds));
+        $end = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $start = $end->modify('-' . $bucketSeconds . ' seconds');
+        $scope = substr(preg_replace('/[^a-zA-Z0-9_-]/', '_', $scope) ?: 'live_point', 0, 32);
+        $jobUuid = AuditEventService::uuid();
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_adsb_coverage_jobs
+              (job_uuid, scope, status, center_latitude, center_longitude, radius_nm, query_start_utc, query_end_utc, bucket_seconds, source_ref_type)
+            VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, 'live_adsb_recorder')
+        ");
+        $stmt->execute(array(
+            $jobUuid,
+            $scope,
+            $lat,
+            $lon,
+            $radiusNm,
+            $this->mysqlDate($start),
+            $this->mysqlDate($end),
+            $bucketSeconds,
+        ));
+        $jobId = (int)$this->pdo->lastInsertId();
+        $created = $this->createTilesForJob($jobId, $scope, $lat, $lon, $radiusNm, $start, $end, $bucketSeconds);
+        $this->pdo->prepare('UPDATE ipca_adsb_coverage_jobs SET tile_count = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?')
+            ->execute(array($created, $jobId));
+        return array(
+            'ok' => true,
+            'job_id' => $jobId,
+            'job_uuid' => $jobUuid,
+            'scope' => $scope,
+            'center_latitude' => $lat,
+            'center_longitude' => $lon,
+            'radius_nm' => $radiusNm,
+            'bucket_seconds' => $bucketSeconds,
+            'tiles_created' => $created,
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function scheduleLiveTargetSnapshotCoverage(bool $highResolutionOnly = false): array
+    {
+        $targets = array_values(array_filter($this->archiveTargets(), function (array $target) use ($highResolutionOnly): bool {
+            $enabled = ($target['source'] ?? '') === 'default' || !empty($target['live_monitoring_enabled']);
+            return $enabled && (!$highResolutionOnly || $this->targetIsHighResolution($target));
+        }));
+        $results = array();
+        $tiles = 0;
+        foreach ($targets as $target) {
+            $scope = (string)($target['id'] ?? 'live_point');
+            $resolutionSeconds = $this->targetLiveResolutionSeconds($target);
+            $result = $this->scheduleLivePointSnapshotCoverage(
+                (float)$target['lat'],
+                (float)$target['lon'],
+                (float)$target['radius_nm'],
+                $resolutionSeconds,
+                $scope
+            );
+            $tiles += (int)($result['tiles_created'] ?? 0);
+            $results[] = $result + array(
+                'target_label' => (string)($target['label'] ?? $scope),
+                'priority' => (string)($target['priority'] ?? 'standard'),
+                'high_resolution' => $this->targetIsHighResolution($target),
+            );
+        }
+        return array('ok' => true, 'target_count' => count($targets), 'tiles_created' => $tiles, 'results' => $results);
     }
 
     /**
@@ -386,6 +463,8 @@ final class AdsbTrafficArchiveService
             'lat' => self::KTRM_LAT,
             'lon' => self::KTRM_LON,
             'radius_nm' => 25.0,
+            'priority' => 'home',
+            'resolution_seconds' => self::HOME_LIVE_RESOLUTION_SECONDS,
             'enabled' => true,
             'source' => 'default',
         ));
@@ -407,6 +486,8 @@ final class AdsbTrafficArchiveService
             if (!is_numeric($lat) || !is_numeric($lon) || !is_numeric($radius)) {
                 continue;
             }
+            $resolutionSeconds = $config['resolution_seconds'] ?? $config['live_resolution_seconds'] ?? null;
+            $priority = strtolower(trim((string)($config['priority'] ?? 'standard')));
             $targets[] = array(
                 'id' => 'geo_' . (int)$row['id'],
                 'definition_uuid' => (string)($row['definition_uuid'] ?? ''),
@@ -415,6 +496,8 @@ final class AdsbTrafficArchiveService
                 'lat' => (float)$lat,
                 'lon' => (float)$lon,
                 'radius_nm' => max(0.5, min(100.0, (float)$radius)),
+                'priority' => $priority === 'home' ? 'home' : 'standard',
+                'resolution_seconds' => is_numeric($resolutionSeconds) ? max(10, min(900, (int)$resolutionSeconds)) : null,
                 'enabled' => !empty($row['enabled']),
                 'live_monitoring_enabled' => !empty($row['live_monitoring_enabled']),
                 'replay_query_enabled' => !empty($row['replay_query_enabled']),
@@ -422,6 +505,30 @@ final class AdsbTrafficArchiveService
             );
         }
         return $targets;
+    }
+
+    /**
+     * @param array<string,mixed> $target
+     */
+    private function targetIsHighResolution(array $target): bool
+    {
+        return (string)($target['priority'] ?? '') === 'home'
+            || (isset($target['resolution_seconds']) && is_numeric($target['resolution_seconds']) && (int)$target['resolution_seconds'] <= 15);
+    }
+
+    /**
+     * @param array<string,mixed> $target
+     */
+    private function targetLiveResolutionSeconds(array $target, ?int $fallback = null): int
+    {
+        $configured = $target['resolution_seconds'] ?? null;
+        if (is_numeric($configured)) {
+            return max(10, min(900, (int)$configured));
+        }
+        if ((string)($target['priority'] ?? '') === 'home') {
+            return self::HOME_LIVE_RESOLUTION_SECONDS;
+        }
+        return max(10, min(900, $fallback ?? self::STANDARD_LIVE_RESOLUTION_SECONDS));
     }
 
     /**
@@ -445,6 +552,7 @@ final class AdsbTrafficArchiveService
             'lat' => $lat,
             'lon' => $lon,
             'radius_nm' => $radiusNm,
+            'resolution_seconds' => self::STANDARD_LIVE_RESOLUTION_SECONDS,
         ));
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_adsb_geographic_definitions

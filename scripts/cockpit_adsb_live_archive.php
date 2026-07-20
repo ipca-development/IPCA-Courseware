@@ -44,9 +44,38 @@ try {
         exit(0);
     }
     if ($command === 'run-once') {
+        if (isset($argv[2])) {
+            $schedule = $archive->scheduleRecentLivePointCoverage(argFloat(2, defaultLat()), argFloat(3, defaultLon()), argFloat(4, defaultRadiusNm()), argInt(5, defaultLookbackMinutes()), argInt(6, defaultBucketSeconds()), defaultScope());
+            $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
+            $fetches = array();
+            for ($i = 0; $i < $fetchLimit; $i++) {
+                $fetches[] = $archive->fetchNextPendingTile();
+            }
+            echo json_encode(array('ok' => true, 'schedule' => $schedule, 'fetches' => $fetches), JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
+            exit(0);
+        }
+        $cycles = defaultHighResolutionCycles();
+        $intervalSeconds = defaultHighResolutionIntervalSeconds();
+        $runs = array();
+        for ($cycle = 0; $cycle < $cycles; $cycle++) {
+            $schedule = $archive->scheduleLiveTargetSnapshotCoverage($cycle > 0);
+            $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
+            $fetches = array();
+            for ($i = 0; $i < $fetchLimit; $i++) {
+                $fetches[] = $archive->fetchNextPendingTile();
+            }
+            $runs[] = array('cycle' => $cycle + 1, 'high_resolution_only' => $cycle > 0, 'schedule' => $schedule, 'fetches' => $fetches);
+            if ($cycle + 1 < $cycles) {
+                sleep($intervalSeconds);
+            }
+        }
+        echo json_encode(array('ok' => true, 'mode' => 'home_high_resolution', 'cycles' => $cycles, 'interval_seconds' => $intervalSeconds, 'runs' => $runs), JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
+        exit(0);
+    }
+    if ($command === 'run-snapshot') {
         $schedule = isset($argv[2])
-            ? $archive->scheduleRecentLivePointCoverage(argFloat(2, defaultLat()), argFloat(3, defaultLon()), argFloat(4, defaultRadiusNm()), argInt(5, defaultLookbackMinutes()), argInt(6, defaultBucketSeconds()), defaultScope())
-            : $archive->scheduleRecentLiveTargetCoverage(defaultLookbackMinutes(), defaultBucketSeconds());
+            ? $archive->scheduleLivePointSnapshotCoverage(argFloat(2, defaultLat()), argFloat(3, defaultLon()), argFloat(4, defaultRadiusNm()), argInt(5, defaultBucketSeconds()), defaultScope())
+            : $archive->scheduleLiveTargetSnapshotCoverage(false);
         $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
         $fetches = array();
         for ($i = 0; $i < $fetchLimit; $i++) {
@@ -56,11 +85,11 @@ try {
         exit(0);
     }
     if ($command === 'loop') {
-        $intervalSeconds = max(30, min(900, argInt(2, defaultBucketSeconds())));
+        $intervalSeconds = max(10, min(900, argInt(2, defaultHighResolutionIntervalSeconds())));
         $iterations = max(0, argInt(3, 0));
         $count = 0;
         while ($iterations === 0 || $count < $iterations) {
-            $schedule = $archive->scheduleRecentLiveTargetCoverage(defaultLookbackMinutes(), defaultBucketSeconds());
+            $schedule = $archive->scheduleLiveTargetSnapshotCoverage(false);
             $fetches = array();
             $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
             for ($i = 0; $i < $fetchLimit; $i++) {
@@ -89,6 +118,7 @@ function usage(): never
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php schedule-live all\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php fetch-next [limit]\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php run-once [optional lat lon radius-nm lookback-min bucket-sec]\n");
+    fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php run-snapshot [optional lat lon radius-nm bucket-sec]\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php loop [interval-sec] [iterations]\n");
     exit(2);
 }
@@ -128,6 +158,16 @@ function defaultLookbackMinutes(): int
 function defaultBucketSeconds(): int
 {
     return (int)(getenv('CW_ADSB_LIVE_BUCKET_SECONDS') ?: 60);
+}
+
+function defaultHighResolutionIntervalSeconds(): int
+{
+    return max(10, min(60, (int)(getenv('CW_ADSB_HOME_LIVE_INTERVAL_SECONDS') ?: 10)));
+}
+
+function defaultHighResolutionCycles(): int
+{
+    return max(1, min(12, (int)(getenv('CW_ADSB_HOME_LIVE_CYCLES') ?: 6)));
 }
 
 function defaultScope(): string
