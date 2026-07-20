@@ -9,6 +9,7 @@ require_once __DIR__ . '/../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../src/GarminTrackFlightSummaryService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupMatchService.php';
 require_once __DIR__ . '/../src/GarminSourceGroupSelectionService.php';
+require_once __DIR__ . '/../src/GarminHistoricalBackfillService.php';
 
 @set_time_limit(0);
 
@@ -69,6 +70,13 @@ function run_cvr_async_job(PDO $pdo, string $jobType, array $payload): array
             return array('ok' => true, 'message' => 'No source group id in payload.');
         }
         return (new GarminSourceGroupSelectionService($pdo))->selectForGroup($sourceGroupId);
+    }
+    if ($jobType === 'GARMIN_HISTORICAL_FILE_PROCESS') {
+        $backfillFileId = (int)($payload['backfill_file_id'] ?? 0);
+        if ($backfillFileId <= 0) {
+            return array('ok' => true, 'message' => 'No historical backfill file id in payload.');
+        }
+        return (new GarminHistoricalBackfillService($pdo))->processFile($backfillFileId);
     }
     if ($jobType === 'GARMIN_TRACK_FLIGHT_SUMMARY') {
         $trackArtifactId = (int)($payload['track_artifact_id'] ?? 0);

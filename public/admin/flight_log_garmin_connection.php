@@ -7,6 +7,8 @@ require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminTrackFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminProcessingStatusService.php';
 require_once __DIR__ . '/../../src/GarminCsvReplayPayloadService.php';
+require_once __DIR__ . '/../../src/GarminHistoricalBackfillService.php';
+require_once __DIR__ . '/../../src/FlightCircleHistoricalImportService.php';
 
 cw_require_admin();
 
@@ -229,9 +231,13 @@ $hasCsvSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_csv_flight_summar
 $hasTrackSummaries = garmin_sync_table_exists($pdo, 'ipca_garmin_track_flight_summaries');
 $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_states');
 $hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
+$hasHistoricalBackfill = garmin_sync_table_exists($pdo, 'ipca_garmin_historical_backfill_batches');
+$hasFlightCircleMigration = garmin_sync_table_exists($pdo, 'ipca_flightcircle_import_batches');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 $replayPayloadService = new GarminCsvReplayPayloadService($pdo);
+$historicalBackfillService = new GarminHistoricalBackfillService($pdo);
+$flightCircleImportService = new FlightCircleHistoricalImportService($pdo);
 $processingStatusError = '';
 try {
     $processingStatus = (new GarminProcessingStatusService($pdo))->status();
@@ -251,6 +257,20 @@ try {
         'percent' => 0,
         'updated_at' => gmdate('c'),
     );
+}
+$historicalBackfillStatus = array('ready' => false, 'batches' => array(), 'file_statuses' => array(), 'segment_classifications' => array(), 'review_statuses' => array());
+$historicalBackfillFiles = array();
+try {
+    $historicalBackfillStatus = $historicalBackfillService->status(5);
+    $historicalBackfillFiles = $historicalBackfillService->recentFiles(12);
+} catch (Throwable $e) {
+    $historicalBackfillStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'file_statuses' => array(), 'segment_classifications' => array(), 'review_statuses' => array());
+}
+$flightCircleStatus = array('ready' => false, 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
+try {
+    $flightCircleStatus = $flightCircleImportService->status(5);
+} catch (Throwable $e) {
+    $flightCircleStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
 }
 
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
@@ -680,6 +700,12 @@ if (isset($_GET['flights_reprocess_queued'])) {
 if (isset($_GET['replays_rebuilt'])) {
     $notice = 'Garmin replay payloads rebuilt: ' . (int)$_GET['replays_rebuilt'] . '.';
 }
+if (isset($_GET['historical_batch'])) {
+    $notice = 'Historical Garmin backfill batch created: #' . (int)$_GET['historical_batch'] . '. Run the historical_backfill worker queue to process uploaded files.';
+}
+if (isset($_GET['flightcircle_batch'])) {
+    $notice = 'FlightCircle historical import completed: batch #' . (int)$_GET['flightcircle_batch'] . '. Review identity suggestions, resource classifications, and logbook proposals before approval.';
+}
 
 cw_header('Garmin Sync Agent');
 ?>
@@ -705,6 +731,130 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
     <?php if ($error !== ''): ?><div class="garmin-error"><?= h($error) ?></div><?php endif; ?>
     <?php if ($notice !== ''): ?><div class="garmin-notice"><?= h($notice) ?></div><?php endif; ?>
+  </section>
+
+  <section class="garmin-card">
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">Historical SD Card CSV Backfill</h3>
+        <p class="garmin-muted">Bulk-upload historical Garmin G3X/G1000 CSV files as immutable SD-card evidence. This does not alter the Mac Sync Agent workflow.</p>
+      </div>
+      <div class="garmin-actions">
+        <a class="secondary" href="/admin/api/garmin_historical_backfill_report.php">Download report</a>
+      </div>
+    </div>
+    <?php if (empty($historicalBackfillStatus['ready'])): ?>
+      <div class="garmin-empty" style="margin-top:12px">Historical backfill tables are not installed yet. Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code>.</div>
+    <?php else: ?>
+      <form method="post" action="/admin/api/garmin_historical_backfill_upload.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px">
+        <div class="garmin-grid">
+          <label class="garmin-kv"><span class="garmin-label">Aircraft hint</span><input name="aircraft_hint" placeholder="Optional tail, e.g. N392EA" style="width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #cbd5e1;border-radius:8px;padding:8px"></label>
+          <label class="garmin-kv"><span class="garmin-label">Source notes</span><input name="notes" placeholder="SD card box, archive folder, date range" style="width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #cbd5e1;border-radius:8px;padding:8px"></label>
+          <label class="garmin-kv"><span class="garmin-label">CSV files</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple style="width:100%;margin-top:6px"></label>
+          <div class="garmin-kv"><span class="garmin-label">Folder upload</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple webkitdirectory directory style="width:100%;margin-top:6px"></div>
+        </div>
+        <div class="garmin-actions"><button type="submit">Upload Historical Garmin CSVs</button><span class="garmin-muted">Files are stored first, then processed asynchronously on queue <code>historical_backfill</code>.</span></div>
+      </form>
+      <div class="garmin-grid" style="margin-top:14px">
+        <?php foreach (($historicalBackfillStatus['file_statuses'] ?? array()) as $status => $count): ?>
+          <div class="garmin-kv"><div class="garmin-label">File <?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
+        <?php endforeach; ?>
+        <?php foreach (($historicalBackfillStatus['segment_classifications'] ?? array()) as $status => $count): ?>
+          <div class="garmin-kv"><div class="garmin-label"><?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
+        <?php endforeach; ?>
+      </div>
+      <?php if ($historicalBackfillFiles !== array()): ?>
+        <div class="garmin-table-wrap" style="margin-top:14px">
+          <h4 style="margin:0 0 8px">Recent Historical Garmin Files</h4>
+          <table class="garmin-table">
+            <thead><tr><th>File</th><th>Aircraft</th><th>Duplicate</th><th>Status</th><th>Class</th><th>Review</th></tr></thead>
+            <tbody>
+              <?php foreach ($historicalBackfillFiles as $file): ?>
+                <tr>
+                  <td><span class="garmin-code"><?= h((string)$file['original_filename']) ?></span></td>
+                  <td><?= garmin_sync_tail_pill((string)($file['resolved_aircraft_registration'] ?: $file['selected_aircraft_hint'])) ?></td>
+                  <td><span class="garmin-badge <?= (string)$file['exact_duplicate_status'] === 'new' ? 'garmin-badge-ok' : 'garmin-badge-warn' ?>"><?= h((string)$file['exact_duplicate_status']) ?></span></td>
+                  <td><span class="garmin-badge <?= garmin_sync_badge_class((string)$file['parse_status']) ?>"><?= h((string)$file['parse_status']) ?></span></td>
+                  <td><?= h((string)$file['classification']) ?></td>
+                  <td><?= h((string)$file['review_status']) ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    <?php endif; ?>
+  </section>
+
+  <section class="garmin-card">
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">FlightCircle Historical Migration</h3>
+        <p class="garmin-muted">Import FlightCircle exports as migration evidence, normalize into source-neutral operation candidates, suggest missing users, and preserve AATD simulator time separately from aircraft ledgers.</p>
+      </div>
+    </div>
+    <?php if (empty($flightCircleStatus['ready'])): ?>
+      <div class="garmin-empty" style="margin-top:12px">FlightCircle migration tables are not installed yet. Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code>.</div>
+    <?php else: ?>
+      <form method="post" action="/admin/api/flightcircle_historical_import.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px">
+        <div class="garmin-grid">
+          <label class="garmin-kv"><span class="garmin-label">FlightCircle CSV</span><input name="flightcircle_csv" type="file" accept=".csv,text/csv" required style="width:100%;margin-top:6px"></label>
+          <div class="garmin-kv"><span class="garmin-label">Resource rules</span><div class="garmin-muted" style="margin-top:6px">Aircraft: N446CS, N392EA, N641TH, N428EA, N153PC. AATD: AL172M2. Ignored: Classroom I/II, Apple Vision Pro, Exam Room, Main Office.</div></div>
+          <div class="garmin-kv"><span class="garmin-label">Informational only</span><div class="garmin-muted" style="margin-top:6px">Training mission codes and FlightCircle routes do not drive authoritative logbook categories or airport detection.</div></div>
+        </div>
+        <div class="garmin-actions"><button type="submit">Import FlightCircle Historical CSV</button></div>
+      </form>
+      <div class="garmin-grid" style="margin-top:14px">
+        <?php foreach (($flightCircleStatus['resources'] ?? array()) as $status => $count): ?>
+          <div class="garmin-kv"><div class="garmin-label">Resource <?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
+        <?php endforeach; ?>
+        <?php foreach (($flightCircleStatus['identity_mappings'] ?? array()) as $status => $count): ?>
+          <div class="garmin-kv"><div class="garmin-label">Identity <?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
+        <?php endforeach; ?>
+      </div>
+      <?php if (($flightCircleStatus['batches'] ?? array()) !== array()): ?>
+        <div class="garmin-table-wrap" style="margin-top:14px">
+          <h4 style="margin:0 0 8px">Recent FlightCircle Imports</h4>
+          <table class="garmin-table">
+            <thead><tr><th>Batch</th><th>Rows</th><th>Aircraft</th><th>AATD</th><th>Ignored</th><th>Unknown</th><th>Identity Review</th><th>Status</th></tr></thead>
+            <tbody>
+              <?php foreach (($flightCircleStatus['batches'] ?? array()) as $batch): ?>
+                <tr>
+                  <td><span class="garmin-code"><?= h(substr((string)$batch['batch_uuid'], 0, 8)) ?></span><br><span class="garmin-muted"><?= h((string)$batch['original_filename']) ?></span></td>
+                  <td><?= number_format((int)$batch['row_count']) ?></td>
+                  <td><?= number_format((int)$batch['aircraft_row_count']) ?></td>
+                  <td><?= number_format((int)$batch['simulator_row_count']) ?></td>
+                  <td><?= number_format((int)$batch['ignored_row_count']) ?></td>
+                  <td><?= number_format((int)$batch['unknown_resource_count']) ?></td>
+                  <td><?= number_format((int)$batch['identity_review_count']) ?></td>
+                  <td><span class="garmin-badge <?= garmin_sync_badge_class((string)$batch['import_status']) ?>"><?= h((string)$batch['import_status']) ?></span></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+      <?php if (($flightCircleStatus['identity_suggestions'] ?? array()) !== array()): ?>
+        <div class="garmin-table-wrap" style="margin-top:14px">
+          <h4 style="margin:0 0 8px">Unmatched User Suggestions</h4>
+          <p class="garmin-muted">These names were found in FlightCircle but were not matched to an existing IPCA.training user. They are suggestions only; no user is created automatically.</p>
+          <table class="garmin-table">
+            <thead><tr><th>Source Name</th><th>Parsed Name</th><th>Context</th><th>Status</th><th>Confidence</th></tr></thead>
+            <tbody>
+              <?php foreach (($flightCircleStatus['identity_suggestions'] ?? array()) as $identity): ?>
+                <tr>
+                  <td><?= h((string)$identity['source_name']) ?></td>
+                  <td><?= h(trim((string)$identity['parsed_first_name'] . ' ' . (string)$identity['parsed_middle_name'] . ' ' . (string)$identity['parsed_last_name'])) ?></td>
+                  <td><?= h((string)$identity['suggested_role_context']) ?></td>
+                  <td><span class="garmin-badge garmin-badge-warn"><?= h((string)$identity['mapping_status']) ?></span></td>
+                  <td><?= h((string)($identity['confidence_score'] ?? '0')) ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    <?php endif; ?>
   </section>
 
   <section class="garmin-card" data-processing-card>

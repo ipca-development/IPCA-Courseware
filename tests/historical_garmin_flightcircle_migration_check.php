@@ -1,0 +1,88 @@
+<?php
+declare(strict_types=1);
+
+$root = dirname(__DIR__);
+$files = array(
+    'migration' => $root . '/scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql',
+    'flightcircle_service' => $root . '/src/FlightCircleHistoricalImportService.php',
+    'garmin_service' => $root . '/src/GarminHistoricalBackfillService.php',
+    'match_service' => $root . '/src/FlightCircleGarminMatchService.php',
+    'worker' => $root . '/scripts/run_async_jobs.php',
+    'admin_page' => $root . '/public/admin/flight_log_garmin_connection.php',
+);
+
+foreach ($files as $name => $path) {
+    if (!is_file($path)) {
+        fwrite(STDERR, "Missing {$name}: {$path}\n");
+        exit(1);
+    }
+    $files[$name] = (string)file_get_contents($path);
+}
+
+$checks = array(
+    'migration creates source-neutral canonical operation and evidence tables' =>
+        str_contains($files['migration'], 'CREATE TABLE IF NOT EXISTS ipca_aircraft_operations')
+        && str_contains($files['migration'], 'CREATE TABLE IF NOT EXISTS ipca_source_evidence')
+        && str_contains($files['migration'], 'CREATE TABLE IF NOT EXISTS ipca_meter_readings')
+        && str_contains($files['migration'], 'CREATE TABLE IF NOT EXISTS ipca_crew_assignments')
+        && str_contains($files['migration'], 'CREATE TABLE IF NOT EXISTS ipca_migration_cutovers'),
+
+    'FlightCircle importer preserves raw files and rows before normalization' =>
+        str_contains($files['migration'], 'ipca_flightcircle_raw_files')
+        && str_contains($files['migration'], 'ipca_flightcircle_raw_rows')
+        && str_contains($files['flightcircle_service'], 'createSourceEvidence')
+        && str_contains($files['flightcircle_service'], 'insertRawRow'),
+
+    'FlightCircle resources are explicitly classified with ignored resources and AL172M2 AATD' =>
+        str_contains($files['flightcircle_service'], "SIMULATOR_RESOURCE = 'AL172M2'")
+        && str_contains($files['flightcircle_service'], 'CLASSROOM I')
+        && str_contains($files['flightcircle_service'], 'APPLE VISION PRO')
+        && str_contains($files['flightcircle_service'], "'aatd_simulator'")
+        && str_contains($files['flightcircle_service'], "'ignored_resource'"),
+
+    'mission codes and route text remain informational only' =>
+        str_contains($files['flightcircle_service'], 'training_mission_codes_in_notes_are_informational_only')
+        && str_contains($files['flightcircle_service'], 'flightcircle_route_is_planned_or_informational_until_confirmed')
+        && str_contains($files['admin_page'], 'Informational only'),
+
+    'unmatched users are suggested for admin review, not auto-created' =>
+        str_contains($files['flightcircle_service'], 'suggested_create_user')
+        && str_contains($files['migration'], 'ipca_flightcircle_user_mappings')
+        && !preg_match('/INSERT\s+INTO\s+users\b/i', $files['flightcircle_service']),
+
+    'AL172M2 creates simulator proposals and not aircraft operation ledgers' =>
+        str_contains($files['flightcircle_service'], 'createSimulatorLogbookProposal')
+        && str_contains($files['flightcircle_service'], "'student_simulator'")
+        && str_contains($files['flightcircle_service'], "'aatd_simulator'")
+        && str_contains($files['flightcircle_service'], 'garmin_position_airport_data_not_authoritative'),
+
+    'historical Garmin backfill uses distinct provider and separate async queue' =>
+        str_contains($files['garmin_service'], "PROVIDER_NAME = 'historical_sd_card_csv'")
+        && str_contains($files['garmin_service'], "SOURCE_TYPE = 'GARMIN_SD_CARD_HISTORICAL_CSV'")
+        && str_contains($files['garmin_service'], "'historical_backfill'")
+        && str_contains($files['worker'], 'GARMIN_HISTORICAL_FILE_PROCESS'),
+
+    'FlightCircle-to-Garmin matching creates reviewable candidates without auto-merge' =>
+        str_contains($files['match_service'], 'ipca_flightcircle_garmin_matches')
+        && str_contains($files['match_service'], 'high_confidence')
+        && str_contains($files['match_service'], 'probable')
+        && !str_contains($files['match_service'], "UPDATE ipca_aircraft_operations\n            SET review_status = 'approved'"),
+
+    'admin page exposes both migration upload sections' =>
+        str_contains($files['admin_page'], 'Historical SD Card CSV Backfill')
+        && str_contains($files['admin_page'], 'FlightCircle Historical Migration')
+        && str_contains($files['admin_page'], 'AL172M2'),
+);
+
+$failed = array();
+foreach ($checks as $name => $pass) {
+    echo ($pass ? 'PASS' : 'FAIL') . " {$name}\n";
+    if (!$pass) {
+        $failed[] = $name;
+    }
+}
+
+if ($failed !== array()) {
+    fwrite(STDERR, "\nFailed checks:\n- " . implode("\n- ", $failed) . "\n");
+    exit(1);
+}
