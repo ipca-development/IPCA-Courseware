@@ -1362,8 +1362,11 @@ final class CockpitReconstructionService
             $sample['system_alerts'] = is_array($decodedAlerts) ? array_values($decodedAlerts) : array();
         }
         if (array_key_exists('trim_range_json', $row)) {
-            $decodedTrimRange = self::decodeJson((string)($row['trim_range_json'] ?? ''));
-            $sample['trim_range'] = is_array($decodedTrimRange) ? $decodedTrimRange : null;
+            $trimRangeRaw = trim((string)($row['trim_range_json'] ?? ''));
+            $decodedTrimRange = $trimRangeRaw !== '' && strtolower($trimRangeRaw) !== 'null'
+                ? self::decodeJson($trimRangeRaw)
+                : array();
+            $sample['trim_range'] = isset($decodedTrimRange['min'], $decodedTrimRange['max']) ? $decodedTrimRange : null;
         }
         if (is_array($canonicalG3x)) {
             foreach (array('autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_status', 'com2_status') as $field) {

@@ -233,6 +233,8 @@ $hasFlightStates = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_artifact_s
 $hasTrackCsvLinks = garmin_sync_table_exists($pdo, 'ipca_garmin_flight_data_track_links');
 $hasHistoricalBackfill = garmin_sync_table_exists($pdo, 'ipca_garmin_historical_backfill_batches');
 $hasFlightCircleMigration = garmin_sync_table_exists($pdo, 'ipca_flightcircle_import_batches');
+$hasFlightCircleMatches = garmin_sync_table_exists($pdo, 'ipca_flightcircle_garmin_matches');
+$hasFlightCircleStaging = garmin_sync_table_exists($pdo, 'ipca_flightcircle_staging_records');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 $replayPayloadService = new GarminCsvReplayPayloadService($pdo);
@@ -353,6 +355,27 @@ if ($hasCsvFiles) {
         LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS id, NULL AS batch_id, NULL AS exact_duplicate_status, NULL AS parse_status, NULL AS classification, NULL AS review_status) hf ON 1 = 0
         LEFT JOIN (SELECT NULL AS id, NULL AS batch_uuid) hb ON 1 = 0
     ";
+    $flightCircleJoin = ($hasFlightCircleMatches && $hasFlightCircleStaging) ? "
+        LEFT JOIN (
+          SELECT
+            m.csv_file_id,
+            COUNT(*) AS fc_match_count,
+            MAX(m.confidence_score) AS fc_match_score,
+            GROUP_CONCAT(DISTINCT m.match_status ORDER BY m.match_status SEPARATOR ', ') AS fc_match_statuses,
+            GROUP_CONCAT(DISTINCT NULLIF(st.user_text, '') ORDER BY st.user_text SEPARATOR ' | ') AS fc_user_text,
+            GROUP_CONCAT(DISTINCT NULLIF(st.instructor_text, '') ORDER BY st.instructor_text SEPARATOR ' | ') AS fc_instructor_text,
+            GROUP_CONCAT(DISTINCT NULLIF(st.reservation_type, '') ORDER BY st.reservation_type SEPARATOR ', ') AS fc_reservation_type
+          FROM ipca_flightcircle_garmin_matches m
+          INNER JOIN ipca_flightcircle_staging_records st ON st.id = m.staging_record_id
+          WHERE m.csv_file_id IS NOT NULL
+          GROUP BY m.csv_file_id
+        ) fc ON fc.csv_file_id = f.id
+    " : "
+        LEFT JOIN (
+          SELECT NULL AS csv_file_id, NULL AS fc_match_count, NULL AS fc_match_score, NULL AS fc_match_statuses,
+                 NULL AS fc_user_text, NULL AS fc_instructor_text, NULL AS fc_reservation_type
+        ) fc ON 1 = 0
+    ";
     $garminImportRows = garmin_sync_rows($pdo, "
         SELECT
           f.id AS csv_file_id,
@@ -380,10 +403,17 @@ if ($hasCsvFiles) {
           hf.exact_duplicate_status,
           hf.parse_status AS historical_parse_status,
           hf.classification AS historical_classification,
-          hf.review_status AS historical_review_status
+          hf.review_status AS historical_review_status,
+          fc.fc_match_count,
+          fc.fc_match_score,
+          fc.fc_match_statuses,
+          fc.fc_user_text,
+          fc.fc_instructor_text,
+          fc.fc_reservation_type
         FROM ipca_garmin_csv_files f
         " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS derivation_status, NULL AS tail_number, NULL AS departure_airport_code, NULL AS arrival_airport_code, NULL AS departure_time_utc, NULL AS arrival_time_utc, NULL AS elapsed_seconds, NULL AS summary_json) s ON 1 = 0") . "
         {$historicalJoin}
+        {$flightCircleJoin}
         WHERE COALESCE(f.provider_name, '') IN ('desktop_sync_agent', 'historical_sd_card_csv')
            OR COALESCE(f.upload_source, '') IN ('desktop_sync_agent', 'admin_historical_backfill')
            OR COALESCE(f.source, '') IN ('garmin_historical_sd_card', 'garmin_cloud')
@@ -1137,7 +1167,7 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-muted" style="margin-top:4px" data-import-bulk-message></div>
       <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">
         <table class="garmin-table">
-          <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
+          <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:10%">FlightCircle</th><th style="width:12%">Crew</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
           <tbody>
           <?php foreach ($garminImportRows as $row): ?>
             <?php
@@ -1171,6 +1201,13 @@ cw_header('Garmin Sync Agent');
               }
               $review = trim((string)($row['historical_review_status'] ?? ''));
               $stateClass = in_array($importState, array('complete', 'completed', 'ok'), true) ? 'garmin-badge-ok' : (in_array($importState, array('failed', 'parse_failed'), true) ? 'garmin-badge-danger' : 'garmin-badge-warn');
+              $fcMatchCount = (int)($row['fc_match_count'] ?? 0);
+              $fcMatchScore = $row['fc_match_score'] !== null ? (float)$row['fc_match_score'] : null;
+              $fcMatchStatuses = trim((string)($row['fc_match_statuses'] ?? ''));
+              $fcUserText = trim((string)($row['fc_user_text'] ?? ''));
+              $fcInstructorText = trim((string)($row['fc_instructor_text'] ?? ''));
+              $fcReservationType = trim((string)($row['fc_reservation_type'] ?? ''));
+              $fcBadgeClass = $fcMatchCount > 0 && $fcMatchScore !== null && $fcMatchScore >= 85 ? 'garmin-badge-ok' : ($fcMatchCount > 0 ? 'garmin-badge-warn' : '');
             ?>
             <tr data-garmin-import-row
                 data-historical-file-id="<?= (int)($row['historical_file_id'] ?? 0) ?>"
@@ -1181,6 +1218,7 @@ cw_header('Garmin Sync Agent');
                 data-hobbs-out="<?= h((string)($summary['hobbs_out'] ?? '')) ?>"
                 data-hobbs-in="<?= h((string)($summary['hobbs_in'] ?? '')) ?>"
                 data-state="<?= h(strtolower($importState)) ?>"
+                data-fc-match="<?= $fcMatchCount > 0 ? '1' : '0' ?>"
                 data-duplicate="<?= $isDuplicate ? 'duplicate' : 'new' ?>">
               <td><input type="checkbox" data-import-checkbox value="<?= (int)($row['historical_file_id'] ?? 0) ?>" <?= ((int)($row['historical_file_id'] ?? 0) <= 0) ? 'disabled' : '' ?>></td>
               <td><span class="garmin-badge <?= $sourceLabel === 'Bulk Upload' ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($sourceLabel) ?></span></td>
@@ -1196,11 +1234,28 @@ cw_header('Garmin Sync Agent');
               <td><?= h((string)($summary['tacho_time'] ?? '--')) ?></td>
               <td><span class="garmin-badge <?= h($stateClass) ?>"><?= h($importState) ?></span><?php if ($review !== ''): ?><br><span class="garmin-muted"><?= h($review) ?></span><?php endif; ?></td>
               <td><?= h($classification) ?></td>
+              <td>
+                <?php if ($fcMatchCount > 0): ?>
+                  <span class="garmin-badge <?= h($fcBadgeClass) ?>"><?= h($fcMatchStatuses !== '' ? $fcMatchStatuses : 'matched') ?></span>
+                  <br><span class="garmin-muted"><?= number_format($fcMatchCount) ?> candidate(s)<?= $fcMatchScore !== null ? ' · ' . number_format($fcMatchScore, 0) . '%' : '' ?></span>
+                <?php else: ?>
+                  <span class="garmin-muted">No FC match</span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php if ($fcUserText !== '' || $fcInstructorText !== ''): ?>
+                  <strong><?= h($fcUserText !== '' ? $fcUserText : '--') ?></strong>
+                  <?php if ($fcInstructorText !== ''): ?><br><span class="garmin-muted">Instr: <?= h($fcInstructorText) ?></span><?php endif; ?>
+                  <?php if ($fcReservationType !== ''): ?><br><span class="garmin-muted"><?= h($fcReservationType) ?></span><?php endif; ?>
+                <?php else: ?>
+                  <span class="garmin-muted">--</span>
+                <?php endif; ?>
+              </td>
               <td><span class="garmin-badge <?= $isDuplicate ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($duplicateStatus !== '' ? $duplicateStatus : 'new') ?></span></td>
               <td><span class="garmin-code"><?= h((string)$row['original_filename']) ?></span><br><span class="garmin-muted">CSV #<?= (int)$row['csv_file_id'] ?></span></td>
             </tr>
           <?php endforeach; ?>
-            <tr data-garmin-import-empty style="display:none"><td colspan="16" class="garmin-empty">No Garmin imports match these filters.</td></tr>
+            <tr data-garmin-import-empty style="display:none"><td colspan="18" class="garmin-empty">No Garmin imports match these filters.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1583,6 +1638,7 @@ cw_header('Garmin Sync Agent');
     const state = importFilterValue('import_state').toLowerCase();
     const duplicate = importFilterValue('import_duplicate');
     let visibleCount = 0;
+    let visibleMatchedCount = 0;
     const visibleRows = [];
     importRows.forEach(row => {
       row.querySelectorAll('[data-hobbs-out-cell],[data-hobbs-in-cell]').forEach(cell => {
@@ -1609,6 +1665,7 @@ cw_header('Garmin Sync Agent');
       row.style.display = visible ? '' : 'none';
       if (visible) {
         visibleCount++;
+        if (row.dataset.fcMatch === '1') visibleMatchedCount++;
         visibleRows.push(row);
       }
     });
@@ -1630,7 +1687,7 @@ cw_header('Garmin Sync Agent');
       }
     }
     if (importEmptyRow) importEmptyRow.style.display = visibleCount === 0 ? '' : 'none';
-    if (importCount) importCount.textContent = 'Showing ' + visibleCount.toLocaleString() + ' of ' + importRows.length.toLocaleString() + ' import(s), newest first.';
+    if (importCount) importCount.textContent = 'Showing ' + visibleCount.toLocaleString() + ' of ' + importRows.length.toLocaleString() + ' import(s), newest first. FlightCircle matched: ' + visibleMatchedCount.toLocaleString() + '.';
   }
   if (importFilterForm) {
     importFilterForm.addEventListener('submit', event => {

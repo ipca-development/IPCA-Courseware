@@ -1597,6 +1597,7 @@ final class CockpitReplayPipeline
                         'source_column' => $source,
                         'alert_key' => $key,
                         'display_text' => trim((string)($alert['text'] ?? $key)),
+                        'severity' => $this->defaultAlertSeverity($key, trim((string)($alert['text'] ?? $key))),
                         'count' => 0,
                     );
                 }
@@ -1608,7 +1609,7 @@ final class CockpitReplayPipeline
                 INSERT INTO ipca_garmin_alert_catalog (
                     aircraft_type, source_column, alert_key, display_text, severity,
                     observation_count, first_seen_at, last_seen_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'info', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE
                     display_text = IF(display_text = '' OR display_text = alert_key, VALUES(display_text), display_text),
                     observation_count = observation_count + VALUES(observation_count),
@@ -1621,6 +1622,7 @@ final class CockpitReplayPipeline
                     $row['source_column'],
                     $row['alert_key'],
                     $row['display_text'],
+                    $row['severity'],
                     (int)$row['count'],
                 ));
             }
@@ -1673,7 +1675,7 @@ final class CockpitReplayPipeline
                 }
                 $seen[$source . "\n" . $key] = true;
                 $catalogRow = $catalog[$source . "\n" . $key] ?? null;
-                $severity = is_array($catalogRow) ? (string)($catalogRow['severity'] ?? 'info') : 'info';
+                $severity = is_array($catalogRow) ? (string)($catalogRow['severity'] ?? 'info') : $this->defaultAlertSeverity($key, $text);
                 $displayText = is_array($catalogRow) && trim((string)($catalogRow['display_text'] ?? '')) !== ''
                     ? trim((string)$catalogRow['display_text'])
                     : $text;
@@ -1711,6 +1713,15 @@ final class CockpitReplayPipeline
         }
         $name = trim((string)($recording['aircraft_display_name'] ?? ''));
         return $name !== '' ? strtoupper($name) : 'UNKNOWN';
+    }
+
+    private function defaultAlertSeverity(string $key, string $text): string
+    {
+        $combined = strtoupper(trim($key . ' ' . $text));
+        if (str_contains($combined, 'COOLANT')) {
+            return 'caution';
+        }
+        return 'info';
     }
 
     /**
