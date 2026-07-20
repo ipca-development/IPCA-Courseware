@@ -96,6 +96,14 @@ final class FlightCircleHistoricalImportService
             ORDER BY updated_at DESC, id DESC
             LIMIT 15
         ");
+        $recentStagingStmt = $this->pdo->query("
+            SELECT id, batch_id, resource_identifier, resource_type, import_disposition, tail_number,
+                   user_text, instructor_text, reservation_type, route_text, depart_local,
+                   hobbs_out, hobbs_in, tach_out, tach_in, operation_id, review_status, updated_at
+            FROM ipca_flightcircle_staging_records
+            ORDER BY COALESCE(depart_local, updated_at) DESC, id DESC
+            LIMIT 50
+        ");
 
         return array(
             'ready' => true,
@@ -104,6 +112,7 @@ final class FlightCircleHistoricalImportService
             'resources' => $resources,
             'dispositions' => $dispositions,
             'identity_suggestions' => $identityStmt !== false ? ($identityStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
+            'recent_staging_records' => $recentStagingStmt !== false ? ($recentStagingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
             'existing_users' => $this->existingUsersForMapping(),
         );
     }

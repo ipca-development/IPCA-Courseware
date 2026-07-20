@@ -1026,6 +1026,31 @@ cw_header('Garmin Sync Agent');
           </table>
         </div>
       <?php endif; ?>
+      <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) !== array()): ?>
+        <div class="garmin-table-wrap" style="margin-top:14px">
+          <h4 style="margin:0 0 8px">Stored FlightCircle Rows</h4>
+          <p class="garmin-muted" style="margin-top:0">These are the normalized FlightCircle records used for enrichment. For matching, the important values are Date, Tail, and Hobbs-Out.</p>
+          <table class="garmin-table">
+            <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
+            <tbody>
+              <?php foreach (($flightCircleStatus['recent_staging_records'] ?? array()) as $record): ?>
+                <tr>
+                  <td><?= h(substr((string)($record['depart_local'] ?? ''), 0, 10) ?: '--') ?></td>
+                  <td><?= garmin_sync_tail_pill((string)($record['tail_number'] ?? $record['resource_identifier'] ?? '')) ?><br><span class="garmin-muted"><?= h((string)($record['resource_type'] ?? '')) ?></span></td>
+                  <td><?= h((string)($record['user_text'] ?? '') ?: '--') ?></td>
+                  <td><?= h((string)($record['instructor_text'] ?? '') ?: '--') ?></td>
+                  <td><?= h((string)($record['reservation_type'] ?? '') ?: '--') ?></td>
+                  <td><strong><?= h($record['hobbs_out'] !== null ? number_format((float)$record['hobbs_out'], 1) : '--') ?></strong></td>
+                  <td><?= h($record['hobbs_in'] !== null ? number_format((float)$record['hobbs_in'], 1) : '--') ?></td>
+                  <td><?= h($record['tach_out'] !== null ? number_format((float)$record['tach_out'], 1) : '--') ?></td>
+                  <td><?= h($record['tach_in'] !== null ? number_format((float)$record['tach_in'], 1) : '--') ?></td>
+                  <td><span class="garmin-badge <?= garmin_sync_badge_class((string)($record['import_disposition'] ?? '')) ?>"><?= h((string)($record['import_disposition'] ?? '')) ?></span><br><span class="garmin-muted">FC row #<?= (int)($record['id'] ?? 0) ?></span></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
       <?php if (($flightCircleStatus['identity_suggestions'] ?? array()) !== array()): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
