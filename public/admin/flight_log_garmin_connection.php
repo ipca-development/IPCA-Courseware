@@ -998,7 +998,7 @@ cw_header('Garmin Sync Agent');
       </div>
     </div>
     <?php if (empty($flightCircleStatus['ready'])): ?>
-      <div class="garmin-empty" style="margin-top:12px">FlightCircle migration tables are not installed yet. Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code>.</div>
+      <div class="garmin-empty" style="margin-top:12px"><?= h((string)($flightCircleStatus['message'] ?? 'FlightCircle migration tables are not installed yet.')) ?> Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code> if the tables are missing.</div>
     <?php else: ?>
       <form method="post" action="/admin/api/flightcircle_historical_import.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px">
         <div class="garmin-grid">

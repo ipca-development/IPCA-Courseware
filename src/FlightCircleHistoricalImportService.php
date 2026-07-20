@@ -1167,7 +1167,7 @@ final class FlightCircleHistoricalImportService
               SUM(resource_type = 'aatd_simulator') AS simulator_rows,
               SUM(resource_type = 'ignored_resource') AS ignored_rows,
               SUM(resource_type = 'unknown') AS unknown_rows,
-              SUM(resource_type = 'aircraft' AND (depart_local IS NULL OR depart_local = '')) AS missing_date_rows,
+              SUM(resource_type = 'aircraft' AND depart_local IS NULL) AS missing_date_rows,
               SUM(resource_type = 'aircraft' AND (tail_number IS NULL OR TRIM(tail_number) = '')) AS missing_tail_rows,
               SUM(resource_type = 'aircraft' AND hobbs_out IS NULL) AS missing_hobbs_out_rows,
               MIN(CASE WHEN resource_type = 'aircraft' THEN depart_local ELSE NULL END) AS first_depart_local,
