@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/AsyncJobService.php';
 require_once __DIR__ . '/../../../src/AuditEventService.php';
+require_once __DIR__ . '/../../../src/GarminHistoricalBackfillService.php';
 
 cw_require_admin();
 
@@ -21,6 +22,13 @@ try {
     }
     $action = trim((string)($_POST['action'] ?? ''));
     $ids = array_values(array_filter(array_map('intval', (array)($_POST['backfill_file_ids'] ?? array()))));
+    if ($action === 'process_queued_inline') {
+        $batchId = max(0, (int)($_POST['batch_id'] ?? 0));
+        $limit = max(1, min(50, (int)($_POST['limit'] ?? 10)));
+        $result = (new GarminHistoricalBackfillService($pdo))->processQueuedFiles($batchId, $limit);
+        $result['status'] = (new GarminHistoricalBackfillService($pdo))->status(10, $batchId > 0 ? $batchId : null);
+        garmin_historical_action_json(200, $result);
+    }
     if ($ids === array()) {
         throw new RuntimeException('Select at least one historical Garmin file.');
     }

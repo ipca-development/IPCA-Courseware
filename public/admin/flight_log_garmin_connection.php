@@ -746,6 +746,70 @@ cw_header('Garmin Sync Agent');
     <?php if (empty($historicalBackfillStatus['ready'])): ?>
       <div class="garmin-empty" style="margin-top:12px">Historical backfill tables are not installed yet. Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code>.</div>
     <?php else: ?>
+      <?php
+        $historicalProgress = is_array($historicalBackfillStatus['progress'] ?? null) ? $historicalBackfillStatus['progress'] : array();
+        $historicalActiveBatch = is_array($historicalBackfillStatus['active_batch'] ?? null) ? $historicalBackfillStatus['active_batch'] : array();
+        $historicalActiveBatchId = (int)($historicalActiveBatch['id'] ?? 0);
+        $historicalTotal = (int)($historicalProgress['total'] ?? 0);
+        $historicalDone = (int)($historicalProgress['done'] ?? 0);
+        $historicalQueued = (int)($historicalProgress['queued'] ?? ($historicalBackfillStatus['file_statuses']['queued'] ?? 0));
+        $historicalFailed = (int)($historicalProgress['failed'] ?? 0);
+        $historicalDuplicates = (int)($historicalProgress['duplicates'] ?? ($historicalBackfillStatus['duplicate_statuses']['previously_imported'] ?? 0));
+        $historicalRemaining = (int)($historicalProgress['remaining'] ?? $historicalQueued);
+        $historicalNeedsReview = (int)($historicalProgress['needs_review'] ?? 0);
+        $historicalPercent = (float)($historicalProgress['percent'] ?? 0);
+        $historicalState = (string)($historicalProgress['state'] ?? 'waiting_for_upload');
+        $historicalHumanState = 'Waiting for upload';
+        $historicalPrimaryAction = 'Select Garmin CSV files or a folder, then upload.';
+        if ($historicalTotal > 0 && $historicalQueued > 0) {
+            $historicalHumanState = 'Uploaded, waiting for processing';
+            $historicalPrimaryAction = 'Click Process next 25 queued files now, or run the historical_backfill worker.';
+        } elseif ($historicalTotal > 0 && $historicalRemaining > 0) {
+            $historicalHumanState = 'Processing in background';
+            $historicalPrimaryAction = 'Wait for the worker or keep processing chunks from this page.';
+        } elseif ($historicalTotal > 0 && $historicalFailed > 0) {
+            $historicalHumanState = 'Processing complete with failures';
+            $historicalPrimaryAction = 'Review failed rows in the table and reprocess selected files if needed.';
+        } elseif ($historicalTotal > 0 && $historicalNeedsReview > 0) {
+            $historicalHumanState = 'Ready for review';
+            $historicalPrimaryAction = 'Review rows still marked Needs Review and use the table actions.';
+        } elseif ($historicalTotal > 0) {
+            $historicalHumanState = 'Processing complete';
+            $historicalPrimaryAction = 'No action needed here unless you want to inspect/reprocess selected rows.';
+        }
+      ?>
+      <div class="garmin-kv" style="margin-top:14px;border-color:#bae6fd;background:#f0f9ff" data-historical-status-panel data-batch-id="<?= $historicalActiveBatchId ?>">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          <div>
+            <div class="garmin-label">Historical batch status</div>
+            <div class="garmin-value" style="font-size:18px" data-historical-human-state><?= h($historicalHumanState) ?></div>
+            <div class="garmin-muted" data-historical-primary-action><?= h($historicalPrimaryAction) ?></div>
+          </div>
+          <div class="garmin-actions">
+            <?php if ($historicalQueued > 0): ?>
+              <button type="button" data-process-historical-queued data-batch-id="<?= $historicalActiveBatchId ?>">Process next 25 queued files now</button>
+              <span class="garmin-muted" data-process-historical-message><?= number_format($historicalQueued) ?> queued.</span>
+            <?php endif; ?>
+            <?php if ($historicalActiveBatchId > 0): ?>
+              <a class="secondary" href="/admin/api/garmin_historical_backfill_report.php?batch_id=<?= $historicalActiveBatchId ?>">Download this batch report</a>
+            <?php endif; ?>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="garmin-progress" data-historical-main-progress><span style="width:<?= h((string)$historicalPercent) ?>%"></span><strong><?= h((string)$historicalPercent) ?>%</strong></div>
+        </div>
+        <div class="garmin-grid" style="margin-top:12px">
+          <div class="garmin-kv"><div class="garmin-label">Total in batch</div><div class="garmin-value" data-historical-total><?= number_format($historicalTotal) ?></div></div>
+          <div class="garmin-kv"><div class="garmin-label">Queued</div><div class="garmin-value" data-historical-queued><?= number_format($historicalQueued) ?></div></div>
+          <div class="garmin-kv"><div class="garmin-label">Processed</div><div class="garmin-value" data-historical-done><?= number_format($historicalDone) ?></div></div>
+          <div class="garmin-kv"><div class="garmin-label">Duplicates</div><div class="garmin-value" data-historical-duplicates><?= number_format($historicalDuplicates) ?></div></div>
+          <div class="garmin-kv"><div class="garmin-label">Failed</div><div class="garmin-value" data-historical-failed><?= number_format($historicalFailed) ?></div></div>
+          <div class="garmin-kv"><div class="garmin-label">Manual review</div><div class="garmin-value" data-historical-needs-review><?= number_format($historicalNeedsReview) ?></div></div>
+        </div>
+        <div class="garmin-muted" style="margin-top:8px">
+          Queued = uploaded but not parsed yet. Processed = parsed/classified or duplicate. Manual review = processed but still needs a human decision. Failed = parser/storage error; select and reprocess or inspect the report.
+        </div>
+      </div>
       <form method="post" action="/admin/api/garmin_historical_backfill_upload.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px" data-historical-garmin-upload data-latest-batch-id="<?= h((string)(($historicalBackfillStatus['active_batch']['id'] ?? '') ?: '')) ?>">
         <div class="garmin-grid">
           <label class="garmin-kv"><span class="garmin-label">Aircraft hint</span><input name="aircraft_hint" placeholder="Optional tail, e.g. N392EA" style="width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #cbd5e1;border-radius:8px;padding:8px"></label>
@@ -770,7 +834,9 @@ cw_header('Garmin Sync Agent');
         </div>
         <div class="garmin-muted" data-historical-upload-message></div>
       </form>
-      <div class="garmin-grid" style="margin-top:14px">
+      <details style="margin-top:14px">
+        <summary><strong>Technical counters</strong> <span class="garmin-muted">raw upload and classification counts</span></summary>
+      <div class="garmin-grid" style="margin-top:10px">
         <?php foreach (($historicalBackfillStatus['file_statuses'] ?? array()) as $status => $count): ?>
           <div class="garmin-kv"><div class="garmin-label">File <?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
         <?php endforeach; ?>
@@ -778,20 +844,34 @@ cw_header('Garmin Sync Agent');
           <div class="garmin-kv"><div class="garmin-label"><?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
         <?php endforeach; ?>
       </div>
+      </details>
       <?php if ($historicalBackfillFiles !== array()): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
-          <h4 style="margin:0 0 8px">Recent Historical Garmin Files</h4>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <h4 style="margin:0">Recent Historical Garmin Files</h4>
+            <div class="garmin-actions">
+              <button type="button" class="secondary" data-historical-bulk-action="reprocess">Reprocess selected</button>
+              <button type="button" class="secondary" data-historical-bulk-action="mark_avionics_only">Mark selected avionics-only</button>
+              <span class="garmin-muted" data-historical-bulk-message></span>
+            </div>
+          </div>
           <table class="garmin-table">
-            <thead><tr><th>File</th><th>Aircraft</th><th>Duplicate</th><th>Status</th><th>Class</th><th>Review</th></tr></thead>
+            <thead><tr><th style="width:4%"><input type="checkbox" data-select-all-historical></th><th>File</th><th>Aircraft</th><th>Duplicate</th><th>Status</th><th>Class</th><th>Review</th></tr></thead>
             <tbody>
               <?php foreach ($historicalBackfillFiles as $file): ?>
+                <?php
+                  $historicalRowQueued = (string)$file['parse_status'] === 'queued';
+                  $historicalClassLabel = $historicalRowQueued ? 'Not processed yet' : (string)$file['classification'];
+                  $historicalReviewLabel = $historicalRowQueued ? 'No review yet' : (string)$file['review_status'];
+                ?>
                 <tr>
+                  <td><input type="checkbox" data-historical-file-checkbox value="<?= (int)$file['id'] ?>"></td>
                   <td><span class="garmin-code"><?= h((string)$file['original_filename']) ?></span></td>
                   <td><?= garmin_sync_tail_pill((string)($file['resolved_aircraft_registration'] ?: $file['selected_aircraft_hint'])) ?></td>
                   <td><span class="garmin-badge <?= (string)$file['exact_duplicate_status'] === 'new' ? 'garmin-badge-ok' : 'garmin-badge-warn' ?>"><?= h((string)$file['exact_duplicate_status']) ?></span></td>
                   <td><span class="garmin-badge <?= garmin_sync_badge_class((string)$file['parse_status']) ?>"><?= h((string)$file['parse_status']) ?></span></td>
-                  <td><?= h((string)$file['classification']) ?></td>
-                  <td><?= h((string)$file['review_status']) ?></td>
+                  <td><?= h($historicalClassLabel) ?></td>
+                  <td><?= h($historicalReviewLabel) ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
@@ -852,9 +932,9 @@ cw_header('Garmin Sync Agent');
       <?php if (($flightCircleStatus['identity_suggestions'] ?? array()) !== array()): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
           <h4 style="margin:0 0 8px">Unmatched User Suggestions</h4>
-          <p class="garmin-muted">These names were found in FlightCircle but were not matched to an existing IPCA.training user. They are suggestions only; no user is created automatically.</p>
+          <p class="garmin-muted">Create a new IPCA.training user from the source name, or map the source name to an existing user. Once mapped, the suggestion disappears and related crew/logbook proposals receive the correct user ID.</p>
           <table class="garmin-table">
-            <thead><tr><th>Source Name</th><th>Parsed Name</th><th>Context</th><th>Status</th><th>Confidence</th></tr></thead>
+            <thead><tr><th>Source Name</th><th>Parsed Name</th><th>Context</th><th>Status</th><th>Create</th><th>Map Existing</th></tr></thead>
             <tbody>
               <?php foreach (($flightCircleStatus['identity_suggestions'] ?? array()) as $identity): ?>
                 <tr>
@@ -862,11 +942,27 @@ cw_header('Garmin Sync Agent');
                   <td><?= h(trim((string)$identity['parsed_first_name'] . ' ' . (string)$identity['parsed_middle_name'] . ' ' . (string)$identity['parsed_last_name'])) ?></td>
                   <td><?= h((string)$identity['suggested_role_context']) ?></td>
                   <td><span class="garmin-badge garmin-badge-warn"><?= h((string)$identity['mapping_status']) ?></span></td>
-                  <td><?= h((string)($identity['confidence_score'] ?? '0')) ?></td>
+                  <td><button type="button" class="garmin-row-button" data-fc-create-user="<?= (int)$identity['id'] ?>">Create user</button></td>
+                  <td>
+                    <select data-fc-existing-user="<?= (int)$identity['id'] ?>" style="max-width:240px;border:1px solid #cbd5e1;border-radius:8px;padding:5px">
+                      <option value="">Select existing user...</option>
+                      <?php foreach (($flightCircleStatus['existing_users'] ?? array()) as $userOption): ?>
+                        <?php
+                          $userDisplay = trim((string)($userOption['first_name'] ?? '') . ' ' . (string)($userOption['last_name'] ?? ''));
+                          if ($userDisplay === '') {
+                              $userDisplay = (string)($userOption['name'] ?? $userOption['email'] ?? ('User #' . $userOption['id']));
+                          }
+                        ?>
+                        <option value="<?= (int)$userOption['id'] ?>"><?= h($userDisplay . ' · ' . (string)($userOption['role'] ?? '') . ' · ' . (string)($userOption['email'] ?? '')) ?></option>
+                      <?php endforeach; ?>
+                    </select>
+                    <button type="button" class="garmin-row-button" data-fc-map-existing="<?= (int)$identity['id'] ?>">Map</button>
+                  </td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
+          <div class="garmin-muted" style="margin-top:8px" data-fc-identity-message></div>
         </div>
       <?php endif; ?>
     <?php endif; ?>
@@ -893,9 +989,9 @@ cw_header('Garmin Sync Agent');
       </div>
     </div>
     <div data-processing-review style="<?= ((int)$processingStatus['needs_review']['total'] > 0) ? 'margin-top:12px' : 'display:none;margin-top:12px' ?>">
-      <div class="garmin-label">Needs review</div>
+      <div class="garmin-label">Processing attention</div>
       <div class="garmin-muted" data-processing-review-text>
-        <?= number_format((int)$processingStatus['needs_review']['total']) ?> record(s) need review.
+        <?= number_format((int)$processingStatus['needs_review']['total']) ?> Garmin artifact(s) still need summary processing.
       </div>
     </div>
   </section>
@@ -1236,6 +1332,20 @@ cw_header('Garmin Sync Agent');
   const historicalSelectedSize = document.querySelector('[data-historical-selected-size]');
   const historicalBatchLabel = document.querySelector('[data-historical-batch-label]');
   const historicalBackendState = document.querySelector('[data-historical-backend-state]');
+  const processHistoricalQueuedButton = document.querySelector('[data-process-historical-queued]');
+  const processHistoricalMessage = document.querySelector('[data-process-historical-message]');
+  const historicalBulkMessage = document.querySelector('[data-historical-bulk-message]');
+  const selectAllHistorical = document.querySelector('[data-select-all-historical]');
+  const historicalHumanState = document.querySelector('[data-historical-human-state]');
+  const historicalPrimaryAction = document.querySelector('[data-historical-primary-action]');
+  const historicalMainProgress = document.querySelector('[data-historical-main-progress]');
+  const historicalTotal = document.querySelector('[data-historical-total]');
+  const historicalQueued = document.querySelector('[data-historical-queued]');
+  const historicalDone = document.querySelector('[data-historical-done]');
+  const historicalDuplicates = document.querySelector('[data-historical-duplicates]');
+  const historicalFailed = document.querySelector('[data-historical-failed]');
+  const historicalNeedsReview = document.querySelector('[data-historical-needs-review]');
+  const fcIdentityMessage = document.querySelector('[data-fc-identity-message]');
   const renderedMaps = new WeakMap();
   let processingRunning = false;
   function current(name) {
@@ -1286,6 +1396,14 @@ cw_header('Garmin Sync Agent');
       if (!row || row.style.display !== 'none') box.checked = selectAll.checked;
     }));
   }
+  function historicalCheckboxes() {
+    return Array.from(document.querySelectorAll('[data-historical-file-checkbox]'));
+  }
+  if (selectAllHistorical) {
+    selectAllHistorical.addEventListener('change', () => historicalCheckboxes().forEach(box => {
+      box.checked = selectAllHistorical.checked;
+    }));
+  }
   function bytesLabel(bytes) {
     const value = Number(bytes || 0);
     if (value >= 1024 * 1024 * 1024) return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
@@ -1322,7 +1440,39 @@ cw_header('Garmin Sync Agent');
     if (label) label.textContent = percent + '%';
     if (historicalUploadMessage) historicalUploadMessage.textContent = message || (done + ' / ' + total + ' uploaded');
   }
+  function historicalHumanStatus(progress) {
+    const total = Number(progress?.total || 0);
+    const queued = Number(progress?.queued || 0);
+    const remaining = Number(progress?.remaining || 0);
+    const failed = Number(progress?.failed || 0);
+    const review = Number(progress?.needs_review || 0);
+    if (total === 0) return ['Waiting for upload', 'Select Garmin CSV files or a folder, then upload.'];
+    if (queued > 0) return ['Uploaded, waiting for processing', 'Click Process next 25 queued files now, or run the historical_backfill worker.'];
+    if (remaining > 0) return ['Processing in background', 'Wait for the worker or continue processing chunks from this page.'];
+    if (failed > 0) return ['Processing complete with failures', 'Review failed rows in the table and reprocess selected files if needed.'];
+    if (review > 0) return ['Ready for review', 'Review rows marked Needs Review and use the table actions.'];
+    return ['Processing complete', 'No action needed here unless you want to inspect or reprocess selected rows.'];
+  }
+  function updateHistoricalMainStatus(progress) {
+    const percent = Number(progress?.percent || 0);
+    const [state, action] = historicalHumanStatus(progress || {});
+    if (historicalHumanState) historicalHumanState.textContent = state;
+    if (historicalPrimaryAction) historicalPrimaryAction.textContent = action;
+    if (historicalTotal) historicalTotal.textContent = Number(progress?.total || 0).toLocaleString();
+    if (historicalQueued) historicalQueued.textContent = Number(progress?.queued || 0).toLocaleString();
+    if (historicalDone) historicalDone.textContent = Number(progress?.done || 0).toLocaleString();
+    if (historicalDuplicates) historicalDuplicates.textContent = Number(progress?.duplicates || 0).toLocaleString();
+    if (historicalFailed) historicalFailed.textContent = Number(progress?.failed || 0).toLocaleString();
+    if (historicalNeedsReview) historicalNeedsReview.textContent = Number(progress?.needs_review || 0).toLocaleString();
+    if (historicalMainProgress) {
+      const bar = historicalMainProgress.querySelector('span');
+      const label = historicalMainProgress.querySelector('strong');
+      if (bar) bar.style.width = percent + '%';
+      if (label) label.textContent = percent + '%';
+    }
+  }
   function setHistoricalBackendProgress(progress, message) {
+    updateHistoricalMainStatus(progress || {});
     if (!historicalBackendProgress) return;
     const percent = Number(progress?.percent || 0);
     historicalBackendProgress.style.display = 'block';
@@ -1368,6 +1518,126 @@ cw_header('Garmin Sync Agent');
     }
     return payload;
   }
+  async function postHistoricalAction(action, extra) {
+    const body = new FormData();
+    body.append('action', action);
+    Object.entries(extra || {}).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(item => body.append(key + '[]', String(item)));
+      } else {
+        body.append(key, String(value));
+      }
+    });
+    const response = await fetch('/admin/api/garmin_historical_backfill_action.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || ('Historical action returned HTTP ' + response.status));
+    }
+    return payload;
+  }
+  async function processHistoricalQueued() {
+    if (!processHistoricalQueuedButton) return;
+    const batchId = Number(processHistoricalQueuedButton.getAttribute('data-batch-id') || 0);
+    processHistoricalQueuedButton.disabled = true;
+    processHistoricalQueuedButton.textContent = 'Processing 25 files...';
+    try {
+      const result = await postHistoricalAction('process_queued_inline', { batch_id: batchId, limit: 25 });
+      if (processHistoricalMessage) {
+        processHistoricalMessage.textContent = 'Processed ' + Number(result.processed || 0).toLocaleString()
+          + ', failed ' + Number(result.failed || 0).toLocaleString()
+          + ', remaining ' + Number(result.remaining || 0).toLocaleString() + '.';
+      }
+      if (result.status?.progress) setHistoricalBackendProgress(result.status.progress, processHistoricalMessage ? processHistoricalMessage.textContent : '');
+      if (Number(result.remaining || 0) > 0) {
+        processHistoricalQueuedButton.disabled = false;
+        processHistoricalQueuedButton.textContent = 'Process next 25 queued files now';
+      } else {
+        processHistoricalQueuedButton.textContent = 'Processing complete. Refreshing...';
+        setTimeout(() => window.location.reload(), 900);
+      }
+    } catch (error) {
+      if (processHistoricalMessage) processHistoricalMessage.textContent = 'Processing failed: ' + error.message;
+      processHistoricalQueuedButton.disabled = false;
+      processHistoricalQueuedButton.textContent = 'Retry processing queued files';
+    }
+  }
+  if (processHistoricalQueuedButton) {
+    processHistoricalQueuedButton.addEventListener('click', processHistoricalQueued);
+  }
+  document.querySelectorAll('[data-historical-bulk-action]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const ids = historicalCheckboxes().filter(box => box.checked).map(box => box.value);
+      if (ids.length === 0) {
+        if (historicalBulkMessage) historicalBulkMessage.textContent = 'Select at least one row first.';
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await postHistoricalAction(button.getAttribute('data-historical-bulk-action') || '', { backfill_file_ids: ids });
+        if (historicalBulkMessage) historicalBulkMessage.textContent = 'Updated ' + Number(result.changed || 0).toLocaleString() + ', queued ' + Number(result.queued || 0).toLocaleString() + '. Refreshing...';
+        setTimeout(() => window.location.reload(), 900);
+      } catch (error) {
+        if (historicalBulkMessage) historicalBulkMessage.textContent = 'Action failed: ' + error.message;
+        button.disabled = false;
+      }
+    });
+  });
+  async function postFlightCircleIdentity(action, mappingId, userId) {
+    const body = new FormData();
+    body.append('action', action);
+    body.append('mapping_id', String(mappingId));
+    if (userId) body.append('user_id', String(userId));
+    const response = await fetch('/admin/api/flightcircle_identity_action.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || ('Identity action returned HTTP ' + response.status));
+    }
+    return payload;
+  }
+  document.querySelectorAll('[data-fc-create-user]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const mappingId = Number(button.getAttribute('data-fc-create-user') || 0);
+      button.disabled = true;
+      if (fcIdentityMessage) fcIdentityMessage.textContent = 'Creating user...';
+      try {
+        const result = await postFlightCircleIdentity('create_user', mappingId);
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Created user #' + result.user_id + '. Refreshing...';
+        setTimeout(() => window.location.reload(), 700);
+      } catch (error) {
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Create user failed: ' + error.message;
+        button.disabled = false;
+      }
+    });
+  });
+  document.querySelectorAll('[data-fc-map-existing]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const mappingId = Number(button.getAttribute('data-fc-map-existing') || 0);
+      const select = document.querySelector('[data-fc-existing-user="' + mappingId + '"]');
+      const userId = select ? Number(select.value || 0) : 0;
+      if (!userId) {
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Select an existing user first.';
+        return;
+      }
+      button.disabled = true;
+      if (fcIdentityMessage) fcIdentityMessage.textContent = 'Mapping user...';
+      try {
+        const result = await postFlightCircleIdentity('map_existing', mappingId, userId);
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Mapped to user #' + result.user_id + '. Refreshing...';
+        setTimeout(() => window.location.reload(), 700);
+      } catch (error) {
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Map existing user failed: ' + error.message;
+        button.disabled = false;
+      }
+    });
+  });
   async function uploadHistoricalGarminSequentially(event) {
     if (!historicalUploadForm) return;
     const files = selectedHistoricalFiles();
@@ -1555,9 +1825,10 @@ cw_header('Garmin Sync Agent');
     if (processingReview) processingReview.style.display = reviewCount > 0 ? 'block' : 'none';
     if (processingReviewText) {
       const sample = Array.isArray(status.needs_review?.sample) ? status.needs_review.sample : [];
+      const reasons = sample.slice(0, 3).map(item => item.reason || item.track_uuid).join(' | ');
       processingReviewText.textContent = reviewCount > 0
-        ? reviewCount.toLocaleString() + ' record(s) need review. ' + sample.slice(0, 3).map(item => item.reason || item.track_uuid).join(' | ')
-        : 'No review items.';
+        ? reviewCount.toLocaleString() + ' Garmin artifact(s) still need summary processing. ' + (reasons ? 'Reason: ' + reasons + '. Use Process Garmin Data, or run the normal Garmin summary worker.' : '')
+        : 'No processing attention items.';
     }
     if (processButton && !processingRunning) {
       if (status.state === 'complete') {
@@ -1569,7 +1840,7 @@ cw_header('Garmin Sync Agent');
         processButton.dataset.action = 'process';
         processButton.disabled = false;
       } else if (status.state === 'needs_review') {
-        processButton.textContent = 'Show Records Needing Review';
+        processButton.textContent = 'Show Processing Attention';
         processButton.dataset.action = 'review';
         processButton.disabled = false;
       } else {
@@ -1581,7 +1852,7 @@ cw_header('Garmin Sync Agent');
   }
   function setReviewAction() {
     if (!processButton) return;
-    processButton.textContent = 'Show Records Needing Review';
+    processButton.textContent = 'Show Processing Attention';
     processButton.dataset.action = 'review';
     processButton.disabled = false;
   }

@@ -193,6 +193,48 @@ final class GarminHistoricalBackfillService
     }
 
     /**
+     * @return array<string,mixed>
+     */
+    public function processQueuedFiles(int $batchId = 0, int $limit = 10): array
+    {
+        $limit = max(1, min(50, $limit));
+        $sql = "
+            SELECT id
+            FROM ipca_garmin_historical_backfill_files
+            WHERE parse_status = 'queued'
+              AND exact_duplicate_status = 'new'
+        ";
+        $params = array();
+        if ($batchId > 0) {
+            $sql .= ' AND batch_id = ?';
+            $params[] = $batchId;
+        }
+        $sql .= ' ORDER BY id ASC LIMIT ' . $limit;
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: array());
+        $processed = 0;
+        $failed = 0;
+        $errors = array();
+        foreach ($ids as $id) {
+            try {
+                $this->processFile($id);
+                $processed++;
+            } catch (Throwable $e) {
+                $failed++;
+                $errors[] = 'File #' . $id . ': ' . $e->getMessage();
+            }
+        }
+        return array(
+            'ok' => true,
+            'processed' => $processed,
+            'failed' => $failed,
+            'remaining' => $this->queuedCount($batchId),
+            'errors' => array_slice($errors, 0, 10),
+        );
+    }
+
+    /**
      * @param array<string,mixed> $file
      * @return array<string,mixed>
      */
@@ -531,6 +573,19 @@ final class GarminHistoricalBackfillService
         }
         $stmt = $this->pdo->prepare('SELECT id FROM ipca_garmin_csv_files WHERE sha256 = ? ORDER BY id ASC LIMIT 1');
         $stmt->execute(array($sha256));
+        return (int)$stmt->fetchColumn();
+    }
+
+    private function queuedCount(int $batchId = 0): int
+    {
+        $sql = "SELECT COUNT(*) FROM ipca_garmin_historical_backfill_files WHERE parse_status = 'queued' AND exact_duplicate_status = 'new'";
+        $params = array();
+        if ($batchId > 0) {
+            $sql .= ' AND batch_id = ?';
+            $params[] = $batchId;
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
         return (int)$stmt->fetchColumn();
     }
 

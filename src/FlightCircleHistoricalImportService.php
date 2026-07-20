@@ -104,7 +104,103 @@ final class FlightCircleHistoricalImportService
             'resources' => $resources,
             'dispositions' => $dispositions,
             'identity_suggestions' => $identityStmt !== false ? ($identityStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
+            'existing_users' => $this->existingUsersForMapping(),
         );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function existingUsersForMapping(): array
+    {
+        if (!$this->tableExists('users')) {
+            return array();
+        }
+        $stmt = $this->pdo->query("
+            SELECT id, name, first_name, last_name, email, role
+            FROM users
+            ORDER BY COALESCE(NULLIF(TRIM(last_name), ''), name, email), COALESCE(NULLIF(TRIM(first_name), ''), name, email)
+            LIMIT 500
+        ");
+        return $stmt !== false ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function mapIdentityToExistingUser(int $mappingId, int $userId, ?int $actorUserId = null): array
+    {
+        if ($mappingId <= 0 || $userId <= 0) {
+            throw new RuntimeException('Mapping and user id are required.');
+        }
+        $mapping = $this->identityMappingById($mappingId);
+        $user = $this->userById($userId);
+        if ($mapping === null || $user === null) {
+            throw new RuntimeException('Identity mapping or user not found.');
+        }
+        $this->pdo->prepare("
+            UPDATE ipca_flightcircle_user_mappings
+            SET ipca_user_id = ?,
+                mapping_status = 'confirmed',
+                confidence_score = 100.00,
+                confirmed_by_user_id = ?,
+                confirmed_at = CURRENT_TIMESTAMP(3),
+                updated_at = CURRENT_TIMESTAMP(3)
+            WHERE id = ?
+        ")->execute(array($userId, $actorUserId, $mappingId));
+        $this->applyIdentityMapping((string)$mapping['source_name'], $userId);
+        return array('ok' => true, 'mapping_id' => $mappingId, 'user_id' => $userId, 'status' => 'confirmed');
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function createUserForIdentityMapping(int $mappingId, ?int $actorUserId = null): array
+    {
+        if ($mappingId <= 0) {
+            throw new RuntimeException('Identity mapping id is required.');
+        }
+        $mapping = $this->identityMappingById($mappingId);
+        if ($mapping === null) {
+            throw new RuntimeException('Identity mapping not found.');
+        }
+        if ((int)($mapping['ipca_user_id'] ?? 0) > 0) {
+            return $this->mapIdentityToExistingUser($mappingId, (int)$mapping['ipca_user_id'], $actorUserId);
+        }
+        $firstName = trim((string)($mapping['parsed_first_name'] ?? ''));
+        $middleName = trim((string)($mapping['parsed_middle_name'] ?? ''));
+        $lastName = trim((string)($mapping['parsed_last_name'] ?? ''));
+        $sourceName = trim((string)($mapping['source_name'] ?? ''));
+        if ($firstName === '' && $lastName === '') {
+            $parts = $this->parseName($sourceName);
+            $firstName = $parts['first'];
+            $middleName = $parts['middle'];
+            $lastName = $parts['last'];
+        }
+        if ($lastName === '' && $firstName !== '') {
+            $lastName = 'Unknown';
+        }
+        if ($firstName === '') {
+            $firstName = $sourceName !== '' ? $sourceName : 'FlightCircle';
+        }
+        $displayName = trim($firstName . ' ' . ($middleName !== '' ? $middleName . ' ' : '') . $lastName);
+        $roleContext = strtolower(trim((string)($mapping['suggested_role_context'] ?? '')));
+        $role = $roleContext === 'instructor' ? 'instructor' : 'student';
+        $email = $this->uniqueMigrationEmail($displayName, $mappingId);
+        $userId = $this->insertMigrationUser($firstName, $lastName, $displayName, $email, $role, $actorUserId);
+        $this->pdo->prepare("
+            UPDATE ipca_flightcircle_user_mappings
+            SET ipca_user_id = ?,
+                mapping_status = 'created_user',
+                confidence_score = 100.00,
+                confirmed_by_user_id = ?,
+                confirmed_at = CURRENT_TIMESTAMP(3),
+                evidence_json = JSON_SET(COALESCE(evidence_json, JSON_OBJECT()), '$.created_user_email', ?),
+                updated_at = CURRENT_TIMESTAMP(3)
+            WHERE id = ?
+        ")->execute(array($userId, $actorUserId, $email, $mappingId));
+        $this->applyIdentityMapping($sourceName, $userId);
+        return array('ok' => true, 'mapping_id' => $mappingId, 'user_id' => $userId, 'email' => $email, 'status' => 'created_user');
     }
 
     /**
@@ -627,6 +723,133 @@ final class FlightCircleHistoricalImportService
             AuditEventService::jsonEncode(array('raw_row_id' => $rawRowId, 'staging_record_id' => $stagingId, 'role_context' => $role)),
         ));
         return $status;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function identityMappingById(int $mappingId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM ipca_flightcircle_user_mappings WHERE id = ? LIMIT 1');
+        $stmt->execute(array($mappingId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function userById(int $userId): ?array
+    {
+        if (!$this->tableExists('users')) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute(array($userId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private function applyIdentityMapping(string $sourceName, int $userId): void
+    {
+        if ($sourceName === '' || $userId <= 0) {
+            return;
+        }
+        if ($this->tableExists('ipca_crew_assignments')) {
+            $this->pdo->prepare("
+                UPDATE ipca_crew_assignments
+                SET person_user_id = ?,
+                    mapping_status = 'confirmed',
+                    review_status = IF(review_status = 'needs_identity_review', 'needs_role_review', review_status),
+                    updated_at = CURRENT_TIMESTAMP(3)
+                WHERE source_system = 'flightcircle'
+                  AND source_person_text = ?
+            ")->execute(array($userId, $sourceName));
+        }
+        if ($this->tableExists('ipca_historical_logbook_proposals')) {
+            $this->pdo->prepare("
+                UPDATE ipca_historical_logbook_proposals
+                SET owner_user_id = ?,
+                    updated_at = CURRENT_TIMESTAMP(3)
+                WHERE source_system = 'flightcircle'
+                  AND source_person_text = ?
+            ")->execute(array($userId, $sourceName));
+        }
+    }
+
+    private function uniqueMigrationEmail(string $displayName, int $mappingId): string
+    {
+        $base = strtolower(trim(preg_replace('/[^a-z0-9]+/i', '.', $displayName) ?? 'flightcircle.user'), '.');
+        if ($base === '') {
+            $base = 'flightcircle.user';
+        }
+        $candidate = $base . '.fc' . $mappingId . '@ipca.training';
+        $suffix = 1;
+        while ($this->emailExists($candidate)) {
+            $candidate = $base . '.fc' . $mappingId . '.' . $suffix . '@ipca.training';
+            $suffix++;
+        }
+        return $candidate;
+    }
+
+    private function emailExists(string $email): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+        $stmt->execute(array($email));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    private function insertMigrationUser(string $firstName, string $lastName, string $displayName, string $email, string $role, ?int $actorUserId): int
+    {
+        if (!$this->tableExists('users')) {
+            throw new RuntimeException('Users table is missing.');
+        }
+        $columns = $this->tableColumns('users');
+        $values = array(
+            'email' => $email,
+            'name' => $displayName,
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'password_hash' => password_hash(bin2hex(random_bytes(24)), PASSWORD_DEFAULT),
+            'role' => in_array($role, array('student', 'instructor'), true) ? $role : 'student',
+            'status' => 'pending_activation',
+            'must_change_password' => 1,
+            'created_by_user_id' => $actorUserId,
+            'updated_by_user_id' => $actorUserId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        );
+        $insertColumns = array();
+        $params = array();
+        foreach ($values as $column => $value) {
+            if (in_array($column, $columns, true)) {
+                $insertColumns[] = $column;
+                $params[] = $value;
+            }
+        }
+        if (!in_array('email', $insertColumns, true) || !in_array('password_hash', $insertColumns, true) || !in_array('role', $insertColumns, true)) {
+            throw new RuntimeException('Users table does not have the required account columns.');
+        }
+        $placeholders = implode(',', array_fill(0, count($insertColumns), '?'));
+        $sql = 'INSERT INTO users (`' . implode('`,`', $insertColumns) . '`) VALUES (' . $placeholders . ')';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tableColumns(string $table): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COLUMN_NAME
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+        ");
+        $stmt->execute(array($table));
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: array());
     }
 
     /**

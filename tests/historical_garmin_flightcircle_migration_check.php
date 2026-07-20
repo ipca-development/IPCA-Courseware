@@ -7,6 +7,7 @@ $files = array(
     'flightcircle_service' => $root . '/src/FlightCircleHistoricalImportService.php',
     'garmin_service' => $root . '/src/GarminHistoricalBackfillService.php',
     'match_service' => $root . '/src/FlightCircleGarminMatchService.php',
+    'identity_api' => $root . '/public/admin/api/flightcircle_identity_action.php',
     'worker' => $root . '/scripts/run_async_jobs.php',
     'admin_page' => $root . '/public/admin/flight_log_garmin_connection.php',
 );
@@ -48,7 +49,17 @@ $checks = array(
     'unmatched users are suggested for admin review, not auto-created' =>
         str_contains($files['flightcircle_service'], 'suggested_create_user')
         && str_contains($files['migration'], 'ipca_flightcircle_user_mappings')
-        && !preg_match('/INSERT\s+INTO\s+users\b/i', $files['flightcircle_service']),
+        && str_contains($files['flightcircle_service'], 'ensureIdentitySuggestion')
+        && !str_contains(extractMethod($files['flightcircle_service'], 'ensureIdentitySuggestion'), 'insertMigrationUser')
+        && !str_contains(extractMethod($files['flightcircle_service'], 'parseRows'), 'insertMigrationUser'),
+
+    'identity review supports create user and map existing actions' =>
+        str_contains($files['flightcircle_service'], 'createUserForIdentityMapping')
+        && str_contains($files['flightcircle_service'], 'mapIdentityToExistingUser')
+        && str_contains($files['identity_api'], "action === 'create_user'")
+        && str_contains($files['identity_api'], "action === 'map_existing'")
+        && str_contains($files['admin_page'], 'data-fc-create-user')
+        && str_contains($files['admin_page'], 'data-fc-map-existing'),
 
     'AL172M2 creates simulator proposals and not aircraft operation ledgers' =>
         str_contains($files['flightcircle_service'], 'createSimulatorLogbookProposal')
@@ -85,4 +96,30 @@ foreach ($checks as $name => $pass) {
 if ($failed !== array()) {
     fwrite(STDERR, "\nFailed checks:\n- " . implode("\n- ", $failed) . "\n");
     exit(1);
+}
+
+function extractMethod(string $source, string $method): string
+{
+    $needle = 'function ' . $method . '(';
+    $pos = strpos($source, $needle);
+    if ($pos === false) {
+        return '';
+    }
+    $brace = strpos($source, '{', $pos);
+    if ($brace === false) {
+        return '';
+    }
+    $depth = 0;
+    $len = strlen($source);
+    for ($i = $brace; $i < $len; $i++) {
+        if ($source[$i] === '{') {
+            $depth++;
+        } elseif ($source[$i] === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return substr($source, $pos, $i - $pos + 1);
+            }
+        }
+    }
+    return '';
 }

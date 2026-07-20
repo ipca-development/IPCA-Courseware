@@ -68,7 +68,7 @@ final class GarminProcessingStatusService
             $message = 'Garmin processing is running in the background.';
         } elseif ($remaining > 0 && $reviewCount > 0 && $reviewCount >= $remaining) {
             $state = 'needs_review';
-            $message = 'Some Garmin records need review before they can be completed.';
+            $message = 'Some Garmin artifacts need processing attention before they can be completed.';
         } elseif ($remaining > 0 && ((int)$jobs['queued'] > 0 || (int)$jobs['retry_wait'] > 0)) {
             $state = 'queued';
             $message = 'Garmin processing is queued. If this does not change, use Process Garmin Data to run the remaining work inline.';
