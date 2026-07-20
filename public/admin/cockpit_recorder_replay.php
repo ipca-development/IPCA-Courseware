@@ -1619,8 +1619,8 @@ cw_header('Cockpit Recorder Replay');
 .system-warning-box {
   position: absolute;
   z-index: 20;
-  min-width: 92px;
-  max-width: 182px;
+  min-width: 122px;
+  max-width: 242px;
   box-sizing: border-box;
   padding: 6px 13px;
   border-radius: 7px;
@@ -1639,6 +1639,13 @@ cw_header('Cockpit Recorder Replay');
 .system-warning-line.is-warning { color: #ff2317; }
 .system-warning-line.is-caution { color: #ffd92f; }
 .system-warning-line.is-info { color: #fff; }
+.system-warning-line.is-flashing {
+  animation: system-warning-flash .8s steps(2, start) infinite;
+}
+@keyframes system-warning-flash {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: .16; }
+}
 .replay-ipca-watermark {
   position: absolute;
   left: 50%;
@@ -3621,9 +3628,10 @@ cw_header('Cockpit Recorder Replay');
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth, bottom: window.innerHeight };
     const profileRect = insetMapProfile && !elementIsHidden(insetMapProfile) ? insetMapProfile.getBoundingClientRect() : null;
     const anchorBottom = profileRect && profileRect.height > 0 ? profileRect.bottom : altimeterRect.bottom;
-    const rightPx = Math.max(12, Math.round(rootRect.right - altimeterRect.right));
+    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left - 20));
     const bottomPx = Math.max(72, Math.round(rootRect.bottom - anchorBottom));
-    systemWarningBox.style.right = `${rightPx}px`;
+    systemWarningBox.style.left = `${leftPx}px`;
+    systemWarningBox.style.right = 'auto';
     systemWarningBox.style.bottom = `${bottomPx}px`;
     return true;
   }
@@ -3637,7 +3645,10 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
     systemWarningBox.innerHTML = alerts
-      .map((alert) => `<div class="system-warning-line is-${escapeHtml(alert.severity)}">${escapeHtml(alert.text)}</div>`)
+      .map((alert) => {
+        const isOilPressWarning = alert.severity === 'warning' && /\bOIL\s+PRESS\b/i.test(alert.text);
+        return `<div class="system-warning-line is-${escapeHtml(alert.severity)}${isOilPressWarning ? ' is-flashing' : ''}">${escapeHtml(alert.text)}</div>`;
+      })
       .join('');
     setElementHidden(systemWarningBox, false);
   }

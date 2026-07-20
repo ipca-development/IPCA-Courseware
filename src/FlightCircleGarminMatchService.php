@@ -5,6 +5,12 @@ require_once __DIR__ . '/AuditEventService.php';
 
 final class FlightCircleGarminMatchService
 {
+    private const AUTHORITATIVE_AIRCRAFT_TAILS = array('N397EA', 'N392EA', 'N482EA', 'N428EA', 'N446CS', 'N153PC', 'N641TH');
+    private const AIRCRAFT_TAIL_ALIASES = array(
+        'N482EA' => array('N428EA'),
+        'N428EA' => array('N482EA'),
+    );
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -36,6 +42,225 @@ final class FlightCircleGarminMatchService
             $batches++;
         }
         return array('ok' => true, 'batches' => $batches, 'scanned' => $scanned, 'created' => $created, 'ambiguous' => $ambiguous, 'no_match_diagnostics' => $diagnostics);
+    }
+
+    /**
+     * Match selected Garmin historical rows to the active FlightCircle ledger.
+     *
+     * @param list<int> $backfillFileIds
+     * @return array<string,mixed>
+     */
+    public function matchSelectedGarminBackfillFiles(array $backfillFileIds): array
+    {
+        $backfillFileIds = array_values(array_unique(array_filter(array_map('intval', $backfillFileIds))));
+        if ($backfillFileIds === array()) {
+            return array('ok' => true, 'scanned' => 0, 'created' => 0, 'ambiguous' => 0, 'no_match_diagnostics' => array());
+        }
+        if (!$this->tableExists('ipca_garmin_historical_segments') || !$this->tableExists('ipca_flightcircle_staging_records')) {
+            return array('ok' => false, 'message' => 'Matching tables are not installed.', 'scanned' => 0, 'created' => 0, 'ambiguous' => 0);
+        }
+        $placeholders = implode(',', array_fill(0, count($backfillFileIds), '?'));
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM ipca_garmin_historical_segments
+            WHERE backfill_file_id IN ({$placeholders})
+            ORDER BY id ASC
+        ");
+        $stmt->execute($backfillFileIds);
+
+        $created = 0;
+        $ambiguous = 0;
+        $scanned = 0;
+        $diagnostics = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $segment) {
+            $scanned++;
+            $result = $this->matchGarminSegmentToFlightCircle($segment);
+            $created += (int)($result['created'] ?? 0);
+            $ambiguous += (int)($result['ambiguous'] ?? 0);
+            if (count($diagnostics) < 25 && is_array($result['diagnostic'] ?? null)) {
+                $diagnostics[] = $result['diagnostic'];
+            }
+        }
+        return array('ok' => true, 'scanned' => $scanned, 'created' => $created, 'ambiguous' => $ambiguous, 'no_match_diagnostics' => $diagnostics);
+    }
+
+    /**
+     * @param array<string,mixed> $segment
+     * @return array<string,mixed>
+     */
+    private function matchGarminSegmentToFlightCircle(array $segment): array
+    {
+        $this->clearUndecidedGarminOutcomes((int)($segment['id'] ?? 0));
+        $summary = $this->summaryFromSegment($segment);
+        $garminTail = (string)($segment['aircraft_registration'] ?? '');
+        $garminHobbsOut = $this->numericOrNull($summary['hobbs_out'] ?? null);
+        if ($garminHobbsOut === null) {
+            $this->storeGarminOutcome(null, $segment, 'no_flightcircle_candidate', 0.0, array('missing_garmin_hobbs_out'), array());
+            return array('created' => 1, 'ambiguous' => 0, 'diagnostic' => $this->garminDiagnostic($segment, 'Garmin Hobbs-Out missing'));
+        }
+
+        $sameTailCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, true);
+        if ($sameTailCandidates !== array()) {
+            $ambiguous = count($sameTailCandidates) > 1 ? 1 : 0;
+            foreach (array_slice($sameTailCandidates, 0, 5) as $candidate) {
+                $score = (float)$candidate['score'];
+                $status = $ambiguous ? 'ambiguous' : ($score >= 90.0 ? 'high_confidence' : 'probable');
+                $this->storeGarminOutcome($candidate, $segment, $status, $score, array('tail_hobbs_out_match'), array());
+            }
+            return array('created' => min(5, count($sameTailCandidates)), 'ambiguous' => $ambiguous);
+        }
+
+        $aliasCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, false);
+        if ($aliasCandidates !== array()) {
+            foreach (array_slice($aliasCandidates, 0, 5) as $candidate) {
+                $this->storeGarminOutcome($candidate, $segment, 'needs_tail_alias', (float)$candidate['score'], array('hobbs_out_match_tail_alias_needed'), array('tail_alias_required'));
+            }
+            return array('created' => min(5, count($aliasCandidates)), 'ambiguous' => count($aliasCandidates) > 1 ? 1 : 0, 'diagnostic' => $this->garminDiagnostic($segment, 'Hobbs-Out matched FlightCircle but aircraft tail needs alias/review'));
+        }
+
+        $this->storeGarminOutcome(null, $segment, 'no_flightcircle_candidate', 0.0, array('no_tail_hobbs_out_match'), array('no_active_flightcircle_candidate'));
+        return array('created' => 1, 'ambiguous' => 0, 'diagnostic' => $this->garminDiagnostic($segment, 'No active FlightCircle row found for Garmin tail and Hobbs-Out'));
+    }
+
+    private function clearUndecidedGarminOutcomes(int $garminSegmentId): void
+    {
+        if ($garminSegmentId <= 0) {
+            return;
+        }
+        $stmt = $this->pdo->prepare("
+            DELETE FROM ipca_flightcircle_garmin_matches
+            WHERE garmin_segment_id = ?
+              AND decided_at IS NULL
+        ");
+        $stmt->execute(array($garminSegmentId));
+    }
+
+    /**
+     * @param array<string,mixed> $segment
+     * @return array<string,mixed>
+     */
+    private function summaryFromSegment(array $segment): array
+    {
+        $evidence = json_decode((string)($segment['evidence_json'] ?? '{}'), true);
+        $summary = is_array($evidence['summary'] ?? null) ? $evidence['summary'] : array();
+        return is_array($summary) ? $summary : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function flightCircleCandidatesForGarmin(string $garminTail, float $garminHobbsOut, bool $sameTailOnly): array
+    {
+        $batchIds = array_map(static fn(array $row): int => (int)$row['id'], $this->datasetBatchesForMatching());
+        $batchIds = array_values(array_filter($batchIds));
+        if ($batchIds === array()) {
+            return array();
+        }
+        $tailCandidates = $this->tailCandidates($garminTail);
+        $batchPlaceholders = implode(',', array_fill(0, count($batchIds), '?'));
+        $tailSql = '';
+        $params = $batchIds;
+        if ($sameTailOnly) {
+            $tailSql = " AND UPPER(REPLACE(REPLACE(tail_number, '-', ''), ' ', '')) IN (" . implode(',', array_fill(0, count($tailCandidates), '?')) . ')';
+            array_push($params, ...$tailCandidates);
+        }
+        $params[] = $garminHobbsOut;
+        $stmt = $this->pdo->prepare("
+            SELECT *,
+                   ABS(hobbs_out - ?) AS hobbs_delta
+            FROM ipca_flightcircle_staging_records
+            WHERE batch_id IN ({$batchPlaceholders})
+              AND tail_number IS NOT NULL
+              AND hobbs_out IS NOT NULL
+              {$tailSql}
+              AND ABS(hobbs_out - ?) <= 0.30
+            ORDER BY ABS(hobbs_out - ?) ASC, id ASC
+            LIMIT 10
+        ");
+        $executeParams = $batchIds;
+        if ($sameTailOnly) {
+            array_push($executeParams, ...$tailCandidates);
+        }
+        array_unshift($executeParams, $garminHobbsOut);
+        $executeParams[] = $garminHobbsOut;
+        $executeParams[] = $garminHobbsOut;
+        $stmt->execute($executeParams);
+        $out = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $delta = (float)($row['hobbs_delta'] ?? 99);
+            $tailMatches = in_array($this->normalizeTail((string)($row['tail_number'] ?? '')), $tailCandidates, true);
+            $row['score'] = ($tailMatches ? 60.0 : 25.0) + ($delta <= 0.15 ? 35.0 : 25.0);
+            $out[] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed>|null $flightCircleRecord
+     * @param array<string,mixed> $segment
+     * @param list<string> $reasons
+     * @param list<string> $conflicts
+     */
+    private function storeGarminOutcome(?array $flightCircleRecord, array $segment, string $status, float $score, array $reasons, array $conflicts): void
+    {
+        $stagingRecordId = $flightCircleRecord !== null ? (int)$flightCircleRecord['id'] : 0;
+        $operationId = $flightCircleRecord !== null ? (int)($flightCircleRecord['operation_id'] ?? 0) : 0;
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_flightcircle_garmin_matches
+              (match_uuid, staging_record_id, operation_id, garmin_segment_id, csv_file_id, match_status,
+               confidence_score, evidence_json, conflict_json)
+            VALUES
+              (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              match_status = VALUES(match_status),
+              confidence_score = VALUES(confidence_score),
+              evidence_json = VALUES(evidence_json),
+              conflict_json = VALUES(conflict_json),
+              updated_at = CURRENT_TIMESTAMP(3)
+        ");
+        $stmt->execute(array(
+            AuditEventService::uuid(),
+            $stagingRecordId,
+            $operationId > 0 ? $operationId : null,
+            (int)$segment['id'],
+            (int)($segment['csv_file_id'] ?? 0) > 0 ? (int)$segment['csv_file_id'] : null,
+            $status,
+            $score,
+            AuditEventService::jsonEncode(array(
+                'matching_direction' => 'garmin_to_flightcircle',
+                'reasons' => $reasons,
+                'garmin_segment' => array(
+                    'id' => (int)$segment['id'],
+                    'tail' => (string)($segment['aircraft_registration'] ?? ''),
+                    'hobbs_out' => $this->summaryFromSegment($segment)['hobbs_out'] ?? null,
+                ),
+                'flightcircle_record' => $flightCircleRecord !== null ? array(
+                    'id' => (int)$flightCircleRecord['id'],
+                    'tail' => (string)($flightCircleRecord['tail_number'] ?? ''),
+                    'hobbs_out' => $flightCircleRecord['hobbs_out'] ?? null,
+                    'hobbs_in' => $flightCircleRecord['hobbs_in'] ?? null,
+                    'user_text' => (string)($flightCircleRecord['user_text'] ?? ''),
+                    'instructor_text' => (string)($flightCircleRecord['instructor_text'] ?? ''),
+                ) : null,
+            )),
+            AuditEventService::jsonEncode(array('conflicts' => $conflicts)),
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $segment
+     * @return array<string,mixed>
+     */
+    private function garminDiagnostic(array $segment, string $reason): array
+    {
+        $summary = $this->summaryFromSegment($segment);
+        return array(
+            'garmin_segment_id' => (int)($segment['id'] ?? 0),
+            'csv_file_id' => (int)($segment['csv_file_id'] ?? 0),
+            'tail' => (string)($segment['aircraft_registration'] ?? ''),
+            'hobbs_out' => $summary['hobbs_out'] ?? null,
+            'reason' => $reason,
+        );
     }
 
     /**
@@ -289,6 +514,26 @@ final class FlightCircleGarminMatchService
             return false;
         }
         return $a === $b || ltrim($a, 'N') === ltrim($b, 'N');
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tailCandidates(string $tail): array
+    {
+        $normalized = $this->normalizeTail($tail);
+        if ($normalized === '') {
+            return array();
+        }
+        $candidates = array($normalized, ltrim($normalized, 'N'));
+        foreach (self::AIRCRAFT_TAIL_ALIASES[$normalized] ?? array() as $alias) {
+            $alias = $this->normalizeTail($alias);
+            if ($alias !== '') {
+                $candidates[] = $alias;
+                $candidates[] = ltrim($alias, 'N');
+            }
+        }
+        return array_values(array_unique(array_filter($candidates)));
     }
 
     private function normalizeTail(string $tail): string

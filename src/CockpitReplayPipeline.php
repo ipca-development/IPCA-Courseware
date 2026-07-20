@@ -1676,6 +1676,10 @@ final class CockpitReplayPipeline
                 $seen[$source . "\n" . $key] = true;
                 $catalogRow = $catalog[$source . "\n" . $key] ?? null;
                 $severity = is_array($catalogRow) ? (string)($catalogRow['severity'] ?? 'info') : $this->defaultAlertSeverity($key, $text);
+                $defaultSeverity = $this->defaultAlertSeverity($key, $text);
+                if ($defaultSeverity !== 'info') {
+                    $severity = $defaultSeverity;
+                }
                 $displayText = is_array($catalogRow) && trim((string)($catalogRow['display_text'] ?? '')) !== ''
                     ? trim((string)$catalogRow['display_text'])
                     : $text;
@@ -1718,6 +1722,9 @@ final class CockpitReplayPipeline
     private function defaultAlertSeverity(string $key, string $text): string
     {
         $combined = strtoupper(trim($key . ' ' . $text));
+        if (str_contains($combined, 'OIL PRESS')) {
+            return 'warning';
+        }
         if (str_contains($combined, 'COOLANT')) {
             return 'caution';
         }

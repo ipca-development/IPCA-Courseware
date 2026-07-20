@@ -6,7 +6,7 @@ require_once __DIR__ . '/FlightCircleGarminMatchService.php';
 
 final class FlightCircleHistoricalImportService
 {
-    private const AIRCRAFT_RESOURCES = array('N446CS', 'N392EA', 'N641TH', 'N428EA', 'N153PC');
+    private const AIRCRAFT_RESOURCES = array('N397EA', 'N392EA', 'N482EA', 'N428EA', 'N446CS', 'N153PC', 'N641TH');
     private const IGNORED_RESOURCES = array('CLASSROOM I', 'CLASSROOM II', 'APPLE VISION PRO', 'EXAM ROOM', 'MAIN OFFICE');
     private const SIMULATOR_RESOURCE = 'AL172M2';
 

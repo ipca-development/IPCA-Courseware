@@ -37,6 +37,8 @@ $checks = array(
 
     'FlightCircle resources are explicitly classified with ignored resources and AL172M2 AATD' =>
         str_contains($files['flightcircle_service'], "SIMULATOR_RESOURCE = 'AL172M2'")
+        && str_contains($files['flightcircle_service'], 'N397EA')
+        && str_contains($files['flightcircle_service'], 'N482EA')
         && str_contains($files['flightcircle_service'], 'CLASSROOM I')
         && str_contains($files['flightcircle_service'], 'APPLE VISION PRO')
         && str_contains($files['flightcircle_service'], "'aatd_simulator'")
@@ -88,6 +90,11 @@ $checks = array(
         && str_contains($files['flightcircle_service'], 'replaceActiveDataset')
         && str_contains($files['flightcircle_service'], 'activeDatasetValidation')
         && str_contains($files['match_service'], 'datasetBatchesForMatching')
+        && str_contains($files['match_service'], 'matchSelectedGarminBackfillFiles')
+        && str_contains($files['match_service'], 'matchGarminSegmentToFlightCircle')
+        && str_contains($files['match_service'], 'needs_tail_alias')
+        && str_contains($files['match_service'], 'no_flightcircle_candidate')
+        && str_contains($files['match_service'], 'AIRCRAFT_TAIL_ALIASES')
         && str_contains($files['match_service'], 'departure_hobbs_matches')
         && !str_contains($files['match_service'], 'same_departure_date')
         && !str_contains($files['match_service'], 'dateWindowForRecord')
@@ -105,7 +112,10 @@ $checks = array(
         && str_contains($files['admin_page'], 'data-import-bulk-action="process_selected_inline"')
         && str_contains($files['admin_page'], 'data-import-bulk-action="match_flightcircle"')
         && str_contains($files['admin_page'], 'data-hobbs-out-cell')
-        && str_contains($files['admin_page'], 'Hobbs continuity gap'),
+        && str_contains($files['admin_page'], 'Hobbs continuity gap')
+        && str_contains($files['admin_page'], 'FC row')
+        && str_contains($files['admin_page'], 'FC Hobbs')
+        && str_contains($files['admin_page'], 'selected Garmin row(s)'),
 );
 
 $failed = array();

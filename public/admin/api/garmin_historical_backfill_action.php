@@ -38,11 +38,11 @@ try {
     $changed = 0;
     if ($action === 'process_selected_inline') {
         $result = (new GarminHistoricalBackfillService($pdo))->processSelectedFiles($ids);
-        $result['match'] = (new FlightCircleGarminMatchService($pdo))->matchAllBatches();
+        $result['match'] = (new FlightCircleGarminMatchService($pdo))->matchSelectedGarminBackfillFiles($ids);
         garmin_historical_action_json(200, $result);
     }
     if ($action === 'match_flightcircle') {
-        $result = (new FlightCircleGarminMatchService($pdo))->matchAllBatches();
+        $result = (new FlightCircleGarminMatchService($pdo))->matchSelectedGarminBackfillFiles($ids);
         garmin_historical_action_json(200, $result);
     }
     if ($action === 'reprocess') {

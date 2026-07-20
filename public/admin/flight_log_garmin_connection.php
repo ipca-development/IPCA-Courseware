@@ -363,8 +363,8 @@ if ($hasCsvFiles) {
         LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS id, NULL AS batch_id, NULL AS exact_duplicate_status, NULL AS parse_status, NULL AS classification, NULL AS review_status) hf ON 1 = 0
         LEFT JOIN (SELECT NULL AS id, NULL AS batch_uuid) hb ON 1 = 0
     ";
-    $flightCircleActiveFilter = $hasFlightCircleActiveDataset ? " AND COALESCE(b.active_dataset, 0) = 1" : "";
-    $flightCircleBatchJoin = $hasFlightCircleActiveDataset ? "INNER JOIN ipca_flightcircle_import_batches b ON b.id = st.batch_id" : "";
+    $flightCircleActiveFilter = $hasFlightCircleActiveDataset ? " AND (m.staging_record_id = 0 OR COALESCE(b.active_dataset, 0) = 1)" : "";
+    $flightCircleBatchJoin = $hasFlightCircleActiveDataset ? "LEFT JOIN ipca_flightcircle_import_batches b ON b.id = st.batch_id" : "";
     $flightCircleJoin = ($hasFlightCircleMatches && $hasFlightCircleStaging) ? "
         LEFT JOIN (
           SELECT
@@ -372,11 +372,14 @@ if ($hasCsvFiles) {
             COUNT(*) AS fc_match_count,
             MAX(m.confidence_score) AS fc_match_score,
             GROUP_CONCAT(DISTINCT m.match_status ORDER BY m.match_status SEPARATOR ', ') AS fc_match_statuses,
+            GROUP_CONCAT(DISTINCT NULLIF(st.id, 0) ORDER BY st.id SEPARATOR ', ') AS fc_staging_ids,
             GROUP_CONCAT(DISTINCT NULLIF(st.user_text, '') ORDER BY st.user_text SEPARATOR ' | ') AS fc_user_text,
             GROUP_CONCAT(DISTINCT NULLIF(st.instructor_text, '') ORDER BY st.instructor_text SEPARATOR ' | ') AS fc_instructor_text,
-            GROUP_CONCAT(DISTINCT NULLIF(st.reservation_type, '') ORDER BY st.reservation_type SEPARATOR ', ') AS fc_reservation_type
+            GROUP_CONCAT(DISTINCT NULLIF(st.reservation_type, '') ORDER BY st.reservation_type SEPARATOR ', ') AS fc_reservation_type,
+            GROUP_CONCAT(DISTINCT CAST(st.hobbs_out AS CHAR) ORDER BY st.hobbs_out SEPARATOR ', ') AS fc_hobbs_out,
+            GROUP_CONCAT(DISTINCT CAST(st.hobbs_in AS CHAR) ORDER BY st.hobbs_in SEPARATOR ', ') AS fc_hobbs_in
           FROM ipca_flightcircle_garmin_matches m
-          INNER JOIN ipca_flightcircle_staging_records st ON st.id = m.staging_record_id
+          LEFT JOIN ipca_flightcircle_staging_records st ON st.id = m.staging_record_id AND m.staging_record_id > 0
           {$flightCircleBatchJoin}
           WHERE m.csv_file_id IS NOT NULL
             {$flightCircleActiveFilter}
@@ -385,7 +388,8 @@ if ($hasCsvFiles) {
     " : "
         LEFT JOIN (
           SELECT NULL AS csv_file_id, NULL AS fc_match_count, NULL AS fc_match_score, NULL AS fc_match_statuses,
-                 NULL AS fc_user_text, NULL AS fc_instructor_text, NULL AS fc_reservation_type
+                 NULL AS fc_staging_ids, NULL AS fc_user_text, NULL AS fc_instructor_text, NULL AS fc_reservation_type,
+                 NULL AS fc_hobbs_out, NULL AS fc_hobbs_in
         ) fc ON 1 = 0
     ";
     $garminImportRows = garmin_sync_rows($pdo, "
@@ -419,9 +423,12 @@ if ($hasCsvFiles) {
           fc.fc_match_count,
           fc.fc_match_score,
           fc.fc_match_statuses,
+          fc.fc_staging_ids,
           fc.fc_user_text,
           fc.fc_instructor_text,
-          fc.fc_reservation_type
+          fc.fc_reservation_type,
+          fc.fc_hobbs_out,
+          fc.fc_hobbs_in
         FROM ipca_garmin_csv_files f
         " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS derivation_status, NULL AS tail_number, NULL AS departure_airport_code, NULL AS arrival_airport_code, NULL AS departure_time_utc, NULL AS arrival_time_utc, NULL AS elapsed_seconds, NULL AS summary_json) s ON 1 = 0") . "
         {$historicalJoin}
@@ -1288,9 +1295,12 @@ cw_header('Garmin Sync Agent');
               $fcMatchCount = (int)($row['fc_match_count'] ?? 0);
               $fcMatchScore = $row['fc_match_score'] !== null ? (float)$row['fc_match_score'] : null;
               $fcMatchStatuses = trim((string)($row['fc_match_statuses'] ?? ''));
+              $fcStagingIds = trim((string)($row['fc_staging_ids'] ?? ''));
               $fcUserText = trim((string)($row['fc_user_text'] ?? ''));
               $fcInstructorText = trim((string)($row['fc_instructor_text'] ?? ''));
               $fcReservationType = trim((string)($row['fc_reservation_type'] ?? ''));
+              $fcHobbsOut = trim((string)($row['fc_hobbs_out'] ?? ''));
+              $fcHobbsIn = trim((string)($row['fc_hobbs_in'] ?? ''));
               $fcBadgeClass = $fcMatchCount > 0 && $fcMatchScore !== null && $fcMatchScore >= 85 ? 'garmin-badge-ok' : ($fcMatchCount > 0 ? 'garmin-badge-warn' : '');
             ?>
             <tr data-garmin-import-row
@@ -1322,6 +1332,8 @@ cw_header('Garmin Sync Agent');
                 <?php if ($fcMatchCount > 0): ?>
                   <span class="garmin-badge <?= h($fcBadgeClass) ?>"><?= h($fcMatchStatuses !== '' ? $fcMatchStatuses : 'matched') ?></span>
                   <br><span class="garmin-muted"><?= number_format($fcMatchCount) ?> candidate(s)<?= $fcMatchScore !== null ? ' · ' . number_format($fcMatchScore, 0) . '%' : '' ?></span>
+                  <?php if ($fcStagingIds !== ''): ?><br><span class="garmin-muted">FC row <?= h($fcStagingIds) ?></span><?php endif; ?>
+                  <?php if ($fcHobbsOut !== ''): ?><br><span class="garmin-muted">FC Hobbs <?= h($fcHobbsOut) ?><?= $fcHobbsIn !== '' ? ' → ' . h($fcHobbsIn) : '' ?></span><?php endif; ?>
                 <?php else: ?>
                   <span class="garmin-muted">No FC match</span>
                 <?php endif; ?>
@@ -1828,9 +1840,9 @@ cw_header('Garmin Sync Agent');
             const diagnostics = Array.isArray(result.no_match_diagnostics) ? result.no_match_diagnostics.slice(0, 3) : [];
             if (diagnostics.length > 0) refreshDelayMs = 6000;
             const diagnosticText = diagnostics.length > 0
-              ? ' Examples: ' + diagnostics.map(item => String(item.date || '--') + ' ' + String(item.tail || '--') + ' Hobbs ' + String(item.hobbs_out || '--') + ': ' + String(item.reason || 'no match')).join(' | ')
+              ? ' Examples: ' + diagnostics.map(item => 'Garmin ' + String(item.tail || '--') + ' Hobbs ' + String(item.hobbs_out || '--') + ': ' + String(item.reason || 'no match')).join(' | ')
               : '';
-            importBulkMessage.textContent = 'FlightCircle matching complete: scanned ' + Number(result.scanned || 0).toLocaleString() + ' active FlightCircle aircraft row(s), created ' + Number(result.created || 0).toLocaleString() + ' candidate(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '.' + diagnosticText + ' Refreshing...';
+            importBulkMessage.textContent = 'FlightCircle matching complete: scanned ' + Number(result.scanned || 0).toLocaleString() + ' selected Garmin row(s), created ' + Number(result.created || 0).toLocaleString() + ' outcome(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '.' + diagnosticText + ' Refreshing...';
           }
         } else {
           let processed = 0;
