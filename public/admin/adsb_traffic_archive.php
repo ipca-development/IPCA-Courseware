@@ -307,7 +307,7 @@ VALUES
     const target = (dashboard && (dashboard.selected_target || (dashboard.target_timeline && dashboard.target_timeline.target))) || {};
     const highResolution = String(target.priority || '') === 'home';
     return highResolution
-      ? { maxInterpolationGap: 30, maxHoldSeconds: 20, trailSeconds: 240 }
+      ? { maxInterpolationGap: 30, maxHoldSeconds: 20, trailSeconds: 600 }
       : { maxInterpolationGap: 240, maxHoldSeconds: 120, trailSeconds: 720 };
   }
 
