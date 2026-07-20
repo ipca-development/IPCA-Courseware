@@ -139,15 +139,21 @@ cw_header('ADS-B Traffic Archive');
 
   <section class="adsb-card">
     <h3 style="margin-top:0">Target Airports</h3>
-    <p class="adsb-muted">Add airport or area targets here. The live recorder cron will record KTRM plus every enabled target listed below. ADS-B Exchange live point queries are capped at 25 NM per target.</p>
+    <p class="adsb-muted">Search by ICAO, IATA, airport name, or city. The lookup uses live OurAirports data with local caching, so this is not limited to airports already stored in the IPCA database.</p>
+    <div class="adsb-actions" style="margin-bottom:10px">
+      <label class="adsb-muted">Airport Search<br><input type="search" id="adsbAirportSearch" placeholder="KPSP, Palm Springs, EBAW, Antwerp"></label>
+      <button class="adsb-button secondary" type="button" id="adsbAirportSearchButton">Search Airport</button>
+      <label class="adsb-muted">Results<br><select class="adsb-control" id="adsbAirportResults" style="min-width:280px"><option value="">Search first...</option></select></label>
+    </div>
     <form class="adsb-actions" method="post" action="/admin/api/adsb_archive_action.php">
       <input type="hidden" name="return" value="/admin/adsb_traffic_archive.php">
-      <label class="adsb-muted">Name<br><input type="text" name="target_name" placeholder="KPSP Live Archive" required></label>
-      <label class="adsb-muted">Latitude<br><input type="number" name="target_lat" step="0.000001" placeholder="33.829667" required></label>
-      <label class="adsb-muted">Longitude<br><input type="number" name="target_lon" step="0.000001" placeholder="-116.506667" required></label>
+      <label class="adsb-muted">Target Name<br><input type="text" name="target_name" id="adsbTargetNameInput" placeholder="KPSP Live Archive" required></label>
+      <label class="adsb-muted">Latitude<br><input type="number" name="target_lat" id="adsbTargetLatInput" step="0.000001" placeholder="auto-filled" required></label>
+      <label class="adsb-muted">Longitude<br><input type="number" name="target_lon" id="adsbTargetLonInput" step="0.000001" placeholder="auto-filled" required></label>
       <label class="adsb-muted">Radius NM<br><input type="number" name="target_radius_nm" min="0.5" max="25" step="0.5" value="25"></label>
       <button type="submit" name="action" value="create_live_target">Add Target Airport</button>
     </form>
+    <div class="adsb-muted" id="adsbAirportSearchStatus" style="margin-top:6px">Select an airport result to auto-fill coordinates.</div>
     <div class="adsb-target-maps" id="adsbTargetMaps" style="margin-top:14px"></div>
   </section>
 
@@ -348,6 +354,49 @@ VALUES
     });
   }
 
+  function airportOptionLabel(airport) {
+    const ident = airport.ident || airport.icao || airport.iata || '';
+    const city = airport.municipality ? ` · ${airport.municipality}` : '';
+    const country = airport.country ? `, ${airport.country}` : '';
+    return `${ident} - ${airport.name || 'Airport'}${city}${country}`;
+  }
+
+  function fillTargetFromAirport(airport) {
+    if (!airport) return;
+    const ident = airport.icao || airport.ident || airport.iata || '';
+    el('adsbTargetNameInput').value = `${ident || airport.name} Live Archive`;
+    el('adsbTargetLatInput').value = Number(airport.lat).toFixed(6);
+    el('adsbTargetLonInput').value = Number(airport.lon).toFixed(6);
+    el('adsbAirportSearchStatus').textContent = `Selected ${airportOptionLabel(airport)} from ${airport.source || 'lookup'}.`;
+  }
+
+  async function searchAirports() {
+    const query = (el('adsbAirportSearch').value || '').trim();
+    const status = el('adsbAirportSearchStatus');
+    const results = el('adsbAirportResults');
+    if (query.length < 2) {
+      status.textContent = 'Enter at least 2 characters, such as KPSP or Palm Springs.';
+      return;
+    }
+    status.textContent = 'Searching airport database...';
+    results.innerHTML = '<option value="">Searching...</option>';
+    const response = await fetch(`/admin/api/airport_search.php?q=${encodeURIComponent(query)}&limit=25`, { headers: { Accept: 'application/json' } });
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'Airport search failed.');
+    }
+    const airports = Array.isArray(data.airports) ? data.airports : [];
+    results._airports = airports;
+    results.innerHTML = airports.length
+      ? airports.map((airport, index) => `<option value="${index}">${airportOptionLabel(airport)}</option>`).join('')
+      : '<option value="">No matching airports found</option>';
+    status.textContent = airports.length ? `${airports.length} airport result(s). Select one to auto-fill coordinates.` : 'No matching airports found.';
+    if (airports.length === 1) {
+      results.value = '0';
+      fillTargetFromAirport(airports[0]);
+    }
+  }
+
   function updateMap(data) {
     const timeline = data && data.target_timeline ? data.target_timeline : {};
     const target = data.selected_target || timeline.target || {};
@@ -455,6 +504,22 @@ VALUES
     const input = el('adsbTimeline');
     input.value = input.max || input.value;
     renderAtTime(Number(input.value || 0));
+  });
+  el('adsbAirportSearchButton').addEventListener('click', () => {
+    searchAirports().catch((error) => {
+      el('adsbAirportSearchStatus').textContent = `Airport search failed: ${error && error.message ? error.message : error}`;
+    });
+  });
+  el('adsbAirportSearch').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      el('adsbAirportSearchButton').click();
+    }
+  });
+  el('adsbAirportResults').addEventListener('change', (event) => {
+    const airports = event.target._airports || [];
+    const airport = airports[Number(event.target.value)];
+    fillTargetFromAirport(airport);
   });
   applyDashboard(dashboard);
   loadDashboard().catch((error) => {
