@@ -1133,6 +1133,7 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-muted" style="margin-top:8px" data-garmin-import-count>
         Showing <?= number_format(count($garminImportRows)) ?> import(s), newest first.
       </div>
+      <div class="garmin-progress" data-import-bulk-progress style="display:none;margin-top:8px"><span style="width:0%"></span><strong>0%</strong></div>
       <div class="garmin-muted" style="margin-top:4px" data-import-bulk-message></div>
       <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">
         <table class="garmin-table">
@@ -1492,6 +1493,7 @@ cw_header('Garmin Sync Agent');
   const importEmptyRow = document.querySelector('[data-garmin-import-empty]');
   const importCount = document.querySelector('[data-garmin-import-count]');
   const importBulkMessage = document.querySelector('[data-import-bulk-message]');
+  const importBulkProgress = document.querySelector('[data-import-bulk-progress]');
   const importSelectAll = document.querySelector('[data-import-select-all]');
   const processButton = document.querySelector('[data-process-garmin]');
   const processingState = document.querySelector('[data-processing-state]');
@@ -1650,6 +1652,22 @@ cw_header('Garmin Sync Agent');
       if (!row || row.style.display !== 'none') box.checked = importSelectAll.checked;
     }));
   }
+  function setImportBulkProgress(done, total, message) {
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (importBulkProgress) {
+      importBulkProgress.style.display = 'block';
+      const bar = importBulkProgress.querySelector('span');
+      const label = importBulkProgress.querySelector('strong');
+      if (bar) bar.style.width = percent + '%';
+      if (label) label.textContent = percent + '%';
+    }
+    if (importBulkMessage && message) importBulkMessage.textContent = message;
+  }
+  function chunks(values, size) {
+    const out = [];
+    for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+    return out;
+  }
   document.querySelectorAll('[data-import-bulk-action]').forEach(button => {
     button.addEventListener('click', async () => {
       const action = button.getAttribute('data-import-bulk-action') || '';
@@ -1659,17 +1677,33 @@ cw_header('Garmin Sync Agent');
         return;
       }
       button.disabled = true;
-      if (importBulkMessage) importBulkMessage.textContent = action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files...';
+      setImportBulkProgress(0, ids.length, action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files in small chunks...');
       try {
-        const result = await postHistoricalAction(action, { backfill_file_ids: ids });
         if (action === 'match_flightcircle') {
+          const result = await postHistoricalAction(action, { backfill_file_ids: ids });
+          setImportBulkProgress(ids.length, ids.length, 'FlightCircle matching complete.');
           if (importBulkMessage) importBulkMessage.textContent = 'FlightCircle matching complete: created ' + Number(result.created || 0).toLocaleString() + ' candidate(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '. Refreshing...';
         } else {
-          const match = result.match || {};
-          if (importBulkMessage) importBulkMessage.textContent = 'Processed ' + Number(result.processed || 0).toLocaleString()
-            + ', failed ' + Number(result.failed || 0).toLocaleString()
-            + ', skipped duplicates ' + Number(result.skipped || 0).toLocaleString()
-            + '. FlightCircle candidates created ' + Number(match.created || 0).toLocaleString() + '. Refreshing...';
+          let processed = 0;
+          let failed = 0;
+          let skipped = 0;
+          let matchCreated = 0;
+          let completedIds = 0;
+          const idChunks = chunks(ids, 10);
+          for (const idChunk of idChunks) {
+            const result = await postHistoricalAction(action, { backfill_file_ids: idChunk });
+            processed += Number(result.processed || 0);
+            failed += Number(result.failed || 0);
+            skipped += Number(result.skipped || 0);
+            matchCreated += Number(result.match?.created || 0);
+            completedIds += idChunk.length;
+            setImportBulkProgress(completedIds, ids.length, 'Processed ' + completedIds.toLocaleString() + ' / ' + ids.length.toLocaleString() + ' selected files. Success ' + processed.toLocaleString() + ', failed ' + failed.toLocaleString() + ', skipped ' + skipped.toLocaleString() + '.');
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          if (importBulkMessage) importBulkMessage.textContent = 'Processed ' + processed.toLocaleString()
+            + ', failed ' + failed.toLocaleString()
+            + ', skipped duplicates ' + skipped.toLocaleString()
+            + '. FlightCircle candidates created ' + matchCreated.toLocaleString() + '. Refreshing...';
         }
         setTimeout(() => window.location.reload(), 1000);
       } catch (error) {
