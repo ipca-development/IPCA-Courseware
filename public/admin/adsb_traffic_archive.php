@@ -424,7 +424,7 @@ VALUES
       case 'business-jet':
         return '<path d="M27 3c4 0 5 8 5 19l18 14v5l-18-6-2 13 7 4v4l-10-3-10 3v-4l7-4-2-13-18 6v-5l18-14C22 11 23 3 27 3z"/><rect x="16" y="34" width="5" height="8" rx="1"/><rect x="35" y="34" width="5" height="8" rx="1"/>';
       case 'helicopter':
-        return '<path d="M23 17h2v-7h-2z"/><path d="M4 8h40v4H4z"/><path d="M22 40h4v6h-4z"/><path d="M10 44h28v3H10z"/><path d="M16 38h16l6-10-7-10H17l-7 10z"/><path d="M7 27H1v-3h6zm40 0h-6v-3h6z"/><path d="M15 17 5 7l3-3 12 12zm18 0L43 7l-3-3-12 12z"/>';
+        return '<path d="M23 3h2v42h-2z" fill="#111827"/><path d="M3 23h42v2H3z" fill="#111827"/><path d="M13 8 40 35l-5 5L8 13z" fill="#111827"/><path d="M35 8 8 35l5 5L40 13z" fill="#111827"/><ellipse cx="24" cy="25" rx="8" ry="13"/><path d="M21 37h6v7h-6z"/><path d="M20 44h8v3h-8z"/><path d="M17 22h14v11H17z" fill="rgba(15,23,42,.22)"/><circle cx="24" cy="24" r="3" fill="rgba(255,255,255,.22)"/>';
       case 'military':
         return '<path d="M31 3 41 24l19 11-16 7 2 14-15-6-15 6 2-14-16-7 19-11z"/><path d="M31 9 37 28l11 7-11 4 1 8-7-4-7 4 1-8-11-4 11-7z" fill="rgba(15,23,42,.28)"/>';
       default:
