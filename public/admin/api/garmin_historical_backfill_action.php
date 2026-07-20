@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/AsyncJobService.php';
 require_once __DIR__ . '/../../../src/AuditEventService.php';
 require_once __DIR__ . '/../../../src/GarminHistoricalBackfillService.php';
+require_once __DIR__ . '/../../../src/FlightCircleGarminMatchService.php';
 
 cw_require_admin();
 
@@ -35,6 +36,15 @@ try {
     $jobs = new AsyncJobService($pdo);
     $queued = 0;
     $changed = 0;
+    if ($action === 'process_selected_inline') {
+        $result = (new GarminHistoricalBackfillService($pdo))->processSelectedFiles($ids);
+        $result['match'] = (new FlightCircleGarminMatchService($pdo))->matchAllBatches();
+        garmin_historical_action_json(200, $result);
+    }
+    if ($action === 'match_flightcircle') {
+        $result = (new FlightCircleGarminMatchService($pdo))->matchAllBatches();
+        garmin_historical_action_json(200, $result);
+    }
     if ($action === 'reprocess') {
         foreach ($ids as $id) {
             $stmt = $pdo->prepare('SELECT csv_file_id FROM ipca_garmin_historical_backfill_files WHERE id = ? LIMIT 1');

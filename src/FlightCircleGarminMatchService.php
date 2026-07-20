@@ -12,6 +12,32 @@ final class FlightCircleGarminMatchService
     /**
      * @return array<string,mixed>
      */
+    public function matchAllBatches(int $limitPerBatch = 1000): array
+    {
+        if (!$this->tableExists('ipca_flightcircle_import_batches')) {
+            return array('ok' => false, 'message' => 'FlightCircle import tables are not installed.', 'created' => 0, 'ambiguous' => 0);
+        }
+        $rows = $this->pdo->query("
+            SELECT id
+            FROM ipca_flightcircle_import_batches
+            WHERE import_status = 'completed'
+            ORDER BY id ASC
+        ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $created = 0;
+        $ambiguous = 0;
+        $batches = 0;
+        foreach ($rows as $row) {
+            $result = $this->matchBatch((int)$row['id'], $limitPerBatch);
+            $created += (int)($result['created'] ?? 0);
+            $ambiguous += (int)($result['ambiguous'] ?? 0);
+            $batches++;
+        }
+        return array('ok' => true, 'batches' => $batches, 'created' => $created, 'ambiguous' => $ambiguous);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
     public function matchBatch(int $batchId, int $limit = 500): array
     {
         if (!$this->tableExists('ipca_flightcircle_staging_records') || !$this->tableExists('ipca_garmin_historical_segments')) {

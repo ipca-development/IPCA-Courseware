@@ -235,6 +235,45 @@ final class GarminHistoricalBackfillService
     }
 
     /**
+     * @param list<int> $backfillFileIds
+     * @return array<string,mixed>
+     */
+    public function processSelectedFiles(array $backfillFileIds): array
+    {
+        $backfillFileIds = array_values(array_unique(array_filter(array_map('intval', $backfillFileIds))));
+        if ($backfillFileIds === array()) {
+            throw new RuntimeException('Select at least one historical Garmin file.');
+        }
+        $processed = 0;
+        $failed = 0;
+        $skipped = 0;
+        $errors = array();
+        foreach ($backfillFileIds as $id) {
+            $stmt = $this->pdo->prepare('SELECT exact_duplicate_status FROM ipca_garmin_historical_backfill_files WHERE id = ? LIMIT 1');
+            $stmt->execute(array($id));
+            $duplicateStatus = (string)($stmt->fetchColumn() ?: '');
+            if ($duplicateStatus !== '' && $duplicateStatus !== 'new') {
+                $skipped++;
+                continue;
+            }
+            try {
+                $this->processFile($id);
+                $processed++;
+            } catch (Throwable $e) {
+                $failed++;
+                $errors[] = 'File #' . $id . ': ' . $e->getMessage();
+            }
+        }
+        return array(
+            'ok' => true,
+            'processed' => $processed,
+            'failed' => $failed,
+            'skipped' => $skipped,
+            'errors' => array_slice($errors, 0, 10),
+        );
+    }
+
+    /**
      * @param array<string,mixed> $file
      * @return array<string,mixed>
      */

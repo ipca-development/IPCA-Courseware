@@ -1113,6 +1113,8 @@ cw_header('Garmin Sync Agent');
         <p class="garmin-muted">One operational list for Garmin CSV files from the IPCA Sync App and Historical Bulk Uploads. Use this list to compare dates, aircraft, Hobbs/Tach, duplicates, and import status.</p>
       </div>
       <div class="garmin-actions">
+        <button type="button" data-import-bulk-action="process_selected_inline">Process selected</button>
+        <button type="button" class="secondary" data-import-bulk-action="match_flightcircle">Enrich selected with FlightCircle</button>
         <a class="secondary" href="/admin/api/garmin_historical_backfill_report.php">Historical report</a>
       </div>
     </div>
@@ -1131,9 +1133,10 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-muted" style="margin-top:8px" data-garmin-import-count>
         Showing <?= number_format(count($garminImportRows)) ?> import(s), newest first.
       </div>
+      <div class="garmin-muted" style="margin-top:4px" data-import-bulk-message></div>
       <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">
         <table class="garmin-table">
-          <thead><tr><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
+          <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
           <tbody>
           <?php foreach ($garminImportRows as $row): ?>
             <?php
@@ -1169,18 +1172,23 @@ cw_header('Garmin Sync Agent');
               $stateClass = in_array($importState, array('complete', 'completed', 'ok'), true) ? 'garmin-badge-ok' : (in_array($importState, array('failed', 'parse_failed'), true) ? 'garmin-badge-danger' : 'garmin-badge-warn');
             ?>
             <tr data-garmin-import-row
+                data-historical-file-id="<?= (int)($row['historical_file_id'] ?? 0) ?>"
                 data-source="<?= h($sourceLabel) ?>"
                 data-tail="<?= h($tail) ?>"
                 data-date="<?= h($dateKey) ?>"
+                data-sort-time="<?= h($startUtc) ?>"
+                data-hobbs-out="<?= h((string)($summary['hobbs_out'] ?? '')) ?>"
+                data-hobbs-in="<?= h((string)($summary['hobbs_in'] ?? '')) ?>"
                 data-state="<?= h(strtolower($importState)) ?>"
                 data-duplicate="<?= $isDuplicate ? 'duplicate' : 'new' ?>">
+              <td><input type="checkbox" data-import-checkbox value="<?= (int)($row['historical_file_id'] ?? 0) ?>" <?= ((int)($row['historical_file_id'] ?? 0) <= 0) ? 'disabled' : '' ?>></td>
               <td><span class="garmin-badge <?= $sourceLabel === 'Bulk Upload' ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($sourceLabel) ?></span></td>
               <td class="garmin-compact"><?= h($dateKey !== '' ? $dateKey : '--') ?><br><span class="garmin-muted"><?= h((string)($summary['dep_time_lt'] ?? '')) ?></span></td>
               <td><?= garmin_sync_tail_pill($tail) ?></td>
               <td><?= h((string)($row['departure_airport_code'] ?? $summary['dep_airport'] ?? '--') ?: '--') ?></td>
               <td><?= h((string)($row['arrival_airport_code'] ?? $summary['arr_airport'] ?? '--') ?: '--') ?></td>
-              <td><?= h((string)($summary['hobbs_out'] ?? '--')) ?></td>
-              <td><?= h((string)($summary['hobbs_in'] ?? '--')) ?></td>
+              <td data-hobbs-out-cell><?= h((string)($summary['hobbs_out'] ?? '--')) ?></td>
+              <td data-hobbs-in-cell><?= h((string)($summary['hobbs_in'] ?? '--')) ?></td>
               <td><?= h((string)($summary['hobbs_time'] ?? '--')) ?></td>
               <td><?= h((string)($summary['tacho_out'] ?? '--')) ?></td>
               <td><?= h((string)($summary['tacho_in'] ?? '--')) ?></td>
@@ -1191,7 +1199,7 @@ cw_header('Garmin Sync Agent');
               <td><span class="garmin-code"><?= h((string)$row['original_filename']) ?></span><br><span class="garmin-muted">CSV #<?= (int)$row['csv_file_id'] ?></span></td>
             </tr>
           <?php endforeach; ?>
-            <tr data-garmin-import-empty style="display:none"><td colspan="15" class="garmin-empty">No Garmin imports match these filters.</td></tr>
+            <tr data-garmin-import-empty style="display:none"><td colspan="16" class="garmin-empty">No Garmin imports match these filters.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1483,6 +1491,8 @@ cw_header('Garmin Sync Agent');
   const importRows = Array.from(document.querySelectorAll('[data-garmin-import-row]'));
   const importEmptyRow = document.querySelector('[data-garmin-import-empty]');
   const importCount = document.querySelector('[data-garmin-import-count]');
+  const importBulkMessage = document.querySelector('[data-import-bulk-message]');
+  const importSelectAll = document.querySelector('[data-import-select-all]');
   const processButton = document.querySelector('[data-process-garmin]');
   const processingState = document.querySelector('[data-processing-state]');
   const processingMessage = document.querySelector('[data-processing-message]');
@@ -1571,7 +1581,13 @@ cw_header('Garmin Sync Agent');
     const state = importFilterValue('import_state').toLowerCase();
     const duplicate = importFilterValue('import_duplicate');
     let visibleCount = 0;
+    const visibleRows = [];
     importRows.forEach(row => {
+      row.querySelectorAll('[data-hobbs-out-cell],[data-hobbs-in-cell]').forEach(cell => {
+        cell.style.color = '';
+        cell.style.fontWeight = '';
+        cell.title = '';
+      });
       let visible = true;
       const rowState = String(row.dataset.state || '').toLowerCase();
       if (source && row.dataset.source !== source) visible = false;
@@ -1589,8 +1605,28 @@ cw_header('Garmin Sync Agent');
         }
       }
       row.style.display = visible ? '' : 'none';
-      if (visible) visibleCount++;
+      if (visible) {
+        visibleCount++;
+        visibleRows.push(row);
+      }
     });
+    if (tail && visibleRows.length > 1) {
+      const chronological = visibleRows.slice().sort((a, b) => String(a.dataset.sortTime || '').localeCompare(String(b.dataset.sortTime || '')));
+      for (let i = 1; i < chronological.length; i++) {
+        const prev = chronological[i - 1];
+        const curr = chronological[i];
+        const prevIn = parseFloat(String(prev.dataset.hobbsIn || '').replace(/[^0-9.-]+/g, ''));
+        const currOut = parseFloat(String(curr.dataset.hobbsOut || '').replace(/[^0-9.-]+/g, ''));
+        if (Number.isFinite(prevIn) && Number.isFinite(currOut) && Math.abs(currOut - prevIn) > 0.11) {
+          const cell = curr.querySelector('[data-hobbs-out-cell]');
+          if (cell) {
+            cell.style.color = '#b91c1c';
+            cell.style.fontWeight = '900';
+            cell.title = 'Hobbs continuity gap: previous Hobbs In ' + prevIn.toFixed(1) + ', this Hobbs Out ' + currOut.toFixed(1);
+          }
+        }
+      }
+    }
     if (importEmptyRow) importEmptyRow.style.display = visibleCount === 0 ? '' : 'none';
     if (importCount) importCount.textContent = 'Showing ' + visibleCount.toLocaleString() + ' of ' + importRows.length.toLocaleString() + ' import(s), newest first.';
   }
@@ -1605,6 +1641,43 @@ cw_header('Garmin Sync Agent');
     });
     applyGarminImportFilters();
   }
+  function importCheckboxes() {
+    return Array.from(document.querySelectorAll('[data-import-checkbox]:not(:disabled)'));
+  }
+  if (importSelectAll) {
+    importSelectAll.addEventListener('change', () => importCheckboxes().forEach(box => {
+      const row = box.closest('[data-garmin-import-row]');
+      if (!row || row.style.display !== 'none') box.checked = importSelectAll.checked;
+    }));
+  }
+  document.querySelectorAll('[data-import-bulk-action]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const action = button.getAttribute('data-import-bulk-action') || '';
+      const ids = importCheckboxes().filter(box => box.checked).map(box => Number(box.value || 0)).filter(Boolean);
+      if (ids.length === 0) {
+        if (importBulkMessage) importBulkMessage.textContent = 'Select at least one bulk-upload row first.';
+        return;
+      }
+      button.disabled = true;
+      if (importBulkMessage) importBulkMessage.textContent = action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files...';
+      try {
+        const result = await postHistoricalAction(action, { backfill_file_ids: ids });
+        if (action === 'match_flightcircle') {
+          if (importBulkMessage) importBulkMessage.textContent = 'FlightCircle matching complete: created ' + Number(result.created || 0).toLocaleString() + ' candidate(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '. Refreshing...';
+        } else {
+          const match = result.match || {};
+          if (importBulkMessage) importBulkMessage.textContent = 'Processed ' + Number(result.processed || 0).toLocaleString()
+            + ', failed ' + Number(result.failed || 0).toLocaleString()
+            + ', skipped duplicates ' + Number(result.skipped || 0).toLocaleString()
+            + '. FlightCircle candidates created ' + Number(match.created || 0).toLocaleString() + '. Refreshing...';
+        }
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (error) {
+        if (importBulkMessage) importBulkMessage.textContent = 'Bulk action failed: ' + error.message;
+        button.disabled = false;
+      }
+    });
+  });
   if (selectAll) {
     selectAll.addEventListener('change', () => boxes.forEach(box => {
       const row = box.closest('[data-flight-row]');

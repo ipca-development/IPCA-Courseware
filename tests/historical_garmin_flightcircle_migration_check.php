@@ -85,6 +85,13 @@ $checks = array(
         str_contains($files['admin_page'], 'Historical SD Card CSV Backfill')
         && str_contains($files['admin_page'], 'FlightCircle Historical Migration')
         && str_contains($files['admin_page'], 'AL172M2'),
+
+    'unified Garmin import overview supports bulk process and FlightCircle enrichment' =>
+        str_contains($files['admin_page'], 'All Garmin Imports')
+        && str_contains($files['admin_page'], 'data-import-bulk-action="process_selected_inline"')
+        && str_contains($files['admin_page'], 'data-import-bulk-action="match_flightcircle"')
+        && str_contains($files['admin_page'], 'data-hobbs-out-cell')
+        && str_contains($files['admin_page'], 'Hobbs continuity gap'),
 );
 
 $failed = array();
