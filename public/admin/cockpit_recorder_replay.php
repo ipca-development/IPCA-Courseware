@@ -3635,7 +3635,7 @@ cw_header('Cockpit Recorder Replay');
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth, bottom: window.innerHeight };
     const profileRect = insetMapProfile && !elementIsHidden(insetMapProfile) ? insetMapProfile.getBoundingClientRect() : null;
     const anchorBottom = profileRect && profileRect.height > 0 ? profileRect.bottom : altimeterRect.bottom;
-    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left - 10));
+    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left - 3));
     const bottomPx = Math.max(72, Math.round(rootRect.bottom - anchorBottom));
     systemWarningBox.style.left = `${leftPx}px`;
     systemWarningBox.style.right = 'auto';
