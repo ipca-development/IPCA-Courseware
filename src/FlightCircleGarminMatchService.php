@@ -74,7 +74,6 @@ final class FlightCircleGarminMatchService
             foreach (array_slice($ranked, 0, 5) as $candidate) {
                 $reasons = (array)($candidate['reasons'] ?? array());
                 $hasRequiredEvidence = in_array('same_aircraft', $reasons, true)
-                    && in_array('same_departure_date', $reasons, true)
                     && (
                         in_array('departure_hobbs_matches', $reasons, true)
                         || in_array('departure_hobbs_near_match', $reasons, true)
@@ -103,21 +102,19 @@ final class FlightCircleGarminMatchService
      */
     private function candidateSegments(array $record): array
     {
-        $dateWindow = $this->dateWindowForRecord($record);
-        $from = $dateWindow['from'];
-        $to = $dateWindow['to'];
+        $tail = $this->normalizeTail((string)($record['tail_number'] ?? ''));
+        if ($tail === '') {
+            return array();
+        }
+        $tailWithoutN = ltrim($tail, 'N');
         $stmt = $this->pdo->prepare("
             SELECT *
             FROM ipca_garmin_historical_segments
-            WHERE (
-                start_utc BETWEEN ? AND ?
-                OR end_utc BETWEEN ? AND ?
-                OR (start_utc <= ? AND end_utc >= ?)
-              )
+            WHERE UPPER(REPLACE(REPLACE(aircraft_registration, '-', ''), ' ', '')) IN (?, ?)
             ORDER BY start_utc ASC, id ASC
-            LIMIT 200
+            LIMIT 1000
         ");
-        $stmt->execute(array($from, $to, $from, $to, $from, $to));
+        $stmt->execute(array($tail, $tailWithoutN));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
     }
 
@@ -137,14 +134,6 @@ final class FlightCircleGarminMatchService
         } else {
             $conflicts[] = 'aircraft_mismatch';
         }
-        if ($this->datesMatch((string)($record['depart_local'] ?? ''), (string)($segment['start_utc'] ?? ''), (string)($segment['end_utc'] ?? ''))) {
-            $score += 25;
-            $reasons[] = 'same_departure_date';
-        } else {
-            $conflicts[] = 'date_mismatch';
-        }
-        $start = strtotime((string)($segment['start_utc'] ?? '')) ?: 0;
-        $end = strtotime((string)($segment['end_utc'] ?? '')) ?: 0;
         $segmentEvidence = json_decode((string)($segment['evidence_json'] ?? '{}'), true);
         $summary = is_array($segmentEvidence['summary'] ?? null) ? $segmentEvidence['summary'] : array();
         $fcHobbsOut = $this->numericOrNull($record['hobbs_out'] ?? null);
@@ -185,7 +174,7 @@ final class FlightCircleGarminMatchService
                 'classification' => (string)$segment['classification'],
                 'start_utc' => (string)$segment['start_utc'],
                 'end_utc' => (string)$segment['end_utc'],
-                'flightcircle_time_ignored' => true,
+                'flightcircle_date_time_used_for_matching' => false,
             ),
         );
     }
@@ -262,9 +251,6 @@ final class FlightCircleGarminMatchService
     private function noMatchDiagnostic(array $record, ?array $bestCandidate): array
     {
         $reasons = array();
-        if (trim((string)($record['depart_local'] ?? '')) === '') {
-            $reasons[] = 'FlightCircle date missing';
-        }
         if (trim((string)($record['tail_number'] ?? '')) === '') {
             $reasons[] = 'FlightCircle tail missing';
         }
@@ -272,7 +258,7 @@ final class FlightCircleGarminMatchService
             $reasons[] = 'FlightCircle Hobbs-Out missing';
         }
         if ($bestCandidate === null) {
-            $reasons[] = 'No Garmin segment found on the FlightCircle date window';
+            $reasons[] = 'No Garmin segment found for this FlightCircle tail';
         } else {
             foreach ((array)($bestCandidate['conflicts'] ?? array()) as $conflict) {
                 $reasons[] = str_replace('_', ' ', (string)$conflict);
@@ -286,30 +272,13 @@ final class FlightCircleGarminMatchService
             'user_text' => (string)($record['user_text'] ?? ''),
             'instructor_text' => (string)($record['instructor_text'] ?? ''),
             'best_score' => $bestCandidate !== null ? (int)($bestCandidate['score'] ?? 0) : 0,
-            'reason' => implode('; ', array_values(array_unique(array_filter($reasons)))) ?: 'No date/tail/Hobbs-Out Garmin match',
+            'reason' => implode('; ', array_values(array_unique(array_filter($reasons)))) ?: 'No tail/Hobbs-Out Garmin match',
         );
     }
 
     private function overlaps(int $aStart, int $aEnd, int $bStart, int $bEnd): bool
     {
         return max($aStart, $bStart) <= min($aEnd, $bEnd);
-    }
-
-    /**
-     * @param array<string,mixed> $record
-     * @return array{from:string,to:string}
-     */
-    private function dateWindowForRecord(array $record): array
-    {
-        $date = substr(trim((string)($record['depart_local'] ?? '')), 0, 10);
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            return array('from' => '1970-01-01 00:00:00', 'to' => '2999-12-31 00:00:00');
-        }
-        $start = strtotime($date . ' 00:00:00') ?: 0;
-        return array(
-            'from' => date('Y-m-d H:i:s', $start - 12 * 3600),
-            'to' => date('Y-m-d H:i:s', $start + 36 * 3600),
-        );
     }
 
     private function tailsMatch(string $left, string $right): bool
@@ -325,26 +294,6 @@ final class FlightCircleGarminMatchService
     private function normalizeTail(string $tail): string
     {
         return strtoupper((string)preg_replace('/[^A-Z0-9]+/i', '', trim($tail)));
-    }
-
-    private function datesMatch(string $flightCircleDepart, string $garminStart, string $garminEnd): bool
-    {
-        $fcDate = substr(trim($flightCircleDepart), 0, 10);
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fcDate)) {
-            return false;
-        }
-        foreach (array($garminStart, $garminEnd) as $value) {
-            $ts = strtotime($value) ?: 0;
-            if ($ts <= 0) {
-                continue;
-            }
-            foreach (array(-1, 0, 1) as $offsetDays) {
-                if (date('Y-m-d', $ts + ($offsetDays * 86400)) === $fcDate) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private function numericOrNull(mixed $value): ?float

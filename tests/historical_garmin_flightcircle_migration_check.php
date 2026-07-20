@@ -82,14 +82,15 @@ $checks = array(
         && str_contains($files['match_service'], 'probable')
         && !str_contains($files['match_service'], "UPDATE ipca_aircraft_operations\n            SET review_status = 'approved'"),
 
-    'FlightCircle matching uses active replacement dataset and explainable date tail Hobbs keys' =>
+    'FlightCircle matching uses active replacement dataset and explainable tail Hobbs keys' =>
         str_contains($files['migration'], 'active_dataset')
         && str_contains($files['active_dataset_migration'], 'active_dataset')
         && str_contains($files['flightcircle_service'], 'replaceActiveDataset')
         && str_contains($files['flightcircle_service'], 'activeDatasetValidation')
         && str_contains($files['match_service'], 'datasetBatchesForMatching')
         && str_contains($files['match_service'], 'departure_hobbs_matches')
-        && str_contains($files['match_service'], 'same_departure_date')
+        && !str_contains($files['match_service'], 'same_departure_date')
+        && !str_contains($files['match_service'], 'dateWindowForRecord')
         && str_contains($files['match_service'], 'noMatchDiagnostic')
         && str_contains($files['admin_page'], 'Active FlightCircle Dataset Validation')
         && str_contains($files['admin_page'], 'replace_active_dataset'),

@@ -1022,7 +1022,7 @@ cw_header('Garmin Sync Agent');
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
             <div>
               <div class="garmin-label">Active FlightCircle Dataset Validation</div>
-              <div class="garmin-muted" style="margin-top:4px">Only this active dataset is used for FlightCircle enrichment. Matching uses date, tail, and Hobbs-Out.</div>
+              <div class="garmin-muted" style="margin-top:4px">Only this active dataset is used for FlightCircle enrichment. Matching uses tail and Hobbs-Out; date remains visible for review only.</div>
             </div>
             <span class="garmin-badge <?= $fcValidationOk ? 'garmin-badge-ok' : 'garmin-badge-warn' ?>"><?= $fcValidationOk ? 'Ready for enrichment' : 'Needs import review' ?></span>
           </div>
@@ -1088,7 +1088,7 @@ cw_header('Garmin Sync Agent');
       <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) !== array()): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
           <h4 style="margin:0 0 8px">Stored FlightCircle Rows</h4>
-          <p class="garmin-muted" style="margin-top:0">These are the normalized FlightCircle records used for enrichment. For matching, the important values are Date, Tail, and Hobbs-Out.</p>
+          <p class="garmin-muted" style="margin-top:0">These are the normalized FlightCircle records used for enrichment. For matching, the important values are Tail and Hobbs-Out. Date is shown for review context only.</p>
           <table class="garmin-table">
             <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
             <tbody>
