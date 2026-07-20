@@ -29,6 +29,7 @@ $checks = array(
         && str_contains($files['archive'], "'priority' => 'home'")
         && str_contains($files['archive'], "'resolution_seconds' => self::HOME_LIVE_RESOLUTION_SECONDS")
         && str_contains($files['archive'], 'targetIsHighResolution')
+        && str_contains($files['archive'], "return (string)(\$target['priority'] ?? '') === 'home'")
         && str_contains($files['live_cli'], "'mode' => 'home_high_resolution'")
         && str_contains($files['live_cli'], 'CW_ADSB_HOME_LIVE_INTERVAL_SECONDS')
         && str_contains($files['live_cli'], 'CW_ADSB_HOME_LIVE_CYCLES'),

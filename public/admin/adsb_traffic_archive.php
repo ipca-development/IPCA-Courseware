@@ -305,11 +305,10 @@ VALUES
 
   function replayTuning() {
     const target = (dashboard && (dashboard.selected_target || (dashboard.target_timeline && dashboard.target_timeline.target))) || {};
-    const resolution = finite(target.resolution_seconds);
-    const highResolution = String(target.priority || '') === 'home' || (resolution !== null && resolution <= 15);
+    const highResolution = String(target.priority || '') === 'home';
     return highResolution
       ? { maxInterpolationGap: 30, maxHoldSeconds: 20, trailSeconds: 60 }
-      : { maxInterpolationGap: 90, maxHoldSeconds: 45, trailSeconds: 120 };
+      : { maxInterpolationGap: 240, maxHoldSeconds: 120, trailSeconds: 180 };
   }
 
   function timelineBounds() {
@@ -429,7 +428,7 @@ VALUES
       case 'military':
         return '<path d="M31 3 41 24l19 11-16 7 2 14-15-6-15 6 2-14-16-7 19-11z"/><path d="M31 9 37 28l11 7-11 4 1 8-7-4-7 4 1-8-11-4 11-7z" fill="rgba(15,23,42,.28)"/>';
       default:
-        return '<path d="M23 5c3 0 4 6 4 15l16 4v6l-16-1-2 12 6 3v3l-8-2-8 2v-3l6-3-2-12-16 1v-6l16-4C19 11 20 5 23 5z"/><path d="M13 22h22v4H13z"/>';
+        return '<path d="M23 5c3 0 4 6 4 15l16 4v6l-16-1-2 12 6 3v3l-8-2-8 2v-3l6-3-2-12-16 1v-6l16-4C19 11 20 5 23 5z"/>';
     }
   }
 

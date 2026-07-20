@@ -512,8 +512,7 @@ final class AdsbTrafficArchiveService
      */
     private function targetIsHighResolution(array $target): bool
     {
-        return (string)($target['priority'] ?? '') === 'home'
-            || (isset($target['resolution_seconds']) && is_numeric($target['resolution_seconds']) && (int)$target['resolution_seconds'] <= 15);
+        return (string)($target['priority'] ?? '') === 'home';
     }
 
     /**

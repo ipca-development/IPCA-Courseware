@@ -87,6 +87,8 @@ $checks = array(
         str_contains($files['page'], 'replayTuning')
         && str_contains($files['page'], 'maxInterpolationGap: 30')
         && str_contains($files['page'], 'maxHoldSeconds: 20')
+        && str_contains($files['page'], 'maxInterpolationGap: 240')
+        && str_contains($files['page'], 'maxHoldSeconds: 120')
         && str_contains($files['page'], 'trailPoints')
         && str_contains($files['page'], 'Hold ${tuning.maxHoldSeconds}s'),
     'admin UI renders Leaflet map without provider-side calls' =>
