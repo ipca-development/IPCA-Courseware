@@ -389,13 +389,6 @@ cw_header('ADS-B Traffic Archive');
         .bindTooltip(`${label}<br>${sample.utc || ''}<br>${sample.altitude_ft !== null ? Math.round(sample.altitude_ft) + ' ft' : ''}`, { direction: 'top' });
       visible.push({ label, sample });
     });
-    if (visible.length > 0 && map && currentLayer) {
-      const layers = currentLayer.getLayers();
-      if (layers.length > 0) {
-        const group = L.featureGroup(layers);
-        map.fitBounds(group.getBounds().pad(0.25), { maxZoom: 11 });
-      }
-    }
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
     el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
     el('adsbAircraftList').innerHTML = visible
