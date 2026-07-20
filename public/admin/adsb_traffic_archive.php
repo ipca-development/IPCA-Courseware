@@ -28,18 +28,22 @@ if (isset($_GET['corridor_requested'])) {
 
 $status = array();
 $recentTraffic = array();
+$dashboard = array();
 try {
     $archiveService = new AdsbTrafficArchiveService($pdo);
     $status = $archiveService->status();
     $recentTraffic = $archiveService->recentTrafficSamples(250);
+    $dashboard = $archiveService->dashboardData('ktrm_live', 6);
 } catch (Throwable $e) {
     $error = $error !== '' ? $error : $e->getMessage();
 }
 
+$dashboardJson = json_encode($dashboard, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '{}';
 cw_header('ADS-B Traffic Archive');
 ?>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-.adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-scope{width:100%;max-width:640px;background:#0f172a;border-radius:16px;border:1px solid rgba(148,163,184,.35)}.adsb-scope-grid{display:grid;grid-template-columns:minmax(280px,640px) 1fr;gap:16px;align-items:start}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}
+.adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input,.adsb-actions select,.adsb-control{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;background:#fff}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}.adsb-map-layout{display:grid;grid-template-columns:minmax(320px,1.7fr) minmax(260px,.8fr);gap:14px}.adsb-map{height:520px;border:1px solid #cbd5e1;border-radius:14px;overflow:hidden;background:#e2e8f0}.adsb-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}.adsb-timeline{width:100%;accent-color:#2563eb}.adsb-growth{height:84px;display:flex;align-items:end;gap:2px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px}.adsb-growth-bar{flex:1;min-width:2px;background:#2563eb;border-radius:3px 3px 0 0}.adsb-target-list{display:grid;gap:8px;max-height:180px;overflow:auto}.adsb-aircraft-list{display:grid;gap:6px;max-height:240px;overflow:auto}.adsb-pill{border:1px solid #e2e8f0;border-radius:999px;padding:5px 8px;background:#f8fafc;font-size:12px}.adsb-live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}@media(max-width:960px){.adsb-map-layout{grid-template-columns:1fr}.adsb-map{height:420px}}
 </style>
 <div class="adsb-page">
   <section class="adsb-card">
@@ -69,6 +73,61 @@ cw_header('ADS-B Traffic Archive');
       <div class="adsb-kv"><div class="adsb-label">Provider Not Configured</div><div class="adsb-value"><?= number_format((int)($status['coverage']['provider_not_configured'] ?? 0)) ?></div></div>
       <div class="adsb-kv"><div class="adsb-label">Samples</div><div class="adsb-value"><?= number_format((int)($status['coverage']['samples'] ?? 0)) ?></div></div>
       <div class="adsb-kv"><div class="adsb-label">Latest Ready</div><div class="adsb-value"><?= h((string)($status['ktrm']['latest_ready_bucket_end_utc'] ?? 'none')) ?></div></div>
+    </div>
+  </section>
+
+  <section class="adsb-card" id="adsbDashboard">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">Realtime Archive Growth</h3>
+        <div class="adsb-muted"><span class="adsb-live-dot"></span>Polls the local ADS-B archive every few seconds. No provider calls are made by this dashboard.</div>
+      </div>
+      <div class="adsb-muted">Last refresh: <span id="adsbRefreshTime">--</span></div>
+    </div>
+    <div class="adsb-grid" style="margin-top:12px">
+      <div class="adsb-kv"><div class="adsb-label">Total Samples</div><div class="adsb-value" id="adsbTotalSamples">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Unique Aircraft</div><div class="adsb-value" id="adsbUniqueAircraft">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Recent Samples</div><div class="adsb-value" id="adsbRecentSamples">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Recent Aircraft</div><div class="adsb-value" id="adsbRecentAircraft">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Raw Payloads</div><div class="adsb-value" id="adsbRawPayloads">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Newest Sample</div><div class="adsb-value adsb-code" id="adsbNewestSample">--</div></div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="adsb-label">Samples per minute</div>
+      <div class="adsb-growth" id="adsbGrowthChart" aria-label="Archive growth chart"></div>
+    </div>
+  </section>
+
+  <section class="adsb-card">
+    <h3 style="margin-top:0">Target Map And Historical Aircraft Scrubber</h3>
+    <div class="adsb-toolbar">
+      <label class="adsb-muted">Target<br><select class="adsb-control" id="adsbTargetSelect"></select></label>
+      <label class="adsb-muted">Lookback hours<br><input class="adsb-control" id="adsbHoursInput" type="number" min="1" max="168" value="6"></label>
+      <button class="adsb-button" type="button" id="adsbReloadButton">Reload Target</button>
+      <span class="adsb-muted" id="adsbTargetSummary">--</span>
+    </div>
+    <div class="adsb-map-layout">
+      <div>
+        <div id="adsbTargetMap" class="adsb-map"></div>
+        <div style="margin-top:12px">
+          <input id="adsbTimeline" class="adsb-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="ADS-B archive time scrubber">
+          <div style="display:flex;justify-content:space-between;gap:10px" class="adsb-muted">
+            <span id="adsbTimelineStart">--</span>
+            <strong id="adsbTimelineCurrent">--</strong>
+            <span id="adsbTimelineEnd">--</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="adsb-grid">
+          <div class="adsb-kv"><div class="adsb-label">Aircraft</div><div class="adsb-value" id="adsbTargetAircraft">--</div></div>
+          <div class="adsb-kv"><div class="adsb-label">Samples</div><div class="adsb-value" id="adsbTargetSamples">--</div></div>
+        </div>
+        <h4>Defined Targets</h4>
+        <div class="adsb-target-list" id="adsbTargetList"></div>
+        <h4>Aircraft At Selected Time</h4>
+        <div class="adsb-aircraft-list" id="adsbAircraftList"></div>
+      </div>
     </div>
   </section>
 
@@ -156,3 +215,176 @@ cw_header('ADS-B Traffic Archive');
     <?php endif; ?>
   </section>
 </div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  const initialDashboard = <?= $dashboardJson ?>;
+  let dashboard = initialDashboard && initialDashboard.ok ? initialDashboard : {};
+  let map = null;
+  let targetCircle = null;
+  let targetMarker = null;
+  let trackLayer = null;
+  let currentLayer = null;
+  let refreshTimer = null;
+
+  const el = (id) => document.getElementById(id);
+  const fmt = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '--';
+  const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+  const utcLabel = (epoch) => {
+    const n = finite(epoch);
+    return n === null ? '--' : new Date(n * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  };
+
+  function colorFor(hex) {
+    let hash = 0;
+    String(hex || '').split('').forEach((ch) => { hash = ((hash << 5) - hash) + ch.charCodeAt(0); hash |= 0; });
+    return `hsl(${Math.abs(hash) % 360} 82% 45%)`;
+  }
+
+  function updateGrowth(data) {
+    const growth = data && data.growth ? data.growth : {};
+    el('adsbTotalSamples').textContent = fmt(growth.total_samples);
+    el('adsbUniqueAircraft').textContent = fmt(growth.unique_aircraft);
+    el('adsbRecentSamples').textContent = fmt(growth.recent_samples);
+    el('adsbRecentAircraft').textContent = fmt(growth.recent_unique_aircraft);
+    el('adsbRawPayloads').textContent = fmt(growth.raw_payloads);
+    el('adsbNewestSample').textContent = growth.newest_sample_utc || '--';
+    el('adsbRefreshTime').textContent = data.generated_at_utc || new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const chart = el('adsbGrowthChart');
+    const buckets = Array.isArray(growth.buckets) ? growth.buckets : [];
+    const maxSamples = Math.max(1, ...buckets.map((b) => Number(b.samples) || 0));
+    chart.innerHTML = buckets.slice(-120).map((bucket) => {
+      const height = Math.max(2, Math.round(((Number(bucket.samples) || 0) / maxSamples) * 68));
+      return `<div class="adsb-growth-bar" title="${bucket.bucket_utc}: ${bucket.samples} samples" style="height:${height}px"></div>`;
+    }).join('');
+  }
+
+  function updateTargets(data) {
+    const targets = Array.isArray(data.targets) ? data.targets : [];
+    const select = el('adsbTargetSelect');
+    const current = select.value || (data.selected_target && data.selected_target.id) || 'ktrm_live';
+    select.innerHTML = targets.map((target) => `<option value="${String(target.id).replace(/"/g, '&quot;')}">${String(target.label || target.id)}</option>`).join('');
+    select.value = targets.some((target) => String(target.id) === current) ? current : ((data.selected_target && data.selected_target.id) || 'ktrm_live');
+    el('adsbTargetList').innerHTML = targets.map((target) => {
+      const radius = finite(target.radius_nm);
+      return `<div class="adsb-pill"><strong>${String(target.label || target.id)}</strong><br><span class="adsb-muted">${Number(target.lat).toFixed(5)}, ${Number(target.lon).toFixed(5)} · ${radius !== null ? radius.toFixed(1) : '--'} NM · ${String(target.source || '')}</span></div>`;
+    }).join('') || '<div class="adsb-muted">No target definitions available.</div>';
+  }
+
+  function ensureMap(target) {
+    if (!map) {
+      map = L.map('adsbTargetMap', { scrollWheelZoom: true });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      trackLayer = L.layerGroup().addTo(map);
+      currentLayer = L.layerGroup().addTo(map);
+    }
+    const lat = finite(target && target.lat) ?? 33.626701;
+    const lon = finite(target && target.lon) ?? -116.160156;
+    const radiusNm = finite(target && target.radius_nm) ?? 25;
+    if (targetCircle) map.removeLayer(targetCircle);
+    if (targetMarker) map.removeLayer(targetMarker);
+    targetMarker = L.marker([lat, lon]).addTo(map).bindTooltip(String((target && target.label) || 'Target'));
+    targetCircle = L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.05 }).addTo(map);
+    map.fitBounds(targetCircle.getBounds(), { padding: [24, 24] });
+  }
+
+  function updateMap(data) {
+    const timeline = data && data.target_timeline ? data.target_timeline : {};
+    const target = data.selected_target || timeline.target || {};
+    ensureMap(target);
+    trackLayer.clearLayers();
+    const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
+    aircraft.forEach((item) => {
+      const points = (Array.isArray(item.samples) ? item.samples : [])
+        .map((sample) => [finite(sample.lat), finite(sample.lon)])
+        .filter((point) => point[0] !== null && point[1] !== null);
+      if (points.length >= 2) {
+        L.polyline(points, { color: colorFor(item.hex), weight: 2, opacity: 0.35 }).addTo(trackLayer);
+      }
+    });
+    const start = finite(timeline.start_epoch);
+    const end = finite(timeline.end_epoch);
+    const input = el('adsbTimeline');
+    input.min = start !== null ? String(start) : '0';
+    input.max = end !== null ? String(end) : '1';
+    input.value = end !== null ? String(end) : input.min;
+    input.disabled = start === null || end === null || start === end;
+    el('adsbTimelineStart').textContent = utcLabel(start);
+    el('adsbTimelineEnd').textContent = utcLabel(end);
+    el('adsbTargetAircraft').textContent = fmt(timeline.aircraft_count);
+    el('adsbTargetSamples').textContent = fmt(timeline.sample_count);
+    const radius = finite(target.radius_nm);
+    el('adsbTargetSummary').textContent = `${target.label || target.id || 'Target'} · ${radius !== null ? radius.toFixed(1) : '--'} NM · ${fmt(timeline.aircraft_count)} aircraft`;
+    renderAtTime(Number(input.value || end || start || 0));
+  }
+
+  function nearestSample(samples, epoch) {
+    let best = null;
+    let bestDelta = Infinity;
+    (Array.isArray(samples) ? samples : []).forEach((sample) => {
+      const sampleEpoch = finite(sample.epoch);
+      if (sampleEpoch === null) return;
+      const delta = Math.abs(sampleEpoch - epoch);
+      if (delta < bestDelta) {
+        best = sample;
+        bestDelta = delta;
+      }
+    });
+    return bestDelta <= 120 ? best : null;
+  }
+
+  function renderAtTime(epoch) {
+    const timeline = dashboard && dashboard.target_timeline ? dashboard.target_timeline : {};
+    const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
+    currentLayer.clearLayers();
+    const visible = [];
+    aircraft.forEach((item) => {
+      const sample = nearestSample(item.samples, epoch);
+      if (!sample) return;
+      const lat = finite(sample.lat);
+      const lon = finite(sample.lon);
+      if (lat === null || lon === null) return;
+      const label = String(item.callsign || item.hex || '').trim().toUpperCase();
+      const color = colorFor(item.hex);
+      L.circleMarker([lat, lon], { radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 2 })
+        .addTo(currentLayer)
+        .bindTooltip(`${label}<br>${sample.utc || ''}<br>${sample.altitude_ft !== null ? Math.round(sample.altitude_ft) + ' ft' : ''}`, { direction: 'top' });
+      visible.push({ label, sample });
+    });
+    el('adsbTimelineCurrent').textContent = utcLabel(epoch);
+    el('adsbAircraftList').innerHTML = visible
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+      .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
+      .join('') || '<div class="adsb-muted">No aircraft sample within 120 seconds of selected time.</div>';
+  }
+
+  function applyDashboard(data) {
+    if (!data || !data.ok) return;
+    dashboard = data;
+    updateGrowth(data);
+    updateTargets(data);
+    updateMap(data);
+  }
+
+  async function loadDashboard() {
+    const target = encodeURIComponent(el('adsbTargetSelect').value || 'ktrm_live');
+    const hours = encodeURIComponent(el('adsbHoursInput').value || '6');
+    const response = await fetch(`/admin/api/adsb_archive_dashboard.php?target=${target}&hours=${hours}`, { headers: { Accept: 'application/json' } });
+    const data = await response.json();
+    applyDashboard(data);
+  }
+
+  el('adsbTimeline').addEventListener('input', (event) => renderAtTime(Number(event.target.value || 0)));
+  el('adsbTargetSelect').addEventListener('change', loadDashboard);
+  el('adsbReloadButton').addEventListener('click', loadDashboard);
+  applyDashboard(dashboard);
+  refreshTimer = window.setInterval(() => {
+    loadDashboard().catch(() => {});
+  }, 10000);
+  window.addEventListener('beforeunload', () => {
+    if (refreshTimer) window.clearInterval(refreshTimer);
+  });
+})();
+</script>

@@ -83,6 +83,51 @@ final class AdsbTrafficArchiveService
     }
 
     /**
+     * @return array<string,mixed>
+     */
+    public function scheduleRecentLivePointCoverage(float $lat, float $lon, float $radiusNm, int $lookbackMinutes = 1, int $bucketSeconds = 60, string $scope = 'live_point'): array
+    {
+        $this->ensureTables();
+        $radiusNm = max(0.5, min(25.0, $radiusNm));
+        $bucketSeconds = max(60, min(900, $bucketSeconds));
+        $minutes = max(1, min(60, $lookbackMinutes));
+        $end = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $start = $end->modify('-' . $minutes . ' minutes');
+        $scope = substr(preg_replace('/[^a-zA-Z0-9_-]/', '_', $scope) ?: 'live_point', 0, 32);
+        $jobUuid = AuditEventService::uuid();
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_adsb_coverage_jobs
+              (job_uuid, scope, status, center_latitude, center_longitude, radius_nm, query_start_utc, query_end_utc, bucket_seconds, source_ref_type)
+            VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, 'live_adsb_recorder')
+        ");
+        $stmt->execute(array(
+            $jobUuid,
+            $scope,
+            $lat,
+            $lon,
+            $radiusNm,
+            $this->mysqlDate($start),
+            $this->mysqlDate($end),
+            $bucketSeconds,
+        ));
+        $jobId = (int)$this->pdo->lastInsertId();
+        $created = $this->createTilesForJob($jobId, $scope, $lat, $lon, $radiusNm, $start, $end, $bucketSeconds);
+        $this->pdo->prepare('UPDATE ipca_adsb_coverage_jobs SET tile_count = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?')
+            ->execute(array($created, $jobId));
+        return array(
+            'ok' => true,
+            'job_id' => $jobId,
+            'job_uuid' => $jobUuid,
+            'scope' => $scope,
+            'center_latitude' => $lat,
+            'center_longitude' => $lon,
+            'radius_nm' => $radiusNm,
+            'bucket_seconds' => $bucketSeconds,
+            'tiles_created' => $created,
+        );
+    }
+
+    /**
      * @param list<array{lat:float,lon:float}> $points
      * @return array<string,mixed>
      */
@@ -277,6 +322,229 @@ final class AdsbTrafficArchiveService
         ));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function dashboardData(string $targetId = 'ktrm_live', int $hours = 6): array
+    {
+        $this->ensureTables();
+        $hours = max(1, min(168, $hours));
+        $targets = $this->archiveTargets();
+        $target = $targets[0] ?? array('id' => 'ktrm_live', 'label' => 'KTRM Live', 'lat' => self::KTRM_LAT, 'lon' => self::KTRM_LON, 'radius_nm' => 25.0);
+        foreach ($targets as $candidate) {
+            if ((string)$candidate['id'] === $targetId) {
+                $target = $candidate;
+                break;
+            }
+        }
+        return array(
+            'ok' => true,
+            'generated_at_utc' => gmdate('Y-m-d H:i:s'),
+            'status' => $this->status(),
+            'growth' => $this->archiveGrowthStats($hours),
+            'targets' => $targets,
+            'selected_target' => $target,
+            'target_timeline' => $this->targetTimeline($target, $hours),
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function archiveTargets(): array
+    {
+        $targets = array(array(
+            'id' => 'ktrm_live',
+            'label' => 'KTRM Live Archive',
+            'type' => 'point_radius',
+            'lat' => self::KTRM_LAT,
+            'lon' => self::KTRM_LON,
+            'radius_nm' => 25.0,
+            'enabled' => true,
+            'source' => 'default',
+        ));
+        if (!$this->tablePresent('ipca_adsb_geographic_definitions')) {
+            return $targets;
+        }
+        $rows = $this->pdo->query("
+            SELECT id, definition_uuid, name, definition_type, configuration_json, enabled, live_monitoring_enabled, replay_query_enabled
+            FROM ipca_adsb_geographic_definitions
+            WHERE enabled = 1
+            ORDER BY name ASC, id ASC
+        ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        foreach ($rows as $row) {
+            $config = json_decode((string)($row['configuration_json'] ?? ''), true);
+            $config = is_array($config) ? $config : array();
+            $lat = $config['lat'] ?? $config['latitude'] ?? $config['center_latitude'] ?? null;
+            $lon = $config['lon'] ?? $config['longitude'] ?? $config['center_longitude'] ?? null;
+            $radius = $config['radius_nm'] ?? $config['radius'] ?? null;
+            if (!is_numeric($lat) || !is_numeric($lon) || !is_numeric($radius)) {
+                continue;
+            }
+            $targets[] = array(
+                'id' => 'geo_' . (int)$row['id'],
+                'definition_uuid' => (string)($row['definition_uuid'] ?? ''),
+                'label' => (string)($row['name'] ?? ('Target ' . (int)$row['id'])),
+                'type' => (string)($row['definition_type'] ?? 'point_radius'),
+                'lat' => (float)$lat,
+                'lon' => (float)$lon,
+                'radius_nm' => max(0.5, min(100.0, (float)$radius)),
+                'enabled' => !empty($row['enabled']),
+                'live_monitoring_enabled' => !empty($row['live_monitoring_enabled']),
+                'replay_query_enabled' => !empty($row['replay_query_enabled']),
+                'source' => 'ipca_adsb_geographic_definitions',
+            );
+        }
+        return $targets;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function archiveGrowthStats(int $hours): array
+    {
+        $sampleSchema = $this->columnsForTable('ipca_adsb_traffic_samples');
+        $liveExpr = !empty($sampleSchema['source_mode']) ? "SUM(source_mode = 'LIVE')" : '0';
+        $historicalExpr = !empty($sampleSchema['source_mode']) ? "SUM(source_mode = 'HISTORICAL')" : '0';
+        $summary = $this->pdo->query("
+            SELECT
+              COUNT(*) AS total_samples,
+              COUNT(DISTINCT aircraft_hex) AS unique_aircraft,
+              MIN(sample_time_utc) AS first_sample_utc,
+              MAX(sample_time_utc) AS newest_sample_utc
+            FROM ipca_adsb_traffic_samples
+        ")->fetch(PDO::FETCH_ASSOC) ?: array();
+        $recentStmt = $this->pdo->prepare("
+            SELECT
+              COUNT(*) AS recent_samples,
+              COUNT(DISTINCT aircraft_hex) AS recent_unique_aircraft,
+              {$liveExpr} AS live_samples,
+              {$historicalExpr} AS historical_samples
+            FROM ipca_adsb_traffic_samples
+            WHERE sample_time_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? HOUR)
+        ");
+        $recentStmt->execute(array($hours));
+        $recent = $recentStmt->fetch(PDO::FETCH_ASSOC) ?: array();
+        $bucketStmt = $this->pdo->prepare("
+            SELECT DATE_FORMAT(sample_time_utc, '%Y-%m-%d %H:%i:00') AS bucket_utc,
+                   COUNT(*) AS samples,
+                   COUNT(DISTINCT aircraft_hex) AS aircraft
+            FROM ipca_adsb_traffic_samples
+            WHERE sample_time_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? HOUR)
+            GROUP BY DATE_FORMAT(sample_time_utc, '%Y-%m-%d %H:%i:00')
+            ORDER BY bucket_utc ASC
+        ");
+        $bucketStmt->execute(array($hours));
+        $rawPayloads = $this->tablePresent('ipca_adsb_raw_payloads')
+            ? (int)$this->pdo->query('SELECT COUNT(*) FROM ipca_adsb_raw_payloads')->fetchColumn()
+            : 0;
+        return array(
+            'hours' => $hours,
+            'total_samples' => (int)($summary['total_samples'] ?? 0),
+            'unique_aircraft' => (int)($summary['unique_aircraft'] ?? 0),
+            'first_sample_utc' => $summary['first_sample_utc'] ?? null,
+            'newest_sample_utc' => $summary['newest_sample_utc'] ?? null,
+            'recent_samples' => (int)($recent['recent_samples'] ?? 0),
+            'recent_unique_aircraft' => (int)($recent['recent_unique_aircraft'] ?? 0),
+            'live_samples' => (int)($recent['live_samples'] ?? 0),
+            'historical_samples' => (int)($recent['historical_samples'] ?? 0),
+            'raw_payloads' => $rawPayloads,
+            'buckets' => $bucketStmt->fetchAll(PDO::FETCH_ASSOC) ?: array(),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $target
+     * @return array<string,mixed>
+     */
+    private function targetTimeline(array $target, int $hours): array
+    {
+        $sampleSchema = $this->columnsForTable('ipca_adsb_traffic_samples');
+        $sourceModeSelect = !empty($sampleSchema['source_mode']) ? 'source_mode' : "'UNKNOWN' AS source_mode";
+        $providerSelect = !empty($sampleSchema['provider']) ? 'provider' : "'' AS provider";
+        $lat = (float)($target['lat'] ?? self::KTRM_LAT);
+        $lon = (float)($target['lon'] ?? self::KTRM_LON);
+        $radiusNm = max(0.5, min(100.0, (float)($target['radius_nm'] ?? 25.0)));
+        $latDelta = $radiusNm / 60.0;
+        $lonDelta = $radiusNm / max(1.0, 60.0 * cos(deg2rad($lat)));
+        $stmt = $this->pdo->prepare("
+            SELECT sample_time_utc,
+                   aircraft_hex,
+                   callsign,
+                   latitude,
+                   longitude,
+                   altitude_ft,
+                   groundspeed_kt,
+                   track_deg,
+                   {$sourceModeSelect},
+                   {$providerSelect},
+                   (3440.065 * 2 * ASIN(SQRT(
+                     POWER(SIN(RADIANS(latitude - ?) / 2), 2)
+                     + COS(RADIANS(?)) * COS(RADIANS(latitude))
+                     * POWER(SIN(RADIANS(longitude - ?) / 2), 2)
+                   ))) AS distance_nm
+            FROM ipca_adsb_traffic_samples
+            WHERE sample_time_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? HOUR)
+              AND latitude BETWEEN ? AND ?
+              AND longitude BETWEEN ? AND ?
+            HAVING distance_nm <= ?
+            ORDER BY sample_time_utc ASC, aircraft_hex ASC
+            LIMIT 25000
+        ");
+        $stmt->execute(array($lat, $lat, $lon, $hours, $lat - $latDelta, $lat + $latDelta, $lon - $lonDelta, $lon + $lonDelta, $radiusNm));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $aircraft = array();
+        $startEpoch = null;
+        $endEpoch = null;
+        foreach ($rows as $row) {
+            $hex = strtolower(trim((string)($row['aircraft_hex'] ?? '')));
+            if ($hex === '') {
+                continue;
+            }
+            $epoch = strtotime((string)($row['sample_time_utc'] ?? '')) ?: null;
+            if ($epoch === null) {
+                continue;
+            }
+            $startEpoch = $startEpoch === null ? $epoch : min($startEpoch, $epoch);
+            $endEpoch = $endEpoch === null ? $epoch : max($endEpoch, $epoch);
+            if (!isset($aircraft[$hex])) {
+                $aircraft[$hex] = array(
+                    'hex' => $hex,
+                    'callsign' => trim((string)($row['callsign'] ?? '')),
+                    'provider' => (string)($row['provider'] ?? ''),
+                    'source_modes' => array(),
+                    'samples' => array(),
+                );
+            }
+            $mode = trim((string)($row['source_mode'] ?? 'UNKNOWN'));
+            if ($mode !== '' && !in_array($mode, $aircraft[$hex]['source_modes'], true)) {
+                $aircraft[$hex]['source_modes'][] = $mode;
+            }
+            if ($aircraft[$hex]['callsign'] === '' && trim((string)($row['callsign'] ?? '')) !== '') {
+                $aircraft[$hex]['callsign'] = trim((string)$row['callsign']);
+            }
+            $aircraft[$hex]['samples'][] = array(
+                'utc' => (string)$row['sample_time_utc'],
+                'epoch' => $epoch,
+                'lat' => (float)$row['latitude'],
+                'lon' => (float)$row['longitude'],
+                'altitude_ft' => is_numeric($row['altitude_ft'] ?? null) ? (float)$row['altitude_ft'] : null,
+                'groundspeed_kt' => is_numeric($row['groundspeed_kt'] ?? null) ? (float)$row['groundspeed_kt'] : null,
+                'track_deg' => is_numeric($row['track_deg'] ?? null) ? (float)$row['track_deg'] : null,
+                'distance_nm' => is_numeric($row['distance_nm'] ?? null) ? (float)$row['distance_nm'] : null,
+            );
+        }
+        return array(
+            'target' => $target,
+            'hours' => $hours,
+            'start_epoch' => $startEpoch,
+            'end_epoch' => $endEpoch,
+            'sample_count' => count($rows),
+            'aircraft_count' => count($aircraft),
+            'aircraft' => array_values($aircraft),
+        );
     }
 
     /**
@@ -939,5 +1207,12 @@ final class AdsbTrafficArchiveService
             $columns[(string)$column] = true;
         }
         return $columns;
+    }
+
+    private function tablePresent(string $table): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $stmt->execute(array($table));
+        return (int)$stmt->fetchColumn() > 0;
     }
 }
