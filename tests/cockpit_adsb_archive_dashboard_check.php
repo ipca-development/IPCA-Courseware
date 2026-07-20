@@ -79,9 +79,16 @@ $checks = array(
         && str_contains($files['page'], 'playbackStep')
         && str_contains($files['page'], 'enterLiveMode')
         && str_contains($files['page'], 'replayMode')
+        && str_contains($files['page'], 'const playbackSpeed = 1')
         && str_contains($files['page'], 'if (replayMode || playbackFrame !== null) return;')
         && str_contains($files['page'], 'targetChanged')
         && str_contains($files['page'], 'map.setView([lat, lon]'),
+    'admin UI avoids stale traffic holds and long fake interpolation' =>
+        str_contains($files['page'], 'replayTuning')
+        && str_contains($files['page'], 'maxInterpolationGap: 30')
+        && str_contains($files['page'], 'maxHoldSeconds: 20')
+        && str_contains($files['page'], 'trailPoints')
+        && str_contains($files['page'], 'Hold ${tuning.maxHoldSeconds}s'),
     'admin UI renders Leaflet map without provider-side calls' =>
         str_contains($files['page'], 'leaflet@1.9.4')
         && str_contains($files['page'], 'L.map')

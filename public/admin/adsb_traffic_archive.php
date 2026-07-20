@@ -250,7 +250,7 @@ VALUES
   let replayMode = false;
   let currentMapTargetKey = '';
   let targetMapsSignature = '';
-  const playbackSpeed = 8;
+  const playbackSpeed = 1;
 
   const el = (id) => document.getElementById(id);
   const fmt = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '--';
@@ -301,6 +301,15 @@ VALUES
     const y = Math.sin(lambda) * Math.cos(phi2);
     const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambda);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function replayTuning() {
+    const target = (dashboard && (dashboard.selected_target || (dashboard.target_timeline && dashboard.target_timeline.target))) || {};
+    const resolution = finite(target.resolution_seconds);
+    const highResolution = String(target.priority || '') === 'home' || (resolution !== null && resolution <= 15);
+    return highResolution
+      ? { maxInterpolationGap: 30, maxHoldSeconds: 20, trailSeconds: 60 }
+      : { maxInterpolationGap: 90, maxHoldSeconds: 45, trailSeconds: 120 };
   }
 
   function timelineBounds() {
@@ -600,15 +609,6 @@ VALUES
     const target = data.selected_target || timeline.target || {};
     if (!ensureMap(target)) return;
     trackLayer.clearLayers();
-    const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
-    aircraft.forEach((item) => {
-      const points = (Array.isArray(item.samples) ? item.samples : [])
-        .map((sample) => [finite(sample.lat), finite(sample.lon)])
-        .filter((point) => point[0] !== null && point[1] !== null);
-      if (points.length >= 2) {
-        L.polyline(points, { color: colorFor(item.hex), weight: 2, opacity: 0.35 }).addTo(trackLayer);
-      }
-    });
     const start = finite(timeline.start_epoch);
     const end = finite(timeline.end_epoch);
     const input = el('adsbTimeline');
@@ -631,7 +631,7 @@ VALUES
     updatePlaybackUi();
   }
 
-  function nearestSample(samples, epoch) {
+  function nearestSample(samples, epoch, maxHoldSeconds) {
     let best = null;
     let bestDelta = Infinity;
     (Array.isArray(samples) ? samples : []).forEach((sample) => {
@@ -643,10 +643,10 @@ VALUES
         bestDelta = delta;
       }
     });
-    return bestDelta <= 300 ? best : null;
+    return bestDelta <= maxHoldSeconds ? best : null;
   }
 
-  function interpolatedSample(samples, epoch) {
+  function interpolatedSample(samples, epoch, tuning) {
     const valid = (Array.isArray(samples) ? samples : [])
       .filter((sample) => finite(sample && sample.epoch) !== null && finite(sample && sample.lat) !== null && finite(sample && sample.lon) !== null)
       .sort((a, b) => Number(a.epoch) - Number(b.epoch));
@@ -667,10 +667,10 @@ VALUES
     if (before && after) {
       const beforeEpoch = finite(before.epoch);
       const afterEpoch = finite(after.epoch);
-      if (beforeEpoch === null || afterEpoch === null) return nearestSample(valid, epoch);
+      if (beforeEpoch === null || afterEpoch === null) return nearestSample(valid, epoch, tuning.maxHoldSeconds);
       if (beforeEpoch === afterEpoch) return { ...before, interpolated: false };
       const gap = afterEpoch - beforeEpoch;
-      if (gap > 900) return nearestSample(valid, epoch);
+      if (gap > tuning.maxInterpolationGap) return nearestSample(valid, epoch, tuning.maxHoldSeconds);
       const ratio = Math.max(0, Math.min(1, (epoch - beforeEpoch) / gap));
       const derivedTrack = bearingDegrees(before, after);
       const track = lerpAngle(before.track_deg ?? derivedTrack, after.track_deg ?? derivedTrack, ratio);
@@ -688,7 +688,19 @@ VALUES
       };
     }
 
-    return nearestSample(valid, epoch);
+    return nearestSample(valid, epoch, tuning.maxHoldSeconds);
+  }
+
+  function trailPoints(samples, epoch, tuning) {
+    const start = epoch - tuning.trailSeconds;
+    return (Array.isArray(samples) ? samples : [])
+      .filter((sample) => {
+        const sampleEpoch = finite(sample && sample.epoch);
+        return sampleEpoch !== null && sampleEpoch >= start && sampleEpoch <= epoch && finite(sample.lat) !== null && finite(sample.lon) !== null;
+      })
+      .sort((a, b) => Number(a.epoch) - Number(b.epoch))
+      .map((sample) => [finite(sample.lat), finite(sample.lon)])
+      .filter((point) => point[0] !== null && point[1] !== null);
   }
 
   function renderAtTime(epoch) {
@@ -702,8 +714,9 @@ VALUES
     currentLayer.clearLayers();
     const visible = [];
     const showLabels = Boolean(el('adsbTrafficLabelsToggle') && el('adsbTrafficLabelsToggle').checked);
+    const tuning = replayTuning();
     aircraft.forEach((item) => {
-      const sample = interpolatedSample(item.samples, epoch);
+      const sample = interpolatedSample(item.samples, epoch, tuning);
       if (!sample) return;
       const alt = finite(sample.altitude_ft);
       if (belowOnly && (alt === null || alt >= 10000)) return;
@@ -712,12 +725,16 @@ VALUES
       if (lat === null || lon === null) return;
       const label = String(item.callsign || item.hex || '').trim().toUpperCase();
       const color = colorFor(item.hex);
+      const trail = trailPoints(item.samples, epoch, tuning);
+      if (trail.length >= 2) {
+        L.polyline(trail, { color, weight: 3, opacity: 0.42 }).addTo(currentLayer);
+      }
       L.marker([lat, lon], { icon: aircraftIcon(item, sample, color, showLabels) })
         .addTo(currentLayer);
       visible.push({ label, sample, displayType: aircraftDisplayType(item, sample) });
     });
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
-    el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft${belowOnly ? ' below 10,000 ft' : ''} near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
+    el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft${belowOnly ? ' below 10,000 ft' : ''} near ${utcLabel(epoch)}. Hold ${tuning.maxHoldSeconds}s, interpolate ${tuning.maxInterpolationGap}s.`;
     el('adsbAircraftList').innerHTML = visible
       .sort((a, b) => String(a.label).localeCompare(String(b.label)))
       .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong> <span class="adsb-muted">${entry.displayType.label}</span><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)

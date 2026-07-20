@@ -52,6 +52,13 @@ $checks = array(
         str_contains($files['archive'], 'refusing to fill historical archive bucket with a live snapshot')
         && str_contains($files['archive'], 'markHistoricalTilesProviderNotConfigured')
         && str_contains($files['archive'], 'LIVE_SNAPSHOT_GRACE_SECONDS'),
+    'live ingestion preserves provider observation age for accurate replay timing' =>
+        str_contains($files['archive'], 'fetched_at_utc')
+        && str_contains($files['archive'], 'providerSeenAgeSeconds')
+        && str_contains($files['archive'], "'seen_pos'")
+        && str_contains($files['archive'], "'seen'")
+        && str_contains($files['archive'], 'providerObservedTime')
+        && str_contains($files['archive'], 'provider_seen_age_seconds'),
 );
 
 $failed = array();

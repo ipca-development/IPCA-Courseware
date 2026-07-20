@@ -857,6 +857,7 @@ final class AdsbTrafficArchiveService
         return array(
             'provider' => tv_adsb_provider(),
             'fetch_mode' => 'near_point_snapshot',
+            'fetched_at_utc' => gmdate('Y-m-d H:i:s'),
             'requested_bucket_start_utc' => (string)$tile['bucket_start_utc'],
             'requested_bucket_end_utc' => (string)$tile['bucket_end_utc'],
             'center_latitude' => $lat,
@@ -913,6 +914,7 @@ final class AdsbTrafficArchiveService
     {
         $items = is_array($payload['aircraft'] ?? null) ? $payload['aircraft'] : (is_array($payload['samples'] ?? null) ? $payload['samples'] : array());
         $fallbackSampleTime = $this->mysqlDate($this->utcDate((string)$tile['bucket_start_utc']));
+        $payloadFetchedAt = (string)($payload['fetched_at_utc'] ?? $fallbackSampleTime);
         $samples = array();
         foreach ($items as $item) {
             if (!is_array($item)) {
@@ -935,7 +937,10 @@ final class AdsbTrafficArchiveService
             $geoAltitudeFt = is_numeric($item['alt_geom'] ?? null) ? (float)$item['alt_geom'] : null;
             $callsign = substr(trim((string)($item['flight'] ?? $item['r'] ?? '')), 0, 32);
             $time = $item['time'] ?? $item['timestamp'] ?? $item['seen_utc'] ?? $item['sample_time_utc'] ?? null;
-            $sampleTime = $time !== null ? $this->providerSampleTime($time, $fallbackSampleTime) : $fallbackSampleTime;
+            $seenAgeSeconds = $this->providerSeenAgeSeconds($item);
+            $sampleTime = $time !== null
+                ? $this->providerSampleTime($time, $fallbackSampleTime)
+                : $this->providerObservedTime($payloadFetchedAt, $seenAgeSeconds, $fallbackSampleTime);
             $providerRecordKey = hash('sha256', implode('|', array(
                 tv_adsb_provider(),
                 self::SOURCE_MODE_LIVE,
@@ -987,6 +992,7 @@ final class AdsbTrafficArchiveService
                     'source_mode' => self::SOURCE_MODE_LIVE,
                     'altitude_source' => $baroAltitudeFt !== null ? 'baro' : ($geoAltitudeFt !== null ? 'geo' : 'unknown'),
                     'position_source' => isset($item['type']) ? (string)$item['type'] : 'unknown',
+                    'provider_seen_age_seconds' => $seenAgeSeconds,
                 )),
                 'observation_fingerprint' => $sampleHash,
             );
@@ -1001,6 +1007,29 @@ final class AdsbTrafficArchiveService
         }
         $ts = strtotime((string)$time);
         return $ts !== false ? gmdate('Y-m-d H:i:s', $ts) : $fallback;
+    }
+
+    /**
+     * @param array<string,mixed> $item
+     */
+    private function providerSeenAgeSeconds(array $item): ?float
+    {
+        foreach (array('seen_pos', 'seen') as $field) {
+            if (isset($item[$field]) && is_numeric($item[$field])) {
+                return max(0.0, (float)$item[$field]);
+            }
+        }
+        return null;
+    }
+
+    private function providerObservedTime(string $fetchedAtUtc, ?float $seenAgeSeconds, string $fallback): string
+    {
+        $fetchedAt = strtotime($fetchedAtUtc);
+        if ($fetchedAt === false) {
+            return $fallback;
+        }
+        $age = $seenAgeSeconds !== null ? min(3600, max(0, (int)round($seenAgeSeconds))) : 0;
+        return gmdate('Y-m-d H:i:s', $fetchedAt - $age);
     }
 
     /**
