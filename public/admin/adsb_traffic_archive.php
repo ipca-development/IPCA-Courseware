@@ -316,7 +316,9 @@ cw_header('ADS-B Traffic Archive');
     if (targetMarker) map.removeLayer(targetMarker);
     targetMarker = L.marker([lat, lon]).addTo(map).bindTooltip(String((target && target.label) || 'Target'));
     targetCircle = L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.05 }).addTo(map);
-    map.fitBounds(targetCircle.getBounds(), { padding: [24, 24] });
+    const latDelta = radiusNm / 60;
+    const lonDelta = radiusNm / Math.max(1, 60 * Math.cos(lat * Math.PI / 180));
+    map.fitBounds([[lat - latDelta, lon - lonDelta], [lat + latDelta, lon + lonDelta]], { padding: [24, 24] });
     setTimeout(() => map.invalidateSize(), 50);
     return true;
   }
