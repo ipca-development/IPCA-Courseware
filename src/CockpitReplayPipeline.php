@@ -1654,7 +1654,9 @@ final class CockpitReplayPipeline
     private function classifyG3xAlerts(array $g3xPoints, array $catalog): array
     {
         $trimRange = $this->trimRangeFromG3xPoints($g3xPoints);
-        $trimRangeJson = $trimRange !== null ? json_encode($trimRange, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '';
+        $trimRangeJson = $trimRange !== null
+            ? (json_encode($trimRange, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: 'null')
+            : 'null';
         foreach ($g3xPoints as &$point) {
             $rawAlerts = is_array($point['system_alerts_raw'] ?? null) ? $point['system_alerts_raw'] : array();
             $alerts = array();
@@ -1691,10 +1693,8 @@ final class CockpitReplayPipeline
                 }
                 return strcmp((string)($a['text'] ?? ''), (string)($b['text'] ?? ''));
             });
-            $point['system_alerts_json'] = $alerts !== array()
-                ? (json_encode($alerts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '')
-                : '';
-            $point['trim_range_json'] = $trimRangeJson !== false ? $trimRangeJson : '';
+            $point['system_alerts_json'] = json_encode($alerts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]';
+            $point['trim_range_json'] = $trimRangeJson;
         }
         unset($point);
         return $g3xPoints;
