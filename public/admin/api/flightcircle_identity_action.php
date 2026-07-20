@@ -22,6 +22,22 @@ try {
     $mappingId = max(0, (int)($_POST['mapping_id'] ?? 0));
     $actorId = (int)($_SESSION['user_id'] ?? 0) ?: null;
     $service = new FlightCircleHistoricalImportService($pdo);
+    if ($action === 'bulk_create_users') {
+        $mappingIds = array_values(array_filter(array_map('intval', (array)($_POST['mapping_ids'] ?? array()))));
+        if ($mappingIds === array()) {
+            throw new RuntimeException('Select at least one user suggestion.');
+        }
+        $created = array();
+        $failed = array();
+        foreach ($mappingIds as $id) {
+            try {
+                $created[] = $service->createUserForIdentityMapping($id, $actorId);
+            } catch (Throwable $e) {
+                $failed[] = array('mapping_id' => $id, 'error' => $e->getMessage());
+            }
+        }
+        flightcircle_identity_json(200, array('ok' => true, 'created_count' => count($created), 'failed_count' => count($failed), 'created' => $created, 'failed' => $failed));
+    }
     if ($action === 'create_user') {
         flightcircle_identity_json(200, $service->createUserForIdentityMapping($mappingId, $actorId));
     }

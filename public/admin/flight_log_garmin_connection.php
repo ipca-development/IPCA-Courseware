@@ -931,13 +931,19 @@ cw_header('Garmin Sync Agent');
       <?php endif; ?>
       <?php if (($flightCircleStatus['identity_suggestions'] ?? array()) !== array()): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
-          <h4 style="margin:0 0 8px">Unmatched User Suggestions</h4>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <h4 style="margin:0">Unmatched User Suggestions</h4>
+            <div class="garmin-actions">
+              <button type="button" class="secondary" data-fc-bulk-create-users>Create selected users</button>
+            </div>
+          </div>
           <p class="garmin-muted">Create a new IPCA.training user from the source name, or map the source name to an existing user. Once mapped, the suggestion disappears and related crew/logbook proposals receive the correct user ID.</p>
           <table class="garmin-table">
-            <thead><tr><th>Source Name</th><th>Parsed Name</th><th>Context</th><th>Status</th><th>Create</th><th>Map Existing</th></tr></thead>
+            <thead><tr><th style="width:4%"><input type="checkbox" data-fc-select-all-identities></th><th>Source Name</th><th>Parsed Name</th><th>Context</th><th>Status</th><th>Create</th><th>Map Existing</th></tr></thead>
             <tbody>
               <?php foreach (($flightCircleStatus['identity_suggestions'] ?? array()) as $identity): ?>
                 <tr>
+                  <td><input type="checkbox" data-fc-identity-checkbox value="<?= (int)$identity['id'] ?>"></td>
                   <td><?= h((string)$identity['source_name']) ?></td>
                   <td><?= h(trim((string)$identity['parsed_first_name'] . ' ' . (string)$identity['parsed_middle_name'] . ' ' . (string)$identity['parsed_last_name'])) ?></td>
                   <td><?= h((string)$identity['suggested_role_context']) ?></td>
@@ -1589,7 +1595,11 @@ cw_header('Garmin Sync Agent');
   async function postFlightCircleIdentity(action, mappingId, userId) {
     const body = new FormData();
     body.append('action', action);
-    body.append('mapping_id', String(mappingId));
+    if (Array.isArray(mappingId)) {
+      mappingId.forEach(id => body.append('mapping_ids[]', String(id)));
+    } else {
+      body.append('mapping_id', String(mappingId));
+    }
     if (userId) body.append('user_id', String(userId));
     const response = await fetch('/admin/api/flightcircle_identity_action.php', {
       method: 'POST',
@@ -1601,6 +1611,33 @@ cw_header('Garmin Sync Agent');
       throw new Error(payload.error || ('Identity action returned HTTP ' + response.status));
     }
     return payload;
+  }
+  const fcSelectAllIdentities = document.querySelector('[data-fc-select-all-identities]');
+  const fcIdentityBoxes = () => Array.from(document.querySelectorAll('[data-fc-identity-checkbox]'));
+  if (fcSelectAllIdentities) {
+    fcSelectAllIdentities.addEventListener('change', () => fcIdentityBoxes().forEach(box => {
+      box.checked = fcSelectAllIdentities.checked;
+    }));
+  }
+  const fcBulkCreate = document.querySelector('[data-fc-bulk-create-users]');
+  if (fcBulkCreate) {
+    fcBulkCreate.addEventListener('click', async () => {
+      const ids = fcIdentityBoxes().filter(box => box.checked).map(box => Number(box.value || 0)).filter(Boolean);
+      if (ids.length === 0) {
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Select at least one user suggestion first.';
+        return;
+      }
+      fcBulkCreate.disabled = true;
+      if (fcIdentityMessage) fcIdentityMessage.textContent = 'Creating ' + ids.length.toLocaleString() + ' users...';
+      try {
+        const result = await postFlightCircleIdentity('bulk_create_users', ids);
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Created ' + Number(result.created_count || 0).toLocaleString() + ' users. Failed ' + Number(result.failed_count || 0).toLocaleString() + '. Refreshing...';
+        setTimeout(() => window.location.reload(), 900);
+      } catch (error) {
+        if (fcIdentityMessage) fcIdentityMessage.textContent = 'Bulk create failed: ' + error.message;
+        fcBulkCreate.disabled = false;
+      }
+    });
   }
   document.querySelectorAll('[data-fc-create-user]').forEach(button => {
     button.addEventListener('click', async () => {

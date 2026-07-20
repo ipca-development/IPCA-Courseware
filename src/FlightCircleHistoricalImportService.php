@@ -779,7 +779,7 @@ final class FlightCircleHistoricalImportService
 
     private function uniqueMigrationEmail(string $displayName, int $mappingId): string
     {
-        $base = strtolower(trim(preg_replace('/[^a-z0-9]+/i', '.', $displayName) ?? 'flightcircle.user'), '.');
+        $base = strtolower(trim(preg_replace('/[^a-z0-9]+/i', '.', $displayName) ?? 'flightcircle.user', '.'));
         if ($base === '') {
             $base = 'flightcircle.user';
         }

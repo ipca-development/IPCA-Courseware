@@ -57,8 +57,10 @@ $checks = array(
         str_contains($files['flightcircle_service'], 'createUserForIdentityMapping')
         && str_contains($files['flightcircle_service'], 'mapIdentityToExistingUser')
         && str_contains($files['identity_api'], "action === 'create_user'")
+        && str_contains($files['identity_api'], "action === 'bulk_create_users'")
         && str_contains($files['identity_api'], "action === 'map_existing'")
         && str_contains($files['admin_page'], 'data-fc-create-user')
+        && str_contains($files['admin_page'], 'data-fc-bulk-create-users')
         && str_contains($files['admin_page'], 'data-fc-map-existing'),
 
     'AL172M2 creates simulator proposals and not aircraft operation ledgers' =>
