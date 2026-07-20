@@ -2398,6 +2398,7 @@ cw_header('Cockpit Recorder Replay');
   let sessionAudioSegments = [];
   let sessionAudioState = { playing: false, startedMs: 0, startedT: 0, currentSegmentId: null };
   let replaySpeed = 1;
+  let normalReferenceViewport = null;
 
   const CAMERA_DEFAULTS = {
     rangeM: 125,
@@ -2622,15 +2623,38 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const isReplayFullscreen = () => root && (document.fullscreenElement === root || document.webkitFullscreenElement === root);
+  const actualReplayViewport = () => {
+    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
+    return {
+      width: Number(container && container.clientWidth) || 0,
+      height: Number(container && container.clientHeight) || 0,
+    };
+  };
+  function captureNormalReferenceViewport() {
+    if (isReplayFullscreen()) return;
+    const viewport = actualReplayViewport();
+    if (viewport.width > 0 && viewport.height > 0) {
+      normalReferenceViewport = viewport;
+    }
+  }
+  function visualReferenceViewport() {
+    const actual = actualReplayViewport();
+    if (isReplayFullscreen() && normalReferenceViewport && normalReferenceViewport.width > 0 && normalReferenceViewport.height > 0) {
+      return normalReferenceViewport;
+    }
+    if (actual.width > 0 && actual.height > 0) {
+      normalReferenceViewport = actual;
+    }
+    return actual;
+  }
   const syntheticVisionHorizontalFovDeg = () => clamp(
     firstFinite(cameraCalibration && cameraCalibration.fovDeg, SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg),
     35,
     100
   );
   const syntheticVisionFovState = () => {
-    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
-    const width = Number(container && container.clientWidth);
-    const height = Number(container && container.clientHeight);
+    const { width, height } = visualReferenceViewport();
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       const fallbackHorizontalFovDeg = syntheticVisionHorizontalFovDeg();
       return {
@@ -4609,23 +4633,26 @@ cw_header('Cockpit Recorder Replay');
       setElementHidden(horizonLine, true);
       return;
     }
-    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
-    const width = Number(container && container.clientWidth);
-    const height = Number(container && container.clientHeight);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    const actualViewport = actualReplayViewport();
+    const referenceViewport = visualReferenceViewport();
+    const width = actualViewport.width;
+    const height = actualViewport.height;
+    const refHeight = referenceViewport.height;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(refHeight) || width <= 0 || height <= 0 || refHeight <= 0) {
       setElementHidden(horizonLine, true);
       return;
     }
     const dbg = currentCameraDebug || {};
     const pitchDeg = firstFinite(view.pitch, dbg.uncalibratedPitchDeg, dbg.pitchDegUsed, 0) || 0;
     const rollDeg = firstFinite(view.roll, dbg.uncalibratedRollDeg, dbg.rollDegUsed, 0) || 0;
-    const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
-    const halfHeight = height / 2;
+    const verticalFovDeg = Math.max(1, firstFinite(dbg.verticalFovDeg, dbg.activeVerticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
+    const halfHeight = refHeight / 2;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
     const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
-    const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, height - 90);
+    const referenceY = clamp(refHeight * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, refHeight - 90);
     const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
-    const y = clamp(yellowReferenceY + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
+    const scaleY = height / refHeight;
+    const y = clamp((yellowReferenceY + pitchOffsetPx + horizonOffsetPx) * scaleY, -height, height * 2);
     setElementHidden(horizonLine, false);
     horizonLine.style.top = `${y}px`;
     horizonLine.style.transform = `translate(-50%, -50%) rotate(${-rollDeg}deg)`;
@@ -4649,10 +4676,13 @@ cw_header('Cockpit Recorder Replay');
       lastValidFpvReplayT = null;
       return;
     }
-    const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
-    const width = Number(container && container.clientWidth);
-    const height = Number(container && container.clientHeight);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    const actualViewport = actualReplayViewport();
+    const referenceViewport = visualReferenceViewport();
+    const actualWidth = actualViewport.width;
+    const actualHeight = actualViewport.height;
+    const width = referenceViewport.width;
+    const height = referenceViewport.height;
+    if (!Number.isFinite(actualWidth) || !Number.isFinite(actualHeight) || !Number.isFinite(width) || !Number.isFinite(height) || actualWidth <= 0 || actualHeight <= 0 || width <= 0 || height <= 0) {
       setElementHidden(attitudeOverlay, true);
       attitudeOverlay.innerHTML = '';
       displayAttitudeYellowReferenceX = null;
@@ -4666,10 +4696,12 @@ cw_header('Cockpit Recorder Replay');
       lastValidFpvReplayT = null;
       return;
     }
+    const scaleX = actualWidth / width;
+    const scaleY = actualHeight / height;
     const dbg = currentCameraDebug || {};
     const pitchDeg = firstFinite(view.pitch, dbg.uncalibratedPitchDeg, dbg.pitchDegUsed, 0) || 0;
     const rollDeg = firstFinite(view.roll, dbg.uncalibratedRollDeg, dbg.rollDegUsed, 0) || 0;
-    const verticalFovDeg = Math.max(1, firstFinite(dbg.activeVerticalFovDeg, dbg.verticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
+    const verticalFovDeg = Math.max(1, firstFinite(dbg.verticalFovDeg, dbg.activeVerticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = height / 2;
     const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
@@ -4679,16 +4711,16 @@ cw_header('Cockpit Recorder Replay');
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
     const airspeedRect = instrumentAnchorRect(airspeedTape);
     const altimeterRect = instrumentAnchorRect(altimeterStack);
-    const airspeedWidth = airspeedRect ? airspeedRect.width : 118;
+    const airspeedWidth = airspeedRect ? airspeedRect.width / scaleX : 118;
     const tapeMargin = airspeedWidth * 0.8;
-    const arcLeft = airspeedRect ? airspeedRect.right - rootRect.left + tapeMargin : width * 0.23;
-    const arcRight = altimeterRect ? altimeterRect.left - rootRect.left - tapeMargin : width * 0.77;
+    const arcLeft = airspeedRect ? (airspeedRect.right - rootRect.left) / scaleX + tapeMargin : width * 0.23;
+    const arcRight = altimeterRect ? (altimeterRect.left - rootRect.left) / scaleX - tapeMargin : width * 0.77;
     const arcSpan = Math.max(220, arcRight - arcLeft);
     const centerX = Number.isFinite(arcLeft) && Number.isFinite(arcRight) && arcRight > arcLeft
       ? (arcLeft + arcRight) / 2
       : width / 2;
     if (root) {
-      root.style.setProperty('--attitude-center-x', `${centerX.toFixed(1)}px`);
+      root.style.setProperty('--attitude-center-x', `${(centerX * scaleX).toFixed(1)}px`);
     }
     const attitudeRollArcScale = 0.6;
     const attitudePitchMarkScale = 0.5;
@@ -4707,7 +4739,7 @@ cw_header('Cockpit Recorder Replay');
         : '';
       return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
-    const tapeTopY = airspeedRect ? Math.max(8, airspeedRect.top - rootRect.top) : 72;
+    const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
     const arcCenterY = tapeTopY + (arcRadius * attitudeRollArcScale);
     const arcPoints = [];
@@ -4824,6 +4856,8 @@ cw_header('Cockpit Recorder Replay');
       displayFdPitchCommandDeg = null;
     }
     const signature = [
+      Math.round(actualWidth),
+      Math.round(actualHeight),
       Math.round(width),
       Math.round(height),
       Math.round(horizonY),
@@ -4851,6 +4885,7 @@ cw_header('Cockpit Recorder Replay');
     }
     attitudeOverlaySignature = signature;
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
+    attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
@@ -4972,6 +5007,7 @@ cw_header('Cockpit Recorder Replay');
       return;
     }
     if (!root) return;
+    captureNormalReferenceViewport();
     const request = root.requestFullscreen || root.webkitRequestFullscreen;
     if (request) request.call(root);
   }
@@ -4981,6 +5017,17 @@ cw_header('Cockpit Recorder Replay');
     const isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
     fullscreenButton.classList.toggle('is-active', isFullscreen);
     fullscreenButton.setAttribute('aria-label', isFullscreen ? 'Exit full screen' : 'Toggle full screen');
+  }
+
+  function handleFullscreenChange() {
+    syncFullscreenButton();
+    if (!isReplayFullscreen()) {
+      captureNormalReferenceViewport();
+    }
+    window.setTimeout(() => {
+      attitudeOverlaySignature = '';
+      safeRenderCesium(true);
+    }, 50);
   }
 
   function updateCameraControlLabels() {
@@ -7100,8 +7147,8 @@ cw_header('Cockpit Recorder Replay');
       animationFrame = requestAnimationFrame(animatePlayback);
     }
   });
-  document.addEventListener('fullscreenchange', syncFullscreenButton);
-  document.addEventListener('webkitfullscreenchange', syncFullscreenButton);
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
   window.addEventListener('keydown', (event) => {
     if (event.code !== 'Space' && event.key !== ' ') return;
     const target = event.target;

@@ -12,6 +12,7 @@ final class AdsbTrafficArchiveService
     private const KTRM_RADIUS_NM = 15.0;
     private const DEFAULT_BUCKET_SECONDS = 300;
     private const LIVE_SNAPSHOT_GRACE_SECONDS = 900;
+    private const SOURCE_MODE_LIVE = 'LIVE';
 
     public function __construct(private PDO $pdo)
     {
@@ -165,17 +166,7 @@ final class AdsbTrafficArchiveService
             $rawPayloadId = $this->storeRawPayload($payload, $row);
             $samples = $this->normalizeProviderPayload($payload, $row, $rawPayloadId);
             $inserted = $this->storeTrafficSamples($samples);
-            $this->pdo->prepare("
-                UPDATE ipca_adsb_coverage_tiles
-                SET status = 'ready',
-                    raw_payload_id = ?,
-                    sample_count = ?,
-                    empty_result = ?,
-                    last_error = NULL,
-                    fetched_at = CURRENT_TIMESTAMP(3),
-                    updated_at = CURRENT_TIMESTAMP(3)
-                WHERE id = ?
-            ")->execute(array($rawPayloadId, count($samples), count($samples) === 0 ? 1 : 0, (int)$row['id']));
+            $this->markTileReady((int)$row['id'], $rawPayloadId, count($samples), $inserted);
             $this->refreshJobStats((int)($row['job_id'] ?? 0));
             return array('ok' => true, 'status' => 'ready', 'tile_id' => (int)$row['id'], 'samples' => count($samples), 'inserted' => $inserted);
         } catch (DomainException $e) {
@@ -496,9 +487,20 @@ final class AdsbTrafficArchiveService
             }
             $alt = $item['alt_baro'] ?? $item['alt_geom'] ?? null;
             $altitudeFt = is_numeric($alt) ? (float)$alt : null;
+            $baroAltitudeFt = is_numeric($item['alt_baro'] ?? null) ? (float)$item['alt_baro'] : null;
+            $geoAltitudeFt = is_numeric($item['alt_geom'] ?? null) ? (float)$item['alt_geom'] : null;
             $callsign = substr(trim((string)($item['flight'] ?? $item['r'] ?? '')), 0, 32);
             $time = $item['time'] ?? $item['timestamp'] ?? $item['seen_utc'] ?? $item['sample_time_utc'] ?? null;
             $sampleTime = $time !== null ? $this->providerSampleTime($time, $fallbackSampleTime) : $fallbackSampleTime;
+            $providerRecordKey = hash('sha256', implode('|', array(
+                tv_adsb_provider(),
+                self::SOURCE_MODE_LIVE,
+                (string)($tile['id'] ?? ''),
+                $hex,
+                $sampleTime,
+                round($lat, 5),
+                round($lon, 5),
+            )));
             $sampleHash = hash('sha256', implode('|', array(
                 tv_adsb_provider(),
                 $hex,
@@ -509,6 +511,9 @@ final class AdsbTrafficArchiveService
             )));
             $samples[] = array(
                 'provider' => tv_adsb_provider(),
+                'provider_record_key' => $providerRecordKey,
+                'source_mode' => self::SOURCE_MODE_LIVE,
+                'icao24' => $hex,
                 'raw_payload_id' => $rawPayloadId,
                 'sample_time_utc' => $sampleTime,
                 'aircraft_hex' => $hex,
@@ -516,12 +521,30 @@ final class AdsbTrafficArchiveService
                 'latitude' => $lat,
                 'longitude' => $lon,
                 'altitude_ft' => $altitudeFt,
+                'baro_altitude_ft' => $baroAltitudeFt,
+                'geo_altitude_ft' => $geoAltitudeFt,
+                'on_ground' => isset($item['ground']) ? (bool)$item['ground'] : (isset($item['onground']) ? (bool)$item['onground'] : null),
                 'groundspeed_kt' => is_numeric($item['gs'] ?? null) ? (float)$item['gs'] : null,
                 'track_deg' => is_numeric($item['track'] ?? null) ? (float)$item['track'] : null,
+                'true_heading_deg' => is_numeric($item['true_heading'] ?? null) ? (float)$item['true_heading'] : null,
                 'vertical_speed_fpm' => is_numeric($item['baro_rate'] ?? null) ? (float)$item['baro_rate'] : null,
+                'squawk' => isset($item['squawk']) ? substr(trim((string)$item['squawk']), 0, 16) : null,
+                'category' => isset($item['category']) ? substr(trim((string)$item['category']), 0, 32) : null,
+                'position_source' => isset($item['type']) ? substr(trim((string)$item['type']), 0, 64) : null,
+                'nic' => is_numeric($item['nic'] ?? null) ? (int)$item['nic'] : null,
+                'nac_p' => is_numeric($item['nac_p'] ?? null) ? (int)$item['nac_p'] : null,
+                'sil' => is_numeric($item['sil'] ?? null) ? (int)$item['sil'] : null,
+                'emergency_status' => isset($item['emergency']) ? substr(trim((string)$item['emergency']), 0, 64) : null,
                 'source_distance_nm' => $distanceNm,
                 'raw_json' => AuditEventService::jsonEncode($item),
                 'sample_hash' => $sampleHash,
+                'normalization_version' => 'adsbexchange_live_v2',
+                'quality_flags_json' => AuditEventService::jsonEncode(array(
+                    'source_mode' => self::SOURCE_MODE_LIVE,
+                    'altitude_source' => $baroAltitudeFt !== null ? 'baro' : ($geoAltitudeFt !== null ? 'geo' : 'unknown'),
+                    'position_source' => isset($item['type']) ? (string)$item['type'] : 'unknown',
+                )),
+                'observation_fingerprint' => $sampleHash,
             );
         }
         return $samples;
@@ -544,32 +567,56 @@ final class AdsbTrafficArchiveService
         if ($samples === array()) {
             return 0;
         }
+        $schema = $this->columnsForTable('ipca_adsb_traffic_samples');
+        $columns = array_values(array_filter(array(
+            'provider',
+            !empty($schema['provider_record_key']) ? 'provider_record_key' : null,
+            !empty($schema['source_mode']) ? 'source_mode' : null,
+            !empty($schema['icao24']) ? 'icao24' : null,
+            'raw_payload_id',
+            !empty($schema['ingestion_batch_id']) ? 'ingestion_batch_id' : null,
+            'sample_time_utc',
+            'aircraft_hex',
+            'callsign',
+            'latitude',
+            'longitude',
+            'altitude_ft',
+            !empty($schema['baro_altitude_ft']) ? 'baro_altitude_ft' : null,
+            !empty($schema['geo_altitude_ft']) ? 'geo_altitude_ft' : null,
+            !empty($schema['on_ground']) ? 'on_ground' : null,
+            'groundspeed_kt',
+            'track_deg',
+            !empty($schema['true_heading_deg']) ? 'true_heading_deg' : null,
+            'vertical_speed_fpm',
+            !empty($schema['squawk']) ? 'squawk' : null,
+            !empty($schema['category']) ? 'category' : null,
+            !empty($schema['position_source']) ? 'position_source' : null,
+            !empty($schema['receiver_id']) ? 'receiver_id' : null,
+            !empty($schema['signal_quality']) ? 'signal_quality' : null,
+            !empty($schema['nic']) ? 'nic' : null,
+            !empty($schema['nac_p']) ? 'nac_p' : null,
+            !empty($schema['sil']) ? 'sil' : null,
+            !empty($schema['emergency_status']) ? 'emergency_status' : null,
+            'source_distance_nm',
+            'raw_json',
+            'sample_hash',
+            !empty($schema['normalization_version']) ? 'normalization_version' : null,
+            !empty($schema['quality_flags_json']) ? 'quality_flags_json' : null,
+            !empty($schema['observation_fingerprint']) ? 'observation_fingerprint' : null,
+        )));
         $stmt = $this->pdo->prepare("
             INSERT IGNORE INTO ipca_adsb_traffic_samples
-              (provider, raw_payload_id, sample_time_utc, aircraft_hex, callsign, latitude, longitude, altitude_ft,
-               groundspeed_kt, track_deg, vertical_speed_fpm, source_distance_nm, raw_json, sample_hash)
+              (" . implode(', ', $columns) . ")
             VALUES
-              (:provider, :raw_payload_id, :sample_time_utc, :aircraft_hex, :callsign, :latitude, :longitude, :altitude_ft,
-               :groundspeed_kt, :track_deg, :vertical_speed_fpm, :source_distance_nm, :raw_json, :sample_hash)
+              (:" . implode(', :', $columns) . ")
         ");
         $inserted = 0;
         foreach ($samples as $sample) {
-            $stmt->execute(array(
-                ':provider' => $sample['provider'],
-                ':raw_payload_id' => $sample['raw_payload_id'],
-                ':sample_time_utc' => $sample['sample_time_utc'],
-                ':aircraft_hex' => $sample['aircraft_hex'],
-                ':callsign' => $sample['callsign'],
-                ':latitude' => $sample['latitude'],
-                ':longitude' => $sample['longitude'],
-                ':altitude_ft' => $sample['altitude_ft'],
-                ':groundspeed_kt' => $sample['groundspeed_kt'],
-                ':track_deg' => $sample['track_deg'],
-                ':vertical_speed_fpm' => $sample['vertical_speed_fpm'],
-                ':source_distance_nm' => $sample['source_distance_nm'],
-                ':raw_json' => $sample['raw_json'],
-                ':sample_hash' => $sample['sample_hash'],
-            ));
+            $params = array();
+            foreach ($columns as $column) {
+                $params[':' . $column] = $sample[$column] ?? null;
+            }
+            $stmt->execute($params);
             $inserted += $stmt->rowCount() > 0 ? 1 : 0;
         }
         return $inserted;
@@ -606,21 +653,50 @@ final class AdsbTrafficArchiveService
         $json = AuditEventService::jsonEncode($payload);
         $sha256 = hash('sha256', $json);
         $path = $this->storeJsonPayload($sha256, $json);
+        $schema = $this->columnsForTable('ipca_adsb_raw_payloads');
+        $values = array(
+            'payload_uuid' => AuditEventService::uuid(),
+            'provider' => tv_adsb_provider(),
+            'source_mode' => self::SOURCE_MODE_LIVE,
+            'request_url' => (string)($payload['path'] ?? ''),
+            'request_json' => AuditEventService::jsonEncode(array('tile_id' => (int)$tile['id'], 'scope' => (string)$tile['scope'])),
+            'http_status' => null,
+            'content_type' => 'application/json',
+            'compression' => null,
+            'sha256' => $sha256,
+            'storage_path' => $path,
+            'byte_size' => strlen($json),
+            'metadata_json' => AuditEventService::jsonEncode(array(
+                'source_mode' => self::SOURCE_MODE_LIVE,
+                'tile_id' => (int)($tile['id'] ?? 0),
+                'scope' => (string)($tile['scope'] ?? ''),
+            )),
+        );
+        $columns = array_values(array_filter(array(
+            'payload_uuid',
+            'provider',
+            !empty($schema['source_mode']) ? 'source_mode' : null,
+            'request_url',
+            'request_json',
+            'http_status',
+            !empty($schema['content_type']) ? 'content_type' : null,
+            !empty($schema['compression']) ? 'compression' : null,
+            'sha256',
+            'storage_path',
+            'byte_size',
+            !empty($schema['metadata_json']) ? 'metadata_json' : null,
+        )));
         $stmt = $this->pdo->prepare("
             INSERT IGNORE INTO ipca_adsb_raw_payloads
-              (payload_uuid, provider, request_url, request_json, http_status, sha256, storage_path, byte_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (" . implode(', ', $columns) . ")
+            VALUES
+              (:" . implode(', :', $columns) . ")
         ");
-        $stmt->execute(array(
-            AuditEventService::uuid(),
-            tv_adsb_provider(),
-            (string)($payload['path'] ?? ''),
-            AuditEventService::jsonEncode(array('tile_id' => (int)$tile['id'], 'scope' => (string)$tile['scope'])),
-            null,
-            $sha256,
-            $path,
-            strlen($json),
-        ));
+        $params = array();
+        foreach ($columns as $column) {
+            $params[':' . $column] = $values[$column] ?? null;
+        }
+        $stmt->execute($params);
         $idStmt = $this->pdo->prepare('SELECT id FROM ipca_adsb_raw_payloads WHERE sha256 = ? LIMIT 1');
         $idStmt->execute(array($sha256));
         return (int)$idStmt->fetchColumn();
@@ -665,6 +741,45 @@ final class AdsbTrafficArchiveService
                 updated_at = CURRENT_TIMESTAMP(3)
             WHERE id = ?
         ")->execute(array((int)($row['total'] ?? 0), (int)($row['ready'] ?? 0), (int)($row['samples'] ?? 0), $remaining === 0 ? 'ready' : 'processing', $jobId));
+    }
+
+    private function markTileReady(int $tileId, int $rawPayloadId, int $returnedCount, int $insertedCount): void
+    {
+        $schema = $this->columnsForTable('ipca_adsb_coverage_tiles');
+        $sets = array(
+            "status = 'ready'",
+            'raw_payload_id = :raw_payload_id',
+            'sample_count = :sample_count',
+            'empty_result = :empty_result',
+            'last_error = NULL',
+            'fetched_at = CURRENT_TIMESTAMP(3)',
+            'updated_at = CURRENT_TIMESTAMP(3)',
+        );
+        $params = array(
+            ':raw_payload_id' => $rawPayloadId,
+            ':sample_count' => $returnedCount,
+            ':empty_result' => $returnedCount === 0 ? 1 : 0,
+            ':id' => $tileId,
+        );
+        $optional = array(
+            'result_status' => 'READY',
+            'returned_count' => $returnedCount,
+            'inserted_count' => $insertedCount,
+            'duplicate_count' => max(0, $returnedCount - $insertedCount),
+            'invalid_count' => 0,
+            'coverage_metrics_json' => AuditEventService::jsonEncode(array(
+                'returned_count' => $returnedCount,
+                'inserted_count' => $insertedCount,
+                'duplicate_count' => max(0, $returnedCount - $insertedCount),
+            )),
+        );
+        foreach ($optional as $column => $value) {
+            if (!empty($schema[$column])) {
+                $sets[] = $column . ' = :' . $column;
+                $params[':' . $column] = $value;
+            }
+        }
+        $this->pdo->prepare('UPDATE ipca_adsb_coverage_tiles SET ' . implode(', ', $sets) . ' WHERE id = :id')->execute($params);
     }
 
     private function coverageStatus(string $start, string $end, float $lat, float $lon, float $radiusNm): string
@@ -805,5 +920,24 @@ final class AdsbTrafficArchiveService
     private function mysqlDate(DateTimeImmutable $date): string
     {
         return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    }
+
+    /**
+     * @return array<string,bool>
+     */
+    private function columnsForTable(string $table): array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT COLUMN_NAME
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+        ');
+        $stmt->execute(array($table));
+        $columns = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: array() as $column) {
+            $columns[(string)$column] = true;
+        }
+        return $columns;
     }
 }
