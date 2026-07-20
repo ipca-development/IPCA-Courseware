@@ -41,6 +41,7 @@ $checks = array(
         && str_contains($files['page'], 'adsbGrowthChart')
         && str_contains($files['page'], 'adsbRecordingStatus')
         && str_contains($files['page'], 'adsbTargetMap')
+        && str_contains($files['page'], 'adsbMapStatus')
         && str_contains($files['page'], 'adsbTimeline')
         && str_contains($files['page'], 'adsbNewestButton')
         && str_contains($files['page'], 'adsb_archive_dashboard.php'),

@@ -111,6 +111,7 @@ cw_header('ADS-B Traffic Archive');
     <div class="adsb-map-layout">
       <div>
         <div id="adsbTargetMap" class="adsb-map"></div>
+        <div class="adsb-muted" id="adsbMapStatus" style="margin-top:6px">Loading archived traffic map...</div>
         <div style="margin-top:12px">
           <input id="adsbTimeline" class="adsb-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="ADS-B archive time scrubber">
           <div style="display:flex;justify-content:space-between;gap:10px" class="adsb-muted">
@@ -296,6 +297,10 @@ cw_header('ADS-B Traffic Archive');
   }
 
   function ensureMap(target) {
+    if (typeof L === 'undefined') {
+      el('adsbMapStatus').textContent = 'Leaflet map library did not load. Check browser/network blocking for unpkg.com.';
+      return false;
+    }
     if (!map) {
       map = L.map('adsbTargetMap', { scrollWheelZoom: true });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -312,12 +317,14 @@ cw_header('ADS-B Traffic Archive');
     targetMarker = L.marker([lat, lon]).addTo(map).bindTooltip(String((target && target.label) || 'Target'));
     targetCircle = L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.05 }).addTo(map);
     map.fitBounds(targetCircle.getBounds(), { padding: [24, 24] });
+    setTimeout(() => map.invalidateSize(), 50);
+    return true;
   }
 
   function updateMap(data) {
     const timeline = data && data.target_timeline ? data.target_timeline : {};
     const target = data.selected_target || timeline.target || {};
-    ensureMap(target);
+    if (!ensureMap(target)) return;
     trackLayer.clearLayers();
     const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
     aircraft.forEach((item) => {
@@ -341,6 +348,7 @@ cw_header('ADS-B Traffic Archive');
     el('adsbTargetSamples').textContent = fmt(timeline.sample_count);
     const radius = finite(target.radius_nm);
     el('adsbTargetSummary').textContent = `${target.label || target.id || 'Target'} · ${radius !== null ? radius.toFixed(1) : '--'} NM · ${fmt(timeline.aircraft_count)} aircraft`;
+    el('adsbMapStatus').textContent = `Loaded ${fmt(timeline.sample_count)} archived samples for ${fmt(timeline.aircraft_count)} aircraft.`;
     renderAtTime(Number(input.value || end || start || 0));
   }
 
@@ -362,6 +370,10 @@ cw_header('ADS-B Traffic Archive');
   function renderAtTime(epoch) {
     const timeline = dashboard && dashboard.target_timeline ? dashboard.target_timeline : {};
     const aircraft = Array.isArray(timeline.aircraft) ? timeline.aircraft : [];
+    if (!currentLayer) {
+      el('adsbMapStatus').textContent = 'Map layer is not ready yet.';
+      return;
+    }
     currentLayer.clearLayers();
     const visible = [];
     aircraft.forEach((item) => {
@@ -377,7 +389,15 @@ cw_header('ADS-B Traffic Archive');
         .bindTooltip(`${label}<br>${sample.utc || ''}<br>${sample.altitude_ft !== null ? Math.round(sample.altitude_ft) + ' ft' : ''}`, { direction: 'top' });
       visible.push({ label, sample });
     });
+    if (visible.length > 0 && map && currentLayer) {
+      const layers = currentLayer.getLayers();
+      if (layers.length > 0) {
+        const group = L.featureGroup(layers);
+        map.fitBounds(group.getBounds().pad(0.25), { maxZoom: 11 });
+      }
+    }
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
+    el('adsbMapStatus').textContent = `Showing ${visible.length} aircraft near ${utcLabel(epoch)}. Timeline contains ${fmt(timeline.sample_count)} samples.`;
     el('adsbAircraftList').innerHTML = visible
       .sort((a, b) => String(a.label).localeCompare(String(b.label)))
       .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
@@ -385,11 +405,19 @@ cw_header('ADS-B Traffic Archive');
   }
 
   function applyDashboard(data) {
-    if (!data || !data.ok) return;
+    if (!data || !data.ok) {
+      el('adsbMapStatus').textContent = data && data.error ? data.error : 'ADS-B dashboard data is unavailable.';
+      return;
+    }
     dashboard = data;
-    updateGrowth(data);
-    updateTargets(data);
-    updateMap(data);
+    try {
+      updateGrowth(data);
+      updateTargets(data);
+      updateMap(data);
+    } catch (error) {
+      el('adsbMapStatus').textContent = `Map render error: ${error && error.message ? error.message : error}`;
+      throw error;
+    }
   }
 
   async function loadDashboard() {
@@ -409,6 +437,9 @@ cw_header('ADS-B Traffic Archive');
     renderAtTime(Number(input.value || 0));
   });
   applyDashboard(dashboard);
+  loadDashboard().catch((error) => {
+    el('adsbMapStatus').textContent = `Dashboard API load failed: ${error && error.message ? error.message : error}`;
+  });
   refreshTimer = window.setInterval(() => {
     loadDashboard().catch(() => {});
   }, 10000);
