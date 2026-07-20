@@ -712,7 +712,10 @@ final class GarminHistoricalBackfillService
             }
             $params[] = $batchId;
         }
-        $sql = 'SELECT ' . $column . ' AS k, COUNT(*) AS c FROM ' . $table . $join . $where . ' GROUP BY ' . $column;
+        $qualifiedColumn = $table === 'ipca_garmin_historical_segments'
+            ? 'ipca_garmin_historical_segments.' . $column
+            : $column;
+        $sql = 'SELECT ' . $qualifiedColumn . ' AS k, COUNT(*) AS c FROM ' . $table . $join . $where . ' GROUP BY ' . $qualifiedColumn;
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
