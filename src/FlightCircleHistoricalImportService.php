@@ -209,7 +209,7 @@ final class FlightCircleHistoricalImportService
         }
         $displayName = trim($firstName . ' ' . ($middleName !== '' ? $middleName . ' ' : '') . $lastName);
         $roleContext = strtolower(trim((string)($mapping['suggested_role_context'] ?? '')));
-        $role = $roleContext === 'instructor' ? 'instructor' : 'student';
+        $role = $roleContext === 'instructor' ? 'supervisor' : 'student';
         $email = $this->uniqueMigrationEmail($displayName, $mappingId);
         $userId = $this->insertMigrationUser($firstName, $lastName, $displayName, $email, $role, $actorUserId);
         $this->pdo->prepare("
