@@ -31,7 +31,8 @@ try {
     }
     $tmpName = (string)($upload['tmp_name'] ?? '');
     $filename = (string)($upload['name'] ?? 'flightcircle.csv');
-    $result = (new FlightCircleHistoricalImportService($pdo))->importUploadedFile($tmpName, $filename, (int)($_SESSION['user_id'] ?? 0) ?: null);
+    $replaceActiveDataset = (string)($_POST['replace_active_dataset'] ?? '1') === '1';
+    $result = (new FlightCircleHistoricalImportService($pdo))->importUploadedFile($tmpName, $filename, (int)($_SESSION['user_id'] ?? 0) ?: null, $replaceActiveDataset);
     if ((string)($_POST['format'] ?? '') === 'json') {
         flightcircle_import_json(200, $result);
     }

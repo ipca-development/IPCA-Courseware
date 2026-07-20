@@ -19,6 +19,13 @@ function garmin_sync_table_exists(PDO $pdo, string $table): bool
     return (int)$stmt->fetchColumn() > 0;
 }
 
+function garmin_sync_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?');
+    $stmt->execute(array($table, $column));
+    return (int)$stmt->fetchColumn() > 0;
+}
+
 /**
  * @return array<int,array<string,mixed>>
  */
@@ -235,6 +242,7 @@ $hasHistoricalBackfill = garmin_sync_table_exists($pdo, 'ipca_garmin_historical_
 $hasFlightCircleMigration = garmin_sync_table_exists($pdo, 'ipca_flightcircle_import_batches');
 $hasFlightCircleMatches = garmin_sync_table_exists($pdo, 'ipca_flightcircle_garmin_matches');
 $hasFlightCircleStaging = garmin_sync_table_exists($pdo, 'ipca_flightcircle_staging_records');
+$hasFlightCircleActiveDataset = $hasFlightCircleMigration && garmin_sync_column_exists($pdo, 'ipca_flightcircle_import_batches', 'active_dataset');
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 $replayPayloadService = new GarminCsvReplayPayloadService($pdo);
@@ -355,6 +363,8 @@ if ($hasCsvFiles) {
         LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS id, NULL AS batch_id, NULL AS exact_duplicate_status, NULL AS parse_status, NULL AS classification, NULL AS review_status) hf ON 1 = 0
         LEFT JOIN (SELECT NULL AS id, NULL AS batch_uuid) hb ON 1 = 0
     ";
+    $flightCircleActiveFilter = $hasFlightCircleActiveDataset ? " AND COALESCE(b.active_dataset, 0) = 1" : "";
+    $flightCircleBatchJoin = $hasFlightCircleActiveDataset ? "INNER JOIN ipca_flightcircle_import_batches b ON b.id = st.batch_id" : "";
     $flightCircleJoin = ($hasFlightCircleMatches && $hasFlightCircleStaging) ? "
         LEFT JOIN (
           SELECT
@@ -367,7 +377,9 @@ if ($hasCsvFiles) {
             GROUP_CONCAT(DISTINCT NULLIF(st.reservation_type, '') ORDER BY st.reservation_type SEPARATOR ', ') AS fc_reservation_type
           FROM ipca_flightcircle_garmin_matches m
           INNER JOIN ipca_flightcircle_staging_records st ON st.id = m.staging_record_id
+          {$flightCircleBatchJoin}
           WHERE m.csv_file_id IS NOT NULL
+            {$flightCircleActiveFilter}
           GROUP BY m.csv_file_id
         ) fc ON fc.csv_file_id = f.id
     " : "
@@ -993,9 +1005,47 @@ cw_header('Garmin Sync Agent');
           <label class="garmin-kv"><span class="garmin-label">FlightCircle CSV</span><input name="flightcircle_csv" type="file" accept=".csv,text/csv" required style="width:100%;margin-top:6px"></label>
           <div class="garmin-kv"><span class="garmin-label">Resource rules</span><div class="garmin-muted" style="margin-top:6px">Aircraft: N446CS, N392EA, N641TH, N428EA, N153PC. AATD: AL172M2. Ignored: Classroom I/II, Apple Vision Pro, Exam Room, Main Office.</div></div>
           <div class="garmin-kv"><span class="garmin-label">Informational only</span><div class="garmin-muted" style="margin-top:6px">Training mission codes and FlightCircle routes do not drive authoritative logbook categories or airport detection.</div></div>
+          <label class="garmin-kv"><span class="garmin-label">Migration dataset</span><span style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><input type="checkbox" name="replace_active_dataset" value="1" checked><span>Replace active FlightCircle migration dataset. Older imports remain preserved but are superseded for Garmin enrichment.</span></span></label>
         </div>
         <div class="garmin-actions"><button type="submit">Import FlightCircle Historical CSV</button></div>
       </form>
+      <?php $fcActiveValidation = is_array($flightCircleStatus['active_validation'] ?? null) ? $flightCircleStatus['active_validation'] : array(); ?>
+      <?php if (!empty($fcActiveValidation['ready'])): ?>
+        <?php
+          $fcValidationSummary = is_array($fcActiveValidation['summary'] ?? null) ? $fcActiveValidation['summary'] : array();
+          $fcMissingDate = (int)($fcValidationSummary['missing_date_rows'] ?? 0);
+          $fcMissingTail = (int)($fcValidationSummary['missing_tail_rows'] ?? 0);
+          $fcMissingHobbs = (int)($fcValidationSummary['missing_hobbs_out_rows'] ?? 0);
+          $fcValidationOk = ($fcMissingDate + $fcMissingTail + $fcMissingHobbs) === 0;
+        ?>
+        <div class="garmin-kv" style="margin-top:14px;border-color:<?= $fcValidationOk ? '#bbf7d0' : '#fed7aa' ?>;background:<?= $fcValidationOk ? '#f0fdf4' : '#fff7ed' ?>">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div>
+              <div class="garmin-label">Active FlightCircle Dataset Validation</div>
+              <div class="garmin-muted" style="margin-top:4px">Only this active dataset is used for FlightCircle enrichment. Matching uses date, tail, and Hobbs-Out.</div>
+            </div>
+            <span class="garmin-badge <?= $fcValidationOk ? 'garmin-badge-ok' : 'garmin-badge-warn' ?>"><?= $fcValidationOk ? 'Ready for enrichment' : 'Needs import review' ?></span>
+          </div>
+          <div class="garmin-grid" style="margin-top:10px">
+            <div><span class="garmin-label">Batch</span><div class="garmin-value">#<?= (int)($fcActiveValidation['batch_id'] ?? 0) ?></div></div>
+            <div><span class="garmin-label">Total rows</span><div class="garmin-value"><?= number_format((int)($fcValidationSummary['total_rows'] ?? 0)) ?></div></div>
+            <div><span class="garmin-label">Aircraft rows</span><div class="garmin-value"><?= number_format((int)($fcValidationSummary['aircraft_rows'] ?? 0)) ?></div></div>
+            <div><span class="garmin-label">AATD rows</span><div class="garmin-value"><?= number_format((int)($fcValidationSummary['simulator_rows'] ?? 0)) ?></div></div>
+            <div><span class="garmin-label">Ignored rows</span><div class="garmin-value"><?= number_format((int)($fcValidationSummary['ignored_rows'] ?? 0)) ?></div></div>
+            <div><span class="garmin-label">Date range</span><div class="garmin-value"><?= h(substr((string)($fcValidationSummary['first_depart_local'] ?? ''), 0, 10) ?: '--') ?> to <?= h(substr((string)($fcValidationSummary['last_depart_local'] ?? ''), 0, 10) ?: '--') ?></div></div>
+            <div><span class="garmin-label">Missing date</span><div class="garmin-value"><?= number_format($fcMissingDate) ?></div></div>
+            <div><span class="garmin-label">Missing tail</span><div class="garmin-value"><?= number_format($fcMissingTail) ?></div></div>
+            <div><span class="garmin-label">Missing Hobbs-Out</span><div class="garmin-value"><?= number_format($fcMissingHobbs) ?></div></div>
+          </div>
+          <?php if (($fcActiveValidation['tail_counts'] ?? array()) !== array()): ?>
+            <div class="garmin-muted" style="margin-top:8px">Tail counts:
+              <?php foreach (array_slice((array)$fcActiveValidation['tail_counts'], 0, 10) as $tailCount): ?>
+                <span class="garmin-code"><?= h((string)($tailCount['tail_number'] ?? '--')) ?> <?= number_format((int)($tailCount['total'] ?? 0)) ?></span>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
       <div class="garmin-grid" style="margin-top:14px">
         <?php foreach (($flightCircleStatus['resources'] ?? array()) as $status => $count): ?>
           <div class="garmin-kv"><div class="garmin-label">Resource <?= h((string)$status) ?></div><div class="garmin-value"><?= number_format((int)$count) ?></div></div>
@@ -1008,11 +1058,20 @@ cw_header('Garmin Sync Agent');
         <div class="garmin-table-wrap" style="margin-top:14px">
           <h4 style="margin:0 0 8px">Recent FlightCircle Imports</h4>
           <table class="garmin-table">
-            <thead><tr><th>Batch</th><th>Rows</th><th>Aircraft</th><th>AATD</th><th>Ignored</th><th>Unknown</th><th>Identity Review</th><th>Status</th></tr></thead>
+            <thead><tr><th>Batch</th><th>Dataset</th><th>Rows</th><th>Aircraft</th><th>AATD</th><th>Ignored</th><th>Unknown</th><th>Identity Review</th><th>Status</th></tr></thead>
             <tbody>
               <?php foreach (($flightCircleStatus['batches'] ?? array()) as $batch): ?>
                 <tr>
                   <td><span class="garmin-code"><?= h(substr((string)$batch['batch_uuid'], 0, 8)) ?></span><br><span class="garmin-muted"><?= h((string)$batch['original_filename']) ?></span></td>
+                  <td>
+                    <?php if (!empty($batch['active_dataset'])): ?>
+                      <span class="garmin-badge garmin-badge-ok">Active</span>
+                    <?php elseif (!empty($batch['superseded_at'])): ?>
+                      <span class="garmin-badge garmin-badge-warn">Superseded</span>
+                    <?php else: ?>
+                      <span class="garmin-muted">Preserved</span>
+                    <?php endif; ?>
+                  </td>
                   <td><?= number_format((int)$batch['row_count']) ?></td>
                   <td><?= number_format((int)$batch['aircraft_row_count']) ?></td>
                   <td><?= number_format((int)$batch['simulator_row_count']) ?></td>
@@ -1761,10 +1820,18 @@ cw_header('Garmin Sync Agent');
       button.disabled = true;
       setImportBulkProgress(0, ids.length, action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files in small chunks...');
       try {
+        let refreshDelayMs = 1000;
         if (action === 'match_flightcircle') {
           const result = await postHistoricalAction(action, { backfill_file_ids: ids });
           setImportBulkProgress(ids.length, ids.length, 'FlightCircle matching complete.');
-          if (importBulkMessage) importBulkMessage.textContent = 'FlightCircle matching complete: created ' + Number(result.created || 0).toLocaleString() + ' candidate(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '. Refreshing...';
+          if (importBulkMessage) {
+            const diagnostics = Array.isArray(result.no_match_diagnostics) ? result.no_match_diagnostics.slice(0, 3) : [];
+            if (diagnostics.length > 0) refreshDelayMs = 6000;
+            const diagnosticText = diagnostics.length > 0
+              ? ' Examples: ' + diagnostics.map(item => String(item.date || '--') + ' ' + String(item.tail || '--') + ' Hobbs ' + String(item.hobbs_out || '--') + ': ' + String(item.reason || 'no match')).join(' | ')
+              : '';
+            importBulkMessage.textContent = 'FlightCircle matching complete: scanned ' + Number(result.scanned || 0).toLocaleString() + ' active FlightCircle aircraft row(s), created ' + Number(result.created || 0).toLocaleString() + ' candidate(s), ambiguous ' + Number(result.ambiguous || 0).toLocaleString() + '.' + diagnosticText + ' Refreshing...';
+          }
         } else {
           let processed = 0;
           let failed = 0;
@@ -1787,7 +1854,7 @@ cw_header('Garmin Sync Agent');
             + ', skipped duplicates ' + skipped.toLocaleString()
             + '. FlightCircle candidates created ' + matchCreated.toLocaleString() + '. Refreshing...';
         }
-        setTimeout(() => window.location.reload(), 1000);
+        setTimeout(() => window.location.reload(), refreshDelayMs);
       } catch (error) {
         if (importBulkMessage) importBulkMessage.textContent = 'Bulk action failed: ' + error.message;
         button.disabled = false;

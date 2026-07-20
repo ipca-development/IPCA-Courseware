@@ -328,12 +328,16 @@ CREATE TABLE IF NOT EXISTS ipca_flightcircle_import_batches (
   unknown_resource_count INT UNSIGNED NOT NULL DEFAULT 0,
   identity_review_count INT UNSIGNED NOT NULL DEFAULT 0,
   operation_candidate_count INT UNSIGNED NOT NULL DEFAULT 0,
+  active_dataset TINYINT(1) NOT NULL DEFAULT 0,
+  superseded_by_batch_id BIGINT UNSIGNED NULL,
+  superseded_at DATETIME(3) NULL,
   error_json JSON NULL,
   counters_json JSON NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   completed_at DATETIME(3) NULL,
   UNIQUE KEY uk_ipca_flightcircle_batches_uuid (batch_uuid),
+  KEY idx_ipca_flightcircle_batches_active (active_dataset, import_status, completed_at),
   KEY idx_ipca_flightcircle_batches_status (import_status, created_at),
   KEY idx_ipca_flightcircle_batches_sha (sha256)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

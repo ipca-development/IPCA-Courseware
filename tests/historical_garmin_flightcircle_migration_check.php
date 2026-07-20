@@ -7,6 +7,7 @@ $files = array(
     'flightcircle_service' => $root . '/src/FlightCircleHistoricalImportService.php',
     'garmin_service' => $root . '/src/GarminHistoricalBackfillService.php',
     'match_service' => $root . '/src/FlightCircleGarminMatchService.php',
+    'active_dataset_migration' => $root . '/scripts/sql/2026_07_20_flightcircle_active_dataset.sql',
     'identity_api' => $root . '/public/admin/api/flightcircle_identity_action.php',
     'worker' => $root . '/scripts/run_async_jobs.php',
     'admin_page' => $root . '/public/admin/flight_log_garmin_connection.php',
@@ -80,6 +81,18 @@ $checks = array(
         && str_contains($files['match_service'], 'high_confidence')
         && str_contains($files['match_service'], 'probable')
         && !str_contains($files['match_service'], "UPDATE ipca_aircraft_operations\n            SET review_status = 'approved'"),
+
+    'FlightCircle matching uses active replacement dataset and explainable date tail Hobbs keys' =>
+        str_contains($files['migration'], 'active_dataset')
+        && str_contains($files['active_dataset_migration'], 'active_dataset')
+        && str_contains($files['flightcircle_service'], 'replaceActiveDataset')
+        && str_contains($files['flightcircle_service'], 'activeDatasetValidation')
+        && str_contains($files['match_service'], 'datasetBatchesForMatching')
+        && str_contains($files['match_service'], 'departure_hobbs_matches')
+        && str_contains($files['match_service'], 'same_departure_date')
+        && str_contains($files['match_service'], 'noMatchDiagnostic')
+        && str_contains($files['admin_page'], 'Active FlightCircle Dataset Validation')
+        && str_contains($files['admin_page'], 'replace_active_dataset'),
 
     'admin page exposes both migration upload sections' =>
         str_contains($files['admin_page'], 'Historical SD Card CSV Backfill')

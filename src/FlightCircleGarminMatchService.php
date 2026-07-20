@@ -12,27 +12,30 @@ final class FlightCircleGarminMatchService
     /**
      * @return array<string,mixed>
      */
-    public function matchAllBatches(int $limitPerBatch = 1000): array
+    public function matchAllBatches(int $limitPerBatch = 0): array
     {
         if (!$this->tableExists('ipca_flightcircle_import_batches')) {
             return array('ok' => false, 'message' => 'FlightCircle import tables are not installed.', 'created' => 0, 'ambiguous' => 0);
         }
-        $rows = $this->pdo->query("
-            SELECT id
-            FROM ipca_flightcircle_import_batches
-            WHERE import_status = 'completed'
-            ORDER BY id ASC
-        ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $rows = $this->datasetBatchesForMatching();
         $created = 0;
         $ambiguous = 0;
         $batches = 0;
+        $scanned = 0;
+        $diagnostics = array();
         foreach ($rows as $row) {
             $result = $this->matchBatch((int)$row['id'], $limitPerBatch);
             $created += (int)($result['created'] ?? 0);
             $ambiguous += (int)($result['ambiguous'] ?? 0);
+            $scanned += (int)($result['scanned'] ?? 0);
+            foreach ((array)($result['no_match_diagnostics'] ?? array()) as $diagnostic) {
+                if (count($diagnostics) < 25 && is_array($diagnostic)) {
+                    $diagnostics[] = $diagnostic;
+                }
+            }
             $batches++;
         }
-        return array('ok' => true, 'batches' => $batches, 'created' => $created, 'ambiguous' => $ambiguous);
+        return array('ok' => true, 'batches' => $batches, 'scanned' => $scanned, 'created' => $created, 'ambiguous' => $ambiguous, 'no_match_diagnostics' => $diagnostics);
     }
 
     /**
@@ -43,6 +46,7 @@ final class FlightCircleGarminMatchService
         if (!$this->tableExists('ipca_flightcircle_staging_records') || !$this->tableExists('ipca_garmin_historical_segments')) {
             return array('ok' => false, 'message' => 'Matching tables are not installed.');
         }
+        $limitSql = $limit > 0 ? ' LIMIT ' . max(1, min(20000, $limit)) : '';
         $stmt = $this->pdo->prepare("
             SELECT *
             FROM ipca_flightcircle_staging_records
@@ -50,20 +54,23 @@ final class FlightCircleGarminMatchService
               AND resource_type = 'aircraft'
               AND import_disposition = 'operation_candidate'
             ORDER BY depart_local ASC, id ASC
-            LIMIT ?
+            {$limitSql}
         ");
         $stmt->bindValue(1, $batchId, PDO::PARAM_INT);
-        $stmt->bindValue(2, max(1, min(5000, $limit)), PDO::PARAM_INT);
         $stmt->execute();
         $created = 0;
         $ambiguous = 0;
+        $scanned = 0;
+        $diagnostics = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $record) {
+            $scanned++;
             $candidates = $this->candidateSegments($record);
             $ranked = array();
             foreach ($candidates as $segment) {
                 $ranked[] = $this->score($record, $segment);
             }
             usort($ranked, static fn(array $a, array $b): int => (int)$b['score'] <=> (int)$a['score']);
+            $storedForRecord = false;
             foreach (array_slice($ranked, 0, 5) as $candidate) {
                 $reasons = (array)($candidate['reasons'] ?? array());
                 $hasRequiredEvidence = in_array('same_aircraft', $reasons, true)
@@ -78,12 +85,16 @@ final class FlightCircleGarminMatchService
                 $status = $candidate['score'] >= 85 ? 'high_confidence' : ($candidate['score'] >= 65 ? 'probable' : 'candidate');
                 $this->storeMatch((int)$record['id'], (int)($record['operation_id'] ?? 0), $candidate, $status);
                 $created++;
+                $storedForRecord = true;
             }
             if (count(array_filter($ranked, static fn(array $c): bool => (int)$c['score'] >= 65)) > 1) {
                 $ambiguous++;
             }
+            if (!$storedForRecord && count($diagnostics) < 25) {
+                $diagnostics[] = $this->noMatchDiagnostic($record, $ranked[0] ?? null);
+            }
         }
-        return array('ok' => true, 'created' => $created, 'ambiguous' => $ambiguous);
+        return array('ok' => true, 'scanned' => $scanned, 'created' => $created, 'ambiguous' => $ambiguous, 'no_match_diagnostics' => $diagnostics);
     }
 
     /**
@@ -210,6 +221,75 @@ final class FlightCircleGarminMatchService
         ));
     }
 
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function datasetBatchesForMatching(): array
+    {
+        if ($this->tableHasColumn('ipca_flightcircle_import_batches', 'active_dataset')) {
+            $active = $this->pdo->query("
+                SELECT id
+                FROM ipca_flightcircle_import_batches
+                WHERE active_dataset = 1
+                  AND import_status = 'completed'
+                ORDER BY completed_at DESC, id DESC
+            ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            if ($active !== array()) {
+                return $active;
+            }
+            $latest = $this->pdo->query("
+                SELECT id
+                FROM ipca_flightcircle_import_batches
+                WHERE import_status = 'completed'
+                ORDER BY completed_at DESC, id DESC
+                LIMIT 1
+            ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            return $latest;
+        }
+        return $this->pdo->query("
+            SELECT id
+            FROM ipca_flightcircle_import_batches
+            WHERE import_status = 'completed'
+            ORDER BY id ASC
+        ")->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /**
+     * @param array<string,mixed> $record
+     * @param array<string,mixed>|null $bestCandidate
+     * @return array<string,mixed>
+     */
+    private function noMatchDiagnostic(array $record, ?array $bestCandidate): array
+    {
+        $reasons = array();
+        if (trim((string)($record['depart_local'] ?? '')) === '') {
+            $reasons[] = 'FlightCircle date missing';
+        }
+        if (trim((string)($record['tail_number'] ?? '')) === '') {
+            $reasons[] = 'FlightCircle tail missing';
+        }
+        if ($this->numericOrNull($record['hobbs_out'] ?? null) === null) {
+            $reasons[] = 'FlightCircle Hobbs-Out missing';
+        }
+        if ($bestCandidate === null) {
+            $reasons[] = 'No Garmin segment found on the FlightCircle date window';
+        } else {
+            foreach ((array)($bestCandidate['conflicts'] ?? array()) as $conflict) {
+                $reasons[] = str_replace('_', ' ', (string)$conflict);
+            }
+        }
+        return array(
+            'flightcircle_record_id' => (int)($record['id'] ?? 0),
+            'date' => substr((string)($record['depart_local'] ?? ''), 0, 10),
+            'tail' => (string)($record['tail_number'] ?? ''),
+            'hobbs_out' => $record['hobbs_out'] ?? null,
+            'user_text' => (string)($record['user_text'] ?? ''),
+            'instructor_text' => (string)($record['instructor_text'] ?? ''),
+            'best_score' => $bestCandidate !== null ? (int)($bestCandidate['score'] ?? 0) : 0,
+            'reason' => implode('; ', array_values(array_unique(array_filter($reasons)))) ?: 'No date/tail/Hobbs-Out Garmin match',
+        );
+    }
+
     private function overlaps(int $aStart, int $aEnd, int $bStart, int $bEnd): bool
     {
         return max($aStart, $bStart) <= min($aEnd, $bEnd);
@@ -277,6 +357,19 @@ final class FlightCircleGarminMatchService
             return null;
         }
         return (float)$clean;
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ");
+        $stmt->execute(array($table, $column));
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     private function tableExists(string $table): bool

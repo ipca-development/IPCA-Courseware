@@ -17,7 +17,7 @@ final class FlightCircleHistoricalImportService
     /**
      * @return array<string,mixed>
      */
-    public function importUploadedFile(string $tmpPath, string $originalFilename, ?int $createdByUserId = null): array
+    public function importUploadedFile(string $tmpPath, string $originalFilename, ?int $createdByUserId = null, bool $replaceActiveDataset = true): array
     {
         if (!is_file($tmpPath)) {
             throw new RuntimeException('FlightCircle CSV upload is missing.');
@@ -52,7 +52,7 @@ final class FlightCircleHistoricalImportService
             $counts = $this->parseRows($batchId, $rawFileId, $storedPath, $createdByUserId);
             $matchResult = (new FlightCircleGarminMatchService($this->pdo))->matchBatch($batchId);
             $counts['garmin_match_candidates'] = (int)($matchResult['created'] ?? 0);
-            $this->finishBatch($batchId, $counts);
+            $this->finishBatch($batchId, $counts, $replaceActiveDataset);
             $this->pdo->commit();
         } catch (Throwable $e) {
             $this->pdo->rollBack();
@@ -63,6 +63,7 @@ final class FlightCircleHistoricalImportService
             'ok' => true,
             'batch_id' => $batchId,
             'sha256' => $sha256,
+            'active_dataset' => $replaceActiveDataset,
             'counts' => $counts,
         );
     }
@@ -75,10 +76,12 @@ final class FlightCircleHistoricalImportService
         if (!$this->tableExists('ipca_flightcircle_import_batches')) {
             return array('ready' => false, 'message' => 'FlightCircle migration tables have not been installed.', 'batches' => array());
         }
+        $hasActiveDataset = $this->tableHasColumn('ipca_flightcircle_import_batches', 'active_dataset');
+        $activeOrder = $hasActiveDataset ? 'active_dataset DESC,' : '';
         $stmt = $this->pdo->prepare("
             SELECT *
             FROM ipca_flightcircle_import_batches
-            ORDER BY created_at DESC, id DESC
+            ORDER BY {$activeOrder} created_at DESC, id DESC
             LIMIT ?
         ");
         $stmt->bindValue(1, max(1, min(50, $limit)), PDO::PARAM_INT);
@@ -88,6 +91,8 @@ final class FlightCircleHistoricalImportService
         $review = $this->countsByStatus('ipca_flightcircle_user_mappings', 'mapping_status');
         $resources = $this->countsByStatus('ipca_flightcircle_staging_records', 'resource_type');
         $dispositions = $this->countsByStatus('ipca_flightcircle_staging_records', 'import_disposition');
+        $activeBatchId = $this->activeDatasetBatchId();
+        $activeValidation = $this->activeDatasetValidation($activeBatchId);
         $identityStmt = $this->pdo->query("
             SELECT id, source_name, parsed_first_name, parsed_middle_name, parsed_last_name,
                    suggested_role_context, ipca_user_id, mapping_status, confidence_score, updated_at
@@ -96,11 +101,13 @@ final class FlightCircleHistoricalImportService
             ORDER BY updated_at DESC, id DESC
             LIMIT 15
         ");
+        $recentStagingWhere = $activeBatchId > 0 ? 'WHERE batch_id = ' . $activeBatchId : '';
         $recentStagingStmt = $this->pdo->query("
             SELECT id, batch_id, resource_identifier, resource_type, import_disposition, tail_number,
                    user_text, instructor_text, reservation_type, route_text, depart_local,
                    hobbs_out, hobbs_in, tach_out, tach_in, operation_id, review_status, updated_at
             FROM ipca_flightcircle_staging_records
+            {$recentStagingWhere}
             ORDER BY COALESCE(depart_local, updated_at) DESC, id DESC
             LIMIT 50
         ");
@@ -111,6 +118,8 @@ final class FlightCircleHistoricalImportService
             'identity_mappings' => $review,
             'resources' => $resources,
             'dispositions' => $dispositions,
+            'active_batch_id' => $activeBatchId,
+            'active_validation' => $activeValidation,
             'identity_suggestions' => $identityStmt !== false ? ($identityStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
             'recent_staging_records' => $recentStagingStmt !== false ? ($recentStagingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
             'existing_users' => $this->existingUsersForMapping(),
@@ -980,8 +989,22 @@ final class FlightCircleHistoricalImportService
     /**
      * @param array<string,int> $counts
      */
-    private function finishBatch(int $batchId, array $counts): void
+    private function finishBatch(int $batchId, array $counts, bool $replaceActiveDataset): void
     {
+        if ($replaceActiveDataset && $this->tableHasColumn('ipca_flightcircle_import_batches', 'active_dataset')) {
+            $this->pdo->prepare("
+                UPDATE ipca_flightcircle_import_batches
+                SET active_dataset = 0,
+                    superseded_by_batch_id = ?,
+                    superseded_at = CURRENT_TIMESTAMP(3),
+                    updated_at = CURRENT_TIMESTAMP(3)
+                WHERE active_dataset = 1
+                  AND id <> ?
+            ")->execute(array($batchId, $batchId));
+        }
+        $activeSql = $this->tableHasColumn('ipca_flightcircle_import_batches', 'active_dataset')
+            ? ', active_dataset = ' . ($replaceActiveDataset ? '1' : '0') . ', superseded_by_batch_id = NULL, superseded_at = NULL'
+            : '';
         $this->pdo->prepare("
             UPDATE ipca_flightcircle_import_batches
             SET import_status = 'completed',
@@ -995,6 +1018,7 @@ final class FlightCircleHistoricalImportService
                 counters_json = ?,
                 completed_at = CURRENT_TIMESTAMP(3),
                 updated_at = CURRENT_TIMESTAMP(3)
+                {$activeSql}
             WHERE id = ?
         ")->execute(array(
             $counts['row_count'],
@@ -1097,6 +1121,83 @@ final class FlightCircleHistoricalImportService
             $out[(string)$row['k']] = (int)$row['c'];
         }
         return $out;
+    }
+
+    private function activeDatasetBatchId(): int
+    {
+        if (!$this->tableExists('ipca_flightcircle_import_batches')) {
+            return 0;
+        }
+        if ($this->tableHasColumn('ipca_flightcircle_import_batches', 'active_dataset')) {
+            $stmt = $this->pdo->query("
+                SELECT id
+                FROM ipca_flightcircle_import_batches
+                WHERE active_dataset = 1
+                  AND import_status = 'completed'
+                ORDER BY completed_at DESC, id DESC
+                LIMIT 1
+            ");
+            $id = $stmt !== false ? (int)$stmt->fetchColumn() : 0;
+            if ($id > 0) {
+                return $id;
+            }
+        }
+        $stmt = $this->pdo->query("
+            SELECT id
+            FROM ipca_flightcircle_import_batches
+            WHERE import_status = 'completed'
+            ORDER BY completed_at DESC, id DESC
+            LIMIT 1
+        ");
+        return $stmt !== false ? (int)$stmt->fetchColumn() : 0;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function activeDatasetValidation(int $batchId): array
+    {
+        if ($batchId <= 0 || !$this->tableExists('ipca_flightcircle_staging_records')) {
+            return array('ready' => false, 'batch_id' => 0);
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT
+              COUNT(*) AS total_rows,
+              SUM(resource_type = 'aircraft') AS aircraft_rows,
+              SUM(resource_type = 'aatd_simulator') AS simulator_rows,
+              SUM(resource_type = 'ignored_resource') AS ignored_rows,
+              SUM(resource_type = 'unknown') AS unknown_rows,
+              SUM(resource_type = 'aircraft' AND (depart_local IS NULL OR depart_local = '')) AS missing_date_rows,
+              SUM(resource_type = 'aircraft' AND (tail_number IS NULL OR TRIM(tail_number) = '')) AS missing_tail_rows,
+              SUM(resource_type = 'aircraft' AND hobbs_out IS NULL) AS missing_hobbs_out_rows,
+              MIN(CASE WHEN resource_type = 'aircraft' THEN depart_local ELSE NULL END) AS first_depart_local,
+              MAX(CASE WHEN resource_type = 'aircraft' THEN depart_local ELSE NULL END) AS last_depart_local
+            FROM ipca_flightcircle_staging_records
+            WHERE batch_id = ?
+        ");
+        $stmt->execute(array($batchId));
+        $summary = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+        $tailStmt = $this->pdo->prepare("
+            SELECT tail_number, COUNT(*) AS total
+            FROM ipca_flightcircle_staging_records
+            WHERE batch_id = ?
+              AND resource_type = 'aircraft'
+            GROUP BY tail_number
+            ORDER BY total DESC, tail_number ASC
+            LIMIT 20
+        ");
+        $tailStmt->execute(array($batchId));
+        return array(
+            'ready' => true,
+            'batch_id' => $batchId,
+            'summary' => $summary,
+            'tail_counts' => $tailStmt->fetchAll(PDO::FETCH_ASSOC) ?: array(),
+        );
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        return in_array($column, $this->tableColumns($table), true);
     }
 
     private function tableExists(string $table): bool
