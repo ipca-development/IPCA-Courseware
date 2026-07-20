@@ -6,6 +6,7 @@ $files = array(
     'archive' => $root . '/src/AdsbTrafficArchiveService.php',
     'page' => $root . '/public/admin/adsb_traffic_archive.php',
     'api' => $root . '/public/admin/api/adsb_archive_dashboard.php',
+    'action' => $root . '/public/admin/api/adsb_archive_action.php',
 );
 
 foreach ($files as $name => $path) {
@@ -31,6 +32,11 @@ $checks = array(
         str_contains($files['archive'], 'ipca_adsb_geographic_definitions')
         && str_contains($files['archive'], "'id' => 'ktrm_live'")
         && str_contains($files['archive'], "'source' => 'default'"),
+    'admin can create point-radius live target definitions' =>
+        str_contains($files['archive'], 'createLivePointTarget')
+        && str_contains($files['action'], 'create_live_target')
+        && str_contains($files['page'], 'Add Target Airport')
+        && str_contains($files['page'], 'target_radius_nm'),
     'dashboard queries local archive tables only' =>
         str_contains($files['archive'], 'ipca_adsb_traffic_samples')
         && str_contains($files['archive'], 'ipca_adsb_raw_payloads')
@@ -41,6 +47,7 @@ $checks = array(
         && str_contains($files['page'], 'adsbGrowthChart')
         && str_contains($files['page'], 'adsbRecordingStatus')
         && str_contains($files['page'], 'adsbTargetMap')
+        && str_contains($files['page'], 'adsbTargetMaps')
         && str_contains($files['page'], 'adsbMapStatus')
         && str_contains($files['page'], 'adsbTimeline')
         && str_contains($files['page'], 'adsbNewestButton')

@@ -128,6 +128,30 @@ final class AdsbTrafficArchiveService
     }
 
     /**
+     * @return array<string,mixed>
+     */
+    public function scheduleRecentLiveTargetCoverage(int $lookbackMinutes = 1, int $bucketSeconds = 60): array
+    {
+        $targets = array_values(array_filter($this->archiveTargets(), static fn(array $target): bool => ($target['source'] ?? '') === 'default' || !empty($target['live_monitoring_enabled'])));
+        $results = array();
+        $tiles = 0;
+        foreach ($targets as $target) {
+            $scope = (string)($target['id'] ?? 'live_point');
+            $result = $this->scheduleRecentLivePointCoverage(
+                (float)$target['lat'],
+                (float)$target['lon'],
+                (float)$target['radius_nm'],
+                $lookbackMinutes,
+                $bucketSeconds,
+                $scope
+            );
+            $tiles += (int)($result['tiles_created'] ?? 0);
+            $results[] = $result + array('target_label' => (string)($target['label'] ?? $scope));
+        }
+        return array('ok' => true, 'target_count' => count($targets), 'tiles_created' => $tiles, 'results' => $results);
+    }
+
+    /**
      * @param list<array{lat:float,lon:float}> $points
      * @return array<string,mixed>
      */
@@ -398,6 +422,47 @@ final class AdsbTrafficArchiveService
             );
         }
         return $targets;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function createLivePointTarget(string $name, float $lat, float $lon, float $radiusNm = 25.0): array
+    {
+        $this->ensureTables();
+        if (!$this->tablePresent('ipca_adsb_geographic_definitions')) {
+            throw new RuntimeException('Apply the ADS-B archive Phase 1 migration before adding target definitions.');
+        }
+        $name = trim($name);
+        if ($name === '') {
+            throw new RuntimeException('Target name is required.');
+        }
+        if ($lat < -90.0 || $lat > 90.0 || $lon < -180.0 || $lon > 180.0) {
+            throw new RuntimeException('Target latitude/longitude is invalid.');
+        }
+        $radiusNm = max(0.5, min(25.0, $radiusNm));
+        $configuration = AuditEventService::jsonEncode(array(
+            'lat' => $lat,
+            'lon' => $lon,
+            'radius_nm' => $radiusNm,
+        ));
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ipca_adsb_geographic_definitions
+              (definition_uuid, name, definition_type, configuration_json, enabled, live_monitoring_enabled, replay_query_enabled)
+            VALUES
+              (?, ?, 'point_radius', ?, 1, 1, 1)
+        ");
+        $uuid = AuditEventService::uuid();
+        $stmt->execute(array($uuid, substr($name, 0, 160), $configuration));
+        return array(
+            'ok' => true,
+            'id' => (int)$this->pdo->lastInsertId(),
+            'definition_uuid' => $uuid,
+            'name' => $name,
+            'lat' => $lat,
+            'lon' => $lon,
+            'radius_nm' => $radiusNm,
+        );
     }
 
     /**

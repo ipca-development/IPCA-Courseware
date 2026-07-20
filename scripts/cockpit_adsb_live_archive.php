@@ -14,6 +14,11 @@ try {
         exit(0);
     }
     if ($command === 'schedule-live') {
+        if (($argv[2] ?? '') === 'all') {
+            $result = $archive->scheduleRecentLiveTargetCoverage(defaultLookbackMinutes(), defaultBucketSeconds());
+            echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
+            exit(0);
+        }
         $result = $archive->scheduleRecentLivePointCoverage(
             argFloat(2, defaultLat()),
             argFloat(3, defaultLon()),
@@ -39,14 +44,9 @@ try {
         exit(0);
     }
     if ($command === 'run-once') {
-        $schedule = $archive->scheduleRecentLivePointCoverage(
-            argFloat(2, defaultLat()),
-            argFloat(3, defaultLon()),
-            argFloat(4, defaultRadiusNm()),
-            argInt(5, defaultLookbackMinutes()),
-            argInt(6, defaultBucketSeconds()),
-            defaultScope()
-        );
+        $schedule = isset($argv[2])
+            ? $archive->scheduleRecentLivePointCoverage(argFloat(2, defaultLat()), argFloat(3, defaultLon()), argFloat(4, defaultRadiusNm()), argInt(5, defaultLookbackMinutes()), argInt(6, defaultBucketSeconds()), defaultScope())
+            : $archive->scheduleRecentLiveTargetCoverage(defaultLookbackMinutes(), defaultBucketSeconds());
         $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
         $fetches = array();
         for ($i = 0; $i < $fetchLimit; $i++) {
@@ -60,7 +60,7 @@ try {
         $iterations = max(0, argInt(3, 0));
         $count = 0;
         while ($iterations === 0 || $count < $iterations) {
-            $schedule = $archive->scheduleRecentLivePointCoverage(defaultLat(), defaultLon(), defaultRadiusNm(), defaultLookbackMinutes(), defaultBucketSeconds(), defaultScope());
+            $schedule = $archive->scheduleRecentLiveTargetCoverage(defaultLookbackMinutes(), defaultBucketSeconds());
             $fetches = array();
             $fetchLimit = max(1, (int)($schedule['tiles_created'] ?? 1));
             for ($i = 0; $i < $fetchLimit; $i++) {
@@ -86,8 +86,9 @@ function usage(): never
     fwrite(STDERR, "Usage:\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php status\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php schedule-live [lat lon radius-nm lookback-min bucket-sec]\n");
+    fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php schedule-live all\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php fetch-next [limit]\n");
-    fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php run-once [lat lon radius-nm lookback-min bucket-sec]\n");
+    fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php run-once [optional lat lon radius-nm lookback-min bucket-sec]\n");
     fwrite(STDERR, "  php scripts/cockpit_adsb_live_archive.php loop [interval-sec] [iterations]\n");
     exit(2);
 }

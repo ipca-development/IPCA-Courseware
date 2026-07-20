@@ -52,6 +52,18 @@ try {
         adsb_archive_redirect($return . $separator . 'batch_processed=' . $processed . '&samples=' . $samples);
     }
 
+    if ($action === 'create_live_target') {
+        $name = trim((string)($_POST['target_name'] ?? ''));
+        $lat = is_numeric($_POST['target_lat'] ?? null) ? (float)$_POST['target_lat'] : null;
+        $lon = is_numeric($_POST['target_lon'] ?? null) ? (float)$_POST['target_lon'] : null;
+        $radiusNm = is_numeric($_POST['target_radius_nm'] ?? null) ? (float)$_POST['target_radius_nm'] : 25.0;
+        if ($lat === null || $lon === null) {
+            throw new RuntimeException('Target latitude and longitude are required.');
+        }
+        $result = $service->createLivePointTarget($name, $lat, $lon, $radiusNm);
+        adsb_archive_redirect($return . $separator . 'target_created=' . urlencode((string)($result['name'] ?? $name)));
+    }
+
     if ($action === 'schedule_recording_corridor') {
         $recordingId = (int)($_POST['recording_id'] ?? 0);
         if ($recordingId <= 0) {

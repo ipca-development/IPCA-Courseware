@@ -25,6 +25,9 @@ if (isset($_GET['batch_processed'])) {
 if (isset($_GET['corridor_requested'])) {
     $notice = 'Flight corridor ADS-B coverage requested for recording ' . (int)$_GET['corridor_requested'] . '. Process pending tiles to fetch available traffic.';
 }
+if (isset($_GET['target_created'])) {
+    $notice = 'ADS-B live target created: ' . h((string)$_GET['target_created']) . '. The next cron run will start recording it.';
+}
 
 $status = array();
 $recentTraffic = array();
@@ -43,7 +46,7 @@ cw_header('ADS-B Traffic Archive');
 ?>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-.adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input,.adsb-actions select,.adsb-control{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;background:#fff}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}.adsb-map-layout{display:grid;grid-template-columns:minmax(320px,1.7fr) minmax(260px,.8fr);gap:14px}.adsb-map{height:520px;border:1px solid #cbd5e1;border-radius:14px;overflow:hidden;background:#e2e8f0}.adsb-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}.adsb-timeline{width:100%;accent-color:#2563eb}.adsb-growth{height:84px;display:flex;align-items:end;gap:2px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px}.adsb-growth-bar{flex:1;min-width:2px;background:#2563eb;border-radius:3px 3px 0 0}.adsb-target-list{display:grid;gap:8px;max-height:180px;overflow:auto}.adsb-aircraft-list{display:grid;gap:6px;max-height:240px;overflow:auto}.adsb-pill{border:1px solid #e2e8f0;border-radius:999px;padding:5px 8px;background:#f8fafc;font-size:12px}.adsb-live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}@media(max-width:960px){.adsb-map-layout{grid-template-columns:1fr}.adsb-map{height:420px}}
+.adsb-page{display:grid;gap:16px}.adsb-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.adsb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.adsb-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.adsb-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.adsb-value{font-weight:900;margin-top:4px}.adsb-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.adsb-actions input,.adsb-actions select,.adsb-control{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;background:#fff}.adsb-actions button,.adsb-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:8px 11px;cursor:pointer;text-decoration:none}.adsb-actions button.secondary,.adsb-button.secondary{background:#475569}.adsb-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.adsb-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.adsb-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px}.adsb-muted{color:#64748b;font-size:13px}.adsb-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}.adsb-table-wrap{overflow-x:auto}.adsb-table{width:100%;border-collapse:collapse;min-width:760px}.adsb-table th,.adsb-table td{border-bottom:1px solid #e2e8f0;padding:9px 8px;text-align:left}.adsb-table th{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.adsb-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}.adsb-map-layout{display:grid;grid-template-columns:minmax(320px,1.7fr) minmax(260px,.8fr);gap:14px}.adsb-map{height:520px;border:1px solid #cbd5e1;border-radius:14px;overflow:hidden;background:#e2e8f0}.adsb-target-maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.adsb-target-map{height:240px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#e2e8f0}.adsb-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}.adsb-timeline{width:100%;accent-color:#2563eb}.adsb-growth{height:84px;display:flex;align-items:end;gap:2px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px}.adsb-growth-bar{flex:1;min-width:2px;background:#2563eb;border-radius:3px 3px 0 0}.adsb-target-list{display:grid;gap:8px;max-height:180px;overflow:auto}.adsb-aircraft-list{display:grid;gap:6px;max-height:240px;overflow:auto}.adsb-pill{border:1px solid #e2e8f0;border-radius:999px;padding:5px 8px;background:#f8fafc;font-size:12px}.adsb-live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}@media(max-width:960px){.adsb-map-layout{grid-template-columns:1fr}.adsb-map{height:420px}}
 </style>
 <div class="adsb-page">
   <section class="adsb-card">
@@ -135,6 +138,20 @@ cw_header('ADS-B Traffic Archive');
   </section>
 
   <section class="adsb-card">
+    <h3 style="margin-top:0">Target Airports</h3>
+    <p class="adsb-muted">Add airport or area targets here. The live recorder cron will record KTRM plus every enabled target listed below. ADS-B Exchange live point queries are capped at 25 NM per target.</p>
+    <form class="adsb-actions" method="post" action="/admin/api/adsb_archive_action.php">
+      <input type="hidden" name="return" value="/admin/adsb_traffic_archive.php">
+      <label class="adsb-muted">Name<br><input type="text" name="target_name" placeholder="KPSP Live Archive" required></label>
+      <label class="adsb-muted">Latitude<br><input type="number" name="target_lat" step="0.000001" placeholder="33.829667" required></label>
+      <label class="adsb-muted">Longitude<br><input type="number" name="target_lon" step="0.000001" placeholder="-116.506667" required></label>
+      <label class="adsb-muted">Radius NM<br><input type="number" name="target_radius_nm" min="0.5" max="25" step="0.5" value="25"></label>
+      <button type="submit" name="action" value="create_live_target">Add Target Airport</button>
+    </form>
+    <div class="adsb-target-maps" id="adsbTargetMaps" style="margin-top:14px"></div>
+  </section>
+
+  <section class="adsb-card">
     <h3 style="margin-top:0">Actions</h3>
     <form class="adsb-actions" method="post" action="/admin/api/adsb_archive_action.php">
       <input type="hidden" name="return" value="/admin/adsb_traffic_archive.php">
@@ -156,8 +173,13 @@ cw_header('ADS-B Traffic Archive');
 
   <section class="adsb-card">
     <h3 style="margin-top:0">Automatic Cron</h3>
-    <p class="adsb-muted">Run this every 5 minutes to continuously schedule and process live KTRM ADS-B archive buckets. Configure <span class="adsb-code">CW_ADSB_ARCHIVE_CRON_TOKEN</span> in PHP-FPM/server env first.</p>
-    <div class="adsb-pre">*/5 * * * * curl -fsS "https://ipca.training/cron/adsb_archive.php?token=$CW_ADSB_ARCHIVE_CRON_TOKEN&amp;limit=5&amp;lookback_minutes=5" >/dev/null</div>
+    <p class="adsb-muted">The server-side live recorder should run every minute. It schedules KTRM plus every enabled row in <span class="adsb-code">ipca_adsb_geographic_definitions</span> where <span class="adsb-code">live_monitoring_enabled=1</span>.</p>
+    <div class="adsb-pre">* * * * * /usr/bin/flock -n /tmp/ipca-adsb-live.lock /usr/local/bin/ipca-adsb-live.sh &gt;&gt; /var/log/ipca-adsb-live.log 2&gt;&amp;1</div>
+    <p class="adsb-muted">To add another airport target, insert a point-radius definition. ADS-B Exchange live radius is capped at 25 NM per target, so use multiple airport targets for broader coverage.</p>
+    <div class="adsb-pre">INSERT INTO ipca_adsb_geographic_definitions
+(definition_uuid, name, definition_type, configuration_json, enabled, live_monitoring_enabled, replay_query_enabled)
+VALUES
+(UUID(), 'KPSP Live Archive', 'point_radius', JSON_OBJECT('lat', 33.829667, 'lon', -116.506667, 'radius_nm', 25), 1, 1, 1);</div>
   </section>
 
   <section class="adsb-card">
@@ -166,35 +188,10 @@ cw_header('ADS-B Traffic Archive');
     <?php if ($recentTraffic === array()): ?>
       <div class="adsb-warning">No archived traffic samples recorded yet. Run the cron or process a live tile.</div>
     <?php else: ?>
-      <div class="adsb-scope-grid">
-        <svg class="adsb-scope" viewBox="0 0 420 420" role="img" aria-label="KTRM ADS-B traffic scope">
-          <circle cx="210" cy="210" r="190" fill="none" stroke="rgba(148,163,184,.45)" stroke-width="1"></circle>
-          <circle cx="210" cy="210" r="126.7" fill="none" stroke="rgba(148,163,184,.22)" stroke-width="1"></circle>
-          <circle cx="210" cy="210" r="63.3" fill="none" stroke="rgba(148,163,184,.18)" stroke-width="1"></circle>
-          <line x1="210" y1="20" x2="210" y2="400" stroke="rgba(148,163,184,.22)" stroke-width="1"></line>
-          <line x1="20" y1="210" x2="400" y2="210" stroke="rgba(148,163,184,.22)" stroke-width="1"></line>
-          <circle cx="210" cy="210" r="5" fill="#38bdf8"></circle>
-          <text x="218" y="206" fill="#e0f2fe" font-size="12" font-family="monospace">KTRM</text>
-          <?php foreach (array_slice($recentTraffic, 0, 120) as $target): ?>
-            <?php
-              $lat = (float)($target['latitude'] ?? 0);
-              $lon = (float)($target['longitude'] ?? 0);
-              $x = 210 + (($lon - (-116.160156)) * 60.0 * cos(deg2rad(33.626701)) / 15.0 * 190.0);
-              $y = 210 - (($lat - 33.626701) * 60.0 / 15.0 * 190.0);
-              if ($x < 20 || $x > 400 || $y < 20 || $y > 400) {
-                  continue;
-              }
-              $label = trim((string)($target['callsign'] ?: $target['aircraft_hex'] ?? ''));
-            ?>
-            <circle cx="<?= h((string)round($x, 1)) ?>" cy="<?= h((string)round($y, 1)) ?>" r="3.5" fill="#facc15"></circle>
-            <?php if ($label !== ''): ?><text x="<?= h((string)round($x + 5, 1)) ?>" y="<?= h((string)round($y - 5, 1)) ?>" fill="#fde68a" font-size="9" font-family="monospace"><?= h(substr($label, 0, 8)) ?></text><?php endif; ?>
-          <?php endforeach; ?>
-        </svg>
-        <div class="adsb-grid">
-          <div class="adsb-kv"><div class="adsb-label">Samples Shown</div><div class="adsb-value"><?= number_format(count($recentTraffic)) ?></div></div>
-          <div class="adsb-kv"><div class="adsb-label">Newest Sample</div><div class="adsb-value"><?= h((string)($recentTraffic[0]['sample_time_utc'] ?? '')) ?></div></div>
-          <div class="adsb-kv"><div class="adsb-label">Unique Aircraft</div><div class="adsb-value"><?= number_format(count(array_unique(array_map(static fn(array $row): string => (string)($row['aircraft_hex'] ?? ''), $recentTraffic)))) ?></div></div>
-        </div>
+      <div class="adsb-grid">
+        <div class="adsb-kv"><div class="adsb-label">Recent Samples Listed</div><div class="adsb-value"><?= number_format(count($recentTraffic)) ?></div></div>
+        <div class="adsb-kv"><div class="adsb-label">Newest Sample</div><div class="adsb-value"><?= h((string)($recentTraffic[0]['sample_time_utc'] ?? '')) ?></div></div>
+        <div class="adsb-kv"><div class="adsb-label">Unique Aircraft</div><div class="adsb-value"><?= number_format(count(array_unique(array_map(static fn(array $row): string => (string)($row['aircraft_hex'] ?? ''), $recentTraffic)))) ?></div></div>
       </div>
       <div class="adsb-table-wrap" style="margin-top:14px">
         <table class="adsb-table">
@@ -229,6 +226,7 @@ cw_header('ADS-B Traffic Archive');
   let trackLayer = null;
   let currentLayer = null;
   let refreshTimer = null;
+  let targetMapsSignature = '';
 
   const el = (id) => document.getElementById(id);
   const fmt = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '--';
@@ -314,13 +312,40 @@ cw_header('ADS-B Traffic Archive');
     const radiusNm = finite(target && target.radius_nm) ?? 25;
     if (targetCircle) map.removeLayer(targetCircle);
     if (targetMarker) map.removeLayer(targetMarker);
-    targetMarker = L.marker([lat, lon]).addTo(map).bindTooltip(String((target && target.label) || 'Target'));
+    targetMarker = L.marker([lat, lon]).addTo(map);
     targetCircle = L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.05 }).addTo(map);
-    const latDelta = radiusNm / 60;
-    const lonDelta = radiusNm / Math.max(1, 60 * Math.cos(lat * Math.PI / 180));
-    map.fitBounds([[lat - latDelta, lon - lonDelta], [lat + latDelta, lon + lonDelta]], { padding: [24, 24] });
+    map.setView([lat, lon], radiusNm >= 20 ? 9 : (radiusNm >= 10 ? 10 : 11));
     setTimeout(() => map.invalidateSize(), 50);
     return true;
+  }
+
+  function renderTargetAirportMaps(data) {
+    const container = el('adsbTargetMaps');
+    const targets = Array.isArray(data.targets) ? data.targets : [];
+    const signature = JSON.stringify(targets.map((target) => [target.id, target.label, target.lat, target.lon, target.radius_nm]));
+    if (signature === targetMapsSignature) return;
+    targetMapsSignature = signature;
+    container.innerHTML = targets.map((target, index) => `
+      <div class="adsb-kv">
+        <strong>${String(target.label || target.id)}</strong>
+        <div class="adsb-muted">${Number(target.lat).toFixed(6)}, ${Number(target.lon).toFixed(6)} · ${Number(target.radius_nm).toFixed(1)} NM · ${String(target.source || '')}</div>
+        <div class="adsb-target-map" id="adsbTargetMiniMap${index}"></div>
+      </div>
+    `).join('');
+    if (typeof L === 'undefined') return;
+    targets.forEach((target, index) => {
+      const lat = finite(target.lat);
+      const lon = finite(target.lon);
+      const radiusNm = finite(target.radius_nm) ?? 25;
+      const node = el(`adsbTargetMiniMap${index}`);
+      if (lat === null || lon === null || !node) return;
+      const mini = L.map(node, { scrollWheelZoom: false, dragging: false, zoomControl: false, attributionControl: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mini);
+      L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.08 }).addTo(mini);
+      L.marker([lat, lon]).addTo(mini);
+      mini.setView([lat, lon], radiusNm >= 20 ? 9 : (radiusNm >= 10 ? 10 : 11));
+      setTimeout(() => mini.invalidateSize(), 50);
+    });
   }
 
   function updateMap(data) {
@@ -387,8 +412,7 @@ cw_header('ADS-B Traffic Archive');
       const label = String(item.callsign || item.hex || '').trim().toUpperCase();
       const color = colorFor(item.hex);
       L.circleMarker([lat, lon], { radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 2 })
-        .addTo(currentLayer)
-        .bindTooltip(`${label}<br>${sample.utc || ''}<br>${sample.altitude_ft !== null ? Math.round(sample.altitude_ft) + ' ft' : ''}`, { direction: 'top' });
+        .addTo(currentLayer);
       visible.push({ label, sample });
     });
     el('adsbTimelineCurrent').textContent = utcLabel(epoch);
@@ -408,6 +432,7 @@ cw_header('ADS-B Traffic Archive');
     try {
       updateGrowth(data);
       updateTargets(data);
+      renderTargetAirportMaps(data);
       updateMap(data);
     } catch (error) {
       el('adsbMapStatus').textContent = `Map render error: ${error && error.message ? error.message : error}`;

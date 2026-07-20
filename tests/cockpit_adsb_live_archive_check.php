@@ -18,6 +18,7 @@ foreach ($files as $name => $path) {
 $checks = array(
     'live recorder schedules configurable point coverage into existing archive jobs' =>
         str_contains($files['archive'], 'scheduleRecentLivePointCoverage')
+        && str_contains($files['archive'], 'scheduleRecentLiveTargetCoverage')
         && str_contains($files['archive'], 'ipca_adsb_coverage_jobs')
         && str_contains($files['archive'], 'createTilesForJob')
         && str_contains($files['archive'], "'live_adsb_recorder'"),
@@ -27,9 +28,11 @@ $checks = array(
         && str_contains($files['live_cli'], 'CW_ADSB_LIVE_BUCKET_SECONDS'),
     'live CLI supports cron and daemon use cases' =>
         str_contains($files['live_cli'], "schedule-live")
+        && str_contains($files['live_cli'], "schedule-live all")
         && str_contains($files['live_cli'], "fetch-next")
         && str_contains($files['live_cli'], "run-once")
-        && str_contains($files['live_cli'], "loop"),
+        && str_contains($files['live_cli'], "loop")
+        && str_contains($files['live_cli'], 'scheduleRecentLiveTargetCoverage'),
     'live CLI does not create a parallel ADS-B archive' =>
         !preg_match('/CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE/i', $files['live_cli'])
         && !str_contains($files['live_cli'], 'OpenSky')
