@@ -280,7 +280,7 @@ final class CockpitReconstructionService
             if (self::replaySamplesTablePresent($this->pdo)) {
                 $this->reportJobProgress($jobId, self::STAGE_REPLAY_BUILD, 48, 'Building replay v2 fixed timeline');
                 $profiler->start('replay_pipeline_build');
-                $replayResult = (new CockpitReplayPipeline())->build(
+                $replayResult = (new CockpitReplayPipeline($this->pdo))->build(
                     $recording,
                     $gpsSamples,
                     $ahrsSamples,
@@ -994,6 +994,8 @@ final class CockpitReconstructionService
             'coolant2_f',
             'cas_alert',
             'terrain_alert',
+            'system_alerts',
+            'trim_range',
             'transponder_code',
             'transponder_mode',
             'nav_source',
@@ -1164,6 +1166,8 @@ final class CockpitReconstructionService
             'coolant2_f',
             'cas_alert',
             'terrain_alert',
+            'system_alerts_json',
+            'trim_range_json',
             'transponder_code',
             'transponder_mode',
             'nav_source',
@@ -1352,6 +1356,14 @@ final class CockpitReconstructionService
             if (array_key_exists($field, $row)) {
                 $sample[$field] = (string)($row[$field] ?? '');
             }
+        }
+        if (array_key_exists('system_alerts_json', $row)) {
+            $decodedAlerts = self::decodeJson((string)($row['system_alerts_json'] ?? ''));
+            $sample['system_alerts'] = is_array($decodedAlerts) ? array_values($decodedAlerts) : array();
+        }
+        if (array_key_exists('trim_range_json', $row)) {
+            $decodedTrimRange = self::decodeJson((string)($row['trim_range_json'] ?? ''));
+            $sample['trim_range'] = is_array($decodedTrimRange) ? $decodedTrimRange : null;
         }
         if (is_array($canonicalG3x)) {
             foreach (array('autopilot_state', 'fd_lateral_mode', 'fd_vertical_mode', 'autopilot_armed_mode', 'com1_status', 'com2_status') as $field) {
@@ -4328,6 +4340,8 @@ final class CockpitReconstructionService
             'coolant2_f',
             'cas_alert',
             'terrain_alert',
+            'system_alerts_json',
+            'trim_range_json',
             'transponder_code',
             'transponder_mode',
             'nav_source',

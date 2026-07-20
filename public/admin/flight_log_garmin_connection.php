@@ -342,6 +342,73 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
 
+$garminImportRows = array();
+$garminImportTailOptions = array();
+$garminImportSourceOptions = array();
+if ($hasCsvFiles) {
+    $historicalJoin = $hasHistoricalBackfill ? "
+        LEFT JOIN ipca_garmin_historical_backfill_files hf ON hf.csv_file_id = f.id
+        LEFT JOIN ipca_garmin_historical_backfill_batches hb ON hb.id = hf.batch_id
+    " : "
+        LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS id, NULL AS batch_id, NULL AS exact_duplicate_status, NULL AS parse_status, NULL AS classification, NULL AS review_status) hf ON 1 = 0
+        LEFT JOIN (SELECT NULL AS id, NULL AS batch_uuid) hb ON 1 = 0
+    ";
+    $garminImportRows = garmin_sync_rows($pdo, "
+        SELECT
+          f.id AS csv_file_id,
+          f.provider_name,
+          f.upload_source,
+          f.source,
+          f.original_filename,
+          f.aircraft_registration,
+          f.aircraft_ident,
+          f.sha256,
+          f.created_at,
+          f.first_valid_sample_utc,
+          f.last_valid_sample_utc,
+          s.derivation_status,
+          s.tail_number AS summary_tail_number,
+          s.departure_airport_code,
+          s.arrival_airport_code,
+          s.departure_time_utc,
+          s.arrival_time_utc,
+          s.elapsed_seconds,
+          s.summary_json,
+          hf.id AS historical_file_id,
+          hf.batch_id AS historical_batch_id,
+          hb.batch_uuid AS historical_batch_uuid,
+          hf.exact_duplicate_status,
+          hf.parse_status AS historical_parse_status,
+          hf.classification AS historical_classification,
+          hf.review_status AS historical_review_status
+        FROM ipca_garmin_csv_files f
+        " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id, NULL AS derivation_status, NULL AS tail_number, NULL AS departure_airport_code, NULL AS arrival_airport_code, NULL AS departure_time_utc, NULL AS arrival_time_utc, NULL AS elapsed_seconds, NULL AS summary_json) s ON 1 = 0") . "
+        {$historicalJoin}
+        WHERE COALESCE(f.provider_name, '') IN ('desktop_sync_agent', 'historical_sd_card_csv')
+           OR COALESCE(f.upload_source, '') IN ('desktop_sync_agent', 'admin_historical_backfill')
+           OR COALESCE(f.source, '') IN ('garmin_historical_sd_card', 'garmin_cloud')
+        ORDER BY COALESCE(s.departure_time_utc, f.first_valid_sample_utc, f.created_at) DESC, f.id DESC
+        LIMIT 1500
+    ");
+    foreach ($garminImportRows as $row) {
+        $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
+        $summary = is_array($summary) ? $summary : array();
+        $tail = strtoupper(trim((string)($row['summary_tail_number'] ?? '')));
+        if ($tail === '' || $tail === 'UNKNOWN' || $tail === 'UNKNOWN TAIL') {
+            $tail = strtoupper(trim((string)($row['aircraft_registration'] ?: $row['aircraft_ident'])));
+        }
+        if ($tail !== '' && $tail !== 'UNKNOWN' && $tail !== 'UNKNOWN TAIL') {
+            $garminImportTailOptions[$tail] = $tail;
+        }
+        $sourceLabel = (string)($row['provider_name'] ?? '') === 'historical_sd_card_csv' || (string)($row['upload_source'] ?? '') === 'admin_historical_backfill'
+            ? 'Bulk Upload'
+            : 'IPCA Sync App';
+        $garminImportSourceOptions[$sourceLabel] = $sourceLabel;
+    }
+    sort($garminImportTailOptions);
+    sort($garminImportSourceOptions);
+}
+
 $csvTrackJoin = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
     LEFT JOIN (
       SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
@@ -1039,6 +1106,98 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
   </section>
 
+  <section class="garmin-card">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">All Garmin Imports</h3>
+        <p class="garmin-muted">One operational list for Garmin CSV files from the IPCA Sync App and Historical Bulk Uploads. Use this list to compare dates, aircraft, Hobbs/Tach, duplicates, and import status.</p>
+      </div>
+      <div class="garmin-actions">
+        <a class="secondary" href="/admin/api/garmin_historical_backfill_report.php">Historical report</a>
+      </div>
+    </div>
+    <?php if ($garminImportRows === array()): ?>
+      <div class="garmin-empty" style="margin-top:12px">No Garmin CSV imports found yet.</div>
+    <?php else: ?>
+      <form class="garmin-filter" data-garmin-import-filter style="grid-template-columns:130px 120px 132px 132px 130px 130px 110px">
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Source</span><select name="import_source"><option value="">All</option><?php foreach ($garminImportSourceOptions as $sourceOption): ?><option value="<?= h($sourceOption) ?>"><?= h($sourceOption) ?></option><?php endforeach; ?></select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Tail</span><select name="import_tail"><option value="">All</option><?php foreach ($garminImportTailOptions as $tailOption): ?><option value="<?= h($tailOption) ?>"><?= h($tailOption) ?></option><?php endforeach; ?></select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">From</span><input type="date" name="import_from"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">To</span><input type="date" name="import_to"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Import state</span><select name="import_state"><option value="">All</option><option value="complete">Complete</option><option value="queued">Queued</option><option value="failed">Failed</option><option value="needs_review">Needs review</option><option value="duplicate">Duplicate</option></select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Duplicate</span><select name="import_duplicate"><option value="">All</option><option value="new">New only</option><option value="duplicate">Duplicates only</option></select></label>
+        <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button type="submit">Apply</button></div>
+      </form>
+      <div class="garmin-muted" style="margin-top:8px" data-garmin-import-count>
+        Showing <?= number_format(count($garminImportRows)) ?> import(s), newest first.
+      </div>
+      <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">
+        <table class="garmin-table">
+          <thead><tr><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
+          <tbody>
+          <?php foreach ($garminImportRows as $row): ?>
+            <?php
+              $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
+              $summary = is_array($summary) ? $summary : array();
+              $sourceLabel = (string)($row['provider_name'] ?? '') === 'historical_sd_card_csv' || (string)($row['upload_source'] ?? '') === 'admin_historical_backfill'
+                  ? 'Bulk Upload'
+                  : 'IPCA Sync App';
+              $tail = strtoupper(trim((string)($row['summary_tail_number'] ?? '')));
+              if ($tail === '' || $tail === 'UNKNOWN' || $tail === 'UNKNOWN TAIL') {
+                  $tail = strtoupper(trim((string)($row['aircraft_registration'] ?: $row['aircraft_ident'])));
+              }
+              $startUtc = (string)($row['departure_time_utc'] ?? $row['first_valid_sample_utc'] ?? $row['created_at'] ?? '');
+              $dateKey = substr($startUtc, 0, 10);
+              $duplicateStatus = trim((string)($row['exact_duplicate_status'] ?? ''));
+              $isDuplicate = $duplicateStatus !== '' && $duplicateStatus !== 'new';
+              $importState = 'complete';
+              if (trim((string)($row['historical_parse_status'] ?? '')) !== '') {
+                  $importState = (string)$row['historical_parse_status'];
+              } elseif (trim((string)($row['derivation_status'] ?? '')) !== '') {
+                  $importState = (string)$row['derivation_status'];
+              } elseif (empty($row['summary_json'])) {
+                  $importState = 'missing_summary';
+              }
+              if ($isDuplicate) {
+                  $importState = 'duplicate';
+              }
+              $classification = trim((string)($row['historical_classification'] ?? ''));
+              if ($classification === '' || ((string)($row['historical_parse_status'] ?? '') === 'queued' && $classification === 'Needs Review')) {
+                  $classification = (string)($row['historical_parse_status'] ?? '') === 'queued' ? 'Not processed yet' : (string)($row['derivation_status'] ?? 'Summary');
+              }
+              $review = trim((string)($row['historical_review_status'] ?? ''));
+              $stateClass = in_array($importState, array('complete', 'completed', 'ok'), true) ? 'garmin-badge-ok' : (in_array($importState, array('failed', 'parse_failed'), true) ? 'garmin-badge-danger' : 'garmin-badge-warn');
+            ?>
+            <tr data-garmin-import-row
+                data-source="<?= h($sourceLabel) ?>"
+                data-tail="<?= h($tail) ?>"
+                data-date="<?= h($dateKey) ?>"
+                data-state="<?= h(strtolower($importState)) ?>"
+                data-duplicate="<?= $isDuplicate ? 'duplicate' : 'new' ?>">
+              <td><span class="garmin-badge <?= $sourceLabel === 'Bulk Upload' ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($sourceLabel) ?></span></td>
+              <td class="garmin-compact"><?= h($dateKey !== '' ? $dateKey : '--') ?><br><span class="garmin-muted"><?= h((string)($summary['dep_time_lt'] ?? '')) ?></span></td>
+              <td><?= garmin_sync_tail_pill($tail) ?></td>
+              <td><?= h((string)($row['departure_airport_code'] ?? $summary['dep_airport'] ?? '--') ?: '--') ?></td>
+              <td><?= h((string)($row['arrival_airport_code'] ?? $summary['arr_airport'] ?? '--') ?: '--') ?></td>
+              <td><?= h((string)($summary['hobbs_out'] ?? '--')) ?></td>
+              <td><?= h((string)($summary['hobbs_in'] ?? '--')) ?></td>
+              <td><?= h((string)($summary['hobbs_time'] ?? '--')) ?></td>
+              <td><?= h((string)($summary['tacho_out'] ?? '--')) ?></td>
+              <td><?= h((string)($summary['tacho_in'] ?? '--')) ?></td>
+              <td><?= h((string)($summary['tacho_time'] ?? '--')) ?></td>
+              <td><span class="garmin-badge <?= h($stateClass) ?>"><?= h($importState) ?></span><?php if ($review !== ''): ?><br><span class="garmin-muted"><?= h($review) ?></span><?php endif; ?></td>
+              <td><?= h($classification) ?></td>
+              <td><span class="garmin-badge <?= $isDuplicate ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($duplicateStatus !== '' ? $duplicateStatus : 'new') ?></span></td>
+              <td><span class="garmin-code"><?= h((string)$row['original_filename']) ?></span><br><span class="garmin-muted">CSV #<?= (int)$row['csv_file_id'] ?></span></td>
+            </tr>
+          <?php endforeach; ?>
+            <tr data-garmin-import-empty style="display:none"><td colspan="15" class="garmin-empty">No Garmin imports match these filters.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+  </section>
+
   <details class="garmin-card">
     <summary><strong>Technical Diagnostics</strong> <span class="garmin-muted">Raw sync artifacts, attention reasons, upload acknowledgments</span></summary>
   <section class="garmin-table-wrap" style="margin-top:14px">
@@ -1320,6 +1479,10 @@ cw_header('Garmin Sync Agent');
   const filterForm = document.querySelector('.garmin-filter');
   const rows = Array.from(document.querySelectorAll('[data-flight-row]'));
   const emptyRow = document.querySelector('[data-filter-empty]');
+  const importFilterForm = document.querySelector('[data-garmin-import-filter]');
+  const importRows = Array.from(document.querySelectorAll('[data-garmin-import-row]'));
+  const importEmptyRow = document.querySelector('[data-garmin-import-empty]');
+  const importCount = document.querySelector('[data-garmin-import-count]');
   const processButton = document.querySelector('[data-process-garmin]');
   const processingState = document.querySelector('[data-processing-state]');
   const processingMessage = document.querySelector('[data-processing-message]');
@@ -1395,6 +1558,52 @@ cw_header('Garmin Sync Agent');
     filterForm.querySelectorAll('input,select').forEach(field => field.addEventListener('input', applyInstantFilters));
     filterForm.querySelectorAll('select').forEach(field => field.addEventListener('change', applyInstantFilters));
     applyInstantFilters();
+  }
+  function importFilterValue(name) {
+    const field = importFilterForm ? importFilterForm.querySelector('[name="' + name + '"]') : null;
+    return field ? String(field.value || '') : '';
+  }
+  function applyGarminImportFilters() {
+    const source = importFilterValue('import_source');
+    const tail = importFilterValue('import_tail').toUpperCase();
+    const dateFrom = importFilterValue('import_from');
+    const dateTo = importFilterValue('import_to');
+    const state = importFilterValue('import_state').toLowerCase();
+    const duplicate = importFilterValue('import_duplicate');
+    let visibleCount = 0;
+    importRows.forEach(row => {
+      let visible = true;
+      const rowState = String(row.dataset.state || '').toLowerCase();
+      if (source && row.dataset.source !== source) visible = false;
+      if (tail && row.dataset.tail !== tail) visible = false;
+      if (dateFrom && row.dataset.date && row.dataset.date < dateFrom) visible = false;
+      if (dateTo && row.dataset.date && row.dataset.date > dateTo) visible = false;
+      if (duplicate && row.dataset.duplicate !== duplicate) visible = false;
+      if (state) {
+        if (state === 'complete') {
+          visible = visible && ['complete', 'completed', 'ok'].includes(rowState);
+        } else if (state === 'needs_review') {
+          visible = visible && row.textContent.toLowerCase().includes('needs_review');
+        } else {
+          visible = visible && rowState.includes(state);
+        }
+      }
+      row.style.display = visible ? '' : 'none';
+      if (visible) visibleCount++;
+    });
+    if (importEmptyRow) importEmptyRow.style.display = visibleCount === 0 ? '' : 'none';
+    if (importCount) importCount.textContent = 'Showing ' + visibleCount.toLocaleString() + ' of ' + importRows.length.toLocaleString() + ' import(s), newest first.';
+  }
+  if (importFilterForm) {
+    importFilterForm.addEventListener('submit', event => {
+      event.preventDefault();
+      applyGarminImportFilters();
+    });
+    importFilterForm.querySelectorAll('input,select').forEach(field => {
+      field.addEventListener('input', applyGarminImportFilters);
+      field.addEventListener('change', applyGarminImportFilters);
+    });
+    applyGarminImportFilters();
   }
   if (selectAll) {
     selectAll.addEventListener('change', () => boxes.forEach(box => {

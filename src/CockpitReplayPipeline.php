@@ -40,6 +40,10 @@ final class CockpitReplayPipeline
     /** @var array<string,mixed> */
     private array $diagnostics = array();
 
+    public function __construct(private ?PDO $pdo = null)
+    {
+    }
+
     /**
      * @param array<string,mixed> $recording
      * @param list<array<string,mixed>> $rawGpsRows
@@ -68,6 +72,9 @@ final class CockpitReplayPipeline
         $gpsPoints = $this->normalizeGpsPoints($rawGpsRows);
         $ahrsPoints = $this->normalizeAhrsPoints($rawAhrsRows);
         $g3xPoints = $this->normalizeG3xPoints($g3xSamples);
+        $alertCatalog = $this->upsertAndLoadAlertCatalog($recording, $g3xPoints);
+        $g3xPoints = $this->classifyG3xAlerts($g3xPoints, $alertCatalog);
+        $trimRange = $this->trimRangeFromG3xPoints($g3xPoints);
         $availableGpsCount = count($gpsPoints);
         $availableAhrsCount = count($ahrsPoints);
 
@@ -94,6 +101,9 @@ final class CockpitReplayPipeline
 
         $this->diagnostics = array(
             'replay_source_mode' => $sourceMode,
+            'system_alert_catalog_enabled' => $this->pdo instanceof PDO && $this->tablePresent('ipca_garmin_alert_catalog'),
+            'system_alert_observed_count' => $this->countObservedAlertKeys($g3xPoints),
+            'trim_range' => $trimRange,
             'raw_gps_available_count' => $availableGpsCount,
             'raw_ahrs_available_count' => $availableAhrsCount,
             'raw_gps_used_count' => $rawGpsCount,
@@ -228,6 +238,8 @@ final class CockpitReplayPipeline
         $textKnots = array(
             'cas_alert' => $this->buildG3xTextKnots($g3xPoints, 'cas_alert'),
             'terrain_alert' => $this->buildG3xTextKnots($g3xPoints, 'terrain_alert'),
+            'system_alerts_json' => $this->buildG3xTextKnots($g3xPoints, 'system_alerts_json', true),
+            'trim_range_json' => $this->buildG3xTextKnots($g3xPoints, 'trim_range_json', true),
             'transponder_code' => $this->buildG3xTextKnots($g3xPoints, 'transponder_code'),
             'transponder_mode' => $this->buildG3xTextKnots($g3xPoints, 'transponder_mode'),
             'nav_source' => $this->buildG3xTextKnots($g3xPoints, 'nav_source'),
@@ -625,6 +637,8 @@ final class CockpitReplayPipeline
                 'acceleration_g' => $instrumentValues['normal_acceleration_g'] ?? null,
                 'cas_alert' => $textValues['cas_alert'] ?? null,
                 'terrain_alert' => $textValues['terrain_alert'] ?? null,
+                'system_alerts_json' => $textValues['system_alerts_json'] ?? null,
+                'trim_range_json' => $textValues['trim_range_json'] ?? null,
                 'transponder_code' => $textValues['transponder_code'] ?? null,
                 'transponder_mode' => $textValues['transponder_mode'] ?? null,
                 'nav_source' => $textValues['nav_source'] ?? null,
@@ -889,6 +903,9 @@ final class CockpitReplayPipeline
                 'normal_acceleration_g' => G3XFlightStreamParser::numericValue($row, 'Normal Acceleration (G)', 'NormAc'),
                 'cas_alert' => trim((string)($row['CAS Alert'] ?? '')),
                 'terrain_alert' => trim((string)($row['Terrain Alert'] ?? '')),
+                'system_alerts_raw' => $this->systemAlertsFromRow($row),
+                'system_alerts_json' => '',
+                'trim_range_json' => '',
                 'transponder_code' => trim((string)($row['Transponder Code'] ?? '')),
                 'transponder_mode' => trim((string)($row['Transponder Mode'] ?? '')),
                 'nav_source' => trim((string)($row['Active Nav Source'] ?? ($row['NavSrc'] ?? ($row['HSIS'] ?? '')))),
@@ -1487,6 +1504,273 @@ final class CockpitReplayPipeline
         }
         usort($knots, fn(array $a, array $b): int => $a['t'] <=> $b['t']);
         return $this->mergeScalarKnots($knots);
+    }
+
+    /**
+     * @param array<string,string> $row
+     * @return list<array{source_column:string,text:string,key:string}>
+     */
+    private function systemAlertsFromRow(array $row): array
+    {
+        $alerts = array();
+        foreach ($row as $column => $value) {
+            $columnName = trim((string)$column);
+            $sourceColumn = '';
+            if (strcasecmp($columnName, 'CAS Alert') === 0) {
+                $sourceColumn = 'CAS Alert';
+            } elseif (strcasecmp($columnName, 'Terrain Alert') === 0) {
+                $sourceColumn = 'Terrain Alert';
+            } elseif (preg_match('/^WARNING\s*\d+$/i', $columnName) === 1) {
+                $sourceColumn = strtoupper(preg_replace('/\s+/', ' ', $columnName) ?? $columnName);
+            }
+            if ($sourceColumn === '') {
+                continue;
+            }
+            foreach ($this->splitAlertText((string)$value) as $text) {
+                $key = self::alertKey($text);
+                if ($key === '') {
+                    continue;
+                }
+                $alerts[] = array(
+                    'source_column' => $sourceColumn,
+                    'text' => $text,
+                    'key' => $key,
+                );
+            }
+        }
+        return $alerts;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function splitAlertText(string $value): array
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return array();
+        }
+        $parts = preg_split('/(?:\r\n|\r|\n|[;|])+/', $value) ?: array($value);
+        $out = array();
+        foreach ($parts as $part) {
+            $text = trim((string)$part);
+            if ($text !== '') {
+                $out[] = preg_replace('/\s+/', ' ', $text) ?? $text;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    private static function alertKey(string $text): string
+    {
+        $key = strtoupper(trim($text));
+        $key = preg_replace('/[^A-Z0-9]+/', ' ', $key) ?? '';
+        return trim(preg_replace('/\s+/', ' ', $key) ?? $key);
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @param list<array<string,mixed>> $g3xPoints
+     * @return array<string,array{severity:string,display_text:string}>
+     */
+    private function upsertAndLoadAlertCatalog(array $recording, array $g3xPoints): array
+    {
+        if (!$this->pdo instanceof PDO || !$this->tablePresent('ipca_garmin_alert_catalog')) {
+            return array();
+        }
+        $aircraftType = $this->alertAircraftType($recording);
+        $observed = array();
+        foreach ($g3xPoints as $point) {
+            $alerts = is_array($point['system_alerts_raw'] ?? null) ? $point['system_alerts_raw'] : array();
+            foreach ($alerts as $alert) {
+                if (!is_array($alert)) {
+                    continue;
+                }
+                $source = trim((string)($alert['source_column'] ?? ''));
+                $key = trim((string)($alert['key'] ?? ''));
+                if ($source === '' || $key === '') {
+                    continue;
+                }
+                $mapKey = $source . "\n" . $key;
+                if (!isset($observed[$mapKey])) {
+                    $observed[$mapKey] = array(
+                        'source_column' => $source,
+                        'alert_key' => $key,
+                        'display_text' => trim((string)($alert['text'] ?? $key)),
+                        'count' => 0,
+                    );
+                }
+                $observed[$mapKey]['count']++;
+            }
+        }
+        if ($observed !== array()) {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO ipca_garmin_alert_catalog (
+                    aircraft_type, source_column, alert_key, display_text, severity,
+                    observation_count, first_seen_at, last_seen_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'info', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON DUPLICATE KEY UPDATE
+                    display_text = IF(display_text = '' OR display_text = alert_key, VALUES(display_text), display_text),
+                    observation_count = observation_count + VALUES(observation_count),
+                    last_seen_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+            ");
+            foreach ($observed as $row) {
+                $stmt->execute(array(
+                    $aircraftType,
+                    $row['source_column'],
+                    $row['alert_key'],
+                    $row['display_text'],
+                    (int)$row['count'],
+                ));
+            }
+        }
+
+        $catalog = array();
+        $stmt = $this->pdo->prepare("
+            SELECT source_column, alert_key, display_text, severity
+            FROM ipca_garmin_alert_catalog
+            WHERE aircraft_type IN ('', ?)
+        ");
+        $stmt->execute(array($aircraftType));
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $severity = strtolower(trim((string)($row['severity'] ?? 'info')));
+            if (!in_array($severity, array('warning', 'caution', 'info'), true)) {
+                $severity = 'info';
+            }
+            $catalog[(string)$row['source_column'] . "\n" . (string)$row['alert_key']] = array(
+                'severity' => $severity,
+                'display_text' => trim((string)($row['display_text'] ?? '')),
+            );
+        }
+        return $catalog;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $g3xPoints
+     * @param array<string,array{severity:string,display_text:string}> $catalog
+     * @return list<array<string,mixed>>
+     */
+    private function classifyG3xAlerts(array $g3xPoints, array $catalog): array
+    {
+        $trimRange = $this->trimRangeFromG3xPoints($g3xPoints);
+        $trimRangeJson = $trimRange !== null ? json_encode($trimRange, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '';
+        foreach ($g3xPoints as &$point) {
+            $rawAlerts = is_array($point['system_alerts_raw'] ?? null) ? $point['system_alerts_raw'] : array();
+            $alerts = array();
+            $seen = array();
+            foreach ($rawAlerts as $rawAlert) {
+                if (!is_array($rawAlert)) {
+                    continue;
+                }
+                $source = trim((string)($rawAlert['source_column'] ?? ''));
+                $key = trim((string)($rawAlert['key'] ?? ''));
+                $text = trim((string)($rawAlert['text'] ?? ''));
+                if ($source === '' || $key === '' || isset($seen[$source . "\n" . $key])) {
+                    continue;
+                }
+                $seen[$source . "\n" . $key] = true;
+                $catalogRow = $catalog[$source . "\n" . $key] ?? null;
+                $severity = is_array($catalogRow) ? (string)($catalogRow['severity'] ?? 'info') : 'info';
+                $displayText = is_array($catalogRow) && trim((string)($catalogRow['display_text'] ?? '')) !== ''
+                    ? trim((string)$catalogRow['display_text'])
+                    : $text;
+                $alerts[] = array(
+                    'source_column' => $source,
+                    'key' => $key,
+                    'text' => $displayText,
+                    'severity' => $severity,
+                );
+            }
+            usort($alerts, static function (array $a, array $b): int {
+                $rank = array('warning' => 0, 'caution' => 1, 'info' => 2);
+                $aRank = $rank[(string)($a['severity'] ?? 'info')] ?? 2;
+                $bRank = $rank[(string)($b['severity'] ?? 'info')] ?? 2;
+                if ($aRank !== $bRank) {
+                    return $aRank <=> $bRank;
+                }
+                return strcmp((string)($a['text'] ?? ''), (string)($b['text'] ?? ''));
+            });
+            $point['system_alerts_json'] = $alerts !== array()
+                ? (json_encode($alerts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '')
+                : '';
+            $point['trim_range_json'] = $trimRangeJson !== false ? $trimRangeJson : '';
+        }
+        unset($point);
+        return $g3xPoints;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function alertAircraftType(array $recording): string
+    {
+        $type = trim((string)($recording['aircraft_type'] ?? ''));
+        if ($type !== '') {
+            return strtoupper($type);
+        }
+        $name = trim((string)($recording['aircraft_display_name'] ?? ''));
+        return $name !== '' ? strtoupper($name) : 'UNKNOWN';
+    }
+
+    /**
+     * @param list<array<string,mixed>> $g3xPoints
+     * @return array{min:float,max:float,neutral:float,source:string}|null
+     */
+    private function trimRangeFromG3xPoints(array $g3xPoints): ?array
+    {
+        $values = array();
+        foreach ($g3xPoints as $point) {
+            if (isset($point['elevator_trim_pct']) && is_numeric($point['elevator_trim_pct'])) {
+                $values[] = (float)$point['elevator_trim_pct'];
+            }
+        }
+        if ($values === array()) {
+            return null;
+        }
+        $min = min($values);
+        $max = max($values);
+        if (abs($max - $min) < 0.001) {
+            $min -= 1.0;
+            $max += 1.0;
+        }
+        $neutral = $min <= 0.0 && $max >= 0.0 ? 0.0 : (($min + $max) / 2.0);
+        return array(
+            'min' => round($min, 3),
+            'max' => round($max, 3),
+            'neutral' => round($neutral, 3),
+            'source' => 'current_replay_auto_detect',
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $g3xPoints
+     */
+    private function countObservedAlertKeys(array $g3xPoints): int
+    {
+        $seen = array();
+        foreach ($g3xPoints as $point) {
+            $alerts = is_array($point['system_alerts_raw'] ?? null) ? $point['system_alerts_raw'] : array();
+            foreach ($alerts as $alert) {
+                if (is_array($alert)) {
+                    $key = trim((string)($alert['source_column'] ?? '')) . "\n" . trim((string)($alert['key'] ?? ''));
+                    if (trim($key) !== '') {
+                        $seen[$key] = true;
+                    }
+                }
+            }
+        }
+        return count($seen);
+    }
+
+    private function tablePresent(string $table): bool
+    {
+        if (!$this->pdo instanceof PDO) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare('SHOW TABLES LIKE ?');
+        $stmt->execute(array($table));
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

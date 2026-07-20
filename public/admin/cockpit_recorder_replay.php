@@ -481,6 +481,8 @@ cw_header('Cockpit Recorder Replay');
 .replay-horizon-line[hidden],
 .airspeed-tape[hidden],
 .altimeter-stack[hidden],
+.trim-indicator[hidden],
+.system-warning-box[hidden],
 .engine-panel[hidden] {
   display: none !important;
 }
@@ -1115,6 +1117,9 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive.is-panel-layout .airspeed-tape {
   left: calc(var(--panel-engine-width) + clamp(30px, 4vw, 72px) + 60px);
 }
+.replay-immersive.is-panel-layout .trim-indicator {
+  left: calc(var(--panel-engine-width) + clamp(30px, 4vw, 72px) + 150px);
+}
 .replay-immersive.is-panel-layout .altimeter-stack {
   right: calc(clamp(60px, 8vw, 122px) + 60px);
 }
@@ -1530,6 +1535,71 @@ cw_header('Cockpit Recorder Replay');
   stroke: #73ff45;
   stroke-width: 7.5;
 }
+.trim-indicator {
+  position: absolute;
+  z-index: 20;
+  width: 44px;
+  height: 160px;
+  box-sizing: border-box;
+  padding: 8px 5px;
+  border-radius: 10px;
+  background: rgba(40, 40, 40, .62);
+  border: 1px solid rgba(255, 255, 255, .22);
+  color: #fff;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+}
+.trim-indicator-label,
+.trim-indicator-direction {
+  font-size: 12px;
+  letter-spacing: .01em;
+}
+.trim-indicator-track {
+  position: relative;
+  height: 104px;
+  margin: 3px 0;
+}
+.trim-indicator-track::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, .84);
+}
+.trim-reference {
+  position: absolute;
+  left: 10px;
+  width: 12px;
+  height: 2px;
+  transform: translateY(-1px);
+}
+.trim-reference-red { background: #ff2317; }
+.trim-reference-yellow { background: #ffff00; }
+.trim-reference-green { background: #73ff45; width: 18px; left: 7px; }
+.trim-reference-upper { top: 14%; }
+.trim-reference-upper-mid { top: 32%; }
+.trim-reference-green { top: 50%; }
+.trim-reference-lower-mid { top: 68%; }
+.trim-reference-lower { top: 86%; }
+.trim-indicator-pointer {
+  position: absolute;
+  right: 1px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-right: 18px solid #fff;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .55));
+}
 .temperature-box {
   position: absolute;
   left: 0;
@@ -1546,6 +1616,29 @@ cw_header('Cockpit Recorder Replay');
   line-height: 1.25;
   text-align: left;
 }
+.system-warning-box {
+  position: absolute;
+  z-index: 20;
+  min-width: 132px;
+  max-width: 260px;
+  box-sizing: border-box;
+  padding: 9px 18px;
+  border-radius: 9px;
+  background: rgba(40, 40, 40, .62);
+  border: 1px solid rgba(255, 255, 255, .18);
+  pointer-events: none;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.22;
+  text-align: left;
+  text-transform: uppercase;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .38));
+}
+.system-warning-line { white-space: nowrap; }
+.system-warning-line.is-warning { color: #ff2317; }
+.system-warning-line.is-caution { color: #ffd92f; }
+.system-warning-line.is-info { color: #fff; }
 .replay-ipca-watermark {
   position: absolute;
   left: 50%;
@@ -2041,6 +2134,19 @@ cw_header('Cockpit Recorder Replay');
         <span><span id="airspeedGsValue" class="airspeed-tape-gs-value">--</span><span class="airspeed-tape-unit airspeed-tape-gs-unit">KT</span></span>
       </div>
     </div>
+    <div id="trimIndicator" class="trim-indicator" aria-label="Trim position indicator" hidden>
+      <div class="trim-indicator-label">TRIM</div>
+      <div class="trim-indicator-direction">DN</div>
+      <div class="trim-indicator-track">
+        <div class="trim-reference trim-reference-red trim-reference-upper"></div>
+        <div class="trim-reference trim-reference-yellow trim-reference-upper-mid"></div>
+        <div class="trim-reference trim-reference-green"></div>
+        <div class="trim-reference trim-reference-yellow trim-reference-lower-mid"></div>
+        <div class="trim-reference trim-reference-red trim-reference-lower"></div>
+        <div id="trimIndicatorPointer" class="trim-indicator-pointer"></div>
+      </div>
+      <div class="trim-indicator-direction">UP</div>
+    </div>
     <div id="aoaIndicator" class="aoa-indicator" aria-label="Angle of attack indicator" hidden>
       <svg id="aoaIndicatorSvg" viewBox="0 10 72 124" role="img" aria-label="Angle of attack"></svg>
     </div>
@@ -2063,6 +2169,7 @@ cw_header('Cockpit Recorder Replay');
         <div id="temperatureBox" class="temperature-box">OAT --°C<br>ISA --°C</div>
       </div>
     </div>
+    <div id="systemWarningBox" class="system-warning-box" aria-label="System warnings" hidden></div>
     <div id="settingsPanel" class="replay-modal replay-settings-panel" aria-label="Replay settings" hidden>
       <div class="replay-settings-tabs" role="tablist" aria-label="Replay settings tabs">
         <button class="replay-settings-tab-button is-active" type="button" id="settingsCameraTabButton" data-settings-tab="camera" role="tab" aria-selected="true">Camera</button>
@@ -2176,6 +2283,7 @@ cw_header('Cockpit Recorder Replay');
         <div class="replay-calibration-section-title">Instruments</div>
         <div class="replay-instrument-grid">
           <label class="replay-toggle"><span>Airspeed Indicator</span><input type="checkbox" data-instrument-toggle="airspeed_indicator"></label>
+          <label class="replay-toggle"><span>Trim Position Indicator</span><input type="checkbox" data-instrument-toggle="trim_position_indicator"></label>
           <label class="replay-toggle"><span>Altimeter</span><input type="checkbox" data-instrument-toggle="altimeter"></label>
           <label class="replay-toggle"><span>Horizontal Situation Indicator</span><input type="checkbox" data-instrument-toggle="hsi"></label>
           <label class="replay-toggle"><span>Angle of Attack Indicator</span><input type="checkbox" data-instrument-toggle="aoa_indicator"></label>
@@ -2189,6 +2297,7 @@ cw_header('Cockpit Recorder Replay');
           <label class="replay-toggle"><span>Navaid Stack</span><input type="checkbox" data-instrument-toggle="navaid_stack"></label>
           <label class="replay-toggle"><span>Autopilot FMA</span><input type="checkbox" data-instrument-toggle="autopilot_fma"></label>
           <label class="replay-toggle"><span>Engine Instrument Stack</span><input type="checkbox" data-instrument-toggle="engine_instrument_stack"></label>
+          <label class="replay-toggle"><span>System Warning Box</span><input type="checkbox" data-instrument-toggle="system_warning_box"></label>
           <label class="replay-toggle"><span>Wind Indicator</span><input type="checkbox" data-instrument-toggle="wind_indicator"></label>
         </div>
       </div>
@@ -2288,6 +2397,8 @@ cw_header('Cockpit Recorder Replay');
   const airspeedTapePointer = document.getElementById('airspeedTapePointer');
   const airspeedTasValue = document.getElementById('airspeedTasValue');
   const airspeedGsValue = document.getElementById('airspeedGsValue');
+  const trimIndicator = document.getElementById('trimIndicator');
+  const trimIndicatorPointer = document.getElementById('trimIndicatorPointer');
   const aoaIndicator = document.getElementById('aoaIndicator');
   const aoaIndicatorSvg = document.getElementById('aoaIndicatorSvg');
   const altimeterStack = document.getElementById('altimeterStack');
@@ -2302,6 +2413,7 @@ cw_header('Cockpit Recorder Replay');
   const vsiScale = document.getElementById('vsiScale');
   const vsiPointer = document.getElementById('vsiPointer');
   const temperatureBox = document.getElementById('temperatureBox');
+  const systemWarningBox = document.getElementById('systemWarningBox');
   const calibrationToggle = document.getElementById('calibrationToggle');
   const debugToggle = document.getElementById('debugToggle');
   const cameraPanel = document.getElementById('cameraPanel');
@@ -2434,6 +2546,7 @@ cw_header('Cockpit Recorder Replay');
   const CAMERA_PRESET_ADMIN_LOCKED = false;
   const INSTRUMENT_TOGGLE_IDS = [
     'airspeed_indicator',
+    'trim_position_indicator',
     'altimeter',
     'hsi',
     'aoa_indicator',
@@ -2447,10 +2560,11 @@ cw_header('Cockpit Recorder Replay');
     'navaid_stack',
     'autopilot_fma',
     'engine_instrument_stack',
+    'system_warning_box',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack']);
-  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack', 'system_warning_box']);
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -2782,8 +2896,10 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateTrimIndicator(sampleAt(activeT));
     updateAoaIndicator(sampleAt(activeT));
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    updateSystemWarningBox(sampleAt(activeT));
     updateInsetMap(sampleAt(activeT), true);
     updateAvionicsHeader(sampleAt(activeT));
     safeRenderCesium(true);
@@ -2920,8 +3036,10 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateTrimIndicator(sampleAt(activeT));
     updateAoaIndicator(sampleAt(activeT));
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    updateSystemWarningBox(sampleAt(activeT));
   }
 
   function setAttitudeReferenceOffset(value) {
@@ -2960,8 +3078,10 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(displayCamera);
     updateAttitudeIndicator(displayCamera, sampleAt(activeT));
     updateAirspeedTape(sampleAt(activeT), 1 / 60, true);
+    updateTrimIndicator(sampleAt(activeT));
     updateAoaIndicator(sampleAt(activeT));
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
+    updateSystemWarningBox(sampleAt(activeT));
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
     updateEnginePanel(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
@@ -2992,6 +3112,7 @@ cw_header('Cockpit Recorder Replay');
 
   function applyInstrumentVisibility() {
     if (airspeedTape && !instrumentEnabled('airspeed_indicator')) setElementHidden(airspeedTape, true);
+    if (trimIndicator && !instrumentEnabled('trim_position_indicator')) setElementHidden(trimIndicator, true);
     if (altimeterStack && !instrumentEnabled('altimeter')) setElementHidden(altimeterStack, true);
     if (hsiOverlay && !instrumentEnabled('hsi')) setElementHidden(hsiOverlay, true);
     if (attitudeOverlay && !instrumentEnabled('attitude_indicator')) setElementHidden(attitudeOverlay, true);
@@ -2999,6 +3120,7 @@ cw_header('Cockpit Recorder Replay');
     if (insetMap && !instrumentEnabled('inset_map')) setElementHidden(insetMap, true);
     if (aoaIndicator && !instrumentEnabled('aoa_indicator')) setElementHidden(aoaIndicator, true);
     if (enginePanel && !instrumentEnabled('engine_instrument_stack')) setElementHidden(enginePanel, true);
+    if (systemWarningBox && !instrumentEnabled('system_warning_box')) setElementHidden(systemWarningBox, true);
   }
 
   function g3xField(sample, ...keys) {
@@ -3441,6 +3563,82 @@ cw_header('Cockpit Recorder Replay');
     if (airspeedTapePointer) airspeedTapePointer.textContent = String(Math.round(displayAirspeedKt));
     if (airspeedTasValue) airspeedTasValue.textContent = tas === null ? '--' : String(Math.round(tas));
     if (airspeedGsValue) airspeedGsValue.textContent = gs === null ? '--' : String(Math.round(gs));
+  }
+
+  function trimIndicatorPlacement() {
+    if (!trimIndicator || !airspeedTape) return false;
+    const airspeedRect = instrumentAnchorRect(airspeedTape);
+    if (!airspeedRect) return false;
+    const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+    const airspeedStyle = window.getComputedStyle(airspeedTape);
+    const scaleMatch = String(airspeedStyle.transform || '').match(/^matrix\(([^,]+),/);
+    const scale = scaleMatch ? Number(scaleMatch[1]) : 1;
+    const gap = Math.max(8, Math.round(8 * scale));
+    const baseHeight = 160;
+    trimIndicator.style.transform = `scale(${Number.isFinite(scale) ? scale : 1})`;
+    trimIndicator.style.transformOrigin = 'top left';
+    trimIndicator.style.left = `${Math.round(airspeedRect.right - rootRect.left + gap)}px`;
+    trimIndicator.style.top = `${Math.round(airspeedRect.bottom - rootRect.top - (baseHeight * (Number.isFinite(scale) ? scale : 1)))}px`;
+    return true;
+  }
+
+  function updateTrimIndicator(sample) {
+    if (!trimIndicator || !trimIndicatorPointer) return;
+    const trimValue = firstFinite(sample && sample.elevator_trim_pct);
+    const trimRange = sample && sample.trim_range && typeof sample.trim_range === 'object' ? sample.trim_range : null;
+    const min = trimRange ? Number(trimRange.min) : null;
+    const max = trimRange ? Number(trimRange.max) : null;
+    if (!sample || !instrumentEnabled('trim_position_indicator') || trimValue === null || !Number.isFinite(min) || !Number.isFinite(max) || max <= min || !trimIndicatorPlacement()) {
+      setElementHidden(trimIndicator, true);
+      return;
+    }
+    const ratio = clamp((trimValue - min) / (max - min), 0, 1);
+    const yPct = 100 - (ratio * 100);
+    trimIndicatorPointer.style.top = `${yPct.toFixed(1)}%`;
+    setElementHidden(trimIndicator, false);
+  }
+
+  function normalizedSystemAlerts(sample) {
+    const alerts = sample && Array.isArray(sample.system_alerts) ? sample.system_alerts : [];
+    const rank = { warning: 0, caution: 1, info: 2 };
+    return alerts
+      .map((alert) => {
+        const severity = String(alert && alert.severity || 'info').toLowerCase();
+        return {
+          text: String(alert && alert.text || '').trim(),
+          severity: Object.prototype.hasOwnProperty.call(rank, severity) ? severity : 'info',
+        };
+      })
+      .filter((alert) => alert.text !== '')
+      .sort((a, b) => (rank[a.severity] - rank[b.severity]) || a.text.localeCompare(b.text));
+  }
+
+  function systemWarningBoxPlacement() {
+    if (!systemWarningBox || !altimeterStack) return false;
+    const altimeterRect = instrumentAnchorRect(altimeterStack);
+    if (!altimeterRect) return false;
+    const rootRect = root ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth, bottom: window.innerHeight };
+    const temperatureRect = temperatureBox && !elementIsHidden(temperatureBox) ? temperatureBox.getBoundingClientRect() : null;
+    const anchorBottom = temperatureRect && temperatureRect.height > 0 ? temperatureRect.bottom : altimeterRect.bottom + 48;
+    const rightPx = Math.max(12, Math.round(rootRect.right - altimeterRect.right));
+    const bottomPx = Math.max(72, Math.round(rootRect.bottom - anchorBottom + 8));
+    systemWarningBox.style.right = `${rightPx}px`;
+    systemWarningBox.style.bottom = `${bottomPx}px`;
+    return true;
+  }
+
+  function updateSystemWarningBox(sample) {
+    if (!systemWarningBox) return;
+    const alerts = normalizedSystemAlerts(sample);
+    if (!sample || !instrumentEnabled('system_warning_box') || alerts.length === 0 || !systemWarningBoxPlacement()) {
+      setElementHidden(systemWarningBox, true);
+      systemWarningBox.innerHTML = '';
+      return;
+    }
+    systemWarningBox.innerHTML = alerts
+      .map((alert) => `<div class="system-warning-line is-${escapeHtml(alert.severity)}">${escapeHtml(alert.text)}</div>`)
+      .join('');
+    setElementHidden(systemWarningBox, false);
   }
 
   function aoaProfileNumber(key, fallback) {
@@ -6038,8 +6236,10 @@ cw_header('Cockpit Recorder Replay');
       updateHorizonLine(freeInstrumentView);
       updateAttitudeIndicator(freeInstrumentView, freeSample, 1 / 60, true);
       updateAirspeedTape(freeSample, 1 / 60, true);
+      updateTrimIndicator(freeSample);
       updateAoaIndicator(freeSample);
       updateAltimeterTape(freeSample, 1 / 60, true);
+      updateSystemWarningBox(freeSample);
       updateHsiOverlay(freeSample, 1 / 60, true);
       updateEnginePanel(freeSample, 1 / 60, true);
       updateInsetMap(freeSample, true);
@@ -6059,8 +6259,10 @@ cw_header('Cockpit Recorder Replay');
       updateHorizonLine(fallbackInstrumentView);
       updateAttitudeIndicator(fallbackInstrumentView, sample, dtSec, snap);
       updateAirspeedTape(sample, dtSec, snap);
+      updateTrimIndicator(sample);
       updateAoaIndicator(sample);
       updateAltimeterTape(sample, dtSec, snap);
+      updateSystemWarningBox(sample);
       updateHsiOverlay(sample, dtSec, snap);
       updateEnginePanel(sample, dtSec, snap);
       updateInsetMap(sample, snap);
@@ -6123,8 +6325,10 @@ cw_header('Cockpit Recorder Replay');
     updateHorizonLine(view);
     updateAttitudeIndicator(view, sample, dtSec, snap);
     updateAirspeedTape(sample, dtSec, snap);
+    updateTrimIndicator(sample);
     updateAoaIndicator(sample);
     updateAltimeterTape(sample, dtSec, snap);
+    updateSystemWarningBox(sample);
     updateHsiOverlay(sample, dtSec, snap);
     updateEnginePanel(sample, dtSec, snap);
     updateInsetMap(sample, snap);
