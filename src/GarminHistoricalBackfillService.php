@@ -28,9 +28,41 @@ final class GarminHistoricalBackfillService
             throw new RuntimeException('No historical Garmin CSV files were selected.');
         }
 
+        $batchId = $this->createBatchRecord($createdByUserId, $aircraftHint, $notes);
+        $result = $this->addUploadedFilesToBatch($batchId, $files, $aircraftHint);
+
+        return array('ok' => true, 'batch_id' => $batchId, 'files' => $result['files']);
+    }
+
+    public function createBatchRecord(?int $createdByUserId = null, string $aircraftHint = '', string $notes = ''): int
+    {
         $this->pdo->beginTransaction();
         try {
             $batchId = $this->createBatch($createdByUserId, $aircraftHint, $notes);
+            $this->pdo->commit();
+            return $batchId;
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $files Usually $_FILES['garmin_csv_files'].
+     * @return array<string,mixed>
+     */
+    public function addUploadedFilesToBatch(int $batchId, array $files, string $aircraftHint = ''): array
+    {
+        if ($batchId <= 0) {
+            throw new RuntimeException('Historical Garmin batch id is required.');
+        }
+        $normalizedFiles = $this->normalizeUploadedFiles($files);
+        if ($normalizedFiles === array()) {
+            throw new RuntimeException('No historical Garmin CSV files were selected.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
             $results = array();
             foreach ($normalizedFiles as $file) {
                 $results[] = $this->ingestOneUploadedFile($batchId, $file, $aircraftHint);
@@ -48,29 +80,45 @@ final class GarminHistoricalBackfillService
     /**
      * @return array<string,mixed>
      */
-    public function status(int $limit = 10): array
+    public function status(int $limit = 10, ?int $batchId = null): array
     {
         if (!$this->tableExists('ipca_garmin_historical_backfill_batches')) {
             return array('ready' => false, 'message' => 'Historical Garmin backfill tables have not been installed.', 'batches' => array());
         }
-        $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM ipca_garmin_historical_backfill_batches
-            ORDER BY created_at DESC, id DESC
-            LIMIT ?
-        ");
-        $stmt->bindValue(1, max(1, min(50, $limit)), PDO::PARAM_INT);
+        if ($batchId !== null && $batchId > 0) {
+            $stmt = $this->pdo->prepare("
+                SELECT *
+                FROM ipca_garmin_historical_backfill_batches
+                WHERE id = ?
+                LIMIT 1
+            ");
+            $stmt->bindValue(1, $batchId, PDO::PARAM_INT);
+        } else {
+            $stmt = $this->pdo->prepare("
+                SELECT *
+                FROM ipca_garmin_historical_backfill_batches
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            ");
+            $stmt->bindValue(1, max(1, min(50, $limit)), PDO::PARAM_INT);
+        }
         $stmt->execute();
         $batches = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
 
-        $fileStatuses = $this->countsByStatus('ipca_garmin_historical_backfill_files', 'parse_status');
-        $classes = $this->countsByStatus('ipca_garmin_historical_segments', 'classification');
-        $reviews = $this->countsByStatus('ipca_garmin_historical_segments', 'review_status');
+        $fileStatuses = $this->countsByStatus('ipca_garmin_historical_backfill_files', 'parse_status', $batchId);
+        $duplicateStatuses = $this->countsByStatus('ipca_garmin_historical_backfill_files', 'exact_duplicate_status', $batchId);
+        $classes = $this->countsByStatus('ipca_garmin_historical_segments', 'classification', $batchId);
+        $reviews = $this->countsByStatus('ipca_garmin_historical_segments', 'review_status', $batchId);
+        $activeBatch = $batches[0] ?? null;
+        $progress = $this->progressForBatch(is_array($activeBatch) ? (int)$activeBatch['id'] : 0);
 
         return array(
             'ready' => true,
             'batches' => $batches,
+            'active_batch' => $activeBatch,
+            'progress' => $progress,
             'file_statuses' => $fileStatuses,
+            'duplicate_statuses' => $duplicateStatuses,
             'segment_classifications' => $classes,
             'review_statuses' => $reviews,
         );
@@ -549,13 +597,70 @@ final class GarminHistoricalBackfillService
     /**
      * @return array<string,int>
      */
-    private function countsByStatus(string $table, string $column): array
+    /**
+     * @return array<string,mixed>
+     */
+    private function progressForBatch(int $batchId): array
+    {
+        if ($batchId <= 0 || !$this->tableExists('ipca_garmin_historical_backfill_files')) {
+            return array('total' => 0, 'done' => 0, 'remaining' => 0, 'percent' => 0, 'state' => 'idle');
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT
+              COUNT(*) AS total,
+              SUM(parse_status IN ('completed','duplicate')) AS done,
+              SUM(parse_status = 'queued') AS queued,
+              SUM(parse_status = 'failed') AS failed,
+              SUM(review_status = 'needs_review') AS needs_review,
+              SUM(exact_duplicate_status <> 'new') AS duplicates
+            FROM ipca_garmin_historical_backfill_files
+            WHERE batch_id = ?
+        ");
+        $stmt->execute(array($batchId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+        $total = (int)($row['total'] ?? 0);
+        $done = (int)($row['done'] ?? 0);
+        $failed = (int)($row['failed'] ?? 0);
+        $remaining = max(0, $total - $done - $failed);
+        $percent = $total > 0 ? (int)round((($done + $failed) / $total) * 100) : 0;
+        $state = $total === 0 ? 'waiting_for_upload' : ($remaining > 0 ? 'backend_processing' : ($failed > 0 ? 'needs_review' : 'complete'));
+        return array(
+            'total' => $total,
+            'done' => $done,
+            'queued' => (int)($row['queued'] ?? 0),
+            'failed' => $failed,
+            'needs_review' => (int)($row['needs_review'] ?? 0),
+            'duplicates' => (int)($row['duplicates'] ?? 0),
+            'remaining' => $remaining,
+            'percent' => $percent,
+            'state' => $state,
+        );
+    }
+
+    /**
+     * @return array<string,int>
+     */
+    private function countsByStatus(string $table, string $column, ?int $batchId = null): array
     {
         if (!$this->tableExists($table)) {
             return array();
         }
-        $sql = 'SELECT ' . $column . ' AS k, COUNT(*) AS c FROM ' . $table . ' GROUP BY ' . $column;
-        $rows = $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $params = array();
+        $join = '';
+        $where = '';
+        if ($batchId !== null && $batchId > 0) {
+            if ($table === 'ipca_garmin_historical_segments') {
+                $join = ' INNER JOIN ipca_garmin_historical_backfill_files f ON f.id = ipca_garmin_historical_segments.backfill_file_id';
+                $where = ' WHERE f.batch_id = ?';
+            } else {
+                $where = ' WHERE batch_id = ?';
+            }
+            $params[] = $batchId;
+        }
+        $sql = 'SELECT ' . $column . ' AS k, COUNT(*) AS c FROM ' . $table . $join . $where . ' GROUP BY ' . $column;
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $out = array();
         foreach ($rows as $row) {
             $out[(string)$row['k']] = (int)$row['c'];

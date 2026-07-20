@@ -8,10 +8,12 @@ cw_require_admin();
 
 try {
     header('Content-Type: application/json; charset=utf-8');
+    $batchId = (int)($_GET['batch_id'] ?? 0);
+    $service = new GarminHistoricalBackfillService($pdo);
     echo json_encode(array(
         'ok' => true,
-        'status' => (new GarminHistoricalBackfillService($pdo))->status(10),
-        'recent_files' => (new GarminHistoricalBackfillService($pdo))->recentFiles(25),
+        'status' => $service->status(10, $batchId > 0 ? $batchId : null),
+        'recent_files' => $service->recentFiles(25),
     ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

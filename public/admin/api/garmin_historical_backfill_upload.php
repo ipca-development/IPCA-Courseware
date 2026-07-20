@@ -24,10 +24,21 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         throw new RuntimeException('POST required.');
     }
-    $files = is_array($_FILES['garmin_csv_files'] ?? null) ? $_FILES['garmin_csv_files'] : array();
+    $service = new GarminHistoricalBackfillService($pdo);
+    $action = trim((string)($_POST['action'] ?? 'upload'));
     $aircraftHint = trim((string)($_POST['aircraft_hint'] ?? ''));
     $notes = trim((string)($_POST['notes'] ?? ''));
-    $result = (new GarminHistoricalBackfillService($pdo))->createBatchFromUpload($files, (int)($_SESSION['user_id'] ?? 0) ?: null, $aircraftHint, $notes);
+    if ($action === 'create_batch') {
+        $batchId = $service->createBatchRecord((int)($_SESSION['user_id'] ?? 0) ?: null, $aircraftHint, $notes);
+        garmin_historical_upload_json(200, array('ok' => true, 'batch_id' => $batchId));
+    }
+    $files = is_array($_FILES['garmin_csv_files'] ?? null) ? $_FILES['garmin_csv_files'] : array();
+    $batchId = (int)($_POST['batch_id'] ?? 0);
+    if ($action === 'upload_to_batch' || $batchId > 0) {
+        $result = $service->addUploadedFilesToBatch($batchId, $files, $aircraftHint);
+    } else {
+        $result = $service->createBatchFromUpload($files, (int)($_SESSION['user_id'] ?? 0) ?: null, $aircraftHint, $notes);
+    }
     if ((string)($_POST['format'] ?? '') === 'json') {
         garmin_historical_upload_json(200, $result);
     }

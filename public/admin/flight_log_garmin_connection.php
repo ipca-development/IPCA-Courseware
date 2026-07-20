@@ -746,14 +746,29 @@ cw_header('Garmin Sync Agent');
     <?php if (empty($historicalBackfillStatus['ready'])): ?>
       <div class="garmin-empty" style="margin-top:12px">Historical backfill tables are not installed yet. Run <code>scripts/sql/2026_07_20_historical_garmin_flightcircle_migration.sql</code>.</div>
     <?php else: ?>
-      <form method="post" action="/admin/api/garmin_historical_backfill_upload.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px">
+      <form method="post" action="/admin/api/garmin_historical_backfill_upload.php" enctype="multipart/form-data" style="display:grid;gap:10px;margin-top:12px" data-historical-garmin-upload data-latest-batch-id="<?= h((string)(($historicalBackfillStatus['active_batch']['id'] ?? '') ?: '')) ?>">
         <div class="garmin-grid">
           <label class="garmin-kv"><span class="garmin-label">Aircraft hint</span><input name="aircraft_hint" placeholder="Optional tail, e.g. N392EA" style="width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #cbd5e1;border-radius:8px;padding:8px"></label>
           <label class="garmin-kv"><span class="garmin-label">Source notes</span><input name="notes" placeholder="SD card box, archive folder, date range" style="width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #cbd5e1;border-radius:8px;padding:8px"></label>
-          <label class="garmin-kv"><span class="garmin-label">CSV files</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple style="width:100%;margin-top:6px"></label>
-          <div class="garmin-kv"><span class="garmin-label">Folder upload</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple webkitdirectory directory style="width:100%;margin-top:6px"></div>
+          <label class="garmin-kv"><span class="garmin-label">CSV files</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple style="width:100%;margin-top:6px" data-historical-file-input></label>
+          <div class="garmin-kv"><span class="garmin-label">Folder upload</span><input name="garmin_csv_files[]" type="file" accept=".csv,text/csv" multiple webkitdirectory directory style="width:100%;margin-top:6px" data-historical-file-input></div>
         </div>
-        <div class="garmin-actions"><button type="submit">Upload Historical Garmin CSVs</button><span class="garmin-muted">Files are stored first, then processed asynchronously on queue <code>historical_backfill</code>.</span></div>
+        <div class="garmin-actions"><button type="submit" data-historical-upload-button>Upload Historical Garmin CSVs</button><span class="garmin-muted">Files are stored first, then processed asynchronously on queue <code>historical_backfill</code>.</span></div>
+        <div class="garmin-grid" data-historical-upload-summary style="display:none">
+          <div class="garmin-kv"><div class="garmin-label">Selected files</div><div class="garmin-value" data-historical-selected-count>0</div></div>
+          <div class="garmin-kv"><div class="garmin-label">Selected size</div><div class="garmin-value" data-historical-selected-size>0 B</div></div>
+          <div class="garmin-kv"><div class="garmin-label">Active batch</div><div class="garmin-value" data-historical-batch-label>Not started</div></div>
+          <div class="garmin-kv"><div class="garmin-label">Backend state</div><div class="garmin-value" data-historical-backend-state>Waiting</div></div>
+        </div>
+        <div>
+          <div class="garmin-label">Upload transfer</div>
+          <div class="garmin-progress" data-historical-upload-progress style="display:none"><span style="width:0%"></span><strong>0%</strong></div>
+        </div>
+        <div>
+          <div class="garmin-label">Backend processing</div>
+          <div class="garmin-progress" data-historical-backend-progress style="display:none"><span style="width:0%"></span><strong>0%</strong></div>
+        </div>
+        <div class="garmin-muted" data-historical-upload-message></div>
       </form>
       <div class="garmin-grid" style="margin-top:14px">
         <?php foreach (($historicalBackfillStatus['file_statuses'] ?? array()) as $status => $count): ?>
@@ -1211,6 +1226,16 @@ cw_header('Garmin Sync Agent');
   const processingDetail = document.querySelector('[data-processing-detail]');
   const processingReview = document.querySelector('[data-processing-review]');
   const processingReviewText = document.querySelector('[data-processing-review-text]');
+  const historicalUploadForm = document.querySelector('[data-historical-garmin-upload]');
+  const historicalUploadButton = document.querySelector('[data-historical-upload-button]');
+  const historicalUploadProgress = document.querySelector('[data-historical-upload-progress]');
+  const historicalBackendProgress = document.querySelector('[data-historical-backend-progress]');
+  const historicalUploadMessage = document.querySelector('[data-historical-upload-message]');
+  const historicalUploadSummary = document.querySelector('[data-historical-upload-summary]');
+  const historicalSelectedCount = document.querySelector('[data-historical-selected-count]');
+  const historicalSelectedSize = document.querySelector('[data-historical-selected-size]');
+  const historicalBatchLabel = document.querySelector('[data-historical-batch-label]');
+  const historicalBackendState = document.querySelector('[data-historical-backend-state]');
   const renderedMaps = new WeakMap();
   let processingRunning = false;
   function current(name) {
@@ -1260,6 +1285,151 @@ cw_header('Garmin Sync Agent');
       const row = box.closest('[data-flight-row]');
       if (!row || row.style.display !== 'none') box.checked = selectAll.checked;
     }));
+  }
+  function bytesLabel(bytes) {
+    const value = Number(bytes || 0);
+    if (value >= 1024 * 1024 * 1024) return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+    if (value >= 1024) return (value / 1024).toFixed(1) + ' KB';
+    return value.toLocaleString() + ' B';
+  }
+  function selectedHistoricalFiles() {
+    if (!historicalUploadForm) return [];
+    const fileInputs = Array.from(historicalUploadForm.querySelectorAll('input[type="file"][name="garmin_csv_files[]"]'));
+    const byKey = new Map();
+    fileInputs.flatMap(input => Array.from(input.files || [])).forEach(file => {
+      byKey.set((file.webkitRelativePath || file.name) + ':' + file.size + ':' + file.lastModified, file);
+    });
+    return Array.from(byKey.values());
+  }
+  function renderHistoricalSelection() {
+    const files = selectedHistoricalFiles();
+    const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    if (historicalUploadSummary) historicalUploadSummary.style.display = files.length > 0 ? 'grid' : 'none';
+    if (historicalSelectedCount) historicalSelectedCount.textContent = files.length.toLocaleString();
+    if (historicalSelectedSize) historicalSelectedSize.textContent = bytesLabel(totalBytes);
+    if (historicalUploadMessage && files.length > 0) {
+      historicalUploadMessage.textContent = files.length.toLocaleString() + ' file(s) selected. Upload will run one file at a time to avoid server request-size limits.';
+    }
+  }
+  function setHistoricalUploadProgress(done, total, message) {
+    if (!historicalUploadProgress) return;
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    historicalUploadProgress.style.display = 'block';
+    const bar = historicalUploadProgress.querySelector('span');
+    const label = historicalUploadProgress.querySelector('strong');
+    if (bar) bar.style.width = percent + '%';
+    if (label) label.textContent = percent + '%';
+    if (historicalUploadMessage) historicalUploadMessage.textContent = message || (done + ' / ' + total + ' uploaded');
+  }
+  function setHistoricalBackendProgress(progress, message) {
+    if (!historicalBackendProgress) return;
+    const percent = Number(progress?.percent || 0);
+    historicalBackendProgress.style.display = 'block';
+    const bar = historicalBackendProgress.querySelector('span');
+    const label = historicalBackendProgress.querySelector('strong');
+    if (bar) bar.style.width = percent + '%';
+    if (label) label.textContent = percent + '%';
+    if (historicalBackendState) historicalBackendState.textContent = String(progress?.state || 'waiting').replace(/_/g, ' ');
+    if (historicalUploadMessage && message) historicalUploadMessage.textContent = message;
+  }
+  async function pollHistoricalBackend(batchId, stopWhenComplete) {
+    if (!batchId) return;
+    for (let i = 0; i < 240; i++) {
+      const response = await fetch('/admin/api/garmin_historical_backfill_status.php?batch_id=' + encodeURIComponent(String(batchId)), { credentials: 'same-origin' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || ('Historical status returned HTTP ' + response.status));
+      const progress = payload.status?.progress || {};
+      const statuses = payload.status?.file_statuses || {};
+      const classes = payload.status?.segment_classifications || {};
+      const classText = Object.keys(classes).length ? ' · classes: ' + Object.entries(classes).map(([k, v]) => k + ' ' + v).join(', ') : '';
+      setHistoricalBackendProgress(progress, [
+        'Backend batch #' + batchId,
+        'done ' + Number(progress.done || 0).toLocaleString() + '/' + Number(progress.total || 0).toLocaleString(),
+        'queued ' + Number(progress.queued || 0).toLocaleString(),
+        'failed ' + Number(progress.failed || 0).toLocaleString(),
+        'needs review ' + Number(progress.needs_review || 0).toLocaleString(),
+        Object.entries(statuses).map(([k, v]) => k + ' ' + v).join(', ') + classText
+      ].filter(Boolean).join(' · '));
+      if (stopWhenComplete && Number(progress.total || 0) > 0 && Number(progress.remaining || 0) === 0) return;
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    }
+  }
+  async function postHistoricalUpload(body) {
+    body.append('format', 'json');
+    const response = await fetch('/admin/api/garmin_historical_backfill_upload.php', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || ('Upload returned HTTP ' + response.status));
+    }
+    return payload;
+  }
+  async function uploadHistoricalGarminSequentially(event) {
+    if (!historicalUploadForm) return;
+    const files = selectedHistoricalFiles();
+    if (files.length <= 1) return;
+    event.preventDefault();
+    if (historicalUploadButton) {
+      historicalUploadButton.disabled = true;
+      historicalUploadButton.textContent = 'Creating batch...';
+    }
+    try {
+      const aircraftHint = String((historicalUploadForm.querySelector('[name="aircraft_hint"]') || {}).value || '');
+      const notes = String((historicalUploadForm.querySelector('[name="notes"]') || {}).value || '');
+      const createBody = new FormData();
+      createBody.append('action', 'create_batch');
+      createBody.append('aircraft_hint', aircraftHint);
+      createBody.append('notes', notes);
+      const created = await postHistoricalUpload(createBody);
+      const batchId = Number(created.batch_id || 0);
+      if (!batchId) throw new Error('Batch was not created.');
+      if (historicalBatchLabel) historicalBatchLabel.textContent = '#' + batchId;
+      if (historicalBackendState) historicalBackendState.textContent = 'receiving files';
+      let uploaded = 0;
+      let failed = 0;
+      setHistoricalUploadProgress(0, files.length, 'Created batch #' + batchId + '. Uploading files one at a time...');
+      const backendPoll = pollHistoricalBackend(batchId, false).catch(() => {});
+      for (const file of files) {
+        const body = new FormData();
+        body.append('action', 'upload_to_batch');
+        body.append('batch_id', String(batchId));
+        body.append('aircraft_hint', aircraftHint);
+        body.append('garmin_csv_files[]', file, file.webkitRelativePath || file.name);
+        if (historicalUploadButton) historicalUploadButton.textContent = 'Uploading ' + (uploaded + 1) + ' / ' + files.length;
+        try {
+          await postHistoricalUpload(body);
+        } catch (error) {
+          failed++;
+          if (historicalUploadMessage) historicalUploadMessage.textContent = 'Failed ' + file.name + ': ' + error.message + '. Continuing...';
+        }
+        uploaded++;
+        setHistoricalUploadProgress(uploaded, files.length, 'Uploaded ' + uploaded + ' / ' + files.length + (failed ? ' · failed ' + failed : '') + '.');
+      }
+      if (historicalUploadButton) historicalUploadButton.textContent = 'Upload complete';
+      setHistoricalBackendProgress({ percent: 0, state: 'queued' }, 'Upload transfer complete. Waiting for backend processing updates...');
+      await pollHistoricalBackend(batchId, true).catch(() => {});
+      window.location.href = '/admin/flight_log_garmin_connection.php?historical_batch=' + encodeURIComponent(String(batchId));
+    } catch (error) {
+      if (historicalUploadMessage) historicalUploadMessage.textContent = 'Upload failed: ' + error.message;
+      if (historicalUploadButton) {
+        historicalUploadButton.disabled = false;
+        historicalUploadButton.textContent = 'Retry Historical Garmin Upload';
+      }
+    }
+  }
+  if (historicalUploadForm) {
+    historicalUploadForm.addEventListener('submit', uploadHistoricalGarminSequentially);
+    historicalUploadForm.querySelectorAll('[data-historical-file-input]').forEach(input => input.addEventListener('change', renderHistoricalSelection));
+    renderHistoricalSelection();
+    const latestBatchId = Number(historicalUploadForm.getAttribute('data-latest-batch-id') || 0);
+    if (latestBatchId > 0) {
+      if (historicalBatchLabel) historicalBatchLabel.textContent = '#' + latestBatchId;
+      pollHistoricalBackend(latestBatchId, false).catch(() => {});
+    }
   }
   function mapMessage(element, text) {
     if (!element || element.querySelector('.garmin-map-message')) return;
