@@ -119,7 +119,11 @@ cw_header('ADS-B Traffic Archive');
         <div id="adsbTargetMap" class="adsb-map"></div>
         <div class="adsb-muted" id="adsbMapStatus" style="margin-top:6px">Loading archived traffic map...</div>
         <div style="margin-top:12px">
-          <input id="adsbTimeline" class="adsb-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="ADS-B archive time scrubber">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <button class="adsb-button secondary" type="button" id="adsbPlayButton">Play</button>
+            <span class="adsb-muted" id="adsbReplayMode">Live</span>
+          </div>
+          <input id="adsbTimeline" class="adsb-timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="ADS-B archive time scrubber">
           <div style="display:flex;justify-content:space-between;gap:10px" class="adsb-muted">
             <span id="adsbTimelineStart">--</span>
             <strong id="adsbTimelineCurrent">--</strong>
@@ -240,7 +244,13 @@ VALUES
   let trackLayer = null;
   let currentLayer = null;
   let refreshTimer = null;
+  let playbackFrame = null;
+  let playbackEpoch = null;
+  let playbackLastFrameMs = null;
+  let replayMode = false;
+  let currentMapTargetKey = '';
   let targetMapsSignature = '';
+  const playbackSpeed = 8;
 
   const el = (id) => document.getElementById(id);
   const fmt = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '--';
@@ -291,6 +301,92 @@ VALUES
     const y = Math.sin(lambda) * Math.cos(phi2);
     const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambda);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function timelineBounds() {
+    const input = el('adsbTimeline');
+    return {
+      min: finite(input && input.min),
+      max: finite(input && input.max)
+    };
+  }
+
+  function clampEpoch(epoch, min, max) {
+    const value = finite(epoch);
+    if (value === null) return min ?? max ?? 0;
+    if (min !== null && value < min) return min;
+    if (max !== null && value > max) return max;
+    return value;
+  }
+
+  function updatePlaybackUi() {
+    const button = el('adsbPlayButton');
+    const mode = el('adsbReplayMode');
+    if (button) button.textContent = playbackFrame !== null ? 'Pause' : 'Play';
+    if (mode) mode.textContent = replayMode ? (playbackFrame !== null ? 'Replay Playing' : 'Replay Paused') : 'Live';
+  }
+
+  function setTimelineEpoch(epoch) {
+    const input = el('adsbTimeline');
+    const bounds = timelineBounds();
+    const value = clampEpoch(epoch, bounds.min, bounds.max);
+    input.value = String(value);
+    renderAtTime(value);
+  }
+
+  function stopPlayback() {
+    if (playbackFrame !== null) {
+      window.cancelAnimationFrame(playbackFrame);
+      playbackFrame = null;
+    }
+    playbackLastFrameMs = null;
+    updatePlaybackUi();
+  }
+
+  function enterLiveMode() {
+    stopPlayback();
+    replayMode = false;
+    const bounds = timelineBounds();
+    if (bounds.max !== null) {
+      setTimelineEpoch(bounds.max);
+    }
+    updatePlaybackUi();
+  }
+
+  function playbackStep(frameMs) {
+    const bounds = timelineBounds();
+    if (bounds.min === null || bounds.max === null) {
+      stopPlayback();
+      return;
+    }
+    if (playbackLastFrameMs === null) {
+      playbackLastFrameMs = frameMs;
+    }
+    const deltaSeconds = Math.max(0, (frameMs - playbackLastFrameMs) / 1000) * playbackSpeed;
+    playbackLastFrameMs = frameMs;
+    playbackEpoch = clampEpoch((playbackEpoch ?? Number(el('adsbTimeline').value || bounds.min)) + deltaSeconds, bounds.min, bounds.max);
+    setTimelineEpoch(playbackEpoch);
+    if (playbackEpoch >= bounds.max - 0.05) {
+      enterLiveMode();
+      return;
+    }
+    playbackFrame = window.requestAnimationFrame(playbackStep);
+  }
+
+  function startPlayback(epoch) {
+    const bounds = timelineBounds();
+    if (bounds.min === null || bounds.max === null || bounds.min === bounds.max) return;
+    replayMode = true;
+    playbackEpoch = clampEpoch(epoch ?? Number(el('adsbTimeline').value || bounds.min), bounds.min, bounds.max);
+    if (playbackEpoch >= bounds.max - 0.05) {
+      playbackEpoch = bounds.min;
+    }
+    setTimelineEpoch(playbackEpoch);
+    if (playbackFrame === null) {
+      playbackLastFrameMs = null;
+      playbackFrame = window.requestAnimationFrame(playbackStep);
+    }
+    updatePlaybackUi();
   }
 
   function aircraftDisplayType(item, sample) {
@@ -413,11 +509,16 @@ VALUES
     const lat = finite(target && target.lat) ?? 33.626701;
     const lon = finite(target && target.lon) ?? -116.160156;
     const radiusNm = finite(target && target.radius_nm) ?? 25;
+    const targetKey = String((target && target.id) || `${lat},${lon},${radiusNm}`);
+    const targetChanged = targetKey !== currentMapTargetKey;
+    currentMapTargetKey = targetKey;
     if (targetCircle) map.removeLayer(targetCircle);
     if (targetMarker) map.removeLayer(targetMarker);
     targetMarker = L.marker([lat, lon]).addTo(map);
     targetCircle = L.circle([lat, lon], { radius: radiusNm * 1852, color: '#2563eb', weight: 2, fillOpacity: 0.05 }).addTo(map);
-    map.setView([lat, lon], radiusNm >= 20 ? 9 : (radiusNm >= 10 ? 10 : 11));
+    if (targetChanged) {
+      map.setView([lat, lon], radiusNm >= 20 ? 9 : (radiusNm >= 10 ? 10 : 11));
+    }
     setTimeout(() => map.invalidateSize(), 50);
     return true;
   }
@@ -511,9 +612,13 @@ VALUES
     const start = finite(timeline.start_epoch);
     const end = finite(timeline.end_epoch);
     const input = el('adsbTimeline');
+    const priorEpoch = finite(input.value);
     input.min = start !== null ? String(start) : '0';
     input.max = end !== null ? String(end) : '1';
-    input.value = end !== null ? String(end) : input.min;
+    const nextEpoch = replayMode && priorEpoch !== null
+      ? clampEpoch(priorEpoch, start, end)
+      : (end !== null ? end : Number(input.min));
+    input.value = String(nextEpoch);
     input.disabled = start === null || end === null || start === end;
     el('adsbTimelineStart').textContent = utcLabel(start);
     el('adsbTimelineEnd').textContent = utcLabel(end);
@@ -523,6 +628,7 @@ VALUES
     el('adsbTargetSummary').textContent = `${target.label || target.id || 'Target'} · ${radius !== null ? radius.toFixed(1) : '--'} NM · ${fmt(timeline.aircraft_count)} aircraft`;
     el('adsbMapStatus').textContent = `Loaded ${fmt(timeline.sample_count)} archived samples for ${fmt(timeline.aircraft_count)} aircraft.`;
     renderAtTime(Number(input.value || end || start || 0));
+    updatePlaybackUi();
   }
 
   function nearestSample(samples, epoch) {
@@ -643,13 +749,35 @@ VALUES
     applyDashboard(data);
   }
 
-  el('adsbTimeline').addEventListener('input', (event) => renderAtTime(Number(event.target.value || 0)));
-  el('adsbTargetSelect').addEventListener('change', loadDashboard);
+  el('adsbTimeline').addEventListener('input', (event) => {
+    const epoch = Number(event.target.value || 0);
+    const bounds = timelineBounds();
+    if (bounds.max !== null && epoch < bounds.max - 0.5) {
+      stopPlayback();
+      startPlayback(epoch);
+    } else {
+      enterLiveMode();
+    }
+  });
+  el('adsbPlayButton').addEventListener('click', () => {
+    if (playbackFrame !== null) {
+      stopPlayback();
+      replayMode = true;
+      updatePlaybackUi();
+      return;
+    }
+    startPlayback(Number(el('adsbTimeline').value || 0));
+  });
+  el('adsbTargetSelect').addEventListener('change', () => {
+    stopPlayback();
+    replayMode = false;
+    currentMapTargetKey = '';
+    loadDashboard();
+  });
   el('adsbReloadButton').addEventListener('click', loadDashboard);
   el('adsbNewestButton').addEventListener('click', () => {
-    const input = el('adsbTimeline');
-    input.value = input.max || input.value;
-    renderAtTime(Number(input.value || 0));
+    enterLiveMode();
+    loadDashboard().catch(() => {});
   });
   el('adsbBelow10000Filter').addEventListener('change', () => {
     renderAtTime(Number(el('adsbTimeline').value || 0));
@@ -678,9 +806,11 @@ VALUES
     el('adsbMapStatus').textContent = `Dashboard API load failed: ${error && error.message ? error.message : error}`;
   });
   refreshTimer = window.setInterval(() => {
+    if (replayMode || playbackFrame !== null) return;
     loadDashboard().catch(() => {});
   }, 10000);
   window.addEventListener('beforeunload', () => {
+    stopPlayback();
     if (refreshTimer) window.clearInterval(refreshTimer);
   });
 })();

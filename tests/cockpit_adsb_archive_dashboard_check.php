@@ -50,6 +50,7 @@ $checks = array(
         && str_contains($files['page'], 'adsbTargetMaps')
         && str_contains($files['page'], 'adsbMapStatus')
         && str_contains($files['page'], 'adsbTimeline')
+        && str_contains($files['page'], 'adsbPlayButton')
         && str_contains($files['page'], 'adsbBelow10000Filter')
         && str_contains($files['page'], 'adsbNewestButton')
         && str_contains($files['page'], 'adsb_archive_dashboard.php'),
@@ -73,6 +74,14 @@ $checks = array(
         && str_contains($files['page'], 'bearingDegrees')
         && str_contains($files['page'], 'adsbTrafficLabelsToggle')
         && str_contains($files['page'], 'Aircraft labels'),
+    'admin UI has smooth replay mode without interrupting map zoom' =>
+        str_contains($files['page'], 'requestAnimationFrame')
+        && str_contains($files['page'], 'playbackStep')
+        && str_contains($files['page'], 'enterLiveMode')
+        && str_contains($files['page'], 'replayMode')
+        && str_contains($files['page'], 'if (replayMode || playbackFrame !== null) return;')
+        && str_contains($files['page'], 'targetChanged')
+        && str_contains($files['page'], 'map.setView([lat, lon]'),
     'admin UI renders Leaflet map without provider-side calls' =>
         str_contains($files['page'], 'leaflet@1.9.4')
         && str_contains($files['page'], 'L.map')
