@@ -358,13 +358,13 @@ CREATE TABLE IF NOT EXISTS ipca_flightcircle_raw_rows (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   batch_id BIGINT UNSIGNED NOT NULL,
   raw_file_id BIGINT UNSIGNED NOT NULL,
-  row_number INT UNSIGNED NOT NULL,
+  `row_number` INT UNSIGNED NOT NULL,
   source_row_identity_hash CHAR(64) NOT NULL,
   source_row_hash CHAR(64) NOT NULL,
   row_json JSON NOT NULL,
   parse_status VARCHAR(32) NOT NULL DEFAULT 'parsed',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uk_ipca_flightcircle_raw_rows_file_row (raw_file_id, row_number),
+  UNIQUE KEY uk_ipca_flightcircle_raw_rows_file_row (raw_file_id, `row_number`),
   UNIQUE KEY uk_ipca_flightcircle_raw_rows_identity (batch_id, source_row_identity_hash),
   KEY idx_ipca_flightcircle_raw_rows_hash (source_row_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

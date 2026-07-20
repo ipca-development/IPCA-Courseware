@@ -703,7 +703,7 @@ final class FlightCircleHistoricalImportService
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_flightcircle_raw_rows
-              (batch_id, raw_file_id, row_number, source_row_identity_hash, source_row_hash, row_json)
+              (batch_id, raw_file_id, `row_number`, source_row_identity_hash, source_row_hash, row_json)
             VALUES (?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               id = LAST_INSERT_ID(id),
