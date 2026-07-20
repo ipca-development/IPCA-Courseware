@@ -834,7 +834,7 @@ final class FlightCircleHistoricalImportService
             'first_name' => $firstName,
             'last_name' => $lastName,
             'password_hash' => password_hash(bin2hex(random_bytes(24)), PASSWORD_DEFAULT),
-            'role' => in_array($role, array('student', 'instructor'), true) ? $role : 'student',
+            'role' => in_array($role, array('student', 'supervisor'), true) ? $role : 'student',
             'status' => 'pending_activation',
             'must_change_password' => 1,
             'created_by_user_id' => $actorUserId,
