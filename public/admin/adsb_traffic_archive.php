@@ -33,7 +33,7 @@ try {
     $archiveService = new AdsbTrafficArchiveService($pdo);
     $status = $archiveService->status();
     $recentTraffic = $archiveService->recentTrafficSamples(250);
-    $dashboard = $archiveService->dashboardData('ktrm_live', 6);
+    $dashboard = $archiveService->dashboardData('ktrm_live', 1);
 } catch (Throwable $e) {
     $error = $error !== '' ? $error : $e->getMessage();
 }
@@ -91,6 +91,7 @@ cw_header('ADS-B Traffic Archive');
       <div class="adsb-kv"><div class="adsb-label">Recent Aircraft</div><div class="adsb-value" id="adsbRecentAircraft">--</div></div>
       <div class="adsb-kv"><div class="adsb-label">Raw Payloads</div><div class="adsb-value" id="adsbRawPayloads">--</div></div>
       <div class="adsb-kv"><div class="adsb-label">Newest Sample</div><div class="adsb-value adsb-code" id="adsbNewestSample">--</div></div>
+      <div class="adsb-kv"><div class="adsb-label">Recording Status</div><div class="adsb-value" id="adsbRecordingStatus">--</div><div class="adsb-muted" id="adsbRecordingAge">--</div></div>
     </div>
     <div style="margin-top:12px">
       <div class="adsb-label">Samples per minute</div>
@@ -102,8 +103,9 @@ cw_header('ADS-B Traffic Archive');
     <h3 style="margin-top:0">Target Map And Historical Aircraft Scrubber</h3>
     <div class="adsb-toolbar">
       <label class="adsb-muted">Target<br><select class="adsb-control" id="adsbTargetSelect"></select></label>
-      <label class="adsb-muted">Lookback hours<br><input class="adsb-control" id="adsbHoursInput" type="number" min="1" max="168" value="6"></label>
+      <label class="adsb-muted">Lookback hours<br><input class="adsb-control" id="adsbHoursInput" type="number" min="1" max="168" value="1"></label>
       <button class="adsb-button" type="button" id="adsbReloadButton">Reload Target</button>
+      <button class="adsb-button secondary" type="button" id="adsbNewestButton">Jump To Newest</button>
       <span class="adsb-muted" id="adsbTargetSummary">--</span>
     </div>
     <div class="adsb-map-layout">
@@ -234,6 +236,11 @@ cw_header('ADS-B Traffic Archive');
     const n = finite(epoch);
     return n === null ? '--' : new Date(n * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   };
+  const epochFromMysqlUtc = (value) => {
+    if (!value) return null;
+    const parsed = Date.parse(String(value).replace(' ', 'T') + 'Z');
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null;
+  };
 
   function colorFor(hex) {
     let hash = 0;
@@ -250,6 +257,23 @@ cw_header('ADS-B Traffic Archive');
     el('adsbRawPayloads').textContent = fmt(growth.raw_payloads);
     el('adsbNewestSample').textContent = growth.newest_sample_utc || '--';
     el('adsbRefreshTime').textContent = data.generated_at_utc || new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const newestEpoch = epochFromMysqlUtc(growth.newest_sample_utc);
+    const ageSeconds = newestEpoch !== null ? Math.max(0, Math.round(Date.now() / 1000 - newestEpoch)) : null;
+    const recordingStatus = el('adsbRecordingStatus');
+    const recordingAge = el('adsbRecordingAge');
+    if (ageSeconds === null) {
+      recordingStatus.textContent = 'No Samples';
+      recordingStatus.style.color = '#92400e';
+      recordingAge.textContent = 'No archived traffic has been recorded yet.';
+    } else if (ageSeconds <= 180) {
+      recordingStatus.textContent = 'Recording OK';
+      recordingStatus.style.color = '#166534';
+      recordingAge.textContent = `${ageSeconds}s since newest sample`;
+    } else {
+      recordingStatus.textContent = 'Stale';
+      recordingStatus.style.color = '#92400e';
+      recordingAge.textContent = `${Math.round(ageSeconds / 60)} min since newest sample`;
+    }
     const chart = el('adsbGrowthChart');
     const buckets = Array.isArray(growth.buckets) ? growth.buckets : [];
     const maxSamples = Math.max(1, ...buckets.map((b) => Number(b.samples) || 0));
@@ -332,7 +356,7 @@ cw_header('ADS-B Traffic Archive');
         bestDelta = delta;
       }
     });
-    return bestDelta <= 120 ? best : null;
+    return bestDelta <= 300 ? best : null;
   }
 
   function renderAtTime(epoch) {
@@ -357,7 +381,7 @@ cw_header('ADS-B Traffic Archive');
     el('adsbAircraftList').innerHTML = visible
       .sort((a, b) => String(a.label).localeCompare(String(b.label)))
       .map((entry) => `<div class="adsb-pill"><strong>${entry.label}</strong><br><span class="adsb-muted">${entry.sample.utc || ''} · ${entry.sample.altitude_ft !== null ? Math.round(entry.sample.altitude_ft).toLocaleString() + ' ft' : '--'} · ${entry.sample.groundspeed_kt !== null ? Math.round(entry.sample.groundspeed_kt) + ' kt' : '--'}</span></div>`)
-      .join('') || '<div class="adsb-muted">No aircraft sample within 120 seconds of selected time.</div>';
+      .join('') || '<div class="adsb-muted">No aircraft sample within 5 minutes of selected time.</div>';
   }
 
   function applyDashboard(data) {
@@ -379,6 +403,11 @@ cw_header('ADS-B Traffic Archive');
   el('adsbTimeline').addEventListener('input', (event) => renderAtTime(Number(event.target.value || 0)));
   el('adsbTargetSelect').addEventListener('change', loadDashboard);
   el('adsbReloadButton').addEventListener('click', loadDashboard);
+  el('adsbNewestButton').addEventListener('click', () => {
+    const input = el('adsbTimeline');
+    input.value = input.max || input.value;
+    renderAtTime(Number(input.value || 0));
+  });
   applyDashboard(dashboard);
   refreshTimer = window.setInterval(() => {
     loadDashboard().catch(() => {});
