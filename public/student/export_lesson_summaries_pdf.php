@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/lesson_summary_service.php';
+require_once __DIR__ . '/../../src/mpdf_helpers.php';
 
 $composerAutoload = __DIR__ . '/../../vendor/autoload.php';
 if (file_exists($composerAutoload)) {
@@ -122,7 +123,7 @@ try {
 
     $mpdf->SetFooter('IPCA Academy|' . $footerCenter . '|Page {PAGENO} of {nbpg}');
 
-    $mpdf->WriteHTML($html);
+    cw_mpdf_write_html_in_chunks($mpdf, $html);
     $mpdf->Output($filename, \Mpdf\Output\Destination::INLINE);
     exit;
 
