@@ -1192,44 +1192,10 @@ cw_header('Garmin Sync Agent');
             Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
           </p>
           <div class="garmin-muted" style="margin:8px 0 6px">
-            FlightCircle rows table starts below. If no rows match, an empty-state row will be shown.
+            FlightCircle row loader v2. Rows load separately so this admin page stays responsive.
           </div>
-          <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px">
-            <table class="garmin-table">
-              <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
-              <tbody>
-                <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) === array()): ?>
-                  <tr><td colspan="10" class="garmin-empty">No FlightCircle rows match these filters.</td></tr>
-                <?php endif; ?>
-                <?php foreach (($flightCircleStatus['recent_staging_records'] ?? array()) as $record): ?>
-                  <?php
-                    $fcRecordDate = substr((string)($record['depart_local'] ?? ''), 0, 10) ?: '--';
-                    $fcRecordTail = (string)($record['tail_number'] ?? $record['resource_identifier'] ?? '');
-                    $fcRecordResource = (string)($record['resource_type'] ?? '');
-                    $fcRecordUser = (string)($record['user_text'] ?? '');
-                    $fcRecordInstructor = (string)($record['instructor_text'] ?? '');
-                    $fcRecordReservation = (string)($record['reservation_type'] ?? '');
-                    $fcRecordHobbsOut = array_key_exists('hobbs_out', $record) && $record['hobbs_out'] !== null ? number_format((float)$record['hobbs_out'], 1) : '--';
-                    $fcRecordHobbsIn = array_key_exists('hobbs_in', $record) && $record['hobbs_in'] !== null ? number_format((float)$record['hobbs_in'], 1) : '--';
-                    $fcRecordTachOut = array_key_exists('tach_out', $record) && $record['tach_out'] !== null ? number_format((float)$record['tach_out'], 1) : '--';
-                    $fcRecordTachIn = array_key_exists('tach_in', $record) && $record['tach_in'] !== null ? number_format((float)$record['tach_in'], 1) : '--';
-                    $fcRecordDisposition = (string)($record['import_disposition'] ?? '');
-                  ?>
-                  <tr>
-                    <td><?= h($fcRecordDate) ?></td>
-                    <td><?= garmin_sync_tail_pill($fcRecordTail) ?><br><span class="garmin-muted"><?= h($fcRecordResource) ?></span></td>
-                    <td><?= h($fcRecordUser !== '' ? $fcRecordUser : '--') ?></td>
-                    <td><?= h($fcRecordInstructor !== '' ? $fcRecordInstructor : '--') ?></td>
-                    <td><?= h($fcRecordReservation !== '' ? $fcRecordReservation : '--') ?></td>
-                    <td><strong><?= h($fcRecordHobbsOut) ?></strong></td>
-                    <td><?= h($fcRecordHobbsIn) ?></td>
-                    <td><?= h($fcRecordTachOut) ?></td>
-                    <td><?= h($fcRecordTachIn) ?></td>
-                    <td><span class="garmin-badge <?= garmin_sync_badge_class($fcRecordDisposition) ?>"><?= h($fcRecordDisposition) ?></span><br><span class="garmin-muted">FC row #<?= (int)($record['id'] ?? 0) ?></span></td>
-                  </tr>
-                <?php endforeach; ?>
-              </tbody>
-            </table>
+          <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table>
+            <div class="garmin-empty">Loading FlightCircle rows...</div>
           </div>
         </div>
       <?php endif; ?>
@@ -1799,8 +1765,92 @@ cw_header('Garmin Sync Agent');
   const historicalFailed = document.querySelector('[data-historical-failed]');
   const historicalNeedsReview = document.querySelector('[data-historical-needs-review]');
   const fcIdentityMessage = document.querySelector('[data-fc-identity-message]');
+  const fcStagingTable = document.querySelector('[data-fc-staging-table]');
   const renderedMaps = new WeakMap();
   let processingRunning = false;
+  function textCell(row, value, strong) {
+    const cell = document.createElement('td');
+    const content = strong ? document.createElement('strong') : document.createElement('span');
+    content.textContent = value === null || value === undefined || String(value) === '' ? '--' : String(value);
+    cell.appendChild(content);
+    row.appendChild(cell);
+  }
+  function formatOneDecimal(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(1) : '--';
+  }
+  function renderFlightCircleRows(payload) {
+    if (!fcStagingTable) return;
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const table = document.createElement('table');
+    table.className = 'garmin-table';
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    if (rows.length === 0) {
+      const emptyRow = document.createElement('tr');
+      const emptyCell = document.createElement('td');
+      emptyCell.colSpan = 10;
+      emptyCell.className = 'garmin-empty';
+      emptyCell.textContent = 'No FlightCircle rows match these filters.';
+      emptyRow.appendChild(emptyCell);
+      tbody.appendChild(emptyRow);
+    }
+    rows.forEach(item => {
+      const row = document.createElement('tr');
+      textCell(row, String(item.depart_local || '').slice(0, 10) || '--', false);
+      const tailCell = document.createElement('td');
+      const tail = document.createElement('span');
+      tail.className = 'garmin-tail-pill';
+      tail.textContent = String(item.tail_number || item.resource_identifier || 'Unknown');
+      const resource = document.createElement('span');
+      resource.className = 'garmin-muted';
+      resource.textContent = String(item.resource_type || '');
+      tailCell.appendChild(tail);
+      tailCell.appendChild(document.createElement('br'));
+      tailCell.appendChild(resource);
+      row.appendChild(tailCell);
+      textCell(row, item.user_text || '--', false);
+      textCell(row, item.instructor_text || '--', false);
+      textCell(row, item.reservation_type || '--', false);
+      textCell(row, formatOneDecimal(item.hobbs_out), true);
+      textCell(row, formatOneDecimal(item.hobbs_in), false);
+      textCell(row, formatOneDecimal(item.tach_out), false);
+      textCell(row, formatOneDecimal(item.tach_in), false);
+      const dispositionCell = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'garmin-badge';
+      badge.textContent = String(item.import_disposition || '--');
+      const rowId = document.createElement('span');
+      rowId.className = 'garmin-muted';
+      rowId.textContent = 'FC row #' + String(item.id || 0);
+      dispositionCell.appendChild(badge);
+      dispositionCell.appendChild(document.createElement('br'));
+      dispositionCell.appendChild(rowId);
+      row.appendChild(dispositionCell);
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    fcStagingTable.replaceChildren(table);
+  }
+  async function loadFlightCircleRows() {
+    if (!fcStagingTable) return;
+    const params = new URLSearchParams(window.location.search);
+    try {
+      const response = await fetch('/admin/api/flightcircle_staging_rows.php?' + params.toString(), { credentials: 'same-origin' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || ('FlightCircle rows returned HTTP ' + response.status));
+      renderFlightCircleRows(payload);
+    } catch (error) {
+      fcStagingTable.innerHTML = '';
+      const message = document.createElement('div');
+      message.className = 'garmin-error';
+      message.textContent = 'Could not load FlightCircle rows: ' + error.message;
+      fcStagingTable.appendChild(message);
+    }
+  }
+  loadFlightCircleRows();
   function current(name) {
     const field = filterForm ? filterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '').toUpperCase() : '';
