@@ -71,7 +71,7 @@ final class FlightCircleHistoricalImportService
     /**
      * @return array<string,mixed>
      */
-    public function status(int $limit = 10): array
+    public function status(int $limit = 10, array $stagingFilters = array()): array
     {
         if (!$this->tableExists('ipca_flightcircle_import_batches')) {
             return array('ready' => false, 'message' => 'FlightCircle migration tables have not been installed.', 'batches' => array());
@@ -101,16 +101,80 @@ final class FlightCircleHistoricalImportService
             ORDER BY updated_at DESC, id DESC
             LIMIT 15
         ");
-        $recentStagingWhere = $activeBatchId > 0 ? 'WHERE batch_id = ' . $activeBatchId : '';
-        $recentStagingStmt = $this->pdo->query("
+        $stagingWhere = array();
+        $stagingParams = array();
+        if ($activeBatchId > 0) {
+            $stagingWhere[] = 'batch_id = ?';
+            $stagingParams[] = $activeBatchId;
+        }
+        $resourceType = trim((string)($stagingFilters['resource_type'] ?? 'aircraft'));
+        if ($resourceType !== '' && $resourceType !== 'all') {
+            $stagingWhere[] = 'resource_type = ?';
+            $stagingParams[] = $resourceType;
+        }
+        $tail = strtoupper(trim((string)($stagingFilters['tail'] ?? '')));
+        if ($tail !== '') {
+            $stagingWhere[] = "UPPER(REPLACE(REPLACE(COALESCE(tail_number, resource_identifier, ''), '-', ''), ' ', '')) = ?";
+            $stagingParams[] = str_replace(array('-', ' '), '', $tail);
+        }
+        $student = trim((string)($stagingFilters['student'] ?? ''));
+        if ($student !== '') {
+            $stagingWhere[] = 'user_text LIKE ?';
+            $stagingParams[] = '%' . $student . '%';
+        }
+        $instructor = trim((string)($stagingFilters['instructor'] ?? ''));
+        if ($instructor !== '') {
+            $stagingWhere[] = 'instructor_text LIKE ?';
+            $stagingParams[] = '%' . $instructor . '%';
+        }
+        $dateFrom = trim((string)($stagingFilters['date_from'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom) === 1) {
+            $stagingWhere[] = 'depart_local >= ?';
+            $stagingParams[] = $dateFrom . ' 00:00:00';
+        }
+        $dateTo = trim((string)($stagingFilters['date_to'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo) === 1) {
+            $stagingWhere[] = 'depart_local <= ?';
+            $stagingParams[] = $dateTo . ' 23:59:59';
+        }
+        $stagingWhereSql = $stagingWhere !== array() ? 'WHERE ' . implode(' AND ', $stagingWhere) : '';
+        $sort = (string)($stagingFilters['sort'] ?? 'date_desc');
+        $sortSql = match ($sort) {
+            'date_asc' => 'COALESCE(depart_local, updated_at) ASC, id ASC',
+            'tail_asc' => 'tail_number ASC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'tail_desc' => 'tail_number DESC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'student_asc' => 'user_text ASC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'student_desc' => 'user_text DESC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'instructor_asc' => 'instructor_text ASC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'instructor_desc' => 'instructor_text DESC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'hobbs_asc' => 'hobbs_out ASC, COALESCE(depart_local, updated_at) ASC, id ASC',
+            'hobbs_desc' => 'hobbs_out DESC, COALESCE(depart_local, updated_at) DESC, id DESC',
+            default => 'COALESCE(depart_local, updated_at) DESC, id DESC',
+        };
+        $stagingLimitSetting = (string)($stagingFilters['limit'] ?? '250');
+        $stagingLimit = $stagingLimitSetting === 'all' ? 10000 : max(50, min(10000, (int)$stagingLimitSetting));
+        $filteredCountStmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM ipca_flightcircle_staging_records
+            {$stagingWhereSql}
+        ");
+        $filteredCountStmt->execute($stagingParams);
+        $filteredStagingCount = (int)$filteredCountStmt->fetchColumn();
+        $recentStagingStmt = $this->pdo->prepare("
             SELECT id, batch_id, resource_identifier, resource_type, import_disposition, tail_number,
                    user_text, instructor_text, reservation_type, route_text, depart_local,
                    hobbs_out, hobbs_in, tach_out, tach_in, operation_id, review_status, updated_at
             FROM ipca_flightcircle_staging_records
-            {$recentStagingWhere}
-            ORDER BY COALESCE(depart_local, updated_at) DESC, id DESC
-            LIMIT 50
+            {$stagingWhereSql}
+            ORDER BY {$sortSql}
+            LIMIT ?
         ");
+        $stagingFetchParams = $stagingParams;
+        $stagingFetchParams[] = $stagingLimit;
+        foreach ($stagingFetchParams as $idx => $value) {
+            $recentStagingStmt->bindValue($idx + 1, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $recentStagingStmt->execute();
 
         return array(
             'ready' => true,
@@ -121,7 +185,10 @@ final class FlightCircleHistoricalImportService
             'active_batch_id' => $activeBatchId,
             'active_validation' => $activeValidation,
             'identity_suggestions' => $identityStmt !== false ? ($identityStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
-            'recent_staging_records' => $recentStagingStmt !== false ? ($recentStagingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array(),
+            'recent_staging_records' => $recentStagingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array(),
+            'recent_staging_filtered_count' => $filteredStagingCount,
+            'recent_staging_limit' => $stagingLimitSetting,
+            'recent_staging_filters' => $stagingFilters,
             'existing_users' => $this->existingUsersForMapping(),
         );
     }

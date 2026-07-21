@@ -298,9 +298,19 @@ try {
 } catch (Throwable $e) {
     $historicalBackfillStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'file_statuses' => array(), 'segment_classifications' => array(), 'review_statuses' => array());
 }
+$flightCircleRowFilters = array(
+    'resource_type' => trim((string)($_GET['fc_resource'] ?? 'aircraft')),
+    'tail' => strtoupper(trim((string)($_GET['fc_tail'] ?? ''))),
+    'student' => trim((string)($_GET['fc_student'] ?? '')),
+    'instructor' => trim((string)($_GET['fc_instructor'] ?? '')),
+    'date_from' => trim((string)($_GET['fc_from'] ?? '')),
+    'date_to' => trim((string)($_GET['fc_to'] ?? '')),
+    'sort' => trim((string)($_GET['fc_sort'] ?? 'date_desc')),
+    'limit' => trim((string)($_GET['fc_limit'] ?? '250')),
+);
 $flightCircleStatus = array('ready' => false, 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
 try {
-    $flightCircleStatus = $flightCircleImportService->status(5);
+    $flightCircleStatus = $flightCircleImportService->status(5, $flightCircleRowFilters);
 } catch (Throwable $e) {
     $flightCircleStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
 }
@@ -1123,13 +1133,70 @@ cw_header('Garmin Sync Agent');
           </table>
         </div>
       <?php endif; ?>
-      <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) !== array()): ?>
+      <?php if (!empty($fcActiveValidation['ready'])): ?>
         <div class="garmin-table-wrap" style="margin-top:14px">
-          <h4 style="margin:0 0 8px">Stored FlightCircle Rows</h4>
-          <p class="garmin-muted" style="margin-top:0">These are the normalized FlightCircle records used for enrichment. For matching, the important values are Tail and Hobbs-Out. Date is shown for review context only.</p>
+          <?php
+            $fcRowFilters = is_array($flightCircleStatus['recent_staging_filters'] ?? null) ? $flightCircleStatus['recent_staging_filters'] : $flightCircleRowFilters;
+            $fcShownRows = count((array)($flightCircleStatus['recent_staging_records'] ?? array()));
+            $fcFilteredRows = (int)($flightCircleStatus['recent_staging_filtered_count'] ?? $fcShownRows);
+            $fcValidationSummaryForRows = is_array($flightCircleStatus['active_validation']['summary'] ?? null) ? $flightCircleStatus['active_validation']['summary'] : array();
+            $fcTotalRows = (int)($fcValidationSummaryForRows['total_rows'] ?? 0);
+            $fcAircraftRows = (int)($fcValidationSummaryForRows['aircraft_rows'] ?? 0);
+            $fcTailOptions = array();
+            foreach ((array)($flightCircleStatus['active_validation']['tail_counts'] ?? array()) as $tailCount) {
+                $tailOption = strtoupper(trim((string)($tailCount['tail_number'] ?? '')));
+                if ($tailOption !== '') {
+                    $fcTailOptions[$tailOption] = $tailOption;
+                }
+            }
+          ?>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div>
+              <h4 style="margin:0 0 8px">Stored FlightCircle Flights</h4>
+              <p class="garmin-muted" style="margin-top:0">
+                Showing <?= number_format($fcShownRows) ?> of <?= number_format($fcFilteredRows) ?> matching normalized FlightCircle row(s)<?= $fcTotalRows > 0 ? ' from ' . number_format($fcTotalRows) . ' stored row(s)' : '' ?><?= $fcAircraftRows > 0 ? ', including ' . number_format($fcAircraftRows) . ' aircraft row(s)' : '' ?>.
+                These records are used for enrichment. For matching, the important values are Tail and Hobbs-Out. Date is shown for review context only.
+              </p>
+            </div>
+            <a class="secondary" style="border-radius:10px;background:#475569;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;font-size:12px" href="/admin/flight_log_garmin_connection.php">Reset FlightCircle filters</a>
+          </div>
+          <form class="garmin-filter" method="get" style="grid-template-columns:120px 120px 150px 150px 132px 132px 160px 110px 95px">
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Rows</span><select name="fc_resource">
+              <?php foreach (array('aircraft' => 'Aircraft flights', 'aatd_simulator' => 'AATD', 'all' => 'All rows') as $value => $label): ?>
+                <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['resource_type'] ?? 'aircraft') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </select></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Tail</span><select name="fc_tail">
+              <option value="">All</option>
+              <?php foreach ($fcTailOptions as $tailOption): ?>
+                <option value="<?= h($tailOption) ?>" <?= strtoupper((string)($fcRowFilters['tail'] ?? '')) === $tailOption ? 'selected' : '' ?>><?= h($tailOption) ?></option>
+              <?php endforeach; ?>
+            </select></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Student</span><input type="search" name="fc_student" value="<?= h((string)($fcRowFilters['student'] ?? '')) ?>" placeholder="Name"></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Instructor</span><input type="search" name="fc_instructor" value="<?= h((string)($fcRowFilters['instructor'] ?? '')) ?>" placeholder="Name"></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">From</span><input type="date" name="fc_from" value="<?= h((string)($fcRowFilters['date_from'] ?? '')) ?>"></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">To</span><input type="date" name="fc_to" value="<?= h((string)($fcRowFilters['date_to'] ?? '')) ?>"></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Sort</span><select name="fc_sort">
+              <?php foreach (array('date_desc' => 'Newest first', 'date_asc' => 'Chronological', 'tail_asc' => 'Tail A-Z', 'tail_desc' => 'Tail Z-A', 'student_asc' => 'Student A-Z', 'student_desc' => 'Student Z-A', 'instructor_asc' => 'Instructor A-Z', 'instructor_desc' => 'Instructor Z-A', 'hobbs_asc' => 'Hobbs low-high', 'hobbs_desc' => 'Hobbs high-low') as $value => $label): ?>
+                <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['sort'] ?? 'date_desc') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </select></label>
+            <label class="garmin-filter-control"><span class="garmin-filter-label">Show</span><select name="fc_limit">
+              <?php foreach (array('250' => '250', '1000' => '1,000', 'all' => 'All') as $value => $label): ?>
+                <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['limit'] ?? '250') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </select></label>
+            <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button type="submit">Apply</button></div>
+          </form>
+          <p class="garmin-muted" style="margin-top:0">
+            Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
+          </p>
           <table class="garmin-table">
             <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
             <tbody>
+              <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) === array()): ?>
+                <tr><td colspan="10" class="garmin-empty">No FlightCircle rows match these filters.</td></tr>
+              <?php endif; ?>
               <?php foreach (($flightCircleStatus['recent_staging_records'] ?? array()) as $record): ?>
                 <tr>
                   <td><?= h(substr((string)($record['depart_local'] ?? ''), 0, 10) ?: '--') ?></td>

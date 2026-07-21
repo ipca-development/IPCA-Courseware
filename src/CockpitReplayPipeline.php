@@ -1746,18 +1746,11 @@ final class CockpitReplayPipeline
         if ($values === array()) {
             return null;
         }
-        $min = min($values);
-        $max = max($values);
-        if (abs($max - $min) < 0.001) {
-            $min -= 1.0;
-            $max += 1.0;
-        }
-        $neutral = $min <= 0.0 && $max >= 0.0 ? 0.0 : (($min + $max) / 2.0);
         return array(
-            'min' => round($min, 3),
-            'max' => round($max, 3),
-            'neutral' => round($neutral, 3),
-            'source' => 'current_replay_auto_detect',
+            'min' => -100.0,
+            'max' => 100.0,
+            'neutral' => 0.0,
+            'source' => 'fixed_pitch_trim_percent',
         );
     }
 

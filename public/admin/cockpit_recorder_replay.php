@@ -3601,14 +3601,14 @@ cw_header('Cockpit Recorder Replay');
     if (!trimIndicator || !trimIndicatorPointer) return;
     const trimValue = firstFinite(sample && sample.elevator_trim_pct);
     const trimRange = sample && sample.trim_range && typeof sample.trim_range === 'object' ? sample.trim_range : null;
-    const min = trimRange ? Number(trimRange.min) : null;
-    const max = trimRange ? Number(trimRange.max) : null;
+    const min = trimRange ? Number(trimRange.min) : -100;
+    const max = trimRange ? Number(trimRange.max) : 100;
     if (!sample || !instrumentEnabled('trim_position_indicator') || trimValue === null || !Number.isFinite(min) || !Number.isFinite(max) || max <= min || !trimIndicatorPlacement()) {
       setElementHidden(trimIndicator, true);
       return;
     }
     const ratio = clamp((trimValue - min) / (max - min), 0, 1);
-    const yPct = 100 - (ratio * 100);
+    const yPct = ratio * 100;
     trimIndicatorPointer.style.top = `${yPct.toFixed(1)}%`;
     setElementHidden(trimIndicator, false);
   }
