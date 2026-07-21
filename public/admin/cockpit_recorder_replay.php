@@ -2555,9 +2555,6 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function fallbackAlertSeverity(text) {
-    const normalized = String(text || '').toUpperCase();
-    if (/\bOIL\s+PRESS\b/.test(normalized) || /\bWARNING\b/.test(normalized)) return 'warning';
-    if (/\bCOOLANT\b/.test(normalized) || /\bCAUTION\b/.test(normalized)) return 'caution';
     return 'info';
   }
 

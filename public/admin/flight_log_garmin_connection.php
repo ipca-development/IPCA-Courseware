@@ -1242,7 +1242,7 @@ cw_header('Garmin Sync Agent');
       <p class="garmin-muted" style="margin-top:8px">
         Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
       </p>
-      <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table>
+      <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table-static>
         <table class="garmin-table">
           <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
           <tbody>
