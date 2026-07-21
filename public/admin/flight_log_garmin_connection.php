@@ -308,6 +308,9 @@ $flightCircleRowFilters = array(
     'sort' => trim((string)($_GET['fc_sort'] ?? 'date_desc')),
     'limit' => trim((string)($_GET['fc_limit'] ?? '50')),
 );
+if (!in_array($flightCircleRowFilters['limit'], array('50', '250', '1000', 'all'), true)) {
+    $flightCircleRowFilters['limit'] = '50';
+}
 $flightCircleStatus = array('ready' => false, 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
 try {
     $flightCircleStatus = $flightCircleImportService->status(5, $flightCircleRowFilters);
@@ -1240,7 +1243,41 @@ cw_header('Garmin Sync Agent');
         Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
       </p>
       <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table>
-        <div class="garmin-empty">Loading FlightCircle rows...</div>
+        <table class="garmin-table">
+          <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
+          <tbody>
+            <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) === array()): ?>
+              <tr><td colspan="10" class="garmin-empty">No FlightCircle rows match these filters.</td></tr>
+            <?php endif; ?>
+            <?php foreach (($flightCircleStatus['recent_staging_records'] ?? array()) as $record): ?>
+              <?php
+                $fcRecordDate = substr((string)($record['depart_local'] ?? ''), 0, 10) ?: '--';
+                $fcRecordTail = (string)($record['tail_number'] ?? $record['resource_identifier'] ?? '');
+                $fcRecordResource = (string)($record['resource_type'] ?? '');
+                $fcRecordUser = (string)($record['user_text'] ?? '');
+                $fcRecordInstructor = (string)($record['instructor_text'] ?? '');
+                $fcRecordReservation = (string)($record['reservation_type'] ?? '');
+                $fcRecordHobbsOut = array_key_exists('hobbs_out', $record) && $record['hobbs_out'] !== null ? number_format((float)$record['hobbs_out'], 1) : '--';
+                $fcRecordHobbsIn = array_key_exists('hobbs_in', $record) && $record['hobbs_in'] !== null ? number_format((float)$record['hobbs_in'], 1) : '--';
+                $fcRecordTachOut = array_key_exists('tach_out', $record) && $record['tach_out'] !== null ? number_format((float)$record['tach_out'], 1) : '--';
+                $fcRecordTachIn = array_key_exists('tach_in', $record) && $record['tach_in'] !== null ? number_format((float)$record['tach_in'], 1) : '--';
+                $fcRecordDisposition = (string)($record['import_disposition'] ?? '');
+              ?>
+              <tr>
+                <td><?= h($fcRecordDate) ?></td>
+                <td><?= garmin_sync_tail_pill($fcRecordTail) ?><br><span class="garmin-muted"><?= h($fcRecordResource) ?></span></td>
+                <td><?= h($fcRecordUser !== '' ? $fcRecordUser : '--') ?></td>
+                <td><?= h($fcRecordInstructor !== '' ? $fcRecordInstructor : '--') ?></td>
+                <td><?= h($fcRecordReservation !== '' ? $fcRecordReservation : '--') ?></td>
+                <td><strong><?= h($fcRecordHobbsOut) ?></strong></td>
+                <td><?= h($fcRecordHobbsIn) ?></td>
+                <td><?= h($fcRecordTachOut) ?></td>
+                <td><?= h($fcRecordTachIn) ?></td>
+                <td><span class="garmin-badge <?= garmin_sync_badge_class($fcRecordDisposition) ?>"><?= h($fcRecordDisposition !== '' ? $fcRecordDisposition : '--') ?></span><br><span class="garmin-muted">FC row #<?= (int)($record['id'] ?? 0) ?></span></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
       </div>
     </section>
   <?php endif; ?>
