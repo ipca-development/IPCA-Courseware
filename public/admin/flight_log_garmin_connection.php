@@ -650,6 +650,19 @@ if ($hasCsvSummaries) {
 }
 garmin_sync_perf_log('summary_option_queries', $garminSyncTimingStart, array('rows' => count($summaryOptionRows)));
 
+$filterTail = strtoupper(trim((string)($_GET['tail'] ?? '')));
+$filterDateFrom = trim((string)($_GET['date_from'] ?? ''));
+$filterDateTo = trim((string)($_GET['date_to'] ?? ''));
+$filterDep = strtoupper(trim((string)($_GET['dep'] ?? '')));
+$filterArr = strtoupper(trim((string)($_GET['arr'] ?? '')));
+$filterStatus = trim((string)($_GET['status'] ?? ''));
+$showIncomplete = in_array(strtolower(trim((string)($_GET['show_incomplete'] ?? ''))), array('1', 'true', 'yes'), true);
+$showHidden = in_array(strtolower(trim((string)($_GET['show_hidden'] ?? ''))), array('1', 'true', 'yes'), true);
+$newOnly = in_array(strtolower(trim((string)($_GET['new_only'] ?? ''))), array('1', 'true', 'yes'), true);
+$flightLimit = max(25, min(250, (int)($_GET['flight_limit'] ?? 50)));
+$flightPage = max(1, (int)($_GET['flight_page'] ?? 1));
+$flightOffset = ($flightPage - 1) * $flightLimit;
+$recentTracksTotal = 0;
 $recentTracks = array();
 if ($hasTracks) {
     $garminSyncTimingStart = microtime(true);
@@ -712,6 +725,20 @@ if ($hasTracks) {
     $csvIdExpression = count($csvIdParts) > 1 ? 'COALESCE(' . implode(', ', $csvIdParts) . ')' : $csvIdParts[0];
     $stateSelect = $hasFlightStates ? 'st.hidden_at AS hidden_at, st.hidden_reason AS hidden_reason' : 'NULL AS hidden_at, NULL AS hidden_reason';
     $stateJoin = $hasFlightStates ? 'LEFT JOIN ipca_garmin_flight_artifact_states st ON st.track_artifact_id = t.id' : '';
+    $trackWhere = array("t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'");
+    $trackParams = array();
+    if (!$showHidden && $hasFlightStates) {
+        $trackWhere[] = 'st.hidden_at IS NULL';
+    }
+    if ($filterDateFrom !== '') {
+        $trackWhere[] = 'DATE(t.last_seen_at) >= ?';
+        $trackParams[] = $filterDateFrom;
+    }
+    if ($filterDateTo !== '') {
+        $trackWhere[] = 'DATE(t.last_seen_at) <= ?';
+        $trackParams[] = $filterDateTo;
+    }
+    $trackWhereSql = 'WHERE ' . implode(' AND ', $trackWhere);
     $sourceJoin = $hasCsvJoinPath ? "
         " . ($hasTrackCsvLinks ? "LEFT JOIN (
           SELECT provider_name, garmin_entry_uuid, canonical_track_uuid, MAX(garmin_csv_file_id) AS garmin_csv_file_id
@@ -731,6 +758,16 @@ if ($hasTracks) {
         LEFT JOIN ipca_garmin_csv_files f
           ON f.id = {$csvIdExpression}
     " : '';
+    $countRows = garmin_sync_rows($pdo, "
+        SELECT COUNT(*) AS total
+        FROM ipca_garmin_normalized_track_artifacts t
+        {$stateJoin}
+        {$trackWhereSql}
+    ", $trackParams);
+    $recentTracksTotal = (int)($countRows[0]['total'] ?? 0);
+    $recentTracksParams = $trackParams;
+    $recentTracksParams[] = $flightLimit;
+    $recentTracksParams[] = $flightOffset;
     $recentTracks = garmin_sync_rows($pdo, "
         SELECT
           t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
@@ -745,9 +782,16 @@ if ($hasTracks) {
         {$entryJoin}
         {$sourceJoin}
         {$stateJoin}
+        {$trackWhereSql}
         ORDER BY t.last_seen_at DESC, t.id DESC
-    ");
-    garmin_sync_perf_log('recent_tracks_query', $garminSyncTimingStart, array('rows' => count($recentTracks)));
+        LIMIT ? OFFSET ?
+    ", $recentTracksParams);
+    garmin_sync_perf_log('recent_tracks_query', $garminSyncTimingStart, array(
+        'rows' => count($recentTracks),
+        'total' => $recentTracksTotal,
+        'limit' => $flightLimit,
+        'page' => $flightPage,
+    ));
 }
 
 $recentAcknowledgments = array();
@@ -771,16 +815,6 @@ if ($hasAcks && $hasTokens) {
         LIMIT 50
     ");
 }
-
-$filterTail = strtoupper(trim((string)($_GET['tail'] ?? '')));
-$filterDateFrom = trim((string)($_GET['date_from'] ?? ''));
-$filterDateTo = trim((string)($_GET['date_to'] ?? ''));
-$filterDep = strtoupper(trim((string)($_GET['dep'] ?? '')));
-$filterArr = strtoupper(trim((string)($_GET['arr'] ?? '')));
-$filterStatus = trim((string)($_GET['status'] ?? ''));
-$showIncomplete = in_array(strtolower(trim((string)($_GET['show_incomplete'] ?? ''))), array('1', 'true', 'yes'), true);
-$showHidden = in_array(strtolower(trim((string)($_GET['show_hidden'] ?? ''))), array('1', 'true', 'yes'), true);
-$newOnly = in_array(strtolower(trim((string)($_GET['new_only'] ?? ''))), array('1', 'true', 'yes'), true);
 
 $flightRows = array();
 $flightModals = array();
@@ -1620,7 +1654,10 @@ cw_header('Garmin Sync Agent');
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div>
         <h3 style="margin:0">Garmin Flights</h3>
-        <p class="garmin-muted">Showing <?= number_format(count($flightRows)) ?> Garmin flight artifact(s). Complete avionics flights are shown by default; raw identifiers and technical evidence are in each row's detail modal.</p>
+        <p class="garmin-muted">
+          Showing <?= number_format(count($flightRows)) ?> Garmin flight artifact(s) on page <?= number_format($flightPage) ?><?= $recentTracksTotal > 0 ? ' of about ' . number_format((int)ceil($recentTracksTotal / max(1, $flightLimit))) . ' page(s), ' . number_format($recentTracksTotal) . ' total matching artifact(s)' : '' ?>.
+          Complete avionics flights are shown by default; raw identifiers and technical evidence are in each row's detail modal.
+        </p>
       </div>
       <form class="garmin-actions" method="post" action="/admin/api/garmin_flights_bulk_action.php" id="garmin-bulk-form">
         <input type="hidden" name="return" value="<?= h('/admin/flight_log_garmin_connection.php' . ($_SERVER['QUERY_STRING'] ? '?' . (string)$_SERVER['QUERY_STRING'] : '')) ?>">
@@ -1642,8 +1679,22 @@ cw_header('Garmin Sync Agent');
       <label class="garmin-filter-control"><span class="garmin-filter-label">Visibility</span><select name="show_incomplete"><option value="0">Complete only</option><option value="1"<?= $showIncomplete ? ' selected' : '' ?>>Show incomplete</option></select></label>
       <label class="garmin-filter-control"><span class="garmin-filter-label">Hidden</span><select name="show_hidden"><option value="0">Hide hidden</option><option value="1"<?= $showHidden ? ' selected' : '' ?>>Show hidden</option></select></label>
       <label class="garmin-filter-control"><span class="garmin-filter-label">New</span><select name="new_only"><option value="0">All</option><option value="1"<?= $newOnly ? ' selected' : '' ?>>New only</option></select></label>
+      <label class="garmin-filter-control"><span class="garmin-filter-label">Show</span><select name="flight_limit"><?php foreach (array(25, 50, 100, 250) as $limitOption): ?><option value="<?= $limitOption ?>"<?= $flightLimit === $limitOption ? ' selected' : '' ?>><?= $limitOption ?></option><?php endforeach; ?></select></label>
+      <input type="hidden" name="flight_page" value="1">
       <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button class="secondary" type="submit">Apply</button></div>
     </form>
+    <?php if ($recentTracksTotal > $flightLimit): ?>
+      <?php
+        $flightTotalPages = max(1, (int)ceil($recentTracksTotal / max(1, $flightLimit)));
+        $previousFlightPageUrl = '/admin/flight_log_garmin_connection.php?' . http_build_query(array_merge($_GET, array('flight_page' => max(1, $flightPage - 1), 'flight_limit' => $flightLimit)));
+        $nextFlightPageUrl = '/admin/flight_log_garmin_connection.php?' . http_build_query(array_merge($_GET, array('flight_page' => min($flightTotalPages, $flightPage + 1), 'flight_limit' => $flightLimit)));
+      ?>
+      <div class="garmin-actions" style="margin-top:10px">
+        <a class="secondary" href="<?= h($previousFlightPageUrl) ?>" style="<?= $flightPage <= 1 ? 'pointer-events:none;opacity:.45' : '' ?>">Previous flights</a>
+        <span class="garmin-muted">Page <?= number_format($flightPage) ?> / <?= number_format($flightTotalPages) ?></span>
+        <a class="secondary" href="<?= h($nextFlightPageUrl) ?>" style="<?= $flightPage >= $flightTotalPages ? 'pointer-events:none;opacity:.45' : '' ?>">Next flights</a>
+      </div>
+    <?php endif; ?>
 
     <?php if ($flightRows === array()): ?>
       <div class="garmin-empty">No Garmin flights match the current filters. Incomplete/GPS-only flights are hidden by default.</div>

@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-function h(string $s): string
+function h(mixed $s): string
 {
-    return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 }
 
 function redirect(string $path): void
