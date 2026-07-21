@@ -250,6 +250,11 @@
     const bearing = g3x.nav_bearing_deg !== null && g3x.nav_bearing_deg !== undefined
       ? normDeg(g3x.nav_bearing_deg) : null;
     const isGps = navSource && /gps|fms|wpt/i.test(String(navSource));
+    const hasNavGuidance = navSource && crs !== null && (
+      bearing !== null ||
+      g3x.nav_distance_nm !== null && g3x.nav_distance_nm !== undefined ||
+      g3x.hcdi !== null && g3x.hcdi !== undefined
+    );
     const crsColor = isGps ? '#ff39ff' : '#39ff39';
     const navLabel = navSourceLabel(g3x);
     const cx = 170; const cy = 170;
@@ -274,15 +279,27 @@
     let crsNeedle = '';
     if (crs !== null) {
       const a = ((crs - hdg) * Math.PI) / 180;
-      const x = cx + 98 * Math.sin(a);
-      const y = cy - 98 * Math.cos(a);
+      const x1 = cx - 98 * Math.sin(a);
+      const y1 = cy + 98 * Math.cos(a);
+      const x2 = cx + 98 * Math.sin(a);
+      const y2 = cy - 98 * Math.cos(a);
       const bx1 = cx + 18 * Math.sin(a + Math.PI / 2);
       const by1 = cy - 18 * Math.cos(a + Math.PI / 2);
       const bx2 = cx + 18 * Math.sin(a - Math.PI / 2);
       const by2 = cy - 18 * Math.cos(a - Math.PI / 2);
       crsNeedle = `<line x1="${bx1}" y1="${by1}" x2="${bx2}" y2="${by2}" stroke="${crsColor}" stroke-width="5"/>
-        <line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${crsColor}" stroke-width="3"/>
-        <polygon points="${x},${y} ${x - 10 * Math.cos(a)},${y - 10 * Math.sin(a)} ${x + 12 * Math.sin(a)},${y - 12 * Math.cos(a)}" fill="${crsColor}"/>`;
+        <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${crsColor}" stroke-width="3"/>`;
+      if (hasNavGuidance) {
+        const flagCenterX = cx + 42 * Math.sin(a);
+        const flagCenterY = cy - 42 * Math.cos(a);
+        const tipX = cx + 58 * Math.sin(a);
+        const tipY = cy - 58 * Math.cos(a);
+        const leftX = flagCenterX + 9 * Math.sin(a + Math.PI / 2);
+        const leftY = flagCenterY - 9 * Math.cos(a + Math.PI / 2);
+        const rightX = flagCenterX + 9 * Math.sin(a - Math.PI / 2);
+        const rightY = flagCenterY - 9 * Math.cos(a - Math.PI / 2);
+        crsNeedle += `<polygon points="${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}" fill="${crsColor}"/>`;
+      }
     }
 
     let brgNeedle = '';

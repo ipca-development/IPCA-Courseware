@@ -85,32 +85,83 @@ final class FlightCircleGarminMatchService
     }
 
     /**
+     * Match selected Garmin CSV rows, including Sync App rows that do not have a historical backfill file id.
+     *
+     * @param list<int> $csvFileIds
+     * @return array<string,mixed>
+     */
+    public function matchSelectedGarminCsvFiles(array $csvFileIds): array
+    {
+        $csvFileIds = array_values(array_unique(array_filter(array_map('intval', $csvFileIds))));
+        if ($csvFileIds === array()) {
+            return array('ok' => true, 'scanned' => 0, 'created' => 0, 'ambiguous' => 0, 'no_match_diagnostics' => array());
+        }
+        if (!$this->tableExists('ipca_garmin_csv_flight_summaries') || !$this->tableExists('ipca_flightcircle_staging_records')) {
+            return array('ok' => false, 'message' => 'Matching tables are not installed.', 'scanned' => 0, 'created' => 0, 'ambiguous' => 0);
+        }
+        $placeholders = implode(',', array_fill(0, count($csvFileIds), '?'));
+        $stmt = $this->pdo->prepare("
+            SELECT
+              s.csv_file_id,
+              s.tail_number,
+              s.departure_time_utc,
+              s.arrival_time_utc,
+              s.summary_json,
+              f.aircraft_registration,
+              f.aircraft_ident
+            FROM ipca_garmin_csv_flight_summaries s
+            INNER JOIN ipca_garmin_csv_files f ON f.id = s.csv_file_id
+            WHERE s.csv_file_id IN ({$placeholders})
+            ORDER BY s.csv_file_id ASC
+        ");
+        $stmt->execute($csvFileIds);
+
+        $created = 0;
+        $ambiguous = 0;
+        $scanned = 0;
+        $diagnostics = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $scanned++;
+            $segment = $this->segmentFromCsvSummary($row);
+            $result = $this->matchGarminSegmentToFlightCircle($segment);
+            $created += (int)($result['created'] ?? 0);
+            $ambiguous += (int)($result['ambiguous'] ?? 0);
+            if (count($diagnostics) < 25 && is_array($result['diagnostic'] ?? null)) {
+                $diagnostics[] = $result['diagnostic'];
+            }
+        }
+        return array('ok' => true, 'scanned' => $scanned, 'created' => $created, 'ambiguous' => $ambiguous, 'no_match_diagnostics' => $diagnostics);
+    }
+
+    /**
      * @param array<string,mixed> $segment
      * @return array<string,mixed>
      */
     private function matchGarminSegmentToFlightCircle(array $segment): array
     {
-        $this->clearUndecidedGarminOutcomes((int)($segment['id'] ?? 0));
+        $this->clearUndecidedGarminOutcomesForSegment($segment);
         $summary = $this->summaryFromSegment($segment);
         $garminTail = (string)($segment['aircraft_registration'] ?? '');
         $garminHobbsOut = $this->numericOrNull($summary['hobbs_out'] ?? null);
+        $garminHobbsIn = $this->numericOrNull($summary['hobbs_in'] ?? null);
         if ($garminHobbsOut === null) {
             $this->storeGarminOutcome(null, $segment, 'no_flightcircle_candidate', 0.0, array('missing_garmin_hobbs_out'), array());
             return array('created' => 1, 'ambiguous' => 0, 'diagnostic' => $this->garminDiagnostic($segment, 'Garmin Hobbs-Out missing'));
         }
 
-        $sameTailCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, true);
+        $sameTailCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, $garminHobbsIn, true);
         if ($sameTailCandidates !== array()) {
             $ambiguous = count($sameTailCandidates) > 1 ? 1 : 0;
             foreach (array_slice($sameTailCandidates, 0, 5) as $candidate) {
                 $score = (float)$candidate['score'];
                 $status = $ambiguous ? 'ambiguous' : ($score >= 90.0 ? 'high_confidence' : 'probable');
-                $this->storeGarminOutcome($candidate, $segment, $status, $score, array('tail_hobbs_out_match'), array());
+                $reason = !empty($candidate['range_contains_garmin']) ? 'tail_hobbs_range_contains_garmin_leg' : 'tail_hobbs_out_match';
+                $this->storeGarminOutcome($candidate, $segment, $status, $score, array($reason), array());
             }
             return array('created' => min(5, count($sameTailCandidates)), 'ambiguous' => $ambiguous);
         }
 
-        $aliasCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, false);
+        $aliasCandidates = $this->flightCircleCandidatesForGarmin($garminTail, $garminHobbsOut, $garminHobbsIn, false);
         if ($aliasCandidates !== array()) {
             foreach (array_slice($aliasCandidates, 0, 5) as $candidate) {
                 $this->storeGarminOutcome($candidate, $segment, 'needs_tail_alias', (float)$candidate['score'], array('hobbs_out_match_tail_alias_needed'), array('tail_alias_required'));
@@ -137,6 +188,55 @@ final class FlightCircleGarminMatchService
 
     /**
      * @param array<string,mixed> $segment
+     */
+    private function clearUndecidedGarminOutcomesForSegment(array $segment): void
+    {
+        $segmentId = (int)($segment['id'] ?? 0);
+        if ($segmentId > 0) {
+            $this->clearUndecidedGarminOutcomes($segmentId);
+            return;
+        }
+        $csvFileId = (int)($segment['csv_file_id'] ?? 0);
+        if ($csvFileId <= 0) {
+            return;
+        }
+        $stmt = $this->pdo->prepare("
+            DELETE FROM ipca_flightcircle_garmin_matches
+            WHERE csv_file_id = ?
+              AND garmin_segment_id IS NULL
+              AND decided_at IS NULL
+        ");
+        $stmt->execute(array($csvFileId));
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function segmentFromCsvSummary(array $row): array
+    {
+        $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
+        $summary = is_array($summary) ? $summary : array();
+        $tail = trim((string)($row['tail_number'] ?? ''));
+        if ($tail === '' || strcasecmp($tail, 'Unknown tail') === 0) {
+            $tail = trim((string)($row['aircraft_registration'] ?? ''));
+        }
+        if ($tail === '') {
+            $tail = trim((string)($row['aircraft_ident'] ?? ''));
+        }
+        return array(
+            'id' => 0,
+            'csv_file_id' => (int)($row['csv_file_id'] ?? 0),
+            'aircraft_registration' => strtoupper($tail),
+            'start_utc' => $row['departure_time_utc'] ?? null,
+            'end_utc' => $row['arrival_time_utc'] ?? null,
+            'classification' => (string)($row['derivation_status'] ?? 'csv_summary'),
+            'evidence_json' => AuditEventService::jsonEncode(array('summary' => $summary)),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $segment
      * @return array<string,mixed>
      */
     private function summaryFromSegment(array $segment): array
@@ -149,7 +249,7 @@ final class FlightCircleGarminMatchService
     /**
      * @return list<array<string,mixed>>
      */
-    private function flightCircleCandidatesForGarmin(string $garminTail, float $garminHobbsOut, bool $sameTailOnly): array
+    private function flightCircleCandidatesForGarmin(string $garminTail, float $garminHobbsOut, ?float $garminHobbsIn, bool $sameTailOnly): array
     {
         $batchIds = array_map(static fn(array $row): int => (int)$row['id'], $this->datasetBatchesForMatching());
         $batchIds = array_values(array_filter($batchIds));
@@ -164,32 +264,46 @@ final class FlightCircleGarminMatchService
             $tailSql = " AND UPPER(REPLACE(REPLACE(tail_number, '-', ''), ' ', '')) IN (" . implode(',', array_fill(0, count($tailCandidates), '?')) . ')';
             array_push($params, ...$tailCandidates);
         }
-        $params[] = $garminHobbsOut;
+        $rangeSql = $garminHobbsIn !== null ? ' OR (hobbs_out <= ? AND hobbs_in IS NOT NULL AND hobbs_in >= ?)' : '';
         $stmt = $this->pdo->prepare("
             SELECT *,
-                   ABS(hobbs_out - ?) AS hobbs_delta
+                   ABS(hobbs_out - ?) AS hobbs_delta,
+                   CASE
+                     WHEN ? IS NOT NULL AND hobbs_out <= ? AND hobbs_in IS NOT NULL AND hobbs_in >= ? THEN 1
+                     ELSE 0
+                   END AS range_contains_garmin
             FROM ipca_flightcircle_staging_records
             WHERE batch_id IN ({$batchPlaceholders})
               AND tail_number IS NOT NULL
               AND hobbs_out IS NOT NULL
               {$tailSql}
-              AND ABS(hobbs_out - ?) <= 0.30
-            ORDER BY ABS(hobbs_out - ?) ASC, id ASC
+              AND (ABS(hobbs_out - ?) <= 0.30{$rangeSql})
+            ORDER BY range_contains_garmin DESC, ABS(hobbs_out - ?) ASC, id ASC
             LIMIT 10
         ");
-        $executeParams = $batchIds;
+        $executeParams = array(
+            $garminHobbsOut,
+            $garminHobbsIn,
+            $garminHobbsOut + 0.15,
+            ($garminHobbsIn ?? $garminHobbsOut) - 0.15,
+        );
+        array_push($executeParams, ...$batchIds);
         if ($sameTailOnly) {
             array_push($executeParams, ...$tailCandidates);
         }
-        array_unshift($executeParams, $garminHobbsOut);
         $executeParams[] = $garminHobbsOut;
+        if ($garminHobbsIn !== null) {
+            $executeParams[] = $garminHobbsOut + 0.15;
+            $executeParams[] = $garminHobbsIn - 0.15;
+        }
         $executeParams[] = $garminHobbsOut;
         $stmt->execute($executeParams);
         $out = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $delta = (float)($row['hobbs_delta'] ?? 99);
             $tailMatches = in_array($this->normalizeTail((string)($row['tail_number'] ?? '')), $tailCandidates, true);
-            $row['score'] = ($tailMatches ? 60.0 : 25.0) + ($delta <= 0.15 ? 35.0 : 25.0);
+            $rangeContains = !empty($row['range_contains_garmin']);
+            $row['score'] = ($tailMatches ? 60.0 : 25.0) + ($rangeContains || $delta <= 0.15 ? 35.0 : 25.0);
             $out[] = $row;
         }
         return $out;
@@ -222,7 +336,7 @@ final class FlightCircleGarminMatchService
             AuditEventService::uuid(),
             $stagingRecordId,
             $operationId > 0 ? $operationId : null,
-            (int)$segment['id'],
+            (int)($segment['id'] ?? 0) > 0 ? (int)$segment['id'] : null,
             (int)($segment['csv_file_id'] ?? 0) > 0 ? (int)$segment['csv_file_id'] : null,
             $status,
             $score,

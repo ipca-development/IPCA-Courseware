@@ -23,6 +23,7 @@ try {
     }
     $action = trim((string)($_POST['action'] ?? ''));
     $ids = array_values(array_filter(array_map('intval', (array)($_POST['backfill_file_ids'] ?? array()))));
+    $csvFileIds = array_values(array_filter(array_map('intval', (array)($_POST['csv_file_ids'] ?? array()))));
     if ($action === 'process_queued_inline') {
         $batchId = max(0, (int)($_POST['batch_id'] ?? 0));
         $limit = max(1, min(50, (int)($_POST['limit'] ?? 10)));
@@ -30,19 +31,25 @@ try {
         $result['status'] = (new GarminHistoricalBackfillService($pdo))->status(10, $batchId > 0 ? $batchId : null);
         garmin_historical_action_json(200, $result);
     }
-    if ($ids === array()) {
+    if ($ids === array() && $csvFileIds === array()) {
         throw new RuntimeException('Select at least one historical Garmin file.');
     }
     $jobs = new AsyncJobService($pdo);
     $queued = 0;
     $changed = 0;
     if ($action === 'process_selected_inline') {
+        if ($ids === array()) {
+            throw new RuntimeException('Select at least one bulk-upload row to process.');
+        }
         $result = (new GarminHistoricalBackfillService($pdo))->processSelectedFiles($ids);
         $result['match'] = (new FlightCircleGarminMatchService($pdo))->matchSelectedGarminBackfillFiles($ids);
         garmin_historical_action_json(200, $result);
     }
     if ($action === 'match_flightcircle') {
-        $result = (new FlightCircleGarminMatchService($pdo))->matchSelectedGarminBackfillFiles($ids);
+        $matcher = new FlightCircleGarminMatchService($pdo);
+        $result = $csvFileIds !== array()
+            ? $matcher->matchSelectedGarminCsvFiles($csvFileIds)
+            : $matcher->matchSelectedGarminBackfillFiles($ids);
         garmin_historical_action_json(200, $result);
     }
     if ($action === 'reprocess') {

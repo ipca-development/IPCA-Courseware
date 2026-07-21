@@ -859,6 +859,7 @@ cw_header('Garmin Sync Agent');
 <style>
 .garmin-page{display:grid;gap:16px}.garmin-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px;box-shadow:0 10px 24px rgba(15,23,42,.06)}.garmin-muted{color:#64748b;font-size:12px}.garmin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.garmin-kv{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.garmin-label{color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.garmin-value{font-weight:800;margin-top:3px}.garmin-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}.garmin-badge-ok{background:#dcfce7;color:#166534}.garmin-badge-warn{background:#fef3c7;color:#92400e}.garmin-badge-danger{background:#fee2e2;color:#991b1b}.garmin-badge-new{background:#dbeafe;color:#1d4ed8}.garmin-state-badge{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.garmin-state-complete{background:#dcfce7;color:#166534}.garmin-state-processing,.garmin-state-queued,.garmin-state-processing_required{background:#dbeafe;color:#1d4ed8}.garmin-state-needs_review{background:#fef3c7;color:#92400e}.garmin-state-failed{background:#fee2e2;color:#991b1b}.garmin-operational-grid{display:grid;grid-template-columns:1.4fr repeat(3,minmax(135px,1fr));gap:12px;align-items:stretch}.garmin-primary-action{border:0;border-radius:12px;background:#0f172a;color:#fff;font-weight:900;padding:11px 15px;cursor:pointer;font-size:13px}.garmin-primary-action[disabled]{background:#94a3b8;cursor:not-allowed}.garmin-table-wrap{overflow-x:visible}.garmin-flights-scroll{max-height:72vh;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}.garmin-flights-scroll .garmin-table th{position:sticky;top:0;z-index:2;background:#fff}.garmin-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}.garmin-table th,.garmin-table td{border-bottom:1px solid #e2e8f0;padding:7px 6px;text-align:left;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}.garmin-table th{color:#475569;font-size:9.5px;text-transform:uppercase;letter-spacing:.025em;resize:none;overflow:hidden}.garmin-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;word-break:break-all}.garmin-toolbar,.garmin-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.garmin-toolbar a,.garmin-toolbar button,.garmin-actions button,.garmin-actions a{border:0;border-radius:10px;background:#0f172a;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;cursor:pointer;font-size:12px}.garmin-toolbar a.secondary,.garmin-toolbar button.secondary,.garmin-actions .secondary{background:#475569}.garmin-toolbar form{margin:0}.garmin-progress{position:relative;height:18px;background:#e2e8f0;border-radius:999px;overflow:hidden}.garmin-progress span{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#0ea5e9)}.garmin-progress strong{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#0f172a;font-size:11px;font-weight:900;text-shadow:0 1px 0 rgba(255,255,255,.75)}.garmin-empty{padding:18px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}.garmin-notice{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px}.garmin-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px}.garmin-filter{display:grid;grid-template-columns:110px 132px 132px 110px 110px;gap:8px 10px;margin-top:12px;align-items:end;justify-content:start}.garmin-filter-control{display:grid;grid-template-rows:14px 32px;gap:3px;align-items:end}.garmin-filter-label{display:block;height:14px;color:#64748b;font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}.garmin-filter input,.garmin-filter select,.garmin-filter button{box-sizing:border-box;width:100%;height:32px;border-radius:8px;font:inherit;font-size:12px;line-height:1}.garmin-filter input,.garmin-filter select{border:1px solid #cbd5e1;background:#fff;padding:6px 8px}.garmin-filter button{border:0;background:#475569;color:#fff;font-weight:800;padding:6px 10px;cursor:pointer}.garmin-row-button{border:0;background:transparent;color:#1d4ed8;font-weight:900;cursor:pointer;padding:0}.garmin-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:9999;padding:24px;overflow:auto}.garmin-modal-backdrop.is-open{display:block}.garmin-modal{max-width:980px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);overflow:hidden}.garmin-modal-header{display:flex;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e2e8f0}.garmin-modal-body{padding:16px 18px;display:grid;gap:12px}.garmin-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.garmin-raw-block{max-height:240px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font-size:11px}.garmin-compact{white-space:nowrap}.garmin-tail-pill{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;white-space:nowrap}.garmin-tail-unknown{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-upload-pill{display:inline-flex;border-radius:999px;background:#e0f2fe;color:#075985;padding:2px 7px;font-size:10px;font-weight:900}
 .garmin-flight-hero{display:grid;grid-template-columns:1fr 1.25fr .8fr 1.25fr;gap:12px}.garmin-flight-card,.garmin-counter-card,.garmin-source-panel,.garmin-map-panel{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.garmin-flight-big{font-size:17px;font-weight:900;color:#0f172a;margin-top:4px}.garmin-flight-center{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.garmin-flight-duration{font-size:24px;font-weight:950;color:#1d4ed8}.garmin-counter-grid{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:12px}.garmin-counter-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #e2e8f0;padding:7px 0;font-size:15px}.garmin-counter-row strong{font-size:18px}.garmin-counter-total{margin-top:10px;border-radius:12px;background:#0f172a;color:#fff;padding:9px 10px;font-weight:900}.garmin-source-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}.garmin-source-row{display:grid;grid-template-columns:130px 1fr;gap:10px;align-items:start;padding:7px 0;border-bottom:1px solid #e2e8f0}.garmin-source-row span{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.garmin-source-row code{font-size:12px;word-break:break-all}.garmin-pill-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.garmin-pill{display:inline-flex;border-radius:999px;background:#e2e8f0;color:#334155;border:1px solid #cbd5e1;padding:4px 9px;font-size:11px;font-weight:900}.garmin-pill-ok,.garmin-pill-good{background:#dcfce7;color:#166534;border-color:#bbf7d0}.garmin-pill-warn{background:#fef3c7;color:#92400e;border-color:#fde68a}.garmin-pill-danger,.garmin-pill-bad{background:#fee2e2;color:#991b1b;border-color:#fecaca}.garmin-quality-bar{height:9px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:8px 0}.garmin-quality-bar span{display:block;height:100%;border-radius:999px}.garmin-quality-good{background:linear-gradient(90deg,#22c55e,#16a34a)}.garmin-quality-warn{background:linear-gradient(90deg,#f59e0b,#22c55e)}.garmin-quality-bad{background:linear-gradient(90deg,#ef4444,#f59e0b)}.garmin-track-map{position:relative;height:260px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#e2e8f0}.garmin-map-message{position:absolute;z-index:500;left:12px;top:12px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 9px;color:#475569;font-size:12px;box-shadow:0 6px 16px rgba(15,23,42,.12)}@media(max-width:900px){.garmin-flight-hero,.garmin-counter-grid,.garmin-source-grid{grid-template-columns:1fr}.garmin-source-row{grid-template-columns:1fr}}
+.garmin-import-date{min-width:92px;white-space:nowrap;overflow:visible!important;text-overflow:clip!important}.garmin-import-date-main{display:block;font-size:12px;font-weight:900;color:#0f172a;letter-spacing:-.01em}.garmin-import-date-time{display:block;margin-top:2px;font-size:12px;color:#64748b}.garmin-fc-pill-cell{white-space:nowrap;overflow:visible!important;text-overflow:clip!important}
 </style>
 <div class="garmin-page">
   <section class="garmin-card">
@@ -1293,7 +1294,7 @@ cw_header('Garmin Sync Agent');
       <div class="garmin-muted" style="margin-top:4px" data-import-bulk-message></div>
       <div class="garmin-flights-scroll" style="margin-top:10px;max-height:68vh">
         <table class="garmin-table">
-          <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:8%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:10%">FlightCircle</th><th style="width:12%">Crew</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
+          <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:10%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:8%">FlightCircle</th><th style="width:12%">Crew</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
           <tbody>
           <?php foreach ($garminImportRows as $row): ?>
             <?php
@@ -1340,6 +1341,7 @@ cw_header('Garmin Sync Agent');
             ?>
             <tr data-garmin-import-row
                 data-historical-file-id="<?= (int)($row['historical_file_id'] ?? 0) ?>"
+                data-csv-file-id="<?= (int)($row['csv_file_id'] ?? 0) ?>"
                 data-source="<?= h($sourceLabel) ?>"
                 data-tail="<?= h($tail) ?>"
                 data-date="<?= h($dateKey) ?>"
@@ -1349,9 +1351,9 @@ cw_header('Garmin Sync Agent');
                 data-state="<?= h(strtolower($importState)) ?>"
                 data-fc-match="<?= $fcMatchCount > 0 ? '1' : '0' ?>"
                 data-duplicate="<?= $isDuplicate ? 'duplicate' : 'new' ?>">
-              <td><input type="checkbox" data-import-checkbox value="<?= (int)($row['historical_file_id'] ?? 0) ?>" <?= ((int)($row['historical_file_id'] ?? 0) <= 0) ? 'disabled' : '' ?>></td>
+              <td><input type="checkbox" data-import-checkbox value="<?= (int)($row['historical_file_id'] ?? 0) ?>" data-csv-file-id="<?= (int)($row['csv_file_id'] ?? 0) ?>" <?= ((int)($row['historical_file_id'] ?? 0) <= 0 && (int)($row['csv_file_id'] ?? 0) <= 0) ? 'disabled' : '' ?>></td>
               <td><span class="garmin-badge <?= $sourceLabel === 'Bulk Upload' ? 'garmin-badge-warn' : 'garmin-badge-ok' ?>"><?= h($sourceLabel) ?></span></td>
-              <td class="garmin-compact"><?= h($dateKey !== '' ? $dateKey : '--') ?><br><span class="garmin-muted"><?= h((string)($summary['dep_time_lt'] ?? '')) ?></span></td>
+              <td class="garmin-import-date"><span class="garmin-import-date-main"><?= h($dateKey !== '' ? $dateKey : '--') ?></span><span class="garmin-import-date-time"><?= h((string)($summary['dep_time_lt'] ?? '')) ?></span></td>
               <td><?= garmin_sync_tail_pill($tail) ?></td>
               <td><?= h((string)($row['departure_airport_code'] ?? $summary['dep_airport'] ?? '--') ?: '--') ?></td>
               <td><?= h((string)($row['arrival_airport_code'] ?? $summary['arr_airport'] ?? '--') ?: '--') ?></td>
@@ -1363,12 +1365,9 @@ cw_header('Garmin Sync Agent');
               <td><?= h((string)($summary['tacho_time'] ?? '--')) ?></td>
               <td><span class="garmin-badge <?= h($stateClass) ?>"><?= h($importState) ?></span><?php if ($review !== ''): ?><br><span class="garmin-muted"><?= h($review) ?></span><?php endif; ?></td>
               <td><?= h($classification) ?></td>
-              <td>
+              <td class="garmin-fc-pill-cell">
                 <?php if ($fcMatchCount > 0): ?>
                   <span class="garmin-badge <?= h($fcBadgeClass) ?>"><?= h($fcMatchStatuses !== '' ? $fcMatchStatuses : 'matched') ?></span>
-                  <br><span class="garmin-muted"><?= number_format($fcMatchCount) ?> candidate(s)<?= $fcMatchScore !== null ? ' · ' . number_format($fcMatchScore, 0) . '%' : '' ?></span>
-                  <?php if ($fcStagingIds !== ''): ?><br><span class="garmin-muted">FC row <?= h($fcStagingIds) ?></span><?php endif; ?>
-                  <?php if ($fcHobbsOut !== ''): ?><br><span class="garmin-muted">FC Hobbs <?= h($fcHobbsOut) ?><?= $fcHobbsIn !== '' ? ' → ' . h($fcHobbsIn) : '' ?></span><?php endif; ?>
                 <?php else: ?>
                   <span class="garmin-muted">No FC match</span>
                 <?php endif; ?>
@@ -1681,6 +1680,8 @@ cw_header('Garmin Sync Agent');
   const importBulkMessage = document.querySelector('[data-import-bulk-message]');
   const importBulkProgress = document.querySelector('[data-import-bulk-progress]');
   const importSelectAll = document.querySelector('[data-import-select-all]');
+  const importFilterStorageKey = 'ipca.garminImports.filters';
+  const importFilterNames = ['import_source', 'import_tail', 'import_from', 'import_to', 'import_state', 'import_duplicate'];
   const processButton = document.querySelector('[data-process-garmin]');
   const processingState = document.querySelector('[data-processing-state]');
   const processingMessage = document.querySelector('[data-processing-message]');
@@ -1761,7 +1762,50 @@ cw_header('Garmin Sync Agent');
     const field = importFilterForm ? importFilterForm.querySelector('[name="' + name + '"]') : null;
     return field ? String(field.value || '') : '';
   }
+  function garminImportFilterState() {
+    const state = {};
+    if (!importFilterForm) return state;
+    importFilterNames.forEach(name => {
+      state[name] = importFilterValue(name);
+    });
+    return state;
+  }
+  function restoreGarminImportFilters() {
+    if (!importFilterForm) return;
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(importFilterStorageKey) || '{}') || {};
+    } catch (error) {
+      saved = {};
+    }
+    const params = new URLSearchParams(window.location.search);
+    importFilterNames.forEach(name => {
+      const field = importFilterForm.querySelector('[name="' + name + '"]');
+      if (!field) return;
+      const value = params.has(name) ? String(params.get(name) || '') : String(saved[name] || '');
+      if (value !== '') field.value = value;
+    });
+  }
+  function persistGarminImportFilters() {
+    if (!importFilterForm) return;
+    const state = garminImportFilterState();
+    try {
+      localStorage.setItem(importFilterStorageKey, JSON.stringify(state));
+    } catch (error) {
+      // Filter persistence is best-effort; the table should still work if storage is blocked.
+    }
+    const url = new URL(window.location.href);
+    importFilterNames.forEach(name => {
+      if (state[name]) {
+        url.searchParams.set(name, state[name]);
+      } else {
+        url.searchParams.delete(name);
+      }
+    });
+    window.history.replaceState(null, '', url.toString());
+  }
   function applyGarminImportFilters() {
+    persistGarminImportFilters();
     const source = importFilterValue('import_source');
     const tail = importFilterValue('import_tail').toUpperCase();
     const dateFrom = importFilterValue('import_from');
@@ -1821,6 +1865,7 @@ cw_header('Garmin Sync Agent');
     if (importCount) importCount.textContent = 'Showing ' + visibleCount.toLocaleString() + ' of ' + importRows.length.toLocaleString() + ' import(s), newest first. FlightCircle matched: ' + visibleMatchedCount.toLocaleString() + '.';
   }
   if (importFilterForm) {
+    restoreGarminImportFilters();
     importFilterForm.addEventListener('submit', event => {
       event.preventDefault();
       applyGarminImportFilters();
@@ -1859,18 +1904,21 @@ cw_header('Garmin Sync Agent');
   document.querySelectorAll('[data-import-bulk-action]').forEach(button => {
     button.addEventListener('click', async () => {
       const action = button.getAttribute('data-import-bulk-action') || '';
-      const ids = importCheckboxes().filter(box => box.checked).map(box => Number(box.value || 0)).filter(Boolean);
-      if (ids.length === 0) {
-        if (importBulkMessage) importBulkMessage.textContent = 'Select at least one bulk-upload row first.';
+      const selectedBoxes = importCheckboxes().filter(box => box.checked);
+      const ids = selectedBoxes.map(box => Number(box.value || 0)).filter(Boolean);
+      const csvIds = selectedBoxes.map(box => Number(box.getAttribute('data-csv-file-id') || 0)).filter(Boolean);
+      const actionTotal = action === 'match_flightcircle' ? csvIds.length : ids.length;
+      if (actionTotal === 0) {
+        if (importBulkMessage) importBulkMessage.textContent = action === 'match_flightcircle' ? 'Select at least one Garmin CSV row first.' : 'Select at least one bulk-upload row first.';
         return;
       }
       button.disabled = true;
-      setImportBulkProgress(0, ids.length, action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files in small chunks...');
+      setImportBulkProgress(0, actionTotal, action === 'match_flightcircle' ? 'Running FlightCircle enrichment/matching...' : 'Processing selected Garmin files in small chunks...');
       try {
         let refreshDelayMs = 1000;
         if (action === 'match_flightcircle') {
-          const result = await postHistoricalAction(action, { backfill_file_ids: ids });
-          setImportBulkProgress(ids.length, ids.length, 'FlightCircle matching complete.');
+          const result = await postHistoricalAction(action, { csv_file_ids: csvIds });
+          setImportBulkProgress(csvIds.length, csvIds.length, 'FlightCircle matching complete.');
           if (importBulkMessage) {
             const diagnostics = Array.isArray(result.no_match_diagnostics) ? result.no_match_diagnostics.slice(0, 3) : [];
             if (diagnostics.length > 0) refreshDelayMs = 6000;
@@ -1901,6 +1949,7 @@ cw_header('Garmin Sync Agent');
             + ', skipped duplicates ' + skipped.toLocaleString()
             + '. FlightCircle candidates created ' + matchCreated.toLocaleString() + '. Refreshing...';
         }
+        persistGarminImportFilters();
         setTimeout(() => window.location.reload(), refreshDelayMs);
       } catch (error) {
         if (importBulkMessage) importBulkMessage.textContent = 'Bulk action failed: ' + error.message;
