@@ -1550,7 +1550,7 @@ final class CockpitReplayPipeline
         if ($value === '') {
             return array();
         }
-        $parts = preg_split('/(?:\r\n|\r|\n|[;|])+/', $value) ?: array($value);
+        $parts = preg_split('/(?:\r\n|\r|\n|[;|]|\s*\/\s*)+/', $value) ?: array($value);
         $out = array();
         foreach ($parts as $part) {
             $text = trim((string)$part);

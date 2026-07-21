@@ -2547,6 +2547,20 @@ cw_header('Cockpit Recorder Replay');
     return catalog[`${source}\n${catalogKey}`] || catalog[normalizedAlertKey(source, text || key)] || catalog[`CAS ALERT\n${catalogKey}`] || null;
   }
 
+  function splitSystemAlertText(text) {
+    return String(text || '')
+      .split(/(?:\r\n|\r|\n|[;|]|\s*\/\s*)+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+
+  function fallbackAlertSeverity(text) {
+    const normalized = String(text || '').toUpperCase();
+    if (/\bOIL\s+PRESS\b/.test(normalized) || /\bWARNING\b/.test(normalized)) return 'warning';
+    if (/\bCOOLANT\b/.test(normalized) || /\bCAUTION\b/.test(normalized)) return 'caution';
+    return 'info';
+  }
+
   function replayModelInstrumentDefaults() {
     const presentation = replayPresentationSettings();
     const instruments = presentation.instruments && typeof presentation.instruments === 'object' ? presentation.instruments : {};
@@ -3724,10 +3738,7 @@ cw_header('Cockpit Recorder Replay');
         ['CAS ALERT', sample.cas_alert],
         ['TERRAIN ALERT', sample.terrain_alert],
       ].forEach(([sourceColumn, value]) => {
-        String(value || '')
-          .split(/[|;,]+/)
-          .map((part) => part.trim())
-          .filter(Boolean)
+        splitSystemAlertText(value)
           .forEach((text) => fallbackAlerts.push({
             key: text.toUpperCase().replace(/\s+/g, ' '),
             text,
@@ -3739,14 +3750,19 @@ cw_header('Cockpit Recorder Replay');
     const alerts = storedAlerts.length ? storedAlerts : fallbackAlerts;
     const rank = { warning: 0, caution: 1, info: 2 };
     return alerts
-      .map((alert) => {
-        const catalog = replayAlertCatalogLookup(alert && alert.source_column, alert && alert.key, alert && alert.text);
-        const severity = String(catalog && catalog.severity || alert && alert.resolved_severity || alert && alert.severity || 'info').toLowerCase();
-        const text = String(catalog && catalog.display_text || alert && alert.text || '').trim();
-        return {
-          text,
-          severity: Object.prototype.hasOwnProperty.call(rank, severity) ? severity : 'info',
-        };
+      .flatMap((alert) => {
+        const sourceColumn = alert && alert.source_column;
+        const parts = splitSystemAlertText(alert && alert.text);
+        return parts.map((partText) => {
+          const partKey = partText.toUpperCase().replace(/\s+/g, ' ');
+          const catalog = replayAlertCatalogLookup(sourceColumn, partKey, partText);
+          const severity = String(catalog && catalog.severity || alert && alert.resolved_severity || alert && alert.severity || fallbackAlertSeverity(partText)).toLowerCase();
+          const text = String(catalog && catalog.display_text || partText).trim();
+          return {
+            text,
+            severity: Object.prototype.hasOwnProperty.call(rank, severity) ? severity : fallbackAlertSeverity(text),
+          };
+        });
       })
       .filter((alert) => alert.text !== '')
       .sort((a, b) => (rank[a.severity] - rank[b.severity]) || a.text.localeCompare(b.text));
