@@ -7,6 +7,7 @@ require_once __DIR__ . '/CockpitReconstructionProfiler.php';
 require_once __DIR__ . '/G3XFlightStreamParser.php';
 require_once __DIR__ . '/PfdProfileService.php';
 require_once __DIR__ . '/CockpitAircraftService.php';
+require_once __DIR__ . '/AircraftSettingsService.php';
 require_once __DIR__ . '/AdsbTrafficArchiveService.php';
 require_once __DIR__ . '/LocalTrafficArchiveRepository.php';
 require_once __DIR__ . '/tv_adsb_status.php';
@@ -687,6 +688,7 @@ final class CockpitReconstructionService
         $summary = self::decodeJson((string)($recording['reconstruction_summary_json'] ?? ''));
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
+        $aircraftSettings = (new AircraftSettingsService($this->pdo))->resolvedForRecording($recording);
 
         return array(
             'ok' => true,
@@ -716,6 +718,7 @@ final class CockpitReconstructionService
             'raw_gps_count' => (int)($diagnostics['raw_gps_count'] ?? 0),
             'raw_ahrs_count' => (int)($diagnostics['raw_ahrs_count'] ?? 0),
             'replay_sample_count' => $sampleCount,
+            'aircraft_settings' => $aircraftSettings,
             'max_raw_gps_gap_s' => isset($diagnostics['max_raw_gps_gap_s']) ? (float)$diagnostics['max_raw_gps_gap_s'] : null,
             'max_replay_dt_s' => isset($diagnostics['max_replay_dt_s']) ? (float)$diagnostics['max_replay_dt_s'] : null,
             'diagnostics' => $diagnostics,

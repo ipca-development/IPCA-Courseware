@@ -123,6 +123,7 @@ cw_header('Cockpit Recorder Aircraft');
         <button class="cockpit-btn" type="submit">Save Aircraft</button>
         <a class="cockpit-btn cockpit-btn-secondary" href="/admin/cockpit_recorder_aircraft.php">New</a>
         <?php if ((int)($form['id'] ?? 0) > 0): ?>
+          <a class="cockpit-btn cockpit-btn-secondary" href="/admin/aircraft_settings.php?aircraft_id=<?= (int)$form['id'] ?>">Aircraft Settings</a>
           <a class="cockpit-btn cockpit-btn-secondary" href="/admin/cockpit_recorder_aircraft_pfd.php?id=<?= (int)$form['id'] ?>">PFD Profile</a>
         <?php endif; ?>
       </div>
@@ -162,7 +163,7 @@ cw_header('Cockpit Recorder Aircraft');
                 <span class="cockpit-badge">Inactive</span>
               <?php endif; ?>
             </td>
-            <td><a href="/admin/cockpit_recorder_aircraft.php?edit=<?= (int)($row['id'] ?? 0) ?>">Edit</a> · <a href="/admin/cockpit_recorder_aircraft_pfd.php?id=<?= (int)($row['id'] ?? 0) ?>">PFD</a></td>
+            <td><a href="/admin/cockpit_recorder_aircraft.php?edit=<?= (int)($row['id'] ?? 0) ?>">Edit</a> · <a href="/admin/aircraft_settings.php?aircraft_id=<?= (int)($row['id'] ?? 0) ?>">Settings</a> · <a href="/admin/cockpit_recorder_aircraft_pfd.php?id=<?= (int)($row['id'] ?? 0) ?>">PFD</a></td>
           </tr>
         <?php endforeach; ?>
         </tbody>

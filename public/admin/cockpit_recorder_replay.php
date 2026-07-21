@@ -2083,6 +2083,9 @@ cw_header('Cockpit Recorder Replay');
 <?php else: ?>
   <div class="replay-avionics-header" aria-label="Avionics data header">
     <div class="replay-avionics-brand">Avionics data</div>
+    <?php if (is_array($recording) && (int)($recording['aircraft_id'] ?? 0) > 0): ?>
+      <a class="replay-avionics-brand" style="text-decoration:none" href="/admin/aircraft_settings.php?aircraft_id=<?= (int)$recording['aircraft_id'] ?>">Aircraft Settings</a>
+    <?php endif; ?>
     <div id="radioStackGroup" class="replay-avionics-group" aria-label="Radio stack"></div>
     <div id="autopilotFmaGroup" class="replay-avionics-group" aria-label="Autopilot flight mode annunciator"></div>
     <div id="navaidStackGroup" class="replay-avionics-group" aria-label="Navaid stack"></div>
@@ -2502,6 +2505,57 @@ cw_header('Cockpit Recorder Replay');
   let lastValidFpvReplayT = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
+  function replayAircraftSettings() {
+    return payload && payload.aircraft_settings && typeof payload.aircraft_settings === 'object'
+      ? payload.aircraft_settings
+      : {};
+  }
+
+  function replayPresentationSettings() {
+    const settings = replayAircraftSettings();
+    return settings.presentation && typeof settings.presentation === 'object' ? settings.presentation : {};
+  }
+
+  function replayTrimSettings() {
+    const presentation = replayPresentationSettings();
+    return presentation.trim && typeof presentation.trim === 'object' ? presentation.trim : null;
+  }
+
+  function normalizedAlertKey(sourceColumn, text) {
+    return String(sourceColumn || '').trim().toUpperCase() + '\n' + String(text || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  function replayAlertCatalogLookup(sourceColumn, key, text) {
+    const presentation = replayPresentationSettings();
+    const alerts = presentation.alerts && typeof presentation.alerts === 'object' ? presentation.alerts : {};
+    const catalog = alerts.catalog && typeof alerts.catalog === 'object' ? alerts.catalog : {};
+    const source = String(sourceColumn || '').trim().toUpperCase();
+    const catalogKey = String(key || text || '').trim().toUpperCase();
+    return catalog[`${source}\n${catalogKey}`] || catalog[normalizedAlertKey(source, text || key)] || catalog[`CAS ALERT\n${catalogKey}`] || null;
+  }
+
+  function replayModelInstrumentDefaults() {
+    const presentation = replayPresentationSettings();
+    const instruments = presentation.instruments && typeof presentation.instruments === 'object' ? presentation.instruments : {};
+    return instruments.model_defaults && typeof instruments.model_defaults === 'object' ? instruments.model_defaults : {};
+  }
+
+  function activeAirspeedProfile() {
+    const defaults = replayModelInstrumentDefaults();
+    return defaults.airspeed && typeof defaults.airspeed === 'object' && Object.keys(defaults.airspeed).length > 0
+      ? defaults.airspeed
+      : AIRSPEED_PROFILE;
+  }
+
+  function activeEngineProfile() {
+    const defaults = replayModelInstrumentDefaults();
+    return defaults.engine && typeof defaults.engine === 'object' && Array.isArray(defaults.engine.instruments)
+      ? defaults.engine
+      : ENGINE_PROFILE;
+  }
   let altimeterSettingUnit = 'hpa';
   let hsiOverlaySignature = '';
   let attitudeOverlaySignature = '';
@@ -2894,6 +2948,34 @@ cw_header('Cockpit Recorder Replay');
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
       presetAdminLocked: CAMERA_PRESET_ADMIN_LOCKED,
     };
+  }
+
+  function replayDefaultInstrumentSettings() {
+    const presentation = replayPresentationSettings();
+    const instruments = presentation.instruments && typeof presentation.instruments === 'object' ? presentation.instruments : {};
+    const override = instruments.aircraft_override && typeof instruments.aircraft_override === 'object' ? instruments.aircraft_override : {};
+    const defaults = override.default_enabled_instruments && typeof override.default_enabled_instruments === 'object'
+      ? override.default_enabled_instruments
+      : {};
+    return defaults;
+  }
+
+  function applyReplayInstrumentDefaults() {
+    if (!cameraCalibration || !cameraCalibration.instruments) return;
+    const dbDefaults = replayDefaultInstrumentSettings();
+    if (!dbDefaults || Object.keys(dbDefaults).length === 0) return;
+    let savedInstruments = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
+      savedInstruments = saved.instruments && typeof saved.instruments === 'object' ? saved.instruments : {};
+    } catch (err) {
+      savedInstruments = {};
+    }
+    INSTRUMENT_TOGGLE_IDS.forEach((key) => {
+      if (savedInstruments[key] !== undefined || dbDefaults[key] === undefined) return;
+      cameraCalibration.instruments[key] = dbDefaults[key] === true;
+    });
+    syncCalibrationControls();
   }
 
   function saveCameraCalibration() {
@@ -3491,7 +3573,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function airspeedProfileNumber(path, fallback) {
-    let value = AIRSPEED_PROFILE;
+    let value = activeAirspeedProfile();
     for (const key of path) {
       value = value && value[key];
     }
@@ -3600,7 +3682,7 @@ cw_header('Cockpit Recorder Replay');
   function updateTrimIndicator(sample) {
     if (!trimIndicator || !trimIndicatorPointer) return;
     const trimValue = firstFinite(sample && sample.elevator_trim_pct);
-    const trimRange = sample && sample.trim_range && typeof sample.trim_range === 'object' ? sample.trim_range : null;
+    const trimRange = replayTrimSettings() || (sample && sample.trim_range && typeof sample.trim_range === 'object' ? sample.trim_range : null);
     const min = trimRange ? Number(trimRange.min) : -100;
     const max = trimRange ? Number(trimRange.max) : 100;
     if (!sample || !instrumentEnabled('trim_position_indicator') || trimValue === null || !Number.isFinite(min) || !Number.isFinite(max) || max <= min || !trimIndicatorPlacement()) {
@@ -3614,13 +3696,34 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function normalizedSystemAlerts(sample) {
-    const alerts = sample && Array.isArray(sample.system_alerts) ? sample.system_alerts : [];
+    const storedAlerts = sample && Array.isArray(sample.system_alerts) ? sample.system_alerts : [];
+    const fallbackAlerts = [];
+    if (storedAlerts.length === 0 && sample) {
+      [
+        ['CAS ALERT', sample.cas_alert],
+        ['TERRAIN ALERT', sample.terrain_alert],
+      ].forEach(([sourceColumn, value]) => {
+        String(value || '')
+          .split(/[|;,]+/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .forEach((text) => fallbackAlerts.push({
+            key: text.toUpperCase().replace(/\s+/g, ' '),
+            text,
+            source_column: sourceColumn,
+            severity: 'info',
+          }));
+      });
+    }
+    const alerts = storedAlerts.length ? storedAlerts : fallbackAlerts;
     const rank = { warning: 0, caution: 1, info: 2 };
     return alerts
       .map((alert) => {
-        const severity = String(alert && alert.severity || 'info').toLowerCase();
+        const catalog = replayAlertCatalogLookup(alert && alert.source_column, alert && alert.key, alert && alert.text);
+        const severity = String(catalog && catalog.severity || alert && alert.resolved_severity || alert && alert.severity || 'info').toLowerCase();
+        const text = String(catalog && catalog.display_text || alert && alert.text || '').trim();
         return {
-          text: String(alert && alert.text || '').trim(),
+          text,
           severity: Object.prototype.hasOwnProperty.call(rank, severity) ? severity : 'info',
         };
       })
@@ -3889,7 +3992,8 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function engineProfileInstruments() {
-    return Array.isArray(ENGINE_PROFILE && ENGINE_PROFILE.instruments) ? ENGINE_PROFILE.instruments : [];
+    const profile = activeEngineProfile();
+    return Array.isArray(profile && profile.instruments) ? profile.instruments : [];
   }
 
   function engineValue(sample, instrument) {
@@ -7463,6 +7567,7 @@ cw_header('Cockpit Recorder Replay');
     }));
 
     payload = { ...data, samples };
+    applyReplayInstrumentDefaults();
     sessionAudioSegments.splice(0, sessionAudioSegments.length, ...((payload.recording && Array.isArray(payload.recording.audio_segments)) ? payload.recording.audio_segments : []));
     if (sessionAudioSegments.length > 1) {
       const firstSegment = sessionAudioSegments.find((segment) => Number(segment.start_offset_seconds) === 0) || sessionAudioSegments[0];
