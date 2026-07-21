@@ -816,7 +816,6 @@ if ($hasAcks && $hasTokens) {
 }
 
 $flightRows = array();
-$flightModals = array();
 $tailOptions = array();
 $depOptions = array();
 $arrOptions = array();
@@ -1718,7 +1717,6 @@ cw_header('Garmin Sync Agent');
             $track = $flight['track'];
             $summary = $flight['summary'];
             $flightId = garmin_sync_flight_id((int)$track['id']);
-            $modalId = 'garmin-flight-' . (int)$track['id'];
             $statusLabel = (string)$flight['status_label'];
             $statusClass = $statusLabel === 'Complete' ? 'garmin-badge-ok' : ($statusLabel === 'GPS only' ? 'garmin-badge-danger' : 'garmin-badge-warn');
             $qualityScore = garmin_sync_quality_score($summary, $statusLabel);
@@ -1736,7 +1734,7 @@ cw_header('Garmin Sync Agent');
               data-new="<?= $flight['is_new'] ? '1' : '0' ?>"
               data-hidden="<?= trim((string)($track['hidden_at'] ?? '')) !== '' ? '1' : '0' ?>">
             <td><input form="garmin-bulk-form" name="track_artifact_ids[]" type="checkbox" data-flight-checkbox value="<?= (int)$track['id'] ?>"></td>
-            <td><button class="garmin-row-button" type="button" data-modal-open="<?= h($modalId) ?>"><?= h($flightId) ?></button><?php if ($flight['is_new']): ?> <span class="garmin-badge garmin-badge-new">New</span><?php endif; ?></td>
+            <td><button class="garmin-row-button" type="button" data-modal-track-id="<?= (int)$track['id'] ?>"><?= h($flightId) ?></button><?php if ($flight['is_new']): ?> <span class="garmin-badge garmin-badge-new">New</span><?php endif; ?></td>
             <td class="garmin-compact"><?= h((string)($summary['date_label'] ?? garmin_sync_date_label((string)($summary['start_utc'] ?? '')))) ?></td>
             <td class="garmin-compact"><?= garmin_sync_tail_pill((string)($summary['tail'] ?? '')) ?></td>
             <td class="garmin-compact"><?= h((string)($summary['dep_airport'] ?? '--')) ?></td>
@@ -1770,100 +1768,14 @@ cw_header('Garmin Sync Agent');
               <?php endif; ?>
             </td>
           </tr>
-          <?php ob_start(); ?>
-            <div class="garmin-modal-backdrop" id="<?= h($modalId) ?>">
-              <div class="garmin-modal">
-                <div class="garmin-modal-header">
-                  <div>
-                    <div class="garmin-label">Garmin Flight</div>
-                    <h3 style="margin:2px 0"><?= h($flightId) ?> · <?= h((string)($summary['tail'] ?? 'Unknown tail')) ?></h3>
-                    <div class="garmin-muted"><?= h(garmin_sync_modal_date_label((string)($summary['start_utc'] ?? ''))) ?> · <?= h((string)($summary['dep_airport'] ?? '--')) ?> <?= h((string)($summary['dep_time_lt'] ?? '--')) ?> LT - <?= h((string)($summary['arr_airport'] ?? '--')) ?> <?= h((string)($summary['arr_time_lt'] ?? '--')) ?> LT</div>
-                  </div>
-                  <button class="garmin-row-button" type="button" data-modal-close>Close</button>
-                </div>
-                <div class="garmin-modal-body">
-                  <div class="garmin-flight-hero">
-                    <div class="garmin-flight-card">
-                      <div class="garmin-label">Date</div>
-                      <div class="garmin-flight-big"><?= h(garmin_sync_modal_date_label((string)($summary['start_utc'] ?? ''))) ?></div>
-                    </div>
-                    <div class="garmin-flight-card">
-                      <div class="garmin-label">Departure Airport</div>
-                      <div class="garmin-flight-big"><?= h(garmin_sync_airport_label((string)($summary['dep_airport'] ?? '--'))) ?></div>
-                      <div class="garmin-muted">Departure Time <?= h((string)($summary['dep_time_lt'] ?? '--')) ?> Local</div>
-                    </div>
-                    <div class="garmin-flight-card garmin-flight-center">
-                      <div class="garmin-label">Enroute</div>
-                      <div class="garmin-flight-duration"><?= h((string)($summary['elapsed_time'] ?? '--')) ?></div>
-                    </div>
-                    <div class="garmin-flight-card">
-                      <div class="garmin-label">Arrival Airport</div>
-                      <div class="garmin-flight-big"><?= h(garmin_sync_airport_label((string)($summary['arr_airport'] ?? '--'))) ?></div>
-                      <div class="garmin-muted">Arrival Time <?= h((string)($summary['arr_time_lt'] ?? '--')) ?> Local</div>
-                    </div>
-                  </div>
-                  <div class="garmin-counter-grid">
-                    <div class="garmin-counter-card">
-                      <div class="garmin-label">Hobbs</div>
-                      <div class="garmin-counter-row"><span>Out</span><strong><?= h((string)($summary['hobbs_out'] ?? '--')) ?></strong></div>
-                      <div class="garmin-counter-row"><span>In</span><strong><?= h((string)($summary['hobbs_in'] ?? '--')) ?></strong></div>
-                      <div class="garmin-counter-total">Total Hobbs <?= h((string)($summary['hobbs_time'] ?? '--')) ?></div>
-                    </div>
-                    <div class="garmin-counter-card">
-                      <div class="garmin-label">Tacho</div>
-                      <div class="garmin-counter-row"><span>Out</span><strong><?= h((string)($summary['tacho_out'] ?? '--')) ?></strong></div>
-                      <div class="garmin-counter-row"><span>In</span><strong><?= h((string)($summary['tacho_in'] ?? '--')) ?></strong></div>
-                      <div class="garmin-counter-total">Total Tacho <?= h((string)($summary['tacho_time'] ?? '--')) ?></div>
-                    </div>
-                    <div class="garmin-counter-card">
-                      <div class="garmin-label">At A Glance</div>
-                      <div class="garmin-pill-row">
-                        <?= garmin_sync_tail_pill((string)($summary['tail'] ?? '')) ?>
-                        <span class="garmin-pill garmin-pill-<?= h(strtolower($qualityClass)) ?>"><?= h($statusLabel) ?></span>
-                        <span class="garmin-pill">Rows <?= number_format((int)($summary['row_count'] ?? 0)) ?></span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="garmin-source-grid">
-                    <div class="garmin-source-panel">
-                      <div class="garmin-label">Source Data</div>
-                      <div class="garmin-source-row"><span>Full Track UUID</span><code><?= h((string)$track['track_uuid']) ?></code></div>
-                      <div class="garmin-source-row"><span>Entry UUID</span><code><?= h((string)$track['garmin_entry_uuid']) ?></code></div>
-                      <div class="garmin-source-row"><span>Telemetry</span><strong><?= number_format((int)$track['session_count']) ?> sessions · <?= number_format((int)$track['field_count']) ?> fields · <?= h(garmin_sync_bytes($track['file_size_bytes'] ?? 0)) ?></strong></div>
-                    </div>
-                    <div class="garmin-source-panel">
-                      <div class="garmin-label">Classification</div>
-                      <div class="garmin-pill-row">
-                        <?php foreach (garmin_sync_classification_pills((string)$flight['classification']) as $pill): ?>
-                          <span class="garmin-pill garmin-pill-<?= h($pill['class']) ?>"><?= h($pill['label']) ?></span>
-                        <?php endforeach; ?>
-                      </div>
-                      <div class="garmin-label" style="margin-top:12px">Source Quality</div>
-                      <div class="garmin-quality-bar"><span class="garmin-quality-<?= h($qualityClass) ?>" style="width:<?= (int)$qualityScore ?>%"></span></div>
-                      <div class="garmin-muted"><?= h((string)($summary['avionics_family'] ?? '--')) ?> · <?= h((string)($summary['default_quality'] ?? '--')) ?> · counters <?= !empty($summary['provides_counter_headers']) ? 'yes' : 'no' ?></div>
-                    </div>
-                  </div>
-                  <div class="garmin-map-panel">
-                    <div class="garmin-label">GPS Track Log</div>
-                    <div class="garmin-track-map" data-garmin-map data-raw-url="/admin/api/garmin_artifact_raw.php?track_artifact_id=<?= (int)$track['id'] ?>"></div>
-                  </div>
-                  <div><a href="/admin/api/garmin_artifact_raw.php?track_artifact_id=<?= (int)$track['id'] ?>" target="_blank" rel="noopener">Open full raw Garmin normalized JSON</a></div>
-                  <pre class="garmin-raw-block"><?= h(json_encode(array('summary' => $summary, 'source_names' => $flight['source_names'], 'sha256' => $track['sha256'] ?? ''), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) ?></pre>
-                </div>
-              </div>
-            </div>
-          <?php $flightModals[] = ob_get_clean(); ?>
         <?php endforeach; ?>
-          <?php garmin_sync_perf_log('garmin_flight_rows_and_modal_html_render', $garminSyncFlightTableRenderStart, array('flight_rows' => count($flightRows), 'modals' => count($flightModals))); ?>
+          <?php garmin_sync_perf_log('garmin_flight_rows_html_render', $garminSyncFlightTableRenderStart, array('flight_rows' => count($flightRows), 'modals' => 0)); ?>
           <tr data-filter-empty style="display:none"><td colspan="17" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
       </div>
     <?php endif; ?>
   </section>
-  <?php foreach ($flightModals as $modalHtml): ?>
-    <?= $modalHtml ?>
-  <?php endforeach; ?>
 
   <details class="garmin-card">
     <summary><strong>Recent Upload Acknowledgments</strong> <span class="garmin-muted">technical sync log</span></summary>
@@ -2746,25 +2658,44 @@ cw_header('Garmin Sync Agent');
       mapMessage(element, 'Could not load GPS track preview.');
     }
   }
-  document.querySelectorAll('[data-modal-open]').forEach(button => {
-    button.addEventListener('click', () => {
-      const modal = document.getElementById(button.getAttribute('data-modal-open'));
-      if (modal) {
-        modal.classList.add('is-open');
-        modal.querySelectorAll('[data-garmin-map]').forEach(renderGarminMap);
+  async function openGarminFlightModal(trackArtifactId, button) {
+    const modalId = 'garmin-flight-' + String(trackArtifactId);
+    let modal = document.getElementById(modalId);
+    if (!modal) {
+      if (button) button.disabled = true;
+      try {
+        const response = await fetch('/admin/api/garmin_flight_modal.php?track_artifact_id=' + encodeURIComponent(String(trackArtifactId)), { credentials: 'same-origin' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || ('Modal request returned HTTP ' + response.status));
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = String(payload.html || '');
+        modal = wrapper.firstElementChild;
+        if (!modal) throw new Error('Modal response was empty.');
+        document.body.appendChild(modal);
+      } catch (error) {
+        window.alert('Could not load Garmin flight details: ' + error.message);
+        return;
+      } finally {
+        if (button) button.disabled = false;
       }
-    });
+    }
+    modal.classList.add('is-open');
+    modal.querySelectorAll('[data-garmin-map]').forEach(renderGarminMap);
+  }
+  document.querySelectorAll('[data-modal-track-id]').forEach(button => {
+    button.addEventListener('click', () => openGarminFlightModal(button.getAttribute('data-modal-track-id') || '', button));
   });
-  document.querySelectorAll('[data-modal-close]').forEach(button => {
-    button.addEventListener('click', () => {
-      const modal = button.closest('.garmin-modal-backdrop');
+  document.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.matches('[data-modal-close]')) {
+      const modal = target.closest('.garmin-modal-backdrop');
       if (modal) modal.classList.remove('is-open');
-    });
-  });
-  document.querySelectorAll('.garmin-modal-backdrop').forEach(backdrop => {
-    backdrop.addEventListener('click', event => {
-      if (event.target === backdrop) backdrop.classList.remove('is-open');
-    });
+      return;
+    }
+    if (target.classList.contains('garmin-modal-backdrop')) {
+      target.classList.remove('is-open');
+    }
   });
   const bulkForm = document.getElementById('garmin-bulk-form');
   if (bulkForm) {
