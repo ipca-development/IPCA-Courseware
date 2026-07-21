@@ -2521,6 +2521,16 @@ cw_header('Cockpit Recorder Replay');
     return presentation.trim && typeof presentation.trim === 'object' ? presentation.trim : null;
   }
 
+  function replayLayoutSettings() {
+    const presentation = replayPresentationSettings();
+    return presentation.layout && typeof presentation.layout === 'object' ? presentation.layout : {};
+  }
+
+  function replayWarningBoxSettings() {
+    const layout = replayLayoutSettings();
+    return layout.system_warning_box && typeof layout.system_warning_box === 'object' ? layout.system_warning_box : {};
+  }
+
   function normalizedAlertKey(sourceColumn, text) {
     return String(sourceColumn || '').trim().toUpperCase() + '\n' + String(text || '')
       .trim()
@@ -2960,22 +2970,33 @@ cw_header('Cockpit Recorder Replay');
     return defaults;
   }
 
+  function replayDefaultLayoutMode() {
+    const layout = replayLayoutSettings();
+    return layout.replay_layout_mode === 'panel' ? 'panel' : 'legacy';
+  }
+
   function applyReplayInstrumentDefaults() {
     if (!cameraCalibration || !cameraCalibration.instruments) return;
     const dbDefaults = replayDefaultInstrumentSettings();
-    if (!dbDefaults || Object.keys(dbDefaults).length === 0) return;
     let savedInstruments = {};
+    let savedLayoutMode = null;
     try {
       const saved = JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
       savedInstruments = saved.instruments && typeof saved.instruments === 'object' ? saved.instruments : {};
+      savedLayoutMode = saved.layoutMode === 'panel' || saved.layoutMode === 'legacy' ? saved.layoutMode : null;
     } catch (err) {
       savedInstruments = {};
     }
-    INSTRUMENT_TOGGLE_IDS.forEach((key) => {
-      if (savedInstruments[key] !== undefined || dbDefaults[key] === undefined) return;
-      cameraCalibration.instruments[key] = dbDefaults[key] === true;
-    });
-    syncCalibrationControls();
+    if (!savedLayoutMode) {
+      cameraCalibration.layoutMode = replayDefaultLayoutMode();
+    }
+    if (dbDefaults && Object.keys(dbDefaults).length > 0) {
+      INSTRUMENT_TOGGLE_IDS.forEach((key) => {
+        if (savedInstruments[key] !== undefined || dbDefaults[key] === undefined) return;
+        cameraCalibration.instruments[key] = dbDefaults[key] === true;
+      });
+    }
+    updateCalibrationPanel();
   }
 
   function saveCameraCalibration() {
@@ -3735,14 +3756,21 @@ cw_header('Cockpit Recorder Replay');
     if (!systemWarningBox || !altimeterStack) return false;
     const altimeterRect = instrumentAnchorRect(altimeterStack);
     if (!altimeterRect) return false;
+    const settings = replayWarningBoxSettings();
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth, bottom: window.innerHeight };
     const profileRect = insetMapProfile && !elementIsHidden(insetMapProfile) ? insetMapProfile.getBoundingClientRect() : null;
-    const anchorBottom = profileRect && profileRect.height > 0 ? profileRect.bottom : altimeterRect.bottom;
-    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left));
+    const anchor = String(settings.anchor || 'inset_altitude_profile');
+    const anchorBottom = anchor === 'inset_altitude_profile' && profileRect && profileRect.height > 0 ? profileRect.bottom : altimeterRect.bottom;
+    const leftOffsetPx = Number.isFinite(Number(settings.left_offset_px)) ? Number(settings.left_offset_px) : 0;
+    const widthScale = Number.isFinite(Number(settings.width_scale)) ? clamp(Number(settings.width_scale), 0.5, 3) : 1.33;
+    const leftPx = Math.max(12, Math.round(altimeterRect.left - rootRect.left + leftOffsetPx));
     const bottomPx = Math.max(72, Math.round(rootRect.bottom - anchorBottom));
     systemWarningBox.style.left = `${leftPx}px`;
     systemWarningBox.style.right = 'auto';
     systemWarningBox.style.bottom = `${bottomPx}px`;
+    systemWarningBox.style.minWidth = `${Math.round(92 * widthScale)}px`;
+    systemWarningBox.style.maxWidth = `${Math.round(182 * widthScale)}px`;
+    systemWarningBox.style.textAlign = String(settings.text_align || 'left') === 'center' ? 'center' : 'left';
     return true;
   }
 

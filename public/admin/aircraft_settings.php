@@ -17,6 +17,25 @@ $selectedAircraftId = (int)($_GET['aircraft_id'] ?? $_POST['aircraft_id'] ?? 0);
 $selectedAircraft = null;
 $resolved = array();
 $alertRows = array();
+$instrumentChoices = array(
+    'airspeed_indicator' => array('label' => 'Airspeed Indicator', 'default' => true),
+    'trim_position_indicator' => array('label' => 'Trim Position Indicator', 'default' => true),
+    'altimeter' => array('label' => 'Altimeter / Vertical Speed', 'default' => true),
+    'hsi' => array('label' => 'Horizontal Situation Indicator', 'default' => true),
+    'aoa_indicator' => array('label' => 'Angle of Attack Indicator', 'default' => true),
+    'inset_map' => array('label' => 'Inset Map', 'default' => true),
+    'traffic' => array('label' => 'Traffic Overlay', 'default' => false),
+    'horizon_bar' => array('label' => 'Horizon Horizontal Bar', 'default' => true),
+    'attitude_indicator' => array('label' => 'Attitude Indicator', 'default' => true),
+    'flight_director_bars' => array('label' => 'Flight Director Bars', 'default' => false),
+    'flight_path_vector' => array('label' => 'Flight Path Vector', 'default' => false),
+    'radio_stack' => array('label' => 'Radio Stack', 'default' => false),
+    'navaid_stack' => array('label' => 'Navaid Stack', 'default' => false),
+    'autopilot_fma' => array('label' => 'Autopilot FMA', 'default' => false),
+    'engine_instrument_stack' => array('label' => 'Engine Instrument Stack', 'default' => true),
+    'system_warning_box' => array('label' => 'System Warning Box', 'default' => true),
+    'wind_indicator' => array('label' => 'Wind Indicator', 'default' => true),
+);
 
 function aircraft_settings_json(mixed $value): string
 {
@@ -24,12 +43,59 @@ function aircraft_settings_json(mixed $value): string
     return is_string($json) ? $json : '{}';
 }
 
+function aircraft_settings_float(mixed $value, float $fallback): float
+{
+    return is_numeric($value) ? (float)$value : $fallback;
+}
+
+function aircraft_settings_int(mixed $value, int $fallback): int
+{
+    return is_numeric($value) ? (int)$value : $fallback;
+}
+
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $action = (string)($_POST['action'] ?? '');
         if ($action === 'save_replay_profile') {
             $selectedAircraftId = (int)($_POST['aircraft_id'] ?? 0);
-            $settingsService->saveReplayProfile($selectedAircraftId, $_POST);
+            $enabledDefaults = is_array($_POST['default_enabled_instruments'] ?? null)
+                ? array_map('strval', array_keys((array)$_POST['default_enabled_instruments']))
+                : array();
+            $instrumentDefaults = array();
+            foreach ($instrumentChoices as $key => $meta) {
+                $instrumentDefaults[$key] = in_array($key, $enabledDefaults, true);
+            }
+            $layoutPayload = array(
+                'schema_version' => 1,
+                'replay_layout_mode' => (string)($_POST['replay_layout_mode'] ?? 'legacy'),
+                'system_warning_box' => array(
+                    'anchor' => (string)($_POST['warning_box_anchor'] ?? 'inset_altitude_profile'),
+                    'left_offset_px' => aircraft_settings_int($_POST['warning_box_left_offset_px'] ?? 0, 0),
+                    'width_scale' => aircraft_settings_float($_POST['warning_box_width_scale'] ?? 1.33, 1.33),
+                    'text_align' => (string)($_POST['warning_box_text_align'] ?? 'left'),
+                    'grow_direction' => 'up',
+                ),
+            );
+            $instrumentPayload = array(
+                'schema_version' => 1,
+                'default_enabled_instruments' => $instrumentDefaults,
+            );
+            $trimPayload = array(
+                'schema_version' => 1,
+                'min' => aircraft_settings_float($_POST['trim_min'] ?? -100, -100.0),
+                'neutral' => aircraft_settings_float($_POST['trim_neutral'] ?? 0, 0.0),
+                'max' => aircraft_settings_float($_POST['trim_max'] ?? 100, 100.0),
+                'nose_down_value' => aircraft_settings_float($_POST['trim_nose_down_value'] ?? -100, -100.0),
+                'nose_up_value' => aircraft_settings_float($_POST['trim_nose_up_value'] ?? 100, 100.0),
+                'source' => 'admin_ui',
+            );
+            $settingsService->saveReplayProfile($selectedAircraftId, array(
+                'profile_name' => $_POST['profile_name'] ?? 'Default',
+                'layout_config_json' => aircraft_settings_json($layoutPayload),
+                'instrument_override_json' => aircraft_settings_json($instrumentPayload),
+                'trim_config_json' => aircraft_settings_json($trimPayload),
+                'change_reason' => $_POST['change_reason'] ?? 'Aircraft replay presentation settings update',
+            ));
             $notice = 'Aircraft replay settings saved. Existing replay facts do not need to be rebuilt for presentation-only changes.';
         } elseif ($action === 'save_alert') {
             $selectedAircraftId = (int)($_POST['aircraft_id'] ?? 0);
@@ -64,6 +130,10 @@ $instrumentOverride = is_array($instruments['aircraft_override'] ?? null) ? $ins
 $trim = is_array($presentation['trim'] ?? null) ? $presentation['trim'] : array('schema_version' => 1, 'min' => -100, 'neutral' => 0, 'max' => 100);
 $operational = is_array($resolved['operational'] ?? null) ? $resolved['operational'] : null;
 $sources = is_array($resolved['sources'] ?? null) ? $resolved['sources'] : array();
+$warningBox = is_array($layout['system_warning_box'] ?? null) ? $layout['system_warning_box'] : array();
+$defaultEnabledInstruments = is_array($instrumentOverride['default_enabled_instruments'] ?? null)
+    ? $instrumentOverride['default_enabled_instruments']
+    : array();
 
 cw_header('Aircraft Settings');
 ?>
@@ -74,6 +144,11 @@ cw_header('Aircraft Settings');
 .settings-field label { display: block; font-weight: 700; color: #334155; margin-bottom: 5px; }
 .settings-field input, .settings-field select, .settings-field textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 10px; padding: 9px 10px; font: inherit; }
 .settings-field textarea { min-height: 150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.settings-check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.settings-check { display: flex; align-items: center; gap: 9px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; background: #f8fafc; font-weight: 700; color: #334155; }
+.settings-check input { width: auto; }
+.settings-subtitle { margin: 16px 0 8px; color: #0f172a; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; }
+.settings-readonly { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; color: #334155; }
 .settings-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .settings-btn { border: 0; border-radius: 999px; padding: 9px 14px; background: #1d4ed8; color: #fff; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; }
 .settings-btn-secondary { background: #e2e8f0; color: #334155; }
@@ -112,7 +187,7 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
       <a href="#instruments">Instruments</a>
       <a href="#operational">Operational Logic</a>
       <a href="#alerts">Garmin Alerts</a>
-      <a href="#advanced">Advanced JSON</a>
+      <a href="#advanced">Advanced Diagnostics</a>
     </div>
   </section>
 
@@ -155,27 +230,91 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
       <section id="layout" class="settings-card">
         <h3 style="margin-top:0">Layout</h3>
         <p class="settings-muted">Player layout settings are additive metadata. The player falls back to local defaults and temporary localStorage view overrides.</p>
-        <div class="settings-field">
-          <label for="layout_config_json">Layout config JSON</label>
-          <textarea id="layout_config_json" name="layout_config_json"><?= h(aircraft_settings_json($layout)) ?></textarea>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="profile_name">Profile name</label>
+            <input id="profile_name" name="profile_name" value="Default" maxlength="128">
+          </div>
+          <div class="settings-field">
+            <label for="replay_layout_mode">Default replay layout</label>
+            <?php $layoutMode = (string)($layout['replay_layout_mode'] ?? 'legacy'); ?>
+            <select id="replay_layout_mode" name="replay_layout_mode">
+              <option value="legacy" <?= $layoutMode === 'legacy' ? 'selected' : '' ?>>Legacy full-window replay</option>
+              <option value="panel" <?= $layoutMode === 'panel' ? 'selected' : '' ?>>Panel layout with engine and compass space</option>
+            </select>
+          </div>
+        </div>
+        <h4 class="settings-subtitle">Warning Box Placement</h4>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="warning_box_anchor">Anchor</label>
+            <?php $warningAnchor = (string)($warningBox['anchor'] ?? 'inset_altitude_profile'); ?>
+            <select id="warning_box_anchor" name="warning_box_anchor">
+              <option value="inset_altitude_profile" <?= $warningAnchor === 'inset_altitude_profile' ? 'selected' : '' ?>>Inset map altitude section</option>
+              <option value="altimeter_bottom" <?= $warningAnchor === 'altimeter_bottom' ? 'selected' : '' ?>>Altimeter bottom</option>
+            </select>
+          </div>
+          <div class="settings-field">
+            <label for="warning_box_left_offset_px">Horizontal offset, px</label>
+            <input id="warning_box_left_offset_px" name="warning_box_left_offset_px" type="number" step="1" value="<?= h((string)($warningBox['left_offset_px'] ?? 0)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="warning_box_width_scale">Width scale</label>
+            <input id="warning_box_width_scale" name="warning_box_width_scale" type="number" min="0.5" max="3" step="0.01" value="<?= h((string)($warningBox['width_scale'] ?? 1.33)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="warning_box_text_align">Text alignment</label>
+            <?php $warningAlign = (string)($warningBox['text_align'] ?? 'left'); ?>
+            <select id="warning_box_text_align" name="warning_box_text_align">
+              <option value="left" <?= $warningAlign === 'left' ? 'selected' : '' ?>>Left</option>
+              <option value="center" <?= $warningAlign === 'center' ? 'selected' : '' ?>>Center</option>
+            </select>
+          </div>
         </div>
       </section>
 
       <section id="instruments" class="settings-card">
         <h3 style="margin-top:0">Instruments</h3>
-        <p class="settings-muted">Use this JSON for aircraft-specific presentation overrides such as default visible instruments or gauge presentation. Existing legacy PFD data remains visible below.</p>
-        <div class="settings-field">
-          <label for="instrument_override_json">Instrument override JSON</label>
-          <textarea id="instrument_override_json" name="instrument_override_json"><?= h(aircraft_settings_json($instrumentOverride)) ?></textarea>
+        <p class="settings-muted">These are aircraft defaults for new/unset replay views. A user's local replay toggle remains a temporary personal override.</p>
+        <div class="settings-check-grid">
+          <?php foreach ($instrumentChoices as $key => $meta): ?>
+            <?php $checked = array_key_exists($key, $defaultEnabledInstruments) ? (bool)$defaultEnabledInstruments[$key] : (bool)$meta['default']; ?>
+            <label class="settings-check">
+              <input type="checkbox" name="default_enabled_instruments[<?= h($key) ?>]" value="1" <?= $checked ? 'checked' : '' ?>>
+              <span><?= h((string)$meta['label']) ?></span>
+            </label>
+          <?php endforeach; ?>
         </div>
       </section>
 
       <section class="settings-card">
         <h3 style="margin-top:0">Trim Display</h3>
         <p class="settings-muted">Pitch trim convention: nose down is -100, neutral is 0, nose up is +100.</p>
-        <div class="settings-field">
-          <label for="trim_config_json">Trim config JSON</label>
-          <textarea id="trim_config_json" name="trim_config_json"><?= h(aircraft_settings_json($trim)) ?></textarea>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="trim_min">Minimum shown on scale</label>
+            <input id="trim_min" name="trim_min" type="number" step="0.1" value="<?= h((string)($trim['min'] ?? -100)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="trim_neutral">Neutral value</label>
+            <input id="trim_neutral" name="trim_neutral" type="number" step="0.1" value="<?= h((string)($trim['neutral'] ?? 0)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="trim_max">Maximum shown on scale</label>
+            <input id="trim_max" name="trim_max" type="number" step="0.1" value="<?= h((string)($trim['max'] ?? 100)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="trim_nose_down_value">Nose down value</label>
+            <input id="trim_nose_down_value" name="trim_nose_down_value" type="number" step="0.1" value="<?= h((string)($trim['nose_down_value'] ?? -100)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="trim_nose_up_value">Nose up value</label>
+            <input id="trim_nose_up_value" name="trim_nose_up_value" type="number" step="0.1" value="<?= h((string)($trim['nose_up_value'] ?? 100)) ?>">
+          </div>
+          <div class="settings-readonly">
+            <strong>Direction</strong><br>
+            Negative values are nose down. Positive values are nose up.
+          </div>
         </div>
         <div class="settings-field" style="margin-top:12px">
           <label for="change_reason">Change reason</label>
@@ -255,7 +394,8 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
     </section>
 
     <section id="advanced" class="settings-card">
-      <h3 style="margin-top:0">Advanced JSON</h3>
+      <h3 style="margin-top:0">Advanced Diagnostics</h3>
+      <p class="settings-muted">Read-only technical view of the resolved settings payload. Normal edits should be made through the controls above.</p>
       <div class="settings-grid">
         <div>
           <h4>Resolved Settings</h4>

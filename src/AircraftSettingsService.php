@@ -133,10 +133,10 @@ final class AircraftSettingsService
             $stmt = $this->pdo->prepare('
                 SELECT *
                 FROM ipca_garmin_alert_catalog
-                WHERE aircraft_type IN ("", ?)
+                WHERE aircraft_type IN (?, ?)
                 ORDER BY aircraft_type DESC, severity ASC, display_text ASC, alert_key ASC
             ');
-            $stmt->execute(array($aircraftType));
+            $stmt->execute(array('', $aircraftType));
         } else {
             $stmt = $this->pdo->query('
                 SELECT *
