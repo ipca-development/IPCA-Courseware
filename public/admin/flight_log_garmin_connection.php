@@ -1,6 +1,35 @@
 <?php
 declare(strict_types=1);
 
+$garminSyncPerfStart = (float)($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true));
+$garminSyncPerfMarks = array();
+
+function garmin_sync_perf_ms(float $seconds): string
+{
+    return number_format($seconds * 1000, 2, '.', '');
+}
+
+function garmin_sync_perf_log(string $label, float $startedAt, array $context = array()): void
+{
+    $durationMs = garmin_sync_perf_ms(microtime(true) - $startedAt);
+    $parts = array("label={$label}", "duration_ms={$durationMs}");
+    foreach ($context as $key => $value) {
+        if (is_bool($value)) {
+            $value = $value ? '1' : '0';
+        } elseif (is_array($value)) {
+            $value = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+        $parts[] = (string)$key . '=' . str_replace(array("\n", "\r"), ' ', (string)$value);
+    }
+    error_log('garmin_sync_perf ' . implode(' ', $parts));
+}
+
+register_shutdown_function(static function () use ($garminSyncPerfStart): void {
+    garmin_sync_perf_log('total_php_response', $garminSyncPerfStart, array(
+        'memory_peak_mb' => number_format(memory_get_peak_usage(true) / 1048576, 2, '.', ''),
+    ));
+});
+
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
@@ -11,6 +40,7 @@ require_once __DIR__ . '/../../src/GarminHistoricalBackfillService.php';
 require_once __DIR__ . '/../../src/FlightCircleHistoricalImportService.php';
 
 cw_require_admin();
+garmin_sync_perf_log('bootstrap_and_auth_before_page_work', $garminSyncPerfStart);
 
 function garmin_sync_table_exists(PDO $pdo, string $table): bool
 {
@@ -249,6 +279,7 @@ function garmin_sync_tail_pill(string $tail): string
     return '<span class="garmin-tail-pill" style="background:hsl(' . $hue . ' 76% 92%);color:hsl(' . $hue . ' 72% 24%);border-color:hsl(' . $hue . ' 58% 72%)">' . h($tail) . '</span>';
 }
 
+$garminSyncTimingStart = microtime(true);
 $hasTokens = garmin_sync_table_exists($pdo, 'ipca_sync_agent_tokens');
 $hasAcks = garmin_sync_table_exists($pdo, 'ipca_sync_agent_upload_acknowledgments');
 $hasTracks = garmin_sync_table_exists($pdo, 'ipca_garmin_normalized_track_artifacts');
@@ -265,12 +296,17 @@ $hasFlightCircleMigration = garmin_sync_table_exists($pdo, 'ipca_flightcircle_im
 $hasFlightCircleMatches = garmin_sync_table_exists($pdo, 'ipca_flightcircle_garmin_matches');
 $hasFlightCircleStaging = garmin_sync_table_exists($pdo, 'ipca_flightcircle_staging_records');
 $hasFlightCircleActiveDataset = $hasFlightCircleMigration && garmin_sync_column_exists($pdo, 'ipca_flightcircle_import_batches', 'active_dataset');
+garmin_sync_perf_log('schema_table_column_checks', $garminSyncTimingStart, array(
+    'tables_checked' => 15,
+    'flightcircle_active_dataset_column_checked' => $hasFlightCircleMigration,
+));
 $summaryService = new GarminCsvFlightSummaryService($pdo);
 $trackSummaryService = new GarminTrackFlightSummaryService($pdo);
 $replayPayloadService = new GarminCsvReplayPayloadService($pdo);
 $historicalBackfillService = new GarminHistoricalBackfillService($pdo);
 $flightCircleImportService = new FlightCircleHistoricalImportService($pdo);
 $processingStatusError = '';
+$garminSyncTimingStart = microtime(true);
 try {
     $processingStatus = (new GarminProcessingStatusService($pdo))->status();
 } catch (Throwable $e) {
@@ -290,14 +326,17 @@ try {
         'updated_at' => gmdate('c'),
     );
 }
+garmin_sync_perf_log('GarminProcessingStatusService::status', $garminSyncTimingStart, array('state' => (string)($processingStatus['state'] ?? 'unknown')));
 $historicalBackfillStatus = array('ready' => false, 'batches' => array(), 'file_statuses' => array(), 'segment_classifications' => array(), 'review_statuses' => array());
 $historicalBackfillFiles = array();
+$garminSyncTimingStart = microtime(true);
 try {
     $historicalBackfillStatus = $historicalBackfillService->status(5);
     $historicalBackfillFiles = $historicalBackfillService->recentFiles(12);
 } catch (Throwable $e) {
     $historicalBackfillStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'file_statuses' => array(), 'segment_classifications' => array(), 'review_statuses' => array());
 }
+garmin_sync_perf_log('GarminHistoricalBackfillService::status_and_recentFiles', $garminSyncTimingStart, array('recent_files' => count($historicalBackfillFiles)));
 $flightCircleRowFilters = array(
     'resource_type' => trim((string)($_GET['fc_resource'] ?? 'aircraft')),
     'tail' => strtoupper(trim((string)($_GET['fc_tail'] ?? ''))),
@@ -312,28 +351,40 @@ if (!in_array($flightCircleRowFilters['limit'], array('50', '250', '1000', 'all'
     $flightCircleRowFilters['limit'] = '50';
 }
 $flightCircleStatus = array('ready' => false, 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
+$garminSyncTimingStart = microtime(true);
 try {
     $flightCircleStatus = $flightCircleImportService->status(5, $flightCircleRowFilters);
 } catch (Throwable $e) {
     $flightCircleStatus = array('ready' => false, 'message' => $e->getMessage(), 'batches' => array(), 'identity_mappings' => array(), 'resources' => array(), 'dispositions' => array());
 }
+garmin_sync_perf_log('FlightCircleHistoricalImportService::status', $garminSyncTimingStart, array(
+    'ready' => !empty($flightCircleStatus['ready']),
+    'rows' => count((array)($flightCircleStatus['recent_staging_records'] ?? array())),
+    'filtered_count' => (int)($flightCircleStatus['recent_staging_filtered_count'] ?? 0),
+    'limit' => (string)($flightCircleStatus['recent_staging_limit'] ?? ''),
+));
 
+$garminSyncTimingStart = microtime(true);
 $tokens = $hasTokens ? garmin_sync_rows($pdo, "
     SELECT id, token_uuid, display_name, is_active, last_seen_at, revoked_at, created_at
     FROM ipca_sync_agent_tokens
     ORDER BY COALESCE(last_seen_at, created_at) DESC
     LIMIT 10
 ") : array();
+garmin_sync_perf_log('sync_agent_tokens_query', $garminSyncTimingStart, array('rows' => count($tokens)));
 
 $latestToken = $tokens[0] ?? null;
 
+$garminSyncTimingStart = microtime(true);
 $ackSummary = $hasAcks ? garmin_sync_rows($pdo, "
     SELECT status, COUNT(*) AS total, MAX(created_at) AS last_seen_at
     FROM ipca_sync_agent_upload_acknowledgments
     GROUP BY status
     ORDER BY total DESC, status ASC
 ") : array();
+garmin_sync_perf_log('ack_summary_query', $garminSyncTimingStart, array('rows' => count($ackSummary)));
 
+$garminSyncTimingStart = microtime(true);
 $trackSummary = $hasTracks ? garmin_sync_row($pdo, "
     SELECT
       COUNT(*) AS total_tracks,
@@ -343,12 +394,14 @@ $trackSummary = $hasTracks ? garmin_sync_row($pdo, "
       MAX(last_seen_at) AS last_track_at
     FROM ipca_garmin_normalized_track_artifacts
 ") : array('total_tracks' => 0, 'total_bytes' => 0, 'total_sessions' => 0, 'total_fields' => 0, 'last_track_at' => null);
+garmin_sync_perf_log('track_inventory_summary_query', $garminSyncTimingStart, array('total_tracks' => (int)($trackSummary['total_tracks'] ?? 0)));
 
 $currentTachoVersionSql = $pdo->quote(TachoCalculationService::VERSION);
 if (!is_string($currentTachoVersionSql)) {
     $currentTachoVersionSql = "'" . str_replace("'", "''", TachoCalculationService::VERSION) . "'";
 }
 
+$garminSyncTimingStart = microtime(true);
 $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
     SELECT
       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(raw_metadata_json, '$.trackClassification')), 'UNKNOWN') AS classification,
@@ -357,7 +410,9 @@ $classificationSummary = $hasTracks ? garmin_sync_rows($pdo, "
     GROUP BY classification
     ORDER BY total DESC, classification ASC
 ") : array();
+garmin_sync_perf_log('classification_summary_query', $garminSyncTimingStart, array('rows' => count($classificationSummary)));
 
+$garminSyncTimingStart = microtime(true);
 $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     SELECT
       COUNT(f.id) AS total_csv_files,
@@ -386,12 +441,14 @@ $csvSummaryStats = $hasCsvFiles ? garmin_sync_row($pdo, "
     FROM ipca_garmin_csv_files f
     " . ($hasCsvSummaries ? "LEFT JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = f.id" : "LEFT JOIN (SELECT NULL AS csv_file_id) s ON 1 = 0") . "
 ") : array('total_csv_files' => 0, 'summarized_csv_files' => 0, 'missing_summaries' => 0);
+garmin_sync_perf_log('csv_summary_stats_query', $garminSyncTimingStart, array('total_csv_files' => (int)($csvSummaryStats['total_csv_files'] ?? 0)));
 
 $garminImportRows = array();
 $garminImportTailOptions = array();
 $garminImportSourceOptions = array();
 $garminImportHiddenAvionicsOnlyCount = 0;
 if ($hasCsvFiles) {
+    $garminSyncTimingStart = microtime(true);
     $historicalJoin = $hasHistoricalBackfill ? "
         LEFT JOIN ipca_garmin_historical_backfill_files hf ON hf.csv_file_id = f.id
         LEFT JOIN ipca_garmin_historical_backfill_batches hb ON hb.id = hf.batch_id
@@ -475,6 +532,8 @@ if ($hasCsvFiles) {
         ORDER BY COALESCE(s.departure_time_utc, f.first_valid_sample_utc, f.created_at) DESC, f.id DESC
         LIMIT 1500
     ");
+    garmin_sync_perf_log('garmin_imports_query', $garminSyncTimingStart, array('rows' => count($garminImportRows)));
+    $garminSyncTimingStart = microtime(true);
     $visibleGarminImportRows = array();
     foreach ($garminImportRows as $row) {
         $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
@@ -499,6 +558,11 @@ if ($hasCsvFiles) {
     $garminImportRows = $visibleGarminImportRows;
     sort($garminImportTailOptions);
     sort($garminImportSourceOptions);
+    garmin_sync_perf_log('garmin_import_rows_transform', $garminSyncTimingStart, array(
+        'visible_rows' => count($garminImportRows),
+        'hidden_zero_hobbs_rows' => $garminImportHiddenAvionicsOnlyCount,
+        'tail_options' => count($garminImportTailOptions),
+    ));
 }
 
 $csvTrackJoin = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
@@ -533,6 +597,7 @@ $csvTrackMissingCase = ($hasTrackCsvLinks && $hasCsvSummaries) ? "
           AND CAST(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_exact.counter_start_exact')) AS DECIMAL(12,4)) >= 0
           AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(csv_s.summary_json, '$.tacho_calculation_version')), '') = {$currentTachoVersionSql} THEN 0
 " : "";
+$garminSyncTimingStart = microtime(true);
 $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
     SELECT
       COUNT(t.id) AS total_track_artifacts,
@@ -565,8 +630,10 @@ $trackSummaryStats = $hasTracks ? garmin_sync_row($pdo, "
     {$csvTrackJoin}
     WHERE t.artifact_type = 'GARMIN_TRACK_NORMALIZED_JSON'
 ") : array('total_track_artifacts' => 0, 'summarized_track_artifacts' => 0, 'missing_track_summaries' => 0);
+garmin_sync_perf_log('track_summary_stats_query', $garminSyncTimingStart, array('total_track_artifacts' => (int)($trackSummaryStats['total_track_artifacts'] ?? 0)));
 
 $summaryOptionRows = array();
+$garminSyncTimingStart = microtime(true);
 if ($hasTrackSummaries) {
     $summaryOptionRows = array_merge($summaryOptionRows, garmin_sync_rows($pdo, "
         SELECT tail_number, departure_airport_code, arrival_airport_code
@@ -581,9 +648,11 @@ if ($hasCsvSummaries) {
         WHERE derivation_status = 'ok'
     "));
 }
+garmin_sync_perf_log('summary_option_queries', $garminSyncTimingStart, array('rows' => count($summaryOptionRows)));
 
 $recentTracks = array();
 if ($hasTracks) {
+    $garminSyncTimingStart = microtime(true);
     $ackSelect = $hasAcks ? 'a.status AS upload_status, a.created_at AS uploaded_at' : 'NULL AS upload_status, NULL AS uploaded_at';
     $ackJoin = $hasAcks ? "
         LEFT JOIN ipca_sync_agent_upload_acknowledgments a
@@ -678,6 +747,7 @@ if ($hasTracks) {
         {$stateJoin}
         ORDER BY t.last_seen_at DESC, t.id DESC
     ");
+    garmin_sync_perf_log('recent_tracks_query', $garminSyncTimingStart, array('rows' => count($recentTracks)));
 }
 
 $recentAcknowledgments = array();
@@ -731,6 +801,7 @@ foreach ($summaryOptionRows as $optionRow) {
         $arrOptions[$arr] = $arr;
     }
 }
+$garminSyncTimingStart = microtime(true);
 foreach ($recentTracks as $track) {
     $classification = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'trackClassification');
     $sourceNames = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'sourceNames');
@@ -776,6 +847,11 @@ foreach ($recentTracks as $track) {
         'is_new' => $isNew,
     );
 }
+garmin_sync_perf_log('track_summary_queries_and_flight_rows_build', $garminSyncTimingStart, array(
+    'recent_tracks' => count($recentTracks),
+    'flight_rows' => count($flightRows),
+    'tail_options' => count($tailOptions),
+));
 sort($tailOptions);
 sort($depOptions);
 sort($arrOptions);
@@ -785,13 +861,20 @@ $visibleCsvFileIds = array_values(array_unique(array_filter(array_map(
 ))));
 $replayPayloadsByCsvFileId = array();
 $replayPayloadStatusError = '';
+$garminSyncTimingStart = microtime(true);
 try {
     $replayPayloadsByCsvFileId = $replayPayloadService->payloadsForCsvFileIds($visibleCsvFileIds);
 } catch (Throwable $e) {
     $replayPayloadStatusError = 'Garmin replay payload status could not be loaded: ' . $e->getMessage();
 }
+garmin_sync_perf_log('replay_payloads_lookup', $garminSyncTimingStart, array(
+    'csv_file_ids' => count($visibleCsvFileIds),
+    'payloads' => count($replayPayloadsByCsvFileId),
+    'error' => $replayPayloadStatusError !== '',
+));
 
 $attentionRows = array();
+$garminSyncTimingStart = microtime(true);
 foreach ($recentTracks as $track) {
     $classification = garmin_sync_metadata_value((string)($track['raw_metadata_json'] ?? ''), 'trackClassification');
     $status = (string)($track['upload_status'] ?? '');
@@ -803,6 +886,7 @@ foreach ($recentTracks as $track) {
         break;
     }
 }
+garmin_sync_perf_log('attention_rows_scan', $garminSyncTimingStart, array('attention_rows' => count($attentionRows), 'recent_tracks' => count($recentTracks)));
 
 $acceptedUploads = 0;
 $alreadyExists = 0;
@@ -866,6 +950,11 @@ if (isset($_GET['flightcircle_batch'])) {
     $notice = 'FlightCircle historical import completed: batch #' . (int)$_GET['flightcircle_batch'] . '. Review identity suggestions, resource classifications, and logbook proposals before approval.';
 }
 
+garmin_sync_perf_log('total_before_cw_header', $garminSyncPerfStart, array(
+    'garmin_import_rows' => count($garminImportRows),
+    'flight_rows' => count($flightRows),
+    'flightcircle_rows' => count((array)($flightCircleStatus['recent_staging_records'] ?? array())),
+));
 cw_header('Garmin Sync Agent');
 ?>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -1246,6 +1335,7 @@ cw_header('Garmin Sync Agent');
         <table class="garmin-table">
           <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
           <tbody>
+            <?php $garminSyncFlightCircleTableRenderStart = microtime(true); ?>
             <?php if (($flightCircleStatus['recent_staging_records'] ?? array()) === array()): ?>
               <tr><td colspan="10" class="garmin-empty">No FlightCircle rows match these filters.</td></tr>
             <?php endif; ?>
@@ -1276,6 +1366,7 @@ cw_header('Garmin Sync Agent');
                 <td><span class="garmin-badge <?= garmin_sync_badge_class($fcRecordDisposition) ?>"><?= h($fcRecordDisposition !== '' ? $fcRecordDisposition : '--') ?></span><br><span class="garmin-muted">FC row #<?= (int)($record['id'] ?? 0) ?></span></td>
               </tr>
             <?php endforeach; ?>
+            <?php garmin_sync_perf_log('flightcircle_staging_table_html_render', $garminSyncFlightCircleTableRenderStart, array('rows' => count((array)($flightCircleStatus['recent_staging_records'] ?? array())))); ?>
           </tbody>
         </table>
       </div>
@@ -1385,6 +1476,7 @@ cw_header('Garmin Sync Agent');
         <table class="garmin-table">
           <thead><tr><th style="width:3%"><input type="checkbox" data-import-select-all></th><th style="width:7%">Source</th><th style="width:10%">Date</th><th style="width:6%">Tail</th><th style="width:6%">Dep</th><th style="width:6%">Arr</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs</th><th style="width:7%">Tach Out</th><th style="width:7%">Tach In</th><th style="width:7%">Tach</th><th style="width:8%">State</th><th style="width:8%">Class</th><th style="width:8%">FlightCircle</th><th style="width:12%">Crew</th><th style="width:7%">Dup</th><th style="width:12%">File</th></tr></thead>
           <tbody>
+          <?php $garminSyncImportTableRenderStart = microtime(true); ?>
           <?php foreach ($garminImportRows as $row): ?>
             <?php
               $summary = json_decode((string)($row['summary_json'] ?? '{}'), true);
@@ -1474,6 +1566,7 @@ cw_header('Garmin Sync Agent');
               <td><span class="garmin-code"><?= h((string)$row['original_filename']) ?></span><br><span class="garmin-muted">CSV #<?= (int)$row['csv_file_id'] ?></span></td>
             </tr>
           <?php endforeach; ?>
+          <?php garmin_sync_perf_log('garmin_imports_table_html_render', $garminSyncImportTableRenderStart, array('rows' => count($garminImportRows))); ?>
             <tr data-garmin-import-empty style="display:none"><td colspan="18" class="garmin-empty">No Garmin imports match these filters.</td></tr>
           </tbody>
         </table>
@@ -1559,6 +1652,7 @@ cw_header('Garmin Sync Agent');
       <table class="garmin-table">
         <thead><tr><th style="width:3%"><input type="checkbox" data-select-all-flights></th><th style="width:7%">Flight</th><th style="width:9%">Date</th><th style="width:7%">Tail</th><th style="width:6%">Dep AD</th><th style="width:7%">Dep LT</th><th style="width:7%">Hobbs Out</th><th style="width:7%">Hobbs In</th><th style="width:7%">Hobbs Time</th><th style="width:7%">Tacho Out</th><th style="width:7%">Tacho In</th><th style="width:7%">Tacho Time</th><th style="width:6%">Arr AD</th><th style="width:7%">Arr LT</th><th style="width:8%">Status</th><th style="width:13%">Uploaded</th><th style="width:10%">Replay</th></tr></thead>
         <tbody>
+        <?php $garminSyncFlightTableRenderStart = microtime(true); ?>
         <?php foreach ($flightRows as $flight): ?>
           <?php
             $track = $flight['track'];
@@ -1700,6 +1794,7 @@ cw_header('Garmin Sync Agent');
             </div>
           <?php $flightModals[] = ob_get_clean(); ?>
         <?php endforeach; ?>
+          <?php garmin_sync_perf_log('garmin_flight_rows_and_modal_html_render', $garminSyncFlightTableRenderStart, array('flight_rows' => count($flightRows), 'modals' => count($flightModals))); ?>
           <tr data-filter-empty style="display:none"><td colspan="17" class="garmin-empty">No Garmin flights match the current filters. Adjust the filters or choose Show incomplete.</td></tr>
         </tbody>
       </table>
