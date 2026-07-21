@@ -1178,6 +1178,73 @@ cw_header('Garmin Sync Agent');
     <?php endif; ?>
   </section>
 
+  <?php if (!empty($fcActiveValidation['ready'])): ?>
+    <?php
+      $fcRowFilters = is_array($flightCircleStatus['recent_staging_filters'] ?? null) ? $flightCircleStatus['recent_staging_filters'] : $flightCircleRowFilters;
+      $fcShownRows = count((array)($flightCircleStatus['recent_staging_records'] ?? array()));
+      $fcFilteredRows = (int)($flightCircleStatus['recent_staging_filtered_count'] ?? $fcShownRows);
+      $fcValidationSummaryForRows = is_array($flightCircleStatus['active_validation']['summary'] ?? null) ? $flightCircleStatus['active_validation']['summary'] : array();
+      $fcTotalRows = (int)($fcValidationSummaryForRows['total_rows'] ?? 0);
+      $fcAircraftRows = (int)($fcValidationSummaryForRows['aircraft_rows'] ?? 0);
+      $fcTailOptions = array();
+      foreach ((array)($flightCircleStatus['active_validation']['tail_counts'] ?? array()) as $tailCount) {
+          $tailOption = strtoupper(trim((string)($tailCount['tail_number'] ?? '')));
+          if ($tailOption !== '') {
+              $fcTailOptions[$tailOption] = $tailOption;
+          }
+      }
+    ?>
+    <section class="garmin-card" id="flightcircle-stored-flights-browser">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <h3 style="margin:0">Stored FlightCircle Flights Browser</h3>
+          <p class="garmin-muted" style="margin:6px 0 0">
+            Showing <?= number_format($fcShownRows) ?> of <?= number_format($fcFilteredRows) ?> matching normalized FlightCircle row(s)<?= $fcTotalRows > 0 ? ' from ' . number_format($fcTotalRows) . ' stored row(s)' : '' ?><?= $fcAircraftRows > 0 ? ', including ' . number_format($fcAircraftRows) . ' aircraft row(s)' : '' ?>.
+            These records are used for enrichment. Matching uses Tail and Hobbs-Out; date is review context only.
+          </p>
+          <p class="garmin-notice" style="margin:8px 0 0;padding:7px 9px">
+            FlightCircle standalone browser v4 is active.
+          </p>
+        </div>
+        <a class="secondary" style="border-radius:10px;background:#475569;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;font-size:12px" href="/admin/flight_log_garmin_connection.php#flightcircle-stored-flights-browser">Reset FlightCircle filters</a>
+      </div>
+      <form class="garmin-filter" method="get" autocomplete="off" style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Rows</span><select name="fc_resource">
+          <?php foreach (array('aircraft' => 'Aircraft flights', 'aatd_simulator' => 'AATD', 'all' => 'All rows') as $value => $label): ?>
+            <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['resource_type'] ?? 'aircraft') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+          <?php endforeach; ?>
+        </select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Tail</span><select name="fc_tail">
+          <option value="">All</option>
+          <?php foreach ($fcTailOptions as $tailOption): ?>
+            <option value="<?= h($tailOption) ?>" <?= strtoupper((string)($fcRowFilters['tail'] ?? '')) === $tailOption ? 'selected' : '' ?>><?= h($tailOption) ?></option>
+          <?php endforeach; ?>
+        </select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Student</span><input type="search" name="fc_student" value="<?= h((string)($fcRowFilters['student'] ?? '')) ?>" placeholder="Name"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Instructor</span><input type="search" name="fc_instructor" value="<?= h((string)($fcRowFilters['instructor'] ?? '')) ?>" placeholder="Name"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">From</span><input type="date" name="fc_from" value="<?= h((string)($fcRowFilters['date_from'] ?? '')) ?>"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">To</span><input type="date" name="fc_to" value="<?= h((string)($fcRowFilters['date_to'] ?? '')) ?>"></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Sort</span><select name="fc_sort">
+          <?php foreach (array('date_desc' => 'Newest first', 'date_asc' => 'Chronological', 'tail_asc' => 'Tail A-Z', 'tail_desc' => 'Tail Z-A', 'student_asc' => 'Student A-Z', 'student_desc' => 'Student Z-A', 'instructor_asc' => 'Instructor A-Z', 'instructor_desc' => 'Instructor Z-A', 'hobbs_asc' => 'Hobbs low-high', 'hobbs_desc' => 'Hobbs high-low') as $value => $label): ?>
+            <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['sort'] ?? 'date_desc') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+          <?php endforeach; ?>
+        </select></label>
+        <label class="garmin-filter-control"><span class="garmin-filter-label">Show</span><select name="fc_limit">
+          <?php foreach (array('50' => '50', '250' => '250', '1000' => '1,000', 'all' => 'All') as $value => $label): ?>
+            <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['limit'] ?? '50') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+          <?php endforeach; ?>
+        </select></label>
+        <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button type="submit">Apply</button></div>
+      </form>
+      <p class="garmin-muted" style="margin-top:8px">
+        Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
+      </p>
+      <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table>
+        <div class="garmin-empty">Loading FlightCircle rows...</div>
+      </div>
+    </section>
+  <?php endif; ?>
+
   <section class="garmin-card" data-processing-card>
     <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div>

@@ -5,11 +5,13 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/AircraftSettingsService.php';
+require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
 
 cw_require_admin();
 
 $aircraftService = new CockpitAircraftService($pdo);
 $settingsService = new AircraftSettingsService($pdo);
+$operationalService = new AircraftOperationalConfigService($pdo);
 $error = '';
 $notice = '';
 $aircraft = array();
@@ -18,6 +20,7 @@ $selectedAircraft = null;
 $resolved = array();
 $alertRows = array();
 $catalogScanSummary = null;
+$operational = array();
 $instrumentChoices = array(
     'airspeed_indicator' => array('label' => 'Airspeed Indicator', 'default' => true),
     'trim_position_indicator' => array('label' => 'Trim Position Indicator', 'default' => true),
@@ -116,6 +119,20 @@ try {
                 (int)($catalogScanSummary['canonical_alert_count'] ?? 0),
                 (int)($catalogScanSummary['removed_composite_rows'] ?? 0)
             );
+        } elseif ($action === 'save_operational_config') {
+            $selectedAircraftId = (int)($_POST['aircraft_id'] ?? 0);
+            $operationalService->saveVersion($selectedAircraftId, array(
+                'hobbs_engine_on_rpm_threshold' => $_POST['hobbs_engine_on_rpm_threshold'] ?? null,
+                'hobbs_start_confirm_ms' => $_POST['hobbs_start_confirm_ms'] ?? null,
+                'hobbs_stop_confirm_ms' => $_POST['hobbs_stop_confirm_ms'] ?? null,
+                'tacho_rpm_threshold' => $_POST['tacho_rpm_threshold'] ?? null,
+                'movement_groundspeed_kt' => $_POST['movement_groundspeed_kt'] ?? null,
+                'movement_confirm_ms' => $_POST['movement_confirm_ms'] ?? null,
+                'fuel_discrepancy_usg' => $_POST['fuel_discrepancy_usg'] ?? null,
+                'timezone_identifier' => $_POST['timezone_identifier'] ?? 'UTC',
+                'change_reason' => $_POST['operational_change_reason'] ?? 'Operational thresholds update',
+            ));
+            $notice = 'Operational logic settings saved as a new version.';
         }
     }
 
@@ -126,6 +143,7 @@ try {
     if ($selectedAircraftId > 0) {
         $selectedAircraft = $aircraftService->aircraftById($selectedAircraftId);
         $resolved = $settingsService->resolvedForAircraftId($selectedAircraftId);
+        $operational = $operationalService->configForAircraft($selectedAircraftId);
         $alertRows = $settingsService->alertCatalogRows((string)($selectedAircraft['aircraft_type'] ?? ''));
     }
 } catch (Throwable $e) {
@@ -138,7 +156,7 @@ $layout = is_array($presentation['layout'] ?? null) ? $presentation['layout'] : 
 $instruments = is_array($presentation['instruments'] ?? null) ? $presentation['instruments'] : array();
 $instrumentOverride = is_array($instruments['aircraft_override'] ?? null) ? $instruments['aircraft_override'] : array('schema_version' => 1);
 $trim = is_array($presentation['trim'] ?? null) ? $presentation['trim'] : array('schema_version' => 1, 'min' => -100, 'neutral' => 0, 'max' => 100);
-$operational = is_array($resolved['operational'] ?? null) ? $resolved['operational'] : null;
+$operational = is_array($operational ?? null) ? $operational : (is_array($resolved['operational'] ?? null) ? $resolved['operational'] : array());
 $sources = is_array($resolved['sources'] ?? null) ? $resolved['sources'] : array();
 $warningBox = is_array($layout['system_warning_box'] ?? null) ? $layout['system_warning_box'] : array();
 $defaultEnabledInstruments = is_array($instrumentOverride['default_enabled_instruments'] ?? null)
@@ -334,17 +352,56 @@ cw_header('Aircraft Settings');
 
     <section id="operational" class="settings-card">
       <h3 style="margin-top:0">Operational Logic</h3>
-      <?php if ($operational): ?>
+      <p class="settings-muted">These settings affect derived flight records and are saved as versioned operational rules. Changes here do not rewrite old records automatically.</p>
+      <form method="post">
+        <input type="hidden" name="action" value="save_operational_config">
+        <input type="hidden" name="aircraft_id" value="<?= (int)$selectedAircraftId ?>">
         <div class="settings-grid">
-          <div><strong>Version ID</strong><br><?= h((string)($operational['version_id'] ?? '')) ?></div>
-          <div><strong>Hobbs RPM threshold</strong><br><?= h((string)($operational['hobbs_engine_on_rpm_threshold'] ?? '')) ?></div>
-          <div><strong>Movement groundspeed</strong><br><?= h((string)($operational['movement_groundspeed_kt'] ?? '')) ?> kt</div>
-          <div><strong>Fuel discrepancy</strong><br><?= h((string)($operational['fuel_discrepancy_usg'] ?? '')) ?> USG</div>
+          <div class="settings-field">
+            <label for="hobbs_engine_on_rpm_threshold">Hobbs engine-on RPM threshold</label>
+            <input id="hobbs_engine_on_rpm_threshold" name="hobbs_engine_on_rpm_threshold" type="number" min="0" step="1" value="<?= h((string)($operational['hobbs_engine_on_rpm_threshold'] ?? 1000)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="hobbs_start_confirm_ms">Hobbs start confirmation, ms</label>
+            <input id="hobbs_start_confirm_ms" name="hobbs_start_confirm_ms" type="number" min="0" step="100" value="<?= h((string)($operational['hobbs_start_confirm_ms'] ?? 1000)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="hobbs_stop_confirm_ms">Hobbs stop confirmation, ms</label>
+            <input id="hobbs_stop_confirm_ms" name="hobbs_stop_confirm_ms" type="number" min="0" step="100" value="<?= h((string)($operational['hobbs_stop_confirm_ms'] ?? 5000)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="tacho_rpm_threshold">Tacho RPM threshold (optional)</label>
+            <input id="tacho_rpm_threshold" name="tacho_rpm_threshold" type="number" min="0" step="1" value="<?= h((string)($operational['tacho_rpm_threshold'] ?? '')) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="movement_groundspeed_kt">Movement groundspeed threshold, kt</label>
+            <input id="movement_groundspeed_kt" name="movement_groundspeed_kt" type="number" min="0" step="0.1" value="<?= h((string)($operational['movement_groundspeed_kt'] ?? 3.0)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="movement_confirm_ms">Movement confirmation, ms</label>
+            <input id="movement_confirm_ms" name="movement_confirm_ms" type="number" min="0" step="100" value="<?= h((string)($operational['movement_confirm_ms'] ?? 3000)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="fuel_discrepancy_usg">Fuel discrepancy threshold, USG</label>
+            <input id="fuel_discrepancy_usg" name="fuel_discrepancy_usg" type="number" min="0" step="0.1" value="<?= h((string)($operational['fuel_discrepancy_usg'] ?? 1.0)) ?>">
+          </div>
+          <div class="settings-field">
+            <label for="timezone_identifier">Operational timezone</label>
+            <input id="timezone_identifier" name="timezone_identifier" value="<?= h((string)($operational['timezone_identifier'] ?? 'UTC')) ?>" maxlength="64" placeholder="UTC">
+          </div>
+          <div class="settings-field">
+            <label for="operational_change_reason">Change reason</label>
+            <input id="operational_change_reason" name="operational_change_reason" maxlength="512" value="Operational thresholds update">
+          </div>
+          <div class="settings-readonly">
+            <strong>Current version</strong><br>
+            <?= h((string)($operational['config_version_uuid'] ?? 'default preview')) ?>
+          </div>
         </div>
-      <?php else: ?>
-        <p class="settings-muted">No operational config version is active for this aircraft.</p>
-      <?php endif; ?>
-      <p class="settings-muted">These values can alter derived flight records, so they are shown here for visibility and should remain versioned separately from replay/player presentation settings.</p>
+        <div class="settings-actions">
+          <button class="settings-btn" type="submit">Save Operational Logic Version</button>
+        </div>
+      </form>
     </section>
 
     <section id="alerts" class="settings-card">
