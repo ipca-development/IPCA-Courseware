@@ -17,6 +17,7 @@ $selectedAircraftId = (int)($_GET['aircraft_id'] ?? $_POST['aircraft_id'] ?? 0);
 $selectedAircraft = null;
 $resolved = array();
 $alertRows = array();
+$catalogScanSummary = null;
 $instrumentChoices = array(
     'airspeed_indicator' => array('label' => 'Airspeed Indicator', 'default' => true),
     'trim_position_indicator' => array('label' => 'Trim Position Indicator', 'default' => true),
@@ -106,6 +107,15 @@ try {
                 (string)($_POST['notes'] ?? '')
             );
             $notice = 'Garmin alert classification saved. Replays will use the current catalog at playback time.';
+        } elseif ($action === 'scan_alert_catalog') {
+            $selectedAircraftId = (int)($_POST['aircraft_id'] ?? 0);
+            $catalogScanSummary = $settingsService->rebuildAlertCatalogFromStoredCsvs();
+            $notice = sprintf(
+                'Garmin alert catalog rebuilt: %d CSV files scanned, %d canonical alerts found, %d stale combined rows removed.',
+                (int)($catalogScanSummary['files_scanned'] ?? 0),
+                (int)($catalogScanSummary['canonical_alert_count'] ?? 0),
+                (int)($catalogScanSummary['removed_composite_rows'] ?? 0)
+            );
         }
     }
 
@@ -161,11 +171,8 @@ cw_header('Aircraft Settings');
 .settings-table { width: 100%; min-width: 980px; border-collapse: collapse; }
 .settings-table th, .settings-table td { border-bottom: 1px solid #e2e8f0; padding: 9px 8px; text-align: left; vertical-align: top; }
 .settings-table th { color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-.settings-pill { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; background: #e2e8f0; color: #334155; }
-.settings-pill-warning { background: #fee2e2; color: #991b1b; }
-.settings-pill-caution { background: #fef3c7; color: #92400e; }
-.settings-pill-info { background: #e0f2fe; color: #075985; }
-pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 12px; max-height: 340px; overflow: auto; }
+.settings-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
+.settings-summary div { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; }
 </style>
 
 <div class="aircraft-settings-page">
@@ -187,7 +194,6 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
       <a href="#instruments">Instruments</a>
       <a href="#operational">Operational Logic</a>
       <a href="#alerts">Garmin Alerts</a>
-      <a href="#advanced">Advanced Diagnostics</a>
     </div>
   </section>
 
@@ -343,7 +349,22 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
 
     <section id="alerts" class="settings-card">
       <h3 style="margin-top:0">Garmin Alerts</h3>
-      <p class="settings-muted">Alert severities are resolved from the current catalog at playback time. Unknown alerts remain INFO until classified.</p>
+      <p class="settings-muted">Alert severities are resolved from the current catalog at playback time. Use the scanner to analyze all stored Garmin CSV files and build the canonical alert list. Unknown alerts remain INFO until classified.</p>
+      <form method="post" class="settings-actions">
+        <input type="hidden" name="action" value="scan_alert_catalog">
+        <input type="hidden" name="aircraft_id" value="<?= (int)$selectedAircraftId ?>">
+        <button class="settings-btn" type="submit">Scan All Stored Garmin CSVs</button>
+      </form>
+      <?php if (is_array($catalogScanSummary)): ?>
+        <div class="settings-summary">
+          <div><strong>Total CSV files</strong><br><?= (int)($catalogScanSummary['files_total'] ?? 0) ?></div>
+          <div><strong>Scanned</strong><br><?= (int)($catalogScanSummary['files_scanned'] ?? 0) ?></div>
+          <div><strong>Failed</strong><br><?= (int)($catalogScanSummary['files_failed'] ?? 0) ?></div>
+          <div><strong>CSV rows checked</strong><br><?= (int)($catalogScanSummary['rows_scanned'] ?? 0) ?></div>
+          <div><strong>Canonical alerts</strong><br><?= (int)($catalogScanSummary['canonical_alert_count'] ?? 0) ?></div>
+          <div><strong>Combined rows removed</strong><br><?= (int)($catalogScanSummary['removed_composite_rows'] ?? 0) ?></div>
+        </div>
+      <?php endif; ?>
       <div class="settings-table-wrap">
         <table class="settings-table">
           <thead>
@@ -390,21 +411,6 @@ pre.settings-json { margin: 0; white-space: pre-wrap; background: #0f172a; color
           <?php endforeach; ?>
           </tbody>
         </table>
-      </div>
-    </section>
-
-    <section id="advanced" class="settings-card">
-      <h3 style="margin-top:0">Advanced Diagnostics</h3>
-      <p class="settings-muted">Read-only technical view of the resolved settings payload. Normal edits should be made through the controls above.</p>
-      <div class="settings-grid">
-        <div>
-          <h4>Resolved Settings</h4>
-          <pre class="settings-json"><?= h(aircraft_settings_json($resolved)) ?></pre>
-        </div>
-        <div>
-          <h4>Legacy PFD Profile</h4>
-          <pre class="settings-json"><?= h(aircraft_settings_json($instruments['legacy_pfd_profile'] ?? array())) ?></pre>
-        </div>
       </div>
     </section>
   <?php endif; ?>

@@ -1157,10 +1157,13 @@ cw_header('Garmin Sync Agent');
                 Showing <?= number_format($fcShownRows) ?> of <?= number_format($fcFilteredRows) ?> matching normalized FlightCircle row(s)<?= $fcTotalRows > 0 ? ' from ' . number_format($fcTotalRows) . ' stored row(s)' : '' ?><?= $fcAircraftRows > 0 ? ', including ' . number_format($fcAircraftRows) . ' aircraft row(s)' : '' ?>.
                 These records are used for enrichment. For matching, the important values are Tail and Hobbs-Out. Date is shown for review context only.
               </p>
+              <p class="garmin-notice" style="margin:8px 0 0;padding:7px 9px">
+                FlightCircle table renderer v3 is active. If you do not see this line after refresh, PHP/opcache or deployment is serving an older page version.
+              </p>
             </div>
             <a class="secondary" style="border-radius:10px;background:#475569;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;font-size:12px" href="/admin/flight_log_garmin_connection.php">Reset FlightCircle filters</a>
           </div>
-          <form class="garmin-filter" method="get" autocomplete="off" style="grid-template-columns:120px 120px 150px 150px 132px 132px 160px 110px 95px">
+          <form class="garmin-filter" method="get" autocomplete="off" style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
             <label class="garmin-filter-control"><span class="garmin-filter-label">Rows</span><select name="fc_resource">
               <?php foreach (array('aircraft' => 'Aircraft flights', 'aatd_simulator' => 'AATD', 'all' => 'All rows') as $value => $label): ?>
                 <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['resource_type'] ?? 'aircraft') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
@@ -1183,7 +1186,7 @@ cw_header('Garmin Sync Agent');
             </select></label>
             <label class="garmin-filter-control"><span class="garmin-filter-label">Show</span><select name="fc_limit">
               <?php foreach (array('50' => '50', '250' => '250', '1000' => '1,000', 'all' => 'All') as $value => $label): ?>
-                <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['limit'] ?? '250') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+                <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['limit'] ?? '50') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
               <?php endforeach; ?>
             </select></label>
             <div class="garmin-filter-control"><span class="garmin-filter-label">&nbsp;</span><button type="submit">Apply</button></div>

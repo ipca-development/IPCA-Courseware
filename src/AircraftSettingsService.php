@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/PfdProfileService.php';
+require_once __DIR__ . '/G3XFlightStreamParser.php';
 
 final class AircraftSettingsService
 {
@@ -121,6 +122,100 @@ final class AircraftSettingsService
     }
 
     /**
+     * Scans every stored Garmin CSV evidence file and builds a canonical alert catalog.
+     *
+     * @return array<string,mixed>
+     */
+    public function rebuildAlertCatalogFromStoredCsvs(string $localCsvRoot = ''): array
+    {
+        if (!$this->tablePresent('ipca_garmin_alert_catalog')) {
+            throw new RuntimeException('Alert catalog table is unavailable.');
+        }
+        if (!$this->tablePresent('ipca_garmin_csv_files')) {
+            throw new RuntimeException('Garmin CSV file table is unavailable.');
+        }
+
+        $rows = $this->storedGarminCsvFiles();
+        $observed = array();
+        $filesScanned = 0;
+        $filesFailed = 0;
+        $rowCount = 0;
+        $failures = array();
+        $localCsvIndex = $localCsvRoot !== '' ? $this->localCsvFileIndex($localCsvRoot) : array();
+        $localCsvMatches = 0;
+
+        foreach ($rows as $csv) {
+            $path = trim((string)($csv['storage_path'] ?? ''));
+            $matchedLocalPath = $this->matchingLocalCsvPath($csv, $localCsvIndex);
+            if ($matchedLocalPath !== null) {
+                $path = $matchedLocalPath;
+                $localCsvMatches++;
+            }
+            if ($path === '') {
+                continue;
+            }
+            try {
+                if ($matchedLocalPath !== null) {
+                    $parsed = $this->scanAlertRowsFromCsvFile($path, (string)($csv['import_profile'] ?? ''));
+                } else {
+                    $parsed = G3XFlightStreamParser::parseFile($path, (string)($csv['import_profile'] ?? ''));
+                }
+            } catch (Throwable $e) {
+                $filesFailed++;
+                if (count($failures) < 10) {
+                    $failures[] = array(
+                        'id' => (int)($csv['id'] ?? 0),
+                        'filename' => (string)($csv['original_filename'] ?? ''),
+                        'error' => $e->getMessage(),
+                    );
+                }
+                continue;
+            }
+
+            $filesScanned++;
+            $aircraftType = $this->catalogAircraftTypeForCsv($csv);
+            foreach ($parsed['rows'] as $row) {
+                $rowCount++;
+                foreach ($this->alertsFromCsvRow($row) as $alert) {
+                    $source = $alert['source_column'];
+                    $key = $alert['key'];
+                    $mapKey = $aircraftType . "\n" . $source . "\n" . $key;
+                    if (!isset($observed[$mapKey])) {
+                        $observed[$mapKey] = array(
+                            'aircraft_type' => $aircraftType,
+                            'source_column' => $source,
+                            'alert_key' => $key,
+                            'display_text' => $alert['text'],
+                            'count' => 0,
+                        );
+                    }
+                    $observed[$mapKey]['count']++;
+                }
+            }
+        }
+
+        $replaySummary = $this->scanReplaySampleAlerts($observed);
+        $rowCount += (int)$replaySummary['rows_scanned'];
+
+        $this->upsertObservedAlerts(array_values($observed));
+        $removedCompositeRows = $this->removeCompositeAlertRows();
+
+        return array(
+            'files_total' => count($rows),
+            'files_scanned' => $filesScanned,
+            'files_failed' => $filesFailed,
+            'local_csv_root' => $localCsvRoot,
+            'local_csv_files_indexed' => count($localCsvIndex),
+            'local_csv_matches' => $localCsvMatches,
+            'rows_scanned' => $rowCount,
+            'replay_alert_rows_scanned' => (int)$replaySummary['rows_scanned'],
+            'canonical_alert_count' => count($observed),
+            'removed_composite_rows' => $removedCompositeRows,
+            'failures' => $failures,
+        );
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     public function alertCatalogRows(string $aircraftType = ''): array
@@ -134,18 +229,377 @@ final class AircraftSettingsService
                 SELECT *
                 FROM ipca_garmin_alert_catalog
                 WHERE aircraft_type IN (?, ?)
+                  AND display_text NOT LIKE ?
                 ORDER BY aircraft_type DESC, severity ASC, display_text ASC, alert_key ASC
             ');
-            $stmt->execute(array('', $aircraftType));
+            $stmt->execute(array('', $aircraftType, '%/%'));
         } else {
-            $stmt = $this->pdo->query('
+            $stmt = $this->pdo->prepare('
                 SELECT *
                 FROM ipca_garmin_alert_catalog
+                WHERE display_text NOT LIKE ?
                 ORDER BY aircraft_type ASC, severity ASC, display_text ASC, alert_key ASC
             ');
+            $stmt->execute(array('%/%'));
         }
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function storedGarminCsvFiles(): array
+    {
+        $hasAircraftDevices = $this->tablePresent('ipca_aircraft_devices');
+        $sql = $hasAircraftDevices
+            ? 'SELECT c.*, a.aircraft_type AS resolved_aircraft_type
+               FROM ipca_garmin_csv_files c
+               LEFT JOIN ipca_aircraft_devices a ON a.id = c.aircraft_id
+               WHERE c.storage_path <> ?
+               ORDER BY c.id ASC'
+            : 'SELECT c.*, ? AS resolved_aircraft_type
+               FROM ipca_garmin_csv_files c
+               WHERE c.storage_path <> ?
+               ORDER BY c.id ASC';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($hasAircraftDevices ? array('') : array('', ''));
+        $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @param array<string,mixed> $csv
+     */
+    private function catalogAircraftTypeForCsv(array $csv): string
+    {
+        $type = strtoupper(trim((string)($csv['resolved_aircraft_type'] ?? '')));
+        if ($type !== '') {
+            return $type;
+        }
+        $registration = strtoupper(trim((string)($csv['aircraft_registration'] ?? '')));
+        return $registration;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function localCsvFileIndex(string $root): array
+    {
+        $root = rtrim($root, '/');
+        if ($root === '' || !is_dir($root)) {
+            return array();
+        }
+        $index = array();
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            if (!$file instanceof SplFileInfo || !$file->isFile()) {
+                continue;
+            }
+            if (strtolower($file->getExtension()) !== 'csv') {
+                continue;
+            }
+            $index[$file->getBasename()] = $file->getPathname();
+        }
+        return $index;
+    }
+
+    /**
+     * @param array<string,mixed> $csv
+     * @param array<string,string> $localCsvIndex
+     */
+    private function matchingLocalCsvPath(array $csv, array $localCsvIndex): ?string
+    {
+        if ($localCsvIndex === array()) {
+            return null;
+        }
+        $candidates = array_filter(array_unique(array(
+            basename((string)($csv['storage_path'] ?? '')),
+            (string)($csv['original_filename'] ?? ''),
+        )));
+        foreach ($candidates as $candidate) {
+            if (isset($localCsvIndex[$candidate])) {
+                return $localCsvIndex[$candidate];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Streams a Garmin CSV and returns only rows containing relevant alert columns.
+     *
+     * @return array{rows:list<array<string,string>>, row_count:int}
+     */
+    private function scanAlertRowsFromCsvFile(string $path, string $expectedImportProfile = ''): array
+    {
+        if (!is_file($path)) {
+            throw new RuntimeException('G3X CSV file is missing.');
+        }
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new RuntimeException('Could not open G3X CSV file.');
+        }
+        try {
+            while (($line = fgets($handle)) !== false) {
+                if (stripos($line, '#airframe_info') !== false) {
+                    break;
+                }
+            }
+            $headerLine = fgets($handle);
+            if ($headerLine === false) {
+                throw new RuntimeException('G3X CSV header row is missing.');
+            }
+            $firstHeaders = array_map(static fn(string $header): string => ltrim(trim($header), '#'), str_getcsv($headerLine, ',', '"', '\\'));
+            $aliasLine = fgets($handle);
+            if ($aliasLine === false) {
+                throw new RuntimeException('Garmin CSV alias row is missing.');
+            }
+            $aliasHeaders = array_map(static fn(string $header): string => ltrim(trim($header), '#'), str_getcsv($aliasLine, ',', '"', '\\'));
+            $importProfile = GarminCsvImportProfile::detectFromHeaders($firstHeaders, $aliasHeaders);
+            if ($expectedImportProfile !== '') {
+                GarminCsvImportProfile::assertMatches($expectedImportProfile, $importProfile);
+            }
+            $headers = $importProfile === GarminCsvImportProfile::G1000_NXI ? $aliasHeaders : $firstHeaders;
+            $alertIndexes = array();
+            foreach ($headers as $index => $header) {
+                $source = $this->alertSourceColumn((string)$header);
+                if ($source !== '') {
+                    $alertIndexes[$index] = $source;
+                }
+            }
+            if ($alertIndexes === array()) {
+                return array('rows' => array(), 'row_count' => 0);
+            }
+            $rows = array();
+            $rowCount = 0;
+            while (($values = fgetcsv($handle, null, ',', '"', '\\')) !== false) {
+                $rowCount++;
+                $row = array();
+                foreach ($alertIndexes as $index => $sourceColumn) {
+                    $value = trim((string)($values[$index] ?? ''));
+                    if ($value !== '') {
+                        $row[$sourceColumn] = $value;
+                    }
+                }
+                if ($row !== array()) {
+                    $rows[] = $row;
+                }
+            }
+            return array('rows' => $rows, 'row_count' => $rowCount);
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $observed
+     * @return array{rows_scanned:int}
+     */
+    private function scanReplaySampleAlerts(array &$observed): array
+    {
+        if (!$this->tablePresent('ipca_cockpit_replay_samples') || !$this->tablePresent('ipca_cockpit_recordings')) {
+            return array('rows_scanned' => 0);
+        }
+
+        $hasAircraftDevices = $this->tablePresent('ipca_aircraft_devices');
+        $rowsScanned = 0;
+
+        foreach (array('cas_alert' => 'CAS Alert', 'terrain_alert' => 'Terrain Alert') as $column => $sourceColumn) {
+            $sql = $hasAircraftDevices
+                ? 'SELECT COALESCE(a.aircraft_type, r.aircraft_type, ?) AS aircraft_type, COALESCE(a.registration, r.aircraft_registration, ?) AS aircraft_registration, rs.' . $column . ' AS alert_text, COUNT(*) AS observation_count
+                   FROM ipca_cockpit_replay_samples rs
+                   INNER JOIN ipca_cockpit_recordings r ON r.id = rs.recording_id
+                   LEFT JOIN ipca_aircraft_devices a ON a.id = r.aircraft_id
+                   WHERE rs.' . $column . ' IS NOT NULL AND rs.' . $column . ' <> ?
+                   GROUP BY COALESCE(a.aircraft_type, r.aircraft_type, ?), COALESCE(a.registration, r.aircraft_registration, ?), rs.' . $column
+                : 'SELECT COALESCE(r.aircraft_type, ?) AS aircraft_type, COALESCE(r.aircraft_registration, ?) AS aircraft_registration, rs.' . $column . ' AS alert_text, COUNT(*) AS observation_count
+                   FROM ipca_cockpit_replay_samples rs
+                   INNER JOIN ipca_cockpit_recordings r ON r.id = rs.recording_id
+                   WHERE rs.' . $column . ' IS NOT NULL AND rs.' . $column . ' <> ?
+                   GROUP BY COALESCE(r.aircraft_type, ?), COALESCE(r.aircraft_registration, ?), rs.' . $column;
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute(array('', '', '', '', ''));
+            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $rowsScanned += (int)($row['observation_count'] ?? 0);
+                $this->addObservedAlertText(
+                    $observed,
+                    (string)($row['aircraft_type'] ?? ''),
+                    (string)($row['aircraft_registration'] ?? ''),
+                    $sourceColumn,
+                    (string)($row['alert_text'] ?? ''),
+                    (int)($row['observation_count'] ?? 0)
+                );
+            }
+        }
+
+        $stmt = $this->pdo->prepare('
+            SELECT rs.system_alerts_json, COALESCE(a.aircraft_type, r.aircraft_type, ?) AS aircraft_type, COALESCE(a.registration, r.aircraft_registration, ?) AS aircraft_registration
+            FROM ipca_cockpit_replay_samples rs
+            INNER JOIN ipca_cockpit_recordings r ON r.id = rs.recording_id
+            LEFT JOIN ipca_aircraft_devices a ON a.id = r.aircraft_id
+            WHERE rs.system_alerts_json IS NOT NULL
+              AND JSON_LENGTH(rs.system_alerts_json) > 0
+        ');
+        $stmt->execute(array('', ''));
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $decoded = json_decode((string)($row['system_alerts_json'] ?? ''), true);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $rowsScanned++;
+            foreach ($decoded as $alert) {
+                if (!is_array($alert)) {
+                    continue;
+                }
+                $this->addObservedAlertText(
+                    $observed,
+                    (string)($row['aircraft_type'] ?? ''),
+                    (string)($row['aircraft_registration'] ?? ''),
+                    (string)($alert['source_column'] ?? 'CAS Alert'),
+                    (string)($alert['text'] ?? ''),
+                    1
+                );
+            }
+        }
+
+        return array('rows_scanned' => $rowsScanned);
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $observed
+     */
+    private function addObservedAlertText(array &$observed, string $aircraftType, string $registration, string $sourceColumn, string $rawText, int $count): void
+    {
+        $aircraftType = strtoupper(trim($aircraftType));
+        if ($aircraftType === '') {
+            $aircraftType = strtoupper(trim($registration));
+        }
+        foreach ($this->splitAlertText($rawText) as $text) {
+            $key = $this->alertKey($text);
+            if ($key === '') {
+                continue;
+            }
+            $mapKey = $aircraftType . "\n" . $sourceColumn . "\n" . $key;
+            if (!isset($observed[$mapKey])) {
+                $observed[$mapKey] = array(
+                    'aircraft_type' => $aircraftType,
+                    'source_column' => $sourceColumn,
+                    'alert_key' => $key,
+                    'display_text' => $text,
+                    'count' => 0,
+                );
+            }
+            $observed[$mapKey]['count'] += max(1, $count);
+        }
+    }
+
+    /**
+     * @param array<string,string> $row
+     * @return list<array{source_column:string,text:string,key:string}>
+     */
+    private function alertsFromCsvRow(array $row): array
+    {
+        $alerts = array();
+        foreach ($row as $column => $value) {
+            $columnName = trim((string)$column);
+            $sourceColumn = $this->alertSourceColumn($columnName);
+            if ($sourceColumn === '') {
+                continue;
+            }
+            foreach ($this->splitAlertText((string)$value) as $text) {
+                $key = $this->alertKey($text);
+                if ($key === '') {
+                    continue;
+                }
+                $alerts[] = array(
+                    'source_column' => $sourceColumn,
+                    'text' => $text,
+                    'key' => $key,
+                );
+            }
+        }
+        return $alerts;
+    }
+
+    private function alertSourceColumn(string $columnName): string
+    {
+        $columnName = trim($columnName);
+        if (strcasecmp($columnName, 'CAS Alert') === 0) {
+            return 'CAS Alert';
+        }
+        if (strcasecmp($columnName, 'Terrain Alert') === 0) {
+            return 'Terrain Alert';
+        }
+        if (preg_match('/^WARNING\s*\d+$/i', $columnName) === 1) {
+            return strtoupper(preg_replace('/\s+/', ' ', $columnName) ?? $columnName);
+        }
+        return '';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function splitAlertText(string $value): array
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return array();
+        }
+        $parts = preg_split('/(?:\r\n|\r|\n|[;|]|\s*\/\s*)+/', $value) ?: array($value);
+        $out = array();
+        foreach ($parts as $part) {
+            $text = trim((string)$part);
+            if ($text !== '') {
+                $out[] = preg_replace('/\s+/', ' ', $text) ?? $text;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    private function alertKey(string $text): string
+    {
+        $key = strtoupper(trim($text));
+        $key = preg_replace('/[^A-Z0-9]+/', ' ', $key) ?? '';
+        return trim(preg_replace('/\s+/', ' ', $key) ?? $key);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $observed
+     */
+    private function upsertObservedAlerts(array $observed): void
+    {
+        if ($observed === array()) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('
+            INSERT INTO ipca_garmin_alert_catalog (
+                aircraft_type, source_column, alert_key, display_text, severity,
+                observation_count, first_seen_at, last_seen_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE
+                display_text = IF(display_text = ?, VALUES(display_text), display_text),
+                observation_count = VALUES(observation_count),
+                last_seen_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+        ');
+        foreach ($observed as $alert) {
+            $stmt->execute(array(
+                (string)($alert['aircraft_type'] ?? ''),
+                (string)($alert['source_column'] ?? ''),
+                (string)($alert['alert_key'] ?? ''),
+                substr((string)($alert['display_text'] ?? ''), 0, 255),
+                'info',
+                (int)($alert['count'] ?? 0),
+                '',
+            ));
+        }
+    }
+
+    private function removeCompositeAlertRows(): int
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM ipca_garmin_alert_catalog WHERE display_text LIKE ?');
+        $stmt->execute(array('%/%'));
+        return $stmt->rowCount();
     }
 
     /**
