@@ -1333,7 +1333,7 @@ cw_header('Garmin Sync Agent');
         </div>
         <a class="secondary" style="border-radius:10px;background:#475569;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;font-size:12px" href="/admin/flight_log_garmin_connection.php#flightcircle-stored-flights-browser">Reset FlightCircle filters</a>
       </div>
-      <form class="garmin-filter" method="get" action="/admin/flight_log_garmin_connection.php#flightcircle-stored-flights-browser" autocomplete="off" data-fc-browser-filter style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
+      <form class="garmin-filter" method="get" action="/admin/flight_log_garmin_connection.php" autocomplete="off" data-fc-browser-filter style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
         <label class="garmin-filter-control"><span class="garmin-filter-label">Rows</span><select name="fc_resource">
           <?php foreach (array('aircraft' => 'Aircraft flights', 'aatd_simulator' => 'AATD', 'all' => 'All rows') as $value => $label): ?>
             <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['resource_type'] ?? 'aircraft') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
@@ -1364,6 +1364,16 @@ cw_header('Garmin Sync Agent');
       <p class="garmin-muted" style="margin-top:8px">
         Tip: choose <strong>Chronological</strong> plus a date range such as 2026-06-01 through today to review continuity for a period.
       </p>
+      <div class="garmin-muted" style="margin-top:4px">
+        Applied filters:
+        rows <?= h((string)($fcRowFilters['resource_type'] ?? 'aircraft')) ?> ·
+        tail <?= h((string)($fcRowFilters['tail'] ?? 'all') ?: 'all') ?> ·
+        student <?= h((string)($fcRowFilters['student'] ?? 'all') ?: 'all') ?> ·
+        instructor <?= h((string)($fcRowFilters['instructor'] ?? 'all') ?: 'all') ?> ·
+        from <?= h((string)($fcRowFilters['date_from'] ?? 'all') ?: 'all') ?> ·
+        to <?= h((string)($fcRowFilters['date_to'] ?? 'all') ?: 'all') ?> ·
+        sort <?= h((string)($fcRowFilters['sort'] ?? 'date_desc')) ?>
+      </div>
       <div style="margin-top:10px;overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px" data-fc-staging-table-static>
         <table class="garmin-table">
           <thead><tr><th>Date</th><th>Tail / Resource</th><th>User</th><th>Instructor</th><th>Reservation</th><th>Hobbs Out</th><th>Hobbs In</th><th>Tach Out</th><th>Tach In</th><th>Disposition</th></tr></thead>
@@ -1977,6 +1987,25 @@ cw_header('Garmin Sync Agent');
   }
   if (fcBrowserFilterForm) {
     syncFlightCircleBrowserFilters();
+    fcBrowserFilterForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const url = new URL('/admin/flight_log_garmin_connection.php', window.location.origin);
+      const existing = new URLSearchParams(window.location.search);
+      existing.forEach((value, key) => {
+        if (!key.startsWith('fc_')) url.searchParams.set(key, value);
+      });
+      ['fc_resource', 'fc_tail', 'fc_student', 'fc_instructor', 'fc_from', 'fc_to', 'fc_sort', 'fc_limit'].forEach(name => {
+        const field = fcBrowserFilterForm.querySelector('[name="' + name + '"]');
+        const value = field ? String(field.value || '') : '';
+        if (value !== '') {
+          url.searchParams.set(name, value);
+        } else {
+          url.searchParams.delete(name);
+        }
+      });
+      url.hash = 'flightcircle-stored-flights-browser';
+      window.location.assign(url.toString());
+    });
     fcBrowserFilterForm.querySelectorAll('select,input[type="date"]').forEach(field => {
       field.addEventListener('change', () => {
         window.setTimeout(() => fcBrowserFilterForm.requestSubmit(), 20);
