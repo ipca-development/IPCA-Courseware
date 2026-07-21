@@ -765,9 +765,8 @@ if ($hasTracks) {
         {$trackWhereSql}
     ", $trackParams);
     $recentTracksTotal = (int)($countRows[0]['total'] ?? 0);
-    $recentTracksParams = $trackParams;
-    $recentTracksParams[] = $flightLimit;
-    $recentTracksParams[] = $flightOffset;
+    $flightLimitSql = (string)(int)$flightLimit;
+    $flightOffsetSql = (string)(int)$flightOffset;
     $recentTracks = garmin_sync_rows($pdo, "
         SELECT
           t.id, t.garmin_entry_uuid, t.track_uuid, t.sha256, t.file_size_bytes, t.session_count, t.field_count,
@@ -784,8 +783,8 @@ if ($hasTracks) {
         {$stateJoin}
         {$trackWhereSql}
         ORDER BY t.last_seen_at DESC, t.id DESC
-        LIMIT ? OFFSET ?
-    ", $recentTracksParams);
+        LIMIT {$flightLimitSql} OFFSET {$flightOffsetSql}
+    ", $trackParams);
     garmin_sync_perf_log('recent_tracks_query', $garminSyncTimingStart, array(
         'rows' => count($recentTracks),
         'total' => $recentTracksTotal,
