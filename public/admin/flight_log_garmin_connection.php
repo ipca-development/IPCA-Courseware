@@ -1333,7 +1333,7 @@ cw_header('Garmin Sync Agent');
         </div>
         <a class="secondary" style="border-radius:10px;background:#475569;color:#fff;font-weight:800;padding:8px 10px;text-decoration:none;font-size:12px" href="/admin/flight_log_garmin_connection.php#flightcircle-stored-flights-browser">Reset FlightCircle filters</a>
       </div>
-      <form class="garmin-filter" method="get" autocomplete="off" style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
+      <form class="garmin-filter" method="get" action="/admin/flight_log_garmin_connection.php#flightcircle-stored-flights-browser" autocomplete="off" data-fc-browser-filter style="grid-template-columns:repeat(auto-fit,minmax(118px,1fr));max-width:100%">
         <label class="garmin-filter-control"><span class="garmin-filter-label">Rows</span><select name="fc_resource">
           <?php foreach (array('aircraft' => 'Aircraft flights', 'aatd_simulator' => 'AATD', 'all' => 'All rows') as $value => $label): ?>
             <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['resource_type'] ?? 'aircraft') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
@@ -1350,7 +1350,7 @@ cw_header('Garmin Sync Agent');
         <label class="garmin-filter-control"><span class="garmin-filter-label">From</span><input type="date" name="fc_from" value="<?= h((string)($fcRowFilters['date_from'] ?? '')) ?>"></label>
         <label class="garmin-filter-control"><span class="garmin-filter-label">To</span><input type="date" name="fc_to" value="<?= h((string)($fcRowFilters['date_to'] ?? '')) ?>"></label>
         <label class="garmin-filter-control"><span class="garmin-filter-label">Sort</span><select name="fc_sort">
-          <?php foreach (array('date_desc' => 'Newest first', 'date_asc' => 'Chronological', 'tail_asc' => 'Tail A-Z', 'tail_desc' => 'Tail Z-A', 'student_asc' => 'Student A-Z', 'student_desc' => 'Student Z-A', 'instructor_asc' => 'Instructor A-Z', 'instructor_desc' => 'Instructor Z-A', 'hobbs_asc' => 'Hobbs low-high', 'hobbs_desc' => 'Hobbs high-low') as $value => $label): ?>
+          <?php foreach (array('date_desc' => 'Date newest first', 'date_asc' => 'Date chronological', 'tail_asc' => 'Tail A-Z', 'tail_desc' => 'Tail Z-A', 'student_asc' => 'Student A-Z', 'student_desc' => 'Student Z-A', 'instructor_asc' => 'Instructor A-Z', 'instructor_desc' => 'Instructor Z-A', 'hobbs_asc' => 'Hobbs low-high', 'hobbs_desc' => 'Hobbs high-low') as $value => $label): ?>
             <option value="<?= h($value) ?>" <?= (string)($fcRowFilters['sort'] ?? 'date_desc') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
           <?php endforeach; ?>
         </select></label>
@@ -1949,8 +1949,40 @@ cw_header('Garmin Sync Agent');
   const historicalNeedsReview = document.querySelector('[data-historical-needs-review]');
   const fcIdentityMessage = document.querySelector('[data-fc-identity-message]');
   const fcStagingTable = document.querySelector('[data-fc-staging-table]');
+  const fcBrowserFilterForm = document.querySelector('[data-fc-browser-filter]');
   const renderedMaps = new WeakMap();
   let processingRunning = false;
+  function syncFlightCircleBrowserFilters() {
+    if (!fcBrowserFilterForm) return;
+    const params = new URLSearchParams(window.location.search);
+    const defaults = {
+      fc_resource: 'aircraft',
+      fc_tail: '',
+      fc_student: '',
+      fc_instructor: '',
+      fc_from: '',
+      fc_to: '',
+      fc_sort: 'date_desc',
+      fc_limit: '50',
+    };
+    Object.entries(defaults).forEach(([name, defaultValue]) => {
+      const field = fcBrowserFilterForm.querySelector('[name="' + name + '"]');
+      if (!field) return;
+      const value = params.has(name) ? String(params.get(name) || '') : defaultValue;
+      field.value = value;
+      if (field.tagName === 'SELECT' && field.value !== value) {
+        field.value = defaultValue;
+      }
+    });
+  }
+  if (fcBrowserFilterForm) {
+    syncFlightCircleBrowserFilters();
+    fcBrowserFilterForm.querySelectorAll('select,input[type="date"]').forEach(field => {
+      field.addEventListener('change', () => {
+        window.setTimeout(() => fcBrowserFilterForm.requestSubmit(), 20);
+      });
+    });
+  }
   function textCell(row, value, strong) {
     const cell = document.createElement('td');
     const content = strong ? document.createElement('strong') : document.createElement('span');

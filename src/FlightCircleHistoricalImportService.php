@@ -1248,10 +1248,15 @@ final class FlightCircleHistoricalImportService
             SELECT tail_number, COUNT(*) AS total
             FROM ipca_flightcircle_staging_records
             WHERE batch_id = ?
-              AND resource_type = 'aircraft'
+              AND tail_number IS NOT NULL
+              AND TRIM(tail_number) <> ''
+              AND (
+                resource_type = 'aircraft'
+                OR UPPER(TRIM(tail_number)) IN ('N397EA', 'N392EA', 'N482EA', 'N428EA', 'N446CS', 'N153PC', 'N641TH')
+              )
             GROUP BY tail_number
-            ORDER BY total DESC, tail_number ASC
-            LIMIT 20
+            ORDER BY tail_number ASC
+            LIMIT 50
         ");
         $tailStmt->execute(array($batchId));
         return array(
