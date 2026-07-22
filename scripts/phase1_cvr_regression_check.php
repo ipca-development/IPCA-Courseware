@@ -14,7 +14,12 @@ $capabilities = array(
     'json_valid' => (string)$pdo->query("SELECT JSON_VALID('{}')")->fetchColumn(),
 );
 try {
-    $pdo->exec('CREATE TEMPORARY TABLE ipca_phase1_dt_check (dt DATETIME(3) NULL) ENGINE=InnoDB');
+    $pdo->exec('CREATE TEMPORARY TABLE ipca_phase1_dt_check (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, probe_value DATETIME(3) NOT NULL, PRIMARY KEY (id)) ENGINE=InnoDB');
+    $pdo->exec("INSERT INTO ipca_phase1_dt_check (probe_value) VALUES ('2026-07-21 12:34:56.789')");
+    $dt = (string)$pdo->query("SELECT DATE_FORMAT(probe_value, '%Y-%m-%d %H:%i:%s.%f') FROM ipca_phase1_dt_check WHERE id = 1")->fetchColumn();
+    if (!str_starts_with($dt, '2026-07-21 12:34:56.789')) {
+        throw new RuntimeException('DATETIME(3) round-trip lost millisecond precision.');
+    }
     $capabilities['datetime3'] = 'ok';
 } catch (Throwable $e) {
     $failures[] = 'DATETIME(3) capability failed: ' . $e->getMessage();

@@ -121,6 +121,15 @@ return [
                 ],
             ],
             [
+                'key' => 'master_logbook',
+                'label' => 'Master Logbook',
+                'icon' => 'flight',
+                'href' => '/admin/master_logbook.php',
+                'match_paths' => [
+                    '/admin/master_logbook.php',
+                ],
+            ],
+            [
                 'key' => 'flight_records',
                 'label' => 'Flight Records',
                 'icon' => 'flight',
