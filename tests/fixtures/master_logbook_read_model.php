@@ -91,6 +91,7 @@ function ml_current_leg(int $recordId, int $versionId, int $legIndex, string $da
 
 function ml_historical_dispatch(int $operationId, string $date, string $aircraft, string $type = 'aggregate_dispatch', array $extra = array()): array
 {
+    $routeText = (string)($extra['route_text'] ?? 'TRM-LOCAL');
     return array_replace_recursive(array(
         'event_key' => 'historical-event:ao:' . $operationId,
         'leg_key' => 'historical-leg:ao:' . $operationId . ':aggregate',
@@ -104,18 +105,19 @@ function ml_historical_dispatch(int $operationId, string $date, string $aircraft
         'leg_structure_status' => $type === 'unresolved_leg_structure' ? 'unresolved' : 'aggregate',
         'date' => substr($date, 0, 10),
         'date_sort' => $date,
+        'route_text' => $routeText,
         'aircraft' => ml_fixture_value($aircraft, $aircraft, 'ipca_aircraft_operations.aircraft_registration', 0.8, 'needs_review'),
         'pilot_1' => ml_fixture_value('FlightCircle User ' . $operationId, null, 'ipca_aircraft_operations.user_text', 0.3, 'unresolved'),
         'pilot_1_role' => ml_fixture_value('User', null, 'ipca_aircraft_operations.user_text', 0.0, 'unresolved'),
         'pilot_2' => ml_fixture_value('FlightCircle Instructor ' . $operationId, null, 'ipca_aircraft_operations.instructor_text', 0.3, 'unresolved'),
         'pilot_2_role' => ml_fixture_value('Instructor', null, 'ipca_aircraft_operations.instructor_text', 0.0, 'unresolved'),
         'departure_local_time' => ml_fixture_value($date, $date, 'ipca_aircraft_operations.scheduled_start_local', 0.5, 'needs_review'),
-        'departure_airport' => ml_fixture_value('TRM-LOCAL', null, 'ipca_flightcircle_staging_records.route_text', 0.2, 'unresolved'),
+        'departure_airport' => ml_fixture_empty($routeText, 'unresolved'),
         'departure_hobbs' => ml_fixture_value('200.0', '200.0', 'ipca_meter_readings.reading_out', 0.75, 'needs_review'),
         'departure_tacho' => ml_fixture_value('140.0', '140.0', 'ipca_meter_readings.reading_out', 0.75, 'needs_review'),
         'hobbs_duration' => ml_fixture_value('1.2', '1.2', 'ipca_meter_readings.reading_delta', 0.75, 'needs_review'),
         'tacho_duration' => ml_fixture_value('1.0', '1.0', 'ipca_meter_readings.reading_delta', 0.75, 'needs_review'),
-        'arrival_airport' => ml_fixture_value('TRM-LOCAL', null, 'ipca_flightcircle_staging_records.route_text', 0.2, 'unresolved'),
+        'arrival_airport' => ml_fixture_empty($routeText, 'unresolved'),
         'arrival_local_time' => ml_fixture_value(substr($date, 0, 11) . '12:12:00', substr($date, 0, 11) . '12:12:00', 'ipca_aircraft_operations.scheduled_end_local', 0.5, 'needs_review'),
         'arrival_hobbs' => ml_fixture_value('201.2', '201.2', 'ipca_meter_readings.reading_in', 0.75, 'needs_review'),
         'arrival_tacho' => ml_fixture_value('141.0', '141.0', 'ipca_meter_readings.reading_in', 0.75, 'needs_review'),
@@ -132,6 +134,7 @@ function ml_historical_dispatch(int $operationId, string $date, string $aircraft
 }
 
 return array(
+    'valid_airports' => array('KTRM', 'KPSP', 'KHMT', 'KUDD', 'KBNG', 'KRAL', 'KSBD', 'KBLH', 'KCRQ', 'KMYF', 'KSAN', 'KONT', 'KLAX', 'EBAW'),
     'scenario_labels' => array(
         'current_garmin_with_cvr',
         'current_multi_leg',
@@ -178,6 +181,25 @@ return array(
             ml_historical_dispatch(308, '2025-01-08 09:00:00', 'N482EA', 'aggregate_dispatch', array(
                 'pilot_1' => ml_fixture_value('J Smith', null, 'ipca_aircraft_operations.user_text', 0.1, 'unresolved'),
                 'pilot_2' => ml_fixture_value('C Doe', null, 'ipca_aircraft_operations.instructor_text', 0.1, 'unresolved'),
+            )),
+            ml_historical_dispatch(309, '2025-01-09 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => 'Local IFR Training Mission',
+            )),
+            ml_historical_dispatch(310, '2025-01-10 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => '',
+            )),
+            ml_historical_dispatch(311, '2025-01-11 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => 'KTRM-KPSP-KTRM',
+            )),
+            ml_historical_dispatch(312, '2025-01-12 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => 'KTRM-TEST-KTRM',
+            )),
+            ml_historical_dispatch(313, '2025-01-13 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => 'TEST',
+            )),
+            ml_historical_dispatch(314, '2025-01-14 09:00:00', 'N397EA', 'aggregate_dispatch', array(
+                'route_text' => 'KTRM or KPSP',
+                'conflict_status' => 'warning',
             )),
         ),
         'historical_garmin_legs' => array(

@@ -261,13 +261,11 @@ cw_header('Master Logbook');
   }
 
   function adSummary(value, side) {
-    const text = resolved(value);
-    if (!text || text === '--' || text === '—') return '—';
-    const parts = text.split(/\s*[-–]\s*/).map((part) => part.trim()).filter(Boolean);
-    if (parts.length > 1) {
-      return side === 'arr' ? parts[parts.length - 1] : parts[0];
+    if (value && typeof value === 'object' && value.resolved_icao) {
+      return String(value.resolved_icao);
     }
-    return text;
+    const text = resolved(value);
+    return /^[A-Z][A-Z0-9]{3}$/.test(text) ? text : '—';
   }
 
   function numericTime(row, field) {

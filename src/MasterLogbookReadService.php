@@ -55,6 +55,9 @@ final class MasterLogbookReadService
     /** @var array<string,bool> */
     private array $tableExistsCache = array();
 
+    /** @var array<string,bool> */
+    private array $airportValidityCache = array();
+
     private float $lastSchemaMs = 0.0;
     private float $lastCountQueryMs = 0.0;
     private float $lastRowQueryMs = 0.0;
@@ -176,11 +179,22 @@ final class MasterLogbookReadService
         $event = $eventCandidates[0] ?? $matching[0];
         $eventCandidates = $eventCandidates !== array() ? $eventCandidates : $matching;
         $eventCandidates = $this->attachBatchedEvidence($eventCandidates);
+        usort($eventCandidates, static function (array $left, array $right): int {
+            return strcmp((string)($left['date_sort'] ?? ''), (string)($right['date_sort'] ?? ''));
+        });
         $event = $eventCandidates[0];
         $row = $this->candidateToRow($event);
         $legs = array();
         foreach ($eventCandidates as $legCandidate) {
             $legs[] = $this->rowLegDetail($this->candidateToRow($legCandidate), $legCandidate);
+        }
+        $summaryDepartureAirport = $row['departure_airport'];
+        $summaryArrivalAirport = $row['arrival_airport'];
+        if ($legs !== array()) {
+            $firstLeg = $legs[0];
+            $lastLeg = $legs[count($legs) - 1];
+            $summaryDepartureAirport = $firstLeg['departure_airport'];
+            $summaryArrivalAirport = $lastLeg['arrival_airport'];
         }
 
         return array(
@@ -198,6 +212,8 @@ final class MasterLogbookReadService
                 'session_duration' => $event['session_duration'] ?? null,
                 'event_type' => $event['event_type'] ?? $event['source_mode'],
                 'leg_structure_status' => $row['leg_structure_status'],
+                'departure_airport' => $summaryDepartureAirport,
+                'arrival_airport' => $summaryArrivalAirport,
             ),
             'crew' => $event['crew_detail'] ?? array($row['pilot_1'], $row['pilot_2']),
             'mission' => $event['mission_detail'] ?? $row['mission'],
@@ -774,8 +790,8 @@ final class MasterLogbookReadService
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'unresolved'),
             'departure_local_time' => $this->provenanceValue($row['allocation_start_utc'] ?? null, $row['allocation_start_utc'] ?? null, 'ipca_operational_flight_leg_versions.allocation_start_utc', 0.9, 'system'),
             'arrival_local_time' => $this->provenanceValue($row['allocation_end_utc'] ?? null, $row['allocation_end_utc'] ?? null, 'ipca_operational_flight_leg_versions.allocation_end_utc', 0.9, 'system'),
-            'departure_airport' => $this->provenanceValue($row['departure_airport_code'] ?? null, $row['departure_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.departure_airport_code', 0.85, 'system'),
-            'arrival_airport' => $this->provenanceValue($row['arrival_airport_code'] ?? null, $row['arrival_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.arrival_airport_code', 0.85, 'system'),
+            'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.departure_airport_code', 0.85, 'system'),
+            'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.arrival_airport_code', 0.85, 'system'),
             'departure_hobbs' => $this->provenanceValue($row['hobbs_start_hours'] ?? null, $row['hobbs_start_hours'] ?? null, 'ipca_operational_flight_record_versions.hobbs_start_hours', 0.9, 'system'),
             'arrival_hobbs' => $this->provenanceValue($row['hobbs_end_hours'] ?? null, $row['hobbs_end_hours'] ?? null, 'ipca_operational_flight_record_versions.hobbs_end_hours', 0.9, 'system'),
             'departure_tacho' => $this->provenanceValue($row['tacho_start_hours'] ?? null, $row['tacho_start_hours'] ?? null, 'ipca_operational_flight_record_versions.tacho_start_hours', 0.9, 'system'),
@@ -809,6 +825,7 @@ final class MasterLogbookReadService
             'source_record_keys' => array('aircraft_operation' => 'ao:' . $operationId),
             'association_keys' => array('ao:' . $operationId),
             'dedupe_keys' => array('historical-leg:ao:' . $operationId . ':aggregate'),
+            'route_text' => $row['route_text'] ?? null,
             'anchor_rank' => 80,
             'leg_structure_type' => 'aggregate_dispatch',
             'leg_structure_status' => 'aggregate',
@@ -821,8 +838,8 @@ final class MasterLogbookReadService
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'unresolved'),
             'departure_local_time' => $this->provenanceValue($row['scheduled_start_local'] ?? null, $row['scheduled_start_local'] ?? null, 'ipca_aircraft_operations.scheduled_start_local', 0.5, 'needs_review'),
             'arrival_local_time' => $this->provenanceValue($row['scheduled_end_local'] ?? null, $row['scheduled_end_local'] ?? null, 'ipca_aircraft_operations.scheduled_end_local', 0.5, 'needs_review'),
-            'departure_airport' => $this->emptyProvenanceValue($row['route_text'] ?? null, 'unresolved'),
-            'arrival_airport' => $this->emptyProvenanceValue($row['route_text'] ?? null, 'unresolved'),
+            'departure_airport' => $this->airportProvenanceFromRoute($row['route_text'] ?? null, 'departure', 'ipca_aircraft_operations.route_text'),
+            'arrival_airport' => $this->airportProvenanceFromRoute($row['route_text'] ?? null, 'arrival', 'ipca_aircraft_operations.route_text'),
             'departure_hobbs' => $this->emptyProvenanceValue(null, 'not_loaded'),
             'arrival_hobbs' => $this->emptyProvenanceValue(null, 'not_loaded'),
             'departure_tacho' => $this->emptyProvenanceValue(null, 'not_loaded'),
@@ -871,8 +888,8 @@ final class MasterLogbookReadService
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'unresolved'),
             'departure_local_time' => $this->provenanceValue($start, $start !== '' ? $start : null, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.75, 'needs_review'),
             'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.75, 'needs_review'),
-            'departure_airport' => $this->provenanceValue($row['departure_airport_code'] ?? null, $row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.75, 'needs_review'),
-            'arrival_airport' => $this->provenanceValue($row['arrival_airport_code'] ?? null, $row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.75, 'needs_review'),
+            'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.75, 'needs_review'),
+            'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.75, 'needs_review'),
             'departure_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
             'arrival_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
             'departure_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
@@ -921,8 +938,8 @@ final class MasterLogbookReadService
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'not_available'),
             'departure_local_time' => $this->provenanceValue($start, $start !== '' ? $start : null, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.7, 'unreviewed'),
             'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.7, 'unreviewed'),
-            'departure_airport' => $this->provenanceValue($row['departure_airport_code'] ?? null, $row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.7, 'unreviewed'),
-            'arrival_airport' => $this->provenanceValue($row['arrival_airport_code'] ?? null, $row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.7, 'unreviewed'),
+            'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.7, 'unreviewed'),
+            'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.7, 'unreviewed'),
             'departure_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
             'arrival_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
             'departure_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
@@ -1463,6 +1480,12 @@ final class MasterLogbookReadService
                 $row[$field] = $this->emptyProvenanceValue($row[$field] ?? null, 'unresolved');
             }
         }
+        if (($row['departure_airport']['resolved_value'] ?? null) === null && array_key_exists('route_text', $row)) {
+            $row['departure_airport'] = $this->airportProvenanceFromRoute($row['route_text'], 'departure', 'route_text');
+        }
+        if (($row['arrival_airport']['resolved_value'] ?? null) === null && array_key_exists('route_text', $row)) {
+            $row['arrival_airport'] = $this->airportProvenanceFromRoute($row['route_text'], 'arrival', 'route_text');
+        }
         $row['processing_status'] = $this->normalizeProcessingStatus((string)($row['processing_status'] ?? 'pending'));
         $row['verification_status'] = $this->normalizeVerificationStatus((string)($row['verification_status'] ?? 'needs_review'));
         $row['finalization_status'] = $this->normalizeFinalizationStatus((string)($row['finalization_status'] ?? 'draft'));
@@ -1632,6 +1655,135 @@ final class MasterLogbookReadService
     public function emptyProvenanceValue(mixed $raw = null, string $verificationState = 'unresolved'): array
     {
         return $this->provenanceValue($raw, null, 'not_resolved', 0.0, $verificationState);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function airportProvenanceFromExplicitCode(mixed $raw, string $source, float $confidence, string $verificationState): array
+    {
+        $code = $this->normalizeAirportCode($raw);
+        if ($code !== null && $this->airportCodeIsValid($code)) {
+            return $this->airportProvenance($raw, $code, $source, $confidence, $verificationState, array(
+                'method' => 'explicit_airport_code',
+                'validated' => true,
+            ));
+        }
+        return $this->airportProvenance($raw, null, $source, 0.0, 'unresolved', array(
+            'method' => 'explicit_airport_code',
+            'validated' => false,
+            'reason' => $code === null ? 'missing_or_malformed_airport_code' : 'airport_code_not_supported',
+        ));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function airportProvenanceFromRoute(mixed $raw, string $side, string $source): array
+    {
+        $text = trim((string)$raw);
+        if ($text === '') {
+            return $this->airportProvenance($raw, null, $source, 0.0, 'unresolved', array(
+                'method' => 'route_endpoint_parse',
+                'validated' => false,
+                'reason' => 'missing_route_text',
+            ));
+        }
+
+        if (preg_match('/\b(or|either|dependent)\b/i', $text) === 1) {
+            return $this->airportProvenance($raw, null, $source, 0.0, 'unresolved', array(
+                'method' => 'route_endpoint_parse',
+                'validated' => false,
+                'reason' => 'ambiguous_route_text',
+            ));
+        }
+
+        $tokens = array_values(array_filter(preg_split('/[^A-Za-z0-9]+/', strtoupper($text)) ?: array(), static function (string $token): bool {
+            return $token !== '';
+        }));
+        $airportTokens = array();
+        $invalidAirportLikeTokens = array();
+        foreach ($tokens as $token) {
+            if (preg_match('/^[A-Z][A-Z0-9]{3}$/', $token) !== 1) {
+                continue;
+            }
+            if ($this->airportCodeIsValid($token)) {
+                $airportTokens[] = $token;
+            } else {
+                $invalidAirportLikeTokens[] = $token;
+            }
+        }
+
+        if ($invalidAirportLikeTokens !== array()) {
+            return $this->airportProvenance($raw, null, $source, 0.0, 'unresolved', array(
+                'method' => 'route_endpoint_parse',
+                'validated' => false,
+                'reason' => 'route_contains_invalid_airport_like_token',
+                'invalid_tokens' => $invalidAirportLikeTokens,
+            ));
+        }
+
+        if ($airportTokens === array()) {
+            return $this->airportProvenance($raw, null, $source, 0.0, 'unresolved', array(
+                'method' => 'route_endpoint_parse',
+                'validated' => false,
+                'reason' => 'no_supported_airport_tokens',
+            ));
+        }
+
+        $resolved = $side === 'arrival' ? $airportTokens[count($airportTokens) - 1] : $airportTokens[0];
+        return $this->airportProvenance($raw, $resolved, $source, 0.65, 'needs_review', array(
+            'method' => 'route_endpoint_parse',
+            'validated' => true,
+            'tokens' => $airportTokens,
+            'selected_endpoint' => $side,
+        ));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function airportProvenance(mixed $raw, ?string $resolvedIcao, string $source, float $confidence, string $verificationState, array $diagnostics): array
+    {
+        return $this->provenanceValue($raw, $resolvedIcao, $source, $confidence, $verificationState) + array(
+            'resolved_icao' => $resolvedIcao,
+            'diagnostics' => $diagnostics,
+        );
+    }
+
+    private function normalizeAirportCode(mixed $raw): ?string
+    {
+        $code = strtoupper(trim((string)$raw));
+        if ($code === '' || preg_match('/^[A-Z][A-Z0-9]{3}$/', $code) !== 1) {
+            return null;
+        }
+        return $code;
+    }
+
+    private function airportCodeIsValid(string $code): bool
+    {
+        $code = strtoupper($code);
+        if (array_key_exists($code, $this->airportValidityCache)) {
+            return $this->airportValidityCache[$code];
+        }
+
+        if ($this->fixtureData !== null) {
+            $validAirports = isset($this->fixtureData['valid_airports']) && is_array($this->fixtureData['valid_airports'])
+                ? array_map('strtoupper', array_map('strval', $this->fixtureData['valid_airports']))
+                : array();
+            $this->airportValidityCache[$code] = in_array($code, $validAirports, true);
+            return $this->airportValidityCache[$code];
+        }
+
+        if (!$this->pdo instanceof PDO || !$this->tableExists('ipca_airports')) {
+            $this->airportValidityCache[$code] = false;
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM ipca_airports WHERE icao_identifier = ?');
+        $stmt->execute(array($code));
+        $this->airportValidityCache[$code] = (int)$stmt->fetchColumn() > 0;
+        return $this->airportValidityCache[$code];
     }
 
     /**

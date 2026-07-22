@@ -42,6 +42,14 @@ scenario('query diagnostics include required performance fields', diagnostics_ha
 scenario('event-key parser rejects unsupported formats', parser_rejects_bad_event_key($service));
 scenario('leg-key parser rejects unsupported formats', parser_rejects_bad_leg_key($service));
 scenario('service source contains no write SQL keywords', service_is_read_only_source());
+scenario('Local IFR Training Mission produces unresolved DEP and ARR', row_airport_pair($default, 'historical-event:ao:309', null, null));
+scenario('missing route produces unresolved airports instead of fallback', row_airport_pair($default, 'historical-event:ao:310', null, null));
+scenario('valid route text resolves only supported airport endpoints', row_airport_pair($default, 'historical-event:ao:311', 'KTRM', 'KTRM'));
+scenario('confirmed multi-leg event summary uses first departure and last arrival', detail_summary_airport_pair($service, 'current-event:ofr:102', 'KTRM', 'KTRM'));
+scenario('malformed route text does not produce airports', row_airport_pair($default, 'historical-event:ao:312', null, null));
+scenario('four-letter non-airport word is rejected', row_airport_pair($default, 'historical-event:ao:313', null, null));
+scenario('conflicting airport route evidence is not silently resolved', row_airport_pair($default, 'historical-event:ao:314', null, null) && row_conflict($default, 'historical-event:ao:314', 'warning'));
+scenario('no Master Logbook airport fallback remains', no_hardcoded_airport_fallback());
 
 foreach ($scenarioResults as $name => $passed) {
     echo ($passed ? 'PASS' : 'FAIL') . ' ' . $name . PHP_EOL;
@@ -116,6 +124,23 @@ function row_conflict(array $result, string $eventKey, string $status): bool
 {
     $row = row_for($result, $eventKey);
     return is_array($row) && (($row['conflict_status'] ?? null) === $status);
+}
+
+function row_airport_pair(array $result, string $eventKey, ?string $departure, ?string $arrival): bool
+{
+    $row = row_for($result, $eventKey);
+    if (!is_array($row)) {
+        return false;
+    }
+    return (($row['departure_airport']['resolved_icao'] ?? $row['departure_airport']['resolved_value'] ?? null) === $departure)
+        && (($row['arrival_airport']['resolved_icao'] ?? $row['arrival_airport']['resolved_value'] ?? null) === $arrival);
+}
+
+function detail_summary_airport_pair(MasterLogbookReadService $service, string $eventKey, ?string $departure, ?string $arrival): bool
+{
+    $detail = $service->eventDetail($eventKey);
+    return (($detail['summary']['departure_airport']['resolved_icao'] ?? $detail['summary']['departure_airport']['resolved_value'] ?? null) === $departure)
+        && (($detail['summary']['arrival_airport']['resolved_icao'] ?? $detail['summary']['arrival_airport']['resolved_value'] ?? null) === $arrival);
 }
 
 function suppressed(array $result, string $eventKey, string $winnerEventKey): bool
@@ -227,6 +252,21 @@ function service_is_read_only_source(): bool
     }
     foreach (array('->enrich(', '->reconstruct(', '->deriveFromCsvFile(', '->buildForCsvFileId(', '->matchBatch(', '->processTranscriptionStep(') as $needle) {
         if (str_contains($source, $needle)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function no_hardcoded_airport_fallback(): bool
+{
+    $page = (string)file_get_contents(__DIR__ . '/../public/admin/master_logbook.php');
+    $service = (string)file_get_contents(__DIR__ . '/../src/MasterLogbookReadService.php');
+    foreach (array($page, $service) as $source) {
+        if (preg_match('/return\s+[\'"]K[A-Z0-9]{3}[\'"]\s*;/', $source)) {
+            return false;
+        }
+        if (preg_match('/\?\s*[\'"]K[A-Z0-9]{3}[\'"]/', $source)) {
             return false;
         }
     }
