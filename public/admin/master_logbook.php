@@ -8,7 +8,7 @@ cw_require_admin();
 cw_header('Master Logbook');
 ?>
 <style>
-.ml-page{display:grid;gap:18px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:18px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:28px;color:#0f172a}.ml-muted{color:#64748b;font-size:13px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:7px 9px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1180px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:10px 9px;text-align:left;vertical-align:top}.ml-table th{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer}.ml-row:hover{background:#f8fafc}.ml-chip-stack{display:grid;gap:5px}.ml-chip{display:inline-flex;align-items:center;gap:6px;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;letter-spacing:.02em;background:#e2e8f0;color:#334155}.ml-chip svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ml-activity-flight{background:#dbeafe;color:#1e40af}.ml-activity-sim{background:#ede9fe;color:#5b21b6}.ml-activity-ground{background:#f0fdf4;color:#166534}.ml-activity-evidence{background:#f8fafc;color:#475569}.ml-status-confirmed{background:#dcfce7;color:#166534}.ml-status-awaiting{background:#fef3c7;color:#92400e}.ml-status-review{background:#ffedd5;color:#9a3412}.ml-status-verified{background:#dbeafe;color:#1e40af}.ml-status-finalized{background:#e5e7eb;color:#111827}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
+.ml-page{display:grid;gap:14px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:16px;box-shadow:0 10px 22px rgba(15,23,42,.05)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:26px;color:#0f172a}.ml-muted{color:#64748b;font-size:12px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:6px 8px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1280px;font-size:13px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:7px 8px;text-align:left;vertical-align:middle}.ml-table th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-table thead tr:first-child th{text-align:center;border-bottom:0;padding-bottom:3px}.ml-table thead tr:last-child th{padding-top:3px}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}.ml-row:hover{background:#f8fafc;box-shadow:inset 3px 0 0 #2563eb}.ml-chip-stack{display:grid;gap:4px}.ml-chip{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;letter-spacing:.01em;background:#e2e8f0;color:#334155}.ml-chip svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ml-activity-flight{background:#dbeafe;color:#1e40af}.ml-activity-sim{background:#ede9fe;color:#5b21b6}.ml-activity-ground{background:#f0fdf4;color:#166534}.ml-activity-evidence{background:#f8fafc;color:#475569}.ml-status-confirmed{background:#dcfce7;color:#166534}.ml-status-awaiting{background:#fef3c7;color:#92400e}.ml-status-review{background:#ffedd5;color:#9a3412}.ml-status-verified{background:#dbeafe;color:#1e40af}.ml-status-finalized{background:#e5e7eb;color:#111827}.ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900;border:1px solid currentColor}.ml-crew{display:grid;gap:5px;font-size:12px;line-height:1.15}.ml-crew-member{display:grid;gap:1px}.ml-crew-name{font-weight:750;color:#0f172a}.ml-crew-role{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.ml-date{font-size:12px;font-weight:700;color:#334155;white-space:nowrap}.ml-ad{font-weight:900;color:#0f172a}.ml-time,.ml-meter,.ml-duration{font-size:12px;color:#334155;white-space:nowrap}.ml-duration{font-weight:800}.ml-evidence-row{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}.ml-evidence{display:inline-flex;align-items:center;justify-content:center;min-width:38px;border-radius:999px;padding:3px 6px;font-size:10px;font-weight:900;background:#e5e7eb;color:#6b7280}.ml-evidence-on{background:#dcfce7;color:#166534}.ml-evidence-warn{background:#fef3c7;color:#92400e}.ml-evidence-bad{background:#fee2e2;color:#991b1b}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
 </style>
 
 <div class="ml-page" data-master-logbook>
@@ -46,20 +46,26 @@ cw_header('Master Logbook');
       <table class="ml-table">
         <thead>
           <tr>
-            <th>Activity</th>
-            <th><button class="ml-sort" type="button" data-sort="date">Date</button></th>
-            <th><button class="ml-sort" type="button" data-sort="aircraft">Aircraft</button></th>
-            <th>Crew</th>
-            <th>Route</th>
-            <th>Times</th>
-            <th>Durations</th>
-            <th>Evidence</th>
-            <th><button class="ml-sort" type="button" data-sort="verification_status">Review Status</button></th>
-            <th>Actions</th>
+            <th rowspan="2">Activity</th>
+            <th rowspan="2"><button class="ml-sort" type="button" data-sort="date">Date</button></th>
+            <th rowspan="2"><button class="ml-sort" type="button" data-sort="aircraft">Aircraft</button></th>
+            <th rowspan="2">Crew</th>
+            <th colspan="3">Departure</th>
+            <th colspan="3">Arrival</th>
+            <th rowspan="2">Duration</th>
+            <th rowspan="2">Evidence</th>
+          </tr>
+          <tr>
+            <th>AD</th>
+            <th>Local Off-Block</th>
+            <th>Hobbs Out</th>
+            <th>AD</th>
+            <th>Local On-Block</th>
+            <th>Hobbs In</th>
           </tr>
         </thead>
         <tbody data-rows>
-          <tr><td colspan="10" class="ml-empty">Loading...</td></tr>
+          <tr><td colspan="12" class="ml-empty">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -117,7 +123,70 @@ cw_header('Master Logbook');
   function compactDate(value) {
     const text = String(value || '').trim();
     if (!text) return '--';
-    return text.length > 16 ? text.slice(0, 16) : text;
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    let date;
+    if (iso) {
+      date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    } else {
+      date = new Date(text);
+    }
+    if (!Number.isFinite(date.getTime())) return text.length > 16 ? text.slice(0, 16) : text;
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
+  }
+
+  function compactTime(value) {
+    const text = String(value || '').trim();
+    if (!text || text === '--') return '--';
+    const match = text.match(/(\d{1,2}):(\d{2})/);
+    return match ? match[1].padStart(2, '0') + ':' + match[2] : text;
+  }
+
+  function aircraftStyle(registration) {
+    const text = String(registration || 'UNKNOWN');
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    const hue = Math.abs(hash) % 360;
+    return 'background:hsl(' + hue + ' 78% 92%);color:hsl(' + hue + ' 72% 24%);border-color:hsl(' + hue + ' 58% 70%)';
+  }
+
+  function aircraftPill(value) {
+    const registration = resolved(value);
+    return '<span class="ml-aircraft-pill" style="' + esc(aircraftStyle(registration)) + '">' + esc(registration) + '</span>';
+  }
+
+  function crewBlock(row) {
+    const crew = [
+      { name: resolved(row.pilot_1), role: resolved(row.pilot_1_role) },
+      { name: resolved(row.pilot_2), role: resolved(row.pilot_2_role) }
+    ].filter((member) => member.name && member.name !== '--');
+    if (!crew.length) return '<span class="ml-muted">--</span>';
+    return '<div class="ml-crew">' + crew.map((member) => (
+      '<div class="ml-crew-member"><span class="ml-crew-name">' + esc(member.name) + '</span><span class="ml-crew-role">' + esc(member.role && member.role !== '--' ? member.role : 'Crew') + '</span></div>'
+    )).join('') + '</div>';
+  }
+
+  function evidenceStateClass(evidence) {
+    const stateText = evidence && evidence.state ? String(evidence.state) : 'not_available';
+    if (stateText === 'usable' || stateText === 'present') return 'ml-evidence-on';
+    if (stateText === 'processing' || stateText === 'incomplete' || stateText === 'unresolved') return 'ml-evidence-warn';
+    if (stateText === 'failed' || stateText === 'stale' || stateText === 'superseded') return 'ml-evidence-bad';
+    return '';
+  }
+
+  function evidenceIndicator(label, evidence) {
+    const stateText = evidence && evidence.state ? String(evidence.state) : 'not_available';
+    return '<span class="ml-evidence ' + esc(evidenceStateClass(evidence)) + '" title="' + esc(label + ': ' + stateText.replace(/_/g, ' ')) + '">' + esc(label) + '</span>';
+  }
+
+  function evidenceIndicators(row) {
+    return '<div class="ml-evidence-row">' +
+      evidenceIndicator('FDM', row.fdm) +
+      evidenceIndicator('CVR', row.cvr) +
+      evidenceIndicator('ADSB', row.adsb) +
+      evidenceIndicator('Replay', row.replay) +
+    '</div>';
   }
 
   function iconSvg(name) {
@@ -153,8 +222,8 @@ cw_header('Master Logbook');
     if (conflict === 'warning' || conflict === 'conflict' || type === 'unresolved_leg_structure' || type === 'inferred_leg') {
       return { label: 'Needs Review', icon: 'alert', className: 'ml-status-review' };
     }
-    if (type === 'confirmed_leg') return { label: 'Flight Confirmed', icon: 'check', className: 'ml-status-confirmed' };
-    if (type === 'aggregate_dispatch') return { label: 'Awaiting Flight Data', icon: 'clock', className: 'ml-status-awaiting' };
+    if (type === 'confirmed_leg') return { label: 'Confirmed', icon: 'check', className: 'ml-status-confirmed' };
+    if (type === 'aggregate_dispatch') return { label: 'Awaiting Data', icon: 'clock', className: 'ml-status-awaiting' };
     return { label: 'Needs Review', icon: 'alert', className: 'ml-status-review' };
   }
 
@@ -166,19 +235,6 @@ cw_header('Master Logbook');
     return '<div class="ml-chip-stack">' + chip(activityDescriptor(row)) + chip(reconstructionDescriptor(row)) + '</div>';
   }
 
-  function evidencePill(label, evidence) {
-    const stateText = evidence && evidence.state ? String(evidence.state) : 'not_available';
-    const className = 'ml-pill-' + stateText.replace(/_/g, '-');
-    return '<span class="ml-pill ' + esc(className) + '" title="' + esc(label + ': ' + stateText) + '">' + esc(label) + ' ' + esc(stateText.replace(/_/g, ' ')) + '</span>';
-  }
-
-  function replayAction(row) {
-    const actions = Array.isArray(row.available_actions) ? row.available_actions : [];
-    const replay = actions.find((action) => action && action.type === 'launch_replay' && action.url);
-    if (!replay) return '';
-    return '<a class="ml-action secondary" target="_blank" rel="noopener" href="' + esc(replay.url) + '">Replay</a>';
-  }
-
   function renderRows(result) {
     const rows = Array.isArray(result.rows) ? result.rows : [];
     state.totalPages = Number(result.total_pages || 1);
@@ -186,25 +242,23 @@ cw_header('Master Logbook');
     root.querySelector('[data-prev]').disabled = state.page <= 1;
     root.querySelector('[data-next]').disabled = state.page >= state.totalPages;
     if (!rows.length) {
-      rowsEl.innerHTML = '<tr><td colspan="10" class="ml-empty">No rows in this view.</td></tr>';
+      rowsEl.innerHTML = '<tr><td colspan="12" class="ml-empty">No rows in this view.</td></tr>';
       return;
     }
     rowsEl.innerHTML = rows.map((row) => {
-      const crew = [resolved(row.pilot_1), resolved(row.pilot_2)].filter((v) => v && v !== '--').join('<br>') || '--';
-      const route = esc(resolved(row.departure_airport)) + ' → ' + esc(resolved(row.arrival_airport));
-      const times = esc(compactDate(resolved(row.departure_local_time))) + '<br><span class="ml-muted">' + esc(compactDate(resolved(row.arrival_local_time))) + '</span>';
-      const duration = 'Hobbs ' + esc(resolved(row.hobbs_duration)) + '<br><span class="ml-muted">Tacho ' + esc(resolved(row.tacho_duration)) + '</span>';
       return '<tr class="ml-row" data-event-key="' + esc(row.event_key) + '">' +
         '<td>' + activityStatusChips(row) + '</td>' +
-        '<td>' + esc(row.date || '--') + '</td>' +
-        '<td><strong>' + esc(resolved(row.aircraft)) + '</strong></td>' +
-        '<td>' + crew + '</td>' +
-        '<td>' + route + '</td>' +
-        '<td>' + times + '</td>' +
-        '<td>' + duration + '</td>' +
-        '<td><div class="ml-pill-row">' + evidencePill('FDM', row.fdm) + evidencePill('CVR', row.cvr) + evidencePill('ADS-B', row.adsb) + evidencePill('Replay', row.replay) + '</div></td>' +
-        '<td>' + esc(row.processing_status || '--') + '<br><span class="ml-muted">' + esc(row.verification_status || '--') + ' · ' + esc(row.finalization_status || '--') + '</span></td>' +
-        '<td><div class="ml-pill-row"><button class="ml-action" type="button" data-open-detail="' + esc(row.event_key) + '">Details</button>' + replayAction(row) + '</div></td>' +
+        '<td><span class="ml-date">' + esc(compactDate(row.date || resolved(row.departure_local_time))) + '</span></td>' +
+        '<td>' + aircraftPill(row.aircraft) + '</td>' +
+        '<td>' + crewBlock(row) + '</td>' +
+        '<td><span class="ml-ad">' + esc(resolved(row.departure_airport)) + '</span></td>' +
+        '<td><span class="ml-time">' + esc(compactTime(resolved(row.departure_local_time))) + '</span></td>' +
+        '<td><span class="ml-meter">' + esc(resolved(row.departure_hobbs)) + '</span></td>' +
+        '<td><span class="ml-ad">' + esc(resolved(row.arrival_airport)) + '</span></td>' +
+        '<td><span class="ml-time">' + esc(compactTime(resolved(row.arrival_local_time))) + '</span></td>' +
+        '<td><span class="ml-meter">' + esc(resolved(row.arrival_hobbs)) + '</span></td>' +
+        '<td><span class="ml-duration">' + esc(resolved(row.hobbs_duration)) + '</span></td>' +
+        '<td>' + evidenceIndicators(row) + '</td>' +
       '</tr>';
     }).join('');
   }
@@ -225,8 +279,8 @@ cw_header('Master Logbook');
       const payload = await response.json();
       if (!payload.ok) throw new Error(payload.error || 'Unable to load Master Logbook rows.');
       renderRows(payload.result || {});
-      const diag = payload.result && payload.result.query_diagnostics ? payload.result.query_diagnostics : {};
-      statusEl.textContent = 'Loaded with ' + (diag.query_count || 0) + ' row queries, ' + (diag.evidence_query_count || 0) + ' evidence batches, total ' + (diag.total_ms || '--') + ' ms.';
+      const result = payload.result || {};
+      statusEl.textContent = 'Showing ' + Number(result.total_matching_rows || 0).toLocaleString() + ' records. Select a row to view flight details.';
     } catch (error) {
       rowsEl.innerHTML = '<tr><td colspan="10" class="ml-empty">Unable to load rows.</td></tr>';
       statusEl.innerHTML = '<div class="ml-error">' + esc(error.message || error) + '</div>';
@@ -308,7 +362,7 @@ cw_header('Master Logbook');
   async function openDetail(eventKey) {
     detailModal.classList.add('is-open');
     detailModal.setAttribute('aria-hidden', 'false');
-    detailTitle.textContent = eventKey;
+    detailTitle.textContent = 'Training Event';
     detailSubtitle.textContent = 'Loading detail...';
     detailBody.innerHTML = '<div class="ml-muted">Loading detail...</div>';
     try {
@@ -322,14 +376,8 @@ cw_header('Master Logbook');
   }
 
   root.addEventListener('click', (event) => {
-    const detailButton = event.target.closest('[data-open-detail]');
-    if (detailButton) {
-      event.preventDefault();
-      openDetail(detailButton.getAttribute('data-open-detail') || '');
-      return;
-    }
     const row = event.target.closest('.ml-row');
-    if (row && !event.target.closest('a,button')) {
+    if (row) {
       openDetail(row.getAttribute('data-event-key') || '');
     }
   });
