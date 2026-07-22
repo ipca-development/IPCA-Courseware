@@ -8,7 +8,7 @@ cw_require_admin();
 cw_header('Master Logbook');
 ?>
 <style>
-.ml-page{display:grid;gap:18px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:18px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:28px;color:#0f172a}.ml-muted{color:#64748b;font-size:13px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:7px 9px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1180px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:10px 9px;text-align:left;vertical-align:top}.ml-table th{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer}.ml-row:hover{background:#f8fafc}.ml-type{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:900;letter-spacing:.04em;background:#e2e8f0;color:#334155}.ml-type-leg{background:#dcfce7;color:#166534}.ml-type-inferred{background:#fef3c7;color:#92400e}.ml-type-dispatch{background:#dbeafe;color:#1e40af}.ml-type-sim{background:#ede9fe;color:#5b21b6}.ml-type-unresolved{background:#fee2e2;color:#991b1b}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
+.ml-page{display:grid;gap:18px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:18px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:28px;color:#0f172a}.ml-muted{color:#64748b;font-size:13px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:7px 9px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1180px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:10px 9px;text-align:left;vertical-align:top}.ml-table th{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer}.ml-row:hover{background:#f8fafc}.ml-chip-stack{display:grid;gap:5px}.ml-chip{display:inline-flex;align-items:center;gap:6px;width:max-content;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;letter-spacing:.02em;background:#e2e8f0;color:#334155}.ml-chip svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ml-activity-flight{background:#dbeafe;color:#1e40af}.ml-activity-sim{background:#ede9fe;color:#5b21b6}.ml-activity-ground{background:#f0fdf4;color:#166534}.ml-activity-evidence{background:#f8fafc;color:#475569}.ml-status-confirmed{background:#dcfce7;color:#166534}.ml-status-awaiting{background:#fef3c7;color:#92400e}.ml-status-review{background:#ffedd5;color:#9a3412}.ml-status-verified{background:#dbeafe;color:#1e40af}.ml-status-finalized{background:#e5e7eb;color:#111827}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
 </style>
 
 <div class="ml-page" data-master-logbook>
@@ -46,7 +46,7 @@ cw_header('Master Logbook');
       <table class="ml-table">
         <thead>
           <tr>
-            <th>Type</th>
+            <th>Activity</th>
             <th><button class="ml-sort" type="button" data-sort="date">Date</button></th>
             <th><button class="ml-sort" type="button" data-sort="aircraft">Aircraft</button></th>
             <th>Crew</th>
@@ -54,7 +54,7 @@ cw_header('Master Logbook');
             <th>Times</th>
             <th>Durations</th>
             <th>Evidence</th>
-            <th><button class="ml-sort" type="button" data-sort="verification_status">Status</button></th>
+            <th><button class="ml-sort" type="button" data-sort="verification_status">Review Status</button></th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -120,15 +120,50 @@ cw_header('Master Logbook');
     return text.length > 16 ? text.slice(0, 16) : text;
   }
 
-  function typeBadge(row) {
+  function iconSvg(name) {
+    const icons = {
+      flight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 21l2-7-7-4 2-2 8 2 4-7 2 2-4 7 2 8-2 2-4-7-3 6z"/></svg>',
+      monitor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+      book: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2"/><path d="M8 7h7M8 11h7"/></svg>',
+      file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+      check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>',
+      clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+      alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 9v4M12 17h.01"/></svg>',
+      verified: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.4 2.1 3.2-.2.8 3.1 2.6 1.8-1.3 2.9 1.3 2.9-2.6 1.8-.8 3.1-3.2-.2L12 21l-2.4-2.1-3.2.2-.8-3.1L3 14.2l1.3-2.9L3 8.4l2.6-1.8.8-3.1 3.2.2L12 3z"/><path d="M8.5 12.5l2.2 2.2 4.8-5"/></svg>',
+      lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+    };
+    return icons[name] || '';
+  }
+
+  function activityDescriptor(row) {
     const source = String(row.source_mode || '');
+    if (source === 'simulator') return { label: 'Simulator', icon: 'monitor', className: 'ml-activity-sim' };
+    if (source === 'non_flight') return { label: 'Ground Training', icon: 'book', className: 'ml-activity-ground' };
+    if (source === 'orphan_recording' || source === 'unresolved_garmin') return { label: 'Flight Evidence', icon: 'file', className: 'ml-activity-evidence' };
+    return { label: 'Flight', icon: 'flight', className: 'ml-activity-flight' };
+  }
+
+  function reconstructionDescriptor(row) {
     const type = String(row.leg_structure_type || '');
-    if (source === 'simulator') return '<span class="ml-type ml-type-sim">SIM</span>';
-    if (source === 'orphan_recording' || source === 'unresolved_garmin' || source === 'non_flight') return '<span class="ml-type ml-type-unresolved">UNRESOLVED</span>';
-    if (type === 'confirmed_leg') return '<span class="ml-type ml-type-leg">LEG</span>';
-    if (type === 'inferred_leg') return '<span class="ml-type ml-type-inferred">INFERRED</span>';
-    if (type === 'aggregate_dispatch') return '<span class="ml-type ml-type-dispatch">DISPATCH</span>';
-    return '<span class="ml-type">SESSION</span>';
+    const conflict = String(row.conflict_status || '');
+    const verification = String(row.verification_status || '');
+    const finalization = String(row.finalization_status || '');
+    if (finalization === 'finalized') return { label: 'Finalized', icon: 'lock', className: 'ml-status-finalized' };
+    if (verification === 'verified' || verification === 'system_verified') return { label: 'Verified', icon: 'verified', className: 'ml-status-verified' };
+    if (conflict === 'warning' || conflict === 'conflict' || type === 'unresolved_leg_structure' || type === 'inferred_leg') {
+      return { label: 'Needs Review', icon: 'alert', className: 'ml-status-review' };
+    }
+    if (type === 'confirmed_leg') return { label: 'Flight Confirmed', icon: 'check', className: 'ml-status-confirmed' };
+    if (type === 'aggregate_dispatch') return { label: 'Awaiting Flight Data', icon: 'clock', className: 'ml-status-awaiting' };
+    return { label: 'Needs Review', icon: 'alert', className: 'ml-status-review' };
+  }
+
+  function chip(descriptor) {
+    return '<span class="ml-chip ' + esc(descriptor.className) + '">' + iconSvg(descriptor.icon) + esc(descriptor.label) + '</span>';
+  }
+
+  function activityStatusChips(row) {
+    return '<div class="ml-chip-stack">' + chip(activityDescriptor(row)) + chip(reconstructionDescriptor(row)) + '</div>';
   }
 
   function evidencePill(label, evidence) {
@@ -160,8 +195,8 @@ cw_header('Master Logbook');
       const times = esc(compactDate(resolved(row.departure_local_time))) + '<br><span class="ml-muted">' + esc(compactDate(resolved(row.arrival_local_time))) + '</span>';
       const duration = 'Hobbs ' + esc(resolved(row.hobbs_duration)) + '<br><span class="ml-muted">Tacho ' + esc(resolved(row.tacho_duration)) + '</span>';
       return '<tr class="ml-row" data-event-key="' + esc(row.event_key) + '">' +
-        '<td>' + typeBadge(row) + '<div class="ml-source-note">' + esc(row.leg_structure_status || '') + '</div></td>' +
-        '<td>' + esc(row.date || '--') + '<div class="ml-code">' + esc(row.leg_key || '') + '</div></td>' +
+        '<td>' + activityStatusChips(row) + '</td>' +
+        '<td>' + esc(row.date || '--') + '</td>' +
         '<td><strong>' + esc(resolved(row.aircraft)) + '</strong></td>' +
         '<td>' + crew + '</td>' +
         '<td>' + route + '</td>' +
@@ -216,19 +251,48 @@ cw_header('Master Logbook');
     return '<div class="ml-kv"><div class="ml-label">' + esc(label) + '</div><div class="ml-value">' + esc(value == null || value === '' ? '--' : value) + '</div></div>';
   }
 
+  function detailActivityDescriptor(detail) {
+    const parsed = detail && detail.identity && detail.identity.parsed ? detail.identity.parsed : {};
+    if (parsed.type === 'simulator') return { label: 'Simulator', icon: 'monitor', className: 'ml-activity-sim' };
+    if (parsed.type === 'nonflight') return { label: 'Ground Training', icon: 'book', className: 'ml-activity-ground' };
+    if (parsed.type === 'orphan_recording' || parsed.type === 'unresolved_garmin_csv') return { label: 'Flight Evidence', icon: 'file', className: 'ml-activity-evidence' };
+    return { label: 'Flight', icon: 'flight', className: 'ml-activity-flight' };
+  }
+
+  function detailReconstructionDescriptor(detail, legs) {
+    const firstLeg = Array.isArray(legs) && legs.length ? legs[0] : {};
+    const evidence = detail && detail.evidence ? detail.evidence : {};
+    const verification = detail && detail.verification ? detail.verification : {};
+    return reconstructionDescriptor({
+      leg_structure_type: firstLeg.leg_structure_type || '',
+      conflict_status: verification.conflict_status || '',
+      verification_status: verification.verification_status || '',
+      finalization_status: verification.finalization_status || '',
+      fdm: evidence.fdm || {}
+    });
+  }
+
   function renderDetail(detail) {
     const summary = detail.summary || {};
     const identity = detail.identity || {};
     const legs = Array.isArray(detail.legs) ? detail.legs : [];
-    detailTitle.textContent = String(identity.event_key || 'Training Event');
+    detailTitle.textContent = 'Training Event';
     detailSubtitle.textContent = String((summary.aircraft && resolved(summary.aircraft)) || summary.aircraft || '') + ' · ' + String(summary.date || '');
     const crewItems = Array.isArray(detail.crew) ? detail.crew : Object.values(detail.crew || {});
-    const legsHtml = legs.length ? '<ul class="ml-list">' + legs.map((leg) => '<li><strong>' + esc(leg.leg_key || leg.type || 'Leg') + '</strong> · ' + esc(leg.leg_structure_type || leg.leg_structure_status || '') + '</li>').join('') + '</ul>' : '<div class="ml-muted">No leg detail rows returned.</div>';
+    const legsHtml = legs.length ? '<div class="ml-grid">' + legs.map((leg, index) => {
+      const route = resolved(leg.departure_airport) + ' to ' + resolved(leg.arrival_airport);
+      const times = compactDate(resolved(leg.departure_local_time)) + ' - ' + compactDate(resolved(leg.arrival_local_time));
+      return '<div class="ml-kv"><div class="ml-label">Flight segment ' + esc(index + 1) + '</div><div class="ml-value">' + esc(route) + '</div><div class="ml-muted">' + esc(times) + '</div><div style="margin-top:8px">' + chip(reconstructionDescriptor(leg)) + '</div></div>';
+    }).join('') + '</div>' : '<div class="ml-muted">No segment detail rows returned.</div>';
     const transcript = detail.transcript || {};
     const map = detail.map || {};
+    const activity = detailActivityDescriptor(detail);
+    const reconstruction = detailReconstructionDescriptor(detail, legs);
     detailBody.innerHTML =
       '<section class="ml-section"><h3 style="margin:0">Summary</h3><div class="ml-grid">' +
-        kv('Date', summary.date) + kv('Aircraft', resolved(summary.aircraft)) + kv('Start', summary.event_start) + kv('End', summary.event_end) + kv('Type', summary.event_type) + kv('Leg Structure', summary.leg_structure_status) +
+        '<div class="ml-kv"><div class="ml-label">Activity</div><div style="margin-top:4px">' + chip(activity) + '</div></div>' +
+        '<div class="ml-kv"><div class="ml-label">Reconstruction</div><div style="margin-top:4px">' + chip(reconstruction) + '</div></div>' +
+        kv('Date', summary.date) + kv('Aircraft', resolved(summary.aircraft)) + kv('Start', summary.event_start) + kv('End', summary.event_end) +
       '</div></section>' +
       '<section class="ml-section"><h3 style="margin:0">Crew</h3><div>' + (crewItems.length ? crewItems.map((item) => esc(typeof item === 'object' ? resolved(item) : item)).join('<br>') : '<span class="ml-muted">Crew roles unresolved.</span>') + '</div></section>' +
       '<section class="ml-section"><h3 style="margin:0">Mission</h3><div>' + esc(typeof detail.mission === 'object' ? resolved(detail.mission) : (detail.mission || '--')) + '</div></section>' +
@@ -238,8 +302,7 @@ cw_header('Master Logbook');
       '<section class="ml-section"><h3 style="margin:0">Replay Availability</h3>' + renderEvidenceMap({ replay: (detail.evidence || {}).replay || {} }) + '</section>' +
       '<section class="ml-section"><h3 style="margin:0">Proposal / Final Logbook</h3>' + renderEvidenceMap({ proposal: (detail.evidence || {}).proposal || {}, official_logbook: (detail.evidence || {}).official_logbook || {} }) + '</section>' +
       '<section class="ml-section"><h3 style="margin:0">Map References</h3><pre class="ml-pre">' + esc(JSON.stringify(map.track_references || [], null, 2)) + '</pre></section>' +
-      '<section class="ml-section"><h3 style="margin:0">Operational Classification</h3><pre class="ml-pre">' + esc(JSON.stringify(detail.operational_classification || {}, null, 2)) + '</pre></section>' +
-      '<section class="ml-section"><h3 style="margin:0">Source Provenance</h3><pre class="ml-pre">' + esc(JSON.stringify(identity.source_record_keys || {}, null, 2)) + '</pre></section>';
+      '<section class="ml-section"><h3 style="margin:0">Operational Classification</h3><pre class="ml-pre">' + esc(JSON.stringify(detail.operational_classification || {}, null, 2)) + '</pre></section>';
   }
 
   async function openDetail(eventKey) {
