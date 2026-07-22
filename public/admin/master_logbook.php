@@ -8,7 +8,7 @@ cw_require_admin();
 cw_header('Master Logbook');
 ?>
 <style>
-.ml-page{display:grid;gap:14px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:16px;box-shadow:0 10px 22px rgba(15,23,42,.05)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:26px;color:#0f172a}.ml-muted{color:#64748b;font-size:12px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:6px 8px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1280px;font-size:13px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:7px 8px;text-align:left;vertical-align:middle}.ml-table th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-table thead tr:first-child th{text-align:center;border-bottom:0;padding-bottom:3px}.ml-table thead tr:last-child th{padding-top:3px}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}.ml-row:hover{background:#f8fafc;box-shadow:inset 3px 0 0 #2563eb}.ml-chip-stack{display:grid;gap:4px}.ml-chip{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;letter-spacing:.01em;background:#e2e8f0;color:#334155}.ml-chip svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ml-activity-flight{background:#dbeafe;color:#1e40af}.ml-activity-sim{background:#ede9fe;color:#5b21b6}.ml-activity-ground{background:#f0fdf4;color:#166534}.ml-activity-evidence{background:#f8fafc;color:#475569}.ml-status-confirmed{background:#dcfce7;color:#166534}.ml-status-awaiting{background:#fef3c7;color:#92400e}.ml-status-review{background:#ffedd5;color:#9a3412}.ml-status-verified{background:#dbeafe;color:#1e40af}.ml-status-finalized{background:#e5e7eb;color:#111827}.ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900;border:1px solid currentColor}.ml-crew{display:grid;gap:5px;font-size:12px;line-height:1.15}.ml-crew-member{display:grid;gap:1px}.ml-crew-name{font-weight:750;color:#0f172a}.ml-crew-role{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.ml-date{font-size:12px;font-weight:700;color:#334155;white-space:nowrap}.ml-ad{font-weight:900;color:#0f172a}.ml-time,.ml-meter,.ml-duration{font-size:12px;color:#334155;white-space:nowrap}.ml-duration{font-weight:800}.ml-evidence-row{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}.ml-evidence{display:inline-flex;align-items:center;justify-content:center;min-width:38px;border-radius:999px;padding:3px 6px;font-size:10px;font-weight:900;background:#e5e7eb;color:#6b7280}.ml-evidence-on{background:#dcfce7;color:#166534}.ml-evidence-warn{background:#fef3c7;color:#92400e}.ml-evidence-bad{background:#fee2e2;color:#991b1b}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
+.ml-page{display:grid;gap:14px}.ml-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:16px;box-shadow:0 10px 22px rgba(15,23,42,.05)}.ml-hero{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.ml-title{margin:0;font-size:26px;color:#0f172a}.ml-muted{color:#64748b;font-size:12px}.ml-tabs{display:flex;gap:8px;flex-wrap:wrap}.ml-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;cursor:pointer}.ml-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}.ml-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.ml-select{border:1px solid #cbd5e1;border-radius:10px;padding:6px 8px;background:#fff}.ml-table-wrap{overflow-x:auto}.ml-table{width:100%;border-collapse:collapse;min-width:1340px;font-size:13px}.ml-table th,.ml-table td{border-bottom:1px solid #e2e8f0;padding:7px 8px;text-align:left;vertical-align:middle}.ml-table th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#475569;background:#f8fafc}.ml-table thead tr:first-child th{text-align:center;border-bottom:0;padding-bottom:3px}.ml-table thead tr:last-child th{padding-top:3px}.ml-table th:nth-child(5),.ml-table td:nth-child(5),.ml-table th:nth-child(8),.ml-table td:nth-child(8){border-left:2px solid #e2e8f0}.ml-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;cursor:pointer;padding:0}.ml-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}.ml-row:hover,.ml-row.is-expanded{background:#f8fafc;box-shadow:inset 3px 0 0 #2563eb}.ml-chip-stack{display:grid;gap:4px}.ml-chip{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;letter-spacing:.01em;background:#e2e8f0;color:#334155}.ml-chip svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ml-activity-flight{background:#dbeafe;color:#1e40af}.ml-activity-sim{background:#ede9fe;color:#5b21b6}.ml-activity-ground{background:#f0fdf4;color:#166534}.ml-activity-evidence{background:#f8fafc;color:#475569}.ml-status-confirmed{background:#dcfce7;color:#166534}.ml-status-awaiting{background:#fef3c7;color:#92400e}.ml-status-review{background:#ffedd5;color:#9a3412}.ml-status-verified{background:#dbeafe;color:#1e40af}.ml-status-finalized{background:#e5e7eb;color:#111827}.ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900;border:1px solid currentColor}.ml-crew{display:grid;gap:5px;font-size:11px;line-height:1.13;min-width:170px}.ml-crew-member{display:grid;gap:1px}.ml-crew-name{font-weight:750;color:#0f172a;white-space:nowrap}.ml-crew-role{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.ml-date{font-size:12px;font-weight:700;color:#334155;white-space:nowrap}.ml-ad{font-weight:900;color:#0f172a}.ml-time,.ml-meter,.ml-duration,.ml-landings{font-size:12px;color:#334155;white-space:nowrap}.ml-duration,.ml-landings{font-weight:800}.ml-evidence-row{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}.ml-evidence{display:inline-flex;align-items:center;justify-content:center;min-width:38px;border-radius:999px;padding:3px 6px;font-size:10px;font-weight:900;background:#e5e7eb;color:#6b7280}.ml-evidence-on{background:#dcfce7;color:#166534}.ml-pill-row{display:flex;gap:5px;flex-wrap:wrap}.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 7px;font-size:11px;font-weight:800;background:#e2e8f0;color:#334155}.ml-pill-usable{background:#dcfce7;color:#166534}.ml-pill-present{background:#dbeafe;color:#1e40af}.ml-pill-processing{background:#fef3c7;color:#92400e}.ml-pill-failed,.ml-pill-stale,.ml-pill-superseded{background:#fee2e2;color:#991b1b}.ml-pill-incomplete,.ml-pill-unresolved{background:#ffedd5;color:#9a3412}.ml-action{border:0;border-radius:9px;background:#1d4ed8;color:#fff;font-weight:800;padding:7px 10px;cursor:pointer;text-decoration:none;display:inline-flex}.ml-action.secondary{background:#475569}.ml-action:disabled{opacity:.6;cursor:not-allowed}.ml-pagination{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}.ml-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569}.ml-status{min-height:18px}.ml-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px}.ml-loading{opacity:.65}.ml-expanded td{background:#f8fafc;padding:0 8px 12px}.ml-expanded-panel{border:1px solid #dbe3ef;border-radius:14px;background:#fff;margin:0 0 4px;padding:14px;display:grid;gap:12px;box-shadow:0 8px 18px rgba(15,23,42,.05)}.ml-expanded-title{display:flex;justify-content:space-between;gap:12px;align-items:center}.ml-leg-list{display:grid;gap:10px}.ml-leg-card{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc}.ml-leg-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#475569;font-weight:900;margin-bottom:7px}.ml-leg-flow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center}.ml-leg-arrow{color:#64748b;font-weight:900}.ml-leg-point{display:grid;gap:2px}.ml-leg-ad{font-weight:900;color:#0f172a}.ml-leg-meta{font-size:12px;color:#475569}.ml-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;z-index:9999;padding:28px;overflow:auto}.ml-modal-backdrop.is-open{display:block}.ml-modal{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(15,23,42,.35);overflow:hidden}.ml-modal-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid #e2e8f0}.ml-modal-body{padding:18px 20px;display:grid;gap:14px}.ml-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.ml-kv,.ml-section{border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px}.ml-section{background:#fff;display:grid;gap:10px}.ml-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.ml-value{font-weight:850;color:#0f172a;margin-top:3px}.ml-list{margin:0;padding-left:18px}.ml-pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-size:12px}.ml-empty{padding:22px;color:#64748b;text-align:center}.ml-source-note{font-size:12px;color:#64748b;margin-top:4px}
 </style>
 
 <div class="ml-page" data-master-logbook>
@@ -52,20 +52,21 @@ cw_header('Master Logbook');
             <th rowspan="2">Crew</th>
             <th colspan="3">Departure</th>
             <th colspan="3">Arrival</th>
-            <th rowspan="2">Duration</th>
+            <th rowspan="2">Flight</th>
+            <th rowspan="2">LDG</th>
             <th rowspan="2">Evidence</th>
           </tr>
           <tr>
-            <th>AD</th>
-            <th>Local Off-Block</th>
+            <th>DEP</th>
+            <th>Time</th>
             <th>Hobbs Out</th>
-            <th>AD</th>
-            <th>Local On-Block</th>
+            <th>ARR</th>
+            <th>Time</th>
             <th>Hobbs In</th>
           </tr>
         </thead>
         <tbody data-rows>
-          <tr><td colspan="12" class="ml-empty">Loading...</td></tr>
+          <tr><td colspan="13" class="ml-empty">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -106,6 +107,7 @@ cw_header('Master Logbook');
   const detailBody = document.querySelector('[data-detail-body]');
   const detailTitle = document.getElementById('ml-detail-title');
   const detailSubtitle = document.querySelector('[data-detail-subtitle]');
+  const detailCache = new Map();
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
@@ -131,7 +133,7 @@ cw_header('Master Logbook');
       date = new Date(text);
     }
     if (!Number.isFinite(date.getTime())) return text.length > 16 ? text.slice(0, 16) : text;
-    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   }
 
   function compactTime(value) {
@@ -139,6 +141,70 @@ cw_header('Master Logbook');
     if (!text || text === '--') return '--';
     const match = text.match(/(\d{1,2}):(\d{2})/);
     return match ? match[1].padStart(2, '0') + ':' + match[2] : text;
+  }
+
+  function adSummary(value, side) {
+    const text = resolved(value);
+    if (!text || text === '--') return '--';
+    const parts = text.split(/\s*[-–]\s*/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      return side === 'arr' ? parts[parts.length - 1] : parts[0];
+    }
+    return text;
+  }
+
+  function numericTime(row, field) {
+    const value = resolved(row[field]);
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatHours(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (!text || text === '--') return '--';
+    const match = text.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return text;
+    return Number(match[0]).toFixed(1) + ' h';
+  }
+
+  function formatLandings(value) {
+    const text = resolved(value);
+    if (!text || text === '--') return '--';
+    const match = text.match(/\d+/);
+    return match ? match[0] + ' LDG' : text;
+  }
+
+  function groupEventRows(rows) {
+    const groups = [];
+    const byKey = new Map();
+    rows.forEach((row) => {
+      const key = String(row.event_key || '');
+      if (!byKey.has(key)) {
+        const group = { key, rows: [], summary: row };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      byKey.get(key).rows.push(row);
+    });
+    groups.forEach((group) => {
+      group.rows.sort((a, b) => numericTime(a, 'departure_local_time') - numericTime(b, 'departure_local_time'));
+      const first = group.rows[0] || group.summary;
+      const last = group.rows[group.rows.length - 1] || first;
+      group.summary = Object.assign({}, first, {
+        arrival_airport: last.arrival_airport,
+        arrival_local_time: last.arrival_local_time,
+        arrival_hobbs: last.arrival_hobbs,
+        landings: group.rows.reduce((total, row) => {
+          const match = resolved(row.landings).match(/\d+/);
+          return total + (match ? Number(match[0]) : 0);
+        }, 0) || first.landings,
+        hobbs_duration: group.rows.reduce((total, row) => {
+          const match = String(resolved(row.hobbs_duration)).match(/-?\d+(?:\.\d+)?/);
+          return total + (match ? Number(match[0]) : 0);
+        }, 0) || first.hobbs_duration
+      });
+    });
+    return groups;
   }
 
   function aircraftStyle(registration) {
@@ -170,8 +236,6 @@ cw_header('Master Logbook');
   function evidenceStateClass(evidence) {
     const stateText = evidence && evidence.state ? String(evidence.state) : 'not_available';
     if (stateText === 'usable' || stateText === 'present') return 'ml-evidence-on';
-    if (stateText === 'processing' || stateText === 'incomplete' || stateText === 'unresolved') return 'ml-evidence-warn';
-    if (stateText === 'failed' || stateText === 'stale' || stateText === 'superseded') return 'ml-evidence-bad';
     return '';
   }
 
@@ -237,30 +301,108 @@ cw_header('Master Logbook');
 
   function renderRows(result) {
     const rows = Array.isArray(result.rows) ? result.rows : [];
+    const groups = groupEventRows(rows);
     state.totalPages = Number(result.total_pages || 1);
     pageLabel.textContent = 'Page ' + Number(result.page || state.page) + ' of ' + state.totalPages + ' · ' + Number(result.total_matching_rows || 0).toLocaleString() + ' rows';
     root.querySelector('[data-prev]').disabled = state.page <= 1;
     root.querySelector('[data-next]').disabled = state.page >= state.totalPages;
-    if (!rows.length) {
-      rowsEl.innerHTML = '<tr><td colspan="12" class="ml-empty">No rows in this view.</td></tr>';
+    if (!groups.length) {
+      rowsEl.innerHTML = '<tr><td colspan="13" class="ml-empty">No rows in this view.</td></tr>';
       return;
     }
-    rowsEl.innerHTML = rows.map((row) => {
+    rowsEl.innerHTML = groups.map((group) => {
+      const row = group.summary;
       return '<tr class="ml-row" data-event-key="' + esc(row.event_key) + '">' +
         '<td>' + activityStatusChips(row) + '</td>' +
         '<td><span class="ml-date">' + esc(compactDate(row.date || resolved(row.departure_local_time))) + '</span></td>' +
         '<td>' + aircraftPill(row.aircraft) + '</td>' +
         '<td>' + crewBlock(row) + '</td>' +
-        '<td><span class="ml-ad">' + esc(resolved(row.departure_airport)) + '</span></td>' +
+        '<td><span class="ml-ad">' + esc(adSummary(row.departure_airport, 'dep')) + '</span></td>' +
         '<td><span class="ml-time">' + esc(compactTime(resolved(row.departure_local_time))) + '</span></td>' +
         '<td><span class="ml-meter">' + esc(resolved(row.departure_hobbs)) + '</span></td>' +
-        '<td><span class="ml-ad">' + esc(resolved(row.arrival_airport)) + '</span></td>' +
+        '<td><span class="ml-ad">' + esc(adSummary(row.arrival_airport, 'arr')) + '</span></td>' +
         '<td><span class="ml-time">' + esc(compactTime(resolved(row.arrival_local_time))) + '</span></td>' +
         '<td><span class="ml-meter">' + esc(resolved(row.arrival_hobbs)) + '</span></td>' +
-        '<td><span class="ml-duration">' + esc(resolved(row.hobbs_duration)) + '</span></td>' +
+        '<td><span class="ml-duration">' + esc(formatHours(resolved(row.hobbs_duration))) + '</span></td>' +
+        '<td><span class="ml-landings">' + esc(formatLandings(row.landings)) + '</span></td>' +
         '<td>' + evidenceIndicators(row) + '</td>' +
       '</tr>';
     }).join('');
+  }
+
+  async function fetchDetail(eventKey) {
+    if (detailCache.has(eventKey)) return detailCache.get(eventKey);
+    const response = await fetch('/admin/api/master_logbook_detail.php?event_key=' + encodeURIComponent(eventKey), { credentials: 'same-origin' });
+    const payload = await response.json();
+    if (!payload.ok) throw new Error(payload.error || 'Unable to load detail.');
+    detailCache.set(eventKey, payload.detail || {});
+    return payload.detail || {};
+  }
+
+  function legCard(leg, index) {
+    const depAd = adSummary(leg.departure_airport, 'dep');
+    const arrAd = adSummary(leg.arrival_airport, 'arr');
+    const depTime = compactTime(resolved(leg.departure_local_time));
+    const arrTime = compactTime(resolved(leg.arrival_local_time));
+    const depHobbs = resolved(leg.meter_values && leg.meter_values.hobbs_out ? leg.meter_values.hobbs_out : leg.departure_hobbs);
+    const arrHobbs = resolved(leg.meter_values && leg.meter_values.hobbs_in ? leg.meter_values.hobbs_in : leg.arrival_hobbs);
+    return '<div class="ml-leg-card">' +
+      '<div class="ml-leg-title">Leg ' + esc(index + 1) + '</div>' +
+      '<div class="ml-leg-flow">' +
+        '<div class="ml-leg-point"><span class="ml-leg-ad">DEP ' + esc(depAd) + '</span><span class="ml-leg-meta">' + esc(depTime) + ' · Hobbs ' + esc(depHobbs) + '</span></div>' +
+        '<div class="ml-leg-arrow">→</div>' +
+        '<div class="ml-leg-point"><span class="ml-leg-ad">ARR ' + esc(arrAd) + '</span><span class="ml-leg-meta">' + esc(arrTime) + ' · Hobbs ' + esc(arrHobbs) + '</span></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function expandedHtml(detail) {
+    const legs = Array.isArray(detail.legs) ? detail.legs : [];
+    const evidence = detail.evidence || {};
+    const confirmedLegs = legs.filter((leg) => String(leg.leg_structure_type || '') === 'confirmed_leg');
+    const legHtml = confirmedLegs.length
+      ? '<div class="ml-leg-list">' + confirmedLegs.map(legCard).join('') + '</div>'
+      : '<div class="ml-muted">No confirmed flight legs are available yet for this Training Event.</div>';
+    const replay = evidence.replay && evidence.replay.launch_url
+      ? '<a class="ml-action secondary" target="_blank" rel="noopener" href="' + esc(evidence.replay.launch_url) + '">Open Replay</a>'
+      : '';
+    return '<div class="ml-expanded-panel">' +
+      '<div class="ml-expanded-title"><div><strong>Confirmed Flight Legs</strong><div class="ml-muted">Only confirmed legs from the read model are shown here.</div></div><div class="ml-pill-row">' + replay + '<button class="ml-action" type="button" data-open-full-detail>Open Full Details</button></div></div>' +
+      legHtml +
+      '<div class="ml-grid">' +
+        kv('Mission', typeof detail.mission === 'object' ? resolved(detail.mission) : (detail.mission || '--')) +
+        kv('FDM', evidence.fdm && evidence.fdm.state ? evidence.fdm.state : 'not_available') +
+        kv('CVR', evidence.cvr && evidence.cvr.state ? evidence.cvr.state : 'not_available') +
+        kv('Replay', evidence.replay && evidence.replay.state ? evidence.replay.state : 'not_available') +
+      '</div>' +
+    '</div>';
+  }
+
+  async function toggleExpanded(row) {
+    const eventKey = row.getAttribute('data-event-key') || '';
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('ml-expanded')) {
+      next.remove();
+      row.classList.remove('is-expanded');
+      return;
+    }
+    rowsEl.querySelectorAll('.ml-expanded').forEach((expanded) => expanded.remove());
+    rowsEl.querySelectorAll('.ml-row.is-expanded').forEach((openRow) => openRow.classList.remove('is-expanded'));
+    row.classList.add('is-expanded');
+    row.insertAdjacentHTML('afterend', '<tr class="ml-expanded"><td colspan="13"><div class="ml-expanded-panel"><span class="ml-muted">Loading Training Event...</span></div></td></tr>');
+    const expandedRow = row.nextElementSibling;
+    try {
+      const detail = await fetchDetail(eventKey);
+      expandedRow.querySelector('td').innerHTML = expandedHtml(detail);
+      expandedRow.querySelector('[data-open-full-detail]').addEventListener('click', (event) => {
+        event.stopPropagation();
+        renderDetail(detail);
+        detailModal.classList.add('is-open');
+        detailModal.setAttribute('aria-hidden', 'false');
+      });
+    } catch (error) {
+      expandedRow.querySelector('td').innerHTML = '<div class="ml-error">' + esc(error.message || error) + '</div>';
+    }
   }
 
   async function loadRows() {
@@ -282,7 +424,7 @@ cw_header('Master Logbook');
       const result = payload.result || {};
       statusEl.textContent = 'Showing ' + Number(result.total_matching_rows || 0).toLocaleString() + ' records. Select a row to view flight details.';
     } catch (error) {
-      rowsEl.innerHTML = '<tr><td colspan="10" class="ml-empty">Unable to load rows.</td></tr>';
+      rowsEl.innerHTML = '<tr><td colspan="13" class="ml-empty">Unable to load rows.</td></tr>';
       statusEl.innerHTML = '<div class="ml-error">' + esc(error.message || error) + '</div>';
     } finally {
       root.classList.remove('ml-loading');
@@ -366,10 +508,7 @@ cw_header('Master Logbook');
     detailSubtitle.textContent = 'Loading detail...';
     detailBody.innerHTML = '<div class="ml-muted">Loading detail...</div>';
     try {
-      const response = await fetch('/admin/api/master_logbook_detail.php?event_key=' + encodeURIComponent(eventKey), { credentials: 'same-origin' });
-      const payload = await response.json();
-      if (!payload.ok) throw new Error(payload.error || 'Unable to load detail.');
-      renderDetail(payload.detail || {});
+      renderDetail(await fetchDetail(eventKey));
     } catch (error) {
       detailBody.innerHTML = '<div class="ml-error">' + esc(error.message || error) + '</div>';
     }
@@ -378,7 +517,7 @@ cw_header('Master Logbook');
   root.addEventListener('click', (event) => {
     const row = event.target.closest('.ml-row');
     if (row) {
-      openDetail(row.getAttribute('data-event-key') || '');
+      toggleExpanded(row);
     }
   });
 
