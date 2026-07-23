@@ -171,7 +171,13 @@ return array(
         ),
         'historical_flightcircle' => array(
             ml_historical_dispatch(301, '2025-01-01 09:00:00', 'N397EA'),
-            ml_historical_dispatch(302, '2025-01-02 09:00:00', 'N482EA'),
+            ml_historical_dispatch(302, '2025-01-02 09:00:00', 'N482EA', 'aggregate_dispatch', array(
+                'pilot_1' => ml_fixture_value('Lynn Vanderhallen', 'Lynn Vanderhallen', 'ipca_crew_assignments.source_person_text', 0.9, 'needs_review'),
+                'pilot_1_role' => ml_fixture_value('student', 'Student', 'ipca_crew_assignments.source_role_text', 0.65, 'needs_review'),
+                'pilot_2' => ml_fixture_value('Zane Haley', 'Zane Haley', 'ipca_crew_assignments.source_person_text', 0.9, 'needs_review'),
+                'pilot_2_role' => ml_fixture_value('instructor', 'Instructor', 'ipca_crew_assignments.source_role_text', 0.65, 'needs_review'),
+                'mission' => ml_fixture_value('1-3-5: Touch-and-go training', '1-3-5: Touch-and-go training', 'ipca_aircraft_operations.mission_notes', 0.55, 'needs_review'),
+            )),
             ml_historical_dispatch(303, '2025-01-03 09:00:00', 'N397EA'),
             ml_historical_dispatch(304, '2025-01-04 09:00:00', 'N482EA', 'unresolved_leg_structure'),
             ml_historical_dispatch(307, '2025-01-07 09:00:00', 'N397EA', 'aggregate_dispatch', array(
@@ -212,6 +218,11 @@ return array(
                 'association_keys' => array('ao:302', 'fcs:302', 'ghs:501', 'csv:501'),
                 'dedupe_keys' => array('historical-garmin-leg:ao:302:ghs:501'),
                 'anchor_rank' => 85,
+                'pilot_1' => ml_fixture_empty(null, 'not_traced'),
+                'pilot_1_role' => ml_fixture_empty(null, 'unresolved'),
+                'pilot_2' => ml_fixture_empty(null, 'not_traced'),
+                'pilot_2_role' => ml_fixture_empty(null, 'unresolved'),
+                'mission' => ml_fixture_empty(null, 'unresolved'),
                 'finalization_status' => 'proposed',
             )),
             ml_current_leg(0, 0, 2, '2025-01-02 10:20:00', 'N482EA', 'KPSP', 'KTRM', 'draft', array(
@@ -223,6 +234,11 @@ return array(
                 'association_keys' => array('ao:302', 'fcs:302', 'ghs:502', 'csv:502'),
                 'dedupe_keys' => array('historical-garmin-leg:ao:302:ghs:502'),
                 'anchor_rank' => 85,
+                'pilot_1' => ml_fixture_empty(null, 'not_traced'),
+                'pilot_1_role' => ml_fixture_empty(null, 'unresolved'),
+                'pilot_2' => ml_fixture_empty(null, 'not_traced'),
+                'pilot_2_role' => ml_fixture_empty(null, 'unresolved'),
+                'mission' => ml_fixture_empty(null, 'unresolved'),
                 'finalization_status' => 'proposed',
             )),
         ),
@@ -237,6 +253,10 @@ return array(
                 'dedupe_keys' => array('unlinked:csv:401'),
                 'leg_structure_type' => 'inferred_leg',
                 'leg_structure_status' => 'inferred',
+                'pilot_1' => ml_fixture_empty(null, 'not_available'),
+                'pilot_1_role' => ml_fixture_empty(null, 'not_available'),
+                'pilot_2' => ml_fixture_empty(null, 'not_available'),
+                'pilot_2_role' => ml_fixture_empty(null, 'not_available'),
                 'verification_status' => 'unreviewed',
             )),
             ml_current_leg(0, 0, 1, '2025-01-03 09:03:00', 'N397EA', 'KTRM', 'KTRM', 'draft', array(
@@ -351,6 +371,7 @@ return array(
         'historical-event:ao:302' => array(
             'flightcircle' => ml_fixture_evidence('present', 1, 'ao:302', 'needs_review', 0.75),
             'fdm' => ml_fixture_evidence('present', 2, 'ghs:501', 'matched', 0.85),
+            'proposal' => ml_fixture_evidence('present', 1, 'historical-proposals:ao:302', 'Proposed', 0.7),
         ),
         'historical-event:ao:303' => array('flightcircle' => ml_fixture_evidence('present', 1, 'ao:303', 'ambiguous_match', 0.5)),
         'historical-event:ao:304' => array('flightcircle' => ml_fixture_evidence('present', 1, 'ao:304', 'needs_review', 0.6)),

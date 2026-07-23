@@ -21,7 +21,14 @@ scenario('current Garmin-derived flight with CVR', row_has_state($default, 'curr
 scenario('current multi-leg flight', count_rows_for_event($default, 'current-event:ofr:102') === 2);
 scenario('FlightCircle-only historical aircraft operation', row_has_leg_type($default, 'historical-event:ao:301', 'aggregate_dispatch'));
 scenario('FlightCircle enriched with multiple Garmin legs', count_rows_for_event($default, 'historical-event:ao:302') === 2 && detail_leg_count($service, 'historical-event:ao:302') === 2);
+scenario('FlightCircle crew with one or more Garmin legs is inherited by child rows', row_has_crew($default, 'historical-event:ao:302', 'Lynn Vanderhallen', 'Student', 'Zane Haley', 'Instructor'));
+scenario('FlightCircle crew is inherited by every Garmin child leg', all_rows_have_crew($default, 'historical-event:ao:302', 'Lynn Vanderhallen', 'Zane Haley'));
+scenario('Garmin child null crew does not erase parent crew', !crew_and_mission_unresolved($default, 'historical-event:ao:302'));
+scenario('event mission persists after aggregate suppression', row_mission_is($default, 'historical-event:ao:302', '1-3-5: Touch-and-go training'));
+scenario('historical proposal remains associated after aggregate suppression', row_has_state($default, 'historical-event:ao:302', 'proposal', 'present'));
+scenario('event detail keeps one shared crew and mission block for child legs', detail_has_shared_event_context($service, 'historical-event:ao:302', 'Lynn Vanderhallen', '1-3-5: Touch-and-go training', 2));
 scenario('unmatched Garmin record', row_exists($all, 'unresolved-garmin:csv:401') && !row_exists($default, 'unresolved-garmin:csv:401'));
+scenario('unmatched Garmin does not inherit FlightCircle crew', row_has_no_resolved_crew($all, 'unresolved-garmin:csv:401'));
 scenario('simulator session', row_exists($all, 'simulator-event:fcs:601') && !row_exists($default, 'simulator-event:fcs:601') && row_has_leg_type($all, 'simulator-event:fcs:601', 'simulator_session'));
 scenario('non-flight or ignored FlightCircle resource', row_exists($all, 'nonflight-event:fcs:701') && !row_exists($default, 'nonflight-event:fcs:701') && row_has_leg_type($all, 'nonflight-event:fcs:701', 'non_flight_operation'));
 scenario('duplicate Garmin source representing same real-world flight', suppressed($all, 'unresolved-garmin:csv:407', 'current-event:ofr:107'));
@@ -113,6 +120,61 @@ function row_has_leg_type(array $result, string $eventKey, string $type): bool
 {
     $row = row_for($result, $eventKey);
     return is_array($row) && (($row['leg_structure_type'] ?? null) === $type);
+}
+
+function rows_for_event(array $result, string $eventKey): array
+{
+    return array_values(array_filter(rows($result), static function (array $row) use ($eventKey): bool {
+        return ($row['event_key'] ?? '') === $eventKey;
+    }));
+}
+
+function row_has_crew(array $result, string $eventKey, string $pilot1, string $role1, string $pilot2, string $role2): bool
+{
+    $row = row_for($result, $eventKey);
+    if (!is_array($row)) {
+        return false;
+    }
+    return ($row['pilot_1']['resolved_value'] ?? null) === $pilot1
+        && ($row['pilot_1_role']['resolved_value'] ?? null) === $role1
+        && ($row['pilot_2']['resolved_value'] ?? null) === $pilot2
+        && ($row['pilot_2_role']['resolved_value'] ?? null) === $role2;
+}
+
+function all_rows_have_crew(array $result, string $eventKey, string $pilot1, string $pilot2): bool
+{
+    $rows = rows_for_event($result, $eventKey);
+    if ($rows === array()) {
+        return false;
+    }
+    foreach ($rows as $row) {
+        if (($row['pilot_1']['resolved_value'] ?? null) !== $pilot1 || ($row['pilot_2']['resolved_value'] ?? null) !== $pilot2) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function row_mission_is(array $result, string $eventKey, string $mission): bool
+{
+    $row = row_for($result, $eventKey);
+    return is_array($row) && (($row['mission']['resolved_value'] ?? null) === $mission);
+}
+
+function row_has_no_resolved_crew(array $result, string $eventKey): bool
+{
+    $row = row_for($result, $eventKey);
+    return is_array($row)
+        && value_is_null($row, 'pilot_1', 'resolved_value')
+        && value_is_null($row, 'pilot_2', 'resolved_value');
+}
+
+function detail_has_shared_event_context(MasterLogbookReadService $service, string $eventKey, string $pilot1, string $mission, int $legCount): bool
+{
+    $detail = $service->eventDetail($eventKey);
+    return count($detail['legs'] ?? array()) === $legCount
+        && (($detail['crew'][0]['resolved_value'] ?? null) === $pilot1)
+        && (($detail['mission']['resolved_value'] ?? null) === $mission);
 }
 
 function row_finalized(array $result, string $eventKey): bool
@@ -232,7 +294,7 @@ function value_is_null(array $row, string $field, string $key): bool
 function diagnostics_have_fields(array $result): bool
 {
     $diag = $result['query_diagnostics'] ?? array();
-    foreach (array('query_count', 'query_ms', 'schema_table_discovery_ms', 'count_query_ms', 'row_query_ms', 'evidence_query_count', 'evidence_query_ms', 'row_build_ms', 'dedupe_ms', 'evidence_batch_ms', 'json_serialization_ms', 'candidate_count_by_source_branch', 'suppressed_duplicate_count', 'unresolved_count') as $field) {
+    foreach (array('query_count', 'query_ms', 'schema_table_discovery_ms', 'count_query_ms', 'row_query_ms', 'evidence_query_count', 'evidence_query_ms', 'row_build_ms', 'dedupe_ms', 'evidence_batch_ms', 'json_serialization_ms', 'candidate_count_by_source_branch', 'suppressed_duplicate_count', 'unresolved_count', 'operation_ids_loaded', 'crew_assignment_batch_count', 'mission_batch_count', 'proposal_batch_count', 'child_legs_enriched', 'child_legs_with_unresolved_crew', 'child_legs_with_conflict', 'aggregate_rows_suppressed') as $field) {
         if (!array_key_exists($field, $diag)) {
             return false;
         }

@@ -64,6 +64,9 @@ final class MasterLogbookReadService
     private int $lastEvidenceQueryCount = 0;
     private float $lastEvidenceQueryMs = 0.0;
 
+    /** @var array<string,mixed> */
+    private array $lastEnrichmentDiagnostics = array();
+
     /**
      * @param array<string,mixed>|null $fixtureData
      */
@@ -85,6 +88,7 @@ final class MasterLogbookReadService
         $this->lastRowQueryMs = 0.0;
         $this->lastEvidenceQueryCount = 0;
         $this->lastEvidenceQueryMs = 0.0;
+        $this->lastEnrichmentDiagnostics = array();
         $queryCount = 0;
         $queryMs = 0.0;
         $branchCounts = array();
@@ -142,6 +146,16 @@ final class MasterLogbookReadService
             'suppressed_duplicate_count' => count($deduped['suppressed_duplicates']),
             'suppressed_duplicates' => $deduped['suppressed_duplicates'],
             'unresolved_count' => $this->countUnresolved($load['candidates']),
+            'operation_ids_loaded' => $this->lastEnrichmentDiagnostics['operation_ids_loaded'] ?? array(),
+            'crew_assignment_batch_count' => $this->lastEnrichmentDiagnostics['crew_assignment_batch_count'] ?? 0,
+            'mission_batch_count' => $this->lastEnrichmentDiagnostics['mission_batch_count'] ?? 0,
+            'proposal_batch_count' => $this->lastEnrichmentDiagnostics['proposal_batch_count'] ?? 0,
+            'child_legs_enriched' => $this->lastEnrichmentDiagnostics['child_legs_enriched'] ?? 0,
+            'child_legs_with_unresolved_crew' => $this->lastEnrichmentDiagnostics['child_legs_with_unresolved_crew'] ?? 0,
+            'child_legs_with_conflict' => $this->lastEnrichmentDiagnostics['child_legs_with_conflict'] ?? 0,
+            'aggregate_rows_suppressed' => count(array_filter($deduped['suppressed_duplicates'], static function (array $item): bool {
+                return ($item['reason'] ?? '') === 'explicit_operation_has_confirmed_garmin_leg_boundaries';
+            })),
         );
 
         return array(
@@ -482,6 +496,9 @@ final class MasterLogbookReadService
                 SELECT
                     m.operation_id,
                     m.csv_file_id,
+                    MAX(m.id) AS match_id,
+                    MAX(m.staging_record_id) AS staging_record_id,
+                    MAX(m.garmin_segment_id) AS garmin_segment_id,
                     MAX(m.match_status) AS match_status,
                     MAX(m.confidence_score) AS confidence_score,
                     s.derivation_status,
@@ -679,6 +696,9 @@ final class MasterLogbookReadService
                 SELECT
                     m.operation_id,
                     m.csv_file_id,
+                    MAX(m.id) AS match_id,
+                    MAX(m.staging_record_id) AS staging_record_id,
+                    MAX(m.garmin_segment_id) AS garmin_segment_id,
                     MAX(m.match_status) AS match_status,
                     MAX(m.confidence_score) AS confidence_score,
                     s.derivation_status,
@@ -892,13 +912,23 @@ final class MasterLogbookReadService
         $csvFileId = (int)$row['csv_file_id'];
         $start = (string)($row['departure_time_utc'] ?? '');
         $end = (string)($row['arrival_time_utc'] ?? '');
+        $sourceRecordKeys = array('aircraft_operation' => 'ao:' . $operationId, 'csv_file' => 'csv:' . $csvFileId);
+        if ((int)($row['match_id'] ?? 0) > 0) {
+            $sourceRecordKeys['flightcircle_garmin_match'] = 'fcgm:' . (int)$row['match_id'];
+        }
+        if ((int)($row['staging_record_id'] ?? 0) > 0) {
+            $sourceRecordKeys['flightcircle_staging_record'] = 'fcs:' . (int)$row['staging_record_id'];
+        }
+        if ((int)($row['garmin_segment_id'] ?? 0) > 0) {
+            $sourceRecordKeys['garmin_historical_segment'] = 'ghs:' . (int)$row['garmin_segment_id'];
+        }
         return $this->normalizeCandidate(array(
             'event_key' => 'historical-event:ao:' . $operationId,
             'leg_key' => 'historical-garmin-leg:ao:' . $operationId . ':csv:' . $csvFileId,
             'source_mode' => 'historical_flightcircle',
             'source_branch' => 'historical_garmin_legs',
-            'source_record_keys' => array('aircraft_operation' => 'ao:' . $operationId, 'csv_file' => 'csv:' . $csvFileId),
-            'association_keys' => array('ao:' . $operationId, 'csv:' . $csvFileId),
+            'source_record_keys' => $sourceRecordKeys,
+            'association_keys' => array_values($sourceRecordKeys),
             'dedupe_keys' => array('historical-garmin-leg:ao:' . $operationId . ':csv:' . $csvFileId),
             'anchor_rank' => 85,
             'leg_structure_type' => ((string)($row['match_status'] ?? '') === 'high_confidence') ? 'confirmed_leg' : 'inferred_leg',
@@ -1128,6 +1158,7 @@ final class MasterLogbookReadService
             return $this->attachLiveBatchedEvidence($candidates);
         }
 
+        $candidates = $this->attachFixtureOperationContext($candidates);
         $fixtureEvidence = isset($this->fixtureData['evidence']) && is_array($this->fixtureData['evidence']) ? $this->fixtureData['evidence'] : array();
         foreach ($candidates as $idx => $candidate) {
             $eventKey = (string)$candidate['event_key'];
@@ -1175,6 +1206,8 @@ final class MasterLogbookReadService
         $recordingIds = array_values(array_unique(array_filter($recordingIds)));
 
         $matchesByOperation = $this->liveMatchesByOperation($operationIds);
+        $operationContextByOperation = $this->liveOperationContextsByOperation($operationIds);
+        $crewByOperation = $this->liveCrewAssignmentsByOperation($operationIds);
         $proposalsByOperation = $this->liveHistoricalProposalsByOperation($operationIds);
         $replayByCsv = $this->liveReplayPayloadsByCsv($csvIds);
         $recordingStatus = $this->liveRecordingStatus($recordingIds);
@@ -1186,6 +1219,14 @@ final class MasterLogbookReadService
             $operationId = $this->idFromSourceKeys($candidate, 'ao');
             $csvId = $this->idFromSourceKeys($candidate, 'csv');
             $recordingId = $this->idFromSourceKeys($candidate, 'rec');
+
+            if ($operationId > 0 && ($candidate['source_branch'] ?? '') === 'historical_garmin_legs') {
+                $context = $operationContextByOperation[$operationId] ?? null;
+                if (is_array($context)) {
+                    $candidates[$idx] = $this->applyOperationContextToChildLeg($candidates[$idx], $context, $crewByOperation[$operationId] ?? array());
+                    $candidate = $candidates[$idx];
+                }
+            }
 
             if ($operationId > 0) {
                 $match = $matchesByOperation[$operationId] ?? null;
@@ -1279,7 +1320,366 @@ final class MasterLogbookReadService
         foreach ($rows as $row) {
             $out[(int)$row['operation_id']] = $row;
         }
+        $this->lastEnrichmentDiagnostics['proposal_batch_count'] = ($this->lastEnrichmentDiagnostics['proposal_batch_count'] ?? 0) + 1;
         return $out;
+    }
+
+    /**
+     * @param list<int> $operationIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function liveOperationContextsByOperation(array $operationIds): array
+    {
+        if ($operationIds === array() || !$this->tableExists('ipca_aircraft_operations')) {
+            return array();
+        }
+        $rows = $this->timedInQuery("
+            SELECT
+                id AS aircraft_operation_id,
+                aircraft_registration,
+                operation_status,
+                review_status,
+                scheduled_start_local,
+                scheduled_end_local,
+                user_text,
+                instructor_text,
+                reservation_type,
+                rules_text,
+                route_text,
+                mission_notes,
+                source_mode,
+                source_identity_hash,
+                source_summary_json
+            FROM ipca_aircraft_operations
+            WHERE id IN (%s)
+        ", $operationIds);
+        $out = array();
+        foreach ($rows as $row) {
+            $out[(int)$row['aircraft_operation_id']] = $row;
+        }
+        $this->lastEnrichmentDiagnostics['operation_ids_loaded'] = array_values(array_unique(array_merge(
+            $this->lastEnrichmentDiagnostics['operation_ids_loaded'] ?? array(),
+            array_keys($out)
+        )));
+        $this->lastEnrichmentDiagnostics['mission_batch_count'] = ($this->lastEnrichmentDiagnostics['mission_batch_count'] ?? 0) + 1;
+        return $out;
+    }
+
+    /**
+     * @param list<int> $operationIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function liveCrewAssignmentsByOperation(array $operationIds): array
+    {
+        if ($operationIds === array() || !$this->tableExists('ipca_crew_assignments')) {
+            return array();
+        }
+        $rows = $this->timedInQuery("
+            SELECT
+                id,
+                operation_id,
+                person_user_id,
+                source_person_text,
+                source_role_text,
+                resolved_role,
+                mapping_status,
+                confidence_score,
+                review_status,
+                source_system,
+                source_record_id
+            FROM ipca_crew_assignments
+            WHERE operation_id IN (%s)
+            ORDER BY operation_id ASC, CAST(source_record_id AS UNSIGNED) DESC, id DESC
+        ", $operationIds);
+        $out = array();
+        foreach ($rows as $row) {
+            $operationId = (int)$row['operation_id'];
+            if (!isset($out[$operationId])) {
+                $out[$operationId] = array();
+            }
+            $out[$operationId][] = $row;
+        }
+        $this->lastEnrichmentDiagnostics['crew_assignment_batch_count'] = ($this->lastEnrichmentDiagnostics['crew_assignment_batch_count'] ?? 0) + 1;
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $candidates
+     * @return list<array<string,mixed>>
+     */
+    private function attachFixtureOperationContext(array $candidates): array
+    {
+        if ($this->fixtureData === null) {
+            return $candidates;
+        }
+        $parents = array();
+        foreach (($this->fixtureData['branches']['historical_flightcircle'] ?? array()) as $parent) {
+            if (is_array($parent)) {
+                $parents[(string)($parent['event_key'] ?? '')] = $this->normalizeCandidate($parent, 'historical_flightcircle');
+            }
+        }
+        foreach ($candidates as $idx => $candidate) {
+            if (($candidate['source_branch'] ?? '') !== 'historical_garmin_legs') {
+                continue;
+            }
+            $eventKey = (string)($candidate['event_key'] ?? '');
+            if (!isset($parents[$eventKey])) {
+                continue;
+            }
+            $candidates[$idx] = $this->applyParentCandidateContextToChildLeg($candidate, $parents[$eventKey]);
+        }
+        return $candidates;
+    }
+
+    /**
+     * @param array<string,mixed> $child
+     * @param array<string,mixed> $parent
+     * @return array<string,mixed>
+     */
+    private function applyParentCandidateContextToChildLeg(array $child, array $parent): array
+    {
+        foreach (array('aircraft', 'pilot_1', 'pilot_1_role', 'pilot_2', 'pilot_2_role', 'mission') as $field) {
+            if ($this->hasResolvedValue($parent[$field] ?? null)) {
+                $child[$field] = $parent[$field];
+            }
+        }
+        foreach (array('verification_status', 'finalization_status', 'conflict_status') as $field) {
+            if (!empty($parent[$field])) {
+                $child[$field] = $parent[$field];
+            }
+        }
+        $child['event_start'] = $parent['departure_local_time']['resolved_value'] ?? $child['event_start'] ?? null;
+        $child['event_end'] = $parent['arrival_local_time']['resolved_value'] ?? $child['event_end'] ?? null;
+        $child['crew_detail'] = array_values(array_filter(array($child['pilot_1'], $child['pilot_2']), array($this, 'hasResolvedValue')));
+        $child['operation_context_inherited'] = true;
+        return $child;
+    }
+
+    /**
+     * @param array<string,mixed> $child
+     * @param array<string,mixed> $operation
+     * @param list<array<string,mixed>> $crewRows
+     * @return array<string,mixed>
+     */
+    private function applyOperationContextToChildLeg(array $child, array $operation, array $crewRows): array
+    {
+        $operationId = (int)($operation['aircraft_operation_id'] ?? 0);
+        $crew = $this->crewValuesFromOperation($operation, $crewRows);
+
+        $child['aircraft'] = $this->provenanceValue(
+            $operation['aircraft_registration'] ?? null,
+            trim((string)($operation['aircraft_registration'] ?? '')) !== '' ? (string)$operation['aircraft_registration'] : ($child['aircraft']['resolved_value'] ?? null),
+            'ipca_aircraft_operations.aircraft_registration',
+            0.9,
+            (string)($operation['review_status'] ?? 'needs_review')
+        ) + array('source_system' => 'flightcircle', 'source_record_key' => 'ao:' . $operationId);
+
+        foreach (array('pilot_1', 'pilot_1_role', 'pilot_2', 'pilot_2_role') as $field) {
+            if (isset($crew[$field]) && is_array($crew[$field]) && ($this->hasResolvedValue($crew[$field]) || !$this->hasResolvedValue($child[$field] ?? null))) {
+                $child[$field] = $crew[$field];
+            }
+        }
+        $child['crew_detail'] = $crew['crew_detail'];
+
+        $mission = trim((string)($operation['mission_notes'] ?? ''));
+        if ($mission !== '') {
+            $child['mission'] = $this->provenanceValue($mission, $mission, 'ipca_aircraft_operations.mission_notes', 0.55, (string)($operation['review_status'] ?? 'needs_review')) + array(
+                'source_system' => 'flightcircle',
+                'source_record_key' => 'ao:' . $operationId,
+            );
+            $child['mission_detail'] = $child['mission'];
+        }
+
+        $child['event_start'] = $operation['scheduled_start_local'] ?? $child['event_start'] ?? null;
+        $child['event_end'] = $operation['scheduled_end_local'] ?? $child['event_end'] ?? null;
+        $child['verification_status'] = $this->normalizeVerificationStatus((string)($operation['review_status'] ?? $child['verification_status'] ?? 'needs_review'));
+        $child['finalization_status'] = ((string)($operation['operation_status'] ?? '') === 'approved') ? 'finalized' : ($child['finalization_status'] ?? 'proposed');
+        $child['operational_classification'] = array(
+            'reservation_type' => $this->provenanceValue($operation['reservation_type'] ?? null, trim((string)($operation['reservation_type'] ?? '')) !== '' ? (string)$operation['reservation_type'] : null, 'ipca_aircraft_operations.reservation_type', 0.7, (string)($operation['review_status'] ?? 'needs_review')),
+            'rules' => $this->provenanceValue($operation['rules_text'] ?? null, trim((string)($operation['rules_text'] ?? '')) !== '' ? (string)$operation['rules_text'] : null, 'ipca_aircraft_operations.rules_text', 0.7, (string)($operation['review_status'] ?? 'needs_review')),
+            'source_mode' => $operation['source_mode'] ?? 'flightcircle_migration',
+            'source_record_key' => 'ao:' . $operationId,
+        );
+        $child['source_provenance'] = array(
+            'operational_event_source' => 'ipca_aircraft_operations',
+            'source_system' => 'flightcircle',
+            'source_record_key' => 'ao:' . $operationId,
+            'source_identity_hash' => $operation['source_identity_hash'] ?? null,
+            'inherited_by_explicit_association' => true,
+        );
+        $child['operation_context_inherited'] = true;
+        $child['source_record_keys'] = $this->mergeRecordKeys($child['source_record_keys'] ?? array(), array('aircraft_operation' => 'ao:' . $operationId));
+        $child['association_keys'] = array_values(array_unique(array_merge(array_map('strval', $child['association_keys'] ?? array()), array('ao:' . $operationId))));
+
+        if ($crew['crew_conflict']) {
+            $child['conflict_status'] = 'warning';
+            $child['crew_conflict_diagnostics'] = $crew['crew_conflict_diagnostics'];
+            $this->lastEnrichmentDiagnostics['child_legs_with_conflict'] = ($this->lastEnrichmentDiagnostics['child_legs_with_conflict'] ?? 0) + 1;
+        }
+        if (!$this->hasResolvedValue($child['pilot_1'] ?? null) && !$this->hasResolvedValue($child['pilot_2'] ?? null)) {
+            $this->lastEnrichmentDiagnostics['child_legs_with_unresolved_crew'] = ($this->lastEnrichmentDiagnostics['child_legs_with_unresolved_crew'] ?? 0) + 1;
+        }
+        $this->lastEnrichmentDiagnostics['child_legs_enriched'] = ($this->lastEnrichmentDiagnostics['child_legs_enriched'] ?? 0) + 1;
+        return $child;
+    }
+
+    /**
+     * @param array<string,mixed> $operation
+     * @param list<array<string,mixed>> $crewRows
+     * @return array<string,mixed>
+     */
+    private function crewValuesFromOperation(array $operation, array $crewRows): array
+    {
+        $selected = array();
+        $seen = array();
+        $conflicts = array();
+        foreach ($crewRows as $row) {
+            $name = trim((string)($row['source_person_text'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $role = $this->displayCrewRole($row['resolved_role'] ?? null, $row['source_role_text'] ?? null);
+            $identity = strtolower($name . '|' . (string)$role);
+            if (isset($seen[$identity])) {
+                continue;
+            }
+            $seen[$identity] = true;
+            $selected[] = $this->crewProvenance($name, $name, $role, $row);
+        }
+
+        if ($selected === array()) {
+            $user = trim((string)($operation['user_text'] ?? ''));
+            $instructor = trim((string)($operation['instructor_text'] ?? ''));
+            if ($user !== '') {
+                $selected[] = $this->provenanceValue($user, $user, 'ipca_aircraft_operations.user_text', 0.45, 'needs_review') + array('source_system' => 'flightcircle', 'source_record_key' => 'ao:' . (int)($operation['aircraft_operation_id'] ?? 0));
+            }
+            if ($instructor !== '') {
+                $selected[] = $this->provenanceValue($instructor, $instructor, 'ipca_aircraft_operations.instructor_text', 0.55, 'needs_review') + array('source_system' => 'flightcircle', 'source_record_key' => 'ao:' . (int)($operation['aircraft_operation_id'] ?? 0));
+            }
+        }
+
+        usort($selected, function (array $left, array $right): int {
+            $leftRank = $this->crewRoleSortRank($left['role']['resolved_value'] ?? null);
+            $rightRank = $this->crewRoleSortRank($right['role']['resolved_value'] ?? null);
+            if ($leftRank === $rightRank) {
+                return strcmp((string)($left['resolved_value'] ?? ''), (string)($right['resolved_value'] ?? ''));
+            }
+            return $leftRank <=> $rightRank;
+        });
+
+        foreach ($selected as $item) {
+            $role = strtolower((string)($item['role']['resolved_value'] ?? ''));
+            if ($role !== '' && isset($conflicts[$role]) && $conflicts[$role] !== ($item['resolved_value'] ?? null)) {
+                $conflicts[$role . '_conflict'] = array($conflicts[$role], $item['resolved_value'] ?? null);
+            } elseif ($role !== '') {
+                $conflicts[$role] = $item['resolved_value'] ?? null;
+            }
+        }
+
+        $pilot1 = $selected[0] ?? $this->emptyProvenanceValue(null, 'unresolved');
+        $pilot2 = $selected[1] ?? $this->emptyProvenanceValue(null, 'unresolved');
+        return array(
+            'pilot_1' => $this->crewNameOnly($pilot1),
+            'pilot_1_role' => $this->crewRoleOnly($pilot1),
+            'pilot_2' => $this->crewNameOnly($pilot2),
+            'pilot_2_role' => $this->crewRoleOnly($pilot2),
+            'crew_detail' => $selected,
+            'crew_conflict' => count(array_filter(array_keys($conflicts), static fn (string $key): bool => str_ends_with($key, '_conflict'))) > 0,
+            'crew_conflict_diagnostics' => $conflicts,
+        );
+    }
+
+    private function hasResolvedValue(mixed $value): bool
+    {
+        return is_array($value) && array_key_exists('resolved_value', $value) && $value['resolved_value'] !== null && trim((string)$value['resolved_value']) !== '';
+    }
+
+    /**
+     * @param array<string,mixed> $left
+     * @param array<string,mixed> $right
+     * @return array<string,mixed>
+     */
+    private function mergeRecordKeys(array $left, array $right): array
+    {
+        foreach ($right as $key => $value) {
+            if (!isset($left[$key]) || trim((string)$left[$key]) === '') {
+                $left[$key] = $value;
+            }
+        }
+        return $left;
+    }
+
+    private function displayCrewRole(mixed $resolvedRole, mixed $sourceRole): ?string
+    {
+        $candidate = strtolower(trim((string)$resolvedRole));
+        if ($candidate === '' || in_array($candidate, array('unknown_crew_role', 'unknown', 'unresolved'), true)) {
+            $candidate = strtolower(trim((string)$sourceRole));
+        }
+        $map = array(
+            'student' => 'Student',
+            'instructor' => 'Instructor',
+            'pic' => 'PIC',
+            'safety_pilot' => 'Safety Pilot',
+            'safety pilot' => 'Safety Pilot',
+            'examiner' => 'Examiner',
+            'solo' => 'Solo',
+            'observer' => 'Observer',
+        );
+        return $map[$candidate] ?? null;
+    }
+
+    private function crewRoleSortRank(mixed $role): int
+    {
+        $role = strtolower(trim((string)$role));
+        $rank = array(
+            'student' => 10,
+            'pic' => 20,
+            'solo' => 25,
+            'safety pilot' => 30,
+            'instructor' => 40,
+            'examiner' => 50,
+            'observer' => 60,
+        );
+        return $rank[$role] ?? 100;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function crewProvenance(string $rawName, string $resolvedName, ?string $role, array $row): array
+    {
+        $base = $this->provenanceValue($rawName, $resolvedName, 'ipca_crew_assignments.source_person_text', ((float)($row['confidence_score'] ?? 0)) / 100.0, (string)($row['review_status'] ?? 'needs_review')) + array(
+            'source_system' => $row['source_system'] ?? 'flightcircle',
+            'source_record_key' => !empty($row['source_record_id']) ? 'fcs:' . (string)$row['source_record_id'] : 'crew_assignment:' . (int)($row['id'] ?? 0),
+            'person_user_id' => isset($row['person_user_id']) ? (int)$row['person_user_id'] : null,
+            'mapping_status' => $row['mapping_status'] ?? null,
+        );
+        $base['role'] = $this->provenanceValue($row['source_role_text'] ?? null, $role, 'ipca_crew_assignments.source_role_text', $role !== null ? 0.65 : 0.0, $role !== null ? (string)($row['review_status'] ?? 'needs_review') : 'unresolved') + array(
+            'source_system' => $row['source_system'] ?? 'flightcircle',
+            'source_record_key' => !empty($row['source_record_id']) ? 'fcs:' . (string)$row['source_record_id'] : 'crew_assignment:' . (int)($row['id'] ?? 0),
+        );
+        return $base;
+    }
+
+    /**
+     * @param array<string,mixed> $crew
+     * @return array<string,mixed>
+     */
+    private function crewNameOnly(array $crew): array
+    {
+        $out = $crew;
+        unset($out['role']);
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $crew
+     * @return array<string,mixed>
+     */
+    private function crewRoleOnly(array $crew): array
+    {
+        return isset($crew['role']) && is_array($crew['role']) ? $crew['role'] : $this->emptyProvenanceValue(null, 'unresolved');
     }
 
     /**
@@ -1482,6 +1882,8 @@ final class MasterLogbookReadService
             'cvr' => $candidate['cvr'],
             'adsb' => $candidate['adsb'],
             'replay' => $replay,
+            'proposal' => $candidate['proposal'] ?? $this->evidenceState('not_available'),
+            'official_logbook' => $candidate['official_logbook'] ?? $this->evidenceState('not_available'),
             'available_actions' => $actions,
             'provenance' => $candidate['source_record_keys'] ?? array(),
         );
