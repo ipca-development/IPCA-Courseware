@@ -493,6 +493,12 @@ final class MasterLogbookReadService
                     s.elapsed_seconds,
                     s.hobbs_duration_seconds,
                     s.hobbs_status,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_out'))) AS garmin_hobbs_out,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_in'))) AS garmin_hobbs_in,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_time'))) AS garmin_hobbs_time,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out'))) AS garmin_tacho_out,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in'))) AS garmin_tacho_in,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time'))) AS garmin_tacho_time,
                     s.row_count
                 FROM ipca_flightcircle_garmin_matches m
                 INNER JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = m.csv_file_id
@@ -540,6 +546,12 @@ final class MasterLogbookReadService
                     s.elapsed_seconds,
                     s.hobbs_duration_seconds,
                     s.hobbs_status,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_out')) AS garmin_hobbs_out,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_in')) AS garmin_hobbs_in,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_time')) AS garmin_hobbs_time,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out')) AS garmin_tacho_out,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in')) AS garmin_tacho_in,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time')) AS garmin_tacho_time,
                     s.row_count
                 FROM ipca_garmin_csv_flight_summaries s
                 LEFT JOIN ipca_flightcircle_garmin_matches m ON m.csv_file_id = s.csv_file_id AND m.operation_id IS NOT NULL AND m.match_status IN ('high_confidence','probable')
@@ -678,6 +690,12 @@ final class MasterLogbookReadService
                     s.elapsed_seconds,
                     s.hobbs_duration_seconds,
                     s.hobbs_status,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_out'))) AS garmin_hobbs_out,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_in'))) AS garmin_hobbs_in,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_time'))) AS garmin_hobbs_time,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out'))) AS garmin_tacho_out,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in'))) AS garmin_tacho_in,
+                    MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time'))) AS garmin_tacho_time,
                     s.row_count
                 FROM ipca_flightcircle_garmin_matches m
                 INNER JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = m.csv_file_id
@@ -714,6 +732,12 @@ final class MasterLogbookReadService
                 s.elapsed_seconds,
                 s.hobbs_duration_seconds,
                 s.hobbs_status,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_out')) AS garmin_hobbs_out,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_in')) AS garmin_hobbs_in,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.hobbs_time')) AS garmin_hobbs_time,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out')) AS garmin_tacho_out,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in')) AS garmin_tacho_in,
+                JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time')) AS garmin_tacho_time,
                 s.row_count
             FROM ipca_garmin_csv_flight_summaries s
             WHERE s.csv_file_id = ?
@@ -890,12 +914,12 @@ final class MasterLogbookReadService
             'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.75, 'needs_review'),
             'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.75, 'needs_review'),
             'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.75, 'needs_review'),
-            'departure_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'arrival_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'departure_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'arrival_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'hobbs_duration' => $this->provenanceValue($row['hobbs_duration_seconds'] ?? null, is_numeric($row['hobbs_duration_seconds'] ?? null) ? round(((float)$row['hobbs_duration_seconds']) / 3600.0, 3) : null, 'ipca_garmin_csv_flight_summaries.hobbs_duration_seconds', 0.75, 'needs_review'),
-            'tacho_duration' => $this->emptyProvenanceValue(null, 'detail_required'),
+            'departure_hobbs' => $this->counterProvenance($row['garmin_hobbs_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_out', 0.9, 'system'),
+            'arrival_hobbs' => $this->counterProvenance($row['garmin_hobbs_in'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_in', 0.85, 'system'),
+            'departure_tacho' => $this->counterProvenance($row['garmin_tacho_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_out', 0.9, 'system'),
+            'arrival_tacho' => $this->counterProvenance($row['garmin_tacho_in'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_in', 0.85, 'system'),
+            'hobbs_duration' => $this->counterProvenance($row['garmin_hobbs_time'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_time', 0.85, 'system'),
+            'tacho_duration' => $this->counterProvenance($row['garmin_tacho_time'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_time', 0.85, 'system'),
             'landings' => $this->emptyProvenanceValue(null, 'unresolved'),
             'fuel_out' => $this->emptyProvenanceValue(null, 'not_available'),
             'fuel_in' => $this->emptyProvenanceValue(null, 'not_available'),
@@ -940,12 +964,12 @@ final class MasterLogbookReadService
             'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.7, 'unreviewed'),
             'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.7, 'unreviewed'),
             'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.7, 'unreviewed'),
-            'departure_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'arrival_hobbs' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'departure_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'arrival_tacho' => $this->emptyProvenanceValue(null, 'detail_required'),
-            'hobbs_duration' => $this->provenanceValue($row['hobbs_duration_seconds'] ?? null, is_numeric($row['hobbs_duration_seconds'] ?? null) ? round(((float)$row['hobbs_duration_seconds']) / 3600.0, 3) : null, 'ipca_garmin_csv_flight_summaries.hobbs_duration_seconds', 0.7, 'unreviewed'),
-            'tacho_duration' => $this->emptyProvenanceValue(null, 'detail_required'),
+            'departure_hobbs' => $this->counterProvenance($row['garmin_hobbs_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_out', 0.8, 'unreviewed'),
+            'arrival_hobbs' => $this->counterProvenance($row['garmin_hobbs_in'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_in', 0.75, 'unreviewed'),
+            'departure_tacho' => $this->counterProvenance($row['garmin_tacho_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_out', 0.8, 'unreviewed'),
+            'arrival_tacho' => $this->counterProvenance($row['garmin_tacho_in'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_in', 0.75, 'unreviewed'),
+            'hobbs_duration' => $this->counterProvenance($row['garmin_hobbs_time'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_time', 0.75, 'unreviewed'),
+            'tacho_duration' => $this->counterProvenance($row['garmin_tacho_time'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.tacho_time', 0.75, 'unreviewed'),
             'landings' => $this->emptyProvenanceValue(null, 'unresolved'),
             'fuel_out' => $this->emptyProvenanceValue(null, 'not_available'),
             'fuel_in' => $this->emptyProvenanceValue(null, 'not_available'),
@@ -1984,6 +2008,17 @@ final class MasterLogbookReadService
         }
         $hours = round(((float)$milliseconds) / 3600000.0, 3);
         return $this->provenanceValue($milliseconds, $hours, 'duration_ms', 0.9, 'system');
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function counterProvenance(mixed $raw, string $source, float $confidence, string $verificationState): array
+    {
+        if (!is_numeric($raw)) {
+            return $this->emptyProvenanceValue($raw, 'unresolved');
+        }
+        return $this->provenanceValue($raw, number_format((float)$raw, 1, '.', ''), $source, $confidence, $verificationState);
     }
 
     private function tableExists(string $table): bool

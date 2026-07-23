@@ -46,6 +46,7 @@ scenario('Local IFR Training Mission produces unresolved DEP and ARR', row_airpo
 scenario('missing route produces unresolved airports instead of fallback', row_airport_pair($default, 'historical-event:ao:310', null, null));
 scenario('valid route text resolves only supported airport endpoints', row_airport_pair($default, 'historical-event:ao:311', 'KTRM', 'KTRM'));
 scenario('confirmed multi-leg event summary uses first departure and last arrival', detail_summary_airport_pair($service, 'current-event:ofr:102', 'KTRM', 'KTRM'));
+scenario('confirmed Garmin rows expose one-decimal Hobbs and Tacho counters', row_has_one_decimal_counters($default, 'historical-event:ao:302'));
 scenario('malformed route text does not produce airports', row_airport_pair($default, 'historical-event:ao:312', null, null));
 scenario('four-letter non-airport word is rejected', row_airport_pair($default, 'historical-event:ao:313', null, null));
 scenario('conflicting airport route evidence is not silently resolved', row_airport_pair($default, 'historical-event:ao:314', null, null) && row_conflict($default, 'historical-event:ao:314', 'warning'));
@@ -141,6 +142,21 @@ function detail_summary_airport_pair(MasterLogbookReadService $service, string $
     $detail = $service->eventDetail($eventKey);
     return (($detail['summary']['departure_airport']['resolved_icao'] ?? $detail['summary']['departure_airport']['resolved_value'] ?? null) === $departure)
         && (($detail['summary']['arrival_airport']['resolved_icao'] ?? $detail['summary']['arrival_airport']['resolved_value'] ?? null) === $arrival);
+}
+
+function row_has_one_decimal_counters(array $result, string $eventKey): bool
+{
+    $row = row_for($result, $eventKey);
+    if (!is_array($row)) {
+        return false;
+    }
+    foreach (array('departure_hobbs', 'arrival_hobbs', 'departure_tacho', 'arrival_tacho') as $field) {
+        $value = (string)($row[$field]['resolved_value'] ?? '');
+        if (preg_match('/^-?\d+\.\d$/', $value) !== 1) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function suppressed(array $result, string $eventKey, string $winnerEventKey): bool
