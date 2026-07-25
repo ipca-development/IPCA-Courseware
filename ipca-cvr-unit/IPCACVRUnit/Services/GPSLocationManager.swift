@@ -8,10 +8,17 @@ final class GPSLocationManager: NSObject, ObservableObject {
     @Published private(set) var latestSample: GPSSample?
     @Published private(set) var lastError: String = ""
 
+    private static let captureDesiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    private static let captureDistanceFilter: CLLocationDistance = 10
+    private static let minimumCaptureSampleInterval: TimeInterval = 2
+    private static let minimumCaptureDistance: CLLocationDistance = 8
+
     private var locationManager: CLLocationManager?
     private var captureRecordingID: String?
     private var captureStartedAt: Date?
     private var capturedSamples: [GPSSample] = []
+    private var lastCapturedLocation: CLLocation?
+    private var lastCapturedSampleAt: Date?
 
     func prepare() {
         ensureManager()
@@ -30,6 +37,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
         captureRecordingID = recordingID
         captureStartedAt = startedAt
         capturedSamples = []
+        lastCapturedLocation = nil
+        lastCapturedSampleAt = nil
 
         guard let locationManager else {
             state = .unavailable
@@ -57,6 +66,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
         }
         captureRecordingID = nil
         captureStartedAt = nil
+        lastCapturedLocation = nil
+        lastCapturedSampleAt = nil
         locationManager?.stopUpdatingLocation()
         updateAuthorizationState()
 
@@ -93,8 +104,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
         guard locationManager == nil else { return }
         let manager = CLLocationManager()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        manager.distanceFilter = kCLDistanceFilterNone
+        manager.desiredAccuracy = Self.captureDesiredAccuracy
+        manager.distanceFilter = Self.captureDistanceFilter
         manager.pausesLocationUpdatesAutomatically = false
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
@@ -118,11 +129,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
     }
 
     private func startLocationUpdates() {
-        guard CLLocationManager.locationServicesEnabled() else {
-            state = .unavailable
-            lastError = "Location services are disabled."
-            return
-        }
+        locationManager?.desiredAccuracy = Self.captureDesiredAccuracy
+        locationManager?.distanceFilter = Self.captureDistanceFilter
         state = .recording
         lastError = ""
         locationManager?.startUpdatingLocation()
@@ -163,9 +171,23 @@ final class GPSLocationManager: NSObject, ObservableObject {
         )
 
         latestSample = sample
-        if captureRecordingID != nil {
+        if captureRecordingID != nil, shouldCapture(location: location, timestamp: timestamp) {
             capturedSamples.append(sample)
+            lastCapturedLocation = location
+            lastCapturedSampleAt = timestamp
         }
+    }
+
+    private func shouldCapture(location: CLLocation, timestamp: Date) -> Bool {
+        guard let lastCapturedSampleAt, let lastCapturedLocation else {
+            return true
+        }
+
+        let secondsSinceLastSample = timestamp.timeIntervalSince(lastCapturedSampleAt)
+        let metersSinceLastSample = location.distance(from: lastCapturedLocation)
+
+        return secondsSinceLastSample >= Self.minimumCaptureSampleInterval
+            || metersSinceLastSample >= Self.minimumCaptureDistance
     }
 }
 

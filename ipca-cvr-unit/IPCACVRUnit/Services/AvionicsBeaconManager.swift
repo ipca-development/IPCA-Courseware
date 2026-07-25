@@ -2,6 +2,8 @@ import Combine
 import CoreBluetooth
 import Foundation
 
+private let avionicsBeaconUppercaseHexTable = Array("0123456789ABCDEF".utf8)
+
 @MainActor
 final class AvionicsBeaconManager: NSObject, ObservableObject {
     static let serviceUUID = CBUUID(string: "7A2D5E01-9F83-4C0A-BA18-4B39A2D2E001")
@@ -13,6 +15,14 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     static let temporarilyMissingAfter: TimeInterval = 5
     static let offConfirmationAfter: TimeInterval = 60
     static let recorderContactRefreshInterval: TimeInterval = 8
+    private static let discoveryLogInterval: TimeInterval = 1
+    private static let maximumLogEntries = 300
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 
     @Published private(set) var bluetoothAuthorization = "Unknown"
     @Published private(set) var centralState = "Unknown"
@@ -59,6 +69,7 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     private var recorderVersion = (major: UInt8(1), minor: UInt8(0), patch: UInt8(0))
     private var lastKnownBootCounter: UInt32?
     private var lastKnownBootUUID: String?
+    private var lastDiscoveryLogAt: Date?
 
     override init() {
         super.init()
@@ -213,19 +224,22 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
             previousTargetAdvertisementAt = now
         }
 
-        logEntries.append(AvionicsBeaconLogEntry(
-            kind: .discovery,
-            timestamp: now,
-            marker: activeMarker,
-            peripheralIdentifier: peripheral.identifier.uuidString,
-            peripheralName: peripheral.name,
-            advertisedLocalName: localName,
-            advertisedServiceUUIDs: serviceUUIDs,
-            manufacturerDataHex: manufacturerHex,
-            rssi: rssi.intValue,
-            secondsSincePreviousAdvertisement: elapsed,
-            matchedCustomService: matchedService
-        ))
+        if shouldLogDiscovery(at: now) {
+            appendLogEntry(AvionicsBeaconLogEntry(
+                kind: .discovery,
+                timestamp: now,
+                marker: activeMarker,
+                peripheralIdentifier: peripheral.identifier.uuidString,
+                peripheralName: peripheral.name,
+                advertisedLocalName: localName,
+                advertisedServiceUUIDs: serviceUUIDs,
+                manufacturerDataHex: manufacturerHex,
+                rssi: rssi.intValue,
+                secondsSincePreviousAdvertisement: elapsed,
+                matchedCustomService: matchedService
+            ))
+            lastDiscoveryLogAt = now
+        }
 
         guard matchedService else { return }
 
@@ -476,7 +490,8 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
             "recorder_token_hex": status.recorderTokenHex,
             "last_recorder_contact_uptime_seconds": status.lastRecorderContactUptimeSeconds.map { Int($0) as Any } ?? NSNull(),
             "usb_diagnostic_kind": Int(status.usbDiagnosticKind),
-            "usb_diagnostic_value": Int(status.usbDiagnosticValue)
+            "usb_diagnostic_value": Int(status.usbDiagnosticValue),
+            "beacon_identity_hex": status.beaconIdentityHex
         ]
     }
 
@@ -498,18 +513,15 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     }
 
     private static func isoString(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter.string(from: date)
+        isoFormatter.string(from: date)
     }
 
     private static func parseStatusPacket(_ data: Data) -> AvionicsBeaconStatusPacket? {
         guard data.count == AvionicsBeaconStatusPacket.expectedLength else { return nil }
         let bytes = [UInt8](data)
         guard bytes[0] == 1 else { return nil }
-        let bootUUID = Data(bytes[5..<21]).ipcaUUIDHexString
-        let token = Data(bytes[33..<49]).ipcaHexString
+        let bootUUID = bytes.ipcaUUIDHexString(in: 5..<21)
+        let token = bytes.ipcaHexString(in: 33..<49)
         let lastContactRaw = bytes.uint32LE(at: 49)
         return AvionicsBeaconStatusPacket(
             protocolVersion: bytes[0],
@@ -522,7 +534,8 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
             recorderTokenHex: token,
             lastRecorderContactUptimeSeconds: lastContactRaw == UInt32.max ? nil : lastContactRaw,
             usbDiagnosticKind: bytes[53],
-            usbDiagnosticValue: bytes.uint16LE(at: 54)
+            usbDiagnosticValue: bytes.uint16LE(at: 54),
+            beaconIdentityHex: String(format: "%08X", bytes.uint32LE(at: 56))
         )
     }
 
@@ -542,11 +555,25 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
         guard let data = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data else {
             return nil
         }
-        return data.map { String(format: "%02X", $0) }.joined()
+        return data.ipcaHexString
     }
 
     private func logEvent(_ event: String) {
-        logEntries.append(AvionicsBeaconLogEntry(kind: .event, marker: activeMarker, event: event))
+        appendLogEntry(AvionicsBeaconLogEntry(kind: .event, marker: activeMarker, event: event))
+    }
+
+    private func appendLogEntry(_ entry: AvionicsBeaconLogEntry) {
+        logEntries.append(entry)
+        if logEntries.count > Self.maximumLogEntries {
+            logEntries.removeFirst(logEntries.count - Self.maximumLogEntries)
+        }
+    }
+
+    private func shouldLogDiscovery(at now: Date) -> Bool {
+        guard let lastDiscoveryLogAt else {
+            return true
+        }
+        return now.timeIntervalSince(lastDiscoveryLogAt) >= Self.discoveryLogInterval
     }
 
     private func updateBluetoothAuthorization() {
@@ -697,20 +724,12 @@ extension AvionicsBeaconManager: CBPeripheralDelegate {
 
 private extension Data {
     var ipcaHexString: String {
-        map { String(format: "%02X", $0) }.joined()
+        Array(self).ipcaHexString(in: 0..<count)
     }
 
     var ipcaUUIDHexString: String {
         guard count == 16 else { return ipcaHexString }
-        let hex = ipcaHexString
-        let parts = [
-            hex.prefix(8),
-            hex.dropFirst(8).prefix(4),
-            hex.dropFirst(12).prefix(4),
-            hex.dropFirst(16).prefix(4),
-            hex.dropFirst(20)
-        ]
-        return parts.map(String.init).joined(separator: "-")
+        return Array(self).ipcaUUIDHexString(in: 0..<count)
     }
 
     mutating func appendUInt16LE(_ value: UInt16) {
@@ -727,6 +746,26 @@ private extension Data {
 }
 
 private extension Array where Element == UInt8 {
+    func ipcaHexString(in range: Range<Int>) -> String {
+        var output: [UInt8] = []
+        output.reserveCapacity(range.count * 2)
+        for index in range {
+            let byte = self[index]
+            output.append(avionicsBeaconUppercaseHexTable[Int(byte >> 4)])
+            output.append(avionicsBeaconUppercaseHexTable[Int(byte & 0x0F)])
+        }
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    func ipcaUUIDHexString(in range: Range<Int>) -> String {
+        guard range.count == 16 else {
+            return ipcaHexString(in: range)
+        }
+
+        let hex = ipcaHexString(in: range)
+        return "\(hex.prefix(8))-\(hex.dropFirst(8).prefix(4))-\(hex.dropFirst(12).prefix(4))-\(hex.dropFirst(16).prefix(4))-\(hex.dropFirst(20))"
+    }
+
     func uint16LE(at offset: Int) -> UInt16 {
         UInt16(self[offset]) |
             (UInt16(self[offset + 1]) << 8)

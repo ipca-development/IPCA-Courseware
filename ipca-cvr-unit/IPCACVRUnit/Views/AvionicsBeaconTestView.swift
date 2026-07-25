@@ -16,12 +16,9 @@ struct AvionicsBeaconTestView: View {
                     header
                     statusBanner
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                        controls
-                        liveStatus
-                        recentLog
-                    }
-
+                    controls
+                    liveStatus
+                    recentLog
                     helpSection
                 }
                 .padding(16)
@@ -41,7 +38,7 @@ struct AvionicsBeaconTestView: View {
                 Text("Avionics Beacon Test")
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(.white)
-                Text("Foreground BLE diagnostic for the XIAO ESP32-C3 avionics-power beacon")
+                Text("Foreground BLE diagnostic for the avionics-power beacon")
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.82))
             }
@@ -84,7 +81,7 @@ struct AvionicsBeaconTestView: View {
                     .font(.caption)
                     .foregroundStyle(IPCATheme.secondaryText)
 
-                HStack {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
                     Button("Start Scan") {
                         manager.startScan(scanAll: scanAllMode)
                     }
@@ -109,7 +106,7 @@ struct AvionicsBeaconTestView: View {
                     .disabled(manager.logEntries.isEmpty)
                 }
 
-                HStack {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
                     Button("Mark \"Power On\"") {
                         manager.mark("Power On")
                     }
@@ -192,11 +189,11 @@ struct AvionicsBeaconTestView: View {
         IPCACard(title: "Test Procedure", systemImage: "questionmark.circle") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Test A: Aircraft USB power off. Start scan and confirm state remains UNKNOWN or AVIONICS OFF after the timeout.")
-                Text("Test B: Turn aircraft USB power on. Confirm the XIAO boots, at least one matching advertisement arrives, and state changes to AVIONICS ON.")
+                Text("Test B: Turn aircraft USB power on. Confirm the assigned beacon boots, at least one matching advertisement arrives, and state changes to AVIONICS ON.")
                 Text("Test C: Leave power on for at least 5 minutes. Confirm advertisements continue arriving and there are no false OFF transitions.")
                 Text("Test D: Turn aircraft USB power off. Confirm temporary missing after 5 seconds and AVIONICS OFF after 15 seconds.")
-                Text("Test E: Rapidly cycle power off/on. Confirm the app does not create duplicate devices and recognizes the beacon after reboot without depending on the iOS peripheral identifier.")
-                Text("When Admin > Connect Beacon is enabled, this same beacon state starts and stops the CVR recording.")
+                Text("Test E: Rapidly cycle power off/on. Confirm the app recognizes the same beacon identity after reboot and does not rely on the iOS peripheral identifier.")
+                Text("When Admin > Connect Beacon is enabled, this beacon state starts and stops the CVR recording.")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(IPCATheme.secondaryText)
             }

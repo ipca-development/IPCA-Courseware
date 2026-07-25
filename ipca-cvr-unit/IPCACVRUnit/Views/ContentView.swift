@@ -4,212 +4,96 @@ struct ContentView: View {
     @EnvironmentObject private var settings: SettingsStore
     @State private var adminPIN = ""
     @State private var adminUnlocked = false
+    @State private var showAdminUnlock = false
 
     var body: some View {
+        Group {
+            if adminUnlocked {
+                adminTabs
+            } else {
+                StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+            }
+        }
+        .background(IPCATheme.pageBackground.ignoresSafeArea())
+        .onChange(of: showAdminUnlock) { _, presented in
+            if presented {
+                adminPIN = ""
+            }
+        }
+        .sheet(isPresented: $showAdminUnlock) {
+            AdminUnlockView(adminPIN: $adminPIN, adminUnlocked: $adminUnlocked)
+                .onChange(of: adminUnlocked) { _, unlocked in
+                    if unlocked {
+                        adminPIN = ""
+                        showAdminUnlock = false
+                    }
+                }
+        }
+    }
+
+    private var adminTabs: some View {
         TabView {
-            StatusDashboardView(adminUnlocked: $adminUnlocked)
+            StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
                 .tabItem {
-                    Label("Status", systemImage: "waveform")
+                    Image(systemName: "waveform")
+                        .font(.system(size: 12))
+                    Text("Status")
                 }
 
             AvionicsBeaconTestView()
                 .tabItem {
-                    Label("Beacon Test", systemImage: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 12))
+                    Text("Beacon Test")
                 }
 
-            PostflightWorkflowView()
+            AdminRecordingsView()
                 .tabItem {
-                    Label("Postflight", systemImage: "checklist")
+                    Image(systemName: "externaldrive")
+                        .font(.system(size: 12))
+                    Text("Recordings")
                 }
 
-            if adminUnlocked {
-                AdminRecordingsView()
-                    .tabItem {
-                        Label("Recordings", systemImage: "externaldrive")
-                    }
+            AdminSettingsView()
+                .tabItem {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12))
+                    Text("Admin")
+                }
 
-                AdminSettingsView()
-                    .tabItem {
-                        Label("Admin", systemImage: "gearshape")
-                    }
-            } else {
-                AdminUnlockView(adminPIN: $adminPIN, adminUnlocked: $adminUnlocked)
-                    .tabItem {
-                        Label("Admin", systemImage: "lock")
-                    }
-            }
+            ExitAdminView(adminUnlocked: $adminUnlocked)
+                .tabItem {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 12))
+                    Text("Exit Admin")
+                }
         }
-        .background(IPCATheme.pageBackground.ignoresSafeArea())
     }
 }
 
-private struct PostflightWorkflowView: View {
-    @EnvironmentObject private var store: RecordingStore
-    @EnvironmentObject private var settings: SettingsStore
-    @EnvironmentObject private var uploadManager: UploadManager
-    @EnvironmentObject private var network: NetworkMonitor
-
-    private var latestRecording: Recording? {
-        store.recordings.max { lhs, rhs in
-            lhs.startedAt < rhs.startedAt
-        }
-    }
+private struct ExitAdminView: View {
+    @Binding var adminUnlocked: Bool
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Postflight")
-                        .font(.largeTitle.weight(.bold))
-                        .foregroundStyle(IPCATheme.navy)
-
-                    Text("After avionics power is removed, the CVR Unit keeps the recording locally and uploads/transcribes automatically when internet access is available.")
-                        .font(.subheadline)
-                        .foregroundStyle(IPCATheme.secondaryText)
-
-                    if let recording = latestRecording {
-                        IPCACard(title: "Latest Recording", systemImage: "waveform.badge.checkmark") {
-                            PostflightStatusLine(label: "Recording ID", value: shortID(recording.id), color: IPCATheme.secondaryText)
-                            PostflightStatusLine(label: "Started", value: recording.startedAt.formatted(date: .abbreviated, time: .shortened), color: IPCATheme.navy)
-                            PostflightStatusLine(label: "Duration", value: format(duration: recording.duration), color: IPCATheme.navy)
-                            PostflightStatusLine(label: "Audio", value: recording.inputDeviceName, color: recording.inputDeviceName.localizedCaseInsensitiveContains("iPhone") ? IPCATheme.warning : IPCATheme.success)
-                            PostflightStatusLine(label: "GPS", value: recording.gpsSamplesPath == nil ? "Not saved" : "Saved", color: recording.gpsSamplesPath == nil ? IPCATheme.warning : IPCATheme.success)
-                            PostflightStatusLine(label: "Events", value: recording.recordingEventsPath == nil ? "Not saved" : "Saved", color: recording.recordingEventsPath == nil ? IPCATheme.secondaryText : IPCATheme.success)
-                            PostflightStatusLine(label: "Upload", value: uploadLabel(for: recording), color: uploadColor(for: recording))
-                            PostflightStatusLine(label: "Transcript", value: transcriptLabel(for: recording), color: transcriptColor(for: recording))
-                        }
-
-                        IPCACard(title: "Readiness", systemImage: "airplane.departure") {
-                            PostflightStep(title: "Audio saved permanently", isComplete: recording.fileSize > 0, detail: ByteCountFormatter.string(fromByteCount: recording.fileSize, countStyle: .file))
-                            PostflightStep(title: "GPS UTC evidence saved", isComplete: recording.gpsSamplesPath != nil, detail: recording.gpsSamplesPath == nil ? "No GPS sidecar" : "GPS sidecar ready for upload")
-                            PostflightStep(title: "Operational events saved", isComplete: recording.recordingEventsPath != nil, detail: recording.recordingEventsPath == nil ? "No event sidecar" : "Event sidecar ready for upload")
-                            PostflightStep(title: "Upload completed", isComplete: recording.uploadStatus == .uploaded, detail: uploadLabel(for: recording))
-                            PostflightStep(title: "Transcript ready", isComplete: recording.transcriptStatus == .ready, detail: transcriptLabel(for: recording))
-                            if let sourceGapSummary = recording.sourceGapSummary, !sourceGapSummary.isEmpty {
-                                Text(sourceGapSummary)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(IPCATheme.danger)
-                            }
-
-                            Button(recording.uploadStatus == .uploaded ? "Upload Complete" : "Retry Upload Now") {
-                                uploadManager.upload(recordingID: recording.id, store: store, settings: settings)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(recording.uploadStatus == .uploaded || !network.canUpload(allowCellular: settings.allowCellularUpload))
-                        }
-                    } else {
-                        IPCACard(title: "No Recording Yet", systemImage: "record.circle") {
-                            Text("The first completed avionics-on event will appear here automatically.")
-                                .foregroundStyle(IPCATheme.secondaryText)
-                        }
-                    }
-                }
-                .padding(16)
-            }
-            .background(IPCATheme.pageBackground.ignoresSafeArea())
-            .navigationTitle("Postflight")
-        }
-    }
-
-    private func uploadLabel(for recording: Recording) -> String {
-        switch recording.uploadStatus {
-        case .uploaded:
-            return "Complete"
-        case .uploading:
-            return "\(Int((recording.uploadProgress * 100).rounded()))%"
-        case .failed:
-            if let next = recording.nextUploadRetryAt {
-                let seconds = max(0, Int(next.timeIntervalSinceNow.rounded()))
-                return "Failed · retrying in \(seconds)s"
-            }
-            return "Failed"
-        case .pending:
-            return "Pending"
-        }
-    }
-
-    private func transcriptLabel(for recording: Recording) -> String {
-        switch recording.transcriptStatus {
-        case .ready:
-            return "Complete"
-        case .transcribing:
-            return "\(recording.transcriptProgress)%"
-        case .failed:
-            return "Failed"
-        case .pending:
-            return "Pending"
-        }
-    }
-
-    private func uploadColor(for recording: Recording) -> Color {
-        switch recording.uploadStatus {
-        case .uploaded: return IPCATheme.success
-        case .uploading: return IPCATheme.brightBlue
-        case .failed: return IPCATheme.danger
-        case .pending: return IPCATheme.warning
-        }
-    }
-
-    private func transcriptColor(for recording: Recording) -> Color {
-        switch recording.transcriptStatus {
-        case .ready: return IPCATheme.success
-        case .transcribing: return IPCATheme.brightBlue
-        case .failed: return IPCATheme.danger
-        case .pending: return IPCATheme.warning
-        }
-    }
-
-    private func format(duration: TimeInterval) -> String {
-        let total = Int(duration.rounded())
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let seconds = total % 60
-        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-    }
-
-    private func shortID(_ value: String) -> String {
-        String(value.prefix(8))
-    }
-}
-
-private struct PostflightStatusLine: View {
-    var label: String
-    var value: String
-    var color: Color
-
-    var body: some View {
-        HStack {
-            Text(label)
+        VStack(spacing: 18) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(IPCATheme.brightBlue)
+            Text("Exit Admin Mode")
+                .font(.title.weight(.bold))
+                .foregroundStyle(IPCATheme.navy)
+            Text("Lock admin tools and return to the public recorder status screen.")
                 .font(.subheadline)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(IPCATheme.secondaryText)
-            Spacer()
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-}
-
-private struct PostflightStep: View {
-    var title: String
-    var isComplete: Bool
-    var detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isComplete ? "checkmark.circle.fill" : "clock.fill")
-                .foregroundStyle(isComplete ? IPCATheme.success : IPCATheme.warning)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(IPCATheme.navy)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(IPCATheme.secondaryText)
+                .padding(.horizontal)
+            Button("Exit Admin Mode", role: .destructive) {
+                adminUnlocked = false
             }
-            Spacer()
+            .buttonStyle(.borderedProminent)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IPCATheme.pageBackground.ignoresSafeArea())
     }
 }
 
@@ -284,7 +168,7 @@ private struct AdminSettingsView: View {
                 }
 
                 Section("Avionics Beacon") {
-                    Text("One-time setup for the ESP-32 avionics-power beacon. After connection is enabled, the iPhone listens for the beacon and uses it to start and stop recording.")
+                    Text("One-time setup for the avionics-power beacon. After connection is enabled, the iPhone listens for the assigned beacon identity and uses it to start and stop recording.")
                         .font(.caption)
                         .foregroundStyle(IPCATheme.secondaryText)
 
@@ -319,6 +203,28 @@ private struct AdminSettingsView: View {
                         Task { await coordinator.resetAudioRoute(source: "admin UI") }
                     }
                     Text(audio.sourceSummary)
+                    if audio.isInputGainSettable {
+                        Slider(
+                            value: Binding(
+                                get: { Double(audio.inputGain) },
+                                set: { audio.setInputGain(Float($0)) }
+                            ),
+                            in: 0...1
+                        )
+                        LabeledContent("Hardware input gain", value: "\(Int((audio.inputGain * 100).rounded()))%")
+                    } else {
+                        LabeledContent("Hardware input gain", value: "Not controllable by iOS")
+                    }
+                    Picker("Post recording gain", selection: $settings.postRecordingGainDB) {
+                        Text("Off").tag(0.0)
+                        Text("+3 dB").tag(3.0)
+                        Text("+6 dB").tag(6.0)
+                        Text("+9 dB").tag(9.0)
+                        Text("+12 dB").tag(12.0)
+                    }
+                    Text("Post recording gain makes finalized files louder after capture. It cannot recover clipped or noisy input.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
                 }
 
                 Section("GPS Time") {

@@ -58,6 +58,10 @@ $id = trim((string)($_GET['id'] ?? ''));
 $version = trim((string)($_GET['version'] ?? ''));
 $compact = in_array(strtolower(trim((string)($_GET['compact'] ?? ''))), array('1', 'true', 'yes'), true);
 $sampleStride = max(1, min(10, (int)($_GET['sample_stride'] ?? 1)));
+$manifestOnly = in_array(strtolower(trim((string)($_GET['manifest'] ?? ''))), array('1', 'true', 'yes'), true);
+$samplesOnly = in_array(strtolower(trim((string)($_GET['samples'] ?? ''))), array('1', 'true', 'yes'), true);
+$sampleOffset = max(0, (int)($_GET['offset'] ?? 0));
+$sampleLimit = max(500, min(20000, (int)($_GET['limit'] ?? 6000)));
 if ($id === '') {
     replay_api_json_response(array('ok' => false, 'error' => 'Recording id is required.'), 400);
 }
@@ -65,6 +69,19 @@ if ($id === '') {
 try {
     $service = new CockpitReconstructionService($pdo);
     if ($version === '2') {
+        if ($manifestOnly) {
+            $payload = $service->replayPayloadV2Manifest($id, $compact, $sampleStride, $sampleLimit);
+            replay_api_json_response($payload, empty($payload['ok']) ? 404 : 200);
+        }
+        if ($samplesOnly) {
+            http_response_code(200);
+            while (ob_get_level() > 0) {
+                @ob_end_clean();
+            }
+            $replayApiJsonStarted = true;
+            $service->streamReplayPayloadV2SamplesJson($id, $sampleOffset, $sampleLimit, $compact, $sampleStride);
+            exit;
+        }
         $metadata = $service->replayPayloadV2Metadata($id);
         if (empty($metadata['ok'])) {
             replay_api_json_response($metadata, 404);

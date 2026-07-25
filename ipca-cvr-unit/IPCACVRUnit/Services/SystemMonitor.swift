@@ -7,29 +7,32 @@ final class SystemMonitor: ObservableObject {
     @Published private(set) var batteryLevelPercent = 0
     @Published private(set) var batteryStateText = "Unknown"
     @Published private(set) var availableStorageBytes: Int64 = 0
+    @Published private(set) var storageText = "0 bytes"
 
+    private static let refreshInterval: TimeInterval = 30
+    private static let storageFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
     private var timer: Timer?
-
-    var storageText: String {
-        ByteCountFormatter.string(fromByteCount: availableStorageBytes, countStyle: .file)
-    }
-
     func start() {
         UIDevice.current.isBatteryMonitoringEnabled = true
         refresh()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
         }
     }
 
-    private func refresh() {
+    func refresh() {
         let rawLevel = UIDevice.current.batteryLevel
         batteryLevelPercent = rawLevel < 0 ? 0 : Int(rawLevel * 100)
         batteryStateText = Self.label(for: UIDevice.current.batteryState)
         availableStorageBytes = Self.availableStorageBytes()
+        storageText = Self.storageFormatter.string(fromByteCount: availableStorageBytes)
     }
 
     private static func label(for state: UIDevice.BatteryState) -> String {

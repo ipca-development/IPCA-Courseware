@@ -27,6 +27,10 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(adminPIN, forKey: Keys.adminPIN) }
     }
 
+    @Published var postRecordingGainDB: Double {
+        didSet { UserDefaults.standard.set(postRecordingGainDB, forKey: Keys.postRecordingGainDB) }
+    }
+
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
 
@@ -41,6 +45,7 @@ final class SettingsStore: ObservableObject {
         allowCellularUpload = UserDefaults.standard.object(forKey: Keys.allowCellularUpload) as? Bool ?? true
         isBeaconTriggerEnabled = UserDefaults.standard.object(forKey: Keys.isBeaconTriggerEnabled) as? Bool ?? false
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
+        postRecordingGainDB = UserDefaults.standard.object(forKey: Keys.postRecordingGainDB) as? Double ?? 0
     }
 
     var normalizedServerURL: URL? {
@@ -113,5 +118,6 @@ final class SettingsStore: ObservableObject {
         static let allowCellularUpload = "ipca.cvrUnit.allowCellularUpload"
         static let isBeaconTriggerEnabled = "ipca.cvrUnit.isBeaconTriggerEnabled"
         static let adminPIN = "ipca.cvrUnit.adminPIN"
+        static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
     }
 }

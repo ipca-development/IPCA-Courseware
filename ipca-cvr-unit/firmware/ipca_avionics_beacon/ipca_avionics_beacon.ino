@@ -126,7 +126,8 @@ std::string statusPayload() {
   putUInt32LE(buffer, 49, lastRecorderContactUptime);
   buffer[53] = USB_DIAGNOSTIC_UNAVAILABLE;
   putUInt16LE(buffer, 54, 0);
-  putUInt32LE(buffer, 56, 0);
+  uint32_t macFingerprint = static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFFFF);
+  putUInt32LE(buffer, 56, macFingerprint);
   return std::string(reinterpret_cast<const char*>(buffer), STATUS_LENGTH);
 }
 

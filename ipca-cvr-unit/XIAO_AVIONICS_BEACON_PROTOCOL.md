@@ -80,7 +80,7 @@ Byte layout:
 | 49 | 4 | UInt32 LE | Last recorder contact uptime seconds, `0xFFFFFFFF` when never contacted |
 | 53 | 1 | UInt8 | USB diagnostic kind |
 | 54 | 2 | UInt16 LE | USB diagnostic value |
-| 56 | 4 | UInt32 LE | Reserved, zero in v1 |
+| 56 | 4 | UInt32 LE | Beacon identity fingerprint, lower 32 bits of ESP32 eFuse MAC |
 
 Reset reason values:
 
@@ -136,6 +136,7 @@ Empty token representation: all 16 bytes zero. The iPhone should not write an em
 Persistent:
 
 - Boot counter only.
+- Beacon identity fingerprint is derived from ESP32 eFuse MAC and is stable for that hardware.
 
 Volatile, reset on every boot:
 

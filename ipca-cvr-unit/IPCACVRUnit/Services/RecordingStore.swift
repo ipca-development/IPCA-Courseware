@@ -50,6 +50,34 @@ final class RecordingStore: ObservableObject {
         recordings.first(where: { $0.id == id })
     }
 
+    func delete(_ recording: Recording) {
+        deleteLocalFiles(for: recording)
+        recordings.removeAll { $0.id == recording.id }
+        save()
+    }
+
+    func delete(ids: Set<String>) {
+        let recordingsToDelete = recordings.filter { ids.contains($0.id) }
+        for recording in recordingsToDelete {
+            deleteLocalFiles(for: recording)
+        }
+        recordings.removeAll { ids.contains($0.id) }
+        save()
+    }
+
+    func localStorageBytes(for recording: Recording) -> Int64 {
+        filePathsForDeletion(recording).reduce(Int64(0)) { total, path in
+            let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.fileSizeKey])
+            return total + Int64(values?.fileSize ?? 0)
+        }
+    }
+
+    func localStorageBytes(ids: Set<String>) -> Int64 {
+        recordings
+            .filter { ids.contains($0.id) }
+            .reduce(Int64(0)) { $0 + localStorageBytes(for: $1) }
+    }
+
     func pendingUploadIDs() -> [String] {
         recordings
             .filter { $0.shouldAttemptUpload() }
@@ -132,6 +160,53 @@ final class RecordingStore: ObservableObject {
             }
         }
         return changed
+    }
+
+    private func deleteLocalFiles(for recording: Recording) {
+        let fileManager = FileManager.default
+        for path in filePathsForDeletion(recording) where !path.isEmpty {
+            try? fileManager.removeItem(atPath: path)
+        }
+    }
+
+    private func filePathsForDeletion(_ recording: Recording) -> Set<String> {
+        let fileManager = FileManager.default
+        var paths = Set<String>()
+        paths.insert(recording.filePath)
+        if let gpsSamplesPath = recording.gpsSamplesPath {
+            paths.insert(gpsSamplesPath)
+        }
+        if let beaconDiagnosticsPath = recording.beaconDiagnosticsPath {
+            paths.insert(beaconDiagnosticsPath)
+        }
+        if let recordingEventsPath = recording.recordingEventsPath {
+            paths.insert(recordingEventsPath)
+        }
+
+        if let audioURL = try? Self.resolvedFileURL(
+            preferredPath: recording.filePath,
+            recordingID: recording.id,
+            fallbackFilename: "\(recording.id).m4a"
+        ) {
+            paths.insert(audioURL.path)
+        }
+
+        if let directory = try? Self.recordingsDirectory(),
+           let files = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            for url in files {
+                let name = url.lastPathComponent
+                if name == "\(recording.id).m4a"
+                    || name == "\(recording.id).gps.json"
+                    || name == "\(recording.id).beacon.json"
+                    || name == "\(recording.id).events.json"
+                    || name.hasPrefix("\(recording.id).part-")
+                    || name.hasPrefix("\(recording.id).combined") {
+                    paths.insert(url.path)
+                }
+            }
+        }
+
+        return paths
     }
 
     private func save() {

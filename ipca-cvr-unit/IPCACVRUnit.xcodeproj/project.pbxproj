@@ -28,6 +28,7 @@
 		100000000000000000000018 /* AvionicsBeaconManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AvionicsBeaconManager.swift */; };
 		10000000000000000000001A /* AvionicsBeaconTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* AvionicsBeaconTestView.swift */; };
 		10000000000000000000001B /* GPSLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001D /* GPSLocationManager.swift */; };
+		10000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001E /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +55,7 @@
 		20000000000000000000001A /* AvionicsBeaconManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconManager.swift; sourceTree = "<group>"; };
 		20000000000000000000001C /* AvionicsBeaconTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconTestView.swift; sourceTree = "<group>"; };
 		20000000000000000000001D /* GPSLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationManager.swift; sourceTree = "<group>"; };
+		20000000000000000000001E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -82,6 +84,7 @@
 				400000000000000000000003 /* Models */,
 				400000000000000000000004 /* Services */,
 				400000000000000000000005 /* Views */,
+				20000000000000000000001E /* Assets.xcassets */,
 				200000000000000000000011 /* LaunchScreen.storyboard */,
 				200000000000000000000012 /* Info.plist */,
 			);
@@ -194,6 +197,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				10000000000000000000001C /* Assets.xcassets in Resources */,
 				100000000000000000000011 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

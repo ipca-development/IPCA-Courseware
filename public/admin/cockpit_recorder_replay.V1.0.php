@@ -6707,20 +6707,70 @@ cw_header('Cockpit Recorder Replay');
     return { response, text: chunks };
   }
 
+  async function fetchReplayJson(url) {
+    const response = await fetch(url);
+    const text = await response.text();
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch (jsonErr) {
+      throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+    }
+    if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
+    if (!data.ok) throw new Error(data.error || 'Replay data not available.');
+    return data;
+  }
+
+  async function fetchReplayInChunks(recordingId) {
+    const chunkLimit = 6000;
+    const sampleStride = 3;
+    const manifestUrl = `/api/recordings/replay.php?id=${encodeURIComponent(recordingId)}&version=2&manifest=1&compact=1&sample_stride=${sampleStride}&limit=${chunkLimit}`;
+    setReplayLoadProgress(2, 'requesting replay manifest');
+    const data = await fetchReplayJson(manifestUrl);
+    const chunking = data.sample_chunking || {};
+    const totalSourceSamples = Number(chunking.total_source_samples || data.replay_sample_count || 0);
+    const limit = Number(chunking.recommended_limit || chunkLimit) || chunkLimit;
+    const samples = [];
+    let offset = 0;
+    if (totalSourceSamples <= 0) {
+      data.samples = samples;
+      return data;
+    }
+
+    while (offset < totalSourceSamples) {
+      const chunkUrl = `/api/recordings/replay.php?id=${encodeURIComponent(recordingId)}&version=2&samples=1&compact=1&sample_stride=${sampleStride}&offset=${offset}&limit=${limit}`;
+      const chunk = await fetchReplayJson(chunkUrl);
+      if (Array.isArray(chunk.samples)) {
+        samples.push(...chunk.samples);
+      }
+      const nextOffset = Number(chunk.next_offset || 0);
+      offset = nextOffset > offset ? nextOffset : offset + limit;
+      const pct = 8 + Math.min(80, (offset / totalSourceSamples) * 80);
+      setReplayLoadProgress(pct, `loading replay samples ${Math.min(offset, totalSourceSamples).toLocaleString()} / ${totalSourceSamples.toLocaleString()}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    data.samples = samples;
+    setReplayLoadProgress(88, 'preparing chunked replay data');
+    return data;
+  }
+
   async function loadReplay() {
     let data = null;
     try {
-      const replayUrl = standaloneReplay
-        ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
-        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1&sample_stride=3`;
-      const { response, text } = await fetchReplayJsonWithProgress(replayUrl);
-      try {
-        data = JSON.parse(text);
-      } catch (jsonErr) {
-        throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+      if (standaloneReplay) {
+        const replayUrl = `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`;
+        const { response, text } = await fetchReplayJsonWithProgress(replayUrl);
+        try {
+          data = JSON.parse(text);
+        } catch (jsonErr) {
+          throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+        }
+        if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
+        if (!data.ok) throw new Error(data.error || 'Replay data not available.');
+      } else {
+        data = await fetchReplayInChunks(id);
       }
-      if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
-      if (!data.ok) throw new Error(data.error || 'Replay data not available.');
     } catch (err) {
       if (loadStatus) {
         loadStatus.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div>`;

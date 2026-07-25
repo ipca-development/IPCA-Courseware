@@ -772,6 +772,88 @@ final class CockpitReconstructionService
         echo ']}';
     }
 
+    public function replayPayloadV2Manifest(string $id, bool $compact = false, int $sampleStride = 1, int $recommendedLimit = 6000): array
+    {
+        $payload = $this->replayPayloadV2Metadata($id);
+        if (empty($payload['ok'])) {
+            return $payload;
+        }
+
+        $sampleCount = (int)($payload['replay_sample_count'] ?? 0);
+        $sampleStride = max(1, min(10, $sampleStride));
+        $recommendedLimit = max(500, min(20000, $recommendedLimit));
+        $payload['samples'] = array();
+        $payload['sample_chunking'] = array(
+            'available' => true,
+            'compact' => $compact,
+            'sample_stride' => $sampleStride,
+            'recommended_limit' => $recommendedLimit,
+            'total_source_samples' => $sampleCount,
+            'estimated_payload_samples' => (int)ceil($sampleCount / $sampleStride),
+        );
+        return $payload;
+    }
+
+    public function streamReplayPayloadV2SamplesJson(string $id, int $offset, int $limit, bool $compact = false, int $sampleStride = 1): void
+    {
+        if (!self::replaySamplesTablePresent($this->pdo)) {
+            echo json_encode(array(
+                'ok' => false,
+                'error' => 'Apply scripts/sql/2026_06_28_cockpit_recorder_replay_samples.sql before using replay v2.',
+            ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            return;
+        }
+
+        $recording = (new CockpitRecorderService($this->pdo))->recordingByAnyId($id);
+        if (!$recording) {
+            echo json_encode(array('ok' => false, 'error' => 'Recording not found.'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            return;
+        }
+
+        $recordingId = (int)$recording['id'];
+        $startedAt = (string)($recording['started_at'] ?? '');
+        $totalSamples = $this->countRows(self::REPLAY_SAMPLE_TABLE, $recordingId);
+        if ($totalSamples <= 0) {
+            echo json_encode(array(
+                'ok' => false,
+                'error' => 'Replay v2 samples are not available. Reconstruct this recording after applying the replay samples migration.',
+            ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            return;
+        }
+
+        $offset = max(0, $offset);
+        $limit = max(500, min(20000, $limit));
+        $sampleStride = max(1, min(10, $sampleStride));
+        $nextOffset = min($totalSamples, $offset + $limit);
+
+        echo '{"ok":true';
+        echo ',"version":2';
+        echo ',"offset":' . $offset;
+        echo ',"limit":' . $limit;
+        echo ',"next_offset":' . $nextOffset;
+        echo ',"total_source_samples":' . $totalSamples;
+        echo ',"done":' . ($nextOffset >= $totalSamples ? 'true' : 'false');
+        echo ',"samples":[';
+        $sampleFirst = true;
+        $sampleIndex = 0;
+        foreach ($this->replaySampleRowsIterator($recordingId, $startedAt, $offset, $limit) as $sample) {
+            if ($sampleStride > 1 && (($offset + $sampleIndex) % $sampleStride) !== 0) {
+                $sampleIndex++;
+                continue;
+            }
+            $sampleIndex++;
+            if (!$sampleFirst) {
+                echo ',';
+            }
+            $sampleFirst = false;
+            if ($compact) {
+                $sample = $this->compactReplaySample($sample);
+            }
+            echo json_encode($sample, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        }
+        echo ']}';
+    }
+
     /**
      * @param array<string,mixed> $recording
      * @return list<array<string,mixed>>
@@ -1050,7 +1132,7 @@ final class CockpitReconstructionService
     /**
      * @return Generator<int,array<string,mixed>>
      */
-    public function replaySampleRowsIterator(int $recordingId, string $recordingStartedAt = ''): Generator
+    public function replaySampleRowsIterator(int $recordingId, string $recordingStartedAt = '', int $offset = 0, int $limit = 0): Generator
     {
         $columns = array(
             'time_s',
@@ -1216,12 +1298,16 @@ final class CockpitReconstructionService
         }
         $canonicalIndex = 0;
 
+        $offset = max(0, $offset);
+        $limit = max(0, $limit);
+        $limitSql = $limit > 0 ? ' LIMIT ' . $limit . ' OFFSET ' . $offset : '';
+
         $stmt = $this->pdo->prepare('
             SELECT ' . implode(', ', $columns) . '
             FROM ' . self::REPLAY_SAMPLE_TABLE . '
             WHERE recording_id = ?
             ORDER BY sample_index ASC
-        ');
+        ' . $limitSql);
         $stmt->execute(array($recordingId));
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
             if ($canonicalG3xRows !== array()) {

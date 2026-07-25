@@ -12,6 +12,8 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var isUSBActive = false
     @Published private(set) var isAcceptedExternalInputActive = false
     @Published private(set) var isInternalMicWarning = false
+    @Published private(set) var isInputGainSettable = false
+    @Published private(set) var inputGain: Float = 0
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var fileSize: Int64 = 0
@@ -42,6 +44,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     }
 
     private var recorder: AVAudioRecorder?
+    private var monitorEngine: AVAudioEngine?
     private var recordingURL: URL?
     private var finalRecordingURL: URL?
     private var recordingID: String?
@@ -53,6 +56,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     private var timer: Timer?
     private var shouldResumeAfterInterruption = false
     private let segmentDurationSeconds: TimeInterval = 10
+    private let recordingMeterRefreshInterval: TimeInterval = 0.5
+    private let inputStateRefreshInterval: TimeInterval = 5
+    private let fileSizeRefreshInterval: TimeInterval = 2
+    private static let passiveMonitorPublishInterval: TimeInterval = 0.25
+    private static let passiveMonitorBufferSize: AVAudioFrameCount = 4096
+    private var lastInputStateRefreshAt: Date?
+    private var lastFileSizeRefreshAt: Date?
 
     override init() {
         super.init()
@@ -72,6 +82,8 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        monitorEngine?.inputNode.removeTap(onBus: 0)
+        monitorEngine?.stop()
         timer?.invalidate()
     }
 
@@ -84,6 +96,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                 try preferExternalInputIfAvailable()
             }
             updateInputState()
+            if activateSession && !isRecording {
+                try await startInputMonitorIfNeeded()
+            }
         } catch {
             lastError = error.localizedDescription
         }
@@ -96,6 +111,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             try session.setActive(true)
             try preferExternalInputIfAvailable()
             updateInputState()
+            try await startInputMonitorIfNeeded()
             if isRecording, !recordingSignalActive {
                 recorder?.record()
                 recordingSignalActive = recorder?.isRecording == true
@@ -119,6 +135,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             try session.setActive(true)
             try preferExternalInputIfAvailable()
             updateInputState()
+            stopInputMonitor()
 
             let id = UUID().uuidString
             let dir = try RecordingStore.recordingsDirectory()
@@ -145,6 +162,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             activeRecordingStartedAt = startDate
             elapsed = 0
             fileSize = 0
+            lastFileSizeRefreshAt = nil
             level = 0
             peakLevel = 0
             averagePowerDB = -160
@@ -160,7 +178,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
     }
 
-    func stopRecording(language: String) async -> Recording? {
+    func stopRecording(language: String, postGainDB: Double = 0) async -> Recording? {
         guard let recordingID, let startedAt, let finalRecordingURL else { return nil }
         finalizeCurrentSegment()
         self.recorder = nil
@@ -175,10 +193,14 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         recordingSignalActive = false
         backgroundRecordingStatus = "Idle"
         stopTimer()
+        lastFileSizeRefreshAt = nil
 
         let recordedDuration = finalizedSegments.reduce(0) { $0 + max(0, $1.duration) }
         do {
             try await Self.mergeSegments(finalizedSegments, outputURL: finalRecordingURL)
+            if postGainDB > 0 {
+                try await Self.applyGain(to: finalRecordingURL, gainDB: postGainDB)
+            }
         } catch {
             lastError = "Could not merge audio segments: \(error.localizedDescription)"
             return nil
@@ -191,6 +213,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         accumulatedDuration = 0
         finalizedSegments = []
         onAudioSegmentsChanged?([], nil)
+        try? await startInputMonitorIfNeeded()
 
         return Recording(
             id: recordingID,
@@ -211,8 +234,26 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             transcriptProgress: 0,
             language: language,
             transcript: "",
-            lastError: isAcceptedExternalInputActive ? "" : "Audio source warning: \(selectedInputName)"
+            lastError: postGainDB > 0
+                ? "Post-recording gain applied: +\(String(format: "%.0f", postGainDB)) dB"
+                : (isAcceptedExternalInputActive ? "" : "Audio source warning: \(selectedInputName)")
         )
+    }
+
+    func setInputGain(_ value: Float) {
+        let clamped = min(1, max(0, value))
+        do {
+            let session = AVAudioSession.sharedInstance()
+            guard session.isInputGainSettable else {
+                isInputGainSettable = false
+                return
+            }
+            try session.setInputGain(clamped)
+            inputGain = session.inputGain
+            isInputGainSettable = true
+        } catch {
+            lastError = "Input gain update failed: \(error.localizedDescription)"
+        }
     }
 
     func appDidEnterBackground() {
@@ -298,11 +339,59 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         isUSBActive = selected?.portType == .usbAudio
         isAcceptedExternalInputActive = selected.map { Self.isAcceptedExternalPort($0.portType) } ?? false
         isInternalMicWarning = selected?.portType == .builtInMic || !isAcceptedExternalInputActive
+        isInputGainSettable = session.isInputGainSettable
+        inputGain = session.inputGain
+    }
+
+    private func startInputMonitorIfNeeded() async throws {
+        guard !isRecording, monitorEngine == nil else { return }
+        let granted = await requestMicrophonePermission()
+        guard granted else { return }
+        try configureAudioSession()
+        let session = AVAudioSession.sharedInstance()
+        try session.setActive(true)
+        try preferExternalInputIfAvailable()
+        updateInputState()
+
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        var lastMonitorPublishAt = Date.distantPast
+        input.installTap(onBus: 0, bufferSize: Self.passiveMonitorBufferSize, format: format) { [weak self, weak engine] buffer, _ in
+            let now = Date()
+            guard now.timeIntervalSince(lastMonitorPublishAt) >= Self.passiveMonitorPublishInterval else {
+                return
+            }
+            lastMonitorPublishAt = now
+            let levels = Self.audioLevels(from: buffer)
+            Task { @MainActor in
+                guard let self, self.monitorEngine === engine, !self.isRecording else { return }
+                self.updateAudioLevels(average: levels.average, peak: levels.peak)
+                self.recordingSignalActive = levels.average > -55
+                self.backgroundRecordingStatus = self.recordingSignalActive ? "Input signal present" : "Monitoring input"
+            }
+        }
+        monitorEngine = engine
+        do {
+            try engine.start()
+            backgroundRecordingStatus = "Monitoring input"
+        } catch {
+            input.removeTap(onBus: 0)
+            monitorEngine = nil
+            throw error
+        }
+    }
+
+    private func stopInputMonitor() {
+        guard let monitorEngine else { return }
+        monitorEngine.inputNode.removeTap(onBus: 0)
+        monitorEngine.stop()
+        self.monitorEngine = nil
     }
 
     private func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: recordingMeterRefreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.updateMeters()
             }
@@ -321,22 +410,46 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         recordingSignalActive = isRecording && recorder.isRecording
         let average = recorder.averagePower(forChannel: 0)
         let peak = recorder.peakPower(forChannel: 0)
-        averagePowerDB = average
-        peakPowerDB = peak
-        level = Self.normalizedPowerLevel(average)
-        peakLevel = Self.normalizedPowerLevel(peak)
-        if let recordingURL {
+        updateAudioLevels(average: average, peak: peak)
+        if let recordingURL, shouldRefreshFileSize() {
             fileSize = finalizedSegments.reduce(Int64(0)) { $0 + $1.fileSize } + fileSizeFor(url: recordingURL)
         }
-        updateInputState()
+        refreshInputStateIfNeeded()
         if recorder.currentTime >= segmentDurationSeconds {
             rotateSegment()
         }
     }
 
+    private func refreshInputStateIfNeeded() {
+        let now = Date()
+        if let lastInputStateRefreshAt,
+           now.timeIntervalSince(lastInputStateRefreshAt) < inputStateRefreshInterval {
+            return
+        }
+        lastInputStateRefreshAt = now
+        updateInputState()
+    }
+
+    private func shouldRefreshFileSize() -> Bool {
+        let now = Date()
+        if let lastFileSizeRefreshAt,
+           now.timeIntervalSince(lastFileSizeRefreshAt) < fileSizeRefreshInterval {
+            return false
+        }
+        lastFileSizeRefreshAt = now
+        return true
+    }
+
     private func fileSizeFor(url: URL) -> Int64 {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values?.fileSize ?? 0)
+    }
+
+    private func updateAudioLevels(average: Float, peak: Float) {
+        averagePowerDB = average
+        peakPowerDB = peak
+        level = Self.normalizedPowerLevel(average)
+        peakLevel = Self.normalizedPowerLevel(peak)
     }
 
     private func makeRecorder(url: URL) throws -> AVAudioRecorder {
@@ -420,10 +533,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         var cursor = CMTime.zero
         for segment in validSegments.sorted(by: { $0.index < $1.index }) {
             let asset = AVURLAsset(url: URL(fileURLWithPath: segment.filePath))
-            guard let track = asset.tracks(withMediaType: .audio).first else { continue }
-            let timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+            guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
+            let duration = try await asset.load(.duration)
+            let timeRange = CMTimeRange(start: .zero, duration: duration)
             try compositionTrack.insertTimeRange(timeRange, of: track, at: cursor)
-            cursor = CMTimeAdd(cursor, asset.duration)
+            cursor = CMTimeAdd(cursor, duration)
         }
 
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
@@ -431,13 +545,14 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
         exporter.outputURL = outputURL
         exporter.outputFileType = .m4a
+        let exporterBox = AssetExportSessionBox(exporter)
         try await withCheckedThrowingContinuation { continuation in
-            exporter.exportAsynchronously {
-                switch exporter.status {
+            exporterBox.session.exportAsynchronously {
+                switch exporterBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exporter.error ?? CocoaError(.fileWriteUnknown))
+                    continuation.resume(throwing: exporterBox.session.error ?? CocoaError(.fileWriteUnknown))
                 default:
                     continuation.resume(throwing: CocoaError(.fileWriteUnknown))
                 }
@@ -462,10 +577,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         var finalDuration: TimeInterval = 0
         for file in validFiles {
             let asset = AVURLAsset(url: file.url)
-            guard let track = asset.tracks(withMediaType: .audio).first else { continue }
+            guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
+            let duration = try await asset.load(.duration)
             let start = CMTime(seconds: max(0, file.startOffset), preferredTimescale: 600)
-            try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: track, at: start)
-            let seconds = CMTimeGetSeconds(asset.duration)
+            try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: start)
+            let seconds = CMTimeGetSeconds(duration)
             if seconds.isFinite {
                 finalDuration = max(finalDuration, max(0, file.startOffset) + seconds)
             }
@@ -479,13 +595,14 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
         exporter.outputURL = outputURL
         exporter.outputFileType = .m4a
+        let exporterBox = AssetExportSessionBox(exporter)
         try await withCheckedThrowingContinuation { continuation in
-            exporter.exportAsynchronously {
-                switch exporter.status {
+            exporterBox.session.exportAsynchronously {
+                switch exporterBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exporter.error ?? CocoaError(.fileWriteUnknown))
+                    continuation.resume(throwing: exporterBox.session.error ?? CocoaError(.fileWriteUnknown))
                 default:
                     continuation.resume(throwing: CocoaError(.fileWriteUnknown))
                 }
@@ -494,10 +611,75 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         return finalDuration
     }
 
+    static func applyGain(to audioURL: URL, gainDB: Double) async throws {
+        let clampedDB = min(18, max(0, gainDB))
+        guard clampedDB > 0 else { return }
+        let asset = AVURLAsset(url: audioURL)
+        guard let sourceTrack = try await asset.loadTracks(withMediaType: .audio).first else { return }
+        let duration = try await asset.load(.duration)
+        let composition = AVMutableComposition()
+        guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Could not create gain composition track."])
+        }
+        try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: sourceTrack, at: .zero)
+
+        let parameters = AVMutableAudioMixInputParameters(track: track)
+        parameters.setVolume(Float(pow(10, clampedDB / 20)), at: .zero)
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+
+        let outputURL = audioURL.deletingLastPathComponent().appendingPathComponent("\(audioURL.deletingPathExtension().lastPathComponent).gain.m4a")
+        try? FileManager.default.removeItem(at: outputURL)
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Could not create gain export session."])
+        }
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .m4a
+        exporter.audioMix = mix
+        let exporterBox = AssetExportSessionBox(exporter)
+        try await withCheckedThrowingContinuation { continuation in
+            exporterBox.session.exportAsynchronously {
+                switch exporterBox.session.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(throwing: exporterBox.session.error ?? CocoaError(.fileWriteUnknown))
+                default:
+                    continuation.resume(throwing: CocoaError(.fileWriteUnknown))
+                }
+            }
+        }
+        try? FileManager.default.removeItem(at: audioURL)
+        try FileManager.default.moveItem(at: outputURL, to: audioURL)
+    }
+
     private static func normalizedPowerLevel(_ decibels: Float) -> Float {
         if decibels < -60 { return 0 }
         if decibels >= 0 { return 1 }
         return powf((decibels + 60) / 60, 2)
+    }
+
+    private static func audioLevels(from buffer: AVAudioPCMBuffer) -> (average: Float, peak: Float) {
+        guard let channelData = buffer.floatChannelData else { return (-160, -160) }
+        let channelCount = Int(buffer.format.channelCount)
+        let frameLength = Int(buffer.frameLength)
+        guard channelCount > 0, frameLength > 0 else { return (-160, -160) }
+
+        var sumSquares: Float = 0
+        var peak: Float = 0
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            for frame in 0..<frameLength {
+                let sample = abs(samples[frame])
+                sumSquares += sample * sample
+                peak = max(peak, sample)
+            }
+        }
+        let count = Float(channelCount * frameLength)
+        let rms = sqrt(sumSquares / max(1, count))
+        let averageDB = 20 * log10(max(rms, 0.000_000_1))
+        let peakDB = 20 * log10(max(peak, 0.000_000_1))
+        return (averageDB, peakDB)
     }
 
     @objc private func handleRouteChange() {
@@ -515,6 +697,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                         "port_type": selectedInputPortType
                     ]
                 ))
+            } else {
+                stopInputMonitor()
+                try? await startInputMonitorIfNeeded()
             }
         }
     }
@@ -564,5 +749,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                 break
             }
         }
+    }
+}
+
+private final class AssetExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
     }
 }

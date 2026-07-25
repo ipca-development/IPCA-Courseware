@@ -70,13 +70,14 @@ struct AvionicsBeaconStatusPacket: Codable, Equatable {
     var lastRecorderContactUptimeSeconds: UInt32?
     var usbDiagnosticKind: UInt8
     var usbDiagnosticValue: UInt16
+    var beaconIdentityHex: String
 
     var hasRecorderToken: Bool {
         recorderTokenHex != String(repeating: "0", count: 32)
     }
 
     var label: String {
-        "boot \(bootCounter), uptime \(uptimeSeconds)s, reset \(resetReason.rawValue)"
+        "beacon \(beaconIdentityHex), boot \(bootCounter), uptime \(uptimeSeconds)s, reset \(resetReason.rawValue)"
     }
 }
 
