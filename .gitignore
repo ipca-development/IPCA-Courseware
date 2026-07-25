@@ -11,3 +11,8 @@
 # PDF font caches, and temp artifacts must not be deployed from Git.
 /storage/cockpit_recorder/
 /storage/tmp/
+
+# Local iOS app containers and cockpit audio repair test bundles are too large
+# for Git and must remain machine-local evidence.
+*.xcappdata/
+/tmp/cvr-rebuild-test/

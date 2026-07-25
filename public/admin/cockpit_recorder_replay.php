@@ -2600,6 +2600,9 @@ cw_header('Cockpit Recorder Replay');
   let sessionAudioSegments = [];
   let sessionAudioState = { playing: false, startedMs: 0, startedT: 0, currentSegmentId: null };
   let replaySpeed = 1;
+  const replayUrlParams = new URLSearchParams(window.location.search || '');
+  const visualSyncOffsetSeconds = Number(replayUrlParams.get('visual_offset') || replayUrlParams.get('sync_offset') || 0) || 0;
+  const visualSyncScale = Math.max(0.95, Math.min(1.05, Number(replayUrlParams.get('visual_scale') || 1) || 1));
   let normalReferenceViewport = null;
 
   const CAMERA_DEFAULTS = {
@@ -5995,7 +5998,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function targetCameraAt(t) {
-    const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(t);
+    const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(visualReplayTime(t));
     const s = sampleAt(t);
     if (!pos || !s) return null;
     const aircraftHeading = isSyntheticCameraMode() ? syntheticVisionHeadingFromSample(s) : aircraftHeadingFromSample(s);
@@ -6501,8 +6504,15 @@ cw_header('Cockpit Recorder Replay');
     updateDebugOverlay(sample, view);
   }
 
-  function sampleAt(t) {
+  function visualReplayTime(t) {
+    return Math.max(0, (Number(t) || 0) * visualSyncScale + visualSyncOffsetSeconds);
+  }
+
+  function sampleAt(t, applyVisualTransform = true) {
     if (!payload || !payload.samples.length) return null;
+    if (applyVisualTransform && (visualSyncOffsetSeconds !== 0 || visualSyncScale !== 1)) {
+      t = visualReplayTime(t);
+    }
     const samples = payload.samples;
     if (t <= samples[0].t) return samples[0];
     if (t >= samples[samples.length - 1].t) return samples[samples.length - 1];
@@ -7009,7 +7019,7 @@ cw_header('Cockpit Recorder Replay');
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     if (!standaloneReplay && syncAudio && sessionAudioSegments.length > 1) {
-      syncSessionAudio(activeT, sessionAudioState.playing);
+      syncSessionAudio(activeT, sessionAudioState.playing, true);
     } else if (!standaloneReplay && syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
@@ -7025,7 +7035,22 @@ cw_header('Cockpit Recorder Replay');
     }) || null;
   }
 
-  function syncSessionAudio(seconds, shouldPlay) {
+  function currentSessionSegment() {
+    const currentId = String(sessionAudioState.currentSegmentId || '');
+    if (currentId === '') return null;
+    return sessionAudioSegments.find((segment) => {
+      const segmentId = String(segment.id || segment.recording_id || segment.audio_url || '');
+      return segmentId === currentId;
+    }) || null;
+  }
+
+  function sessionAudioReplayTime() {
+    const segment = currentSessionSegment();
+    if (!segment || !Number.isFinite(Number(audio.currentTime))) return null;
+    return (Number(segment.start_offset_seconds) || 0) + Math.max(0, Number(audio.currentTime) || 0);
+  }
+
+  function syncSessionAudio(seconds, shouldPlay, forceSnap = false) {
     const segment = segmentAt(seconds);
     if (!segment) {
       audio.pause();
@@ -7042,10 +7067,11 @@ cw_header('Cockpit Recorder Replay');
     }
     audio.playbackRate = replaySpeed;
     const localT = Math.max(0, (Number(seconds) || 0) - (Number(segment.start_offset_seconds) || 0));
-    if (Number.isFinite(audio.duration)) {
-      audio.currentTime = Math.min(localT, audio.duration || localT);
-    } else {
-      audio.currentTime = localT;
+    const targetT = Number.isFinite(audio.duration) ? Math.min(localT, audio.duration || localT) : localT;
+    const currentT = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : null;
+    const drift = currentT !== null ? Math.abs(currentT - targetT) : Infinity;
+    if (forceSnap || audio.paused || drift > 0.5) {
+      audio.currentTime = targetT;
     }
     if (shouldPlay && audio.paused) {
       try {
@@ -7067,8 +7093,15 @@ cw_header('Cockpit Recorder Replay');
         setPlayButtonState(false);
       }
     } else if (sessionAudioState.playing) {
-      const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
-      activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed * replaySpeed));
+      const audioClockT = sessionAudioReplayTime();
+      if (audioClockT !== null) {
+        activeT = Math.max(0, Math.min(maxT, audioClockT));
+        sessionAudioState.startedMs = performance.now();
+        sessionAudioState.startedT = activeT;
+      } else {
+        const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
+        activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed * replaySpeed));
+      }
       syncSessionAudio(activeT, true);
       if (activeT >= maxT) {
         sessionAudioState.playing = false;
@@ -7577,20 +7610,70 @@ cw_header('Cockpit Recorder Replay');
     return { response, text: chunks };
   }
 
+  async function fetchReplayJson(url) {
+    const response = await fetch(url);
+    const text = await response.text();
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch (jsonErr) {
+      throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+    }
+    if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
+    if (!data.ok) throw new Error(data.error || 'Replay data not available.');
+    return data;
+  }
+
+  async function fetchReplayInChunks(recordingId) {
+    const chunkLimit = 6000;
+    const sampleStride = 3;
+    const manifestUrl = `/api/recordings/replay.php?id=${encodeURIComponent(recordingId)}&version=2&manifest=1&compact=1&sample_stride=${sampleStride}&limit=${chunkLimit}`;
+    setReplayLoadProgress(2, 'requesting replay manifest');
+    const data = await fetchReplayJson(manifestUrl);
+    const chunking = data.sample_chunking || {};
+    const totalSourceSamples = Number(chunking.total_source_samples || data.replay_sample_count || 0);
+    const limit = Number(chunking.recommended_limit || chunkLimit) || chunkLimit;
+    const samples = [];
+    let offset = 0;
+    if (totalSourceSamples <= 0) {
+      data.samples = samples;
+      return data;
+    }
+
+    while (offset < totalSourceSamples) {
+      const chunkUrl = `/api/recordings/replay.php?id=${encodeURIComponent(recordingId)}&version=2&samples=1&compact=1&sample_stride=${sampleStride}&offset=${offset}&limit=${limit}`;
+      const chunk = await fetchReplayJson(chunkUrl);
+      if (Array.isArray(chunk.samples)) {
+        samples.push(...chunk.samples);
+      }
+      const nextOffset = Number(chunk.next_offset || 0);
+      offset = nextOffset > offset ? nextOffset : offset + limit;
+      const pct = 8 + Math.min(80, (offset / totalSourceSamples) * 80);
+      setReplayLoadProgress(pct, `loading replay samples ${Math.min(offset, totalSourceSamples).toLocaleString()} / ${totalSourceSamples.toLocaleString()}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    data.samples = samples;
+    setReplayLoadProgress(88, 'preparing chunked replay data');
+    return data;
+  }
+
   async function loadReplay() {
     let data = null;
     try {
-      const replayUrl = standaloneReplay
-        ? `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`
-        : `/api/recordings/replay.php?id=${encodeURIComponent(id)}&version=2&compact=1&sample_stride=3`;
-      const { response, text } = await fetchReplayJsonWithProgress(replayUrl);
-      try {
-        data = JSON.parse(text);
-      } catch (jsonErr) {
-        throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+      if (standaloneReplay) {
+        const replayUrl = `/admin/api/cockpit_recorder_standalone_replay.php?name=${encodeURIComponent(standaloneReplay)}`;
+        const { response, text } = await fetchReplayJsonWithProgress(replayUrl);
+        try {
+          data = JSON.parse(text);
+        } catch (jsonErr) {
+          throw new Error(`Replay API returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
+        }
+        if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
+        if (!data.ok) throw new Error(data.error || 'Replay data not available.');
+      } else {
+        data = await fetchReplayInChunks(id);
       }
-      if (!response.ok) throw new Error(data.error || `Replay API HTTP ${response.status}`);
-      if (!data.ok) throw new Error(data.error || 'Replay data not available.');
     } catch (err) {
       if (loadStatus) {
         loadStatus.innerHTML = `<div class="replay-error">Could not load replay data: ${String(err.message || err).replace(/[<>&]/g, (ch) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]))}</div>`;

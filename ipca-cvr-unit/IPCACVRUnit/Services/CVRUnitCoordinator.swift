@@ -594,9 +594,8 @@ final class CVRUnitCoordinator: ObservableObject {
                 return
             }
             let audioURL = try RecordingStore.recordingsDirectory().appendingPathComponent("\(manifest.recordingID).m4a")
-            try await AudioRecorderManager.mergeSegments(finalizedSegments, outputURL: audioURL)
+            let duration = try await AudioRecorderManager.mergeSegments(finalizedSegments, outputURL: audioURL)
             let size = (try? audioURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-            let duration = finalizedSegments.reduce(0) { $0 + max(0, $1.duration) }
             var events = manifest.events ?? []
             events.append(contentsOf: [
                 CVRRecordingEvent(severity: "error", type: "app_restart", message: "Cockpit Recorder app restarted while an active recording manifest existed."),

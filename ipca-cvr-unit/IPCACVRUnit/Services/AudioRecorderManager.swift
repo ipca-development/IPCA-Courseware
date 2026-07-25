@@ -55,7 +55,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     private var finalizedSegments: [AudioRecordingSegment] = []
     private var timer: Timer?
     private var shouldResumeAfterInterruption = false
-    private let segmentDurationSeconds: TimeInterval = 10
+    private let segmentDurationSeconds: TimeInterval = 60
     private let recordingMeterRefreshInterval: TimeInterval = 0.5
     private let inputStateRefreshInterval: TimeInterval = 5
     private let fileSizeRefreshInterval: TimeInterval = 2
@@ -195,11 +195,12 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         stopTimer()
         lastFileSizeRefreshAt = nil
 
-        let recordedDuration = finalizedSegments.reduce(0) { $0 + max(0, $1.duration) }
+        var recordedDuration = finalizedSegments.reduce(0) { $0 + max(0, $1.duration) }
         do {
-            try await Self.mergeSegments(finalizedSegments, outputURL: finalRecordingURL)
+            recordedDuration = try await Self.mergeSegments(finalizedSegments, outputURL: finalRecordingURL)
             if postGainDB > 0 {
                 try await Self.applyGain(to: finalRecordingURL, gainDB: postGainDB)
+                recordedDuration = try await Self.audioDurationSeconds(for: finalRecordingURL) ?? recordedDuration
             }
         } catch {
             lastError = "Could not merge audio segments: \(error.localizedDescription)"
@@ -514,15 +515,17 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         directory.appendingPathComponent("\(recordingID).part-\(String(format: "%03d", index)).m4a")
     }
 
-    static func mergeSegments(_ segments: [AudioRecordingSegment], outputURL: URL) async throws {
-        let validSegments = segments.filter { $0.duration > 0 && FileManager.default.fileExists(atPath: $0.filePath) }
+    static func mergeSegments(_ segments: [AudioRecordingSegment], outputURL: URL) async throws -> TimeInterval {
+        let validSegments = segments
+            .filter { $0.duration > 0 && FileManager.default.fileExists(atPath: $0.filePath) }
+            .sorted { $0.index < $1.index }
         guard !validSegments.isEmpty else {
             throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "No finalized audio segments are available."])
         }
         try? FileManager.default.removeItem(at: outputURL)
         if validSegments.count == 1 {
             try FileManager.default.copyItem(at: URL(fileURLWithPath: validSegments[0].filePath), to: outputURL)
-            return
+            return try await audioDurationSeconds(for: outputURL) ?? validSegments[0].duration
         }
 
         let composition = AVMutableComposition()
@@ -530,14 +533,36 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Could not create audio composition track."])
         }
 
-        var cursor = CMTime.zero
-        for segment in validSegments.sorted(by: { $0.index < $1.index }) {
+        let firstStartedAt = validSegments[0].startedAt
+        var finalDuration: TimeInterval = 0
+        for (index, segment) in validSegments.enumerated() {
             let asset = AVURLAsset(url: URL(fileURLWithPath: segment.filePath))
             guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
             let duration = try await asset.load(.duration)
-            let timeRange = CMTimeRange(start: .zero, duration: duration)
-            try compositionTrack.insertTimeRange(timeRange, of: track, at: cursor)
-            cursor = CMTimeAdd(cursor, duration)
+            let startOffsetSeconds = max(0, segment.startedAt.timeIntervalSince(firstStartedAt))
+            let start = CMTime(seconds: startOffsetSeconds, preferredTimescale: 600)
+            var insertDuration = duration
+            if index < validSegments.index(before: validSegments.endIndex) {
+                let nextOffsetSeconds = max(0, validSegments[index + 1].startedAt.timeIntervalSince(firstStartedAt))
+                let wallClockWindowSeconds = max(0, nextOffsetSeconds - startOffsetSeconds)
+                let encodedDurationSeconds = CMTimeGetSeconds(duration)
+                if encodedDurationSeconds.isFinite,
+                   wallClockWindowSeconds > 0,
+                   encodedDurationSeconds > wallClockWindowSeconds {
+                    insertDuration = CMTime(seconds: wallClockWindowSeconds, preferredTimescale: 600)
+                }
+            }
+            guard CMTimeGetSeconds(insertDuration) > 0.05 else { continue }
+            let timeRange = CMTimeRange(start: .zero, duration: insertDuration)
+            try compositionTrack.insertTimeRange(timeRange, of: track, at: start)
+            let seconds = CMTimeGetSeconds(insertDuration)
+            if seconds.isFinite {
+                finalDuration = max(finalDuration, startOffsetSeconds + seconds)
+            }
+        }
+
+        guard finalDuration > 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "Merged audio duration is zero."])
         }
 
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
@@ -558,6 +583,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
                 }
             }
         }
+        return try await audioDurationSeconds(for: outputURL) ?? finalDuration
     }
 
     static func mergeAudioFiles(_ files: [(url: URL, startOffset: TimeInterval)], outputURL: URL) async throws -> TimeInterval {
@@ -575,15 +601,27 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
 
         var finalDuration: TimeInterval = 0
-        for file in validFiles {
+        for (index, file) in validFiles.enumerated() {
             let asset = AVURLAsset(url: file.url)
             guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
             let duration = try await asset.load(.duration)
-            let start = CMTime(seconds: max(0, file.startOffset), preferredTimescale: 600)
-            try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: start)
-            let seconds = CMTimeGetSeconds(duration)
+            let startOffsetSeconds = max(0, file.startOffset)
+            let start = CMTime(seconds: startOffsetSeconds, preferredTimescale: 600)
+            var insertDuration = duration
+            if index < validFiles.index(before: validFiles.endIndex) {
+                let wallClockWindowSeconds = max(0, validFiles[index + 1].startOffset - file.startOffset)
+                let encodedDurationSeconds = CMTimeGetSeconds(duration)
+                if encodedDurationSeconds.isFinite,
+                   wallClockWindowSeconds > 0,
+                   encodedDurationSeconds > wallClockWindowSeconds {
+                    insertDuration = CMTime(seconds: wallClockWindowSeconds, preferredTimescale: 600)
+                }
+            }
+            guard CMTimeGetSeconds(insertDuration) > 0.05 else { continue }
+            try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: insertDuration), of: track, at: start)
+            let seconds = CMTimeGetSeconds(insertDuration)
             if seconds.isFinite {
-                finalDuration = max(finalDuration, max(0, file.startOffset) + seconds)
+                finalDuration = max(finalDuration, startOffsetSeconds + seconds)
             }
         }
 
@@ -609,6 +647,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             }
         }
         return finalDuration
+    }
+
+    static func audioDurationSeconds(for audioURL: URL) async throws -> TimeInterval? {
+        let asset = AVURLAsset(url: audioURL)
+        let duration = try await asset.load(.duration)
+        let seconds = CMTimeGetSeconds(duration)
+        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 
     static func applyGain(to audioURL: URL, gainDB: Double) async throws {
