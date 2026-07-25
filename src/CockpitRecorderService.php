@@ -443,13 +443,16 @@ final class CockpitRecorderService
         if (!$recording) {
             return array('ok' => false, 'error' => 'Recording not found.');
         }
+        $rawTranscript = (string)($recording['transcript_text'] ?? '');
+        $cleanTranscript = self::cleanTranscriptText($rawTranscript);
 
         return array(
             'ok' => true,
             'recording_id' => (string)$recording['recording_uid'],
             'transcription_status' => (string)$recording['transcription_status'],
             'language' => (string)$recording['language'],
-            'transcript' => (string)($recording['transcript_text'] ?? ''),
+            'transcript' => $cleanTranscript,
+            'transcript_cleaned' => $cleanTranscript !== $rawTranscript,
             'error' => (string)($recording['error_message'] ?? ''),
         );
     }
@@ -2249,21 +2252,55 @@ final class CockpitRecorderService
             return '';
         }
 
-        $sentences = preg_split('/(?<=[.!?])\s+/u', $text) ?: array($text);
-        if (count($sentences) < 3) {
+        $units = preg_split('/(?<=[.!?,;:])\s+/u', $text) ?: array($text);
+        if (count($units) < 3) {
             return $text;
         }
 
         $clean = array();
         $seen = array();
         $lastKey = '';
-        foreach ($sentences as $sentence) {
-            $sentence = trim($sentence);
-            if ($sentence === '') {
+        $lastUnitKey = '';
+        $lastUnitRepeatCount = 0;
+        $recentKeys = array();
+        foreach ($units as $unit) {
+            $unit = trim($unit);
+            if ($unit === '') {
                 continue;
             }
 
-            $key = self::transcriptRepeatKey($sentence);
+            $key = self::transcriptRepeatKey($unit);
+            if ($key !== '') {
+                if ($key === $lastUnitKey) {
+                    $lastUnitRepeatCount++;
+                } else {
+                    $lastUnitKey = $key;
+                    $lastUnitRepeatCount = 1;
+                }
+
+                $maxConsecutive = strlen($key) <= 12 ? 3 : (strlen($key) <= 30 ? 2 : 1);
+                if ($lastUnitRepeatCount > $maxConsecutive) {
+                    $recentKeys[] = $key;
+                    if (count($recentKeys) > 8) {
+                        array_shift($recentKeys);
+                    }
+                    continue;
+                }
+
+                $recentCount = count($recentKeys);
+                if (
+                    $recentCount >= 4
+                    && $key === $recentKeys[$recentCount - 2]
+                    && $recentKeys[$recentCount - 1] === $recentKeys[$recentCount - 3]
+                ) {
+                    $recentKeys[] = $key;
+                    if (count($recentKeys) > 8) {
+                        array_shift($recentKeys);
+                    }
+                    continue;
+                }
+            }
+
             if ($key !== '' && strlen($key) > 30) {
                 $count = (int)($seen[$key] ?? 0);
                 $seen[$key] = $count + 1;
@@ -2275,7 +2312,13 @@ final class CockpitRecorderService
                 $lastKey = '';
             }
 
-            $clean[] = $sentence;
+            $clean[] = $unit;
+            if ($key !== '') {
+                $recentKeys[] = $key;
+                if (count($recentKeys) > 8) {
+                    array_shift($recentKeys);
+                }
+            }
         }
 
         $cleaned = trim(implode(' ', $clean));

@@ -6181,7 +6181,7 @@ cw_header('Cockpit Recorder Replay');
     timeline.value = String(activeT);
     timeLabel.textContent = fmtTime(activeT);
     if (!standaloneReplay && syncAudio && sessionAudioSegments.length > 1) {
-      syncSessionAudio(activeT, sessionAudioState.playing);
+      syncSessionAudio(activeT, sessionAudioState.playing, true);
     } else if (!standaloneReplay && syncAudio && Number.isFinite(audio.duration)) {
       audio.currentTime = Math.min(activeT, audio.duration || activeT);
     }
@@ -6197,7 +6197,22 @@ cw_header('Cockpit Recorder Replay');
     }) || null;
   }
 
-  function syncSessionAudio(seconds, shouldPlay) {
+  function currentSessionSegment() {
+    const currentId = String(sessionAudioState.currentSegmentId || '');
+    if (currentId === '') return null;
+    return sessionAudioSegments.find((segment) => {
+      const segmentId = String(segment.id || segment.recording_id || segment.audio_url || '');
+      return segmentId === currentId;
+    }) || null;
+  }
+
+  function sessionAudioReplayTime() {
+    const segment = currentSessionSegment();
+    if (!segment || !Number.isFinite(Number(audio.currentTime))) return null;
+    return (Number(segment.start_offset_seconds) || 0) + Math.max(0, Number(audio.currentTime) || 0);
+  }
+
+  function syncSessionAudio(seconds, shouldPlay, forceSnap = false) {
     const segment = segmentAt(seconds);
     if (!segment) {
       audio.pause();
@@ -6213,10 +6228,11 @@ cw_header('Cockpit Recorder Replay');
       sessionAudioState.currentSegmentId = segmentId;
     }
     const localT = Math.max(0, (Number(seconds) || 0) - (Number(segment.start_offset_seconds) || 0));
-    if (Number.isFinite(audio.duration)) {
-      audio.currentTime = Math.min(localT, audio.duration || localT);
-    } else {
-      audio.currentTime = localT;
+    const targetT = Number.isFinite(audio.duration) ? Math.min(localT, audio.duration || localT) : localT;
+    const currentT = Number.isFinite(Number(audio.currentTime)) ? Number(audio.currentTime) : null;
+    const drift = currentT !== null ? Math.abs(currentT - targetT) : Infinity;
+    if (forceSnap || audio.paused || drift > 0.5) {
+      audio.currentTime = targetT;
     }
     if (shouldPlay && audio.paused) {
       try {
@@ -6238,8 +6254,15 @@ cw_header('Cockpit Recorder Replay');
         playButton.textContent = 'Play';
       }
     } else if (sessionAudioState.playing) {
-      const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
-      activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed));
+      const audioClockT = sessionAudioReplayTime();
+      if (audioClockT !== null) {
+        activeT = Math.max(0, Math.min(maxT, audioClockT));
+        sessionAudioState.startedMs = performance.now();
+        sessionAudioState.startedT = activeT;
+      } else {
+        const elapsed = Math.max(0, (performance.now() - sessionAudioState.startedMs) / 1000);
+        activeT = Math.max(0, Math.min(maxT, sessionAudioState.startedT + elapsed));
+      }
       syncSessionAudio(activeT, true);
       if (activeT >= maxT) {
         sessionAudioState.playing = false;
