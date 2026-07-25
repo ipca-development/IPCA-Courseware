@@ -2180,6 +2180,8 @@ cw_header('Cockpit Recorder Replay');
   let standaloneStartedT = 0;
   let sessionAudioSegments = [];
   let sessionAudioState = { playing: false, startedMs: 0, startedT: 0, currentSegmentId: null };
+  const replayUrlParams = new URLSearchParams(window.location.search || '');
+  const visualSyncOffsetSeconds = Number(replayUrlParams.get('visual_offset') || replayUrlParams.get('sync_offset') || 0) || 0;
 
   const CAMERA_DEFAULTS = {
     rangeM: 125,
@@ -5173,7 +5175,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function targetCameraAt(t) {
-    const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(t);
+    const pos = isSyntheticTestMode() ? fixedSyntheticTestPosition() : positionAt(visualReplayTime(t));
     const s = sampleAt(t);
     if (!pos || !s) return null;
     const aircraftHeading = isSyntheticCameraMode() ? syntheticVisionHeadingFromSample(s) : aircraftHeadingFromSample(s);
@@ -5673,8 +5675,15 @@ cw_header('Cockpit Recorder Replay');
     updateDebugOverlay(sample, view);
   }
 
-  function sampleAt(t) {
+  function visualReplayTime(t) {
+    return Math.max(0, (Number(t) || 0) + visualSyncOffsetSeconds);
+  }
+
+  function sampleAt(t, applyVisualOffset = true) {
     if (!payload || !payload.samples.length) return null;
+    if (applyVisualOffset && visualSyncOffsetSeconds !== 0) {
+      t = visualReplayTime(t);
+    }
     const samples = payload.samples;
     if (t <= samples[0].t) return samples[0];
     if (t >= samples[samples.length - 1].t) return samples[samples.length - 1];
