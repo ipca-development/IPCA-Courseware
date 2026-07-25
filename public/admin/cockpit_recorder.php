@@ -939,14 +939,19 @@ cw_header('Cockpit Recordings');
                       <details>
                         <summary><strong>Repair audio from corrected M4A</strong></summary>
                         <div class="cockpit-muted">Admin-only repair for cases where the original iPhone segment files were rebuilt into a corrected audio timeline. The previous active audio is preserved before this file becomes active.</div>
-                        <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_audio_repair.php" enctype="multipart/form-data">
+                        <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_audio_repair.php" enctype="multipart/form-data" data-audio-repair-form data-recording-id="<?= $id ?>">
                           <input type="hidden" name="id" value="<?= $id ?>">
                           <label>Corrected audio file<input class="cockpit-input" type="file" name="audio" accept=".m4a,.mp4,.aac,audio/mp4,audio/aac" required></label>
                           <label>Duration override, seconds<input class="cockpit-input" type="number" name="duration_seconds" step="0.000001" min="0" placeholder="Optional, e.g. 8579.703424"></label>
                           <label>Repair note<textarea class="cockpit-input" name="note" rows="2" placeholder="Why this audio is replacing the active replay audio"></textarea></label>
                           <label><input type="checkbox" name="reconstruct" value="1" checked> Reconstruct replay after upload</label>
                           <label><input type="checkbox" name="queue_transcription" value="1"> Queue transcript regeneration</label>
-                          <button class="cockpit-button cockpit-danger" type="submit">Replace active audio with corrected file</button>
+                          <div class="cockpit-recon-progress" data-audio-repair-progress hidden>
+                            <div class="cockpit-recon-progress-bar" aria-hidden="true"><div class="cockpit-recon-progress-fill" data-audio-repair-fill style="width:0%"></div></div>
+                            <strong data-audio-repair-stage>Waiting for upload...</strong>
+                            <div class="cockpit-recon-progress-message" data-audio-repair-message>Choose a corrected audio file.</div>
+                          </div>
+                          <button class="cockpit-button cockpit-danger" type="submit" data-audio-repair-submit>Replace active audio with corrected file</button>
                         </form>
                       </details>
                     </section>
@@ -1407,6 +1412,103 @@ cw_header('Cockpit Recordings');
     pollRecording(recordingId);
     timers.set(recordingId, setInterval(function () { pollRecording(recordingId); }, pollMs));
   }
+  function repairUploadSession(recordingId) {
+    const random = window.crypto && window.crypto.getRandomValues ? window.crypto.getRandomValues(new Uint32Array(2)) : [Date.now(), Math.floor(Math.random() * 1000000)];
+    return ['repair', recordingId, Date.now(), Array.from(random).join('-')].join('-');
+  }
+  function setRepairProgress(form, percent, stage, message) {
+    const panel = form.querySelector('[data-audio-repair-progress]');
+    const fill = form.querySelector('[data-audio-repair-fill]');
+    const stageEl = form.querySelector('[data-audio-repair-stage]');
+    const messageEl = form.querySelector('[data-audio-repair-message]');
+    if (panel) panel.hidden = false;
+    if (fill) fill.style.width = Math.max(0, Math.min(100, percent)) + '%';
+    if (stageEl) stageEl.textContent = stage;
+    if (messageEl) messageEl.textContent = message;
+  }
+  async function uploadRepairChunk(form, recordingId, session, file, index, totalChunks, chunkSize) {
+    const start = index * chunkSize;
+    const end = Math.min(file.size, start + chunkSize);
+    const chunk = file.slice(start, end);
+    const response = await fetch('/admin/api/cockpit_recorder_audio_repair_chunk.php?mode=chunk', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/octet-stream',
+        'X-IPCA-Repair-Mode': 'chunk',
+        'X-IPCA-Repair-Session': session,
+        'X-IPCA-Recording-ID': recordingId,
+        'X-IPCA-Original-Filename': file.name,
+        'X-IPCA-Chunk-Index': String(index),
+        'X-IPCA-Total-Chunks': String(totalChunks),
+        'X-IPCA-Total-Size': String(file.size),
+        'X-IPCA-Chunk-Size': String(chunk.size)
+      },
+      body: chunk,
+      cache: 'no-store'
+    });
+    const payload = await response.json();
+    if (!payload || !payload.ok) {
+      throw new Error((payload && payload.error) || 'Chunk upload failed.');
+    }
+  }
+  async function finalizeRepairUpload(form, recordingId, session, file) {
+    const durationInput = form.querySelector('[name="duration_seconds"]');
+    const noteInput = form.querySelector('[name="note"]');
+    const reconstructInput = form.querySelector('[name="reconstruct"]');
+    const queueTranscriptInput = form.querySelector('[name="queue_transcription"]');
+    const payload = {
+      session: session,
+      recording_id: recordingId,
+      original_filename: file.name,
+      duration_seconds: durationInput && durationInput.value ? durationInput.value : '',
+      note: noteInput ? noteInput.value : '',
+      reconstruct: !!(reconstructInput && reconstructInput.checked),
+      queue_transcription: !!(queueTranscriptInput && queueTranscriptInput.checked)
+    };
+    const response = await fetch('/admin/api/cockpit_recorder_audio_repair_chunk.php?mode=finalize', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store'
+    });
+    const result = await response.json();
+    if (!result || !result.ok) {
+      throw new Error((result && result.error) || 'Could not finalize corrected audio.');
+    }
+    return result;
+  }
+  async function handleRepairUpload(event) {
+    const form = event.currentTarget;
+    const fileInput = form.querySelector('input[type="file"][name="audio"]');
+    const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    const recordingId = form.getAttribute('data-recording-id') || '';
+    if (!file || !recordingId) return;
+    event.preventDefault();
+    if (!window.confirm('Replace the active replay audio for this recording? The previous audio will be preserved as backup evidence.')) {
+      return;
+    }
+    const submit = form.querySelector('[data-audio-repair-submit]');
+    if (submit) submit.disabled = true;
+    const chunkSize = 5 * 1024 * 1024;
+    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
+    const session = repairUploadSession(recordingId);
+    try {
+      for (let index = 0; index < totalChunks; index += 1) {
+        const percent = Math.round((index / totalChunks) * 90);
+        setRepairProgress(form, percent, 'Uploading corrected audio...', `Chunk ${index + 1} of ${totalChunks}`);
+        await uploadRepairChunk(form, recordingId, session, file, index, totalChunks, chunkSize);
+      }
+      setRepairProgress(form, 94, 'Finalizing corrected audio...', 'Assembling chunks and activating repaired audio.');
+      const result = await finalizeRepairUpload(form, recordingId, session, file);
+      setRepairProgress(form, 100, 'Audio repair complete', 'Redirecting...');
+      window.location.href = result.redirect || '/admin/cockpit_recorder.php?audio_repair=replaced&id=' + encodeURIComponent(recordingId);
+    } catch (error) {
+      setRepairProgress(form, 0, 'Audio repair failed', error.message || 'Could not upload corrected audio.');
+      if (submit) submit.disabled = false;
+      window.alert(error.message || 'Could not upload corrected audio.');
+    }
+  }
 
   const selectAll = document.querySelector('[data-select-all]');
   const rowCheckboxes = Array.from(document.querySelectorAll('[data-recording-checkbox]'));
@@ -1438,6 +1540,9 @@ cw_header('Cockpit Recordings');
         event.preventDefault();
       }
     });
+  });
+  document.querySelectorAll('[data-audio-repair-form]').forEach((form) => {
+    form.addEventListener('submit', handleRepairUpload);
   });
 
   document.querySelectorAll('[data-modal-open]').forEach((button) => {
