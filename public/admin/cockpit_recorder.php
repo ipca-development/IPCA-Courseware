@@ -528,6 +528,9 @@ if ((string)($_GET['reconstruction'] ?? '') === 'started') {
 if ((string)($_GET['g3x_upload'] ?? '') === 'attached') {
     $notice = 'Garmin CSV attached. Run reconstruction again for the updated replay.';
 }
+if ((string)($_GET['audio_repair'] ?? '') === 'replaced') {
+    $notice = 'Corrected audio was stored and activated for the recording.';
+}
 if (isset($_GET['recordings_hidden'])) {
     $notice = (int)$_GET['recordings_hidden'] . ' recording(s) hidden.';
 }
@@ -933,6 +936,19 @@ cw_header('Cockpit Recordings');
                       <?php if ($healthAudio): ?>
                         <div class="cockpit-muted">Health duration: <?= h(cockpit_admin_fmt_duration((float)($healthAudio['duration_seconds'] ?? $row['duration_seconds'] ?? 0))) ?></div>
                       <?php endif; ?>
+                      <details>
+                        <summary><strong>Repair audio from corrected M4A</strong></summary>
+                        <div class="cockpit-muted">Admin-only repair for cases where the original iPhone segment files were rebuilt into a corrected audio timeline. The previous active audio is preserved before this file becomes active.</div>
+                        <form class="cockpit-form-grid" method="post" action="/admin/api/cockpit_recorder_audio_repair.php" enctype="multipart/form-data">
+                          <input type="hidden" name="id" value="<?= $id ?>">
+                          <label>Corrected audio file<input class="cockpit-input" type="file" name="audio" accept=".m4a,.mp4,.aac,audio/mp4,audio/aac" required></label>
+                          <label>Duration override, seconds<input class="cockpit-input" type="number" name="duration_seconds" step="0.000001" min="0" placeholder="Optional, e.g. 8579.703424"></label>
+                          <label>Repair note<textarea class="cockpit-input" name="note" rows="2" placeholder="Why this audio is replacing the active replay audio"></textarea></label>
+                          <label><input type="checkbox" name="reconstruct" value="1" checked> Reconstruct replay after upload</label>
+                          <label><input type="checkbox" name="queue_transcription" value="1"> Queue transcript regeneration</label>
+                          <button class="cockpit-button cockpit-danger" type="submit">Replace active audio with corrected file</button>
+                        </form>
+                      </details>
                     </section>
 
                     <section class="cockpit-section">
