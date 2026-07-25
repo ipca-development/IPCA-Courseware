@@ -176,6 +176,30 @@ cw_header('Cockpit Recorder Replay');
 <link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
 .replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; margin: 16px; }
+.replay-fullscreen-shell {
+  width: 100%;
+}
+.replay-fullscreen-shell:fullscreen,
+.replay-fullscreen-shell:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  overflow: hidden;
+}
+.replay-fullscreen-shell:fullscreen .replay-avionics-header,
+.replay-fullscreen-shell:-webkit-full-screen .replay-avionics-header {
+  flex: 0 0 45px;
+  border-radius: 0;
+}
+.replay-fullscreen-shell:fullscreen .replay-immersive,
+.replay-fullscreen-shell:-webkit-full-screen .replay-immersive {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+}
 .replay-avionics-header {
   width: 100%;
   height: 45px;
@@ -2081,6 +2105,7 @@ cw_header('Cockpit Recorder Replay');
 <?php if ($error !== ''): ?>
   <div class="replay-error"><?= h($error) ?></div>
 <?php else: ?>
+  <div id="replayFullscreenShell" class="replay-fullscreen-shell">
   <div class="replay-avionics-header" aria-label="Avionics data header">
     <div class="replay-avionics-brand">Avionics data</div>
     <?php if (is_array($recording) && (int)($recording['aircraft_id'] ?? 0) > 0): ?>
@@ -2356,6 +2381,7 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
   </div>
+  </div>
 <?php endif; ?>
 
 <?php if ($error === ''): ?>
@@ -2366,6 +2392,7 @@ cw_header('Cockpit Recorder Replay');
   const AIRSPEED_PROFILE = <?= json_encode($airspeedProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const ENGINE_PROFILE = <?= json_encode($engineProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const root = document.querySelector('[data-replay-id]');
+  const fullscreenRoot = document.getElementById('replayFullscreenShell') || root;
   const id = root ? root.getAttribute('data-replay-id') : '';
   const standaloneReplay = root ? (root.getAttribute('data-standalone-replay') || '') : '';
   const cesiumToken = root ? (root.getAttribute('data-cesium-token') || '').trim().replace(/^['"]+|['"]+$/g, '') : '';
@@ -2830,7 +2857,7 @@ cw_header('Cockpit Recorder Replay');
 
   const smoothFactor = (rate, dtSec) => 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dtSec));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const isReplayFullscreen = () => root && (document.fullscreenElement === root || document.webkitFullscreenElement === root);
+  const isReplayFullscreen = () => fullscreenRoot && (document.fullscreenElement === fullscreenRoot || document.webkitFullscreenElement === fullscreenRoot);
   const actualReplayViewport = () => {
     const container = cesiumViewer && cesiumViewer.container ? cesiumViewer.container : document.getElementById('cesiumReplay');
     return {
@@ -5372,10 +5399,10 @@ cw_header('Cockpit Recorder Replay');
       if (exit) exit.call(document);
       return;
     }
-    if (!root) return;
+    if (!fullscreenRoot) return;
     captureNormalReferenceViewport();
-    const request = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (request) request.call(root);
+    const request = fullscreenRoot.requestFullscreen || fullscreenRoot.webkitRequestFullscreen;
+    if (request) request.call(fullscreenRoot);
   }
 
   function syncFullscreenButton() {
@@ -5557,6 +5584,98 @@ cw_header('Cockpit Recorder Replay');
 
     const rows = payload && Array.isArray(payload.traffic) ? payload.traffic : [];
     if (!rows.length) return [];
+    return interpolateLegacyTrafficRowsAt(rows, activeT, ownshipHex, ownshipLat, ownshipLon, ownshipAlt);
+  }
+
+  function interpolateLegacyTrafficRowsAt(rows, activeT, ownshipHex, ownshipLat, ownshipLon, ownshipAlt) {
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const rowT = finiteNumber(row && row.t);
+      const lat = finiteNumber(row && row.lat);
+      const lon = finiteNumber(row && row.lon);
+      const hex = String((row && row.hex) || '').trim().toLowerCase();
+      if (rowT === null || lat === null || lon === null || hex === '' || (ownshipHex && hex === ownshipHex)) return;
+      if (!grouped.has(hex)) grouped.set(hex, []);
+      grouped.get(hex).push(row);
+    });
+    const targets = [];
+    grouped.forEach((samples, hex) => {
+      samples.sort((a, b) => (finiteNumber(a && a.t) || 0) - (finiteNumber(b && b.t) || 0));
+      let before = null;
+      let after = null;
+      for (const sample of samples) {
+        const sampleT = finiteNumber(sample && sample.t);
+        if (sampleT === null) continue;
+        if (sampleT <= activeT) {
+          before = sample;
+          continue;
+        }
+        after = sample;
+        break;
+      }
+      const target = interpolateLegacyTrafficTarget(hex, before, after, activeT, ownshipLat, ownshipLon, ownshipAlt);
+      if (target) targets.push(target);
+    });
+    return targets.sort((a, b) => (a.dist ?? 999) - (b.dist ?? 999));
+  }
+
+  function interpolateLegacyTrafficTarget(hex, before, after, activeT, ownshipLat, ownshipLon, ownshipAlt) {
+    const nearest = before || after;
+    if (!before || !after) {
+      const nearestT = finiteNumber(nearest && nearest.t);
+      if (nearestT === null || Math.abs(nearestT - activeT) > 12) return null;
+      return legacyTrafficTargetFromRow(hex, nearest, ownshipLat, ownshipLon, ownshipAlt);
+    }
+    const beforeT = finiteNumber(before && before.t);
+    const afterT = finiteNumber(after && after.t);
+    const gap = beforeT !== null && afterT !== null ? afterT - beforeT : null;
+    if (gap === null || gap <= 0 || gap > 75) return null;
+    const ratio = clamp((activeT - beforeT) / gap, 0, 1);
+    const lerp = (a, b) => {
+      const av = finiteNumber(a);
+      const bv = finiteNumber(b);
+      if (av === null || bv === null) return av ?? bv ?? null;
+      return av + (bv - av) * ratio;
+    };
+    const lerpAngle = (a, b) => {
+      const av = finiteNumber(a);
+      const bv = finiteNumber(b);
+      if (av === null || bv === null) return av ?? bv ?? null;
+      const delta = ((bv - av + 540) % 360) - 180;
+      return (av + delta * ratio + 360) % 360;
+    };
+    return legacyTrafficTargetFromRow(hex, {
+      t: activeT,
+      hex,
+      cs: before.cs || after.cs || '',
+      lat: lerp(before.lat, after.lat),
+      lon: lerp(before.lon, after.lon),
+      trk: lerpAngle(before.trk, after.trk),
+      alt: lerp(before.alt, after.alt),
+    }, ownshipLat, ownshipLon, ownshipAlt);
+  }
+
+  function legacyTrafficTargetFromRow(hex, row, ownshipLat, ownshipLon, ownshipAlt) {
+    const lat = finiteNumber(row && row.lat);
+    const lon = finiteNumber(row && row.lon);
+    if (lat === null || lon === null || ownshipLat === null || ownshipLon === null) return null;
+    const alt = finiteNumber(row && row.alt);
+    const dist = haversineM(ownshipLat, ownshipLon, lat, lon) / 1852;
+    if (dist > 15) return null;
+    return {
+      t: finiteNumber(row && row.t),
+      hex,
+      cs: String((row && row.cs) || '').trim().toUpperCase(),
+      lat,
+      lon,
+      trk: finiteNumber(row && row.trk) || 0,
+      alt,
+      dist,
+      rel_alt: ownshipAlt !== null && alt !== null ? alt - ownshipAlt : null,
+    };
+  }
+
+  function nearestLegacyTrafficRowsAt(rows, activeT, ownshipHex) {
     const windowS = 20;
     const nearestByHex = new Map();
     rows.forEach((row) => {
@@ -6534,6 +6653,8 @@ cw_header('Cockpit Recorder Replay');
 
     const span = Math.max(0.001, Number(after.t) - Number(before.t));
     const ratio = Math.max(0, Math.min(1, (Number(t) - Number(before.t)) / span));
+    const discreteSample = ratio < 0.5 ? before : after;
+    const discreteAlerts = Array.isArray(discreteSample.system_alerts) ? discreteSample.system_alerts : [];
     const lerp = (a, b) => {
       if (a === null || a === undefined || b === null || b === undefined) return a ?? b ?? null;
       return Number(a) + (Number(b) - Number(a)) * ratio;
@@ -6641,6 +6762,9 @@ cw_header('Cockpit Recorder Replay');
       track_deg_true: lerpAngle(before.track_deg_true, after.track_deg_true),
       wind_direction_deg_true: lerpAngle(before.wind_direction_deg_true, after.wind_direction_deg_true),
       crab_angle_deg: lerp(before.crab_angle_deg, after.crab_angle_deg),
+      cas_alert: discreteSample.cas_alert || '',
+      terrain_alert: discreteSample.terrain_alert || '',
+      system_alerts: discreteAlerts,
     });
   }
 
