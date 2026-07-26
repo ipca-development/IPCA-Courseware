@@ -2532,6 +2532,8 @@ cw_header('Cockpit Recorder Replay');
   let lastValidFpvReplayT = null;
   let displayRpm = null;
   const displayEngineValues = new Map();
+  const cesiumTrafficEntities = new Map();
+  const trafficBillboardImages = new Map();
   function replayAircraftSettings() {
     return payload && payload.aircraft_settings && typeof payload.aircraft_settings === 'object'
       ? payload.aircraft_settings
@@ -2683,7 +2685,7 @@ cw_header('Cockpit Recorder Replay');
     'system_warning_box',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'engine_instrument_stack', 'system_warning_box']);
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'traffic', 'engine_instrument_stack', 'system_warning_box']);
   const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
@@ -5781,6 +5783,130 @@ cw_header('Cockpit Recorder Replay');
     };
   }
 
+  function trafficThreatLevel(target) {
+    const dist = finiteNumber(target && target.dist);
+    const relAlt = Math.abs(finiteNumber(target && target.rel_alt) ?? 99999);
+    if (dist !== null && dist <= 0.7 && relAlt <= 300) return 'warning';
+    if (dist !== null && dist <= 1.5 && relAlt <= 700) return 'caution';
+    return 'normal';
+  }
+
+  function trafficSymbolColor(level) {
+    if (level === 'warning') return '#ff3b30';
+    if (level === 'caution') return '#ffd92f';
+    return '#b4f5ff';
+  }
+
+  function trafficCesiumColor(level) {
+    if (typeof Cesium === 'undefined') return null;
+    if (level === 'warning') return Cesium.Color.fromCssColorString('#ff3b30');
+    if (level === 'caution') return Cesium.Color.fromCssColorString('#ffd92f');
+    return Cesium.Color.fromCssColorString('#b4f5ff');
+  }
+
+  function trafficBillboardImage(level) {
+    const color = trafficSymbolColor(level);
+    if (trafficBillboardImages.has(color)) return trafficBillboardImages.get(color);
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
+        <path d="M0 -18 L10 14 L0 8 L-10 14 Z" fill="${color}" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M0 -18 L0 8" stroke="rgba(0,0,0,.42)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    `.trim();
+    const encoded = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+    trafficBillboardImages.set(color, encoded);
+    return encoded;
+  }
+
+  function trafficAltitudeLabel(target) {
+    const relAlt = finiteNumber(target && target.rel_alt);
+    if (relAlt === null) return '';
+    const hundreds = Math.round(relAlt / 100);
+    const sign = hundreds >= 0 ? '+' : '-';
+    return `${sign}${String(Math.abs(hundreds)).padStart(2, '0')}`;
+  }
+
+  function trafficEntityLabel(target) {
+    const id = String((target && (target.cs || target.hex)) || '').trim().toUpperCase();
+    const alt = trafficAltitudeLabel(target);
+    return [id, alt].filter(Boolean).join(' ');
+  }
+
+  function clearCesiumTrafficEntities() {
+    if (!cesiumViewer) return;
+    cesiumTrafficEntities.forEach((entity) => {
+      cesiumViewer.entities.remove(entity);
+    });
+    cesiumTrafficEntities.clear();
+  }
+
+  function updateCesiumTraffic(sample) {
+    if (!cesiumReady || !cesiumViewer || typeof Cesium === 'undefined') return;
+    if (!sample || !instrumentEnabled('traffic')) {
+      clearCesiumTrafficEntities();
+      return;
+    }
+    const activeTime = firstFinite(sample.t, activeT) || 0;
+    const targets = insetTrafficTargetsAt(activeTime).slice(0, 24);
+    const visibleIds = new Set();
+    targets.forEach((target) => {
+      const lat = finiteNumber(target && target.lat);
+      const lon = finiteNumber(target && target.lon);
+      if (lat === null || lon === null) return;
+      const hex = String((target && target.hex) || '').trim().toLowerCase();
+      if (hex === '') return;
+      const altFt = finiteNumber(target.alt) ?? finiteNumber(sample.baro_altitude_ft ?? sample.altitude_ft_msl ?? sample.altitude_ft) ?? 0;
+      const level = trafficThreatLevel(target);
+      const position = Cesium.Cartesian3.fromDegrees(lon, lat, altFt * 0.3048);
+      const labelText = trafficEntityLabel(target);
+      visibleIds.add(hex);
+      let entity = cesiumTrafficEntities.get(hex);
+      if (!entity) {
+        entity = cesiumViewer.entities.add({
+          position,
+          billboard: {
+            image: trafficBillboardImage(level),
+            width: 34,
+            height: 34,
+            rotation: degToRad(finiteNumber(target.trk) || 0),
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: labelText,
+            font: '700 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fillColor: trafficCesiumColor(level),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 3,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, 28),
+            verticalOrigin: Cesium.VerticalOrigin.TOP,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        cesiumTrafficEntities.set(hex, entity);
+      } else {
+        if (entity.position && typeof entity.position.setValue === 'function') {
+          entity.position.setValue(position);
+        } else {
+          entity.position = position;
+        }
+        entity.billboard.image = trafficBillboardImage(level);
+        entity.billboard.rotation = degToRad(finiteNumber(target.trk) || 0);
+        entity.label.text = labelText;
+        entity.label.fillColor = trafficCesiumColor(level);
+      }
+    });
+    Array.from(cesiumTrafficEntities.keys()).forEach((hex) => {
+      if (visibleIds.has(hex)) return;
+      const entity = cesiumTrafficEntities.get(hex);
+      if (entity) cesiumViewer.entities.remove(entity);
+      cesiumTrafficEntities.delete(hex);
+    });
+  }
+
   function insetProjector(track, sample, extraPoints = []) {
     if (!track.length) return null;
     let minLat = Infinity;
@@ -6531,6 +6657,7 @@ cw_header('Cockpit Recorder Replay');
       updateEnginePanel(freeSample, 1 / 60, true);
       updateInsetMap(freeSample, true);
       updateAvionicsHeader(freeSample);
+      updateCesiumTraffic(freeSample);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
       return;
@@ -6554,6 +6681,7 @@ cw_header('Cockpit Recorder Replay');
       updateEnginePanel(sample, dtSec, snap);
       updateInsetMap(sample, snap);
       updateAvionicsHeader(sample);
+      updateCesiumTraffic(sample);
       updateDebugOverlay(sample, fallbackInstrumentView);
       return;
     }
@@ -6620,6 +6748,7 @@ cw_header('Cockpit Recorder Replay');
     updateEnginePanel(sample, dtSec, snap);
     updateInsetMap(sample, snap);
     updateAvionicsHeader(sample);
+    updateCesiumTraffic(sample);
     updateDebugOverlay(sample, view);
   }
 
