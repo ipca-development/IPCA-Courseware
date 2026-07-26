@@ -1198,7 +1198,7 @@ cw_header('Cockpit Recorder Replay');
   stroke: rgba(255, 255, 255, .88);
   fill: none;
   stroke-width: 2;
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 .attitude-overlay .attitude-yellow {
@@ -5180,8 +5180,8 @@ cw_header('Cockpit Recorder Replay');
       const segmentWidth = (half * 2) / segmentCount;
       const segments = [];
       for (let index = 0; index < segmentCount; index += 1) {
-        const x1 = -half + index * segmentWidth;
-        const x2 = x1 + segmentWidth;
+        const x1 = -half + index * segmentWidth - (index > 0 ? 0.35 : 0);
+        const x2 = -half + (index + 1) * segmentWidth + (index < segmentCount - 1 ? 0.35 : 0);
         const midX = (x1 + x2) / 2;
         const alpha = pitchLadderAlphaAt(midX, y);
         if (alpha < 0.04) continue;
