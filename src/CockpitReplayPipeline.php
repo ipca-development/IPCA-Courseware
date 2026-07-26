@@ -236,8 +236,8 @@ final class CockpitReplayPipeline
             'oat_c' => $this->buildG3xScalarKnots($g3xPoints, 'oat_c'),
         );
         $textKnots = array(
-            'cas_alert' => $this->buildG3xTextKnots($g3xPoints, 'cas_alert'),
-            'terrain_alert' => $this->buildG3xTextKnots($g3xPoints, 'terrain_alert'),
+            'cas_alert' => $this->buildG3xTextKnots($g3xPoints, 'cas_alert', true),
+            'terrain_alert' => $this->buildG3xTextKnots($g3xPoints, 'terrain_alert', true),
             'system_alerts_json' => $this->buildG3xTextKnots($g3xPoints, 'system_alerts_json', true),
             'trim_range_json' => $this->buildG3xTextKnots($g3xPoints, 'trim_range_json', true),
             'transponder_code' => $this->buildG3xTextKnots($g3xPoints, 'transponder_code'),

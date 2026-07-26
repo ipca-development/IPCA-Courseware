@@ -3795,9 +3795,10 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function normalizedSystemAlerts(sample) {
-    const storedAlerts = sample && Array.isArray(sample.system_alerts) ? sample.system_alerts : [];
+    const hasStoredAlerts = !!(sample && Array.isArray(sample.system_alerts));
+    const storedAlerts = hasStoredAlerts ? sample.system_alerts : [];
     const fallbackAlerts = [];
-    if (storedAlerts.length === 0 && sample) {
+    if (!hasStoredAlerts && sample) {
       [
         ['CAS ALERT', sample.cas_alert],
         ['TERRAIN ALERT', sample.terrain_alert],
@@ -3811,7 +3812,7 @@ cw_header('Cockpit Recorder Replay');
           }));
       });
     }
-    const alerts = storedAlerts.length ? storedAlerts : fallbackAlerts;
+    const alerts = hasStoredAlerts ? storedAlerts : fallbackAlerts;
     const rank = { warning: 0, caution: 1, info: 2 };
     return alerts
       .flatMap((alert) => {
@@ -3865,7 +3866,8 @@ cw_header('Cockpit Recorder Replay');
     systemWarningBox.innerHTML = alerts
       .map((alert) => {
         const isOilPress = /\bOIL\s+PRESS\b/i.test(alert.text);
-        return `<div class="system-warning-line is-${escapeHtml(alert.severity)}${isOilPress ? ' is-oil-press is-flashing' : ''}">${escapeHtml(alert.text)}</div>`;
+        const shouldFlash = isOilPress && isPlaybackActive();
+        return `<div class="system-warning-line is-${escapeHtml(alert.severity)}${isOilPress ? ' is-oil-press' : ''}${shouldFlash ? ' is-flashing' : ''}">${escapeHtml(alert.text)}</div>`;
       })
       .join('');
     setElementHidden(systemWarningBox, false);
@@ -5465,6 +5467,7 @@ cw_header('Cockpit Recorder Replay');
     playButton.setAttribute('aria-label', isPlaying ? 'Pause replay' : 'Play replay');
     playButton.classList.toggle('is-playing', isPlaying);
     if (isPlaying && root) root.classList.add('is-replay-started');
+    updateSystemWarningBox(sampleAt(activeT));
   }
 
   function syncPlaybackSpeed() {
