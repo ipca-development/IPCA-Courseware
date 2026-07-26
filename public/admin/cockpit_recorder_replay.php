@@ -2543,6 +2543,7 @@ cw_header('Cockpit Recorder Replay');
   const cesiumTrafficEntities = new Map();
   const cesiumPapiEntities = new Map();
   const trafficBillboardImages = new Map();
+  const papiLightImages = new Map();
   function replayAircraftSettings() {
     return payload && payload.aircraft_settings && typeof payload.aircraft_settings === 'object'
       ? payload.aircraft_settings
@@ -6137,6 +6138,30 @@ cw_header('Cockpit Recorder Replay');
     return 0;
   }
 
+  function papiLightImage(kind) {
+    const key = kind === 'white' ? 'white' : 'red';
+    if (papiLightImages.has(key)) return papiLightImages.get(key);
+    const inner = key === 'white' ? '#fff7ea' : '#ff2a45';
+    const mid = key === 'white' ? 'rgba(255,245,220,.52)' : 'rgba(255,42,69,.46)';
+    const outer = key === 'white' ? 'rgba(255,245,220,0)' : 'rgba(255,42,69,0)';
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+        <defs>
+          <radialGradient id="papiGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="${inner}" stop-opacity=".95"/>
+            <stop offset="28%" stop-color="${inner}" stop-opacity=".72"/>
+            <stop offset="62%" stop-color="${mid}" stop-opacity=".55"/>
+            <stop offset="100%" stop-color="${outer}" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="36" cy="36" r="34" fill="url(#papiGlow)"/>
+      </svg>
+    `;
+    const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    papiLightImages.set(key, image);
+    return image;
+  }
+
   function updateCesiumPapiGuidance(sample) {
     if (!cesiumReady || !cesiumViewer || typeof Cesium === 'undefined') return;
     if (!sample || !instrumentEnabled('papi_guidance') || replayPapiProfiles().length === 0) {
@@ -6163,18 +6188,19 @@ cw_header('Cockpit Recorder Replay');
       const northM = projection.forwardN * distanceM + projection.rightN * rightM;
       const eastM = projection.forwardE * distanceM + projection.rightE * rightM;
       const pos = offsetLatLonByMeters(projection.thresholdLat, projection.thresholdLon, northM, eastM);
-      const isWhite = index < whiteCount;
-      const color = isWhite ? Cesium.Color.WHITE : Cesium.Color.RED;
+      const isWhite = index >= 4 - whiteCount;
+      const image = papiLightImage(isWhite ? 'white' : 'red');
       const position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 0);
       let entity = cesiumPapiEntities.get(id);
       if (!entity) {
         entity = cesiumViewer.entities.add({
           position,
-          point: {
-            pixelSize: 13,
-            color,
-            outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 2,
+          billboard: {
+            image,
+            width: 34,
+            height: 34,
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
@@ -6186,7 +6212,7 @@ cw_header('Cockpit Recorder Replay');
         } else {
           entity.position = position;
         }
-        entity.point.color = color;
+        entity.billboard.image = image;
       }
     }
     Array.from(cesiumPapiEntities.keys()).forEach((id) => {
