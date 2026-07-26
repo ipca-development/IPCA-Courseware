@@ -5245,7 +5245,7 @@ cw_header('Cockpit Recorder Replay');
       return `<line class="attitude-white" x1="${outerX.toFixed(1)}" y1="${outerY.toFixed(1)}" x2="${innerX.toFixed(1)}" y2="${innerY.toFixed(1)}"></line>`;
     }).join('');
     const slip = clamp(firstFinite(sample && sample.estimated_slip_skid_g, sample && sample.slip_skid_g, 0) || 0, -0.35, 0.35);
-    const slipX = slip / 0.35 * 96;
+    const slipX = -slip / 0.35 * 96;
     const staticPointerY = tapeTopY + 6;
     const pointerHalfWidth = 11;
     const pointerHeight = 22;
