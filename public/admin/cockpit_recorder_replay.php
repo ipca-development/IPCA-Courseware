@@ -6158,12 +6158,12 @@ cw_header('Cockpit Recorder Replay');
         <defs>
           <radialGradient id="papiGlow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stop-color="${inner}" stop-opacity=".95"/>
-            <stop offset="42%" stop-color="${inner}" stop-opacity=".78"/>
-            <stop offset="78%" stop-color="${mid}" stop-opacity=".42"/>
+            <stop offset="54%" stop-color="${inner}" stop-opacity=".82"/>
+            <stop offset="84%" stop-color="${mid}" stop-opacity=".24"/>
             <stop offset="100%" stop-color="${outer}" stop-opacity="0"/>
           </radialGradient>
         </defs>
-        <circle cx="36" cy="36" r="31" fill="url(#papiGlow)"/>
+        <circle cx="36" cy="36" r="25" fill="url(#papiGlow)"/>
       </svg>
     `;
     const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -6206,8 +6206,8 @@ cw_header('Cockpit Recorder Replay');
           position,
           billboard: {
             image,
-            width: 30,
-            height: 30,
+            width: 25,
+            height: 25,
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
