@@ -5944,16 +5944,7 @@ cw_header('Cockpit Recorder Replay');
       `
       : `
         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
-          <defs>
-            <radialGradient id="trafficBall" cx="34%" cy="28%" r="72%">
-              <stop offset="0%" stop-color="#ffffff" stop-opacity=".92"/>
-              <stop offset="18%" stop-color="${color}" stop-opacity=".98"/>
-              <stop offset="72%" stop-color="${color}" stop-opacity="1"/>
-              <stop offset="100%" stop-color="#111827" stop-opacity=".42"/>
-            </radialGradient>
-          </defs>
-          <circle cx="0" cy="0" r="13" fill="url(#trafficBall)" stroke="${color}" stroke-width="1.5"/>
-          <circle cx="-4.5" cy="-5.5" r="3.2" fill="#ffffff" opacity=".78"/>
+          <circle cx="0" cy="0" r="13" fill="${color}" stroke="rgba(255,255,255,.9)" stroke-width="1.8"/>
         </svg>
       `;
     const encoded = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
