@@ -435,6 +435,8 @@ final class CockpitReconstructionService
         $elapsedSeconds = $startedTs !== false ? max(0, $now - $startedTs) : 0;
         $staleSeconds = $updatedTs !== false ? max(0, $now - $updatedTs) : null;
 
+        $endpointAirports = $this->replayEndpointAirports($recordingId);
+
         return array(
             'ok' => true,
             'recording_id' => $recordingId,
@@ -711,7 +713,8 @@ final class CockpitReconstructionService
             ),
             'sample_rate_hz' => (int)($diagnostics['sample_rate_hz'] ?? 10),
             'fixed_timestep_s' => (float)($diagnostics['fixed_timestep_s'] ?? 0.1),
-            'airports' => $this->replayEndpointAirports($recordingId),
+            'airports' => $endpointAirports,
+            'runway_visual_guidance' => $this->runwayVisualGuidanceProfiles($endpointAirports),
             'traffic' => $trafficIsArchive ? $trafficRows : array_map(fn(array $row): array => $this->compactTrafficSample($row), $trafficRows),
             'trafficAircraft' => $trafficAircraft,
             'traffic_meta' => $trafficMeta,
@@ -972,6 +975,61 @@ final class CockpitReconstructionService
             }
         }
         return $best !== null && (float)$best['distance_nm'] <= 8.0 ? $best : null;
+    }
+
+    /**
+     * @param array{departure:array<string,mixed>|null,destination:array<string,mixed>|null} $endpointAirports
+     * @return list<array<string,mixed>>
+     */
+    private function runwayVisualGuidanceProfiles(array $endpointAirports): array
+    {
+        if (!$this->tablePresent('ipca_runway_visual_guidance_profiles')) {
+            return array();
+        }
+        $airportIds = array();
+        foreach ($endpointAirports as $airport) {
+            $icao = strtoupper(trim((string)($airport['icao'] ?? '')));
+            if ($icao !== '') {
+                $airportIds[$icao] = true;
+            }
+        }
+        if ($airportIds === array()) {
+            return array();
+        }
+        $placeholders = implode(',', array_fill(0, count($airportIds), '?'));
+        $stmt = $this->pdo->prepare('
+            SELECT *
+            FROM ipca_runway_visual_guidance_profiles
+            WHERE active = 1
+              AND papi_enabled = 1
+              AND airport_icao IN (' . $placeholders . ')
+            ORDER BY airport_icao ASC, runway_ident ASC
+        ');
+        $stmt->execute(array_keys($airportIds));
+        $profiles = array();
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $profiles[] = array(
+                'id' => (int)($row['id'] ?? 0),
+                'airport_icao' => strtoupper((string)($row['airport_icao'] ?? '')),
+                'runway_ident' => (string)($row['runway_ident'] ?? ''),
+                'runway_name' => (string)($row['runway_name'] ?? ''),
+                'threshold_lat' => (float)($row['threshold_lat'] ?? 0),
+                'threshold_lon' => (float)($row['threshold_lon'] ?? 0),
+                'threshold_elevation_ft' => $row['threshold_elevation_ft'] !== null ? (float)$row['threshold_elevation_ft'] : null,
+                'runway_true_heading_deg' => (float)($row['runway_true_heading_deg'] ?? 0),
+                'runway_length_ft' => $row['runway_length_ft'] !== null ? (float)$row['runway_length_ft'] : null,
+                'runway_width_ft' => $row['runway_width_ft'] !== null ? (float)$row['runway_width_ft'] : null,
+                'papi_side' => (string)($row['papi_side'] ?? 'left'),
+                'papi_lateral_offset_ft' => (float)($row['papi_lateral_offset_ft'] ?? 300),
+                'papi_distance_from_threshold_ft' => (float)($row['papi_distance_from_threshold_ft'] ?? 1000),
+                'papi_light_spacing_ft' => (float)($row['papi_light_spacing_ft'] ?? 20),
+                'glide_path_angle_deg' => (float)($row['glide_path_angle_deg'] ?? 3.0),
+                'threshold_crossing_height_ft' => (float)($row['threshold_crossing_height_ft'] ?? 50.0),
+                'source' => (string)($row['source'] ?? ''),
+                'review_status' => (string)($row['review_status'] ?? ''),
+            );
+        }
+        return $profiles;
     }
 
     /**

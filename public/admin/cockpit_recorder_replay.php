@@ -2338,6 +2338,7 @@ cw_header('Cockpit Recorder Replay');
           <label class="replay-toggle"><span>Angle of Attack Indicator</span><input type="checkbox" data-instrument-toggle="aoa_indicator"></label>
           <label class="replay-toggle"><span>Inset Map</span><input type="checkbox" data-instrument-toggle="inset_map"></label>
           <label class="replay-toggle"><span>Traffic</span><input type="checkbox" data-instrument-toggle="traffic"></label>
+          <label class="replay-toggle"><span>PAPI Guidance</span><input type="checkbox" data-instrument-toggle="papi_guidance"></label>
           <label class="replay-toggle"><span>Horizon Horizontal Bar</span><input type="checkbox" data-instrument-toggle="horizon_bar"></label>
           <label class="replay-toggle"><span>Attitude Indicator</span><input type="checkbox" data-instrument-toggle="attitude_indicator"></label>
           <label class="replay-toggle"><span>Flight Director Bars</span><input type="checkbox" data-instrument-toggle="flight_director_bars"></label>
@@ -2540,6 +2541,7 @@ cw_header('Cockpit Recorder Replay');
   let displayRpm = null;
   const displayEngineValues = new Map();
   const cesiumTrafficEntities = new Map();
+  const cesiumPapiEntities = new Map();
   const trafficBillboardImages = new Map();
   function replayAircraftSettings() {
     return payload && payload.aircraft_settings && typeof payload.aircraft_settings === 'object'
@@ -2683,6 +2685,7 @@ cw_header('Cockpit Recorder Replay');
     'aoa_indicator',
     'inset_map',
     'traffic',
+    'papi_guidance',
     'horizon_bar',
     'attitude_indicator',
     'flight_director_bars',
@@ -2694,8 +2697,8 @@ cw_header('Cockpit Recorder Replay');
     'system_warning_box',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'traffic', 'engine_instrument_stack', 'system_warning_box']);
-  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'traffic', 'papi_guidance', 'engine_instrument_stack', 'system_warning_box']);
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'papi_guidance', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -3317,6 +3320,7 @@ cw_header('Cockpit Recorder Replay');
     if (aoaIndicator && !instrumentEnabled('aoa_indicator')) setElementHidden(aoaIndicator, true);
     if (enginePanel && !instrumentEnabled('engine_instrument_stack')) setElementHidden(enginePanel, true);
     if (systemWarningBox && !instrumentEnabled('system_warning_box')) setElementHidden(systemWarningBox, true);
+    if (!instrumentEnabled('papi_guidance')) clearCesiumPapiEntities();
   }
 
   function g3xField(sample, ...keys) {
@@ -6051,6 +6055,147 @@ cw_header('Cockpit Recorder Replay');
     });
   }
 
+  function clearCesiumPapiEntities() {
+    if (!cesiumViewer) return;
+    cesiumPapiEntities.forEach((entity) => {
+      cesiumViewer.entities.remove(entity);
+    });
+    cesiumPapiEntities.clear();
+  }
+
+  function replayPapiProfiles() {
+    return payload && Array.isArray(payload.runway_visual_guidance) ? payload.runway_visual_guidance : [];
+  }
+
+  function offsetLatLonByMeters(lat, lon, northM, eastM) {
+    const dLat = northM / 6378137;
+    const dLon = eastM / (6378137 * Math.cos(degToRad(lat)));
+    return {
+      lat: lat + dLat * 180 / Math.PI,
+      lon: lon + dLon * 180 / Math.PI,
+    };
+  }
+
+  function runwayProjection(profile, sample) {
+    const thresholdLat = finiteNumber(profile && profile.threshold_lat);
+    const thresholdLon = finiteNumber(profile && profile.threshold_lon);
+    const headingDeg = finiteNumber(profile && profile.runway_true_heading_deg);
+    const aircraftLat = finiteNumber(sample && (sample.lat ?? sample.latitude));
+    const aircraftLon = finiteNumber(sample && (sample.lon ?? sample.longitude));
+    if (thresholdLat === null || thresholdLon === null || headingDeg === null || aircraftLat === null || aircraftLon === null) return null;
+    const northM = degToRad(aircraftLat - thresholdLat) * 6378137;
+    const eastM = degToRad(aircraftLon - thresholdLon) * 6378137 * Math.cos(degToRad(thresholdLat));
+    const headingRad = degToRad(headingDeg);
+    const forwardN = Math.cos(headingRad);
+    const forwardE = Math.sin(headingRad);
+    const rightN = -Math.sin(headingRad);
+    const rightE = Math.cos(headingRad);
+    return {
+      distanceToThresholdM: -(northM * forwardN + eastM * forwardE),
+      crossTrackM: northM * rightN + eastM * rightE,
+      forwardN,
+      forwardE,
+      rightN,
+      rightE,
+      thresholdLat,
+      thresholdLon,
+      headingDeg,
+    };
+  }
+
+  function activePapiProfile(sample) {
+    const profiles = replayPapiProfiles();
+    let best = null;
+    profiles.forEach((profile) => {
+      const projection = runwayProjection(profile, sample);
+      if (!projection) return;
+      const dist = projection.distanceToThresholdM;
+      const cross = Math.abs(projection.crossTrackM);
+      if (dist < -700 || dist > 25000 || cross > 2500) return;
+      const score = cross * 3 + Math.max(0, dist) * 0.05;
+      if (best === null || score < best.score) {
+        best = { profile, projection, score };
+      }
+    });
+    return best;
+  }
+
+  function papiWhiteCount(profile, projection, sample) {
+    const altitudeFt = firstFinite(sample && sample.baro_altitude_ft, sample && sample.altitude_ft_msl, sample && sample.altitude_ft, sample && sample.gps_altitude_ft);
+    const thresholdElevationFt = firstFinite(profile && profile.threshold_elevation_ft, sample && sample.airport_elevation_ft, 0) || 0;
+    const tchFt = firstFinite(profile && profile.threshold_crossing_height_ft, 50) || 50;
+    const glideDeg = firstFinite(profile && profile.glide_path_angle_deg, 3.0) || 3.0;
+    if (altitudeFt === null || !projection || projection.distanceToThresholdM <= 10) return 2;
+    const distanceFt = projection.distanceToThresholdM / 0.3048;
+    const observedAngleDeg = Math.atan2(Math.max(-200, altitudeFt - thresholdElevationFt - tchFt), Math.max(1, distanceFt)) * 180 / Math.PI;
+    const errorDeg = observedAngleDeg - glideDeg;
+    if (errorDeg > 0.55) return 4;
+    if (errorDeg > 0.20) return 3;
+    if (errorDeg >= -0.20) return 2;
+    if (errorDeg >= -0.55) return 1;
+    return 0;
+  }
+
+  function updateCesiumPapiGuidance(sample) {
+    if (!cesiumReady || !cesiumViewer || typeof Cesium === 'undefined') return;
+    if (!sample || !instrumentEnabled('papi_guidance') || replayPapiProfiles().length === 0) {
+      clearCesiumPapiEntities();
+      return;
+    }
+    const active = activePapiProfile(sample);
+    if (!active) {
+      clearCesiumPapiEntities();
+      return;
+    }
+    const { profile, projection } = active;
+    const profileId = String(profile.id || `${profile.airport_icao || ''}:${profile.runway_ident || ''}`);
+    const visibleIds = new Set();
+    const side = String(profile.papi_side || 'left').toLowerCase() === 'right' ? 1 : -1;
+    const distanceM = feetToMeters(firstFinite(profile.papi_distance_from_threshold_ft, 1000) || 1000);
+    const lateralOffsetM = feetToMeters(firstFinite(profile.papi_lateral_offset_ft, 300) || 300);
+    const spacingM = feetToMeters(firstFinite(profile.papi_light_spacing_ft, 20) || 20);
+    const whiteCount = papiWhiteCount(profile, projection, sample);
+    for (let index = 0; index < 4; index += 1) {
+      const id = `${profileId}:${index}`;
+      visibleIds.add(id);
+      const rightM = side * (lateralOffsetM + (index - 1.5) * spacingM);
+      const northM = projection.forwardN * distanceM + projection.rightN * rightM;
+      const eastM = projection.forwardE * distanceM + projection.rightE * rightM;
+      const pos = offsetLatLonByMeters(projection.thresholdLat, projection.thresholdLon, northM, eastM);
+      const isWhite = index < whiteCount;
+      const color = isWhite ? Cesium.Color.WHITE : Cesium.Color.RED;
+      const position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 0);
+      let entity = cesiumPapiEntities.get(id);
+      if (!entity) {
+        entity = cesiumViewer.entities.add({
+          position,
+          point: {
+            pixelSize: 13,
+            color,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        cesiumPapiEntities.set(id, entity);
+      } else {
+        if (entity.position && typeof entity.position.setValue === 'function') {
+          entity.position.setValue(position);
+        } else {
+          entity.position = position;
+        }
+        entity.point.color = color;
+      }
+    }
+    Array.from(cesiumPapiEntities.keys()).forEach((id) => {
+      if (visibleIds.has(id)) return;
+      const entity = cesiumPapiEntities.get(id);
+      if (entity) cesiumViewer.entities.remove(entity);
+      cesiumPapiEntities.delete(id);
+    });
+  }
+
   function insetProjector(track, sample, extraPoints = []) {
     if (!track.length) return null;
     let minLat = Infinity;
@@ -6831,6 +6976,7 @@ cw_header('Cockpit Recorder Replay');
       updateInsetMap(freeSample, true);
       updateAvionicsHeader(freeSample);
       updateCesiumTraffic(freeSample);
+      updateCesiumPapiGuidance(freeSample);
       updateTerrainHeight(freeSample);
       updateDebugOverlay(freeSample, displayCamera);
       return;
@@ -6855,6 +7001,7 @@ cw_header('Cockpit Recorder Replay');
       updateInsetMap(sample, snap);
       updateAvionicsHeader(sample);
       updateCesiumTraffic(sample);
+      updateCesiumPapiGuidance(sample);
       updateDebugOverlay(sample, fallbackInstrumentView);
       return;
     }
@@ -6922,6 +7069,7 @@ cw_header('Cockpit Recorder Replay');
     updateInsetMap(sample, snap);
     updateAvionicsHeader(sample);
     updateCesiumTraffic(sample);
+    updateCesiumPapiGuidance(sample);
     updateDebugOverlay(sample, view);
   }
 
