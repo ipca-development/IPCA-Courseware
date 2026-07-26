@@ -1806,7 +1806,7 @@ final class CockpitReplayPipeline
         if ($segment['edge'] === 'after') {
             return $knots[count($knots) - 1]['v'];
         }
-        return $segment['ratio'] < 0.5 ? $knots[$segment['before']]['v'] : $knots[$segment['after']]['v'];
+        return $knots[$segment['before']]['v'];
     }
 
     /**
