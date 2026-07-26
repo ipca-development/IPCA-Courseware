@@ -87,13 +87,13 @@ $defaultEngineProfile = array(
             array('color' => 'white', 'from' => 5.8, 'to' => 7.3),
         )),
         array('key' => 'coolant1_f', 'label' => 'COOLANT °F', 'unit' => '', 'min' => 86, 'max' => 266, 'value_field' => 'coolant1_f', 'decimals' => 0, 'probe_label' => '1', 'ranges' => array(
-            array('color' => 'white', 'from' => 86, 'to' => 248),
-            array('color' => 'yellow', 'from' => null, 'to' => null),
+            array('color' => 'white', 'from' => 86, 'to' => 210),
+            array('color' => 'yellow', 'from' => 210, 'to' => 248),
             array('color' => 'red', 'from' => 248, 'to' => 266),
         )),
         array('key' => 'coolant2_f', 'label' => '', 'unit' => '', 'min' => 86, 'max' => 266, 'value_field' => 'coolant2_f', 'decimals' => 0, 'probe_label' => '2', 'ranges' => array(
-            array('color' => 'white', 'from' => 86, 'to' => 248),
-            array('color' => 'yellow', 'from' => null, 'to' => null),
+            array('color' => 'white', 'from' => 86, 'to' => 210),
+            array('color' => 'yellow', 'from' => 210, 'to' => 248),
             array('color' => 'red', 'from' => 248, 'to' => 266),
         )),
         array('key' => 'volts', 'label' => 'VOLTS', 'unit' => '', 'min' => 11.5, 'max' => 16, 'value_field' => 'volts', 'decimals' => 1, 'alert_style' => 'range_label', 'ranges' => array(
@@ -1194,6 +1194,19 @@ cw_header('Cockpit Recorder Replay');
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.attitude-overlay .attitude-pitch-ladder-left,
+.attitude-overlay .attitude-pitch-ladder-right {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.attitude-overlay .attitude-pitch-ladder-left {
+  stroke: url(#pitchLadderFadeLeft);
+}
+.attitude-overlay .attitude-pitch-ladder-right {
+  stroke: url(#pitchLadderFadeRight);
+}
 .attitude-overlay .attitude-yellow {
   fill: #f5e91b;
   stroke: rgba(0, 0, 0, .76);
@@ -2149,7 +2162,7 @@ cw_header('Cockpit Recorder Replay');
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
     <div id="insetMap" class="replay-inset-map" aria-label="Interactive inset map" hidden>
       <div id="insetMapTop" class="replay-inset-map-top" aria-label="Horizontal flight track map">
-        <svg id="insetMapSvg" class="replay-inset-map-svg" viewBox="0 0 240 240" role="img" aria-label="North-up flight track"></svg>
+        <svg id="insetMapSvg" class="replay-inset-map-svg" viewBox="0 0 240 240" role="img" aria-label="Flight track inset map"></svg>
         <div class="replay-inset-map-controls" aria-label="Inset map zoom controls">
           <button id="insetMapZoomIn" class="replay-inset-map-zoom" type="button" aria-label="Zoom inset map in">+</button>
           <button id="insetMapZoomOut" class="replay-inset-map-zoom" type="button" aria-label="Zoom inset map out">-</button>
@@ -2616,6 +2629,7 @@ cw_header('Cockpit Recorder Replay');
   let insetMapProjection = null;
   let insetMapPanE = 0;
   let insetMapPanN = 0;
+  let insetMapOrientation = 'north_up';
   let insetMapDragState = null;
   let suppressInsetMapClick = false;
   let localVisualAltitudeOffsetM = null;
@@ -2657,6 +2671,7 @@ cw_header('Cockpit Recorder Replay');
   const RPM_NEEDLE_SMOOTHING_RATE = 4.5;
   const ENGINE_GAUGE_SMOOTHING_RATE = 4.5;
   const ALTIMETER_SETTING_UNIT_STORAGE_KEY = 'ipca.cockpitReplay.altimeterSettingUnit.v1';
+  const INSET_MAP_ORIENTATION_STORAGE_KEY = 'ipca.cockpitReplay.insetMapOrientation.v1';
   const BODY_AXIS_MAPPING = {
     eyeOffsetXForwardM: SYNTHETIC_VISION_DEFAULTS.forwardOffsetM,
     eyeOffsetYRightM: SYNTHETIC_VISION_DEFAULTS.rightOffsetM,
@@ -3081,6 +3096,32 @@ cw_header('Cockpit Recorder Replay');
     } catch (err) {
       // Unit selection is cosmetic; ignore storage failures.
     }
+  }
+
+  function loadInsetMapOrientation() {
+    try {
+      const saved = String(localStorage.getItem(INSET_MAP_ORIENTATION_STORAGE_KEY) || '').toLowerCase();
+      return saved === 'track_up' ? 'track_up' : 'north_up';
+    } catch (err) {
+      return 'north_up';
+    }
+  }
+
+  function saveInsetMapOrientation() {
+    try {
+      localStorage.setItem(INSET_MAP_ORIENTATION_STORAGE_KEY, insetMapOrientation);
+    } catch (err) {
+      // Inset orientation is a visual preference; replay can continue without storage.
+    }
+  }
+
+  function toggleInsetMapOrientation() {
+    insetMapOrientation = insetMapOrientation === 'track_up' ? 'north_up' : 'track_up';
+    insetMapPanE = 0;
+    insetMapPanN = 0;
+    insetMapSignature = '';
+    saveInsetMapOrientation();
+    updateInsetMap(sampleAt(activeT), true);
   }
 
   function updateCalibrationPanel() {
@@ -5126,13 +5167,14 @@ cw_header('Cockpit Recorder Replay');
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
       const half = (major ? 76 : 45) * attitudePitchMarkScale;
+      const centerFadeGap = 18 * attitudePitchMarkScale;
       const labelOffset = 22 * attitudePitchMarkScale;
       const fontSize = (major ? 23 : 20) * attitudePitchMarkScale;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
         ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text>`
         : '';
-      return `<line class="attitude-white" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
+      return `<line class="attitude-pitch-ladder-left" x1="${-half}" y1="${y.toFixed(1)}" x2="${-centerFadeGap}" y2="${y.toFixed(1)}"></line><line class="attitude-pitch-ladder-right" x1="${centerFadeGap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -5282,6 +5324,18 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
+      <defs>
+        <linearGradient id="pitchLadderFadeLeft" x1="-80" y1="0" x2="-8" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity=".88"/>
+          <stop offset="70%" stop-color="#ffffff" stop-opacity=".48"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="pitchLadderFadeRight" x1="8" y1="0" x2="80" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+          <stop offset="30%" stop-color="#ffffff" stop-opacity=".48"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity=".88"/>
+        </linearGradient>
+      </defs>
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
@@ -5972,12 +6026,29 @@ cw_header('Cockpit Recorder Replay');
       e: (lon - originLon) * 60 * Math.cos(degToRad(originLat)),
       n: (lat - originLat) * 60,
     });
-    const nmPoints = track.map((point) => ({ ...point, ...latLonToNm(point.lat, point.lon) }));
+    const orientationDeg = insetMapOrientation === 'track_up'
+      ? normalizeDeg(firstFinite(sample && sample.track_deg_true, sample && sample.gps_track_deg, sample && sample.track_deg, sample && sample.heading_deg_true, sample && sample.heading_deg, 0) || 0)
+      : 0;
+    const rotateNm = (e, n) => {
+      if (orientationDeg === 0) return { e, n };
+      const rad = degToRad(orientationDeg);
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return {
+        e: e * cos - n * sin,
+        n: e * sin + n * cos,
+      };
+    };
+    const latLonToDisplayNm = (lat, lon) => {
+      const nm = latLonToNm(lat, lon);
+      return rotateNm(nm.e, nm.n);
+    };
+    const nmPoints = track.map((point) => ({ ...point, ...latLonToDisplayNm(point.lat, point.lon) }));
     const extraNmPoints = extraPoints
       .map((point) => {
         const lat = finiteNumber(point && point.lat);
         const lon = finiteNumber(point && point.lon);
-        return lat !== null && lon !== null ? latLonToNm(lat, lon) : null;
+        return lat !== null && lon !== null ? latLonToDisplayNm(lat, lon) : null;
       })
       .filter(Boolean);
     let minE = Infinity;
@@ -5998,7 +6069,7 @@ cw_header('Cockpit Recorder Replay');
     });
     const currentLat = finiteNumber(sample && sample.lat);
     const currentLon = finiteNumber(sample && sample.lon);
-    const currentNm = currentLat !== null && currentLon !== null ? latLonToNm(currentLat, currentLon) : null;
+    const currentNm = currentLat !== null && currentLon !== null ? latLonToDisplayNm(currentLat, currentLon) : null;
     const baseCenterE = (minE + maxE) / 2;
     const baseCenterN = (minN + maxN) / 2;
     const zoom = clamp(insetMapZoom, 1, 16);
@@ -6009,7 +6080,7 @@ cw_header('Cockpit Recorder Replay');
     const fullRangeNm = Math.max(widthNm, heightNm, 0.25);
     const scale = ((INSET_MAP_SIZE - INSET_MAP_PADDING * 2) / fullRangeNm) * zoom;
     const project = (lat, lon) => {
-      const nm = latLonToNm(lat, lon);
+      const nm = latLonToDisplayNm(lat, lon);
       return {
         x: INSET_MAP_SIZE / 2 + (nm.e - centerE) * scale,
         y: INSET_MAP_SIZE / 2 - (nm.n - centerN) * scale,
@@ -6019,12 +6090,13 @@ cw_header('Cockpit Recorder Replay');
     };
     return {
       project,
-      latLonToNm,
+      latLonToNm: latLonToDisplayNm,
       baseCenterE,
       baseCenterN,
       rangeNm: fullRangeNm / zoom,
       scale,
       points: nmPoints,
+      orientationDeg,
     };
   }
 
@@ -6105,6 +6177,8 @@ cw_header('Cockpit Recorder Replay');
     const currentTrackPoint = track[currentIndex] || track[0];
     const aircraftPos = projector.project(currentTrackPoint.lat, currentTrackPoint.lon);
     const aircraftTrack = insetTrackDirection(currentTrackPoint.sample, track, currentIndex);
+    const mapOrientationDeg = firstFinite(projector.orientationDeg, 0) || 0;
+    const aircraftDisplayTrack = normalizeDeg(aircraftTrack - mapOrientationDeg);
     const stride = Math.max(1, Math.ceil(track.length / 1300));
     const pathPoints = [];
     track.forEach((point, index) => {
@@ -6129,10 +6203,12 @@ cw_header('Cockpit Recorder Replay');
       insetMapZoom,
       pathPoints.length,
       airports.map((airport) => airport.icao).join(','),
-      trafficTargets.map((target) => `${target.hex}:${target.cs}:${Math.round(target.x)}:${Math.round(target.y)}:${Math.round(target.trk)}`).join(','),
+      trafficTargets.map((target) => `${target.hex}:${target.cs}:${Math.round(target.x)}:${Math.round(target.y)}:${Math.round(normalizeDeg((target.trk || 0) - mapOrientationDeg))}`).join(','),
       Math.round(aircraftPos.x),
       Math.round(aircraftPos.y),
-      Math.round(aircraftTrack),
+      Math.round(aircraftDisplayTrack),
+      insetMapOrientation,
+      Math.round(mapOrientationDeg),
       Math.round(rangeNm * 10),
       insetMap.style.left,
       insetMap.style.top,
@@ -6152,25 +6228,32 @@ cw_header('Cockpit Recorder Replay');
         const label = escapeHtml(target.cs || target.hex.toUpperCase());
         const labelX = clamp(target.x + 7, 4, INSET_MAP_SIZE - 4);
         const labelY = clamp(target.y - 7, 10, INSET_MAP_SIZE - 4);
+        const trafficTrack = normalizeDeg((target.trk || 0) - mapOrientationDeg);
         return `
-          <g transform="translate(${target.x.toFixed(1)} ${target.y.toFixed(1)}) rotate(${target.trk.toFixed(1)})">
+          <g transform="translate(${target.x.toFixed(1)} ${target.y.toFixed(1)}) rotate(${trafficTrack.toFixed(1)})">
             <polygon points="0,-5.5 3.4,4.2 0,1.8 -3.4,4.2" fill="rgba(180,245,255,.95)" stroke="rgba(255,255,255,.88)" stroke-width="1.1" stroke-linejoin="round"></polygon>
           </g>
           <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" font-size="9.5" text-anchor="start" fill="rgba(225,250,255,.98)" stroke="rgba(0,0,0,.85)" stroke-width="2.4" paint-order="stroke">${label}</text>
         `;
       }).join('');
+      const northRotation = insetMapOrientation === 'track_up' ? -mapOrientationDeg : 0;
+      const orientationText = insetMapOrientation === 'track_up' ? 'TRK UP' : 'N UP';
       const planePath = 'M 0.0 -30.4 L 0.7 -29.5 L 1.3 -28.6 L 1.8 -27.7 L 2.4 -26.8 L 2.9 -25.9 L 3.3 -24.9 L 3.7 -24.0 L 3.9 -23.1 L 4.2 -22.2 L 4.5 -21.3 L 4.7 -20.3 L 4.9 -19.4 L 5.0 -18.5 L 5.1 -17.6 L 5.2 -16.7 L 28.5 -15.7 L 42.0 -14.8 L 47.8 -13.9 L 48.6 -13.0 L 49.2 -12.1 L 49.6 -11.2 L 49.9 -10.2 L 50.0 -9.3 L 50.0 -8.4 L 49.9 -7.5 L 21.8 -6.6 L 4.7 -5.6 L 4.5 -4.7 L 4.2 -3.8 L 3.9 -2.9 L 3.7 -2.0 L 3.4 -1.0 L 3.3 -0.1 L 3.0 0.8 L 2.8 1.7 L 2.5 2.6 L 2.4 3.5 L 2.1 4.5 L 2.0 5.4 L 1.8 6.3 L 1.7 7.2 L 1.6 8.1 L 1.6 9.1 L 1.4 10.0 L 1.3 10.9 L 1.3 11.8 L 1.3 12.7 L 1.2 13.6 L 1.2 14.6 L 1.2 15.5 L 1.0 16.4 L 1.0 17.3 L 1.0 18.2 L 1.0 19.2 L 1.0 20.1 L 1.0 21.0 L 1.0 21.9 L 1.0 22.8 L 2.2 23.8 L 8.0 24.7 L 10.8 25.6 L 11.3 26.5 L 11.5 27.4 L 11.4 28.3 L 11.0 29.3 L 3.8 30.2 L -1.0 30.4 L -1.4 30.4 L -4.7 30.2 L -11.2 29.3 L -11.4 28.3 L -11.5 27.4 L -11.3 26.5 L -10.6 25.6 L -7.3 24.7 L -1.7 23.8 L -1.0 22.8 L -1.0 21.9 L -1.0 21.0 L -1.0 20.1 L -1.0 19.2 L -1.0 18.2 L -1.0 17.3 L -1.0 16.4 L -1.0 15.5 L -1.0 14.6 L -1.0 13.6 L -1.2 12.7 L -1.3 11.8 L -1.3 10.9 L -1.4 10.0 L -1.6 9.1 L -1.6 8.1 L -1.7 7.2 L -1.8 6.3 L -2.0 5.4 L -2.1 4.5 L -2.4 3.5 L -2.5 2.6 L -2.8 1.7 L -3.0 0.8 L -3.3 -0.1 L -3.4 -1.0 L -3.7 -2.0 L -3.9 -2.9 L -4.2 -3.8 L -4.5 -4.7 L -4.7 -5.6 L -30.8 -6.6 L -49.9 -7.5 L -50.0 -8.4 L -50.0 -9.3 L -49.9 -10.2 L -49.6 -11.2 L -49.2 -12.1 L -48.6 -13.0 L -47.6 -13.9 L -40.7 -14.8 L -26.6 -15.7 L -5.2 -16.7 L -5.1 -17.6 L -5.0 -18.5 L -4.9 -19.4 L -4.7 -20.3 L -4.5 -21.3 L -4.2 -22.2 L -3.9 -23.1 L -3.5 -24.0 L -3.1 -24.9 L -2.8 -25.9 L -2.4 -26.8 L -1.8 -27.7 L -1.2 -28.6 L -0.5 -29.5 L 0.0 -30.4 Z';
       insetMapSvg.innerHTML = `
         <rect x="0" y="0" width="${INSET_MAP_SIZE}" height="${INSET_MAP_SIZE}" fill="rgba(40,40,40,.12)"></rect>
         <polyline points="${pathPoints.join(' ')}" fill="none" stroke="${INSET_MAP_MAGENTA}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"></polyline>
         ${airportHtml}
         ${trafficHtml}
-        <g transform="translate(${aircraftPos.x.toFixed(1)} ${aircraftPos.y.toFixed(1)}) rotate(${aircraftTrack.toFixed(1)}) scale(.46)">
+        <g transform="translate(${aircraftPos.x.toFixed(1)} ${aircraftPos.y.toFixed(1)}) rotate(${aircraftDisplayTrack.toFixed(1)}) scale(.46)">
           <path d="${planePath}" fill="rgba(0,0,0,.96)" stroke="rgba(255,255,255,.96)" stroke-width="4.5" stroke-linejoin="round"></path>
         </g>
-        <g transform="translate(208 37)">
-          <text x="0" y="-18" font-size="11" text-anchor="middle">N</text>
-          <polygon points="0,-13 -6,8 0,4 6,8" fill="rgba(255,255,255,.96)" stroke="rgba(15,23,42,.35)" stroke-width=".7"></polygon>
+        <g id="insetMapOrientationToggle" role="button" tabindex="0" aria-label="Toggle inset map orientation" transform="translate(208 37)" style="cursor:pointer">
+          <circle cx="0" cy="0" r="25" fill="rgba(15,23,42,.08)"></circle>
+          <text x="0" y="-21" font-size="8.5" text-anchor="middle" fill="rgba(255,255,255,.96)" stroke="rgba(0,0,0,.85)" stroke-width="2" paint-order="stroke">${orientationText}</text>
+          <g transform="rotate(${northRotation.toFixed(1)})">
+            <text x="0" y="-18" font-size="11" text-anchor="middle">N</text>
+            <polygon points="0,-13 -6,8 0,4 6,8" fill="rgba(255,255,255,.96)" stroke="rgba(15,23,42,.35)" stroke-width=".7"></polygon>
+          </g>
         </g>
       `;
       insetMapSignature = signature;
@@ -7523,6 +7606,7 @@ cw_header('Cockpit Recorder Replay');
   }
 
   function startInsetMapPan(event) {
+    if (isInsetMapOrientationToggleEvent(event)) return;
     if (!insetMapProjection || !insetMapProjection.projector || !insetMapProjection.projector.scale) return;
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
@@ -7592,11 +7676,30 @@ cw_header('Cockpit Recorder Replay');
     };
   }
 
+  function isInsetMapOrientationToggleEvent(event) {
+    const target = event && event.target;
+    return !!(target && typeof target.closest === 'function' && target.closest('#insetMapOrientationToggle'));
+  }
+
+  function handleInsetMapOrientationKeydown(event) {
+    if (!isInsetMapOrientationToggleEvent(event)) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleInsetMapOrientation();
+  }
+
   function seekInsetMapTrack(event) {
     if (suppressInsetMapClick) {
       suppressInsetMapClick = false;
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    if (isInsetMapOrientationToggleEvent(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleInsetMapOrientation();
       return;
     }
     if (!insetMapProjection || !insetMapProjection.track || !insetMapProjection.projector) return;
@@ -7808,6 +7911,9 @@ cw_header('Cockpit Recorder Replay');
     insetMapTop.addEventListener('pointercancel', endInsetMapPan);
     insetMapTop.addEventListener('click', seekInsetMapTrack);
   }
+  if (insetMapSvg) {
+    insetMapSvg.addEventListener('keydown', handleInsetMapOrientationKeydown);
+  }
   timeline.addEventListener('input', () => seek(Number(timeline.value), !standaloneReplay, true));
   audio.addEventListener('timeupdate', () => {
     if (sessionAudioSegments.length > 1) return;
@@ -8008,6 +8114,7 @@ cw_header('Cockpit Recorder Replay');
 
   cameraCalibration = loadCameraCalibration();
   altimeterSettingUnit = loadAltimeterSettingUnit();
+  insetMapOrientation = loadInsetMapOrientation();
   updateCalibrationPanel();
   cameraSettings = loadCameraSettings();
   syncCameraControls();

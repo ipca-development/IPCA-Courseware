@@ -2358,6 +2358,8 @@ final class CockpitReconstructionService
         $latitude = G3XFlightStreamParser::numericValue($row, 'Latitude (deg)');
         $longitude = G3XFlightStreamParser::numericValue($row, 'Longitude (deg)', 'Longitude');
         $apState = trim((string)($row['Autopilot State'] ?? ''));
+        $casAlert = self::normalizedReplayAlertText((string)($row['CAS Alert'] ?? $row['CAS ALERT'] ?? ''));
+        $terrainAlert = self::normalizedReplayAlertText((string)($row['Terrain Alert'] ?? $row['TERRAIN ALERT'] ?? ''));
 
         if ($pitch !== null) {
             $sample['pitch_deg'] = $pitch;
@@ -2430,6 +2432,11 @@ final class CockpitReconstructionService
         if ($apState !== '') {
             $sample['autopilot_status'] = $apState;
         }
+        $sample['cas_alert'] = $casAlert;
+        $sample['terrain_alert'] = $terrainAlert;
+        $alerts = self::replayAlertList($casAlert, 'CAS ALERT');
+        array_push($alerts, ...self::replayAlertList($terrainAlert, 'TERRAIN ALERT'));
+        $sample['system_alerts_json'] = json_encode($alerts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]';
         if ($ias !== null) {
             $sample['wind_estimation_method'] = 'g3x_ias_' . number_format($ias, 1, '.', '');
         }
@@ -2467,6 +2474,41 @@ final class CockpitReconstructionService
             $mapped['Latitude (deg)'] = (string)$row['Latitude'];
         }
         return $mapped;
+    }
+
+    private static function normalizedReplayAlertText(string $value): string
+    {
+        $value = trim(preg_replace('/\s+/', ' ', $value) ?? '');
+        $lower = strtolower($value);
+        if ($value === '' || in_array($lower, array('-', '--', 'none', 'normal', 'no alert', 'no alerts', '0'), true)) {
+            return '';
+        }
+        return $value;
+    }
+
+    /**
+     * @return list<array<string,string>>
+     */
+    private static function replayAlertList(string $value, string $sourceColumn): array
+    {
+        $value = self::normalizedReplayAlertText($value);
+        if ($value === '') {
+            return array();
+        }
+        $parts = preg_split('/(?:\s*[|;]\s*|\r?\n)+/', $value) ?: array($value);
+        $alerts = array();
+        foreach ($parts as $part) {
+            $text = self::normalizedReplayAlertText((string)$part);
+            if ($text === '') {
+                continue;
+            }
+            $alerts[] = array(
+                'source_column' => $sourceColumn,
+                'text' => $text,
+                'key' => strtoupper(preg_replace('/\s+/', ' ', $text) ?? $text),
+            );
+        }
+        return $alerts;
     }
 
     private static function haversineMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
