@@ -6106,15 +6106,24 @@ cw_header('Cockpit Recorder Replay');
 
   function activePapiProfile(sample) {
     const profiles = replayPapiProfiles();
+    const aircraftCourse = firstFinite(
+      sample && sample.track_deg_true,
+      sample && sample.track_deg,
+      sample && sample.heading_deg_true,
+      sample && sample.heading_deg_magnetic,
+      sample && sample.heading_deg
+    );
     let best = null;
     profiles.forEach((profile) => {
       const projection = runwayProjection(profile, sample);
       if (!projection) return;
+      if (aircraftCourse !== null && Math.abs(normalizeSignedDeg(aircraftCourse - projection.headingDeg)) > 70) return;
       const dist = projection.distanceToThresholdM;
       const cross = Math.abs(projection.crossTrackM);
       const runwayLengthM = feetToMeters(firstFinite(profile && profile.runway_length_ft, 8500) || 8500);
       if (dist < -(runwayLengthM + 700) || dist > 25000 || cross > 2500) return;
-      const score = cross * 3 + Math.max(0, dist) * 0.05;
+      const alignmentPenalty = aircraftCourse === null ? 0 : Math.abs(normalizeSignedDeg(aircraftCourse - projection.headingDeg)) * 25;
+      const score = cross * 3 + Math.max(0, dist) * 0.05 + alignmentPenalty;
       if (best === null || score < best.score) {
         best = { profile, projection, score };
       }
@@ -6149,12 +6158,12 @@ cw_header('Cockpit Recorder Replay');
         <defs>
           <radialGradient id="papiGlow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stop-color="${inner}" stop-opacity=".95"/>
-            <stop offset="28%" stop-color="${inner}" stop-opacity=".72"/>
-            <stop offset="62%" stop-color="${mid}" stop-opacity=".55"/>
+            <stop offset="42%" stop-color="${inner}" stop-opacity=".78"/>
+            <stop offset="78%" stop-color="${mid}" stop-opacity=".42"/>
             <stop offset="100%" stop-color="${outer}" stop-opacity="0"/>
           </radialGradient>
         </defs>
-        <circle cx="36" cy="36" r="34" fill="url(#papiGlow)"/>
+        <circle cx="36" cy="36" r="31" fill="url(#papiGlow)"/>
       </svg>
     `;
     const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -6179,7 +6188,7 @@ cw_header('Cockpit Recorder Replay');
     const side = String(profile.papi_side || 'left').toLowerCase() === 'right' ? 1 : -1;
     const distanceM = feetToMeters(firstFinite(profile.papi_distance_from_threshold_ft, 1000) || 1000);
     const lateralOffsetM = feetToMeters(firstFinite(profile.papi_lateral_offset_ft, 300) || 300);
-    const spacingM = feetToMeters(firstFinite(profile.papi_light_spacing_ft, 20) || 20);
+    const spacingM = feetToMeters(firstFinite(profile.papi_light_spacing_ft, 20) || 20) * 1.55;
     const whiteCount = papiWhiteCount(profile, projection, sample);
     for (let index = 0; index < 4; index += 1) {
       const id = `${profileId}:${index}`;
@@ -6197,8 +6206,8 @@ cw_header('Cockpit Recorder Replay');
           position,
           billboard: {
             image,
-            width: 34,
-            height: 34,
+            width: 30,
+            height: 30,
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
