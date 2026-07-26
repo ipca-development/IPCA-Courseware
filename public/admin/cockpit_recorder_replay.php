@@ -1194,18 +1194,12 @@ cw_header('Cockpit Recorder Replay');
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.attitude-overlay .attitude-pitch-ladder-left,
-.attitude-overlay .attitude-pitch-ladder-right {
+.attitude-overlay .attitude-pitch-ladder {
+  stroke: rgba(255, 255, 255, .88);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.attitude-overlay .attitude-pitch-ladder-left {
-  stroke: url(#pitchLadderFadeLeft);
-}
-.attitude-overlay .attitude-pitch-ladder-right {
-  stroke: url(#pitchLadderFadeRight);
 }
 .attitude-overlay .attitude-yellow {
   fill: #f5e91b;
@@ -5167,14 +5161,18 @@ cw_header('Cockpit Recorder Replay');
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
       const half = (major ? 76 : 45) * attitudePitchMarkScale;
-      const centerFadeGap = 18 * attitudePitchMarkScale;
+      const lowerFadeStart = 14 * attitudePitchMarkScale;
+      const lowerFadeEnd = Math.max(lowerFadeStart + 1, halfHeight * 0.72);
+      const pitchOpacity = y <= lowerFadeStart
+        ? 0.88
+        : clamp(0.88 - ((y - lowerFadeStart) / (lowerFadeEnd - lowerFadeStart)) * 0.66, 0.22, 0.88);
       const labelOffset = 22 * attitudePitchMarkScale;
       const fontSize = (major ? 23 : 20) * attitudePitchMarkScale;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
-        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text>`
+        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchOpacity.toFixed(2)}">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchOpacity.toFixed(2)}">${label}</text>`
         : '';
-      return `<line class="attitude-pitch-ladder-left" x1="${-half}" y1="${y.toFixed(1)}" x2="${-centerFadeGap}" y2="${y.toFixed(1)}"></line><line class="attitude-pitch-ladder-right" x1="${centerFadeGap}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
+      return `<line class="attitude-pitch-ladder" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}" style="stroke-opacity:${pitchOpacity.toFixed(2)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -5324,18 +5322,6 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
-      <defs>
-        <linearGradient id="pitchLadderFadeLeft" x1="-80" y1="0" x2="-8" y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity=".88"/>
-          <stop offset="70%" stop-color="#ffffff" stop-opacity=".48"/>
-          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-        </linearGradient>
-        <linearGradient id="pitchLadderFadeRight" x1="8" y1="0" x2="80" y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
-          <stop offset="30%" stop-color="#ffffff" stop-opacity=".48"/>
-          <stop offset="100%" stop-color="#ffffff" stop-opacity=".88"/>
-        </linearGradient>
-      </defs>
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
@@ -6249,8 +6235,8 @@ cw_header('Cockpit Recorder Replay');
         </g>
         <g id="insetMapOrientationToggle" role="button" tabindex="0" aria-label="Toggle inset map orientation" transform="translate(208 37)" style="cursor:pointer">
           <circle cx="0" cy="0" r="25" fill="rgba(15,23,42,.08)"></circle>
-          <text x="0" y="-21" font-size="8.5" text-anchor="middle" fill="rgba(255,255,255,.96)" stroke="rgba(0,0,0,.85)" stroke-width="2" paint-order="stroke">${orientationText}</text>
-          <g transform="rotate(${northRotation.toFixed(1)})">
+          <text x="0" y="-28" font-size="8.5" text-anchor="middle" fill="rgba(255,255,255,.96)" stroke="rgba(0,0,0,.85)" stroke-width="2" paint-order="stroke">${orientationText}</text>
+          <g transform="translate(0 2) rotate(${northRotation.toFixed(1)})">
             <text x="0" y="-18" font-size="11" text-anchor="middle">N</text>
             <polygon points="0,-13 -6,8 0,4 6,8" fill="rgba(255,255,255,.96)" stroke="rgba(15,23,42,.35)" stroke-width=".7"></polygon>
           </g>
