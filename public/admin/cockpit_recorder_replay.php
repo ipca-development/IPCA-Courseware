@@ -1198,7 +1198,7 @@ cw_header('Cockpit Recorder Replay');
   stroke: rgba(255, 255, 255, .88);
   fill: none;
   stroke-width: 2;
-  stroke-linecap: butt;
+  stroke-linecap: round;
   stroke-linejoin: round;
 }
 .attitude-overlay .attitude-yellow {
@@ -5141,6 +5141,7 @@ cw_header('Cockpit Recorder Replay');
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
     const airspeedRect = instrumentAnchorRect(airspeedTape);
     const altimeterRect = instrumentAnchorRect(altimeterStack);
+    const hsiRect = instrumentAnchorRect(hsiOverlay);
     const airspeedWidth = airspeedRect ? airspeedRect.width / scaleX : 118;
     const tapeMargin = airspeedWidth * 0.8;
     const arcLeft = airspeedRect ? (airspeedRect.right - rootRect.left) / scaleX + tapeMargin : width * 0.23;
@@ -5167,29 +5168,56 @@ cw_header('Cockpit Recorder Replay');
     const pitchMaskTheta = degToRad(-rollDeg);
     const pitchMaskCos = Math.cos(pitchMaskTheta);
     const pitchMaskSin = Math.sin(pitchMaskTheta);
+    const hsiObstruction = hsiRect && hsiRect.width > 0 && hsiRect.height > 0
+      ? {
+          cx: ((hsiRect.left + hsiRect.right) / 2 - rootRect.left) / scaleX,
+          cy: ((hsiRect.top + hsiRect.bottom) / 2 - rootRect.top) / scaleY,
+          radius: Math.max(hsiRect.width / scaleX, hsiRect.height / scaleY) * 0.43,
+          fade: Math.max(hsiRect.width / scaleX, hsiRect.height / scaleY) * 0.07,
+          headingCx: ((hsiRect.left + hsiRect.right) / 2 - rootRect.left) / scaleX,
+          headingCy: (hsiRect.top - rootRect.top) / scaleY + (hsiRect.height / scaleY) * 0.08,
+          headingRx: (hsiRect.width / scaleX) * 0.23,
+          headingRy: (hsiRect.height / scaleY) * 0.08,
+          headingFade: (hsiRect.height / scaleY) * 0.04,
+        }
+      : null;
+    const hsiVisibilityMultiplier = (screenX, screenY) => {
+      if (!hsiObstruction) return 1;
+      const roseDistance = Math.hypot(screenX - hsiObstruction.cx, screenY - hsiObstruction.cy);
+      const roseMultiplier = roseDistance <= hsiObstruction.radius
+        ? 0
+        : clamp((roseDistance - hsiObstruction.radius) / hsiObstruction.fade, 0, 1);
+      const boxDx = Math.max(0, Math.abs(screenX - hsiObstruction.headingCx) - hsiObstruction.headingRx);
+      const boxDy = Math.max(0, Math.abs(screenY - hsiObstruction.headingCy) - hsiObstruction.headingRy);
+      const boxDistance = Math.hypot(boxDx, boxDy);
+      const boxMultiplier = boxDistance <= 0
+        ? 0
+        : clamp(boxDistance / hsiObstruction.headingFade, 0, 1);
+      return roseMultiplier * boxMultiplier;
+    };
     const pitchLadderAlphaAt = (x, y) => {
       const screenX = centerX + x * pitchMaskCos - y * pitchMaskSin;
       const screenY = horizonY + x * pitchMaskSin + y * pitchMaskCos;
       const distance = Math.hypot(screenX - centerX, screenY - pitchLadderMaskCenterY);
-      if (distance <= pitchLadderFullRadius) return 1;
-      if (distance >= pitchLadderOuterRadius) return 0;
-      return 1 - ((distance - pitchLadderFullRadius) / (pitchLadderOuterRadius - pitchLadderFullRadius));
+      const attitudeAlpha = distance <= pitchLadderFullRadius
+        ? 1
+        : distance >= pitchLadderOuterRadius
+          ? 0
+          : 1 - ((distance - pitchLadderFullRadius) / (pitchLadderOuterRadius - pitchLadderFullRadius));
+      return attitudeAlpha * hsiVisibilityMultiplier(screenX, screenY);
     };
-    const pitchLadderLineHtml = (half, y) => {
-      const segmentCount = 18;
-      const segmentWidth = (half * 2) / segmentCount;
-      const segments = [];
-      for (let index = 0; index < segmentCount; index += 1) {
-        const x1 = -half + index * segmentWidth - (index > 0 ? 0.35 : 0);
-        const x2 = -half + (index + 1) * segmentWidth + (index < segmentCount - 1 ? 0.35 : 0);
-        const midX = (x1 + x2) / 2;
-        const alpha = pitchLadderAlphaAt(midX, y);
-        if (alpha < 0.04) continue;
-        segments.push(`<line class="attitude-pitch-ladder" x1="${x1.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y.toFixed(1)}" style="stroke-opacity:${alpha.toFixed(2)}"></line>`);
+    const pitchLadderGradientDefs = [];
+    const pitchLadderLineHtml = (gradientId, half, y) => {
+      const stops = [];
+      for (let index = 0; index <= 12; index += 1) {
+        const offset = index / 12;
+        const x = -half + offset * half * 2;
+        stops.push(`<stop offset="${(offset * 100).toFixed(1)}%" stop-color="#fff" stop-opacity="${(pitchLadderAlphaAt(x, y) * 0.88).toFixed(2)}"/>`);
       }
-      return segments.join('');
+      pitchLadderGradientDefs.push(`<linearGradient id="${gradientId}" gradientUnits="userSpaceOnUse" x1="${(-half).toFixed(1)}" y1="${y.toFixed(1)}" x2="${half.toFixed(1)}" y2="${y.toFixed(1)}">${stops.join('')}</linearGradient>`);
+      return `<line class="attitude-pitch-ladder" x1="${(-half).toFixed(1)}" y1="${y.toFixed(1)}" x2="${half.toFixed(1)}" y2="${y.toFixed(1)}" style="stroke:url(#${gradientId})"></line>`;
     };
-    const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
+    const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg, markIndex) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
       const half = (major ? 76 : 45) * attitudePitchMarkScale;
@@ -5199,7 +5227,7 @@ cw_header('Cockpit Recorder Replay');
       const text = major || Math.abs(deg) === 5
         ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchLadderAlphaAt(-(half + labelOffset), y).toFixed(2)}">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchLadderAlphaAt(half + labelOffset, y).toFixed(2)}">${label}</text>`
         : '';
-      return `${pitchLadderLineHtml(half, y)}${text}`;
+      return `${pitchLadderLineHtml(`pitchLadderGradient${markIndex}`, half, y)}${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -5332,6 +5360,9 @@ cw_header('Cockpit Recorder Replay');
       Math.round(pitchLadderScaleFactor * 100),
       Math.round(pitchLadderFullRadius),
       Math.round(pitchLadderMaskCenterY),
+      hsiObstruction ? Math.round(hsiObstruction.cx) : 'hsi-x',
+      hsiObstruction ? Math.round(hsiObstruction.cy) : 'hsi-y',
+      hsiObstruction ? Math.round(hsiObstruction.radius) : 'hsi-r',
       Math.round(attitudeRollArcScale * 100),
       Math.round(attitudePitchMarkScale * 100),
       Math.round(attitudeYellowReferenceScale * 100),
@@ -5351,6 +5382,9 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
+      <defs>
+        ${pitchLadderGradientDefs.join('')}
+      </defs>
       <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
