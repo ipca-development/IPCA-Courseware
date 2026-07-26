@@ -5674,7 +5674,15 @@ cw_header('Cockpit Recorder Replay');
       alt,
       dist,
       rel_alt: ownshipAlt !== null && alt !== null ? alt - ownshipAlt : null,
+      on_ground: row && (row.on_ground === true || row.onGround === true),
     };
+  }
+
+  function trafficTargetUsesGroundReference(target) {
+    const onGround = target && (target.on_ground === true || target.onGround === true);
+    const alt = finiteNumber(target && target.alt);
+    const relAlt = Math.abs(finiteNumber(target && target.rel_alt) ?? 99999);
+    return onGround || alt === null || (Math.abs(alt) < 1 && relAlt <= 300);
   }
 
   function nearestLegacyTrafficRowsAt(rows, activeT, ownshipHex) {
@@ -5780,6 +5788,8 @@ cw_header('Cockpit Recorder Replay');
       alt,
       dist,
       rel_alt: ownshipAlt !== null && alt !== null ? alt - ownshipAlt : null,
+      on_ground: sample && sample.onGround === true,
+      gs: finiteNumber(sample && sample.groundSpeedKt),
     };
   }
 
@@ -5811,8 +5821,14 @@ cw_header('Cockpit Recorder Replay');
     const svg = level === 'normal'
       ? `
         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
-          <rect x="-10" y="-10" width="20" height="20" transform="rotate(45)" fill="#ffffff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round"/>
-          <rect x="-7" y="-7" width="14" height="14" transform="rotate(45)" fill="rgba(255,255,255,.92)" stroke="rgba(255,255,255,.75)" stroke-width="1"/>
+          <defs>
+            <linearGradient id="trafficDiamond" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="66%" stop-color="#f8fafc"/>
+              <stop offset="100%" stop-color="#dbeafe"/>
+            </linearGradient>
+          </defs>
+          <rect x="-10" y="-10" width="20" height="20" transform="rotate(45)" fill="url(#trafficDiamond)" stroke="rgba(255,255,255,.92)" stroke-width="2" stroke-linejoin="round"/>
         </svg>
       `
       : `
@@ -5825,7 +5841,7 @@ cw_header('Cockpit Recorder Replay');
               <stop offset="100%" stop-color="#111827" stop-opacity=".42"/>
             </radialGradient>
           </defs>
-          <circle cx="0" cy="0" r="13" fill="url(#trafficBall)" stroke="#0f172a" stroke-width="3"/>
+          <circle cx="0" cy="0" r="13" fill="url(#trafficBall)" stroke="${color}" stroke-width="1.5"/>
           <circle cx="-4.5" cy="-5.5" r="3.2" fill="#ffffff" opacity=".78"/>
         </svg>
       `;
@@ -5872,8 +5888,10 @@ cw_header('Cockpit Recorder Replay');
       const hex = String((target && target.hex) || '').trim().toLowerCase();
       if (hex === '') return;
       const altFt = finiteNumber(target.alt) ?? finiteNumber(sample.baro_altitude_ft ?? sample.altitude_ft_msl ?? sample.altitude_ft) ?? 0;
+      const useGroundReference = trafficTargetUsesGroundReference(target);
       const level = trafficThreatLevel(target);
-      const position = Cesium.Cartesian3.fromDegrees(lon, lat, altFt * 0.3048);
+      const position = Cesium.Cartesian3.fromDegrees(lon, lat, useGroundReference ? 0 : altFt * 0.3048);
+      const heightReference = useGroundReference ? Cesium.HeightReference.CLAMP_TO_GROUND : Cesium.HeightReference.NONE;
       const labelText = trafficEntityLabel(target);
       visibleIds.add(hex);
       let entity = cesiumTrafficEntities.get(hex);
@@ -5887,6 +5905,7 @@ cw_header('Cockpit Recorder Replay');
             rotation: degToRad(finiteNumber(target.trk) || 0),
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            heightReference,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           label: {
@@ -5899,6 +5918,7 @@ cw_header('Cockpit Recorder Replay');
             pixelOffset: new Cesium.Cartesian2(0, 28),
             verticalOrigin: Cesium.VerticalOrigin.TOP,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            heightReference,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
@@ -5911,8 +5931,10 @@ cw_header('Cockpit Recorder Replay');
         }
         entity.billboard.image = trafficBillboardImage(level);
         entity.billboard.rotation = degToRad(finiteNumber(target.trk) || 0);
+        entity.billboard.heightReference = heightReference;
         entity.label.text = labelText;
         entity.label.fillColor = trafficCesiumColor(level);
+        entity.label.heightReference = heightReference;
       }
     });
     Array.from(cesiumTrafficEntities.keys()).forEach((hex) => {
