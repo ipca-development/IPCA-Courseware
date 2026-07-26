@@ -978,12 +978,15 @@ final class CockpitReconstructionService
     }
 
     /**
-     * @param array{departure:array<string,mixed>|null,destination:array<string,mixed>|null} $endpointAirports
+     * @param array{departure:array<string,mixed>|null,destination:array<string,mixed>|null}|null $endpointAirports
      * @return list<array<string,mixed>>
      */
-    private function runwayVisualGuidanceProfiles(array $endpointAirports): array
+    private function runwayVisualGuidanceProfiles(?array $endpointAirports): array
     {
         if (!$this->tablePresent('ipca_runway_visual_guidance_profiles')) {
+            return array();
+        }
+        if ($endpointAirports === null) {
             return array();
         }
         $airportIds = array();
