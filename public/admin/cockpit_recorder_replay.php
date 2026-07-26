@@ -5327,7 +5327,7 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
       <defs>
-        <radialGradient id="pitchLadderVisibilityGradient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(${centerX.toFixed(1)} ${pitchLadderMaskCenterY.toFixed(1)}) scale(${pitchLadderOuterRadius.toFixed(1)})">
+        <radialGradient id="pitchLadderVisibilityGradient" cx="${centerX.toFixed(1)}" cy="${pitchLadderMaskCenterY.toFixed(1)}" r="${pitchLadderOuterRadius.toFixed(1)}" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
           <stop offset="68%" stop-color="#fff" stop-opacity="1"/>
           <stop offset="100%" stop-color="#000" stop-opacity="0"/>
