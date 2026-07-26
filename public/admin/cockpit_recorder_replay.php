@@ -5156,8 +5156,8 @@ cw_header('Cockpit Recorder Replay');
     const attitudePitchMarkScale = 0.5;
     const attitudeYellowReferenceScale = 0.5;
     const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
-    const pitchLadderFullRadius = clamp(Math.min(width, height) * 0.20, 80, 210);
-    const pitchLadderOuterRadius = pitchLadderFullRadius / 0.55;
+    const pitchLadderFullRadius = clamp(Math.min(width, height) * 0.14, 60, 150);
+    const pitchLadderOuterRadius = pitchLadderFullRadius / 0.50;
     const pitchLadderMaskCenterY = clamp(
       horizonY - pitchLadderFullRadius * 0.18,
       pitchLadderFullRadius * 0.35,
