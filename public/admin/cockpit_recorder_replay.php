@@ -5164,6 +5164,31 @@ cw_header('Cockpit Recorder Replay');
       height - pitchLadderFullRadius * 0.35
     );
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight * pitchLadderScaleFactor;
+    const pitchMaskTheta = degToRad(-rollDeg);
+    const pitchMaskCos = Math.cos(pitchMaskTheta);
+    const pitchMaskSin = Math.sin(pitchMaskTheta);
+    const pitchLadderAlphaAt = (x, y) => {
+      const screenX = centerX + x * pitchMaskCos - y * pitchMaskSin;
+      const screenY = horizonY + x * pitchMaskSin + y * pitchMaskCos;
+      const distance = Math.hypot(screenX - centerX, screenY - pitchLadderMaskCenterY);
+      if (distance <= pitchLadderFullRadius) return 1;
+      if (distance >= pitchLadderOuterRadius) return 0;
+      return 1 - ((distance - pitchLadderFullRadius) / (pitchLadderOuterRadius - pitchLadderFullRadius));
+    };
+    const pitchLadderLineHtml = (half, y) => {
+      const segmentCount = 18;
+      const segmentWidth = (half * 2) / segmentCount;
+      const segments = [];
+      for (let index = 0; index < segmentCount; index += 1) {
+        const x1 = -half + index * segmentWidth;
+        const x2 = x1 + segmentWidth;
+        const midX = (x1 + x2) / 2;
+        const alpha = pitchLadderAlphaAt(midX, y);
+        if (alpha < 0.04) continue;
+        segments.push(`<line class="attitude-pitch-ladder" x1="${x1.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y.toFixed(1)}" style="stroke-opacity:${alpha.toFixed(2)}"></line>`);
+      }
+      return segments.join('');
+    };
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
@@ -5172,9 +5197,9 @@ cw_header('Cockpit Recorder Replay');
       const fontSize = (major ? 23 : 20) * attitudePitchMarkScale;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
-        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text>`
+        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchLadderAlphaAt(-(half + labelOffset), y).toFixed(2)}">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchLadderAlphaAt(half + labelOffset, y).toFixed(2)}">${label}</text>`
         : '';
-      return `<line class="attitude-pitch-ladder" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
+      return `${pitchLadderLineHtml(half, y)}${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -5326,17 +5351,7 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
-      <defs>
-        <radialGradient id="pitchLadderVisibilityGradient" cx="${centerX.toFixed(1)}" cy="${pitchLadderMaskCenterY.toFixed(1)}" r="${pitchLadderOuterRadius.toFixed(1)}" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
-          <stop offset="68%" stop-color="#fff" stop-opacity="1"/>
-          <stop offset="100%" stop-color="#000" stop-opacity="0"/>
-        </radialGradient>
-        <mask id="pitchLadderVisibilityMask" maskUnits="userSpaceOnUse" x="0" y="0" width="${width.toFixed(1)}" height="${height.toFixed(1)}">
-          <rect x="0" y="0" width="${width.toFixed(1)}" height="${height.toFixed(1)}" fill="url(#pitchLadderVisibilityGradient)"></rect>
-        </mask>
-      </defs>
-      <g mask="url(#pitchLadderVisibilityMask)" transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
+      <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)}) scale(${attitudeRollArcScale})">
