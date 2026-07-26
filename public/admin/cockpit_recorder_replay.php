@@ -5156,23 +5156,25 @@ cw_header('Cockpit Recorder Replay');
     const attitudePitchMarkScale = 0.5;
     const attitudeYellowReferenceScale = 0.5;
     const pitchLadderScaleFactor = cameraCalibration ? Number(cameraCalibration.pitchLadderScale || 1) : 1;
+    const pitchLadderFullRadius = clamp(Math.min(width, height) * 0.34, 150, 330);
+    const pitchLadderOuterRadius = pitchLadderFullRadius / 0.68;
+    const pitchLadderMaskCenterY = clamp(
+      horizonY - pitchLadderFullRadius * 0.18,
+      pitchLadderFullRadius * 0.35,
+      height - pitchLadderFullRadius * 0.35
+    );
     const pitchPx = (deg) => -Math.tan(degToRad(deg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight * pitchLadderScaleFactor;
     const pitchMarks = [-15, -10, -5, 5, 10, 15].map((deg) => {
       const y = pitchPx(deg);
       const major = Math.abs(deg) % 10 === 0;
       const half = (major ? 76 : 45) * attitudePitchMarkScale;
-      const lowerFadeStart = 14 * attitudePitchMarkScale;
-      const lowerFadeEnd = Math.max(lowerFadeStart + 1, halfHeight * 0.72);
-      const pitchOpacity = y <= lowerFadeStart
-        ? 0.88
-        : clamp(0.88 - ((y - lowerFadeStart) / (lowerFadeEnd - lowerFadeStart)) * 0.66, 0.22, 0.88);
       const labelOffset = 22 * attitudePitchMarkScale;
       const fontSize = (major ? 23 : 20) * attitudePitchMarkScale;
       const label = Math.abs(deg);
       const text = major || Math.abs(deg) === 5
-        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchOpacity.toFixed(2)}">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle" style="opacity:${pitchOpacity.toFixed(2)}">${label}</text>`
+        ? `<text x="${-(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text><text x="${(half + labelOffset)}" y="${(y + 4).toFixed(1)}" font-size="${fontSize.toFixed(1)}" text-anchor="middle">${label}</text>`
         : '';
-      return `<line class="attitude-pitch-ladder" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}" style="stroke-opacity:${pitchOpacity.toFixed(2)}"></line>${text}`;
+      return `<line class="attitude-pitch-ladder" x1="${-half}" y1="${y.toFixed(1)}" x2="${half}" y2="${y.toFixed(1)}"></line>${text}`;
     }).join('');
     const tapeTopY = airspeedRect ? Math.max(8, (airspeedRect.top - rootRect.top) / scaleY) : 72;
     const arcRadius = clamp(arcSpan / (2 * Math.sin(degToRad(60))), 170, 360);
@@ -5303,6 +5305,8 @@ cw_header('Cockpit Recorder Replay');
       Math.round(rollDeg * 10),
       Math.round(verticalFovDeg),
       Math.round(pitchLadderScaleFactor * 100),
+      Math.round(pitchLadderFullRadius),
+      Math.round(pitchLadderMaskCenterY),
       Math.round(attitudeRollArcScale * 100),
       Math.round(attitudePitchMarkScale * 100),
       Math.round(attitudeYellowReferenceScale * 100),
@@ -5322,7 +5326,17 @@ cw_header('Cockpit Recorder Replay');
     attitudeOverlay.setAttribute('viewBox', `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
     attitudeOverlay.setAttribute('preserveAspectRatio', 'none');
     attitudeOverlay.innerHTML = `
-      <g transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
+      <defs>
+        <radialGradient id="pitchLadderVisibilityGradient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(${centerX.toFixed(1)} ${pitchLadderMaskCenterY.toFixed(1)}) scale(${pitchLadderOuterRadius.toFixed(1)})">
+          <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
+          <stop offset="68%" stop-color="#fff" stop-opacity="1"/>
+          <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+        </radialGradient>
+        <mask id="pitchLadderVisibilityMask" maskUnits="userSpaceOnUse" x="0" y="0" width="${width.toFixed(1)}" height="${height.toFixed(1)}">
+          <rect x="0" y="0" width="${width.toFixed(1)}" height="${height.toFixed(1)}" fill="url(#pitchLadderVisibilityGradient)"></rect>
+        </mask>
+      </defs>
+      <g mask="url(#pitchLadderVisibilityMask)" transform="translate(${centerX.toFixed(1)} ${horizonY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)})">
         ${pitchMarks}
       </g>
       <g transform="translate(${centerX.toFixed(1)} ${arcCenterY.toFixed(1)}) rotate(${(-rollDeg).toFixed(2)}) scale(${attitudeRollArcScale})">
