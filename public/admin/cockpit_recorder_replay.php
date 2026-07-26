@@ -6111,7 +6111,8 @@ cw_header('Cockpit Recorder Replay');
       if (!projection) return;
       const dist = projection.distanceToThresholdM;
       const cross = Math.abs(projection.crossTrackM);
-      if (dist < -700 || dist > 25000 || cross > 2500) return;
+      const runwayLengthM = feetToMeters(firstFinite(profile && profile.runway_length_ft, 8500) || 8500);
+      if (dist < -(runwayLengthM + 700) || dist > 25000 || cross > 2500) return;
       const score = cross * 3 + Math.max(0, dist) * 0.05;
       if (best === null || score < best.score) {
         best = { profile, projection, score };

@@ -435,8 +435,6 @@ final class CockpitReconstructionService
         $elapsedSeconds = $startedTs !== false ? max(0, $now - $startedTs) : 0;
         $staleSeconds = $updatedTs !== false ? max(0, $now - $updatedTs) : null;
 
-        $endpointAirports = $this->replayEndpointAirports($recordingId);
-
         return array(
             'ok' => true,
             'recording_id' => $recordingId,
@@ -691,6 +689,7 @@ final class CockpitReconstructionService
         $diagnostics = isset($summary['replay_v2']) && is_array($summary['replay_v2']) ? $summary['replay_v2'] : array();
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
         $aircraftSettings = (new AircraftSettingsService($this->pdo))->resolvedForRecording($recording);
+        $endpointAirports = $this->replayEndpointAirports($recordingId);
 
         return array(
             'ok' => true,
@@ -986,29 +985,30 @@ final class CockpitReconstructionService
         if (!$this->tablePresent('ipca_runway_visual_guidance_profiles')) {
             return array();
         }
-        if ($endpointAirports === null) {
-            return array();
-        }
         $airportIds = array();
-        foreach ($endpointAirports as $airport) {
-            $icao = strtoupper(trim((string)($airport['icao'] ?? '')));
-            if ($icao !== '') {
-                $airportIds[$icao] = true;
+        if ($endpointAirports !== null) {
+            foreach ($endpointAirports as $airport) {
+                $icao = strtoupper(trim((string)($airport['icao'] ?? '')));
+                if ($icao !== '') {
+                    $airportIds[$icao] = true;
+                }
             }
         }
-        if ($airportIds === array()) {
-            return array();
+        $whereAirport = '';
+        $params = array();
+        if ($airportIds !== array()) {
+            $whereAirport = ' AND airport_icao IN (' . implode(',', array_fill(0, count($airportIds), '?')) . ')';
+            $params = array_keys($airportIds);
         }
-        $placeholders = implode(',', array_fill(0, count($airportIds), '?'));
         $stmt = $this->pdo->prepare('
             SELECT *
             FROM ipca_runway_visual_guidance_profiles
             WHERE active = 1
               AND papi_enabled = 1
-              AND airport_icao IN (' . $placeholders . ')
+              ' . $whereAirport . '
             ORDER BY airport_icao ASC, runway_ident ASC
         ');
-        $stmt->execute(array_keys($airportIds));
+        $stmt->execute($params);
         $profiles = array();
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
             $profiles[] = array(
