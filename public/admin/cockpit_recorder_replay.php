@@ -6131,28 +6131,42 @@ cw_header('Cockpit Recorder Replay');
     return best;
   }
 
-  function papiWhiteCount(profile, projection, sample) {
+  function papiGlideAngleDeg(profile, projection, sample) {
     const altitudeFt = firstFinite(sample && sample.baro_altitude_ft, sample && sample.altitude_ft_msl, sample && sample.altitude_ft, sample && sample.gps_altitude_ft);
     const thresholdElevationFt = firstFinite(profile && profile.threshold_elevation_ft, sample && sample.airport_elevation_ft, 0) || 0;
     const tchFt = firstFinite(profile && profile.threshold_crossing_height_ft, 50) || 50;
-    const glideDeg = firstFinite(profile && profile.glide_path_angle_deg, 3.0) || 3.0;
-    if (altitudeFt === null || !projection || projection.distanceToThresholdM <= 10) return 2;
+    if (altitudeFt === null || !projection || projection.distanceToThresholdM <= 10) return null;
     const distanceFt = projection.distanceToThresholdM / 0.3048;
-    const observedAngleDeg = Math.atan2(Math.max(-200, altitudeFt - thresholdElevationFt - tchFt), Math.max(1, distanceFt)) * 180 / Math.PI;
-    const errorDeg = observedAngleDeg - glideDeg;
-    if (errorDeg > 0.55) return 4;
-    if (errorDeg > 0.20) return 3;
-    if (errorDeg >= -0.20) return 2;
-    if (errorDeg >= -0.55) return 1;
-    return 0;
+    return Math.atan2(Math.max(-200, altitudeFt - thresholdElevationFt - tchFt), Math.max(1, distanceFt)) * 180 / Math.PI;
   }
 
-  function papiLightImage(kind) {
-    const key = kind === 'white' ? 'white' : 'red';
+  function smoothStep(edge0, edge1, value) {
+    const t = clamp((value - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
+  function papiLightWhiteBlend(profile, projection, sample, visualIndex) {
+    const observedAngleDeg = papiGlideAngleDeg(profile, projection, sample);
+    if (observedAngleDeg === null) return visualIndex < 2 ? 1 : 0;
+    const glideDeg = firstFinite(profile && profile.glide_path_angle_deg, 3.0) || 3.0;
+    const thresholds = [glideDeg - 0.55, glideDeg - 0.20, glideDeg + 0.20, glideDeg + 0.55];
+    return smoothStep(thresholds[visualIndex] - 0.08, thresholds[visualIndex] + 0.08, observedAngleDeg);
+  }
+
+  function papiLightImage(whiteBlend) {
+    const blend = clamp(Number(whiteBlend) || 0, 0, 1);
+    const bucket = Math.round(blend * 24);
+    const key = `blend:${bucket}`;
     if (papiLightImages.has(key)) return papiLightImages.get(key);
-    const inner = key === 'white' ? '#fff7ea' : '#ff2a45';
-    const mid = key === 'white' ? 'rgba(255,245,220,.52)' : 'rgba(255,42,69,.46)';
-    const outer = key === 'white' ? 'rgba(255,245,220,0)' : 'rgba(255,42,69,0)';
+    const mix = bucket / 24;
+    const red = { r: 255, g: 42, b: 69 };
+    const white = { r: 255, g: 247, b: 234 };
+    const r = Math.round(red.r + (white.r - red.r) * mix);
+    const g = Math.round(red.g + (white.g - red.g) * mix);
+    const b = Math.round(red.b + (white.b - red.b) * mix);
+    const inner = `rgb(${r},${g},${b})`;
+    const mid = `rgba(${r},${g},${b},.42)`;
+    const outer = `rgba(${r},${g},${b},0)`;
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
         <defs>
@@ -6187,9 +6201,8 @@ cw_header('Cockpit Recorder Replay');
     const visibleIds = new Set();
     const side = String(profile.papi_side || 'left').toLowerCase() === 'right' ? 1 : -1;
     const distanceM = feetToMeters(firstFinite(profile.papi_distance_from_threshold_ft, 1000) || 1000);
-    const lateralOffsetM = feetToMeters(firstFinite(profile.papi_lateral_offset_ft, 300) || 300);
+    const lateralOffsetM = feetToMeters(firstFinite(profile.papi_lateral_offset_ft, 300) || 300) * 0.78;
     const spacingM = feetToMeters(firstFinite(profile.papi_light_spacing_ft, 20) || 20) * 1.55;
-    const whiteCount = papiWhiteCount(profile, projection, sample);
     for (let index = 0; index < 4; index += 1) {
       const id = `${profileId}:${index}`;
       visibleIds.add(id);
@@ -6197,8 +6210,8 @@ cw_header('Cockpit Recorder Replay');
       const northM = projection.forwardN * distanceM + projection.rightN * rightM;
       const eastM = projection.forwardE * distanceM + projection.rightE * rightM;
       const pos = offsetLatLonByMeters(projection.thresholdLat, projection.thresholdLon, northM, eastM);
-      const isWhite = index >= 4 - whiteCount;
-      const image = papiLightImage(isWhite ? 'white' : 'red');
+      const visualIndex = side < 0 ? 3 - index : index;
+      const image = papiLightImage(papiLightWhiteBlend(profile, projection, sample, visualIndex));
       const position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 0);
       let entity = cesiumPapiEntities.get(id);
       if (!entity) {
@@ -6206,8 +6219,8 @@ cw_header('Cockpit Recorder Replay');
           position,
           billboard: {
             image,
-            width: 25,
-            height: 25,
+            width: 19,
+            height: 19,
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
