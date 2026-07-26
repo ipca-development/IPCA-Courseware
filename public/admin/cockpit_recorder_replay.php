@@ -5794,27 +5794,43 @@ cw_header('Cockpit Recorder Replay');
   function trafficSymbolColor(level) {
     if (level === 'warning') return '#ff3b30';
     if (level === 'caution') return '#ffd92f';
-    return '#b4f5ff';
+    return '#ffffff';
   }
 
   function trafficCesiumColor(level) {
     if (typeof Cesium === 'undefined') return null;
     if (level === 'warning') return Cesium.Color.fromCssColorString('#ff3b30');
     if (level === 'caution') return Cesium.Color.fromCssColorString('#ffd92f');
-    return Cesium.Color.fromCssColorString('#b4f5ff');
+    return Cesium.Color.WHITE;
   }
 
   function trafficBillboardImage(level) {
     const color = trafficSymbolColor(level);
-    if (trafficBillboardImages.has(color)) return trafficBillboardImages.get(color);
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
-        <path d="M0 -18 L10 14 L0 8 L-10 14 Z" fill="${color}" stroke="white" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M0 -18 L0 8" stroke="rgba(0,0,0,.42)" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-    `.trim();
+    const cacheKey = `${level}:${color}`;
+    if (trafficBillboardImages.has(cacheKey)) return trafficBillboardImages.get(cacheKey);
+    const svg = level === 'normal'
+      ? `
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
+          <rect x="-10" y="-10" width="20" height="20" transform="rotate(45)" fill="#ffffff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round"/>
+          <rect x="-7" y="-7" width="14" height="14" transform="rotate(45)" fill="rgba(255,255,255,.92)" stroke="rgba(255,255,255,.75)" stroke-width="1"/>
+        </svg>
+      `
+      : `
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-24 -24 48 48">
+          <defs>
+            <radialGradient id="trafficBall" cx="34%" cy="28%" r="72%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity=".92"/>
+              <stop offset="18%" stop-color="${color}" stop-opacity=".98"/>
+              <stop offset="72%" stop-color="${color}" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#111827" stop-opacity=".42"/>
+            </radialGradient>
+          </defs>
+          <circle cx="0" cy="0" r="13" fill="url(#trafficBall)" stroke="#0f172a" stroke-width="3"/>
+          <circle cx="-4.5" cy="-5.5" r="3.2" fill="#ffffff" opacity=".78"/>
+        </svg>
+      `;
     const encoded = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
-    trafficBillboardImages.set(color, encoded);
+    trafficBillboardImages.set(cacheKey, encoded);
     return encoded;
   }
 
