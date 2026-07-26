@@ -434,6 +434,19 @@ cw_header('Cockpit Recorder Replay');
 .replay-immersive .cesium-viewer-timelineContainer,
 .replay-immersive .cesium-viewer-fullscreenContainer,
 .replay-immersive .cesium-viewer-bottom .cesium-widget-credits { display: none !important; }
+.replay-copyright {
+  position: absolute;
+  right: 78px;
+  bottom: calc(var(--panel-playback-height) + 12px);
+  z-index: 24;
+  color: rgba(0, 0, 0, .38);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, .18);
+  pointer-events: none;
+  user-select: none;
+}
 .replay-immersive:fullscreen,
 .replay-immersive:-webkit-full-screen {
   height: 100vh;
@@ -2151,6 +2164,7 @@ cw_header('Cockpit Recorder Replay');
     <div class="replay-ipca-watermark" aria-hidden="true">
       <img src="/assets/ipca_logo_watermark.png" alt="">
     </div>
+    <div class="replay-copyright" aria-hidden="true">© <?= h(date('Y')) ?> IPCA - Kay Vereeken – All Rights Reserved.</div>
     <div id="horizonLine" class="replay-horizon-line" aria-hidden="true" hidden></div>
     <svg id="attitudeOverlay" class="attitude-overlay" aria-label="Attitude indicator" hidden></svg>
     <svg id="hsiOverlay" class="hsi-overlay" aria-label="Horizontal situation indicator" viewBox="0 0 390 330" hidden></svg>
