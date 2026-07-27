@@ -32,3 +32,9 @@ struct CrewUsersResponse: Codable {
     var users: [CVRCrewUser]
     var error: String?
 }
+
+struct MissionCatalogResponse: Codable {
+    var ok: Bool
+    var missions: [CVRMissionCatalogEntry]
+    var error: String?
+}

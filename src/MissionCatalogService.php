@@ -84,7 +84,7 @@ final class MissionCatalogService
     public function listMissions(): array
     {
         $stmt = $this->pdo->query("
-            SELECT m.*, v.version_number, v.description
+            SELECT m.*, v.version_number, v.description, v.exercise_json
             FROM ipca_missions m
             LEFT JOIN ipca_mission_versions v ON v.id = m.current_version_id
             ORDER BY m.code ASC

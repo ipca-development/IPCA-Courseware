@@ -35,13 +35,14 @@ struct IPCACVRUnitApp: App {
                 .task {
                     await recordingStore.load()
                     await workflowStore.load()
-                    missionCatalog.load()
+                    missionCatalog.loadBundledFallback()
                     await audioRecorder.refreshInputs()
                     network.start()
                     systemMonitor.start()
                     gpsManager.prepare()
                     await settings.refreshAircraft()
                     await settings.refreshCrewUsers()
+                    await missionCatalog.refreshFromServer(settings: settings)
                     coordinator.bind(
                         audio: audioRecorder,
                         beacon: beaconManager,

@@ -5,7 +5,7 @@ final class MissionCatalogStore: ObservableObject {
     @Published private(set) var missions: [CVRMissionCatalogEntry] = []
     @Published private(set) var lastError = ""
 
-    func load() {
+    func loadBundledFallback() {
         guard let url = Bundle.main.url(forResource: "mission_catalogue_SPC", withExtension: "csv") else {
             lastError = "Mission catalogue is not bundled."
             return
@@ -18,6 +18,36 @@ final class MissionCatalogStore: ObservableObject {
         } catch {
             missions = []
             lastError = "Mission catalogue could not be loaded: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshFromServer(settings: SettingsStore) async {
+        if missions.isEmpty {
+            loadBundledFallback()
+        }
+        guard let url = settings.normalizedServerURL else {
+            if missions.isEmpty {
+                lastError = "Server URL is invalid and no bundled mission catalogue is available."
+            }
+            return
+        }
+
+        do {
+            let response = try await APIClient(serverURL: url).missions()
+            if response.ok {
+                if !response.missions.isEmpty {
+                    missions = response.missions
+                    lastError = ""
+                } else if missions.isEmpty {
+                    lastError = "Server mission catalogue is empty."
+                }
+            } else if missions.isEmpty {
+                lastError = response.error ?? "Could not load server mission catalogue."
+            }
+        } catch {
+            if missions.isEmpty {
+                lastError = "Could not load server mission catalogue: \(error.localizedDescription)"
+            }
         }
     }
 

@@ -192,6 +192,13 @@ struct APIClient {
         return try decode(CrewUsersResponse.self, from: data, response: response)
     }
 
+    func missions() async throws -> MissionCatalogResponse {
+        let url = serverURL.appending(path: "api/recordings/missions.php")
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validate(response: response, data: data)
+        return try decode(MissionCatalogResponse.self, from: data, response: response)
+    }
+
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {
         try validate(response: response, data: data)
         return try decode(UploadResponse.self, from: data, response: response)
