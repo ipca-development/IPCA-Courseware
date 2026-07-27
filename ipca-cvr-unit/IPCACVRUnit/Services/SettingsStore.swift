@@ -116,7 +116,7 @@ final class SettingsStore: ObservableObject {
             }
         } catch {
             crewUsers = []
-            crewUsersError = error.localizedDescription
+            crewUsersError = Self.userFacingAPIError(error, fallback: "Could not load crew users.")
         }
     }
 
@@ -157,6 +157,19 @@ final class SettingsStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
         return normalized.isEmpty ? "CVR UNIT 03" : String(normalized.prefix(32))
+    }
+
+    private static func userFacingAPIError(_ error: Error, fallback: String) -> String {
+        let message = error.localizedDescription
+        if message.contains("HTTP 404") {
+            return "\(fallback) Server endpoint is not available yet. Deploy api/recordings/crew_users.php and refresh again."
+        }
+        if message.localizedCaseInsensitiveContains("<html")
+            || message.localizedCaseInsensitiveContains("<body")
+            || message.localizedCaseInsensitiveContains("nginx") {
+            return "\(fallback) Server returned an HTML error page instead of JSON."
+        }
+        return message.isEmpty ? fallback : message
     }
 
     private enum Keys {

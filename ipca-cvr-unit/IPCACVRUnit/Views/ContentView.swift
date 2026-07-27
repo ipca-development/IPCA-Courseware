@@ -171,6 +171,13 @@ private struct AdminSettingsView: View {
                         Text(settings.aircraftError)
                             .foregroundStyle(IPCATheme.danger)
                     }
+                }
+
+                Section("Crew Users") {
+                    LabeledContent("Loaded users", value: "\(settings.crewUsers.count)")
+                    Button("Refresh Crew Users") {
+                        Task { await settings.refreshCrewUsers() }
+                    }
                     if !settings.crewUsersError.isEmpty {
                         Text(settings.crewUsersError)
                             .font(.caption)
