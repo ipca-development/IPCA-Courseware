@@ -15,12 +15,20 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(selectedAircraftID, forKey: Keys.selectedAircraftID) }
     }
 
+    @Published var cvrUnitIdentifier: String {
+        didSet { UserDefaults.standard.set(Self.normalizedUnitIdentifier(cvrUnitIdentifier), forKey: Keys.cvrUnitIdentifier) }
+    }
+
     @Published var allowCellularUpload: Bool {
         didSet { UserDefaults.standard.set(allowCellularUpload, forKey: Keys.allowCellularUpload) }
     }
 
     @Published var isBeaconTriggerEnabled: Bool {
         didSet { UserDefaults.standard.set(isBeaconTriggerEnabled, forKey: Keys.isBeaconTriggerEnabled) }
+    }
+
+    @Published var expectedBeaconIdentityHex: String {
+        didSet { UserDefaults.standard.set(Self.normalizedBeaconIdentity(expectedBeaconIdentityHex), forKey: Keys.expectedBeaconIdentityHex) }
     }
 
     @Published var adminPIN: String {
@@ -33,6 +41,8 @@ final class SettingsStore: ObservableObject {
 
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
+    @Published private(set) var crewUsers: [CVRCrewUser] = []
+    @Published private(set) var crewUsersError: String = ""
 
     let supportedLanguages: [(code: String, label: String)] = [
         ("en", "English")
@@ -42,8 +52,10 @@ final class SettingsStore: ObservableObject {
         serverURL = UserDefaults.standard.string(forKey: Keys.serverURL) ?? ""
         language = UserDefaults.standard.string(forKey: Keys.language) ?? "en"
         selectedAircraftID = UserDefaults.standard.integer(forKey: Keys.selectedAircraftID)
+        cvrUnitIdentifier = Self.normalizedUnitIdentifier(UserDefaults.standard.string(forKey: Keys.cvrUnitIdentifier) ?? "CVR UNIT 03")
         allowCellularUpload = UserDefaults.standard.object(forKey: Keys.allowCellularUpload) as? Bool ?? true
         isBeaconTriggerEnabled = UserDefaults.standard.object(forKey: Keys.isBeaconTriggerEnabled) as? Bool ?? false
+        expectedBeaconIdentityHex = Self.normalizedBeaconIdentity(UserDefaults.standard.string(forKey: Keys.expectedBeaconIdentityHex) ?? "")
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
         postRecordingGainDB = UserDefaults.standard.object(forKey: Keys.postRecordingGainDB) as? Double ?? 0
     }
@@ -87,6 +99,27 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    func refreshCrewUsers() async {
+        guard let url = normalizedServerURL else {
+            crewUsersError = "Server URL is invalid."
+            crewUsers = []
+            return
+        }
+
+        do {
+            let response = try await APIClient(serverURL: url).crewUsers()
+            if response.ok {
+                crewUsers = response.users
+                crewUsersError = ""
+            } else {
+                crewUsersError = response.error ?? "Could not load crew users."
+            }
+        } catch {
+            crewUsers = []
+            crewUsersError = error.localizedDescription
+        }
+    }
+
     private static func normalizedOrigin(from rawValue: String) -> URL? {
         var raw = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -111,12 +144,29 @@ final class SettingsStore: ObservableObject {
         return components.url
     }
 
+    static func normalizedBeaconIdentity(_ rawValue: String) -> String {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .filter { $0.isHexDigit }
+        return normalized.count == 8 ? String(normalized) : ""
+    }
+
+    static func normalizedUnitIdentifier(_ rawValue: String) -> String {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return normalized.isEmpty ? "CVR UNIT 03" : String(normalized.prefix(32))
+    }
+
     private enum Keys {
         static let serverURL = "ipca.cvrUnit.serverURL"
         static let language = "ipca.cvrUnit.language"
         static let selectedAircraftID = "ipca.cvrUnit.selectedAircraftID"
+        static let cvrUnitIdentifier = "ipca.cvrUnit.cvrUnitIdentifier"
         static let allowCellularUpload = "ipca.cvrUnit.allowCellularUpload"
         static let isBeaconTriggerEnabled = "ipca.cvrUnit.isBeaconTriggerEnabled"
+        static let expectedBeaconIdentityHex = "ipca.cvrUnit.expectedBeaconIdentityHex"
         static let adminPIN = "ipca.cvrUnit.adminPIN"
         static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
     }

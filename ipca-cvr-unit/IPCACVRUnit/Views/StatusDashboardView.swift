@@ -22,7 +22,7 @@ struct StatusDashboardView: View {
                 VStack(spacing: metrics.spacing) {
                     CVRHeaderView(
                         aircraftRegistration: aircraftRegistration,
-                        unitIdentifier: "CVR UNIT 03",
+                        unitIdentifier: settings.cvrUnitIdentifier,
                         metrics: metrics,
                         onLogoTap: handleLogoTap
                     )
@@ -64,7 +64,7 @@ struct StatusDashboardView: View {
     }
 
     private var aircraftRegistration: String {
-        settings.selectedAircraft?.registration ?? "CVR UNIT"
+        settings.selectedAircraft?.registration ?? "NO AIRCRAFT"
     }
 
     private var recorderStatus: RecorderDisplayStatus {

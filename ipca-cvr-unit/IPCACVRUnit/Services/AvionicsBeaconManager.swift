@@ -47,6 +47,8 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     @Published private(set) var gattConnectionState = "Disconnected"
     @Published private(set) var latestStatus: AvionicsBeaconStatusPacket?
     @Published private(set) var lastGATTActivityAt: Date?
+    @Published private(set) var expectedBeaconIdentityHex = ""
+    @Published private(set) var lastIgnoredBeaconIdentityHex = ""
 
     var onAvionicsStateChanged: ((AvionicsPowerState) -> Void)?
     var onMatchingBeaconAdvertisement: (() -> Void)?
@@ -167,6 +169,18 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
         }
     }
 
+    func setExpectedBeaconIdentityHex(_ identityHex: String) {
+        let normalized = Self.normalizedBeaconIdentity(identityHex)
+        guard expectedBeaconIdentityHex != normalized else { return }
+        expectedBeaconIdentityHex = normalized
+        lastIgnoredBeaconIdentityHex = ""
+        logEvent(normalized.isEmpty ? "beacon identity pairing cleared" : "expected beacon identity set: \(normalized)")
+        if shouldScanWhenReady, centralManager?.state == .poweredOn {
+            stopCurrentConnection()
+            startScan(scanAll: requestedScanAllMode)
+        }
+    }
+
     func currentRecorderTokenHex() -> String {
         recorderToken?.ipcaHexString ?? ""
     }
@@ -243,6 +257,12 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
 
         guard matchedService else { return }
 
+        if expectsSpecificBeacon {
+            connectIfNeeded(peripheral)
+            updateState()
+            return
+        }
+
         hasEverSeenBeacon = true
         beaconDetected = true
         firstSeenAt = firstSeenAt ?? now
@@ -289,7 +309,7 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
             secondsSinceLastAdvertisement = Date().timeIntervalSince(lastSeenAt)
         }
 
-        if targetPeripheral?.state == .connected {
+        if targetPeripheral?.state == .connected, !expectsSpecificBeacon {
             transition(to: .avionicsOn)
             return
         }
@@ -334,11 +354,13 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     private func handleConnected(_ peripheral: CBPeripheral) {
         targetPeripheral = peripheral
         peripheral.delegate = self
-        gattConnectionState = "Connected"
+        gattConnectionState = expectsSpecificBeacon ? "Verifying Identity" : "Connected"
         lastGATTActivityAt = Date()
         logEvent("beacon GATT connected")
-        transition(to: .avionicsOn)
-        onBeaconRelationshipAvailable?()
+        if !expectsSpecificBeacon {
+            transition(to: .avionicsOn)
+            onBeaconRelationshipAvailable?()
+        }
         peripheral.discoverServices([Self.serviceUUID])
     }
 
@@ -408,7 +430,25 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
             logEvent("beacon status rejected: malformed \(value.count)-byte payload")
             return
         }
+        guard isExpectedBeacon(packet) else {
+            lastIgnoredBeaconIdentityHex = packet.beaconIdentityHex
+            logEvent("beacon ignored: identity \(packet.beaconIdentityHex) does not match expected \(expectedBeaconIdentityHex)")
+            if let peripheral = targetPeripheral {
+                centralManager?.cancelPeripheralConnection(peripheral)
+            }
+            targetPeripheral = nil
+            statusCharacteristic = nil
+            recorderContactCharacteristic = nil
+            latestStatus = nil
+            gattConnectionState = "Ignored Unpaired Beacon"
+            updateState()
+            return
+        }
         latestStatus = packet
+        hasEverSeenBeacon = true
+        beaconDetected = true
+        lastSeenAt = Date()
+        secondsSinceLastAdvertisement = 0
         lastGATTActivityAt = Date()
         gattConnectionState = "Active"
         transition(to: .avionicsOn)
@@ -455,6 +495,30 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
         peripheral.writeValue(payload, for: characteristic, type: writeType)
         lastGATTActivityAt = Date()
         logEvent("recorder contact written: \(reason), seq \(recorderWriteSequence)")
+    }
+
+    private var expectsSpecificBeacon: Bool {
+        !expectedBeaconIdentityHex.isEmpty
+    }
+
+    private func isExpectedBeacon(_ packet: AvionicsBeaconStatusPacket) -> Bool {
+        !expectsSpecificBeacon || packet.beaconIdentityHex == expectedBeaconIdentityHex
+    }
+
+    private func stopCurrentConnection() {
+        if let targetPeripheral {
+            centralManager?.cancelPeripheralConnection(targetPeripheral)
+        }
+        targetPeripheral = nil
+        statusCharacteristic = nil
+        recorderContactCharacteristic = nil
+        latestStatus = nil
+        beaconDetected = false
+        hasEverSeenBeacon = false
+        lastSeenAt = nil
+        secondsSinceLastAdvertisement = nil
+        gattConnectionState = isScanning ? "Scanning" : "Disconnected"
+        transition(to: isScanning ? .scanning : .unknown)
     }
 
     private func diagnosticsPayload(recordingID: String, recordingSessionID: String, recordingEndReason: String) -> [String: Any] {
@@ -514,6 +578,14 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
 
     private static func isoString(_ date: Date) -> String {
         isoFormatter.string(from: date)
+    }
+
+    private static func normalizedBeaconIdentity(_ rawValue: String) -> String {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .filter { $0.isHexDigit }
+        return normalized.count == 8 ? String(normalized) : ""
     }
 
     private static func parseStatusPacket(_ data: Data) -> AvionicsBeaconStatusPacket? {

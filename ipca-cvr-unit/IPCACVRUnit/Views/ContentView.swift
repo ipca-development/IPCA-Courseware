@@ -11,7 +11,7 @@ struct ContentView: View {
             if adminUnlocked {
                 adminTabs
             } else {
-                StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                OperationalTabsView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
             }
         }
         .background(IPCATheme.pageBackground.ignoresSafeArea())
@@ -158,11 +158,22 @@ private struct AdminSettingsView: View {
                             Text(aircraft.label).tag(aircraft.id)
                         }
                     }
+                    TextField("CVR Unit Identifier", text: $settings.cvrUnitIdentifier)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
                     Button("Refresh Aircraft") {
-                        Task { await settings.refreshAircraft() }
+                        Task {
+                            await settings.refreshAircraft()
+                            await settings.refreshCrewUsers()
+                        }
                     }
                     if !settings.aircraftError.isEmpty {
                         Text(settings.aircraftError)
+                            .foregroundStyle(IPCATheme.danger)
+                    }
+                    if !settings.crewUsersError.isEmpty {
+                        Text(settings.crewUsersError)
+                            .font(.caption)
                             .foregroundStyle(IPCATheme.danger)
                     }
                 }

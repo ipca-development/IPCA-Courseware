@@ -106,6 +106,41 @@ struct AvionicsBeaconTestView: View {
                     .disabled(manager.logEntries.isEmpty)
                 }
 
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Beacon Pairing")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(IPCATheme.navy)
+
+                    LabeledContent("Paired beacon", value: emptyDash(settings.expectedBeaconIdentityHex))
+                    LabeledContent("Connected beacon", value: emptyDash(manager.latestStatus?.beaconIdentityHex ?? ""))
+
+                    if !manager.lastIgnoredBeaconIdentityHex.isEmpty {
+                        Text("Ignored unpaired beacon \(manager.lastIgnoredBeaconIdentityHex).")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(IPCATheme.warning)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), spacing: 8)], alignment: .leading, spacing: 8) {
+                        Button("Pair Current Beacon") {
+                            pairCurrentBeacon()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(manager.latestStatus?.beaconIdentityHex == nil)
+
+                        Button("Clear Pairing") {
+                            settings.expectedBeaconIdentityHex = ""
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(settings.expectedBeaconIdentityHex.isEmpty)
+                    }
+
+                    Text("When a paired identity is set, only that beacon can trigger recording. Other IPCA beacons are visible in diagnostics but ignored for recording.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
                     Button("Mark \"Power On\"") {
                         manager.mark("Power On")
@@ -159,6 +194,9 @@ struct AvionicsBeaconTestView: View {
                 statusRow("Advertised local name", emptyDash(manager.advertisedLocalName))
                 statusRow("Service UUIDs", manager.advertisedServiceUUIDs.isEmpty ? "--" : manager.advertisedServiceUUIDs.joined(separator: ", "))
                 statusRow("Manufacturer data", emptyDash(manager.manufacturerDataHex))
+                statusRow("Paired beacon identity", emptyDash(settings.expectedBeaconIdentityHex), color: settings.expectedBeaconIdentityHex.isEmpty ? IPCATheme.warning : IPCATheme.success)
+                statusRow("Connected beacon identity", emptyDash(manager.latestStatus?.beaconIdentityHex ?? ""), color: connectedBeaconColor)
+                statusRow("Last ignored beacon", emptyDash(manager.lastIgnoredBeaconIdentityHex), color: manager.lastIgnoredBeaconIdentityHex.isEmpty ? IPCATheme.secondaryText : IPCATheme.warning)
             }
         }
     }
@@ -237,6 +275,16 @@ struct AvionicsBeaconTestView: View {
         manager.bluetoothAuthorization == "Allowed Always" ? IPCATheme.success : IPCATheme.warning
     }
 
+    private var connectedBeaconColor: Color {
+        guard let identity = manager.latestStatus?.beaconIdentityHex, !identity.isEmpty else {
+            return IPCATheme.secondaryText
+        }
+        if settings.expectedBeaconIdentityHex.isEmpty || settings.expectedBeaconIdentityHex == identity {
+            return IPCATheme.success
+        }
+        return IPCATheme.warning
+    }
+
     private var ageColor: Color {
         guard let seconds = manager.secondsSinceLastAdvertisement else {
             return IPCATheme.secondaryText
@@ -280,6 +328,11 @@ struct AvionicsBeaconTestView: View {
 
     private func emptyDash(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "--" : value
+    }
+
+    private func pairCurrentBeacon() {
+        guard let identity = manager.latestStatus?.beaconIdentityHex else { return }
+        settings.expectedBeaconIdentityHex = identity
     }
 
     private func logSummary(_ entry: AvionicsBeaconLogEntry) -> String {

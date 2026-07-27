@@ -103,6 +103,14 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        settings.$expectedBeaconIdentityHex
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak beacon] identityHex in
+                beacon?.setExpectedBeaconIdentityHex(identityHex)
+            }
+            .store(in: &cancellables)
+
         beacon.$avionicsPowerState
             .compactMap { $0 }
             .receive(on: RunLoop.main)

@@ -13,6 +13,8 @@ struct IPCACVRUnitApp: App {
     @StateObject private var gpsManager = GPSLocationManager()
     @StateObject private var remoteIPads = RemoteIPadLinkManager()
     @StateObject private var coordinator = CVRUnitCoordinator()
+    @StateObject private var workflowStore = CVRWorkflowStore()
+    @StateObject private var missionCatalog = MissionCatalogStore()
 
     var body: some Scene {
         WindowGroup {
@@ -27,14 +29,19 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(gpsManager)
                 .environmentObject(remoteIPads)
                 .environmentObject(coordinator)
+                .environmentObject(workflowStore)
+                .environmentObject(missionCatalog)
                 .preferredColorScheme(.light)
                 .task {
                     await recordingStore.load()
+                    await workflowStore.load()
+                    missionCatalog.load()
                     await audioRecorder.refreshInputs()
                     network.start()
                     systemMonitor.start()
                     gpsManager.prepare()
                     await settings.refreshAircraft()
+                    await settings.refreshCrewUsers()
                     coordinator.bind(
                         audio: audioRecorder,
                         beacon: beaconManager,

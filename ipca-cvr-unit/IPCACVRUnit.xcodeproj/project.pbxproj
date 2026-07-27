@@ -29,6 +29,13 @@
 		10000000000000000000001A /* AvionicsBeaconTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* AvionicsBeaconTestView.swift */; };
 		10000000000000000000001B /* GPSLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001D /* GPSLocationManager.swift */; };
 		10000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001E /* Assets.xcassets */; };
+		10000000000000000000001D /* CVRWorkflowModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001F /* CVRWorkflowModels.swift */; };
+		10000000000000000000001E /* CVRWorkflowStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* CVRWorkflowStore.swift */; };
+		10000000000000000000001F /* CVROperationalDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CVROperationalDesign.swift */; };
+		100000000000000000000020 /* OperationalWorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* OperationalWorkflowViews.swift */; };
+		100000000000000000000021 /* CVRCatalogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* CVRCatalogModels.swift */; };
+		100000000000000000000022 /* MissionCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* MissionCatalogStore.swift */; };
+		100000000000000000000023 /* mission_catalogue_SPC.csv in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* mission_catalogue_SPC.csv */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +63,13 @@
 		20000000000000000000001C /* AvionicsBeaconTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvionicsBeaconTestView.swift; sourceTree = "<group>"; };
 		20000000000000000000001D /* GPSLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationManager.swift; sourceTree = "<group>"; };
 		20000000000000000000001E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		20000000000000000000001F /* CVRWorkflowModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVRWorkflowModels.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* CVRWorkflowStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVRWorkflowStore.swift; sourceTree = "<group>"; };
+		200000000000000000000021 /* CVROperationalDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVROperationalDesign.swift; sourceTree = "<group>"; };
+		200000000000000000000022 /* OperationalWorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalWorkflowViews.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* CVRCatalogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVRCatalogModels.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* MissionCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionCatalogStore.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* mission_catalogue_SPC.csv */ = {isa = PBXFileReference; lastKnownFileType = text; path = mission_catalogue_SPC.csv; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +98,7 @@
 				400000000000000000000003 /* Models */,
 				400000000000000000000004 /* Services */,
 				400000000000000000000005 /* Views */,
+				400000000000000000000007 /* Resources */,
 				20000000000000000000001E /* Assets.xcassets */,
 				200000000000000000000011 /* LaunchScreen.storyboard */,
 				200000000000000000000012 /* Info.plist */,
@@ -95,6 +110,8 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000018 /* AvionicsBeaconLogEntry.swift */,
+				200000000000000000000023 /* CVRCatalogModels.swift */,
+				20000000000000000000001F /* CVRWorkflowModels.swift */,
 				200000000000000000000002 /* Recording.swift */,
 			);
 			path = Models;
@@ -108,7 +125,9 @@
 				200000000000000000000019 /* AvionicsBeaconExportService.swift */,
 				20000000000000000000001A /* AvionicsBeaconManager.swift */,
 				20000000000000000000000C /* CVRUnitCoordinator.swift */,
+				200000000000000000000020 /* CVRWorkflowStore.swift */,
 				20000000000000000000001D /* GPSLocationManager.swift */,
+				200000000000000000000024 /* MissionCatalogStore.swift */,
 				200000000000000000000008 /* NetworkMonitor.swift */,
 				200000000000000000000004 /* RecordingStore.swift */,
 				20000000000000000000000B /* RemoteIPadLinkManager.swift */,
@@ -125,10 +144,20 @@
 				20000000000000000000000F /* AdminRecordingsView.swift */,
 				20000000000000000000001C /* AvionicsBeaconTestView.swift */,
 				20000000000000000000000D /* ContentView.swift */,
+				200000000000000000000021 /* CVROperationalDesign.swift */,
 				200000000000000000000010 /* IPCATheme.swift */,
+				200000000000000000000022 /* OperationalWorkflowViews.swift */,
 				20000000000000000000000E /* StatusDashboardView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		400000000000000000000007 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000025 /* mission_catalogue_SPC.csv */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		400000000000000000000006 /* Products */ = {
@@ -198,6 +227,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				10000000000000000000001C /* Assets.xcassets in Resources */,
+				100000000000000000000023 /* mission_catalogue_SPC.csv in Resources */,
 				100000000000000000000011 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -229,6 +259,12 @@
 				100000000000000000000018 /* AvionicsBeaconManager.swift in Sources */,
 				10000000000000000000001A /* AvionicsBeaconTestView.swift in Sources */,
 				10000000000000000000001B /* GPSLocationManager.swift in Sources */,
+				10000000000000000000001D /* CVRWorkflowModels.swift in Sources */,
+				10000000000000000000001E /* CVRWorkflowStore.swift in Sources */,
+				10000000000000000000001F /* CVROperationalDesign.swift in Sources */,
+				100000000000000000000020 /* OperationalWorkflowViews.swift in Sources */,
+				100000000000000000000021 /* CVRCatalogModels.swift in Sources */,
+				100000000000000000000022 /* MissionCatalogStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -357,6 +393,7 @@
 		A00000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -371,7 +408,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.cvrunit;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "IPCA CVR Unit";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -384,6 +421,7 @@
 		A00000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -398,7 +436,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.cvrunit;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "IPCA CVR Unit";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
