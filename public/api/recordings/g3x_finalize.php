@@ -111,6 +111,47 @@ function cockpit_g3x_finalize_remove_tree(string $path): void
     @rmdir($path);
 }
 
+function cockpit_g3x_finalize_store_workflow_csv(string $flightRecordUid, string $g3xPath, array $meta): array
+{
+    if (!is_file($g3xPath)) {
+        throw new RuntimeException('Assembled workflow Garmin CSV is missing.');
+    }
+    $root = CockpitRecorderService::projectRoot() . '/storage/cockpit_recorder/workflow_garmin';
+    $dir = $root . '/' . $flightRecordUid;
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not create workflow Garmin storage.');
+    }
+
+    $receiptId = bin2hex(random_bytes(16));
+    $relativePath = 'storage/cockpit_recorder/workflow_garmin/' . $flightRecordUid . '/' . $receiptId . '.csv';
+    $absolutePath = CockpitRecorderService::projectRoot() . '/' . $relativePath;
+    if (!copy($g3xPath, $absolutePath)) {
+        throw new RuntimeException('Could not store workflow Garmin CSV.');
+    }
+
+    $sha256 = hash_file('sha256', $absolutePath) ?: '';
+    $byteCount = (int)filesize($absolutePath);
+    $receipt = array(
+        'receipt_id' => $receiptId,
+        'flight_record_id' => $flightRecordUid,
+        'component_type' => 'garmin_csv',
+        'storage_path' => $relativePath,
+        'sha256' => $sha256,
+        'byte_count' => $byteCount,
+        'original_filename' => (string)($meta['original_filename'] ?? 'garmin.csv'),
+        'server_verified_at' => gmdate('c'),
+    );
+    file_put_contents(
+        $dir . '/' . $receiptId . '.json',
+        json_encode($receipt, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+    );
+
+    return array(
+        'ok' => true,
+        'receipt' => $receipt,
+    );
+}
+
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         cockpit_g3x_finalize_json(405, array('ok' => false, 'error' => 'Method not allowed.'));
@@ -137,8 +178,16 @@ try {
         cockpit_g3x_finalize_json(400, array('ok' => false, 'error' => 'G3X CSV chunks are missing.'));
     }
 
+    $importProfile = (string)($payload['import_profile'] ?? '');
     $service = new CockpitRecorderService($pdo);
-    $result = $service->storeSupplementalG3X($recordingUid, $g3xPath, (string)($payload['import_profile'] ?? ''));
+    try {
+        $result = $service->storeSupplementalG3X($recordingUid, $g3xPath, $importProfile);
+    } catch (Throwable $e) {
+        if ($importProfile !== 'cvr_workflow_garmin_share') {
+            throw $e;
+        }
+        $result = cockpit_g3x_finalize_store_workflow_csv($recordingUid, $g3xPath, cockpit_g3x_finalize_meta($sessionDir, 'g3x') ?? array());
+    }
 
     cockpit_g3x_finalize_remove_tree($sessionDir);
     cockpit_g3x_finalize_json(200, $result);

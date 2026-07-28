@@ -776,7 +776,7 @@ struct GarminWorkflowView: View {
                         CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby, metrics: metrics)
                         CVROperationalTile(title: "SERVER", iconName: "checkmark.icloud.fill", value: serverTileValue, color: serverTileColor, metrics: metrics)
                     }
-                    CVROperationalWarningCard(title: garminComponents.isEmpty ? "GARMIN TAB AVAILABLE" : "GARMIN CSV IMPORTED", message: garminComponents.isEmpty ? "Share a Garmin CSV to this app to attach it to the Flight Record." : "Shared CSV is stored locally and queued with the Flight Record.", iconName: garminComponents.isEmpty ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill", color: garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.success)
+                    CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
                         if allGarminComponentsVerified {
                             workflow.resetForNextFlightIfComplete()
@@ -851,6 +851,39 @@ struct GarminWorkflowView: View {
 
     private var allGarminComponentsVerified: Bool {
         !garminComponents.isEmpty && garminComponents.allSatisfy { $0.state == .serverVerified }
+    }
+
+    private var failedGarminComponent: CVRUploadComponentRecord? {
+        garminComponents.first { $0.state == .failed }
+    }
+
+    private var garminWarningTitle: String {
+        if garminComponents.isEmpty { return "GARMIN TAB AVAILABLE" }
+        if let failedGarminComponent { return "GARMIN UPLOAD FAILED" }
+        if allGarminComponentsVerified { return "GARMIN SERVER VERIFIED" }
+        return "GARMIN CSV IMPORTED"
+    }
+
+    private var garminWarningMessage: String {
+        if garminComponents.isEmpty {
+            return "Share a Garmin CSV to this app to attach it to the Flight Record."
+        }
+        if let failedGarminComponent {
+            return failedGarminComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
+        }
+        if allGarminComponentsVerified {
+            return "Server receipt stored. Tap NEXT FLIGHT when ready."
+        }
+        return "Shared CSV is stored locally and queued with the Flight Record."
+    }
+
+    private var garminWarningIcon: String {
+        failedGarminComponent == nil ? (garminComponents.isEmpty ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill") : "exclamationmark.triangle.fill"
+    }
+
+    private var garminWarningColor: Color {
+        if failedGarminComponent != nil { return CVROperationalPalette.critical }
+        return garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.success
     }
 }
 
