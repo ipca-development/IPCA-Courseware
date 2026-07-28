@@ -48,6 +48,9 @@ if (!$checkDbOnly) {
         'ipca_cvr_devices',
         'ipca_cvr_device_credentials',
         'ipca_cvr_device_enrollments',
+        'ipca_cvr_dispatches',
+        'ipca_cvr_dispatch_versions',
+        'ipca_cvr_dispatch_consents',
         'ipca_flight_sessions',
         'ipca_garmin_csv_upload_requests',
         'ipca_garmin_csv_files',
@@ -76,6 +79,7 @@ if (!$checkDbOnly) {
         __DIR__ . '/../public/api/recordings/status.php',
         __DIR__ . '/../public/api/recordings/transcript.php',
         __DIR__ . '/../public/api/recordings/replay.php',
+        __DIR__ . '/../public/api/cvr/dispatch_sync.php',
     );
     foreach ($protectedEndpoints as $path) {
         if (!is_file($path)) {

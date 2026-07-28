@@ -4,8 +4,47 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CvrDataIntakeReadService.php';
+require_once __DIR__ . '/../../src/CvrDeviceEnrollmentService.php';
+require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 
 cw_require_admin();
+
+$enrollmentResult = null;
+$enrollmentError = '';
+$enrollmentCsrf = (string)($_SESSION['cvr_intake_enrollment_csrf'] ?? '');
+if ($enrollmentCsrf === '') {
+    $enrollmentCsrf = bin2hex(random_bytes(24));
+    $_SESSION['cvr_intake_enrollment_csrf'] = $enrollmentCsrf;
+}
+$aircraftOptions = array();
+try {
+    $aircraftOptions = (new CockpitAircraftService($pdo))->activeAircraft();
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
+        && (string)($_POST['action'] ?? '') === 'create_cvr_enrollment') {
+        if (!hash_equals($enrollmentCsrf, (string)($_POST['csrf_token'] ?? ''))) {
+            throw new RuntimeException('Enrollment request expired. Refresh the page and try again.');
+        }
+        $aircraftId = (int)($_POST['aircraft_id'] ?? 0);
+        $selectedAircraft = null;
+        foreach ($aircraftOptions as $aircraftOption) {
+            if ((int)($aircraftOption['id'] ?? 0) === $aircraftId) {
+                $selectedAircraft = $aircraftOption;
+                break;
+            }
+        }
+        if (!is_array($selectedAircraft)) {
+            throw new RuntimeException('Select a valid active aircraft.');
+        }
+        $enrollmentResult = (new CvrDeviceEnrollmentService($pdo))->createEnrollment(
+            $aircraftId,
+            (string)($selectedAircraft['registration'] ?? ''),
+            isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null,
+            60
+        );
+    }
+} catch (Throwable $e) {
+    $enrollmentError = $e->getMessage();
+}
 
 $intake = new CvrDataIntakeReadService($pdo);
 $dispatch = $intake->dispatchRows();
@@ -138,6 +177,12 @@ cw_header('Master Logbook');
 .intake-progress-bar{height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden}
 .intake-progress-fill{height:100%;background:#2563eb;border-radius:999px}
 .intake-refresh{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#334155;padding:7px 10px;text-decoration:none;font-size:11px;font-weight:800}
+.intake-enrollment{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.intake-field{display:grid;gap:5px;min-width:230px}
+.intake-field label{font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.intake-select{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 10px}
+.intake-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;padding:9px 12px;font-size:11px;font-weight:850;cursor:pointer}
+.intake-code{display:inline-flex;margin-top:10px;border:1px solid #86efac;border-radius:10px;background:#f0fdf4;color:#166534;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:18px;font-weight:900;letter-spacing:.08em}
 @media(max-width:720px){.intake-card{padding:12px}.intake-title{font-size:22px}}
 </style>
 
@@ -148,6 +193,35 @@ cw_header('Master Logbook');
       <p class="intake-muted">Raw CVR inputs received by IPCA.training. This page reports receipt and processing only; it does not correlate or merge flight data.</p>
     </div>
     <a class="intake-refresh" href="/admin/master_logbook.php">Refresh data</a>
+  </section>
+
+  <section class="intake-card">
+    <div class="intake-panel-head">
+      <div>
+        <h2 class="intake-panel-title">CVR Unit Enrollment</h2>
+        <div class="intake-muted">Generate a one-time code, then enter it in the iOS app under CVR Unit Admin. The code expires after 60 minutes.</div>
+      </div>
+    </div>
+    <form method="post" action="/admin/master_logbook.php" class="intake-enrollment">
+      <input type="hidden" name="action" value="create_cvr_enrollment">
+      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($enrollmentCsrf) ?>">
+      <div class="intake-field">
+        <label for="cvr-enrollment-aircraft">Dedicated aircraft</label>
+        <select class="intake-select" id="cvr-enrollment-aircraft" name="aircraft_id" required>
+          <option value="">Select aircraft</option>
+          <?php foreach ($aircraftOptions as $aircraftOption): ?>
+            <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>"><?= cvr_intake_h($aircraftOption['registration'] ?? '') ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <button class="intake-button" type="submit">Generate Enrollment Code</button>
+    </form>
+    <?php if (is_array($enrollmentResult)): ?>
+      <div class="intake-code"><?= cvr_intake_h($enrollmentResult['enrollment_code'] ?? '') ?></div>
+    <?php endif; ?>
+    <?php if ($enrollmentError !== ''): ?>
+      <div class="intake-notice" style="margin-top:10px"><?= cvr_intake_h($enrollmentError) ?></div>
+    <?php endif; ?>
   </section>
 
   <section class="intake-card">
@@ -178,18 +252,20 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap">
         <table class="intake-table">
-          <thead><tr><th>Received</th><th>Dispatch</th><th>Aircraft</th><th>Mission</th><th>Crew</th><th>Source</th><th>Device</th><th>Status</th><th>Error</th></tr></thead>
+          <thead><tr><th>Received</th><th>Dispatch</th><th>Flight Record</th><th>Aircraft</th><th>Mission</th><th>Crew</th><th>Source</th><th>Device</th><th>Status</th><th>Server Receipt</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($dispatch['rows'] as $row): ?>
             <tr>
               <td><?= cvr_intake_h(cvr_intake_timestamp($row['received_at'] ?? null)) ?></td>
               <td><div class="intake-primary intake-mono"><?= cvr_intake_h($row['dispatch_uuid'] ?? '—') ?></div><div class="intake-muted">Version <?= cvr_intake_h($row['dispatch_version'] ?? '1') ?></div></td>
+              <td class="intake-mono"><?= cvr_intake_h($row['workflow_flight_record_uuid'] ?: '—') ?></td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
               <td><?= cvr_intake_h($row['mission_code'] ?: '—') ?></td>
               <td><?= cvr_intake_h(cvr_intake_crew($row['crew_json'] ?? null)) ?></td>
               <td><?= cvr_intake_h($row['source'] ?: '—') ?></td>
               <td class="intake-mono"><?= cvr_intake_h($row['device_identifier'] ?: '—') ?></td>
               <td><?= cvr_intake_badge($row['status'] ?? '') ?></td>
+              <td class="intake-mono"><?= cvr_intake_h($row['server_receipt_id'] ?: '—') ?></td>
               <td class="intake-error"><?= cvr_intake_h($row['error_message'] ?: '—') ?></td>
             </tr>
           <?php endforeach; ?>

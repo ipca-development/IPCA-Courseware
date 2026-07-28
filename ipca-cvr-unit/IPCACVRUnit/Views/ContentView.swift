@@ -140,6 +140,8 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var audio: AudioRecorderManager
     @EnvironmentObject private var gps: GPSLocationManager
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var uploadManager: UploadManager
 
     var body: some View {
         NavigationStack {
@@ -149,6 +151,30 @@ private struct AdminSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Toggle("Allow 5G/cellular upload", isOn: $settings.allowCellularUpload)
+                }
+
+                Section("CVR Device Enrollment") {
+                    LabeledContent("Status", value: settings.deviceEnrollmentStatus)
+                    TextField("One-time enrollment code", text: $settings.enrollmentCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    Button("Enroll CVR Unit") {
+                        Task {
+                            await settings.enrollDevice()
+                            if settings.deviceCredential != nil {
+                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            }
+                        }
+                    }
+                    .disabled(settings.enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text("Generate the code on IPCA.training under Master Logbook → Data Intake.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+                    if !settings.deviceEnrollmentError.isEmpty {
+                        Text(settings.deviceEnrollmentError)
+                            .font(.caption)
+                            .foregroundStyle(IPCATheme.danger)
+                    }
                 }
 
                 Section("Dedicated Aircraft") {

@@ -92,6 +92,70 @@ struct AircraftListResponse: Codable {
     var error: String?
 }
 
+struct DeviceEnrollmentResponse: Codable {
+    var ok: Bool
+    var credential: String?
+    var credentialUUID: String?
+    var aircraftID: Int?
+    var aircraftRegistration: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case credential
+        case credentialUUID = "credential_uuid"
+        case aircraftID = "aircraft_id"
+        case aircraftRegistration = "aircraft_registration"
+        case error
+    }
+}
+
+struct DispatchSyncResponse: Codable {
+    struct ServerDispatch: Codable {
+        var id: Int
+        var dispatchUUID: String
+        var dispatchVersion: Int
+        var flightRecordUUID: String
+        var status: String
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case dispatchUUID = "dispatch_uuid"
+            case dispatchVersion = "dispatch_version"
+            case flightRecordUUID = "flight_record_uuid"
+            case status
+        }
+    }
+
+    struct Receipt: Codable {
+        var receiptID: String
+        var componentType: String
+        var payloadSHA256: String
+        var serverVerifiedAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case receiptID = "receipt_id"
+            case componentType = "component_type"
+            case payloadSHA256 = "payload_sha256"
+            case serverVerifiedAt = "server_verified_at"
+        }
+    }
+
+    var ok: Bool
+    var alreadyPresent: Bool?
+    var dispatch: ServerDispatch?
+    var receipt: Receipt?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyPresent = "already_present"
+        case dispatch
+        case receipt
+        case error
+    }
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
@@ -197,6 +261,35 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(from: url)
         try validate(response: response, data: data)
         return try decode(MissionCatalogResponse.self, from: data, response: response)
+    }
+
+    func enrollDevice(code: String, deviceUUID: String, displayName: String) async throws -> DeviceEnrollmentResponse {
+        let url = serverURL.appending(path: "api/cvr/enroll.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "enrollment_code": code,
+            "device_uuid": deviceUUID,
+            "display_name": displayName
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(DeviceEnrollmentResponse.self, from: data, response: response)
+    }
+
+    func syncDispatch(payload: [String: Any], credential: String) async throws -> DispatchSyncResponse {
+        let url = serverURL.appending(path: "api/cvr/dispatch_sync.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(DispatchSyncResponse.self, from: data, response: response)
     }
 
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {

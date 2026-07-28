@@ -93,7 +93,7 @@ final class UploadManager: ObservableObject {
         guard let flightRecord = workflow.state.activeFlightRecord else { return }
         let components = workflow.state.uploadComponents.filter {
             $0.flightRecordID == flightRecord.id
-                && $0.componentType == "garmin_csv"
+                && ($0.componentType == "dispatch_metadata" || $0.componentType == "garmin_csv")
                 && ($0.state == .queued || $0.state == .failed || $0.state == .needsUserAction)
         }
         guard !components.isEmpty else { return }
@@ -101,7 +101,13 @@ final class UploadManager: ObservableObject {
         for component in components {
             guard !activeUploads.contains(component.id) else { continue }
             activeUploads.insert(component.id)
-            workflow.updateUploadComponent(id: component.id, state: .uploading, progress: max(component.progress ?? 0.01, 0.01), lastError: "Starting Garmin CSV upload...")
+            let componentLabel = component.componentType == "dispatch_metadata" ? "Dispatch" : "Garmin CSV"
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .uploading,
+                progress: max(component.progress ?? 0.01, 0.01),
+                lastError: "Starting \(componentLabel) upload..."
+            )
 
             Task {
                 defer {
@@ -110,12 +116,26 @@ final class UploadManager: ObservableObject {
                     }
                 }
                 do {
-                    let serverReceiptID = try await uploadWorkflowGarminComponent(
-                        component: component,
-                        flightRecordID: flightRecord.id,
-                        baseURL: baseURL,
-                        workflow: workflow
-                    )
+                    let serverReceiptID: String
+                    if component.componentType == "dispatch_metadata" {
+                        let result = try await uploadWorkflowDispatchComponent(
+                            component: component,
+                            workflow: workflow,
+                            settings: settings,
+                            baseURL: baseURL
+                        )
+                        serverReceiptID = result.receiptID
+                        await MainActor.run {
+                            workflow.markDispatchStoredOnServer(serverDispatchID: result.serverDispatchID)
+                        }
+                    } else {
+                        serverReceiptID = try await uploadWorkflowGarminComponent(
+                            component: component,
+                            flightRecordID: flightRecord.id,
+                            baseURL: baseURL,
+                            workflow: workflow
+                        )
+                    }
                     await MainActor.run {
                         workflow.updateUploadComponent(
                             id: component.id,
@@ -140,6 +160,134 @@ final class UploadManager: ObservableObject {
         recording.uploadRetryCount = nextCount
         recording.nextUploadRetryAt = Date().addingTimeInterval(TimeInterval(delay))
         recording.lastError = "\(reason) Retrying in \(delay)s."
+    }
+
+    private func uploadWorkflowDispatchComponent(
+        component: CVRUploadComponentRecord,
+        workflow: CVRWorkflowStore,
+        settings: SettingsStore,
+        baseURL: URL
+    ) async throws -> (receiptID: String, serverDispatchID: String) {
+        guard let credential = settings.deviceCredential, !credential.isEmpty else {
+            throw APIClientError.badResponse("CVR Unit is not enrolled. Generate an enrollment code in IPCA.training and enter it in Admin.")
+        }
+        guard let dispatch = workflow.state.activeDispatch,
+              let flightRecord = workflow.state.activeFlightRecord,
+              component.flightRecordID == flightRecord.id,
+              dispatch.id == flightRecord.dispatchID else {
+            throw APIClientError.badResponse("Dispatch upload data is no longer linked to the active Flight Record.")
+        }
+
+        workflow.updateUploadComponent(
+            id: component.id,
+            state: .uploading,
+            progress: 0.25,
+            lastError: "Sending Dispatch metadata and consent evidence..."
+        )
+        let payload = workflowDispatchPayload(
+            dispatch: dispatch,
+            flightRecord: flightRecord,
+            consents: workflow.state.consents.filter {
+                $0.dispatchID == dispatch.id && $0.dispatchVersion == dispatch.version
+            }
+        )
+        let response = try await APIClient(serverURL: baseURL).syncDispatch(payload: payload, credential: credential)
+        guard response.ok,
+              let receiptID = response.receipt?.receiptID,
+              !receiptID.isEmpty,
+              let serverDispatchID = response.dispatch?.id else {
+            throw APIClientError.badResponse(response.error ?? "Server did not verify the Dispatch.")
+        }
+        return (receiptID, String(serverDispatchID))
+    }
+
+    private func workflowDispatchPayload(
+        dispatch: CVRDispatchRecord,
+        flightRecord: CVRIncompleteFlightRecord,
+        consents: [CVRConsentRecord]
+    ) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let day = DateFormatter()
+        day.calendar = Calendar(identifier: .gregorian)
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.timeZone = TimeZone.current
+        day.dateFormat = "yyyy-MM-dd"
+
+        var dispatchPayload: [String: Any] = [
+            "id": dispatch.id.lowercased(),
+            "organization_id": dispatch.organizationID,
+            "scheduled_date": day.string(from: dispatch.scheduledDate),
+            "tail_number": dispatch.tailNumber,
+            "mission_code": dispatch.missionCode,
+            "planned_departure_airport": dispatch.plannedDepartureAirport,
+            "planned_destination_airport": dispatch.plannedDestinationAirport,
+            "crew": dispatch.crew.map { assignment in
+                var member: [String: Any] = [
+                    "id": assignment.id,
+                    "person_name": assignment.personName,
+                    "role": assignment.role.rawValue
+                ]
+                if let personID = assignment.personID {
+                    member["person_id"] = personID
+                }
+                return member
+            },
+            "fuel_onboard": dispatch.fuelOnboard,
+            "dispatch_source": dispatch.dispatchSource,
+            "creator_identity": dispatch.creatorIdentity,
+            "created_at": iso.string(from: dispatch.createdAt),
+            "modified_at": iso.string(from: dispatch.modifiedAt),
+            "version": dispatch.version,
+            "consent_status": dispatch.consentStatus,
+            "status": dispatch.status.rawValue,
+            "configured_cvr_unit_id": dispatch.configuredCVRUnitID,
+            "configured_beacon_id": dispatch.configuredBeaconID
+        ]
+        if let aircraftID = dispatch.aircraftID {
+            dispatchPayload["aircraft_id"] = aircraftID
+        }
+        if let startingHobbs = dispatch.startingHobbs {
+            dispatchPayload["starting_hobbs"] = startingHobbs
+        }
+        if let startingTacho = dispatch.startingTacho {
+            dispatchPayload["starting_tacho"] = startingTacho
+        }
+        if let oilPercentage = dispatch.oilPercentage {
+            dispatchPayload["oil_percentage"] = oilPercentage
+        }
+        if let schedulerRecordID = dispatch.schedulerRecordID {
+            dispatchPayload["scheduler_record_id"] = schedulerRecordID
+        }
+        if let scheduledStartTime = dispatch.scheduledStartTime {
+            dispatchPayload["scheduled_start_time"] = iso.string(from: scheduledStartTime)
+        }
+        if let scheduledEndTime = dispatch.scheduledEndTime {
+            dispatchPayload["scheduled_end_time"] = iso.string(from: scheduledEndTime)
+        }
+
+        return [
+            "flight_record_uuid": flightRecord.id.lowercased(),
+            "dispatch": dispatchPayload,
+            "consents": consents.map { consent in
+                var consentPayload: [String: Any] = [
+                    "id": consent.id.lowercased(),
+                    "person_name": consent.personName,
+                    "crew_role": consent.crewRole.rawValue,
+                    "consent_result": consent.consentResult,
+                    "timestamp": iso.string(from: consent.timestamp),
+                    "device_id": consent.deviceID,
+                    "dispatch_id": consent.dispatchID.lowercased(),
+                    "dispatch_version": consent.dispatchVersion,
+                    "consent_text_version": consent.consentTextVersion,
+                    "app_version": consent.appVersion
+                ]
+                if let personID = consent.personID {
+                    consentPayload["person_id"] = personID
+                }
+                return consentPayload
+            }
+        ]
     }
 
     private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws -> String {

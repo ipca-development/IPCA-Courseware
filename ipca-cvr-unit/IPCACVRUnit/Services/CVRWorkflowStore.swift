@@ -24,6 +24,9 @@ final class CVRWorkflowStore: ObservableObject {
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             let data = try Data(contentsOf: url)
             state = try decoder.decode(CVRWorkflowState.self, from: data)
+            if ensureDispatchUploadComponent() {
+                save()
+            }
             lastError = ""
         } catch {
             lastError = "Workflow recovery failed: \(error.localizedDescription)"
@@ -175,6 +178,22 @@ final class CVRWorkflowStore: ObservableObject {
             createdAt: Date(),
             updatedAt: Date()
         )
+        let dispatchComponent = CVRUploadComponentRecord(
+            id: "dispatch-\(dispatch.id)-v\(dispatch.version)",
+            serverID: nil,
+            flightRecordID: flightRecord.id,
+            componentType: "dispatch_metadata",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: nil,
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil
+        )
 
         mutate {
             dispatch.status = .flightRecordLoggingEnabled
@@ -182,6 +201,9 @@ final class CVRWorkflowStore: ObservableObject {
             dispatch.modifiedAt = Date()
             $0.activeDispatch = dispatch
             $0.activeFlightRecord = flightRecord
+            if !$0.uploadComponents.contains(where: { $0.id == dispatchComponent.id }) {
+                $0.uploadComponents.append(dispatchComponent)
+            }
             $0.selectedTab = .recorder
         }
     }
@@ -407,14 +429,33 @@ final class CVRWorkflowStore: ObservableObject {
     func updateUploadComponent(id: String, state: CVRUploadComponentState, progress: Double, lastError: String = "", serverReceiptID: String? = nil) {
         mutate {
             guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
+            let previousState = $0.uploadComponents[index].state
+            if state == .serverVerified {
+                guard let serverReceiptID,
+                      !serverReceiptID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    $0.uploadComponents[index].state = .failed
+                    $0.uploadComponents[index].lastError = "Server verification receipt is missing."
+                    $0.uploadComponents[index].lastAttemptAt = Date()
+                    return
+                }
+                $0.uploadComponents[index].serverVerificationAt = Date()
+                $0.uploadComponents[index].serverReceiptID = serverReceiptID
+            }
+            if state == .uploading && previousState != .uploading {
+                $0.uploadComponents[index].attemptCount += 1
+            }
             $0.uploadComponents[index].state = state
             $0.uploadComponents[index].progress = min(max(progress, 0), 1)
             $0.uploadComponents[index].lastError = lastError
             $0.uploadComponents[index].lastAttemptAt = Date()
-            if state == .serverVerified {
-                $0.uploadComponents[index].serverVerificationAt = Date()
-                $0.uploadComponents[index].serverReceiptID = serverReceiptID ?? UUID().uuidString
-            }
+        }
+    }
+
+    func markDispatchStoredOnServer(serverDispatchID: String) {
+        mutate {
+            guard var dispatch = $0.activeDispatch else { return }
+            dispatch.serverDispatchID = serverDispatchID
+            $0.activeDispatch = dispatch
         }
     }
 
@@ -477,6 +518,39 @@ final class CVRWorkflowStore: ObservableObject {
         update(&state)
         state.updatedAt = Date()
         save()
+    }
+
+    @discardableResult
+    private func ensureDispatchUploadComponent() -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let flightRecord = state.activeFlightRecord,
+              flightRecord.dispatchID == dispatch.id else {
+            return false
+        }
+        let componentID = "dispatch-\(dispatch.id)-v\(dispatch.version)"
+        guard !state.uploadComponents.contains(where: {
+            $0.componentType == "dispatch_metadata" && $0.flightRecordID == flightRecord.id
+        }) else {
+            return false
+        }
+        state.uploadComponents.append(CVRUploadComponentRecord(
+            id: componentID,
+            serverID: nil,
+            flightRecordID: flightRecord.id,
+            componentType: "dispatch_metadata",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: nil,
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil
+        ))
+        state.updatedAt = Date()
+        return true
     }
 
     private func appendFlightEvent(

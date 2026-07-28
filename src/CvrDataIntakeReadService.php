@@ -28,20 +28,37 @@ final class CvrDataIntakeReadService
         }
 
         $columns = $this->columns($table);
+        $deviceExpression = $table === 'ipca_cvr_dispatches'
+            && isset($columns['device_id'])
+            && $this->tableExists('ipca_cvr_devices')
+            ? "COALESCE((SELECT d.device_uuid FROM ipca_cvr_devices d WHERE d.id = ipca_cvr_dispatches.device_id LIMIT 1), '') AS device_identifier"
+            : $this->columnExpression($columns, array('device_uuid', 'device_id'), 'device_identifier');
         $select = array(
             $this->columnExpression($columns, array('id'), 'id', '0'),
             $this->columnExpression($columns, array('dispatch_uuid', 'dispatch_id', 'id'), 'dispatch_uuid'),
-            $this->columnExpression($columns, array('version', 'dispatch_version'), 'dispatch_version', '1'),
+            $this->columnExpression($columns, array('current_version', 'version', 'dispatch_version'), 'dispatch_version', '1'),
             $this->columnExpression($columns, array('aircraft_registration', 'tail_number'), 'aircraft_registration'),
             $this->columnExpression($columns, array('mission_code'), 'mission_code'),
             $this->columnExpression($columns, array('status'), 'status'),
             $this->columnExpression($columns, array('source', 'dispatch_source'), 'source'),
-            $this->columnExpression($columns, array('device_uuid', 'device_id'), 'device_identifier'),
+            $deviceExpression,
             $this->columnExpression($columns, array('crew_json', 'crew'), 'crew_json', 'NULL'),
             $this->columnExpression($columns, array('error_message', 'last_error'), 'error_message'),
-            $this->columnExpression($columns, array('received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
+            $this->columnExpression($columns, array('workflow_flight_record_uuid', 'flight_record_uuid'), 'workflow_flight_record_uuid'),
+            $this->columnExpression($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
         );
-        $orderColumn = $this->firstColumn($columns, array('received_at', 'created_at', 'updated_at', 'id')) ?? 'id';
+        if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
+            $select[] = "COALESCE((
+                SELECT v.receipt_uuid
+                FROM ipca_cvr_dispatch_versions v
+                WHERE v.dispatch_id = ipca_cvr_dispatches.id
+                  AND v.dispatch_version = ipca_cvr_dispatches.current_version
+                LIMIT 1
+            ), '') AS server_receipt_id";
+        } else {
+            $select[] = "'' AS server_receipt_id";
+        }
+        $orderColumn = $this->firstColumn($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at', 'id')) ?? 'id';
         $sql = 'SELECT ' . implode(', ', $select)
             . ' FROM ' . $this->quoteIdentifier($table)
             . ' ORDER BY ' . $this->quoteIdentifier($orderColumn) . ' DESC'

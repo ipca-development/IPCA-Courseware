@@ -50,6 +50,7 @@ struct DispatchWorkflowView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var missionCatalog: MissionCatalogStore
+    @EnvironmentObject private var uploadManager: UploadManager
     @Binding var showAdminUnlock: Bool
     @State private var isEditingDispatch = false
 
@@ -152,6 +153,7 @@ struct DispatchWorkflowView: View {
                     if canConfirmDispatch {
                         CVROperationalActionButton(title: "Confirm Dispatch", subtitle: "Create Flight Record", color: CVROperationalPalette.success) {
                             workflow.verifyDispatchAndCreateFlightRecord()
+                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
                     }
                 }
@@ -778,7 +780,7 @@ struct GarminWorkflowView: View {
                     }
                     CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
-                        if allGarminComponentsVerified {
+                        if allWorkflowComponentsVerified {
                             workflow.resetForNextFlightIfComplete()
                         } else {
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
@@ -799,6 +801,11 @@ struct GarminWorkflowView: View {
         }
     }
 
+    private var workflowComponents: [CVRUploadComponentRecord] {
+        guard let flightRecord = workflow.state.activeFlightRecord else { return [] }
+        return workflow.state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+    }
+
     private var csvTileValue: String {
         guard !garminComponents.isEmpty else { return "Waiting" }
         return garminComponents.count == 1 ? "1 file" : "\(garminComponents.count) files"
@@ -806,13 +813,13 @@ struct GarminWorkflowView: View {
 
     private var uploadTileValue: String {
         guard !garminComponents.isEmpty else { return "Recovery" }
-        if let uploading = garminComponents.first(where: { $0.state == .uploading }) {
+        if let uploading = workflowComponents.first(where: { $0.state == .uploading }) {
             return "\(Int(((uploading.progress ?? 0) * 100).rounded()))%"
         }
-        if garminComponents.contains(where: { $0.state == .failed }) {
+        if workflowComponents.contains(where: { $0.state == .failed || $0.state == .needsUserAction }) {
             return "Failed"
         }
-        if garminComponents.allSatisfy({ $0.state == .serverVerified }) || garminComponents.contains(where: { $0.state == .uploaded }) {
+        if allWorkflowComponentsVerified || workflowComponents.contains(where: { $0.state == .uploaded }) {
             return "Uploaded"
         }
         return "Queued"
@@ -820,47 +827,49 @@ struct GarminWorkflowView: View {
 
     private var serverTileValue: String {
         guard !garminComponents.isEmpty else { return "Pending" }
-        return garminComponents.allSatisfy { $0.state == .serverVerified } ? "Verified" : "Pending"
+        return allWorkflowComponentsVerified ? "Verified" : "Pending"
     }
 
     private var serverTileColor: Color {
         guard !garminComponents.isEmpty else { return CVROperationalPalette.standby }
-        return garminComponents.allSatisfy { $0.state == .serverVerified } ? CVROperationalPalette.success : CVROperationalPalette.standby
+        return allWorkflowComponentsVerified ? CVROperationalPalette.success : CVROperationalPalette.standby
     }
 
     private var uploadButtonSubtitle: String {
         guard !garminComponents.isEmpty else { return "Waiting for CSV" }
-        if allGarminComponentsVerified {
+        if allWorkflowComponentsVerified {
             return "Return to Dispatch"
         }
-        if let uploading = garminComponents.first(where: { $0.state == .uploading }) {
+        if let uploading = workflowComponents.first(where: { $0.state == .uploading }) {
             return "Uploading \(Int(((uploading.progress ?? 0) * 100).rounded()))%"
         }
-        if garminComponents.contains(where: { $0.state == .failed }) {
+        if failedWorkflowComponent != nil {
             return "Retry missing / failed components"
         }
         return "CSV and flight data"
     }
 
     private var uploadButtonTitle: String {
-        if allGarminComponentsVerified {
+        if allWorkflowComponentsVerified {
             return "NEXT FLIGHT"
         }
-        return garminComponents.contains(where: { $0.state == .failed }) ? "RETRY FAILED ITEMS" : "UPLOAD QUEUED ITEMS"
+        return failedWorkflowComponent != nil ? "RETRY FAILED ITEMS" : "UPLOAD QUEUED ITEMS"
     }
 
-    private var allGarminComponentsVerified: Bool {
-        !garminComponents.isEmpty && garminComponents.allSatisfy { $0.state == .serverVerified }
+    private var allWorkflowComponentsVerified: Bool {
+        !workflowComponents.isEmpty && workflowComponents.allSatisfy { $0.state == .serverVerified }
     }
 
-    private var failedGarminComponent: CVRUploadComponentRecord? {
-        garminComponents.first { $0.state == .failed }
+    private var failedWorkflowComponent: CVRUploadComponentRecord? {
+        workflowComponents.first { $0.state == .failed || $0.state == .needsUserAction }
     }
 
     private var garminWarningTitle: String {
         if garminComponents.isEmpty { return "GARMIN TAB AVAILABLE" }
-        if let failedGarminComponent { return "GARMIN UPLOAD FAILED" }
-        if allGarminComponentsVerified { return "GARMIN SERVER VERIFIED" }
+        if let failedWorkflowComponent {
+            return failedWorkflowComponent.componentType == "dispatch_metadata" ? "DISPATCH UPLOAD FAILED" : "GARMIN UPLOAD FAILED"
+        }
+        if allWorkflowComponentsVerified { return "FLIGHT DATA SERVER VERIFIED" }
         return "GARMIN CSV IMPORTED"
     }
 
@@ -868,21 +877,21 @@ struct GarminWorkflowView: View {
         if garminComponents.isEmpty {
             return "Share a Garmin CSV to this app to attach it to the Flight Record."
         }
-        if let failedGarminComponent {
-            return failedGarminComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
+        if let failedWorkflowComponent {
+            return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
         }
-        if allGarminComponentsVerified {
-            return "Server receipt stored. Tap NEXT FLIGHT when ready."
+        if allWorkflowComponentsVerified {
+            return "Dispatch and Garmin server receipts stored. Tap NEXT FLIGHT when ready."
         }
         return "Shared CSV is stored locally and queued with the Flight Record."
     }
 
     private var garminWarningIcon: String {
-        failedGarminComponent == nil ? (garminComponents.isEmpty ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill") : "exclamationmark.triangle.fill"
+        failedWorkflowComponent == nil ? (garminComponents.isEmpty ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill") : "exclamationmark.triangle.fill"
     }
 
     private var garminWarningColor: Color {
-        if failedGarminComponent != nil { return CVROperationalPalette.critical }
+        if failedWorkflowComponent != nil { return CVROperationalPalette.critical }
         return garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.success
     }
 }

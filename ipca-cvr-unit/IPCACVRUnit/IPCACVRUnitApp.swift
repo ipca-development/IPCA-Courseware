@@ -43,6 +43,7 @@ struct IPCACVRUnitApp: App {
                     await settings.refreshAircraft()
                     await settings.refreshCrewUsers()
                     await missionCatalog.refreshFromServer(settings: settings)
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                     coordinator.bind(
                         audio: audioRecorder,
                         beacon: beaconManager,
@@ -61,6 +62,7 @@ struct IPCACVRUnitApp: App {
                         coordinator.appEnteredBackground()
                     case .active:
                         coordinator.appWillEnterForeground()
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                     default:
                         break
                     }

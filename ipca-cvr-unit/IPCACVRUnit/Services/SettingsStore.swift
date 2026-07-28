@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Security
 
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -43,6 +44,9 @@ final class SettingsStore: ObservableObject {
     @Published private(set) var aircraftError: String = ""
     @Published private(set) var crewUsers: [CVRCrewUser] = []
     @Published private(set) var crewUsersError: String = ""
+    @Published var enrollmentCode: String = ""
+    @Published private(set) var deviceEnrollmentStatus: String = "Not enrolled"
+    @Published private(set) var deviceEnrollmentError: String = ""
 
     let supportedLanguages: [(code: String, label: String)] = [
         ("en", "English")
@@ -58,6 +62,7 @@ final class SettingsStore: ObservableObject {
         expectedBeaconIdentityHex = Self.normalizedBeaconIdentity(UserDefaults.standard.string(forKey: Keys.expectedBeaconIdentityHex) ?? "")
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
         postRecordingGainDB = UserDefaults.standard.object(forKey: Keys.postRecordingGainDB) as? Double ?? 0
+        deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
     }
 
     var normalizedServerURL: URL? {
@@ -73,6 +78,54 @@ final class SettingsStore: ObservableObject {
 
     var selectedAircraft: CockpitAircraft? {
         aircraft.first(where: { $0.id == selectedAircraftID })
+    }
+
+    var deviceUUID: String {
+        if let existing = UserDefaults.standard.string(forKey: Keys.deviceUUID), UUID(uuidString: existing) != nil {
+            return existing.lowercased()
+        }
+        let created = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(created, forKey: Keys.deviceUUID)
+        return created
+    }
+
+    var deviceCredential: String? {
+        Self.keychainValue(for: Keys.deviceCredential)
+    }
+
+    func enrollDevice() async {
+        let code = enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !code.isEmpty else {
+            deviceEnrollmentError = "Enter the enrollment code generated in IPCA.training."
+            return
+        }
+        guard let url = normalizedServerURL else {
+            deviceEnrollmentError = "Server URL is invalid."
+            return
+        }
+
+        deviceEnrollmentStatus = "Enrolling..."
+        deviceEnrollmentError = ""
+        do {
+            let response = try await APIClient(serverURL: url).enrollDevice(
+                code: code,
+                deviceUUID: deviceUUID,
+                displayName: cvrUnitIdentifier
+            )
+            guard response.ok, let credential = response.credential, !credential.isEmpty else {
+                throw APIClientError.badResponse(response.error ?? "Enrollment failed.")
+            }
+            try Self.setKeychainValue(credential, for: Keys.deviceCredential)
+            if let aircraftID = response.aircraftID, aircraftID > 0 {
+                selectedAircraftID = aircraftID
+            }
+            enrollmentCode = ""
+            deviceEnrollmentStatus = "Enrolled"
+            deviceEnrollmentError = ""
+        } catch {
+            deviceEnrollmentStatus = deviceCredential == nil ? "Not enrolled" : "Enrolled"
+            deviceEnrollmentError = error.localizedDescription
+        }
     }
 
     func refreshAircraft() async {
@@ -190,5 +243,52 @@ final class SettingsStore: ObservableObject {
         static let expectedBeaconIdentityHex = "ipca.cvrUnit.expectedBeaconIdentityHex"
         static let adminPIN = "ipca.cvrUnit.adminPIN"
         static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
+        static let deviceUUID = "ipca.cvrUnit.deviceUUID"
+        static let deviceCredential = "ipca.cvrUnit.deviceCredential"
+    }
+
+    private static let keychainService = "training.ipca.cvr-unit"
+
+    private static func keychainValue(for account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private static func setKeychainValue(_ value: String, for account: String) throws {
+        let baseQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: account
+        ]
+        let data = Data(value.utf8)
+        let updateStatus = SecItemUpdate(
+            baseQuery as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess {
+            return
+        }
+        guard updateStatus == errSecItemNotFound else {
+            throw APIClientError.badResponse("Could not update the secure device credential.")
+        }
+        var addQuery = baseQuery
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        guard SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess else {
+            throw APIClientError.badResponse("Could not save the secure device credential.")
+        }
     }
 }
