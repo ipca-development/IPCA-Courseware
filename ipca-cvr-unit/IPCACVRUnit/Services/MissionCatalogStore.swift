@@ -58,10 +58,15 @@ final class MissionCatalogStore: ObservableObject {
 
     private static func parse(_ text: String) throws -> [CVRMissionCatalogEntry] {
         let rows = csvRows(text)
-        guard rows.count >= 2 else { return [] }
-        let dataRows = rows.dropFirst().drop { row in
-            row.first?.caseInsensitiveCompare("Program") != .orderedSame
-        }.dropFirst()
+        guard rows.count >= 2,
+              let headerIndex = rows.firstIndex(where: { row in
+                  row.first?
+                      .trimmingCharacters(in: .whitespacesAndNewlines)
+                      .caseInsensitiveCompare("Program") == .orderedSame
+              }) else {
+            return []
+        }
+        let dataRows = rows.dropFirst(headerIndex + 1)
 
         return dataRows.compactMap { row in
             guard row.count >= 6,

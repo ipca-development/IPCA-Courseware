@@ -14,7 +14,7 @@ try {
             COALESCE(email, '') AS email,
             COALESCE(role, '') AS role
         FROM users
-        WHERE role IN ('student', 'instructor', 'supervisor', 'chief_instructor', 'admin')
+        WHERE role IN ('student', 'instructor', 'supervisor', 'chief_instructor')
         ORDER BY name ASC, email ASC, id ASC
     ");
     $rows = $stmt !== false ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();

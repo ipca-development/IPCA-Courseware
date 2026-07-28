@@ -36,6 +36,7 @@ struct CVROperationalMetrics {
     var statusFontSize: CGFloat { isCompact ? 24 : 27 }
     var timerFontSize: CGFloat { isCompact ? 32 : 38 }
     var tileIconSize: CGFloat { isCompact ? 20 : 23 }
+    var tileHeight: CGFloat { isCompact ? 88 : 98 }
     var primaryHeight: CGFloat { isCompact ? 112 : 128 }
 }
 
@@ -154,20 +155,23 @@ struct CVROperationalTile: View {
             Image(systemName: iconName)
                 .font(.system(size: metrics.tileIconSize, weight: .semibold))
                 .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                .frame(height: metrics.tileIconSize + 2)
             Text(title)
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(CVROperationalPalette.textSecondary)
                 .lineLimit(1)
+                .frame(height: 13)
             Text(value)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.82)
+                .frame(height: 32, alignment: .top)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: metrics.isCompact ? 84 : 94)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: metrics.tileHeight, maxHeight: metrics.tileHeight)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
     }

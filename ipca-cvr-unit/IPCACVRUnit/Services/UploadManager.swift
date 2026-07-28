@@ -86,12 +86,162 @@ final class UploadManager: ObservableObject {
         }
     }
 
+    func uploadQueuedWorkflowComponents(workflow: CVRWorkflowStore, settings: SettingsStore) {
+        guard let baseURL = settings.normalizedServerURL else {
+            return
+        }
+        guard let flightRecord = workflow.state.activeFlightRecord else { return }
+        let components = workflow.state.uploadComponents.filter {
+            $0.flightRecordID == flightRecord.id
+                && $0.componentType == "garmin_csv"
+                && ($0.state == .queued || $0.state == .failed || $0.state == .needsUserAction)
+        }
+        guard !components.isEmpty else { return }
+
+        for component in components {
+            guard !activeUploads.contains(component.id) else { continue }
+            activeUploads.insert(component.id)
+            workflow.updateUploadComponent(id: component.id, state: .uploading, progress: max(component.progress ?? 0.01, 0.01), lastError: "Starting Garmin CSV upload...")
+
+            Task {
+                defer {
+                    Task { @MainActor in
+                        self.activeUploads.remove(component.id)
+                    }
+                }
+                do {
+                    try await uploadWorkflowGarminComponent(component: component, flightRecordID: flightRecord.id, baseURL: baseURL, workflow: workflow)
+                    await MainActor.run {
+                        workflow.updateUploadComponent(id: component.id, state: .serverVerified, progress: 1, lastError: "", serverReceiptID: UUID().uuidString)
+                    }
+                } catch {
+                    await MainActor.run {
+                        workflow.updateUploadComponent(id: component.id, state: .failed, progress: component.progress ?? 0, lastError: error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
     private func scheduleRetryFields(recording: inout Recording, reason: String) {
         let nextCount = (recording.uploadRetryCount ?? 0) + 1
         let delay = min(120, max(30, 30 * (1 << min(nextCount - 1, 2))))
         recording.uploadRetryCount = nextCount
         recording.nextUploadRetryAt = Date().addingTimeInterval(TimeInterval(delay))
         recording.lastError = "\(reason) Retrying in \(delay)s."
+    }
+
+    private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws {
+        guard let localFilePath = component.localFilePath else {
+            throw APIClientError.badResponse("Garmin CSV local file is missing.")
+        }
+        let fileURL = URL(fileURLWithPath: localFilePath)
+        let fileSize = try fileSize(fileURL)
+        let totalChunks = max(1, Int(ceil(Double(fileSize) / Double(chunkSize))))
+
+        for chunkIndex in 0..<totalChunks {
+            let offset = Int64(chunkIndex * chunkSize)
+            let count = min(chunkSize, Int(fileSize - offset))
+            let chunkData = try readChunk(fileURL: fileURL, offset: offset, count: count, chunkIndex: chunkIndex)
+            let request = workflowChunkUploadRequest(
+                baseURL: baseURL,
+                recordingID: flightRecordID,
+                fileType: "g3x",
+                chunkIndex: chunkIndex,
+                totalChunks: totalChunks,
+                totalSize: fileSize,
+                chunkSize: count,
+                originalFilename: fileURL.lastPathComponent,
+                mimeType: "text/csv"
+            )
+
+            await MainActor.run {
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .uploading,
+                    progress: max(0.01, Double(chunkIndex) / Double(totalChunks) * 0.95),
+                    lastError: "Uploading CSV chunk \(chunkIndex + 1)/\(totalChunks)..."
+                )
+            }
+
+            var lastError: Error?
+            for attempt in 1...maxChunkAttempts {
+                do {
+                    let (data, response) = try await send(request: request, body: chunkData)
+                    let decoded = try APIClient(serverURL: baseURL).decodeChunkUploadResponse(data: data, response: response)
+                    if !decoded.ok {
+                        throw APIClientError.badResponse(decoded.error ?? "Chunk upload failed.")
+                    }
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    if attempt < maxChunkAttempts {
+                        try await Task.sleep(nanoseconds: UInt64(min(30, attempt * attempt * 2)) * 1_000_000_000)
+                    }
+                }
+            }
+            if let lastError {
+                throw lastError
+            }
+
+            await MainActor.run {
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .uploading,
+                    progress: min(0.95, Double(chunkIndex + 1) / Double(totalChunks) * 0.95),
+                    lastError: "Uploaded CSV chunk \(chunkIndex + 1)/\(totalChunks)"
+                )
+            }
+        }
+
+        await MainActor.run {
+            workflow.updateUploadComponent(id: component.id, state: .uploaded, progress: 0.98, lastError: "Finalizing Garmin CSV on server...")
+        }
+
+        var finalize = URLRequest(url: baseURL.appending(path: "api/recordings/g3x_finalize.php"))
+        finalize.httpMethod = "POST"
+        finalize.timeoutInterval = 3600
+        finalize.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        finalize.httpBody = try JSONSerialization.data(withJSONObject: [
+            "recording_id": flightRecordID,
+            "import_profile": "cvr_workflow_garmin_share"
+        ])
+        let (data, response) = try await data(for: finalize)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIClientError.badResponse("Server finalize failed.")
+        }
+        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if let ok = decoded?["ok"] as? Bool, ok == false {
+            throw APIClientError.badResponse((decoded?["error"] as? String) ?? "Server rejected Garmin CSV.")
+        }
+    }
+
+    private func workflowChunkUploadRequest(
+        baseURL: URL,
+        recordingID: String,
+        fileType: String,
+        chunkIndex: Int,
+        totalChunks: Int,
+        totalSize: Int64,
+        chunkSize: Int,
+        originalFilename: String,
+        mimeType: String
+    ) -> URLRequest {
+        let url = baseURL.appending(path: "api/recordings/upload_chunk.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue(recordingID, forHTTPHeaderField: "X-IPCA-Recording-ID")
+        request.setValue(fileType, forHTTPHeaderField: "X-IPCA-File-Type")
+        request.setValue(String(chunkIndex), forHTTPHeaderField: "X-IPCA-Chunk-Index")
+        request.setValue(String(totalChunks), forHTTPHeaderField: "X-IPCA-Total-Chunks")
+        request.setValue(String(totalSize), forHTTPHeaderField: "X-IPCA-Total-Size")
+        request.setValue(String(chunkSize), forHTTPHeaderField: "X-IPCA-Chunk-Size")
+        request.setValue(originalFilename, forHTTPHeaderField: "X-IPCA-Original-Filename")
+        request.setValue(mimeType, forHTTPHeaderField: "X-IPCA-Mime-Type")
+        return request
     }
 
     private func scheduleRetry(recordingID: String, store: RecordingStore, settings: SettingsStore) {

@@ -109,7 +109,7 @@ final class SettingsStore: ObservableObject {
         do {
             let response = try await APIClient(serverURL: url).crewUsers()
             if response.ok {
-                crewUsers = response.users
+                crewUsers = response.users.filter { !Self.isAdministrativeCrewUser($0) }
                 crewUsersError = ""
             } else {
                 crewUsersError = response.error ?? "Could not load crew users."
@@ -170,6 +170,14 @@ final class SettingsStore: ObservableObject {
             return "\(fallback) Server returned an HTML error page instead of JSON."
         }
         return message.isEmpty ? fallback : message
+    }
+
+    private static func isAdministrativeCrewUser(_ user: CVRCrewUser) -> Bool {
+        let role = user.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return role == "admin"
+            || role == "administrator"
+            || role == "super_admin"
+            || role == "system_admin"
     }
 
     private enum Keys {

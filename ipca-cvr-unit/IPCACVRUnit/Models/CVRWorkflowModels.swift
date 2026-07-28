@@ -203,6 +203,11 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var dispatchID: String
     var recordingSessionID: String?
     var status: CVRFlightRecordStatus
+    var endingHobbs: Double?
+    var endingTacho: Double?
+    var fuelRemaining: String?
+    var endingOilPercentage: Int?
+    var maintenanceRemark: String?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -273,9 +278,11 @@ struct CVRUploadComponentRecord: Identifiable, Codable, Equatable {
     var serverID: String?
     var flightRecordID: String
     var componentType: String
+    var localFilePath: String?
     var sha256: String?
     var byteCount: Int64?
     var state: CVRUploadComponentState
+    var progress: Double?
     var attemptCount: Int
     var lastError: String
     var lastAttemptAt: Date?

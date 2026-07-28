@@ -65,6 +65,9 @@ struct IPCACVRUnitApp: App {
                         break
                     }
                 }
+                .onOpenURL { url in
+                    workflowStore.importGarminCSV(from: url)
+                }
         }
     }
 }

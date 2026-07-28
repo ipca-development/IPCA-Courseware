@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -93,19 +94,30 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func updateActiveDispatch(_ update: (inout CVRDispatchRecord) -> Void) {
+        if isDispatchLocked {
+            lastError = "Dispatch is locked after confirmation."
+            return
+        }
+
         mutate {
             guard var dispatch = $0.activeDispatch else { return }
             let previousMaterialSignature = Self.materialSignature(dispatch)
+            let previousStatus = dispatch.status
             update(&dispatch)
             dispatch.version += 1
             dispatch.modifiedAt = Date()
+            let materialChanged = previousMaterialSignature != Self.materialSignature(dispatch)
             dispatch.status = Self.dispatchStatus(for: dispatch, consents: $0.consents)
-            if previousMaterialSignature != Self.materialSignature(dispatch) {
+            if materialChanged {
                 $0.consents = []
                 dispatch.consentStatus = "invalidated_by_dispatch_change"
                 if $0.activeFlightRecord?.status == .recorderVerificationRequired {
                     $0.activeFlightRecord = nil
                 }
+            } else if previousStatus == .flightRecordLoggingEnabled,
+                      $0.activeFlightRecord?.dispatchID == dispatch.id,
+                      dispatch.status == .readyForVerification {
+                dispatch.status = .flightRecordLoggingEnabled
             }
             $0.activeDispatch = dispatch
         }
@@ -155,6 +167,11 @@ final class CVRWorkflowStore: ObservableObject {
             dispatchID: dispatch.id,
             recordingSessionID: nil,
             status: .recorderVerificationRequired,
+            endingHobbs: nil,
+            endingTacho: nil,
+            fuelRemaining: nil,
+            endingOilPercentage: nil,
+            maintenanceRemark: nil,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -215,8 +232,226 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    func recordEngineStartOffBlock(gpsSample: GPSSample?) {
+        guard var flightRecord = state.activeFlightRecord else { return }
+        guard !state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block" }) else {
+            return
+        }
+
+        let now = Date()
+        let event = CVRFlightEventRecord(
+            id: UUID().uuidString,
+            flightRecordID: flightRecord.id,
+            recordingSessionID: flightRecord.recordingSessionID,
+            eventType: "engine_start_off_block",
+            timestampUTC: now,
+            timestampLocal: now,
+            deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
+            audioOffset: nil,
+            latitude: gpsSample?.latitude,
+            longitude: gpsSample?.longitude,
+            altitude: gpsSample?.altitude,
+            groundSpeed: gpsSample?.speedKnots,
+            source: "manual_engine_start_hold",
+            confidence: 1.0,
+            creationMethod: "three_second_hold",
+            userIdentity: "local_cvr_unit"
+        )
+
+        mutate {
+            flightRecord.status = .recording
+            flightRecord.updatedAt = now
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.append(event)
+        }
+    }
+
+    func recordInFlightAction(eventType: String, creationMethod: String, gpsSample: GPSSample?) {
+        guard let flightRecord = state.activeFlightRecord else { return }
+        appendFlightEvent(
+            flightRecord: flightRecord,
+            eventType: eventType,
+            source: "manual_in_flight_action",
+            creationMethod: creationMethod,
+            gpsSample: gpsSample
+        )
+    }
+
+    func recordEngineShutdownOnBlock(gpsSample: GPSSample?) {
+        guard var flightRecord = state.activeFlightRecord else { return }
+        guard state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block" }) else {
+            return
+        }
+        guard !state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block" }) else {
+            return
+        }
+
+        let event = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: "engine_shutdown_on_block",
+            source: "manual_engine_shutdown_hold",
+            creationMethod: "three_second_hold",
+            gpsSample: gpsSample
+        )
+
+        mutate {
+            flightRecord.status = .shutdownVerificationRequired
+            flightRecord.updatedAt = event.timestampUTC
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.append(event)
+        }
+    }
+
+    func recordShutdownVerification(
+        endingHobbs: Double?,
+        endingTacho: Double?,
+        fuelRemaining: String,
+        oilPercentage: Int?,
+        maintenanceRemark: String,
+        gpsSample: GPSSample?
+    ) {
+        guard var flightRecord = state.activeFlightRecord else { return }
+        guard state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block" }) else {
+            return
+        }
+
+        let event = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: "shutdown_verification_completed",
+            source: "manual_shutdown_verification",
+            creationMethod: "post_flight_form",
+            gpsSample: gpsSample
+        )
+
+        mutate {
+            flightRecord.endingHobbs = endingHobbs
+            flightRecord.endingTacho = endingTacho
+            flightRecord.fuelRemaining = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
+            flightRecord.endingOilPercentage = oilPercentage
+            flightRecord.maintenanceRemark = maintenanceRemark.trimmingCharacters(in: .whitespacesAndNewlines)
+            flightRecord.status = .awaitingGarmin
+            flightRecord.updatedAt = event.timestampUTC
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.removeAll { $0.flightRecordID == flightRecord.id && $0.eventType == "shutdown_verification_completed" }
+            $0.flightEvents.append(event)
+            $0.selectedTab = .garmin
+        }
+    }
+
+    func importGarminCSV(from sourceURL: URL) {
+        guard var flightRecord = state.activeFlightRecord else {
+            lastError = "Create or recover a Flight Record before importing Garmin CSV."
+            return
+        }
+
+        let accessed = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            guard sourceURL.pathExtension.caseInsensitiveCompare("csv") == .orderedSame else {
+                lastError = "Garmin import expects a CSV file."
+                return
+            }
+
+            let data = try Data(contentsOf: sourceURL)
+            let directory = try garminImportDirectory()
+            let timestamp = Self.fileTimestampFormatter.string(from: Date())
+            let cleanName = sourceURL.deletingPathExtension().lastPathComponent
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+            let destination = directory.appendingPathComponent("\(flightRecord.id)-\(timestamp)-\(cleanName).csv")
+            try data.write(to: destination, options: [.atomic])
+
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let component = CVRUploadComponentRecord(
+                id: UUID().uuidString,
+                serverID: nil,
+                flightRecordID: flightRecord.id,
+                componentType: "garmin_csv",
+                localFilePath: destination.path,
+                sha256: digest,
+                byteCount: Int64(data.count),
+                state: .queued,
+                progress: 0,
+                attemptCount: 0,
+                lastError: "",
+                lastAttemptAt: nil,
+                serverVerificationAt: nil,
+                serverReceiptID: nil
+            )
+            let event = makeFlightEvent(
+                flightRecord: flightRecord,
+                eventType: "garmin_csv_imported",
+                source: "ios_share_sheet",
+                creationMethod: "document_open_url",
+                gpsSample: nil
+            )
+
+            mutate {
+                flightRecord.status = .awaitingUpload
+                flightRecord.updatedAt = event.timestampUTC
+                $0.activeFlightRecord = flightRecord
+                $0.uploadComponents.append(component)
+                $0.flightEvents.append(event)
+                $0.selectedTab = .garmin
+            }
+        } catch {
+            lastError = "Could not import Garmin CSV: \(error.localizedDescription)"
+        }
+    }
+
+    func updateUploadComponent(id: String, state: CVRUploadComponentState, progress: Double, lastError: String = "", serverReceiptID: String? = nil) {
+        mutate {
+            guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
+            $0.uploadComponents[index].state = state
+            $0.uploadComponents[index].progress = min(max(progress, 0), 1)
+            $0.uploadComponents[index].lastError = lastError
+            $0.uploadComponents[index].lastAttemptAt = Date()
+            if state == .serverVerified {
+                $0.uploadComponents[index].serverVerificationAt = Date()
+                $0.uploadComponents[index].serverReceiptID = serverReceiptID ?? UUID().uuidString
+            }
+        }
+    }
+
+    func resetForNextFlightIfComplete() {
+        guard let flightRecord = state.activeFlightRecord else { return }
+        let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+        guard !components.isEmpty, components.allSatisfy({ $0.state == .serverVerified }) else { return }
+
+        mutate {
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .dispatch
+        }
+    }
+
     var isDispatchVerified: Bool {
-        state.activeDispatch?.status == .flightRecordLoggingEnabled || state.activeDispatch?.status == .dispatchVerified
+        guard let dispatch = state.activeDispatch else { return false }
+        if state.activeFlightRecord?.dispatchID == dispatch.id {
+            switch dispatch.status {
+            case .readyForVerification, .dispatchVerified, .flightRecordLoggingEnabled:
+                return true
+            case .noDispatch, .dispatchIncomplete, .consentRequired, .tailNumberConflict:
+                return false
+            }
+        }
+        return dispatch.status == .flightRecordLoggingEnabled || dispatch.status == .dispatchVerified
+    }
+
+    var isDispatchLocked: Bool {
+        guard let dispatch = state.activeDispatch else { return false }
+        return state.activeFlightRecord?.dispatchID == dispatch.id
     }
 
     var isRecorderVerified: Bool {
@@ -244,6 +479,53 @@ final class CVRWorkflowStore: ObservableObject {
         save()
     }
 
+    private func appendFlightEvent(
+        flightRecord: CVRIncompleteFlightRecord,
+        eventType: String,
+        source: String,
+        creationMethod: String,
+        gpsSample: GPSSample?
+    ) {
+        let event = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: eventType,
+            source: source,
+            creationMethod: creationMethod,
+            gpsSample: gpsSample
+        )
+        mutate {
+            $0.flightEvents.append(event)
+        }
+    }
+
+    private func makeFlightEvent(
+        flightRecord: CVRIncompleteFlightRecord,
+        eventType: String,
+        source: String,
+        creationMethod: String,
+        gpsSample: GPSSample?
+    ) -> CVRFlightEventRecord {
+        let now = Date()
+        return CVRFlightEventRecord(
+            id: UUID().uuidString,
+            flightRecordID: flightRecord.id,
+            recordingSessionID: flightRecord.recordingSessionID,
+            eventType: eventType,
+            timestampUTC: now,
+            timestampLocal: now,
+            deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
+            audioOffset: nil,
+            latitude: gpsSample?.latitude,
+            longitude: gpsSample?.longitude,
+            altitude: gpsSample?.altitude,
+            groundSpeed: gpsSample?.speedKnots,
+            source: source,
+            confidence: 1.0,
+            creationMethod: creationMethod,
+            userIdentity: "local_cvr_unit"
+        )
+    }
+
     private func save() {
         do {
             let url = try storeURL()
@@ -266,6 +548,27 @@ final class CVRWorkflowStore: ObservableObject {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("flight-workflow.json")
     }
+
+    private func garminImportDirectory() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = base.appendingPathComponent("IPCACVRUnit/GarminImports", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static let fileTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }()
 
     private static func dispatchStatus(for dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> CVRDispatchStatus {
         if !dispatch.missingItems.isEmpty {
