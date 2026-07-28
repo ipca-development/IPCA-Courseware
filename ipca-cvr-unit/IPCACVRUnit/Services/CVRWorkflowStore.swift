@@ -372,7 +372,7 @@ final class CVRWorkflowStore: ObservableObject {
                 serverID: nil,
                 flightRecordID: flightRecord.id,
                 componentType: "garmin_csv",
-                localFilePath: destination.path,
+                localFilePath: "GarminImports/\(destination.lastPathComponent)",
                 sha256: digest,
                 byteCount: Int64(data.count),
                 state: .queued,

@@ -4,6 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 
+$masterLogbookMode = strtolower(trim((string)($_GET['mode'] ?? 'intake')));
+if ($masterLogbookMode !== 'reconciliation') {
+    require __DIR__ . '/master_logbook_intake.php';
+    return;
+}
+
 cw_require_admin();
 cw_header('Master Logbook');
 ?>

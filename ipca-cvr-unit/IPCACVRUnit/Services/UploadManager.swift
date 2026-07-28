@@ -110,9 +110,20 @@ final class UploadManager: ObservableObject {
                     }
                 }
                 do {
-                    try await uploadWorkflowGarminComponent(component: component, flightRecordID: flightRecord.id, baseURL: baseURL, workflow: workflow)
+                    let serverReceiptID = try await uploadWorkflowGarminComponent(
+                        component: component,
+                        flightRecordID: flightRecord.id,
+                        baseURL: baseURL,
+                        workflow: workflow
+                    )
                     await MainActor.run {
-                        workflow.updateUploadComponent(id: component.id, state: .serverVerified, progress: 1, lastError: "", serverReceiptID: UUID().uuidString)
+                        workflow.updateUploadComponent(
+                            id: component.id,
+                            state: .serverVerified,
+                            progress: 1,
+                            lastError: "",
+                            serverReceiptID: serverReceiptID
+                        )
                     }
                 } catch {
                     await MainActor.run {
@@ -131,11 +142,8 @@ final class UploadManager: ObservableObject {
         recording.lastError = "\(reason) Retrying in \(delay)s."
     }
 
-    private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws {
-        guard let localFilePath = component.localFilePath else {
-            throw APIClientError.badResponse("Garmin CSV local file is missing.")
-        }
-        let fileURL = URL(fileURLWithPath: localFilePath)
+    private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws -> String {
+        let fileURL = try workflowComponentFileURL(component)
         let fileSize = try fileSize(fileURL)
         let totalChunks = max(1, Int(ceil(Double(fileSize) / Double(chunkSize))))
 
@@ -215,6 +223,12 @@ final class UploadManager: ObservableObject {
         if let ok = decoded?["ok"] as? Bool, ok == false {
             throw APIClientError.badResponse((decoded?["error"] as? String) ?? "Server rejected Garmin CSV.")
         }
+        guard let receipt = decoded?["receipt"] as? [String: Any],
+              let receiptID = receipt["receipt_id"] as? String,
+              !receiptID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw APIClientError.badResponse("Server did not return a Garmin CSV verification receipt.")
+        }
+        return receiptID
     }
 
     private func workflowChunkUploadRequest(
@@ -242,6 +256,43 @@ final class UploadManager: ObservableObject {
         request.setValue(originalFilename, forHTTPHeaderField: "X-IPCA-Original-Filename")
         request.setValue(mimeType, forHTTPHeaderField: "X-IPCA-Mime-Type")
         return request
+    }
+
+    private func workflowComponentFileURL(_ component: CVRUploadComponentRecord) throws -> URL {
+        guard let localFilePath = component.localFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !localFilePath.isEmpty else {
+            throw APIClientError.badResponse("Garmin CSV local file reference is missing. Share the CSV to the app again.")
+        }
+
+        let fileManager = FileManager.default
+        if localFilePath.hasPrefix("/") {
+            let absoluteURL = URL(fileURLWithPath: localFilePath)
+            if fileManager.fileExists(atPath: absoluteURL.path) {
+                return absoluteURL
+            }
+            if let fallback = try? workflowGarminImportDirectory().appendingPathComponent(absoluteURL.lastPathComponent),
+               fileManager.fileExists(atPath: fallback.path) {
+                return fallback
+            }
+            throw APIClientError.badResponse("Garmin CSV is no longer in local storage. Share the CSV to the app again.")
+        }
+
+        let relative = localFilePath.replacingOccurrences(of: "GarminImports/", with: "")
+        let url = try workflowGarminImportDirectory().appendingPathComponent(relative)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw APIClientError.badResponse("Garmin CSV is no longer in local storage. Share the CSV to the app again.")
+        }
+        return url
+    }
+
+    private func workflowGarminImportDirectory() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        return base.appendingPathComponent("IPCACVRUnit/GarminImports", isDirectory: true)
     }
 
     private func scheduleRetry(recordingID: String, store: RecordingStore, settings: SettingsStore) {

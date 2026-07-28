@@ -111,7 +111,105 @@ function cockpit_g3x_finalize_remove_tree(string $path): void
     @rmdir($path);
 }
 
-function cockpit_g3x_finalize_store_workflow_csv(string $flightRecordUid, string $g3xPath, array $meta): array
+function cockpit_g3x_finalize_uuid(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    $hex = bin2hex($bytes);
+    return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4) . '-'
+        . substr($hex, 16, 4) . '-' . substr($hex, 20);
+}
+
+function cockpit_g3x_finalize_table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+    ");
+    $stmt->execute(array($table));
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function cockpit_g3x_finalize_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+    ");
+    $stmt->execute(array($table, $column));
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function cockpit_g3x_finalize_register_workflow_csv(
+    PDO $pdo,
+    string $flightRecordUid,
+    string $relativePath,
+    string $sha256,
+    int $byteCount,
+    array $meta
+): ?int {
+    if (!cockpit_g3x_finalize_table_exists($pdo, 'ipca_garmin_csv_files')) {
+        return null;
+    }
+
+    $columns = array(
+        'csv_file_uuid',
+        'original_filename',
+        'storage_path',
+        'sha256',
+        'file_size_bytes',
+        'mime_type',
+        'import_profile',
+        'source',
+        'evidence_status',
+    );
+    $values = array(
+        ':csv_file_uuid' => cockpit_g3x_finalize_uuid(),
+        ':original_filename' => (string)($meta['original_filename'] ?? 'garmin.csv'),
+        ':storage_path' => $relativePath,
+        ':sha256' => $sha256,
+        ':file_size_bytes' => $byteCount,
+        ':mime_type' => (string)($meta['mime_type'] ?? 'text/csv'),
+        ':import_profile' => 'cvr_workflow_garmin_share',
+        ':source' => 'cvr_app',
+        ':evidence_status' => 'received',
+    );
+    if (cockpit_g3x_finalize_column_exists($pdo, 'ipca_garmin_csv_files', 'upload_source')) {
+        $columns[] = 'upload_source';
+        $values[':upload_source'] = 'cvr_app';
+    }
+    if (cockpit_g3x_finalize_column_exists($pdo, 'ipca_garmin_csv_files', 'workflow_flight_record_uuid')) {
+        $columns[] = 'workflow_flight_record_uuid';
+        $values[':workflow_flight_record_uuid'] = $flightRecordUid;
+    }
+
+    $quotedColumns = array_map(static fn(string $column): string => '`' . $column . '`', $columns);
+    $placeholders = array_keys($values);
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO ipca_garmin_csv_files (' . implode(', ', $quotedColumns) . ')'
+            . ' VALUES (' . implode(', ', $placeholders) . ')'
+        );
+        $stmt->execute($values);
+        return (int)$pdo->lastInsertId();
+    } catch (PDOException $e) {
+        if ((string)$e->getCode() !== '23000') {
+            throw $e;
+        }
+        $stmt = $pdo->prepare('SELECT id FROM ipca_garmin_csv_files WHERE sha256 = ? ORDER BY id DESC LIMIT 1');
+        $stmt->execute(array($sha256));
+        $existingId = (int)$stmt->fetchColumn();
+        if ($existingId <= 0) {
+            throw $e;
+        }
+        return $existingId;
+    }
+}
+
+function cockpit_g3x_finalize_store_workflow_csv(PDO $pdo, string $flightRecordUid, string $g3xPath, array $meta): array
 {
     if (!is_file($g3xPath)) {
         throw new RuntimeException('Assembled workflow Garmin CSV is missing.');
@@ -131,9 +229,18 @@ function cockpit_g3x_finalize_store_workflow_csv(string $flightRecordUid, string
 
     $sha256 = hash_file('sha256', $absolutePath) ?: '';
     $byteCount = (int)filesize($absolutePath);
+    $csvFileId = cockpit_g3x_finalize_register_workflow_csv(
+        $pdo,
+        $flightRecordUid,
+        $relativePath,
+        $sha256,
+        $byteCount,
+        $meta
+    );
     $receipt = array(
         'receipt_id' => $receiptId,
         'flight_record_id' => $flightRecordUid,
+        'garmin_csv_file_id' => $csvFileId,
         'component_type' => 'garmin_csv',
         'storage_path' => $relativePath,
         'sha256' => $sha256,
@@ -186,7 +293,7 @@ try {
         if ($importProfile !== 'cvr_workflow_garmin_share') {
             throw $e;
         }
-        $result = cockpit_g3x_finalize_store_workflow_csv($recordingUid, $g3xPath, cockpit_g3x_finalize_meta($sessionDir, 'g3x') ?? array());
+        $result = cockpit_g3x_finalize_store_workflow_csv($pdo, $recordingUid, $g3xPath, cockpit_g3x_finalize_meta($sessionDir, 'g3x') ?? array());
     }
 
     cockpit_g3x_finalize_remove_tree($sessionDir);
