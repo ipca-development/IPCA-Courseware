@@ -9,6 +9,8 @@ $bundleMigration = file_get_contents($root . '/scripts/sql/2026_07_29_manual_rec
 $missionSeed = file_get_contents($root . '/scripts/seed_mission_1_4_9_canonical.php') ?: '';
 $debriefSource = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
 $debriefMigration = file_get_contents($root . '/scripts/sql/2026_07_29_structured_ai_debrief.sql') ?: '';
+$manualWorker = file_get_contents($root . '/public/admin/api/manual_bundle_reconstruct.php') ?: '';
+$workerScript = file_get_contents($root . '/scripts/run_cockpit_recorder_reconstruction.php') ?: '';
 
 $service = (new ReflectionClass(FlightDebriefService::class))->newInstanceWithoutConstructor();
 $calculate = new ReflectionMethod(FlightDebriefService::class, 'calculateSuggestedOverall');
@@ -37,6 +39,14 @@ $checks = array(
         str_contains($bundleService, "!== 'ready'")
         && str_contains($bundleService, 'Raw transcript is empty.')
         && str_contains($bundleService, 'transcript_snapshot_id'),
+    'manual worker receives hash-verified selected Garmin CSV' =>
+        str_contains($bundleService, 'Frozen Garmin CSV hash verification failed.')
+        && str_contains($manualWorker, '--g3x-csv-path=')
+        && str_contains($workerScript, "\$options['g3x_csv_path']"),
+    'background worker synchronizes bundle completion and errors' =>
+        str_contains($workerScript, 'updateManualBundleReconstruction')
+        && str_contains($workerScript, "'reconstruction_complete'")
+        && str_contains($workerScript, "'failed'"),
     'canonical 1-4-9 includes scenario and rubric documents' =>
         str_contains($missionSeed, "'scenario_plan'")
         && str_contains($missionSeed, "'evaluation_rubric'")

@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/CockpitReconstructionService.php';
+require_once __DIR__ . '/../src/AuditEventService.php';
 
 $recordingId = '';
+$bundleId = 0;
 $options = array('replay_source_mode' => 'g3x_only');
 
 foreach ($argv ?? array() as $arg) {
@@ -14,6 +16,11 @@ foreach ($argv ?? array() as $arg) {
         $value = trim(substr($arg, strlen('--job-id=')));
         if (is_numeric($value)) {
             $options['job_id'] = (int)$value;
+        }
+    } elseif (str_starts_with($arg, '--bundle-id=')) {
+        $value = trim(substr($arg, strlen('--bundle-id=')));
+        if (is_numeric($value)) {
+            $bundleId = (int)$value;
         }
     } elseif (str_starts_with($arg, '--altimeter-setting-inhg=')) {
         $value = trim(substr($arg, strlen('--altimeter-setting-inhg=')));
@@ -52,6 +59,7 @@ try {
     $service = new CockpitReconstructionService($pdo);
     $result = $service->reconstruct($recordingId, $options);
     if (!empty($result['cancelled'])) {
+        updateManualBundleReconstruction($pdo, $bundleId, (int)($options['job_id'] ?? 0), 'reconstruction_ready', 'cancelled', null);
         echo 'Cockpit recorder reconstruction ' . $recordingId . ' cancelled.' . PHP_EOL;
         exit(0);
     }
@@ -65,6 +73,7 @@ try {
     $totalDuration = is_numeric($result['total_duration_s'] ?? null) ? (float)$result['total_duration_s'] : null;
 
     $replaySourceMode = (string)($result['replay_source_mode'] ?? 'g3x_only');
+    updateManualBundleReconstruction($pdo, $bundleId, (int)($options['job_id'] ?? 0), 'reconstruction_complete', 'ready', null);
 
     echo 'Cockpit recorder reconstruction ' . $recordingId . ' completed with '
         . number_format($canonicalCount) . ' canonical samples.'
@@ -87,6 +96,74 @@ try {
     } catch (Throwable) {
         // The original reconstruction failure is the useful error for the worker log.
     }
+    updateManualBundleReconstruction(
+        $pdo,
+        $bundleId,
+        (int)($options['job_id'] ?? 0),
+        'reconstruction_ready',
+        'failed',
+        $e->getMessage()
+    );
     fwrite(STDERR, 'Cockpit recorder reconstruction failed: ' . $e->getMessage() . PHP_EOL);
     exit(1);
+}
+
+function updateManualBundleReconstruction(
+    PDO $pdo,
+    int $bundleId,
+    int $jobId,
+    string $bundleStatus,
+    string $replayStatus,
+    ?string $error
+): void {
+    if ($bundleId <= 0 || $jobId <= 0) {
+        return;
+    }
+    try {
+        $statement = $pdo->prepare(
+            'UPDATE ipca_manual_intake_bundles
+             SET status = ?, replay_status = ?, processing_error = ?
+             WHERE id = ? AND reconstruction_job_id = ?'
+        );
+        $statement->execute(array($bundleStatus, $replayStatus, $error, $bundleId, $jobId));
+        if ($statement->rowCount() <= 0) {
+            return;
+        }
+        $pdo->prepare(
+            'INSERT INTO ipca_manual_intake_bundle_audit
+             (event_uuid, bundle_id, event_type, actor_user_id, detail_json)
+             VALUES (?, ?, ?, NULL, ?)'
+        )->execute(array(
+            AuditEventService::uuid(),
+            $bundleId,
+            $replayStatus === 'ready' ? 'reconstruction_completed' : 'reconstruction_' . $replayStatus,
+            AuditEventService::jsonEncode(array(
+                'job_id' => $jobId,
+                'bundle_status' => $bundleStatus,
+                'replay_status' => $replayStatus,
+                'error' => $error,
+            )),
+        ));
+        (new AuditEventService($pdo))->record(
+            $replayStatus === 'ready' ? 'reconstruction_completed' : 'reconstruction_' . $replayStatus,
+            'ipca_manual_intake_bundles',
+            (string)$bundleId,
+            null,
+            array(
+                'job_id' => $jobId,
+                'bundle_status' => $bundleStatus,
+                'replay_status' => $replayStatus,
+                'error' => $error,
+            ),
+            'Manual CVR bundle reconstruction worker status.',
+            'system',
+            null,
+            null,
+            null,
+            1,
+            'cvr_reconstruction'
+        );
+    } catch (Throwable $auditError) {
+        error_log('Could not synchronize manual Reconstruction bundle status: ' . $auditError->getMessage());
+    }
 }

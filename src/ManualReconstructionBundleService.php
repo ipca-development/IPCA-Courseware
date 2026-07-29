@@ -175,6 +175,44 @@ final class ManualReconstructionBundleService
         return $this->bundle($bundleId) ?? array();
     }
 
+    /** @return array{recording_id:int,g3x_csv_path:string,g3x_sha256:string} */
+    public function reconstructionSource(int $bundleId): array
+    {
+        $bundle = $this->bundle($bundleId);
+        if (!$bundle || !in_array((string)($bundle['status'] ?? ''), array(
+            'reconstruction_ready',
+            'reconstruction_complete',
+            'processing',
+        ), true)) {
+            throw new RuntimeException('Frozen Reconstruction bundle is unavailable.');
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT metadata_snapshot_json
+             FROM ipca_manual_intake_bundle_items
+             WHERE bundle_id = ? AND source_type = \'garmin_csv\'
+               AND source_table = \'ipca_garmin_csv_files\' LIMIT 1'
+        );
+        $statement->execute(array($bundleId));
+        $metadata = json_decode((string)$statement->fetchColumn(), true);
+        if (!is_array($metadata)) {
+            throw new RuntimeException('Frozen Garmin source metadata is unavailable.');
+        }
+        if ((int)($metadata['id'] ?? 0) !== (int)$bundle['garmin_csv_file_id']) {
+            throw new RuntimeException('Frozen Garmin source does not match the bundle.');
+        }
+        $resolved = $this->resolveStoredGarminPath((string)($metadata['storage_path'] ?? ''));
+        $expectedHash = strtolower(trim((string)($metadata['sha256'] ?? '')));
+        $actualHash = strtolower((string)(hash_file('sha256', $resolved['absolute']) ?: ''));
+        if ($expectedHash !== '' && !hash_equals($expectedHash, $actualHash)) {
+            throw new RuntimeException('Frozen Garmin CSV hash verification failed.');
+        }
+        return array(
+            'recording_id' => (int)$bundle['cockpit_recording_id'],
+            'g3x_csv_path' => $resolved['absolute'],
+            'g3x_sha256' => $actualHash,
+        );
+    }
+
     /** @return list<array<string,mixed>> */
     public function recentBundles(int $limit = 30): array
     {
@@ -189,6 +227,12 @@ final class ManualReconstructionBundleService
                     WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_id,
                    (SELECT j.status FROM ipca_cockpit_reconstruction_jobs j
                     WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_status
+                   ,(SELECT j.progress FROM ipca_cockpit_reconstruction_jobs j
+                    WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_progress
+                   ,(SELECT j.progress_message FROM ipca_cockpit_reconstruction_jobs j
+                    WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_message
+                   ,(SELECT j.error_message FROM ipca_cockpit_reconstruction_jobs j
+                    WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_error
             FROM ipca_manual_intake_bundles b
             INNER JOIN ipca_cockpit_recordings r ON r.id = b.cockpit_recording_id
             ORDER BY b.id DESC LIMIT ' . max(1, min(100, $limit));

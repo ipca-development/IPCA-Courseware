@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/CockpitReconstructionService.php';
 require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
 require_once __DIR__ . '/../../../src/AuditEventService.php';
+require_once __DIR__ . '/../../../src/ManualReconstructionBundleService.php';
 
 cw_require_admin();
 
@@ -28,7 +29,9 @@ try {
     if (!is_array($bundle)) {
         throw new RuntimeException('Frozen Reconstruction bundle is unavailable.');
     }
-    $recordingId = (int)$bundle['cockpit_recording_id'];
+    $source = (new ManualReconstructionBundleService($pdo))->reconstructionSource($bundleId);
+    $recordingId = (int)$source['recording_id'];
+    $g3xCsvPath = (string)$source['g3x_csv_path'];
     $service = new CockpitReconstructionService($pdo);
     $jobId = $service->createReconstructionJob($recordingId);
     $pdo->prepare(
@@ -58,6 +61,8 @@ try {
         . escapeshellarg($script) . ' '
         . escapeshellarg('--recording-id=' . $recordingId) . ' '
         . escapeshellarg('--job-id=' . $jobId) . ' '
+        . escapeshellarg('--bundle-id=' . $bundleId) . ' '
+        . escapeshellarg('--g3x-csv-path=' . $g3xCsvPath) . ' '
         . escapeshellarg('--replay-source-mode=g3x_only')
         . ' >> ' . escapeshellarg($log) . ' 2>&1 < /dev/null & echo $!';
     exec($command, $output, $exitCode);
