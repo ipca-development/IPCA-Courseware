@@ -43,7 +43,9 @@ if ($pageSource === false
     || !str_contains($pageSource, 'upload_manual_garmin_csv')
     || !str_contains($pageSource, 'upload_manual_audio')
     || !str_contains($pageSource, 'supersede_reconstruction_bundle')
-    || !str_contains($pageSource, 'dispatchOptionLabel')) {
+    || !str_contains($pageSource, 'dispatchOptionLabel')
+    || !str_contains($pageSource, 'data-audio-short-toggle')
+    || !str_contains($pageSource, 'intake-audio-row-short')) {
     fwrite(STDERR, "master_logbook_intake contract failed.\n");
     exit(1);
 }

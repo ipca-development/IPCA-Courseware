@@ -153,7 +153,8 @@ final class CvrDispatchIntakeService
             throw new RuntimeException('Dispatch meter or oil values are invalid.');
         }
 
-        $deviceTail = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
+        $deviceTail = self::normalizeTailRegistration((string)($device['aircraft_registration'] ?? ''));
+        $tailNumber = self::normalizeTailRegistration($tailNumber);
         if ($deviceTail === '' || $tailNumber === '' || $deviceTail !== $tailNumber) {
             throw new RuntimeException('Dispatch tail number does not match the enrolled CVR device.');
         }
@@ -538,6 +539,11 @@ final class CvrDispatchIntakeService
     private function isUuid(string $value): bool
     {
         return preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/', $value) === 1;
+    }
+
+    private static function normalizeTailRegistration(string $registration): string
+    {
+        return strtoupper((string)preg_replace('/[^A-Z0-9]/', '', trim($registration)));
     }
 
     private function canonicalize(mixed $value): mixed

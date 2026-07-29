@@ -66,6 +66,12 @@ check('tail mismatch is blocking', static function () use ($normalize, $service,
     $changed['dispatch']['tail_number'] = 'N000XX';
     return throws_runtime(static fn() => $normalize->invoke($service, $changed, $device), 'tail number');
 });
+check('tail punctuation is normalized before compare', static function () use ($normalize, $service, $payload, $device): bool {
+    $changed = $payload;
+    $changed['dispatch']['tail_number'] = 'N392-EA';
+    $normalized = $normalize->invoke($service, $changed, $device);
+    return ($normalized['aircraft_registration'] ?? '') === 'N392EA';
+});
 check('stale consent version is blocking', static function () use ($normalize, $service, $payload, $device): bool {
     $changed = $payload;
     $changed['consents'][0]['dispatch_version'] = 3;

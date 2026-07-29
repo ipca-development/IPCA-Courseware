@@ -72,6 +72,8 @@ struct DispatchWorkflowView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @Binding var showAdminUnlock: Bool
     @State private var isEditingDispatch = false
+    @State private var recoveryExportURL: URL?
+    @State private var recoveryExportError = ""
 
     var body: some View {
         GeometryReader { proxy in
@@ -131,7 +133,21 @@ struct DispatchWorkflowView: View {
 
     @ViewBuilder
     private var warningCard: some View {
-        if let error = workflow.lastError.nilIfEmpty {
+        if let failedDispatch = workflow.dispatchUploadFailure() {
+            CVROperationalWarningCard(
+                title: "DISPATCH UPLOAD FAILED",
+                message: failedDispatch.lastError.nilIfEmpty ?? "The server rejected Dispatch upload. Flight data is still stored locally on this device.",
+                iconName: "icloud.slash.fill",
+                color: CVROperationalPalette.critical
+            )
+        } else if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
+            CVROperationalWarningCard(
+                title: "AIRCRAFT MISMATCH",
+                message: "Dispatch tail \(aircraftTile) does not match enrolled aircraft \(settings.selectedAircraft?.registration ?? "—"). Fix alignment before retrying upload.",
+                iconName: "airplane.circle.fill",
+                color: CVROperationalPalette.critical
+            )
+        } else if let error = workflow.lastError.nilIfEmpty {
             CVROperationalWarningCard(title: "WORKFLOW STORAGE WARNING", message: error, iconName: "externaldrive.badge.exclamationmark", color: CVROperationalPalette.warning)
         } else if settings.selectedAircraft == nil {
             CVROperationalWarningCard(title: "AIRCRAFT CONFIGURATION REQUIRED", message: "Assign this CVR Unit to its aircraft before Dispatch.", iconName: "lock.trianglebadge.exclamationmark", color: CVROperationalPalette.critical)
@@ -146,6 +162,44 @@ struct DispatchWorkflowView: View {
 
     private var actionButtons: some View {
         VStack(spacing: 8) {
+            if workflow.dispatchUploadFailure() != nil || workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
+                CVROperationalActionButton(
+                    title: "FIX AIRCRAFT & RETRY UPLOAD",
+                    subtitle: settings.selectedAircraft?.registration ?? "Select enrolled aircraft in Admin",
+                    color: CVROperationalPalette.secondaryBlue
+                ) {
+                    _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                }
+                if !workflow.failedActiveUploadComponents().isEmpty {
+                    CVROperationalActionButton(title: "RETRY ALL FAILED UPLOADS", subtitle: "Dispatch, events, closure, Garmin", color: CVROperationalPalette.warning) {
+                        workflow.requeueFailedUploads()
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    }
+                }
+                CVROperationalActionButton(title: "EXPORT RECOVERY JSON", subtitle: "Share local flight evidence backup", color: CVROperationalPalette.standby) {
+                    do {
+                        recoveryExportURL = try workflow.activeWorkflowExportURL()
+                        recoveryExportError = ""
+                    } catch {
+                        recoveryExportURL = nil
+                        recoveryExportError = error.localizedDescription
+                    }
+                }
+                if let recoveryExportURL {
+                    ShareLink(item: recoveryExportURL) {
+                        Label("Share Recovery Backup", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(CVROperationalPalette.secondaryBlue)
+                }
+                if !recoveryExportError.isEmpty {
+                    Text(recoveryExportError)
+                        .font(.caption)
+                        .foregroundStyle(CVROperationalPalette.critical)
+                }
+            }
             if workflow.state.activeDispatch == nil {
                 if settings.selectedAircraft == nil {
                     CVROperationalActionButton(title: "CONFIGURE AIRCRAFT", subtitle: "Assign aircraft", color: CVROperationalPalette.critical) {
@@ -970,6 +1024,10 @@ struct GarminWorkflowView: View {
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
                         if settings.isSimulationModeEnabled {
                             completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
+                        } else if workflow.dispatchUploadFailure() != nil || !workflow.failedActiveUploadComponents().isEmpty {
+                            _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
+                            workflow.requeueFailedUploads()
+                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         } else if allWorkflowComponentsVerified {
                             workflow.resetForNextFlightIfComplete()
                         } else {

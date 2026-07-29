@@ -195,6 +195,15 @@ try {
 }
 $dispatch = $intake->dispatchRows();
 $audio = $intake->audioRows();
+$audioShortThresholdSeconds = 600;
+$audioShortRowCount = 0;
+foreach ($audio['rows'] as $audioRow) {
+    $audioDurationSeconds = (float)($audioRow['duration_seconds'] ?? 0);
+    if ($audioDurationSeconds > 0 && $audioDurationSeconds < $audioShortThresholdSeconds) {
+        $audioShortRowCount++;
+    }
+}
+$audioVisibleRowCount = max(0, count($audio['rows']) - $audioShortRowCount);
 $garmin = $intake->garminRows();
 $reconstructionBundles = $reconstructionService->recentBundles();
 $selectedDebrief = null;
@@ -450,7 +459,11 @@ cw_header('Master Logbook');
 .intake-tab.is-active .intake-count{background:rgba(255,255,255,.2);color:#fff}
 .intake-panel{display:none}
 .intake-panel.is-active{display:block}
-.intake-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}
+.intake-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.intake-audio-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.intake-audio-toggle{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:850;cursor:pointer}
+.intake-audio-toggle.is-on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+.intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
 .intake-panel-title{margin:0;color:#0f172a;font-size:17px}
 .intake-table-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:12px}
 .intake-table{width:100%;min-width:1080px;border-collapse:collapse;font-size:12px}
@@ -622,7 +635,7 @@ cw_header('Master Logbook');
         Dispatch <span class="intake-count"><?= count($dispatch['rows']) ?></span>
       </button>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="audio">
-        Cockpit Audio <span class="intake-count"><?= count($audio['rows']) ?></span>
+        Cockpit Audio <span class="intake-count" data-audio-tab-count><?= $audioVisibleRowCount ?></span>
       </button>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="garmin">
         Garmin CSV <span class="intake-count"><?= count($garmin['rows']) ?></span>
@@ -679,6 +692,23 @@ cw_header('Master Logbook');
         <h2 class="intake-panel-title">Cockpit Audio</h2>
         <div class="intake-muted">Audio upload and transcription status received from recorder units.</div>
       </div>
+      <?php if ($audio['available'] && $audio['rows'] !== array() && $audioShortRowCount > 0): ?>
+        <div class="intake-audio-filter">
+          <span class="intake-muted" data-audio-summary>
+            Showing <?= (int)$audioVisibleRowCount ?> of <?= count($audio['rows']) ?> recordings
+            (<?= (int)$audioShortRowCount ?> under 10 min hidden)
+          </span>
+          <button
+            class="intake-audio-toggle"
+            type="button"
+            data-audio-short-toggle
+            aria-pressed="false"
+            title="Short recordings are usually power-ups and are hidden by default"
+          >
+            Short recordings (&lt; 10 min): OFF
+          </button>
+        </div>
+      <?php endif; ?>
     </div>
     <div class="intake-upload-panel">
       <div class="intake-muted" style="margin-bottom:10px">Manual Upload Audio — use when a recording is missing from intake. Times are interpreted in the aircraft&apos;s operational timezone (California local for IPCA fleet).</div>
@@ -706,7 +736,7 @@ cw_header('Master Logbook');
     <?php elseif ($audio['rows'] === array()): ?>
       <div class="intake-empty">No Cockpit Audio recordings have been received.</div>
     <?php else: ?>
-      <div class="intake-table-wrap">
+      <div class="intake-table-wrap intake-audio-table" data-audio-table data-hide-short="true" data-audio-total="<?= count($audio['rows']) ?>" data-audio-short="<?= (int)$audioShortRowCount ?>">
         <table class="intake-table">
           <thead><tr><th>Received (LT)</th><th>Recording</th><th>Aircraft</th><th>Start (LT)</th><th>Duration</th><th>Input</th><th>File</th><th>Upload</th><th>Transcription</th><th>Error</th></tr></thead>
           <tbody>
@@ -714,8 +744,10 @@ cw_header('Master Logbook');
             <?php
               $transcriptionProgress = max(0, min(100, (int)($row['transcription_progress'] ?? 0)));
               $tail = (string)($row['aircraft_registration'] ?? '');
+              $durationSeconds = (float)($row['duration_seconds'] ?? 0);
+              $isShortRecording = $durationSeconds > 0 && $durationSeconds < $audioShortThresholdSeconds;
             ?>
-            <tr>
+            <tr class="<?= $isShortRecording ? 'intake-audio-row-short' : '' ?>" data-audio-duration-seconds="<?= cvr_intake_h((string)$durationSeconds) ?>">
               <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></td>
               <td><div class="intake-primary intake-mono"><?= cvr_intake_h($row['recording_uid'] ?: '—') ?></div><div class="intake-muted"><?= cvr_intake_h($row['session_uuid'] ?: 'No session link') ?></div></td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
@@ -736,6 +768,11 @@ cw_header('Master Logbook');
           </tbody>
         </table>
       </div>
+      <?php if ($audioVisibleRowCount === 0 && $audioShortRowCount > 0): ?>
+        <div class="intake-empty" data-audio-filtered-empty style="margin-top:12px">
+          All recordings are under 10 minutes. Turn on <strong>Short recordings (&lt; 10 min)</strong> to view them.
+        </div>
+      <?php endif; ?>
     <?php endif; ?>
   </section>
 
@@ -1468,6 +1505,54 @@ cw_header('Master Logbook');
       window.setTimeout(() => { button.textContent = originalText; }, 1800);
     });
   });
+
+  const audioTable = page.querySelector('[data-audio-table]');
+  const audioToggle = page.querySelector('[data-audio-short-toggle]');
+  const audioSummary = page.querySelector('[data-audio-summary]');
+  const audioTabCount = page.querySelector('[data-audio-tab-count]');
+  const audioFilteredEmpty = page.querySelector('[data-audio-filtered-empty]');
+  const audioShortStorageKey = 'master_logbook_audio_show_short';
+  if (audioTable && audioToggle) {
+    const totalCount = Number(audioTable.getAttribute('data-audio-total') || '0');
+    const shortCount = Number(audioTable.getAttribute('data-audio-short') || '0');
+    const visibleCount = Math.max(0, totalCount - shortCount);
+    const updateAudioFilter = (showShort) => {
+      audioTable.setAttribute('data-hide-short', showShort ? 'false' : 'true');
+      audioToggle.classList.toggle('is-on', showShort);
+      audioToggle.setAttribute('aria-pressed', showShort ? 'true' : 'false');
+      audioToggle.textContent = showShort
+        ? 'Short recordings (< 10 min): ON'
+        : 'Short recordings (< 10 min): OFF';
+      const shown = showShort ? totalCount : visibleCount;
+      if (audioSummary) {
+        audioSummary.textContent = showShort
+          ? `Showing all ${totalCount} recordings (${shortCount} under 10 min)`
+          : `Showing ${visibleCount} of ${totalCount} recordings (${shortCount} under 10 min hidden)`;
+      }
+      if (audioTabCount) {
+        audioTabCount.textContent = String(shown);
+      }
+      if (audioFilteredEmpty) {
+        audioFilteredEmpty.style.display = (!showShort && visibleCount === 0 && shortCount > 0) ? 'block' : 'none';
+      }
+    };
+    let showShort = false;
+    try {
+      showShort = window.localStorage.getItem(audioShortStorageKey) === '1';
+    } catch (error) {
+      showShort = false;
+    }
+    updateAudioFilter(showShort);
+    audioToggle.addEventListener('click', () => {
+      showShort = !showShort;
+      try {
+        window.localStorage.setItem(audioShortStorageKey, showShort ? '1' : '0');
+      } catch (error) {
+        // Ignore storage failures; keep in-memory preference for this page view.
+      }
+      updateAudioFilter(showShort);
+    });
+  }
 })();
 </script>
 <?php cw_footer(); ?>

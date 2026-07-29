@@ -7,6 +7,7 @@ $root = dirname(__DIR__);
 $bundleService = file_get_contents($root . '/src/ManualReconstructionBundleService.php') ?: '';
 $bundleMigration = file_get_contents($root . '/scripts/sql/2026_07_29_manual_reconstruction_bundles.sql') ?: '';
 $missionSeed = file_get_contents($root . '/scripts/seed_mission_1_4_9_canonical.php') ?: '';
+$mission215Seed = file_get_contents($root . '/scripts/mission_canonical/mission_2_1_5.php') ?: '';
 $debriefSource = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
 $debriefMigration = file_get_contents($root . '/scripts/sql/2026_07_29_structured_ai_debrief.sql') ?: '';
 $manualWorker = file_get_contents($root . '/public/admin/api/manual_bundle_reconstruct.php') ?: '';
@@ -67,6 +68,13 @@ $checks = array(
         && str_contains($missionSeed, 'communication_failure')
         && str_contains($missionSeed, 'flap_failure')
         && str_contains($missionSeed, 'forward_slip'),
+    'canonical 2-1-5 includes scenario plan rubric and phase 1 progress check sequence' =>
+        str_contains($mission215Seed, "'scenario_plan'")
+        && str_contains($mission215Seed, "'evaluation_rubric'")
+        && str_contains($mission215Seed, 'takeoff.soft_field')
+        && str_contains($mission215Seed, 'takeoff.short_field')
+        && str_contains($mission215Seed, 'Engine failure in takeoff/climb')
+        && str_contains($mission215Seed, 'Salton Sea Training Area'),
     'structured debrief stores append-only evidence and instructor fields' =>
         str_contains($debriefMigration, 'supersedes_debrief_id')
         && str_contains($debriefMigration, 'evidence_refs_json')

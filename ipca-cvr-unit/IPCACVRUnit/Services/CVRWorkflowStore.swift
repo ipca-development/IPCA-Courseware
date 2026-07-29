@@ -684,6 +684,82 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    func activeWorkflowExportURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("IPCA-CVR-Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suffix = state.activeFlightRecord?.id ?? state.activeDispatch?.id ?? "workflow"
+        let url = directory.appendingPathComponent("IPCA-CVR-active-\(suffix).json")
+        try encoder.encode(state).write(to: url, options: [.atomic])
+        return url
+    }
+
+    func dispatchUploadFailure() -> CVRUploadComponentRecord? {
+        state.uploadComponents.first {
+            $0.componentType == "dispatch_metadata" && ($0.state == .failed || $0.state == .needsUserAction)
+        }
+    }
+
+    func failedActiveUploadComponents() -> [CVRUploadComponentRecord] {
+        state.uploadComponents.filter { $0.state == .failed || $0.state == .needsUserAction }
+    }
+
+    static func normalizedTail(_ value: String) -> String {
+        value.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    func dispatchTailMismatch(enrolledRegistration: String?) -> Bool {
+        guard let dispatch = state.activeDispatch else { return false }
+        let enrolled = Self.normalizedTail(enrolledRegistration ?? "")
+        guard !enrolled.isEmpty else { return false }
+        return Self.normalizedTail(dispatch.tailNumber) != enrolled
+    }
+
+    @discardableResult
+    func repairDispatchAircraftAlignment(selectedAircraft: CockpitAircraft?) -> Bool {
+        guard let aircraft = selectedAircraft else {
+            lastError = "Assign the enrolled aircraft in Admin before retrying upload."
+            return false
+        }
+        let enrolledTail = aircraft.registration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !enrolledTail.isEmpty else {
+            lastError = "Enrolled aircraft registration is missing."
+            return false
+        }
+        guard state.activeDispatch != nil else {
+            lastError = "No active Dispatch is available to repair."
+            return false
+        }
+        mutate {
+            guard var dispatch = $0.activeDispatch else { return }
+            dispatch.tailNumber = enrolledTail
+            dispatch.aircraftID = aircraft.id
+            dispatch.modifiedAt = Date()
+            $0.activeDispatch = dispatch
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+                if $0.uploadComponents[index].state == .failed || $0.uploadComponents[index].state == .needsUserAction {
+                    $0.uploadComponents[index].state = .queued
+                    $0.uploadComponents[index].lastError = ""
+                    $0.uploadComponents[index].progress = 0
+                }
+            }
+        }
+        return true
+    }
+
+    func requeueFailedUploads(componentTypes: Set<String>? = nil) {
+        mutate {
+            for index in $0.uploadComponents.indices {
+                let component = $0.uploadComponents[index]
+                guard component.state == .failed || component.state == .needsUserAction else { continue }
+                if let componentTypes, !componentTypes.contains(component.componentType) { continue }
+                $0.uploadComponents[index].state = .queued
+                $0.uploadComponents[index].lastError = ""
+                $0.uploadComponents[index].progress = 0
+            }
+        }
+    }
+
     func archiveExportURL(id: String) throws -> URL {
         guard let archive = archives.first(where: { $0.id == id }) else {
             throw CocoaError(.fileNoSuchFile)

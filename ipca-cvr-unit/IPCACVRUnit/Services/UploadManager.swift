@@ -206,12 +206,19 @@ final class UploadManager: ObservableObject {
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             throw APIClientError.badResponse("CVR Unit is not enrolled. Generate an enrollment code in IPCA.training and enter it in Admin.")
         }
-        let dispatch = context.dispatch
-        let flightRecord = context.flightRecord
-        guard component.flightRecordID == flightRecord.id,
-              dispatch.id == flightRecord.dispatchID else {
+        let initialDispatch = context.dispatch
+        let initialFlightRecord = context.flightRecord
+        guard component.flightRecordID == initialFlightRecord.id,
+              initialDispatch.id == initialFlightRecord.dispatchID else {
             throw APIClientError.badResponse("Dispatch upload data is no longer linked to the active Flight Record.")
         }
+
+        _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
+        guard let refreshedContext = workflow.workflowUploadContext(componentID: component.id) else {
+            throw APIClientError.badResponse("Dispatch upload context is unavailable after repair.")
+        }
+        let dispatch = refreshedContext.dispatch
+        let flightRecord = refreshedContext.flightRecord
 
         workflow.updateUploadComponent(
             id: component.id,
@@ -222,9 +229,10 @@ final class UploadManager: ObservableObject {
         let payload = workflowDispatchPayload(
             dispatch: dispatch,
             flightRecord: flightRecord,
-            consents: context.consents.filter {
+            consents: refreshedContext.consents.filter {
                 $0.dispatchID == dispatch.id && $0.dispatchVersion == dispatch.version
-            }
+            },
+            settings: settings
         )
         let response = try await APIClient(serverURL: baseURL).syncDispatch(payload: payload, credential: credential)
         guard response.ok,
@@ -239,7 +247,8 @@ final class UploadManager: ObservableObject {
     private func workflowDispatchPayload(
         dispatch: CVRDispatchRecord,
         flightRecord: CVRIncompleteFlightRecord,
-        consents: [CVRConsentRecord]
+        consents: [CVRConsentRecord],
+        settings: SettingsStore
     ) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -249,11 +258,17 @@ final class UploadManager: ObservableObject {
         day.timeZone = TimeZone.current
         day.dateFormat = "yyyy-MM-dd"
 
+        let uploadTail = settings.selectedAircraft?.registration
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            ?? dispatch.tailNumber.uppercased()
+        let uploadAircraftID = settings.selectedAircraft?.id ?? dispatch.aircraftID
+
         var dispatchPayload: [String: Any] = [
             "id": dispatch.id.lowercased(),
             "organization_id": dispatch.organizationID,
             "scheduled_date": day.string(from: dispatch.scheduledDate),
-            "tail_number": dispatch.tailNumber,
+            "tail_number": uploadTail,
             "mission_code": dispatch.missionCode,
             "planned_departure_airport": dispatch.plannedDepartureAirport,
             "planned_destination_airport": dispatch.plannedDestinationAirport,
@@ -279,7 +294,7 @@ final class UploadManager: ObservableObject {
             "configured_cvr_unit_id": dispatch.configuredCVRUnitID,
             "configured_beacon_id": dispatch.configuredBeaconID
         ]
-        if let aircraftID = dispatch.aircraftID {
+        if let aircraftID = uploadAircraftID {
             dispatchPayload["aircraft_id"] = aircraftID
         }
         if let startingHobbs = dispatch.startingHobbs {
