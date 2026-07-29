@@ -51,6 +51,10 @@ if (!$checkDbOnly) {
         'ipca_cvr_dispatches',
         'ipca_cvr_dispatch_versions',
         'ipca_cvr_dispatch_consents',
+        'ipca_cvr_workflow_evidence_batches',
+        'ipca_cvr_flight_events',
+        'ipca_cvr_recorder_verifications',
+        'ipca_cvr_flight_closures',
         'ipca_flight_sessions',
         'ipca_garmin_csv_upload_requests',
         'ipca_garmin_csv_files',
@@ -64,6 +68,12 @@ if (!$checkDbOnly) {
         'ipca_flight_record_logbook_proposals',
         'ipca_accepted_logbook_proposal_links',
         'ipca_async_jobs',
+        'ipca_manual_intake_bundles',
+        'ipca_manual_intake_bundle_items',
+        'ipca_cockpit_transcript_snapshots',
+        'ipca_mission_canonical_documents',
+        'ipca_structured_debriefs',
+        'ipca_structured_debrief_evaluations',
     );
     foreach ($requiredTables as $table) {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
@@ -80,6 +90,7 @@ if (!$checkDbOnly) {
         __DIR__ . '/../public/api/recordings/transcript.php',
         __DIR__ . '/../public/api/recordings/replay.php',
         __DIR__ . '/../public/api/cvr/dispatch_sync.php',
+        __DIR__ . '/../public/api/cvr/flight_events_sync.php',
     );
     foreach ($protectedEndpoints as $path) {
         if (!is_file($path)) {

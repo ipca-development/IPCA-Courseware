@@ -900,6 +900,7 @@ final class CockpitRecorderService
      */
     public function publicRecordingPayload(array $recording): array
     {
+        $reconstruction = $this->publicReconstructionStatus((int)($recording['id'] ?? 0), $recording);
         return array(
             'id' => (int)($recording['id'] ?? 0),
             'recording_id' => (string)($recording['recording_uid'] ?? ''),
@@ -920,6 +921,9 @@ final class CockpitRecorderService
             'upload_status' => (string)($recording['upload_status'] ?? 'pending'),
             'transcription_status' => (string)($recording['transcription_status'] ?? 'pending'),
             'progress' => (int)($recording['transcription_progress'] ?? 0),
+            'reconstruction_status' => $reconstruction['status'],
+            'reconstruction_progress' => $reconstruction['progress'],
+            'reconstruction_stage' => $reconstruction['stage'],
             'file_size' => (int)($recording['file_size_bytes'] ?? 0),
             'ahrs_available' => trim((string)($recording['ahrs_storage_path'] ?? '')) !== '',
             'ahrs_file_size' => (int)($recording['ahrs_file_size_bytes'] ?? 0),
@@ -947,6 +951,41 @@ final class CockpitRecorderService
             'updated_at' => $recording['updated_at'] ?? null,
             'error' => (string)($recording['error_message'] ?? ''),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array{status:string,progress:int,stage:string}
+     */
+    private function publicReconstructionStatus(int $recordingId, array $recording): array
+    {
+        $fallbackStatus = (string)($recording['reconstruction_status'] ?? 'not_started');
+        if ($recordingId <= 0) {
+            return array('status' => $fallbackStatus, 'progress' => 0, 'stage' => '');
+        }
+        try {
+            $present = $this->pdo->query("SHOW TABLES LIKE 'ipca_cockpit_reconstruction_jobs'");
+            if ($present === false || $present->fetchColumn() === false) {
+                return array('status' => $fallbackStatus, 'progress' => 0, 'stage' => '');
+            }
+            $statement = $this->pdo->prepare(
+                'SELECT status, progress, progress_stage
+                 FROM ipca_cockpit_reconstruction_jobs
+                 WHERE recording_id = ? ORDER BY id DESC LIMIT 1'
+            );
+            $statement->execute(array($recordingId));
+            $job = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($job)) {
+                return array('status' => $fallbackStatus, 'progress' => 0, 'stage' => '');
+            }
+            return array(
+                'status' => (string)($job['status'] ?? $fallbackStatus),
+                'progress' => max(0, min(100, (int)($job['progress'] ?? 0))),
+                'stage' => (string)($job['progress_stage'] ?? ''),
+            );
+        } catch (Throwable) {
+            return array('status' => $fallbackStatus, 'progress' => 0, 'stage' => '');
+        }
     }
 
     /**

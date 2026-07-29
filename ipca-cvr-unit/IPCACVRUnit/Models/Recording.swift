@@ -110,6 +110,9 @@ struct Recording: Identifiable, Codable, Equatable {
     var transcriptStatus: TranscriptStatus
     var uploadProgress: Double
     var transcriptProgress: Int
+    var replayStatus: String? = nil
+    var replayProgress: Int? = nil
+    var replayStage: String? = nil
     var language: String
     var transcript: String
     var lastError: String

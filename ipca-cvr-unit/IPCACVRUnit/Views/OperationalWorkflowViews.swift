@@ -413,10 +413,12 @@ struct InFlightWorkflowView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
-    @EnvironmentObject private var system: SystemMonitor
     @EnvironmentObject private var gps: GPSLocationManager
+    @EnvironmentObject private var uploadManager: UploadManager
     @Binding var showAdminUnlock: Bool
     @State private var isShowingShutdownVerification = false
+    @State private var exerciseConfirmed = false
+    @State private var trainingRemarkConfirmed = false
 
     var body: some View {
         Group {
@@ -438,7 +440,10 @@ struct InFlightWorkflowView: View {
                                     CVROperationalTile(title: "GPS", iconName: "location.fill", value: gps.state == .ready || gps.state == .recording ? "Ready" : "Acquiring", color: gps.state == .ready || gps.state == .recording ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
                                 }
                                 inFlightControlPanel
-                                CVROperationalTile(title: "STORAGE", iconName: "externaldrive.fill", value: "\(system.storageText) available", color: CVROperationalPalette.success, metrics: metrics)
+                                HStack(spacing: metrics.spacing) {
+                                    CVROperationalTile(title: "TAKE OFFS", iconName: "airplane.departure", value: "\(takeoffCount)", color: takeoffCount > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
+                                    CVROperationalTile(title: "LANDINGS", iconName: "airplane.arrival", value: "\(landingCount)", color: landingCount > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
+                                }
                             }
                             .padding(.horizontal, metrics.outerHorizontalPadding)
                             .padding(.vertical, metrics.outerVerticalPadding)
@@ -495,7 +500,7 @@ struct InFlightWorkflowView: View {
 
     private var inFlightSubtitle: String {
         if hasEngineShutdownEvent { return "SHUTDOWN VERIFICATION REQUIRED" }
-        if hasEngineStartEvent { return "ENGINE START RECORDED" }
+        if hasEngineStartEvent { return "GPS AIRBORNE FLIGHT TIME" }
         return avionicsReady ? "PRESS AND HOLD ENGINE START" : "WAITING FOR AVIONICS POWER"
     }
 
@@ -506,9 +511,8 @@ struct InFlightWorkflowView: View {
     }
 
     private func inFlightValue(now: Date) -> String? {
-        guard let offBlock = offBlockEvent?.timestampUTC else { return nil }
-        let end = onBlockEvent?.timestampUTC ?? now
-        return elapsedText(from: offBlock, to: end)
+        guard hasEngineStartEvent else { return nil }
+        return elapsedText(seconds: gpsAirborneSeconds(now: now))
     }
 
     @ViewBuilder
@@ -525,38 +529,85 @@ struct InFlightWorkflowView: View {
         } else if hasEngineStartEvent {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    CVROperationalActionButton(title: "EXERCISE", subtitle: "Mark training item", color: CVROperationalPalette.secondaryBlue) {
+                    CVROperationalActionButton(title: "EXERCISE START", subtitle: "Mark training item", color: CVROperationalPalette.secondaryBlue, isConfirmed: exerciseConfirmed) {
                         workflow.recordInFlightAction(eventType: "exercise_marker", creationMethod: "tap", gpsSample: gps.latestSample)
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        flashConfirmation($exerciseConfirmed)
                     }
-                    CVROperationalActionButton(title: "TRAINING REMARK", subtitle: "Mark comment", color: CVROperationalPalette.secondaryBlue) {
+                    CVROperationalActionButton(title: "TRAINING REMARK", subtitle: "Mark comment", color: CVROperationalPalette.secondaryBlue, isConfirmed: trainingRemarkConfirmed) {
                         workflow.recordInFlightAction(eventType: "training_remark_marker", creationMethod: "tap", gpsSample: gps.latestSample)
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        flashConfirmation($trainingRemarkConfirmed)
                     }
                 }
                 CVRHoldActionButton(title: "SAFETY EVENT", subtitle: "Hold 2 seconds", color: CVROperationalPalette.warning, minimumDuration: 2) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
                 CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordEngineShutdownOnBlock(gpsSample: gps.latestSample)
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
             }
         } else if avionicsReady {
             CVRHoldActionButton(title: "ENGINE START", subtitle: "Hold 3 seconds for OFF Block", color: CVROperationalPalette.success) {
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 workflow.recordEngineStartOffBlock(gpsSample: gps.latestSample)
+                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
         } else {
             CVROperationalWarningCard(title: "WAITING FOR AVIONICS POWER", message: "Engine Start will appear when the paired beacon reports avionics power.", iconName: "timer", color: CVROperationalPalette.standby)
         }
     }
 
-    private func elapsedText(from start: Date, to end: Date) -> String {
-        let seconds = max(0, Int(end.timeIntervalSince(start)))
+    private var takeoffCount: Int {
+        flightEvents.filter { $0.eventType == "gps_takeoff_provisional" }.count
+    }
+
+    private var landingCount: Int {
+        flightEvents.filter { $0.eventType == "gps_landing_provisional" }.count
+    }
+
+    private var flightEvents: [CVRFlightEventRecord] {
+        guard let flightRecord = workflow.state.activeFlightRecord else { return [] }
+        return workflow.state.flightEvents
+            .filter { $0.flightRecordID == flightRecord.id }
+            .sorted { $0.timestampUTC < $1.timestampUTC }
+    }
+
+    private func gpsAirborneSeconds(now: Date) -> TimeInterval {
+        var airborneStart: Date?
+        var total: TimeInterval = 0
+        for event in flightEvents {
+            if event.eventType == "gps_takeoff_provisional", airborneStart == nil {
+                airborneStart = event.timestampUTC
+            } else if event.eventType == "gps_landing_provisional", let start = airborneStart {
+                total += max(0, event.timestampUTC.timeIntervalSince(start))
+                airborneStart = nil
+            }
+        }
+        if let airborneStart, !hasEngineShutdownEvent {
+            total += max(0, now.timeIntervalSince(airborneStart))
+        }
+        return total
+    }
+
+    private func elapsedText(seconds rawSeconds: TimeInterval) -> String {
+        let seconds = max(0, Int(rawSeconds))
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
         let remainingSeconds = seconds % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, remainingSeconds)
+    }
+
+    private func flashConfirmation(_ confirmation: Binding<Bool>) {
+        confirmation.wrappedValue = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            confirmation.wrappedValue = false
+        }
     }
 }
 
@@ -566,7 +617,9 @@ private struct CVRHoldActionButton: View {
     let color: Color
     var minimumDuration: TimeInterval = 3
     let action: () -> Void
-    @GestureState private var isPressing = false
+    @State private var isPressing = false
+    @State private var holdProgress = 0.0
+    @State private var confirmedFlash = false
 
     var body: some View {
         VStack(spacing: 3) {
@@ -575,23 +628,54 @@ private struct CVRHoldActionButton: View {
                 .tracking(1.0)
             Text(subtitle)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(CVROperationalPalette.textSecondary)
+                .foregroundStyle(confirmedFlash ? Color.white.opacity(0.9) : CVROperationalPalette.textSecondary)
         }
-        .foregroundStyle(color)
+        .foregroundStyle(confirmedFlash ? Color.white : color)
         .frame(maxWidth: .infinity, minHeight: 72)
-        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
+        .background {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    CVROperationalPalette.cardBackground
+                    color.opacity(confirmedFlash ? 0.95 : 0.30)
+                        .frame(width: proxy.size.width * holdProgress)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+        }
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(color.opacity(0.85), lineWidth: 1))
         .scaleEffect(isPressing ? 0.985 : 1.0)
         .contentShape(RoundedRectangle(cornerRadius: 18))
-        .gesture(
-            LongPressGesture(minimumDuration: minimumDuration)
-                .updating($isPressing) { current, state, _ in
-                    state = current
+        .onLongPressGesture(
+            minimumDuration: minimumDuration,
+            maximumDistance: 45,
+            pressing: { pressing in
+                isPressing = pressing
+                if pressing {
+                    confirmedFlash = false
+                    holdProgress = 0
+                    withAnimation(.linear(duration: minimumDuration)) {
+                        holdProgress = 1
+                    }
+                } else if !confirmedFlash {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        holdProgress = 0
+                    }
                 }
-                .onEnded { _ in
-                    action()
+            },
+            perform: {
+                confirmedFlash = true
+                holdProgress = 1
+                action()
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    confirmedFlash = false
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        holdProgress = 0
+                    }
                 }
+            }
         )
+        .animation(.easeInOut(duration: 0.1), value: confirmedFlash)
     }
 }
 
@@ -762,7 +846,10 @@ struct GarminWorkflowView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var recordingStore: RecordingStore
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
     @Binding var showAdminUnlock: Bool
+    @State private var confirmOfflineArchive = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -773,10 +860,10 @@ struct GarminWorkflowView: View {
                     CVROperationalHeaderView(aircraftRegistration: settings.selectedAircraft?.registration ?? workflow.state.activeDispatch?.tailNumber ?? "NO AIRCRAFT", unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                     CVROperationalStatusCard(title: "GARMIN RECOVERY", subtitle: "IMPORT AND UPLOAD QUEUE", iconName: "doc.badge.arrow.up", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "GARMIN", metrics: metrics)
                     HStack(spacing: metrics.spacing) {
-                        CVROperationalTile(title: "CSV", iconName: "doc.text.fill", value: csvTileValue, color: garminComponents.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.success, metrics: metrics)
-                        CVROperationalTile(title: "MATCH", iconName: "link", value: garminComponents.isEmpty ? "Pending" : "Attached", color: garminComponents.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.success, metrics: metrics)
                         CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby, metrics: metrics)
-                        CVROperationalTile(title: "SERVER", iconName: "checkmark.icloud.fill", value: serverTileValue, color: serverTileColor, metrics: metrics)
+                        CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
+                        CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
+                        CVROperationalTile(title: "G3X BT", iconName: "antenna.radiowaves.left.and.right", value: "Not exposed", color: CVROperationalPalette.standby, metrics: metrics)
                     }
                     CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
@@ -786,11 +873,34 @@ struct GarminWorkflowView: View {
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
                     }
+                    if canArchiveWithPendingUploads {
+                        Button("ARCHIVE LOCALLY & START NEXT FLIGHT") {
+                            confirmOfflineArchive = true
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    }
                 }
                 .padding(.horizontal, metrics.outerHorizontalPadding)
                 .padding(.vertical, metrics.outerVerticalPadding)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
+        }
+        .confirmationDialog(
+            "Start the next flight?",
+            isPresented: $confirmOfflineArchive,
+            titleVisibility: .visible
+        ) {
+            Button("Archive Locally & Start Next Flight") {
+                workflow.resetForNextFlightIfComplete()
+                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All workflow evidence will be retained in Admin Flight History. Pending components will continue retrying from the archive.")
+        }
+        .task {
+            await pollRecoveryProcessingStatus()
         }
     }
 
@@ -806,12 +916,15 @@ struct GarminWorkflowView: View {
         return workflow.state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
     }
 
-    private var csvTileValue: String {
-        guard !garminComponents.isEmpty else { return "Waiting" }
-        return garminComponents.count == 1 ? "1 file" : "\(garminComponents.count) files"
+    private var recoveryRecording: Recording? {
+        guard let sessionID = workflow.state.activeFlightRecord?.recordingSessionID else { return nil }
+        return recordingStore.recordings.first { $0.flightSessionID == sessionID || $0.id == sessionID }
     }
 
     private var uploadTileValue: String {
+        if let recording = recoveryRecording, recording.uploadStatus == .uploading {
+            return "\(Int((recording.uploadProgress * 100).rounded()))%"
+        }
         guard !garminComponents.isEmpty else { return "Recovery" }
         if let uploading = workflowComponents.first(where: { $0.state == .uploading }) {
             return "\(Int(((uploading.progress ?? 0) * 100).rounded()))%"
@@ -825,14 +938,40 @@ struct GarminWorkflowView: View {
         return "Queued"
     }
 
-    private var serverTileValue: String {
-        guard !garminComponents.isEmpty else { return "Pending" }
-        return allWorkflowComponentsVerified ? "Verified" : "Pending"
+    private var transcriptTileValue: String {
+        guard let recording = recoveryRecording else { return "N/A" }
+        switch recording.transcriptStatus {
+        case .ready: return "Ready"
+        case .transcribing: return "\(recording.transcriptProgress)%"
+        case .failed: return "Failed"
+        case .pending: return recording.uploadStatus == .uploaded ? "Queued" : "Pending"
+        }
     }
 
-    private var serverTileColor: Color {
-        guard !garminComponents.isEmpty else { return CVROperationalPalette.standby }
-        return allWorkflowComponentsVerified ? CVROperationalPalette.success : CVROperationalPalette.standby
+    private var transcriptTileColor: Color {
+        guard let recording = recoveryRecording else { return CVROperationalPalette.standby }
+        if recording.transcriptStatus == .ready { return CVROperationalPalette.success }
+        if recording.transcriptStatus == .failed { return CVROperationalPalette.critical }
+        return CVROperationalPalette.secondaryBlue
+    }
+
+    private var replayTileValue: String {
+        guard let recording = recoveryRecording else { return "N/A" }
+        let status = (recording.replayStatus ?? "not_started").lowercased()
+        if status == "ready" || status == "complete" || status == "completed" { return "Ready" }
+        if status == "failed" { return "Failed" }
+        if status == "processing" || status == "running" {
+            return "\(max(0, min(100, recording.replayProgress ?? 0)))%"
+        }
+        return "Pending"
+    }
+
+    private var replayTileColor: Color {
+        guard let recording = recoveryRecording else { return CVROperationalPalette.standby }
+        let status = (recording.replayStatus ?? "not_started").lowercased()
+        if status == "ready" || status == "complete" || status == "completed" { return CVROperationalPalette.success }
+        if status == "failed" { return CVROperationalPalette.critical }
+        return status == "processing" || status == "running" ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby
     }
 
     private var uploadButtonSubtitle: String {
@@ -860,6 +999,14 @@ struct GarminWorkflowView: View {
         !workflowComponents.isEmpty && workflowComponents.allSatisfy { $0.state == .serverVerified }
     }
 
+    private var canArchiveWithPendingUploads: Bool {
+        guard !allWorkflowComponentsVerified,
+              let flightRecord = workflow.state.activeFlightRecord else { return false }
+        return flightRecord.status == .awaitingGarmin
+            || flightRecord.status == .awaitingUpload
+            || flightRecord.status == .complete
+    }
+
     private var failedWorkflowComponent: CVRUploadComponentRecord? {
         workflowComponents.first { $0.state == .failed || $0.state == .needsUserAction }
     }
@@ -881,9 +1028,9 @@ struct GarminWorkflowView: View {
             return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
         }
         if allWorkflowComponentsVerified {
-            return "Dispatch and Garmin server receipts stored. Tap NEXT FLIGHT when ready."
+            return "Flight data is server verified. Direct Garmin G3X Bluetooth connection state is not exposed to this iOS app; avionics power is \(avionicsPowerLabel)."
         }
-        return "Shared CSV is stored locally and queued with the Flight Record."
+        return "Shared CSV is stored locally and queued. Direct Garmin G3X Bluetooth connection state is not exposed to this iOS app; avionics power is \(avionicsPowerLabel)."
     }
 
     private var garminWarningIcon: String {
@@ -893,6 +1040,41 @@ struct GarminWorkflowView: View {
     private var garminWarningColor: Color {
         if failedWorkflowComponent != nil { return CVROperationalPalette.critical }
         return garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.success
+    }
+
+    private var avionicsPowerLabel: String {
+        beacon.currentState == .avionicsOn || beacon.currentState == .temporarilyMissing ? "ON" : "not detected"
+    }
+
+    private func pollRecoveryProcessingStatus() async {
+        while !Task.isCancelled {
+            if let recording = recoveryRecording,
+               let serverID = recording.serverID,
+               !serverID.isEmpty,
+               let baseURL = settings.normalizedServerURL {
+                do {
+                    let response = try await APIClient(serverURL: baseURL).status(recordingID: serverID)
+                    if let remote = response.recording {
+                        recordingStore.update(recording.id) {
+                            $0.transcriptProgress = remote.progress
+                            $0.replayStatus = remote.reconstructionStatus
+                            $0.replayProgress = remote.reconstructionProgress
+                            $0.replayStage = remote.reconstructionStage
+                            if remote.transcriptionStatus == "ready" {
+                                $0.transcriptStatus = .ready
+                            } else if remote.transcriptionStatus == "failed" {
+                                $0.transcriptStatus = .failed
+                            } else if remote.transcriptionStatus == "transcribing" || remote.transcriptionStatus == "queued" {
+                                $0.transcriptStatus = .transcribing
+                            }
+                        }
+                    }
+                } catch {
+                    // Keep the last known processing state; the next poll retries.
+                }
+            }
+            try? await Task.sleep(for: .seconds(5))
+        }
     }
 }
 

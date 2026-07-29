@@ -54,6 +54,12 @@ struct ContentView: View {
                     Text("Recordings")
                 }
 
+            AdminWorkflowArchivesView()
+                .tabItem {
+                    Image(systemName: "archivebox")
+                    Text("Flight History")
+                }
+
             AdminSettingsView()
                 .tabItem {
                     Image(systemName: "gearshape")
@@ -68,6 +74,100 @@ struct ContentView: View {
                     Text("Exit Admin")
                 }
         }
+    }
+}
+
+private struct AdminWorkflowArchivesView: View {
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if workflow.archives.isEmpty {
+                    ContentUnavailableView(
+                        "No Archived Flights",
+                        systemImage: "archivebox",
+                        description: Text("Completed workflows will be retained here before NEXT FLIGHT clears the active screen.")
+                    )
+                } else {
+                    ForEach(workflow.archives.sorted(by: { $0.archivedAt > $1.archivedAt })) { archive in
+                        NavigationLink {
+                            AdminWorkflowArchiveDetailView(archive: archive)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(archive.dispatch.tailNumber) · \(archive.dispatch.missionCode)")
+                                    .font(.headline)
+                                Text(archive.archivedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(IPCATheme.secondaryText)
+                                Text("\(archive.flightEvents.count) events · \(archive.status == .serverVerified ? "Server verified" : "Upload pending")")
+                                    .font(.caption)
+                                    .foregroundStyle(archive.status == .serverVerified ? IPCATheme.success : IPCATheme.warning)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Flight History")
+        }
+    }
+}
+
+private struct AdminWorkflowArchiveDetailView: View {
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    let archive: CVRWorkflowArchiveRecord
+    @State private var exportURL: URL?
+    @State private var exportError = ""
+
+    var body: some View {
+        List {
+            Section("Flight") {
+                LabeledContent("Aircraft", value: archive.dispatch.tailNumber)
+                LabeledContent("Mission", value: archive.dispatch.missionCode)
+                LabeledContent("Flight Record", value: archive.flightRecordID)
+                LabeledContent("Archived", value: archive.archivedAt.formatted(date: .abbreviated, time: .standard))
+                LabeledContent("Recording Session", value: archive.flightRecord.recordingSessionID ?? "Not linked")
+            }
+            Section("Closure") {
+                LabeledContent("Ending Hobbs", value: archive.flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? "—")
+                LabeledContent("Ending Tacho", value: archive.flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? "—")
+                LabeledContent("Fuel Remaining", value: archive.flightRecord.fuelRemaining ?? "—")
+                LabeledContent("Oil", value: archive.flightRecord.endingOilPercentage.map { "\($0)%" } ?? "—")
+            }
+            Section("Event Timeline") {
+                ForEach(archive.flightEvents.sorted(by: { $0.timestampUTC < $1.timestampUTC })) { event in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(event.eventType.replacingOccurrences(of: "_", with: " ").uppercased())
+                            .font(.caption.weight(.bold))
+                        Text(event.timestampUTC.formatted(date: .omitted, time: .standard))
+                        if let offset = event.audioOffset {
+                            Text(String(format: "Audio +%.1f s", offset))
+                                .font(.caption)
+                                .foregroundStyle(IPCATheme.secondaryText)
+                        }
+                    }
+                }
+            }
+            Section("Export") {
+                Button("Prepare JSON Export") {
+                    do {
+                        exportURL = try workflow.archiveExportURL(id: archive.id)
+                        exportError = ""
+                    } catch {
+                        exportError = error.localizedDescription
+                    }
+                }
+                if let exportURL {
+                    ShareLink(item: exportURL) {
+                        Label("Share Archive", systemImage: "square.and.arrow.up")
+                    }
+                }
+                if !exportError.isEmpty {
+                    Text(exportError).foregroundStyle(IPCATheme.danger)
+                }
+            }
+        }
+        .navigationTitle("Archived Flight")
     }
 }
 

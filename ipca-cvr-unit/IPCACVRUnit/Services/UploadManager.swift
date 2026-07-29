@@ -90,18 +90,31 @@ final class UploadManager: ObservableObject {
         guard let baseURL = settings.normalizedServerURL else {
             return
         }
-        guard let flightRecord = workflow.state.activeFlightRecord else { return }
-        let components = workflow.state.uploadComponents.filter {
-            $0.flightRecordID == flightRecord.id
-                && ($0.componentType == "dispatch_metadata" || $0.componentType == "garmin_csv")
-                && ($0.state == .queued || $0.state == .failed || $0.state == .needsUserAction)
+        let supportedTypes = Set([
+            "dispatch_metadata", "garmin_csv", "flight_events",
+            "recorder_verification", "flight_record_closure"
+        ])
+        let components = workflow.queuedWorkflowComponents().filter {
+            supportedTypes.contains($0.componentType)
         }
         guard !components.isEmpty else { return }
 
         for component in components {
+            guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
+            if component.componentType != "dispatch_metadata",
+               component.componentType != "garmin_csv",
+               context.dispatch.serverDispatchID == nil {
+                continue
+            }
             guard !activeUploads.contains(component.id) else { continue }
             activeUploads.insert(component.id)
-            let componentLabel = component.componentType == "dispatch_metadata" ? "Dispatch" : "Garmin CSV"
+            let componentLabel: String = switch component.componentType {
+            case "dispatch_metadata": "Dispatch"
+            case "garmin_csv": "Garmin CSV"
+            case "flight_events": "Flight Event"
+            case "recorder_verification": "Recorder Verification"
+            default: "Flight Closure"
+            }
             workflow.updateUploadComponent(
                 id: component.id,
                 state: .uploading,
@@ -120,18 +133,31 @@ final class UploadManager: ObservableObject {
                     if component.componentType == "dispatch_metadata" {
                         let result = try await uploadWorkflowDispatchComponent(
                             component: component,
-                            workflow: workflow,
+                            context: context,
                             settings: settings,
-                            baseURL: baseURL
+                            baseURL: baseURL,
+                            workflow: workflow
                         )
                         serverReceiptID = result.receiptID
                         await MainActor.run {
-                            workflow.markDispatchStoredOnServer(serverDispatchID: result.serverDispatchID)
+                            workflow.markDispatchStoredOnServer(
+                                serverDispatchID: result.serverDispatchID,
+                                flightRecordID: context.flightRecord.id
+                            )
+                            self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
-                    } else {
+                    } else if component.componentType == "garmin_csv" {
                         serverReceiptID = try await uploadWorkflowGarminComponent(
                             component: component,
-                            flightRecordID: flightRecord.id,
+                            flightRecordID: context.flightRecord.id,
+                            baseURL: baseURL,
+                            workflow: workflow
+                        )
+                    } else {
+                        serverReceiptID = try await uploadWorkflowEvidenceComponent(
+                            component: component,
+                            context: context,
+                            settings: settings,
                             baseURL: baseURL,
                             workflow: workflow
                         )
@@ -164,16 +190,23 @@ final class UploadManager: ObservableObject {
 
     private func uploadWorkflowDispatchComponent(
         component: CVRUploadComponentRecord,
-        workflow: CVRWorkflowStore,
+        context: (
+            dispatch: CVRDispatchRecord,
+            flightRecord: CVRIncompleteFlightRecord,
+            consents: [CVRConsentRecord],
+            events: [CVRFlightEventRecord],
+            verifications: [CVRRecorderVerificationRecord]
+        ),
         settings: SettingsStore,
-        baseURL: URL
+        baseURL: URL,
+        workflow: CVRWorkflowStore
     ) async throws -> (receiptID: String, serverDispatchID: String) {
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             throw APIClientError.badResponse("CVR Unit is not enrolled. Generate an enrollment code in IPCA.training and enter it in Admin.")
         }
-        guard let dispatch = workflow.state.activeDispatch,
-              let flightRecord = workflow.state.activeFlightRecord,
-              component.flightRecordID == flightRecord.id,
+        let dispatch = context.dispatch
+        let flightRecord = context.flightRecord
+        guard component.flightRecordID == flightRecord.id,
               dispatch.id == flightRecord.dispatchID else {
             throw APIClientError.badResponse("Dispatch upload data is no longer linked to the active Flight Record.")
         }
@@ -187,7 +220,7 @@ final class UploadManager: ObservableObject {
         let payload = workflowDispatchPayload(
             dispatch: dispatch,
             flightRecord: flightRecord,
-            consents: workflow.state.consents.filter {
+            consents: context.consents.filter {
                 $0.dispatchID == dispatch.id && $0.dispatchVersion == dispatch.version
             }
         )
@@ -287,6 +320,128 @@ final class UploadManager: ObservableObject {
                 }
                 return consentPayload
             }
+        ]
+    }
+
+    private func uploadWorkflowEvidenceComponent(
+        component: CVRUploadComponentRecord,
+        context: (
+            dispatch: CVRDispatchRecord,
+            flightRecord: CVRIncompleteFlightRecord,
+            consents: [CVRConsentRecord],
+            events: [CVRFlightEventRecord],
+            verifications: [CVRRecorderVerificationRecord]
+        ),
+        settings: SettingsStore,
+        baseURL: URL,
+        workflow: CVRWorkflowStore
+    ) async throws -> String {
+        guard let credential = settings.deviceCredential, !credential.isEmpty else {
+            throw APIClientError.badResponse("CVR Unit is not enrolled. Workflow evidence remains stored locally.")
+        }
+        workflow.updateUploadComponent(
+            id: component.id,
+            state: .uploading,
+            progress: 0.25,
+            lastError: "Sending immutable \(component.componentType.replacingOccurrences(of: "_", with: " ")) evidence..."
+        )
+        let payload = try workflowEvidencePayload(component: component, context: context)
+        let response = try await APIClient(serverURL: baseURL).syncWorkflowEvidence(
+            payload: payload,
+            credential: credential
+        )
+        guard response.ok,
+              let receiptID = response.receipt?.receiptID,
+              !receiptID.isEmpty else {
+            throw APIClientError.badResponse(response.error ?? "Server did not verify workflow evidence.")
+        }
+        return receiptID
+    }
+
+    private func workflowEvidencePayload(
+        component: CVRUploadComponentRecord,
+        context: (
+            dispatch: CVRDispatchRecord,
+            flightRecord: CVRIncompleteFlightRecord,
+            consents: [CVRConsentRecord],
+            events: [CVRFlightEventRecord],
+            verifications: [CVRRecorderVerificationRecord]
+        )
+    ) throws -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let evidence: [String: Any]
+
+        switch component.componentType {
+        case "flight_events":
+            let eventID = component.localFilePath.map { String($0.dropFirst("event:".count)) }
+            guard let event = context.events.first(where: { $0.id == eventID }) else {
+                throw APIClientError.badResponse("The queued Flight Event is missing from local history.")
+            }
+            var item: [String: Any] = [
+                "event_uuid": event.id.lowercased(),
+                "event_type": event.eventType,
+                "timestamp_utc": iso.string(from: event.timestampUTC),
+                "timestamp_local": iso.string(from: event.timestampLocal),
+                "source": event.source,
+                "confidence": event.confidence,
+                "creation_method": event.creationMethod
+            ]
+            if let value = event.recordingSessionID { item["recording_session_id"] = value }
+            if let value = event.deviceMonotonicTime { item["device_monotonic_time"] = value }
+            if let value = event.audioOffset { item["audio_offset"] = value }
+            if let value = event.latitude { item["latitude"] = value }
+            if let value = event.longitude { item["longitude"] = value }
+            if let value = event.altitude { item["altitude"] = value }
+            if let value = event.groundSpeed { item["ground_speed"] = value }
+            if let value = event.userIdentity { item["user_identity"] = value }
+            evidence = item
+        case "recorder_verification":
+            let verificationID = component.localFilePath.map { String($0.dropFirst("verification:".count)) }
+            guard let verification = context.verifications.first(where: { $0.id == verificationID }) else {
+                throw APIClientError.badResponse("The queued Recorder Verification is missing from local history.")
+            }
+            evidence = [
+                "verification_uuid": verification.id.lowercased(),
+                "timestamp": iso.string(from: verification.timestamp),
+                "device_id": verification.deviceID,
+                "app_version": verification.appVersion,
+                "user_identity": verification.userIdentity,
+                "audio_route_status": verification.audioRouteStatus,
+                "beacon_status": verification.beaconStatus,
+                "gps_status": verification.gpsStatus,
+                "storage_status": verification.storageStatus,
+                "thermal_status": verification.thermalStatus,
+                "battery_status": verification.batteryStatus,
+                "permission_status": verification.permissionStatus,
+                "file_writing_test_result": verification.fileWritingTestResult,
+                "warnings": verification.warnings,
+                "accepted_nonblocking_warnings": verification.acceptedNonblockingWarnings
+            ]
+        case "flight_record_closure":
+            let flight = context.flightRecord
+            var item: [String: Any] = [
+                "closure_uuid": component.id.lowercased(),
+                "status": flight.status.rawValue,
+                "updated_at": iso.string(from: flight.updatedAt)
+            ]
+            if let value = flight.endingHobbs { item["ending_hobbs"] = value }
+            if let value = flight.endingTacho { item["ending_tacho"] = value }
+            if let value = flight.fuelRemaining { item["fuel_remaining"] = value }
+            if let value = flight.endingOilPercentage { item["ending_oil_percentage"] = value }
+            if let value = flight.maintenanceRemark { item["maintenance_remark"] = value }
+            evidence = item
+        default:
+            throw APIClientError.badResponse("Unsupported workflow evidence component.")
+        }
+
+        return [
+            "schema_version": 1,
+            "component_uuid": component.id.lowercased(),
+            "component_type": component.componentType,
+            "flight_record_uuid": context.flightRecord.id.lowercased(),
+            "dispatch_uuid": context.dispatch.id.lowercased(),
+            "evidence": evidence
         ]
     }
 
@@ -793,6 +948,9 @@ final class UploadManager: ObservableObject {
                 await MainActor.run {
                     store.update(recordingID) {
                         $0.transcriptProgress = remote.progress
+                        $0.replayStatus = remote.reconstructionStatus
+                        $0.replayProgress = remote.reconstructionProgress
+                        $0.replayStage = remote.reconstructionStage
                         $0.lastError = remote.error
                         if remote.transcriptionStatus == "ready" {
                             $0.transcriptStatus = .ready

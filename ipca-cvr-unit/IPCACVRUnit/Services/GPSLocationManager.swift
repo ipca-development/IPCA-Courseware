@@ -2,16 +2,26 @@ import Combine
 import CoreLocation
 import Foundation
 
+enum GPSFlightTransition {
+    case takeoff(timestamp: Date, sample: GPSSample)
+    case landing(timestamp: Date, sample: GPSSample)
+}
+
 @MainActor
 final class GPSLocationManager: NSObject, ObservableObject {
     @Published private(set) var state: GPSConnectionState = .permissionNeeded
     @Published private(set) var latestSample: GPSSample?
     @Published private(set) var lastError: String = ""
+    var onFlightTransition: ((GPSFlightTransition) -> Void)?
 
     private static let captureDesiredAccuracy = kCLLocationAccuracyNearestTenMeters
     private static let captureDistanceFilter: CLLocationDistance = 10
     private static let minimumCaptureSampleInterval: TimeInterval = 2
     private static let minimumCaptureDistance: CLLocationDistance = 8
+    private static let takeoffSpeedKnots = 40.0
+    private static let landingSpeedKnots = 30.0
+    private static let takeoffConfirmationSeconds: TimeInterval = 6
+    private static let landingConfirmationSeconds: TimeInterval = 4
 
     private var locationManager: CLLocationManager?
     private var captureRecordingID: String?
@@ -19,6 +29,9 @@ final class GPSLocationManager: NSObject, ObservableObject {
     private var capturedSamples: [GPSSample] = []
     private var lastCapturedLocation: CLLocation?
     private var lastCapturedSampleAt: Date?
+    private var isAirborne = false
+    private var takeoffCandidateAt: Date?
+    private var landingCandidateAt: Date?
 
     func prepare() {
         ensureManager()
@@ -39,6 +52,9 @@ final class GPSLocationManager: NSObject, ObservableObject {
         capturedSamples = []
         lastCapturedLocation = nil
         lastCapturedSampleAt = nil
+        isAirborne = false
+        takeoffCandidateAt = nil
+        landingCandidateAt = nil
 
         guard let locationManager else {
             state = .unavailable
@@ -171,10 +187,48 @@ final class GPSLocationManager: NSObject, ObservableObject {
         )
 
         latestSample = sample
+        evaluateFlightTransition(sample: sample, location: location)
         if captureRecordingID != nil, shouldCapture(location: location, timestamp: timestamp) {
             capturedSamples.append(sample)
             lastCapturedLocation = location
             lastCapturedSampleAt = timestamp
+        }
+    }
+
+    private func evaluateFlightTransition(sample: GPSSample, location: CLLocation) {
+        guard captureRecordingID != nil,
+              location.horizontalAccuracy >= 0,
+              location.horizontalAccuracy <= 50,
+              location.speed >= 0 else {
+            return
+        }
+
+        if isAirborne {
+            takeoffCandidateAt = nil
+            if sample.speedKnots <= Self.landingSpeedKnots {
+                let candidate = landingCandidateAt ?? sample.timestamp
+                landingCandidateAt = candidate
+                if sample.timestamp.timeIntervalSince(candidate) >= Self.landingConfirmationSeconds {
+                    isAirborne = false
+                    landingCandidateAt = nil
+                    onFlightTransition?(.landing(timestamp: candidate, sample: sample))
+                }
+            } else {
+                landingCandidateAt = nil
+            }
+        } else {
+            landingCandidateAt = nil
+            if sample.speedKnots >= Self.takeoffSpeedKnots {
+                let candidate = takeoffCandidateAt ?? sample.timestamp
+                takeoffCandidateAt = candidate
+                if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffConfirmationSeconds {
+                    isAirborne = true
+                    takeoffCandidateAt = nil
+                    onFlightTransition?(.takeoff(timestamp: candidate, sample: sample))
+                }
+            } else {
+                takeoffCandidateAt = nil
+            }
         }
     }
 

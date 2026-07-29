@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class CVRWorkflowStore: ObservableObject {
     @Published private(set) var state: CVRWorkflowState = .empty
+    @Published private(set) var archives: [CVRWorkflowArchiveRecord] = []
     @Published private(set) var lastError = ""
 
     private let encoder: JSONEncoder
@@ -21,12 +22,17 @@ final class CVRWorkflowStore: ObservableObject {
     func load() async {
         do {
             let url = try storeURL()
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
-            let data = try Data(contentsOf: url)
-            state = try decoder.decode(CVRWorkflowState.self, from: data)
-            if ensureDispatchUploadComponent() {
-                save()
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                state = try decoder.decode(CVRWorkflowState.self, from: data)
+                var changed = recoverInterruptedActiveUploads()
+                changed = ensureDispatchUploadComponent() || changed
+                changed = ensureEvidenceUploadComponents() || changed
+                if changed {
+                    save()
+                }
             }
+            try loadArchives()
             lastError = ""
         } catch {
             lastError = "Workflow recovery failed: \(error.localizedDescription)"
@@ -169,6 +175,7 @@ final class CVRWorkflowStore: ObservableObject {
             serverFlightRecordID: nil,
             dispatchID: dispatch.id,
             recordingSessionID: nil,
+            recordingStartedAt: nil,
             status: .recorderVerificationRequired,
             endingHobbs: nil,
             endingTacho: nil,
@@ -247,6 +254,14 @@ final class CVRWorkflowStore: ObservableObject {
         mutate {
             $0.recorderVerifications.removeAll { $0.flightRecordID == flightRecord.id }
             $0.recorderVerifications.append(verification)
+            $0.uploadComponents.removeAll {
+                $0.flightRecordID == flightRecord.id && $0.componentType == "recorder_verification"
+            }
+            $0.uploadComponents.append(evidenceComponent(
+                flightRecordID: flightRecord.id,
+                type: "recorder_verification",
+                evidenceID: verification.id
+            ))
             flightRecord.status = .standingByForAvionics
             flightRecord.updatedAt = Date()
             $0.activeFlightRecord = flightRecord
@@ -269,7 +284,7 @@ final class CVRWorkflowStore: ObservableObject {
             timestampUTC: now,
             timestampLocal: now,
             deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
-            audioOffset: nil,
+            audioOffset: flightRecord.recordingStartedAt.map { max(0, now.timeIntervalSince($0)) },
             latitude: gpsSample?.latitude,
             longitude: gpsSample?.longitude,
             altitude: gpsSample?.altitude,
@@ -285,6 +300,7 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.updatedAt = now
             $0.activeFlightRecord = flightRecord
             $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
         }
     }
 
@@ -297,6 +313,68 @@ final class CVRWorkflowStore: ObservableObject {
             creationMethod: creationMethod,
             gpsSample: gpsSample
         )
+    }
+
+    func recordGPSFlightTransition(_ transition: GPSFlightTransition) {
+        guard let flightRecord = state.activeFlightRecord,
+              state.flightEvents.contains(where: {
+                  $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+              }),
+              !state.flightEvents.contains(where: {
+                  $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+              }) else {
+            return
+        }
+
+        let eventType: String
+        let timestamp: Date
+        let sample: GPSSample
+        switch transition {
+        case .takeoff(let detectedAt, let detectedSample):
+            let takeoffs = state.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
+            }.count
+            let landings = state.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "gps_landing_provisional"
+            }.count
+            guard takeoffs <= landings else { return }
+            eventType = "gps_takeoff_provisional"
+            timestamp = detectedAt
+            sample = detectedSample
+        case .landing(let detectedAt, let detectedSample):
+            let takeoffs = state.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
+            }.count
+            let landings = state.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "gps_landing_provisional"
+            }.count
+            guard takeoffs > landings else { return }
+            eventType = "gps_landing_provisional"
+            timestamp = detectedAt
+            sample = detectedSample
+        }
+        let event = CVRFlightEventRecord(
+            id: UUID().uuidString,
+            flightRecordID: flightRecord.id,
+            recordingSessionID: flightRecord.recordingSessionID,
+            eventType: eventType,
+            timestampUTC: timestamp,
+            timestampLocal: timestamp,
+            deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
+            audioOffset: flightRecord.recordingStartedAt.map { max(0, timestamp.timeIntervalSince($0)) },
+            latitude: sample.latitude,
+            longitude: sample.longitude,
+            altitude: sample.altitude,
+            groundSpeed: sample.speedKnots,
+            source: "gps_realtime_provisional",
+            confidence: 0.85,
+            creationMethod: "speed_hysteresis",
+            userIdentity: nil
+        )
+        mutate {
+            $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
+        }
     }
 
     func recordEngineShutdownOnBlock(gpsSample: GPSSample?) {
@@ -321,6 +399,7 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.updatedAt = event.timestampUTC
             $0.activeFlightRecord = flightRecord
             $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
         }
     }
 
@@ -354,8 +433,25 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.status = .awaitingGarmin
             flightRecord.updatedAt = event.timestampUTC
             $0.activeFlightRecord = flightRecord
-            $0.flightEvents.removeAll { $0.flightRecordID == flightRecord.id && $0.eventType == "shutdown_verification_completed" }
+            let supersededEventIDs = Set($0.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "shutdown_verification_completed"
+            }.map(\.id))
+            $0.flightEvents.removeAll { supersededEventIDs.contains($0.id) }
+            $0.uploadComponents.removeAll {
+                $0.componentType == "flight_events"
+                    && supersededEventIDs.contains(String(($0.localFilePath ?? "").dropFirst("event:".count)))
+            }
             $0.flightEvents.append(event)
+            $0.uploadComponents.removeAll {
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "flight_record_closure"
+            }
+            $0.uploadComponents.append(eventUploadComponent(event))
+            $0.uploadComponents.append(evidenceComponent(
+                flightRecordID: flightRecord.id,
+                type: "flight_record_closure",
+                evidenceID: event.id
+            ))
             $0.selectedTab = .garmin
         }
     }
@@ -419,6 +515,7 @@ final class CVRWorkflowStore: ObservableObject {
                 $0.activeFlightRecord = flightRecord
                 $0.uploadComponents.append(component)
                 $0.flightEvents.append(event)
+                $0.uploadComponents.append(eventUploadComponent(event))
                 $0.selectedTab = .garmin
             }
         } catch {
@@ -427,42 +524,105 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func updateUploadComponent(id: String, state: CVRUploadComponentState, progress: Double, lastError: String = "", serverReceiptID: String? = nil) {
-        mutate {
-            guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
-            let previousState = $0.uploadComponents[index].state
-            if state == .serverVerified {
-                guard let serverReceiptID,
-                      !serverReceiptID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    $0.uploadComponents[index].state = .failed
-                    $0.uploadComponents[index].lastError = "Server verification receipt is missing."
-                    $0.uploadComponents[index].lastAttemptAt = Date()
-                    return
-                }
-                $0.uploadComponents[index].serverVerificationAt = Date()
-                $0.uploadComponents[index].serverReceiptID = serverReceiptID
+        if self.state.uploadComponents.contains(where: { $0.id == id }) {
+            mutate {
+                guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
+                updateComponent(&$0.uploadComponents[index], state: state, progress: progress, lastError: lastError, serverReceiptID: serverReceiptID)
             }
-            if state == .uploading && previousState != .uploading {
-                $0.uploadComponents[index].attemptCount += 1
-            }
-            $0.uploadComponents[index].state = state
-            $0.uploadComponents[index].progress = min(max(progress, 0), 1)
-            $0.uploadComponents[index].lastError = lastError
-            $0.uploadComponents[index].lastAttemptAt = Date()
+            return
+        }
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.uploadComponents.contains(where: { $0.id == id })
+        }), let componentIndex = archives[archiveIndex].uploadComponents.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        var updated = archives
+        updateComponent(&updated[archiveIndex].uploadComponents[componentIndex], state: state, progress: progress, lastError: lastError, serverReceiptID: serverReceiptID)
+        updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy { $0.state == .serverVerified } ? .serverVerified : .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+        } catch {
+            self.lastError = "Could not persist archived upload receipt: \(error.localizedDescription)"
         }
     }
 
-    func markDispatchStoredOnServer(serverDispatchID: String) {
-        mutate {
-            guard var dispatch = $0.activeDispatch else { return }
-            dispatch.serverDispatchID = serverDispatchID
-            $0.activeDispatch = dispatch
+    func markDispatchStoredOnServer(serverDispatchID: String, flightRecordID: String? = nil) {
+        if flightRecordID == nil || state.activeFlightRecord?.id == flightRecordID {
+            mutate {
+                guard var dispatch = $0.activeDispatch else { return }
+                dispatch.serverDispatchID = serverDispatchID
+                $0.activeDispatch = dispatch
+            }
+            return
         }
+        guard let index = archives.firstIndex(where: { $0.flightRecordID == flightRecordID }) else { return }
+        var updated = archives
+        updated[index].dispatch.serverDispatchID = serverDispatchID
+        do {
+            try saveArchives(updated)
+            archives = updated
+        } catch {
+            lastError = "Could not update archived Dispatch receipt: \(error.localizedDescription)"
+        }
+    }
+
+    func queuedWorkflowComponents() -> [CVRUploadComponentRecord] {
+        let eligible: (CVRUploadComponentRecord) -> Bool = {
+            $0.state == .queued || $0.state == .failed || $0.state == .needsUserAction
+        }
+        return state.uploadComponents.filter(eligible) + archives.flatMap(\.uploadComponents).filter(eligible)
+    }
+
+    func workflowUploadContext(componentID: String) -> (
+        dispatch: CVRDispatchRecord,
+        flightRecord: CVRIncompleteFlightRecord,
+        consents: [CVRConsentRecord],
+        events: [CVRFlightEventRecord],
+        verifications: [CVRRecorderVerificationRecord]
+    )? {
+        if state.uploadComponents.contains(where: { $0.id == componentID }),
+           let dispatch = state.activeDispatch,
+           let flightRecord = state.activeFlightRecord {
+            return (dispatch, flightRecord, state.consents, state.flightEvents, state.recorderVerifications)
+        }
+        guard let archive = archives.first(where: {
+            $0.uploadComponents.contains(where: { $0.id == componentID })
+        }) else { return nil }
+        return (archive.dispatch, archive.flightRecord, archive.consents, archive.flightEvents, archive.recorderVerifications)
+    }
+
+    func linkRecordingSession(recordingID: String, startedAt: Date) {
+        guard !recordingID.isEmpty else { return }
+        mutate {
+            guard var flightRecord = $0.activeFlightRecord else { return }
+            flightRecord.recordingSessionID = recordingID
+            flightRecord.recordingStartedAt = startedAt
+            flightRecord.updatedAt = Date()
+            $0.activeFlightRecord = flightRecord
+            for index in $0.flightEvents.indices where $0.flightEvents[index].flightRecordID == flightRecord.id {
+                $0.flightEvents[index].recordingSessionID = recordingID
+                $0.flightEvents[index].audioOffset = max(0, $0.flightEvents[index].timestampUTC.timeIntervalSince(startedAt))
+            }
+        }
+    }
+
+    func archiveExportURL(id: String) throws -> URL {
+        guard let archive = archives.first(where: { $0.id == id }) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("IPCA-CVR-Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("IPCA-CVR-\(archive.flightRecordID).json")
+        try encoder.encode(archive).write(to: url, options: [.atomic])
+        return url
     }
 
     func resetForNextFlightIfComplete() {
         guard let flightRecord = state.activeFlightRecord else { return }
         let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
-        guard !components.isEmpty, components.allSatisfy({ $0.state == .serverVerified }) else { return }
+        guard !components.isEmpty else { return }
+        guard archiveActiveWorkflow() else { return }
 
         mutate {
             $0.activeDispatch = nil
@@ -520,6 +680,73 @@ final class CVRWorkflowStore: ObservableObject {
         save()
     }
 
+    private func updateComponent(
+        _ component: inout CVRUploadComponentRecord,
+        state: CVRUploadComponentState,
+        progress: Double,
+        lastError: String,
+        serverReceiptID: String?
+    ) {
+        let previousState = component.state
+        if state == .serverVerified {
+            guard let serverReceiptID,
+                  !serverReceiptID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                component.state = .failed
+                component.lastError = "Server verification receipt is missing."
+                component.lastAttemptAt = Date()
+                return
+            }
+            component.serverVerificationAt = Date()
+            component.serverReceiptID = serverReceiptID
+        }
+        if state == .uploading && previousState != .uploading {
+            component.attemptCount += 1
+        }
+        component.state = state
+        component.progress = min(max(progress, 0), 1)
+        component.lastError = lastError
+        component.lastAttemptAt = Date()
+    }
+
+    private func archiveActiveWorkflow() -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let flightRecord = state.activeFlightRecord else {
+            lastError = "Cannot archive an incomplete workflow."
+            return false
+        }
+        if archives.contains(where: { $0.flightRecordID == flightRecord.id }) {
+            return true
+        }
+        let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+        let archive = CVRWorkflowArchiveRecord(
+            id: UUID().uuidString,
+            schemaVersion: 2,
+            flightRecordID: flightRecord.id,
+            dispatch: dispatch,
+            flightRecord: flightRecord,
+            consents: state.consents.filter { $0.dispatchID == dispatch.id },
+            recorderVerifications: state.recorderVerifications.filter { $0.flightRecordID == flightRecord.id },
+            flightEvents: state.flightEvents.filter { $0.flightRecordID == flightRecord.id },
+            flightLegs: state.flightLegs.filter { $0.flightRecordID == flightRecord.id },
+            uploadComponents: components,
+            discrepancies: state.discrepancies.filter { $0.flightRecordID == flightRecord.id },
+            recordingSessionIDs: [flightRecord.recordingSessionID].compactMap { $0 },
+            archivedAt: Date(),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            status: components.allSatisfy { $0.state == .serverVerified } ? .serverVerified : .uploadPending
+        )
+        do {
+            var updated = archives
+            updated.append(archive)
+            try saveArchives(updated)
+            archives = updated
+            return true
+        } catch {
+            lastError = "Flight history archive failed. NEXT FLIGHT was blocked: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     @discardableResult
     private func ensureDispatchUploadComponent() -> Bool {
         guard let dispatch = state.activeDispatch,
@@ -553,6 +780,79 @@ final class CVRWorkflowStore: ObservableObject {
         return true
     }
 
+    private func recoverInterruptedActiveUploads() -> Bool {
+        var changed = false
+        for index in state.uploadComponents.indices where state.uploadComponents[index].state == .uploading {
+            state.uploadComponents[index].state = .queued
+            state.uploadComponents[index].lastError = "Upload was interrupted and has been queued for recovery."
+            changed = true
+        }
+        return changed
+    }
+
+    private func ensureEvidenceUploadComponents() -> Bool {
+        guard let flightRecord = state.activeFlightRecord else { return false }
+        var changed = false
+        for event in state.flightEvents where event.flightRecordID == flightRecord.id {
+            let path = "event:\(event.id)"
+            if !state.uploadComponents.contains(where: { $0.componentType == "flight_events" && $0.localFilePath == path }) {
+                state.uploadComponents.append(eventUploadComponent(event))
+                changed = true
+            }
+        }
+        if let verification = state.recorderVerifications.last(where: { $0.flightRecordID == flightRecord.id }),
+           !state.uploadComponents.contains(where: { $0.componentType == "recorder_verification" && $0.localFilePath == "verification:\(verification.id)" }) {
+            state.uploadComponents.append(evidenceComponent(
+                flightRecordID: flightRecord.id,
+                type: "recorder_verification",
+                evidenceID: verification.id
+            ))
+            changed = true
+        }
+        if flightRecord.status == .awaitingGarmin || flightRecord.status == .awaitingUpload || flightRecord.status == .complete,
+           !state.uploadComponents.contains(where: { $0.componentType == "flight_record_closure" && $0.flightRecordID == flightRecord.id }) {
+            state.uploadComponents.append(evidenceComponent(
+                flightRecordID: flightRecord.id,
+                type: "flight_record_closure",
+                evidenceID: flightRecord.id
+            ))
+            changed = true
+        }
+        return changed
+    }
+
+    private func eventUploadComponent(_ event: CVRFlightEventRecord) -> CVRUploadComponentRecord {
+        evidenceComponent(
+            flightRecordID: event.flightRecordID,
+            type: "flight_events",
+            evidenceID: event.id
+        )
+    }
+
+    private func evidenceComponent(
+        flightRecordID: String,
+        type: String,
+        evidenceID: String
+    ) -> CVRUploadComponentRecord {
+        let prefix = type == "flight_events" ? "event" : (type == "recorder_verification" ? "verification" : "closure")
+        return CVRUploadComponentRecord(
+            id: UUID().uuidString,
+            serverID: nil,
+            flightRecordID: flightRecordID,
+            componentType: type,
+            localFilePath: "\(prefix):\(evidenceID)",
+            sha256: nil,
+            byteCount: nil,
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil
+        )
+    }
+
     private func appendFlightEvent(
         flightRecord: CVRIncompleteFlightRecord,
         eventType: String,
@@ -569,6 +869,7 @@ final class CVRWorkflowStore: ObservableObject {
         )
         mutate {
             $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
         }
     }
 
@@ -588,7 +889,7 @@ final class CVRWorkflowStore: ObservableObject {
             timestampUTC: now,
             timestampLocal: now,
             deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
-            audioOffset: nil,
+            audioOffset: flightRecord.recordingStartedAt.map { max(0, now.timeIntervalSince($0)) },
             latitude: gpsSample?.latitude,
             longitude: gpsSample?.longitude,
             altitude: gpsSample?.altitude,
@@ -611,6 +912,38 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    private func loadArchives() throws {
+        let url = try archivesURL()
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            archives = []
+            return
+        }
+        var recovered = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
+        var changed = false
+        for archiveIndex in recovered.indices {
+            for componentIndex in recovered[archiveIndex].uploadComponents.indices
+            where recovered[archiveIndex].uploadComponents[componentIndex].state == .uploading {
+                recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                recovered[archiveIndex].uploadComponents[componentIndex].lastError = "Upload was interrupted and has been queued for recovery."
+                recovered[archiveIndex].status = .uploadPending
+                changed = true
+            }
+        }
+        if changed {
+            try saveArchives(recovered)
+        }
+        archives = recovered
+    }
+
+    private func saveArchives(_ records: [CVRWorkflowArchiveRecord]) throws {
+        let url = try archivesURL()
+        try encoder.encode(records).write(to: url, options: [.atomic])
+        let verification = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
+        guard verification.map(\.id) == records.map(\.id) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
+
     private func storeURL() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -621,6 +954,18 @@ final class CVRWorkflowStore: ObservableObject {
         let dir = base.appendingPathComponent("IPCACVRUnit", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("flight-workflow.json")
+    }
+
+    private func archivesURL() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = base.appendingPathComponent("IPCACVRUnit", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("workflow-archives.json")
     }
 
     private func garminImportDirectory() throws -> URL {

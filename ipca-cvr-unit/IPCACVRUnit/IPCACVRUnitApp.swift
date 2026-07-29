@@ -52,7 +52,8 @@ struct IPCACVRUnitApp: App {
                         remoteIPads: remoteIPads,
                         store: recordingStore,
                         settings: settings,
-                        uploadManager: uploadManager
+                        uploadManager: uploadManager,
+                        workflow: workflowStore
                     )
                     coordinator.appBecameActive()
                 }

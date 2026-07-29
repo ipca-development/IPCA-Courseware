@@ -6,6 +6,9 @@ struct APIRecording: Codable {
     var uploadStatus: String
     var transcriptionStatus: String
     var progress: Int
+    var reconstructionStatus: String?
+    var reconstructionProgress: Int?
+    var reconstructionStage: String?
     var error: String
 
     enum CodingKeys: String, CodingKey {
@@ -14,6 +17,9 @@ struct APIRecording: Codable {
         case uploadStatus = "upload_status"
         case transcriptionStatus = "transcription_status"
         case progress
+        case reconstructionStatus = "reconstruction_status"
+        case reconstructionProgress = "reconstruction_progress"
+        case reconstructionStage = "reconstruction_stage"
         case error
     }
 }
@@ -156,6 +162,20 @@ struct DispatchSyncResponse: Codable {
     }
 }
 
+struct WorkflowEvidenceSyncResponse: Codable {
+    var ok: Bool
+    var alreadyPresent: Bool?
+    var receipt: DispatchSyncResponse.Receipt?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyPresent = "already_present"
+        case receipt
+        case error
+    }
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
@@ -290,6 +310,19 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(DispatchSyncResponse.self, from: data, response: response)
+    }
+
+    func syncWorkflowEvidence(payload: [String: Any], credential: String) async throws -> WorkflowEvidenceSyncResponse {
+        let url = serverURL.appending(path: "api/cvr/flight_events_sync.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(WorkflowEvidenceSyncResponse.self, from: data, response: response)
     }
 
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {

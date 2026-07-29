@@ -2,9 +2,14 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
+require_once __DIR__ . '/openai.php';
 
 final class FlightDebriefService
 {
+    private const PROMPT_VERSION = '1-4-9-v1';
+    private const LOGIC_VERSION = 'grading-v1';
+    private const ALLOWED_EVIDENCE = array('transcript', 'event_marker', 'garmin', 'adsb', 'audio');
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -122,6 +127,610 @@ final class FlightDebriefService
             ':audio_released' => $values['audio_released'],
             ':released_by' => $actorUserId,
         ));
+    }
+
+    /** @return array<string,mixed> */
+    public function generateStructuredDebrief(int $bundleId, ?int $actorUserId = null): array
+    {
+        $bundle = $this->structuredBundle($bundleId);
+        if (!$bundle) {
+            throw new RuntimeException('Reconstruction bundle not found.');
+        }
+        if ((int)($bundle['transcript_snapshot_id'] ?? 0) <= 0) {
+            throw new RuntimeException('Generate Debrief is disabled until the raw transcript is Ready, non-empty, and version-locked.');
+        }
+        $snapshot = $this->row('ipca_cockpit_transcript_snapshots', (int)$bundle['transcript_snapshot_id']);
+        if (trim((string)($snapshot['transcript_text'] ?? '')) === '') {
+            throw new RuntimeException('Locked transcript snapshot is empty.');
+        }
+        $missionVersion = $this->missionVersion((string)$bundle['mission_code']);
+        $exercise = json_decode((string)($missionVersion['exercise_json'] ?? ''), true);
+        if (!is_array($exercise['scenario_plan'] ?? null) || !is_array($exercise['evaluation_rubric'] ?? null)) {
+            throw new RuntimeException('Mission requires a canonical scenario_plan and evaluation_rubric.');
+        }
+        $evidence = $this->structuredEvidence($bundle, $snapshot);
+        $encodedEvidence = AuditEventService::jsonEncode($evidence);
+        if (str_contains(strtolower($encodedEvidence), 'flightcircle')) {
+            throw new RuntimeException('FlightCircle evidence is prohibited from AI debrief generation.');
+        }
+        $prompt = $this->structuredPrompt($exercise, $evidence);
+        $request = array(
+            'model' => cw_openai_model(),
+            'input' => array(
+                array('role' => 'system', 'content' => array(array('type' => 'input_text', 'text' => $this->structuredSystemPrompt()))),
+                array('role' => 'user', 'content' => array(array('type' => 'input_text', 'text' => $prompt))),
+            ),
+        );
+        $response = cw_openai_responses($request, 600);
+        $rawText = $this->responseText($response);
+        $decoded = $this->decodeModelJson($rawText);
+        $normalized = $this->normalizeStructuredDebrief($decoded, $exercise['evaluation_rubric']);
+        $overall = $this->calculateSuggestedOverall($normalized['evaluations']);
+        $normalized['suggested_overall'] = $overall['result'];
+
+        $this->pdo->beginTransaction();
+        try {
+            $previous = $this->pdo->prepare(
+                'SELECT id FROM ipca_structured_debriefs WHERE bundle_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE'
+            );
+            $previous->execute(array($bundleId));
+            $supersedes = (int)$previous->fetchColumn() ?: null;
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_structured_debriefs
+                 (debrief_uuid, bundle_id, mission_version_id, transcript_snapshot_id, supersedes_debrief_id,
+                  status, provider, model, prompt_version, logic_version, prompt_sha256, request_sha256,
+                  response_sha256, raw_response_json, general_text, chronological_review_json,
+                  mission_assessment_text, summary_next_steps_text, suggested_overall,
+                  overall_calculation_json, uncertainty_json, created_by)
+                 VALUES (?, ?, ?, ?, ?, \'ai_draft\', \'openai\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $insert->execute(array(
+                AuditEventService::uuid(), $bundleId, (int)$missionVersion['id'], (int)$snapshot['id'], $supersedes,
+                cw_openai_model(), self::PROMPT_VERSION, self::LOGIC_VERSION,
+                hash('sha256', $prompt),
+                hash('sha256', AuditEventService::jsonEncode($request)),
+                hash('sha256', AuditEventService::jsonEncode($response)),
+                AuditEventService::jsonEncode($response),
+                $normalized['general'],
+                AuditEventService::jsonEncode($normalized['chronological_review']),
+                $normalized['mission_standards_assessment'],
+                $normalized['summary_next_steps'],
+                $overall['result'],
+                AuditEventService::jsonEncode($overall),
+                AuditEventService::jsonEncode($normalized['uncertainties']),
+                $actorUserId,
+            ));
+            $debriefId = (int)$this->pdo->lastInsertId();
+            $evaluationInsert = $this->pdo->prepare(
+                'INSERT INTO ipca_structured_debrief_evaluations
+                 (evaluation_uuid, debrief_id, rubric_type, rubric_item_id, title, required_standard,
+                  suggested_grade, evidence_status, completion_status, rationale, confidence,
+                  evidence_refs_json, instructor_prompting_json, main_issue, improvement_suggestion)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($normalized['evaluations'] as $evaluation) {
+                $evaluationInsert->execute(array(
+                    AuditEventService::uuid(), $debriefId, $evaluation['rubric_type'],
+                    $evaluation['rubric_item_id'], $evaluation['title'], $evaluation['required_standard'],
+                    $evaluation['suggested_grade'], $evaluation['evidence_status'], $evaluation['completion_status'],
+                    $evaluation['rationale'], $evaluation['confidence'],
+                    AuditEventService::jsonEncode($evaluation['evidence_refs']),
+                    AuditEventService::jsonEncode($evaluation['instructor_prompting']),
+                    $evaluation['main_issue'], $evaluation['improvement_suggestion'],
+                ));
+            }
+            $this->structuredAudit($debriefId, 'ai_draft_generated', $actorUserId, null, array(
+                'bundle_id' => $bundleId,
+                'suggested_overall' => $overall['result'],
+                'model' => cw_openai_model(),
+            ), 'Evidence-backed AI suggestions generated; instructor review required.');
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return $this->structuredDebrief($debriefId);
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function structuredDebriefsForBundle(int $bundleId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM ipca_structured_debriefs WHERE bundle_id = ? ORDER BY id DESC'
+        );
+        $statement->execute(array($bundleId));
+        return $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /** @return array<string,mixed> */
+    public function structuredDebrief(int $debriefId): array
+    {
+        $statement = $this->pdo->prepare('SELECT * FROM ipca_structured_debriefs WHERE id = ? LIMIT 1');
+        $statement->execute(array($debriefId));
+        $debrief = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($debrief)) {
+            throw new RuntimeException('Debrief not found.');
+        }
+        $evaluations = $this->pdo->prepare(
+            'SELECT * FROM ipca_structured_debrief_evaluations
+             WHERE debrief_id = ? ORDER BY rubric_type, id'
+        );
+        $evaluations->execute(array($debriefId));
+        $debrief['evaluations'] = $evaluations->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return $debrief;
+    }
+
+    /** @param array<int,array<string,mixed>> $reviews */
+    public function saveInstructorReview(
+        int $debriefId,
+        array $reviews,
+        string $overall,
+        string $comments,
+        int $actorUserId
+    ): void {
+        $debrief = $this->structuredDebrief($debriefId);
+        if (in_array((string)$debrief['status'], array('approved', 'released'), true)) {
+            throw new RuntimeException('Approved debrief versions are immutable. Regenerate a superseding version.');
+        }
+        $overall = strtoupper(trim($overall));
+        if (!in_array($overall, array('BLUE', 'GREEN', 'YELLOW', 'RED', 'INCOMPLETE'), true)) {
+            throw new RuntimeException('Select a valid instructor overall result.');
+        }
+        $taskScale = array('DE', 'EX', 'PR', 'PE', 'NO');
+        $srmScale = array('EX', 'PR', 'MD', 'NO');
+        $this->pdo->beginTransaction();
+        try {
+            foreach ($reviews as $evaluationId => $review) {
+                $evaluationId = (int)$evaluationId;
+                $rubricType = (string)($review['rubric_type'] ?? '');
+                $grade = strtoupper(trim((string)($review['grade'] ?? '')));
+                $allowed = $rubricType === 'srm' ? $srmScale : $taskScale;
+                if ($grade !== '' && !in_array($grade, $allowed, true)) {
+                    throw new RuntimeException('Invalid instructor grade.');
+                }
+                $this->pdo->prepare(
+                    'UPDATE ipca_structured_debrief_evaluations
+                     SET instructor_grade = ?, instructor_comment = ?, reviewed_by = ?,
+                         reviewed_at = CURRENT_TIMESTAMP(3)
+                     WHERE id = ? AND debrief_id = ?'
+                )->execute(array(
+                    $grade === '' ? null : $grade,
+                    trim((string)($review['comment'] ?? '')),
+                    $actorUserId, $evaluationId, $debriefId,
+                ));
+            }
+            $this->pdo->prepare(
+                'UPDATE ipca_structured_debriefs
+                 SET status = \'instructor_draft\', instructor_overall = ?, instructor_comments = ?
+                 WHERE id = ?'
+            )->execute(array($overall, trim($comments), $debriefId));
+            $this->structuredAudit($debriefId, 'instructor_review_saved', $actorUserId, null, array(
+                'instructor_overall' => $overall,
+                'review_count' => count($reviews),
+            ), 'Instructor draft review saved.');
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function approveStructuredDebrief(int $debriefId, int $actorUserId): void
+    {
+        $debrief = $this->structuredDebrief($debriefId);
+        if ((string)$debrief['status'] !== 'instructor_draft') {
+            throw new RuntimeException('Save the instructor review before approval.');
+        }
+        if (trim((string)($debrief['instructor_overall'] ?? '')) === '') {
+            throw new RuntimeException('Instructor overall result is required.');
+        }
+        foreach ($debrief['evaluations'] as $evaluation) {
+            if (trim((string)($evaluation['instructor_grade'] ?? '')) === '') {
+                throw new RuntimeException('Every task and SRM item requires an instructor grade before approval.');
+            }
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_structured_debriefs
+             SET status = \'approved\', approved_by = ?, approved_at = CURRENT_TIMESTAMP(3)
+             WHERE id = ? AND status = \'instructor_draft\''
+        )->execute(array($actorUserId, $debriefId));
+        $this->structuredAudit($debriefId, 'instructor_approved', $actorUserId, null, array(
+            'instructor_overall' => $debrief['instructor_overall'],
+        ), 'Instructor approval is authoritative; approved version is immutable.');
+    }
+
+    public function rejectStructuredDebrief(int $debriefId, string $reason, int $actorUserId): void
+    {
+        $debrief = $this->structuredDebrief($debriefId);
+        if (in_array((string)$debrief['status'], array('approved', 'released'), true)) {
+            throw new RuntimeException('Approved debrief versions cannot be rejected.');
+        }
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new RuntimeException('A rejection reason is required.');
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_structured_debriefs SET status = \'rejected\', instructor_comments = ? WHERE id = ?'
+        )->execute(array($reason, $debriefId));
+        $this->structuredAudit($debriefId, 'ai_draft_rejected', $actorUserId, null, array(
+            'reason' => $reason,
+        ), 'Instructor rejected the AI draft; regeneration creates a superseding version.');
+    }
+
+    public function releaseStructuredDebrief(int $debriefId, int $recipientUserId, int $actorUserId): void
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT d.*, b.operational_flight_record_version_id
+             FROM ipca_structured_debriefs d
+             INNER JOIN ipca_manual_intake_bundles b ON b.id = d.bundle_id
+             WHERE d.id = ? LIMIT 1'
+        );
+        $statement->execute(array($debriefId));
+        $debrief = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($debrief) || (string)$debrief['status'] !== 'approved') {
+            throw new RuntimeException('Only an instructor-approved debrief can be released.');
+        }
+        $flightRecordVersionId = (int)($debrief['operational_flight_record_version_id'] ?? 0);
+        if ($flightRecordVersionId <= 0 || $recipientUserId <= 0) {
+            throw new RuntimeException('Canonical Flight Record version and recipient are required for release.');
+        }
+        $this->setReleaseControls($flightRecordVersionId, $recipientUserId, array(
+            'debrief_released' => true,
+        ), $actorUserId);
+        $this->pdo->prepare(
+            'UPDATE ipca_structured_debriefs SET status = \'released\', released_at = CURRENT_TIMESTAMP(3)
+             WHERE id = ? AND status = \'approved\''
+        )->execute(array($debriefId));
+        $this->structuredAudit($debriefId, 'debrief_released', $actorUserId, null, array(
+            'recipient_user_id' => $recipientUserId,
+            'flight_record_version_id' => $flightRecordVersionId,
+        ), 'Approved debrief explicitly released to recipient.');
+    }
+
+    /** @param array<string,mixed> $bundle @param array<string,mixed> $snapshot @return array<string,mixed> */
+    private function structuredEvidence(array $bundle, array $snapshot): array
+    {
+        $events = array();
+        if ($this->tableExists('ipca_cvr_flight_events')) {
+            $statement = $this->pdo->prepare(
+                'SELECT event_uuid, event_type, timestamp_utc, audio_offset_seconds, source, confidence
+                 FROM ipca_cvr_flight_events WHERE workflow_flight_record_uuid = ? ORDER BY timestamp_utc'
+            );
+            $statement->execute(array($bundle['workflow_flight_record_uuid']));
+            $events = $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        }
+        $chunks = array();
+        if ($this->tableExists('ipca_cockpit_recording_transcription_chunks')) {
+            $statement = $this->pdo->prepare(
+                'SELECT chunk_index, start_seconds, end_seconds, transcript_text
+                 FROM ipca_cockpit_recording_transcription_chunks
+                 WHERE recording_id = ? AND status = \'ready\' ORDER BY chunk_index'
+            );
+            $statement->execute(array((int)$bundle['cockpit_recording_id']));
+            $chunks = $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        }
+        $timeline = array();
+        if ($this->tableExists('ipca_cockpit_timeline_events')) {
+            $statement = $this->pdo->prepare(
+                'SELECT event_type, start_seconds, end_seconds, confidence, metadata_json
+                 FROM ipca_cockpit_timeline_events WHERE recording_id = ? ORDER BY start_seconds'
+            );
+            $statement->execute(array((int)$bundle['cockpit_recording_id']));
+            $timeline = $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        }
+        $adsb = array();
+        if ($this->tableExists('ipca_cockpit_adsb_enrichments')) {
+            $statement = $this->pdo->prepare(
+                'SELECT status, ownship_sample_count, traffic_sample_count, aircraft_hex
+                 FROM ipca_cockpit_adsb_enrichments WHERE recording_id = ? ORDER BY id DESC LIMIT 1'
+            );
+            $statement->execute(array((int)$bundle['cockpit_recording_id']));
+            $adsb = $statement->fetch(PDO::FETCH_ASSOC) ?: array();
+        }
+        return array(
+            'bundle_uuid' => $bundle['bundle_uuid'],
+            'manifest_sha256' => $bundle['manifest_sha256'],
+            'transcript_snapshot' => array(
+                'snapshot_uuid' => $snapshot['snapshot_uuid'],
+                'sha256' => $snapshot['transcript_sha256'],
+                'text' => (string)$snapshot['transcript_text'],
+                'chunks' => $chunks,
+            ),
+            'event_markers' => $events,
+            'garmin_reconstruction_timeline' => $timeline,
+            'adsb_context' => $adsb,
+            'source_limitations' => array(
+                'Garmin measures aircraft performance and flight path; it does not prove prompting or decision quality.',
+                'ADS-B provides traffic context; it does not prove the student saw traffic.',
+                'Transcript absence is insufficient evidence, not automatic NO.',
+            ),
+        );
+    }
+
+    /** @param array<string,mixed> $exercise @param array<string,mixed> $evidence */
+    private function structuredPrompt(array $exercise, array $evidence): string
+    {
+        return "MISSION CANONICAL DATA:\n"
+            . AuditEventService::jsonEncode($exercise)
+            . "\n\nIMMUTABLE EVIDENCE:\n"
+            . AuditEventService::jsonEncode($evidence)
+            . "\n\nReturn JSON only using the requested structure. Evaluate every canonical task and SRM item.";
+    }
+
+    private function structuredSystemPrompt(): string
+    {
+        return implode("\n", array(
+            'You create a professional, factual, motivational flight-training debrief draft for instructor review.',
+            'The AI only suggests grades. Never claim authority over the instructor.',
+            'Return JSON with: general (string), chronological_review (array of objects with title, narrative, evidence_refs), mission_standards_assessment (string), summary_next_steps (string), evaluations (array), uncertainties (array).',
+            'Each evaluation requires rubric_type task|srm, rubric_item_id, suggested_grade or null, evidence_status supported|partial|insufficient_evidence, completion_status completed|not_completed|uncertain, rationale, confidence 0..1, evidence_refs, instructor_prompting, main_issue, improvement_suggestion.',
+            'Use task grades DE, EX, PR, PE, NO exactly and SRM grades EX, PR, MD, NO exactly.',
+            'Do not use NO merely because a task is absent from transcript. Use null grade and insufficient_evidence.',
+            'Exercise markers define chronological segment boundaries. Training Remark markers prioritize the transcript/audio immediately following the marker. Safety markers create separate safety windows.',
+            'Every factual claim and suggested grade must cite transcript chunk/time, marker, Garmin timeline, ADS-B context, or audio offset.',
+            'Garmin supports performance; transcript supports instruction, prompting, checklists and decisions. ADS-B does not prove visual acquisition.',
+            'Be specific and constructive. Do not fabricate events, measurements, dialogue, traffic awareness, or task completion.',
+        ));
+    }
+
+    /** @param array<string,mixed> $decoded @param array<string,mixed> $rubric @return array<string,mixed> */
+    private function normalizeStructuredDebrief(array $decoded, array $rubric): array
+    {
+        $provided = array();
+        foreach (is_array($decoded['evaluations'] ?? null) ? $decoded['evaluations'] : array() as $evaluation) {
+            if (is_array($evaluation) && trim((string)($evaluation['rubric_item_id'] ?? '')) !== '') {
+                $provided[(string)$evaluation['rubric_item_id']] = $evaluation;
+            }
+        }
+        $evaluations = array();
+        foreach (array('task' => $rubric['tasks'] ?? array(), 'srm' => $rubric['srm_items'] ?? array()) as $type => $items) {
+            foreach (is_array($items) ? $items : array() as $item) {
+                $id = (string)($item['id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+                $candidate = is_array($provided[$id] ?? null) ? $provided[$id] : array();
+                $grade = strtoupper(trim((string)($candidate['suggested_grade'] ?? '')));
+                $allowed = $type === 'srm' ? array('EX', 'PR', 'MD', 'NO') : array('DE', 'EX', 'PR', 'PE', 'NO');
+                $refs = $this->sanitizeEvidenceRefs($candidate['evidence_refs'] ?? array());
+                $status = strtolower(trim((string)($candidate['evidence_status'] ?? 'insufficient_evidence')));
+                if (!in_array($status, array('supported', 'partial', 'insufficient_evidence'), true) || $refs === array()) {
+                    $status = 'insufficient_evidence';
+                }
+                if (!in_array($grade, $allowed, true) || $status === 'insufficient_evidence') {
+                    $grade = null;
+                }
+                $completion = strtolower(trim((string)($candidate['completion_status'] ?? 'uncertain')));
+                if (!in_array($completion, array('completed', 'not_completed', 'uncertain'), true)) {
+                    $completion = 'uncertain';
+                }
+                if ($status === 'insufficient_evidence') {
+                    $completion = 'uncertain';
+                }
+                $evaluations[] = array(
+                    'rubric_type' => $type,
+                    'rubric_item_id' => $id,
+                    'title' => (string)($item['title'] ?? $id),
+                    'required_standard' => strtoupper((string)($item['required_standard'] ?? ($type === 'srm' ? 'MD' : 'PE'))),
+                    'suggested_grade' => $grade,
+                    'evidence_status' => $status,
+                    'completion_status' => $completion,
+                    'rationale' => trim((string)($candidate['rationale'] ?? 'Insufficient evidence for a reliable suggestion; instructor review required.')),
+                    'confidence' => max(0, min(1, (float)($candidate['confidence'] ?? 0))),
+                    'evidence_refs' => $refs,
+                    'instructor_prompting' => is_array($candidate['instructor_prompting'] ?? null) ? $candidate['instructor_prompting'] : array(),
+                    'main_issue' => trim((string)($candidate['main_issue'] ?? '')) ?: null,
+                    'improvement_suggestion' => trim((string)($candidate['improvement_suggestion'] ?? '')) ?: null,
+                    'required' => !empty($item['required']),
+                );
+            }
+        }
+        return array(
+            'general' => trim((string)($decoded['general'] ?? 'Instructor review required.')),
+            'chronological_review' => is_array($decoded['chronological_review'] ?? null) ? $decoded['chronological_review'] : array(),
+            'mission_standards_assessment' => trim((string)($decoded['mission_standards_assessment'] ?? 'See task-level evidence suggestions.')),
+            'summary_next_steps' => trim((string)($decoded['summary_next_steps'] ?? 'Review evidence and agree specific next steps with the student.')),
+            'evaluations' => $evaluations,
+            'uncertainties' => is_array($decoded['uncertainties'] ?? null) ? $decoded['uncertainties'] : array(),
+        );
+    }
+
+    /** @param list<array<string,mixed>> $evaluations @return array<string,mixed> */
+    private function calculateSuggestedOverall(array $evaluations): array
+    {
+        $taskScale = array('DE' => 1, 'EX' => 2, 'PR' => 3, 'PE' => 4);
+        $srmScale = array('EX' => 1, 'PR' => 2, 'MD' => 3);
+        $above = 0;
+        $below = 0;
+        $assessed = 0;
+        $incomplete = false;
+        $safetyInsufficient = false;
+        foreach ($evaluations as $evaluation) {
+            if (empty($evaluation['required'])) {
+                continue;
+            }
+            if ($evaluation['completion_status'] === 'not_completed' || $evaluation['suggested_grade'] === 'NO') {
+                $incomplete = true;
+                continue;
+            }
+            $grade = (string)($evaluation['suggested_grade'] ?? '');
+            $required = (string)$evaluation['required_standard'];
+            $scale = $evaluation['rubric_type'] === 'srm' ? $srmScale : $taskScale;
+            if (!isset($scale[$grade], $scale[$required])) {
+                continue;
+            }
+            $assessed++;
+            if ($scale[$grade] > $scale[$required]) {
+                $above++;
+            } elseif ($scale[$grade] < $scale[$required]) {
+                $below++;
+            }
+            if ($evaluation['rubric_item_id'] === 'srm.safety_management' && $scale[$grade] < $scale[$required]) {
+                $safetyInsufficient = true;
+            }
+        }
+        $abovePct = $assessed > 0 ? $above / $assessed : 0;
+        $belowPct = $assessed > 0 ? $below / $assessed : 0;
+        if ($incomplete) {
+            $result = 'INCOMPLETE';
+        } elseif ($assessed === 0) {
+            $result = 'PENDING INSTRUCTOR REVIEW';
+        } elseif ($safetyInsufficient || $belowPct > 0.25) {
+            $result = 'RED';
+        } elseif ($below > 0) {
+            $result = 'YELLOW';
+        } elseif ($abovePct >= 0.25) {
+            $result = 'BLUE';
+        } else {
+            $result = 'GREEN';
+        }
+        return array(
+            'result' => $result,
+            'assessed_required_count' => $assessed,
+            'above_count' => $above,
+            'below_count' => $below,
+            'above_fraction' => $abovePct,
+            'below_fraction' => $belowPct,
+            'explicit_incomplete' => $incomplete,
+            'safety_insufficient' => $safetyInsufficient,
+            'unassessed_items_do_not_default_to_no' => true,
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function sanitizeEvidenceRefs(mixed $refs): array
+    {
+        $result = array();
+        foreach (is_array($refs) ? $refs : array() as $ref) {
+            if (!is_array($ref)) {
+                continue;
+            }
+            $type = strtolower(trim((string)($ref['type'] ?? '')));
+            $encoded = strtolower(AuditEventService::jsonEncode($ref));
+            if (!in_array($type, self::ALLOWED_EVIDENCE, true)
+                || str_contains($encoded, 'flightcircle')
+                || str_contains($encoded, 'historical')) {
+                continue;
+            }
+            $result[] = $ref;
+        }
+        return $result;
+    }
+
+    /** @return array<string,mixed> */
+    private function structuredBundle(int $bundleId): array
+    {
+        $statement = $this->pdo->prepare('SELECT * FROM ipca_manual_intake_bundles WHERE id = ? LIMIT 1');
+        $statement->execute(array($bundleId));
+        return $statement->fetch(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /** @return array<string,mixed> */
+    private function missionVersion(string $missionCode): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT v.* FROM ipca_missions m
+             INNER JOIN ipca_mission_versions v ON v.id = m.current_version_id
+             WHERE UPPER(m.code) = UPPER(?) LIMIT 1'
+        );
+        $statement->execute(array(trim($missionCode)));
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new RuntimeException('Canonical mission version was not found.');
+        }
+        return $row;
+    }
+
+    /** @return array<string,mixed> */
+    private function row(string $table, int $id): array
+    {
+        $allowed = array('ipca_cockpit_transcript_snapshots');
+        if (!in_array($table, $allowed, true)) {
+            throw new RuntimeException('Evidence table is not allowlisted.');
+        }
+        $statement = $this->pdo->prepare('SELECT * FROM `' . $table . '` WHERE id = ? LIMIT 1');
+        $statement->execute(array($id));
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new RuntimeException('Evidence record not found.');
+        }
+        return $row;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $statement->execute(array($table));
+        return (int)$statement->fetchColumn() === 1;
+    }
+
+    /** @return array<string,mixed> */
+    private function decodeModelJson(string $text): array
+    {
+        $text = trim($text);
+        $text = preg_replace('/^```(?:json)?\s*|\s*```$/i', '', $text) ?? $text;
+        $decoded = json_decode($text, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('AI debrief response was not valid structured JSON.');
+        }
+        return $decoded;
+    }
+
+    /** @param array<string,mixed> $response */
+    private function responseText(array $response): string
+    {
+        $parts = array();
+        foreach (is_array($response['output'] ?? null) ? $response['output'] : array() as $output) {
+            foreach (is_array($output['content'] ?? null) ? $output['content'] : array() as $content) {
+                if (($content['type'] ?? '') === 'output_text' && isset($content['text'])) {
+                    $parts[] = (string)$content['text'];
+                }
+            }
+        }
+        $text = trim(implode("\n", $parts));
+        if ($text === '') {
+            throw new RuntimeException('AI debrief response was empty.');
+        }
+        return $text;
+    }
+
+    /** @param array<string,mixed>|null $old @param array<string,mixed>|null $new */
+    private function structuredAudit(
+        int $debriefId,
+        string $eventType,
+        ?int $actorUserId,
+        ?array $old,
+        ?array $new,
+        string $reason
+    ): void {
+        $this->pdo->prepare(
+            'INSERT INTO ipca_structured_debrief_audit
+             (event_uuid, debrief_id, event_type, actor_user_id, old_values_json, new_values_json, reason)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute(array(
+            AuditEventService::uuid(), $debriefId, $eventType, $actorUserId,
+            $old === null ? null : AuditEventService::jsonEncode($old),
+            $new === null ? null : AuditEventService::jsonEncode($new),
+            $reason,
+        ));
+        (new AuditEventService($this->pdo))->record(
+            $eventType,
+            'ipca_structured_debriefs',
+            (string)$debriefId,
+            $old,
+            $new,
+            $reason,
+            $actorUserId === null ? 'system' : 'user',
+            $actorUserId,
+            null,
+            null,
+            1,
+            'cvr_reconstruction'
+        );
     }
 
     private function nextPackageVersion(int $flightRecordVersionId): int

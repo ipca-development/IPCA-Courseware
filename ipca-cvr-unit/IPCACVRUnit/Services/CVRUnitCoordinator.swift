@@ -37,6 +37,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private weak var store: RecordingStore?
     private weak var settings: SettingsStore?
     private weak var uploadManager: UploadManager?
+    private weak var workflow: CVRWorkflowStore?
     private var activeRecordingSessionID: String?
     private var activeRecorderToken: Data?
     private var activeRecordingEvents: [CVRRecordingEvent] = []
@@ -61,7 +62,8 @@ final class CVRUnitCoordinator: ObservableObject {
         remoteIPads: RemoteIPadLinkManager,
         store: RecordingStore,
         settings: SettingsStore,
-        uploadManager: UploadManager
+        uploadManager: UploadManager,
+        workflow: CVRWorkflowStore
     ) {
         guard self.audio == nil else { return }
         self.audio = audio
@@ -72,11 +74,15 @@ final class CVRUnitCoordinator: ObservableObject {
         self.store = store
         self.settings = settings
         self.uploadManager = uploadManager
+        self.workflow = workflow
 
         network.$statusText
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.attemptPendingUploads()
+                if let self, let workflow = self.workflow, let settings = self.settings {
+                    self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                }
             }
             .store(in: &cancellables)
 
@@ -171,6 +177,13 @@ final class CVRUnitCoordinator: ObservableObject {
                 self.activeFinalizedSegments = segments
                 self.activeSegmentPath = activePath
                 self.saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: segments, activeSegmentPath: activePath)
+            }
+        }
+        gps.onFlightTransition = { [weak self] transition in
+            guard let self else { return }
+            self.workflow?.recordGPSFlightTransition(transition)
+            if let workflow = self.workflow, let settings = self.settings {
+                self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
         }
 
@@ -304,6 +317,7 @@ final class CVRUnitCoordinator: ObservableObject {
             if let recordingID = audio.activeRecordingID, let startedAt = audio.activeRecordingStartedAt {
                 gps?.startCapture(recordingID: recordingID, startedAt: startedAt)
                 saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: [], activeSegmentPath: nil)
+                workflow?.linkRecordingSession(recordingID: activeRecordingSessionID ?? recordingID, startedAt: startedAt)
             }
             mode = .recording
             log("Recording started: \(audio.activeRecordingID ?? "unknown").")
@@ -370,6 +384,7 @@ final class CVRUnitCoordinator: ObservableObject {
         }
         recording.gpsSamplesPath = gps?.stopCaptureAndSave(recordingID: recording.id)
         recording.flightSessionID = sessionID ?? recording.id
+        workflow?.linkRecordingSession(recordingID: recording.flightSessionID, startedAt: recording.startedAt)
         if !mergedRecoveredPrelude {
             recording.segmentIndex = activeSegmentIndex
             recording.previousSegmentID = activePreviousSegmentID

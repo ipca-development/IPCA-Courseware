@@ -202,6 +202,7 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var serverFlightRecordID: String?
     var dispatchID: String
     var recordingSessionID: String?
+    var recordingStartedAt: Date?
     var status: CVRFlightRecordStatus
     var endingHobbs: Double?
     var endingTacho: Double?
@@ -210,6 +211,29 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var maintenanceRemark: String?
     var createdAt: Date
     var updatedAt: Date
+}
+
+enum CVRWorkflowArchiveStatus: String, Codable {
+    case uploadPending
+    case serverVerified
+}
+
+struct CVRWorkflowArchiveRecord: Identifiable, Codable, Equatable {
+    var id: String
+    var schemaVersion: Int
+    var flightRecordID: String
+    var dispatch: CVRDispatchRecord
+    var flightRecord: CVRIncompleteFlightRecord
+    var consents: [CVRConsentRecord]
+    var recorderVerifications: [CVRRecorderVerificationRecord]
+    var flightEvents: [CVRFlightEventRecord]
+    var flightLegs: [CVRFlightLegRecord]
+    var uploadComponents: [CVRUploadComponentRecord]
+    var discrepancies: [CVRDiscrepancyRecord]
+    var recordingSessionIDs: [String]
+    var archivedAt: Date
+    var appVersion: String
+    var status: CVRWorkflowArchiveStatus
 }
 
 struct CVRRecorderVerificationRecord: Identifiable, Codable, Equatable {

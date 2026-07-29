@@ -212,6 +212,7 @@ struct CVROperationalActionButton: View {
     var title: String
     var subtitle: String?
     var color: Color
+    var isConfirmed: Bool = false
     var action: () -> Void
 
     var body: some View {
@@ -224,14 +225,15 @@ struct CVROperationalActionButton: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                        .foregroundStyle(isConfirmed ? Color.white.opacity(0.9) : CVROperationalPalette.textSecondary)
                         .lineLimit(1)
                 }
             }
-            .foregroundStyle(color)
+            .foregroundStyle(isConfirmed ? Color.white : color)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 17))
-            .overlay(RoundedRectangle(cornerRadius: 17).stroke(color.opacity(0.75), lineWidth: 1))
+            .background(isConfirmed ? CVROperationalPalette.success : CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 17))
+            .overlay(RoundedRectangle(cornerRadius: 17).stroke(isConfirmed ? CVROperationalPalette.success : color.opacity(0.75), lineWidth: 1))
+            .animation(.easeInOut(duration: 0.12), value: isConfirmed)
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 17))
