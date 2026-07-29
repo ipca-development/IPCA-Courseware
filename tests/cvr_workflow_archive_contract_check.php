@@ -71,6 +71,13 @@ $checks = array(
         && str_contains($views, 'Oil was serviced before this flight')
         && str_contains($dispatchIntake, 'assertPreviousFlightContinuity')
         && str_contains($dispatchIntake, '> 0.20'),
+    'failed dispatch upload can be repaired with continuity confirmation' =>
+        str_contains($store, 'updateActiveDispatchForUploadRepair')
+        && str_contains($store, 'dispatchContinuityUploadIssue')
+        && str_contains($store, 'dispatchUploadVerified')
+        && str_contains($views, 'CONFIRM & RETRY DISPATCH UPLOAD')
+        && str_contains($views, 'Oil has been uploaded')
+        && str_contains($views, 'CONTINUITY CONFIRMATION REQUIRED'),
     'operational calculation versions accept long service version labels' =>
         str_contains($derivation, "substr((string)(\$value['calculation_version'] ?? 'phase3-v1'), 0, 64)")
         && str_contains((string) file_get_contents($root . '/src/TachoCalculationService.php'), 'tacho_rpm_threshold_cumulative_v2')

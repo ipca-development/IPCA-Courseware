@@ -646,7 +646,9 @@ private struct AudioGaugeGeometry {
     }
 
     func angle(for value: Double) -> CGFloat {
-        CGFloat((180 + min(1, max(0, value)) * 180) * .pi / 180)
+        let clamped = min(1, max(0, value))
+        let degrees = 180 + clamped * 180
+        return CGFloat(degrees * .pi / 180)
     }
 }
 

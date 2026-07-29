@@ -718,6 +718,61 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    func dispatchUploadVerified() -> Bool {
+        state.uploadComponents.contains {
+            $0.componentType == "dispatch_metadata" && $0.state == .serverVerified
+        }
+    }
+
+    enum DispatchContinuityUploadIssue: Equatable {
+        case oilServicing
+        case refueling
+    }
+
+    func dispatchContinuityUploadIssue() -> DispatchContinuityUploadIssue? {
+        if let error = dispatchUploadFailure()?.lastError.lowercased() {
+            if error.contains("oil") && error.contains("servic") {
+                return .oilServicing
+            }
+            if error.contains("refuel") {
+                return .refueling
+            }
+        }
+        if dispatchMissingItems.contains(where: { $0.contains("CONFIRM OIL WAS SERVICED") }) {
+            return .oilServicing
+        }
+        if dispatchMissingItems.contains(where: { $0.contains("CONFIRM AIRCRAFT WAS REFUELED") }) {
+            return .refueling
+        }
+        return nil
+    }
+
+    var canRepairFailedDispatchUpload: Bool {
+        isDispatchLocked && dispatchUploadFailure() != nil
+    }
+
+    @discardableResult
+    func updateActiveDispatchForUploadRepair(_ update: (inout CVRDispatchRecord) -> Void) -> Bool {
+        guard canRepairFailedDispatchUpload else {
+            lastError = "Dispatch can only be repaired while a Dispatch upload is failing."
+            return false
+        }
+        return mutate {
+            guard var dispatch = $0.activeDispatch else { return }
+            update(&dispatch)
+            dispatch.modifiedAt = Date()
+            $0.activeDispatch = dispatch
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+                if $0.uploadComponents[index].state == .failed || $0.uploadComponents[index].state == .needsUserAction {
+                    $0.uploadComponents[index].state = .queued
+                    $0.uploadComponents[index].lastError = ""
+                    $0.uploadComponents[index].progress = 0
+                }
+            }
+        }
+    }
+
     func failedActiveUploadComponents() -> [CVRUploadComponentRecord] {
         state.uploadComponents.filter { $0.state == .failed || $0.state == .needsUserAction }
     }

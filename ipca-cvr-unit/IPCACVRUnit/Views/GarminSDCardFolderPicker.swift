@@ -33,6 +33,7 @@ struct GarminSDCardFolderPicker: UIViewControllerRepresentable {
                 onCancel()
                 return
             }
+            _ = url.startAccessingSecurityScopedResource()
             onPick(url)
         }
 

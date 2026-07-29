@@ -40,9 +40,7 @@
 		100000000000000000000025 /* G3XFlightStreamParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* G3XFlightStreamParser.swift */; };
 		100000000000000000000026 /* GarminCsvClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* GarminCsvClassifier.swift */; };
 		100000000000000000000027 /* GarminCsvVaultModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* GarminCsvVaultModels.swift */; };
-		100000000000000000000028 /* GarminCsvVaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* GarminCsvVaultStore.swift */; };
-		100000000000000000000029 /* GarminSDCardRecoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* GarminSDCardRecoveryService.swift */; };
-		10000000000000000000002A /* GarminCsvSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* GarminCsvSyncManager.swift */; };
+		10000000000000000000002C /* GarminRecoveryServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* GarminRecoveryServices.swift */; };
 		10000000000000000000002B /* GarminSDCardFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* GarminSDCardFolderPicker.swift */; };
 /* End PBXBuildFile section */
 
@@ -82,10 +80,8 @@
 		200000000000000000000027 /* G3XFlightStreamParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G3XFlightStreamParser.swift; sourceTree = "<group>"; };
 		200000000000000000000028 /* GarminCsvClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminCsvClassifier.swift; sourceTree = "<group>"; };
 		200000000000000000000029 /* GarminCsvVaultModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminCsvVaultModels.swift; sourceTree = "<group>"; };
-		20000000000000000000002A /* GarminCsvVaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminCsvVaultStore.swift; sourceTree = "<group>"; };
-		20000000000000000000002B /* GarminSDCardRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardRecoveryService.swift; sourceTree = "<group>"; };
-		20000000000000000000002C /* GarminCsvSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminCsvSyncManager.swift; sourceTree = "<group>"; };
 		20000000000000000000002D /* GarminSDCardFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardFolderPicker.swift; sourceTree = "<group>"; };
+		20000000000000000000002E /* GarminRecoveryServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminRecoveryServices.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,9 +142,7 @@
 				200000000000000000000020 /* CVRWorkflowStore.swift */,
 				200000000000000000000026 /* FlightLandingCycleDetector.swift */,
 				200000000000000000000028 /* GarminCsvClassifier.swift */,
-				20000000000000000000002A /* GarminCsvVaultStore.swift */,
-				20000000000000000000002B /* GarminSDCardRecoveryService.swift */,
-				20000000000000000000002C /* GarminCsvSyncManager.swift */,
+				20000000000000000000002E /* GarminRecoveryServices.swift */,
 				20000000000000000000001D /* GPSLocationManager.swift */,
 				200000000000000000000024 /* MissionCatalogStore.swift */,
 				200000000000000000000008 /* NetworkMonitor.swift */,
@@ -301,9 +295,7 @@
 				100000000000000000000025 /* G3XFlightStreamParser.swift in Sources */,
 				100000000000000000000026 /* GarminCsvClassifier.swift in Sources */,
 				100000000000000000000027 /* GarminCsvVaultModels.swift in Sources */,
-				100000000000000000000028 /* GarminCsvVaultStore.swift in Sources */,
-				100000000000000000000029 /* GarminSDCardRecoveryService.swift in Sources */,
-				10000000000000000000002A /* GarminCsvSyncManager.swift in Sources */,
+				10000000000000000000002C /* GarminRecoveryServices.swift in Sources */,
 				10000000000000000000002B /* GarminSDCardFolderPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

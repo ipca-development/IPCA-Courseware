@@ -72,8 +72,8 @@ struct IPCACVRUnitApp: App {
                     )
                     coordinator.appBecameActive()
                 }
-                .onChange(of: scenePhase) { _, phase in
-                    switch phase {
+                .onChange(of: scenePhase) {
+                    switch scenePhase {
                     case .background:
                         coordinator.appEnteredBackground()
                     case .active:

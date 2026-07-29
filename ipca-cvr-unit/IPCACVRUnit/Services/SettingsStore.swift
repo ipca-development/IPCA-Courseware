@@ -92,9 +92,15 @@ final class SettingsStore: ObservableObject {
     }
 
     func setGarminSDCardFolder(_ url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
         do {
             let bookmark = try url.bookmarkData(
-                options: [],
+                options: .minimalBookmark,
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
@@ -117,10 +123,39 @@ final class SettingsStore: ObservableObject {
         var stale = false
         return try? URL(
             resolvingBookmarkData: bookmark,
-            options: [],
+            options: [.withoutImplicitStartAccessing],
             relativeTo: nil,
             bookmarkDataIsStale: &stale
         )
+    }
+
+    var garminSDCardBookmarkIsStale: Bool {
+        guard let bookmark = garminSDCardBookmarkData else { return false }
+        var stale = false
+        _ = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withoutImplicitStartAccessing],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        )
+        return stale
+    }
+
+    struct GarminSDCardAccess {
+        let url: URL
+        let stop: () -> Void
+
+        func stopAccess() {
+            stop()
+        }
+    }
+
+    func beginGarminSDCardAccess() -> GarminSDCardAccess? {
+        guard let url = resolvedGarminSDCardRootURL() else { return nil }
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        return GarminSDCardAccess(url: url) {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 
     var normalizedServerURL: URL? {

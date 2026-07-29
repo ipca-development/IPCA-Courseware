@@ -7,28 +7,32 @@ struct ContentView: View {
     @State private var showAdminUnlock = false
 
     var body: some View {
-        Group {
+        ZStack {
+            OperationalTabsView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                .allowsHitTesting(!adminUnlocked)
+                .accessibilityHidden(adminUnlocked)
+
             if adminUnlocked {
                 adminTabs
-            } else {
-                OperationalTabsView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: adminUnlocked)
         .background(IPCATheme.pageBackground.ignoresSafeArea())
-        .onChange(of: settings.isSimulationModeEnabled) { _, enabled in
-            if enabled {
+        .onChange(of: settings.isSimulationModeEnabled) {
+            if settings.isSimulationModeEnabled {
                 adminUnlocked = false
             }
         }
-        .onChange(of: showAdminUnlock) { _, presented in
-            if presented {
+        .onChange(of: showAdminUnlock) {
+            if showAdminUnlock {
                 adminPIN = ""
             }
         }
         .sheet(isPresented: $showAdminUnlock) {
             AdminUnlockView(adminPIN: $adminPIN, adminUnlocked: $adminUnlocked)
-                .onChange(of: adminUnlocked) { _, unlocked in
-                    if unlocked {
+                .onChange(of: adminUnlocked) {
+                    if adminUnlocked {
                         adminPIN = ""
                         showAdminUnlock = false
                     }
@@ -178,6 +182,7 @@ private struct AdminWorkflowArchiveDetailView: View {
 
 private struct ExitAdminView: View {
     @Binding var adminUnlocked: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 18) {
@@ -193,7 +198,13 @@ private struct ExitAdminView: View {
                 .foregroundStyle(IPCATheme.secondaryText)
                 .padding(.horizontal)
             Button("Exit Admin Mode", role: .destructive) {
-                adminUnlocked = false
+                if reduceMotion {
+                    adminUnlocked = false
+                } else {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        adminUnlocked = false
+                    }
+                }
             }
             .buttonStyle(.borderedProminent)
         }
@@ -345,7 +356,7 @@ private struct AdminSettingsView: View {
                         step: 50
                     )
                     LabeledContent("Local vault files", value: "\(garminVault.records.count)")
-                    Text("One-time setup: choose the Garmin SD card root or data_log folder in Files. The Garmin Recovery tab scans automatically and imports data-rich CSV files only.")
+                    Text("One-time setup: with the SD card inserted, choose the card root or its data_log folder in Files. If scans fail later, re-select the folder after reinserting the card.")
                         .font(.caption)
                         .foregroundStyle(IPCATheme.secondaryText)
                 }

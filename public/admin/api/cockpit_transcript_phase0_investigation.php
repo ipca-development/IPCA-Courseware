@@ -34,22 +34,52 @@ try {
         phase0_api_json(200, array('ok' => true, 'hallucination_history' => $service->searchHallucinationHistory()));
     }
 
+    $verifyUuid = trim((string)($_GET['verify_persistence'] ?? ''));
+    if ($verifyUuid !== '') {
+        $report = $service->verifyProbePersistence($verifyUuid);
+        phase0_api_json(!empty($report['ok']) ? 200 : 500, array('ok' => !empty($report['ok']), 'verification' => $report));
+    }
+
     $recordingId = (int)($_GET['recording_id'] ?? $_GET['id'] ?? 0);
     $probeProvider = filter_var($_GET['probe_provider'] ?? '0', FILTER_VALIDATE_BOOLEAN);
     $probeChunk = (int)($_GET['probe_chunk'] ?? 0);
 
     if ($probeProvider && $recordingId > 0) {
-        $report = $service->runMandatoryProviderProbe($recordingId, $probeChunk, true);
+        // API default: filesystem evidence only unless persist=1 explicitly requested.
+        $persistMode = filter_var($_GET['persist'] ?? '0', FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+        $persistFallback = filter_var($_GET['persist_fallback'] ?? '0', FILTER_VALIDATE_BOOLEAN);
+
+        $report = $service->runMandatoryProviderProbe(
+            $recordingId,
+            $probeChunk,
+            true,
+            'storage/cockpit_recorder/phase0_evidence',
+            $persistMode,
+            $persistFallback
+        );
         if (!filter_var($_GET['include_primary_raw'] ?? '0', FILTER_VALIDATE_BOOLEAN)) {
             unset($report['primary_raw_json']);
         }
-        phase0_api_json(!empty($report['ok']) ? 200 : 500, $report);
+
+        $httpCode = 200;
+        if (!empty($report['ok'])) {
+            if ($persistMode === 1) {
+                $persist = is_array($report['persistence'] ?? null) ? $report['persistence'] : array();
+                if (($persist['typed_persistence_succeeded'] ?? false) !== true) {
+                    $httpCode = 500;
+                }
+            }
+        } else {
+            $httpCode = 500;
+        }
+
+        phase0_api_json($httpCode, $report);
     }
 
     if ($recordingId <= 0) {
         phase0_api_json(400, array(
             'ok' => false,
-            'error' => 'recording_id required. Actions: find-affected, hallucination-search, or probe_provider=1.',
+            'error' => 'recording_id required. Actions: find-affected, hallucination-search, probe_provider=1, verify_persistence=UUID.',
         ));
     }
 

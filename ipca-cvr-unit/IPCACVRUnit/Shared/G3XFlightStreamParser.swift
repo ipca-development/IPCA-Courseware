@@ -83,16 +83,64 @@ enum G3XFlightStreamParser {
     static func parsePreview(fileURL: URL, maxBytes: Int = 256 * 1024) throws -> (metadata: G3XFlightStreamMetadata, headers: [String]) {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
-        let prefix = try handle.read(upToCount: maxBytes) ?? Data()
+        var prefix = try handle.read(upToCount: maxBytes) ?? Data()
+        if prefix.starts(with: [0xEF, 0xBB, 0xBF]) {
+            prefix = Data(prefix.dropFirst(3))
+        }
         guard let text = String(data: prefix, encoding: .utf8) else {
             throw G3XParserError.invalidFormat("Garmin CSV is not valid UTF-8 text.")
         }
-        let parsed = try parse(text: text)
-        let headerLine = text.split(whereSeparator: \.isNewline).dropFirst().first.map(String.init) ?? ""
-        let headers = parseCSVLine(headerLine).map {
+        return try parseHeaderPreview(text: text)
+    }
+
+    private static func parseHeaderPreview(text: String) throws -> (metadata: G3XFlightStreamMetadata, headers: [String]) {
+        let lines = normalizedLines(text)
+        guard let metaLine = lines.first else {
+            throw G3XParserError.invalidFormat("File is empty.")
+        }
+
+        let aircraftIdent = captureQuotedValue(in: metaLine, key: "aircraft_ident")
+            ?? captureQuotedValue(in: metaLine, key: "airframe_name")
+            ?? ""
+        let product = captureQuotedValue(in: metaLine, key: "product") ?? ""
+        guard metaLine.contains("#airframe_info") || !aircraftIdent.isEmpty else {
+            throw G3XParserError.invalidFormat("Missing Garmin #airframe_info header.")
+        }
+        guard lines.count >= 3 else {
+            throw G3XParserError.invalidFormat("Garmin CSV header rows are missing.")
+        }
+
+        let firstHeaders = normalizeHeaderLine(lines[1])
+        let aliasHeaders = normalizeHeaderLine(lines[2])
+        guard !firstHeaders.isEmpty else {
+            throw G3XParserError.invalidFormat("Could not read Garmin column headers.")
+        }
+        let importProfile = detectImportProfile(headers: firstHeaders, aliases: aliasHeaders)
+        let headers = importProfile == "garmin_g1000nxi" ? aliasHeaders : firstHeaders
+        let metadata = G3XFlightStreamMetadata(
+            aircraftIdent: aircraftIdent,
+            product: product,
+            importProfile: importProfile,
+            startUtc: nil,
+            endUtc: nil,
+            rowCount: 0
+        )
+        return (metadata, headers)
+    }
+
+    private static func normalizedLines(_ text: String) -> [String] {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+    }
+
+    private static func normalizeHeaderLine(_ line: String) -> [String] {
+        parseCSVLine(line).map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         }
-        return (parsed.metadata, headers)
+        .filter { !$0.isEmpty }
     }
 
     static func rowUtcDate(from row: [String: String]) -> Date? {

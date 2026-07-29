@@ -18,7 +18,9 @@ enum GarminCsvClassifier {
     static func classify(headers: [String]) -> GarminCsvClassification {
         let normalized = Set(headers.map(normalizeHeader).filter { !$0.isEmpty })
 
-        let hasTime = hasAny(normalized, candidates: ["dateyyyy-mm-dd", "lcldate", "utctimehhmmss", "utctime", "timestamp", "time"])
+        let hasTime = hasAny(normalized, candidates: [
+            "dateyyyy-mm-dd", "lcldate", "lcltime", "timehhmmss", "utctimehhmmss", "utctime", "timestamp", "time"
+        ])
         let hasLat = hasAny(normalized, candidates: ["latitudedeg", "latitude", "lat"])
         let hasLon = hasAny(normalized, candidates: ["longitudedeg", "longitude", "lon", "lng"])
         let hasGps = hasLat && hasLon
@@ -29,6 +31,8 @@ enum GarminCsvClassifier {
         let hasFuelQty = hasAny(normalized, candidates: ["fuelqtygal", "fqty1", "fuelquantity", "fuelremaining"])
         let hasAttitude = hasAny(normalized, candidates: ["pitchdeg", "rolldeg", "pitch", "roll"])
         let hasAirspeed = hasAny(normalized, candidates: ["indicatedairspeedkt", "trueairspeedkt", "ias", "tas", "airspeed"])
+        let hasOil = hasAny(normalized, candidates: ["oilpress", "e1oilp", "oiltemp", "e1oilt", "oilpressure"])
+        let hasManifold = hasAny(normalized, candidates: ["manifoldpress", "e1map", "map"])
 
         if !hasTime || !hasGps {
             return GarminCsvClassification(
@@ -38,9 +42,9 @@ enum GarminCsvClassifier {
             )
         }
 
-        let hasAvionics = hasRpm || hasAirframeHours || hasEngineHours || hasFuelFlow || hasFuelQty || hasAttitude || hasAirspeed
+        let hasAvionics = hasRpm || hasAirframeHours || hasEngineHours || hasFuelFlow || hasFuelQty || hasAttitude || hasAirspeed || hasOil || hasManifold
 
-        if hasRpm && (hasAirframeHours || hasEngineHours || hasFuelFlow || hasAttitude || hasAirspeed) {
+        if hasRpm && (hasAirframeHours || hasEngineHours || hasFuelFlow || hasAttitude || hasAirspeed || hasOil || hasManifold) {
             return GarminCsvClassification(
                 dataLogType: .fullAvionics,
                 isDataRich: true,

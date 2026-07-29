@@ -38,8 +38,10 @@ struct GarminCsvVaultIndex: Codable, Equatable {
 struct GarminSDCardScanSummary: Equatable {
     var scannedAt: Date
     var cardAvailable: Bool
+    var csvFilesScanned: Int
     var dataRichFound: Int
     var gpsOnlySkipped: Int
+    var unreadableFiles: Int
     var alreadyKnown: Int
     var imported: Int
     var matchedFlightRecord: Bool

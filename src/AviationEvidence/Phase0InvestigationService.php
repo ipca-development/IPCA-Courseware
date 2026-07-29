@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../CockpitRecorderService.php';
 require_once __DIR__ . '/../openai.php';
+require_once __DIR__ . '/EvidenceSchema.php';
+require_once __DIR__ . '/ProviderRunPersister.php';
+require_once __DIR__ . '/Phase0PersistenceVerifier.php';
 
 final class Phase0InvestigationService
 {
@@ -169,8 +172,15 @@ final class Phase0InvestigationService
      *
      * @return array<string,mixed>
      */
-    public function runMandatoryProviderProbe(int $recordingId, int $chunkIndex, bool $saveEvidence = true, string $saveDir = 'storage/cockpit_recorder/phase0_evidence'): array
-    {
+    public function runMandatoryProviderProbe(
+        int $recordingId,
+        int $chunkIndex,
+        bool $saveEvidence = true,
+        string $saveDir = 'storage/cockpit_recorder/phase0_evidence',
+        int $persistMode = 0,
+        bool $persistFallbackFilesystem = false
+    ): array {
+        $probeExecutionUuid = self::uuid();
         $recording = $this->recorderService->recordingByAnyId((string)$recordingId);
         if (!is_array($recording)) {
             return array('ok' => false, 'error' => 'Recording not found.');
@@ -204,6 +214,12 @@ final class Phase0InvestigationService
         if ($chunkAudioPath === null) {
             return array('ok' => false, 'error' => 'Failed to extract chunk audio via ffmpeg.');
         }
+
+        $sourceAudioSha256 = hash_file('sha256', $audioPath) ?: '';
+        $chunkAudioSha256 = hash_file('sha256', $chunkAudioPath) ?: '';
+        $chunkByteLength = is_file($chunkAudioPath) ? (int)filesize($chunkAudioPath) : null;
+        $chunkStartTimeMs = (int)round($start * 1000.0);
+        $chunkDurationMs = (int)round($duration * 1000.0);
 
         $model = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: 'gpt-4o-transcribe'));
         if ($model === '') {
@@ -315,12 +331,15 @@ final class Phase0InvestigationService
         $report = array(
             'ok' => is_array($primary) && !empty($primary['ok']),
             'generated_at' => gmdate('c'),
+            'probe_execution_uuid' => $probeExecutionUuid,
             'recording_id' => $recordingId,
             'chunk_index' => $chunkIndex,
             'chunk_audio' => array(
-                'source_sha256' => hash_file('sha256', $audioPath),
+                'source_sha256' => $sourceAudioSha256,
+                'chunk_sha256' => $chunkAudioSha256,
                 'chunk_start_seconds' => $start,
                 'chunk_duration_seconds' => $duration,
+                'chunk_byte_length' => $chunkByteLength,
             ),
             'probe_runs' => array_map(static function (array $run): array {
                 $copy = $run;
@@ -333,32 +352,150 @@ final class Phase0InvestigationService
             'pass_4b_detector_priority_evidence' => self::pass4bDetectorNotes($segmentTiming, $primary),
         );
 
-        if ($saveEvidence && is_array($primary) && is_array($primary['raw_json'] ?? null)) {
+        $evidenceFilesByLabel = array();
+
+        if ($saveEvidence) {
             $absDir = str_starts_with($saveDir, '/') ? $saveDir : CockpitRecorderService::projectRoot() . '/' . ltrim($saveDir, '/');
             if (!is_dir($absDir)) {
                 @mkdir($absDir, 0775, true);
             }
             $base = $absDir . '/recording_' . $recordingId . '_chunk_' . $chunkIndex . '_' . gmdate('Ymd_His');
             file_put_contents($base . '_report.json', json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-            file_put_contents($base . '_provider_raw.json', json_encode($primary['raw_json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $evidenceFilesByLabel['report'] = $base . '_report.json';
+            if (is_array($primary) && is_array($primary['raw_json'] ?? null)) {
+                file_put_contents($base . '_provider_raw.json', json_encode($primary['raw_json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                $evidenceFilesByLabel['primary_raw'] = $base . '_provider_raw.json';
+            }
             foreach ($probeRuns as $run) {
                 if (!is_array($run['raw_json'] ?? null)) {
                     continue;
                 }
                 $label = preg_replace('/[^a-z0-9_]+/i', '_', (string)($run['label'] ?? 'probe')) ?? 'probe';
-                file_put_contents($base . '_' . $label . '_raw.json', json_encode($run['raw_json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                $path = $base . '_' . $label . '_raw.json';
+                file_put_contents($path, json_encode($run['raw_json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                $evidenceFilesByLabel[$label] = $path;
             }
             $report['evidence_files'] = array(
                 'report' => $base . '_report.json',
                 'primary_raw' => $base . '_provider_raw.json',
-            );
+            ) + $evidenceFilesByLabel;
         }
 
         if (is_array($primary) && is_array($primary['raw_json'] ?? null)) {
             $report['primary_raw_json'] = $primary['raw_json'];
         }
 
+        $report['persistence'] = $this->maybePersistProbeExecution(
+            $persistMode,
+            $persistFallbackFilesystem,
+            $recordingId,
+            $chunkIndex,
+            $probeExecutionUuid,
+            $sourceAudioSha256,
+            $chunkAudioSha256,
+            $chunkStartTimeMs,
+            $chunkDurationMs,
+            $chunkByteLength,
+            $probeRuns,
+            $evidenceFilesByLabel,
+            $prompt
+        );
+
         return $report;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $probeRuns
+     * @param array<string,string> $evidenceFilesByLabel
+     * @return array<string,mixed>
+     */
+    private function maybePersistProbeExecution(
+        int $persistMode,
+        bool $persistFallbackFilesystem,
+        int $recordingId,
+        int $chunkIndex,
+        string $probeExecutionUuid,
+        string $sourceAudioSha256,
+        string $chunkAudioSha256,
+        int $chunkStartTimeMs,
+        int $chunkDurationMs,
+        ?int $chunkByteLength,
+        array $probeRuns,
+        array $evidenceFilesByLabel,
+        string $promptText
+    ): array {
+        if ($persistMode !== 1) {
+            return array(
+                'enabled' => false,
+                'mode' => 'filesystem_only',
+                'typed_persistence_attempted' => false,
+                'typed_persistence_succeeded' => false,
+            );
+        }
+
+        if (!EvidenceSchema::persistenceReady($this->pdo)) {
+            if ($persistFallbackFilesystem) {
+                return array(
+                    'enabled' => true,
+                    'mode' => 'filesystem_only_fallback',
+                    'typed_persistence_attempted' => false,
+                    'typed_persistence_succeeded' => false,
+                    'warning' => 'Evidence schema not ready. Applied filesystem-only fallback because persist_fallback was requested.',
+                    'schema_version' => null,
+                );
+            }
+            return array(
+                'enabled' => true,
+                'mode' => 'failed_schema_missing',
+                'typed_persistence_attempted' => true,
+                'typed_persistence_succeeded' => false,
+                'error' => 'Evidence schema not ready. Apply ' . EvidenceSchema::MIGRATION_FILE
+                    . ' or rerun with persist=0 (filesystem only).',
+            );
+        }
+
+        try {
+            $persister = ProviderRunPersister::fromPdo($this->pdo);
+            $result = $persister->persistProbeExecution(
+                $recordingId,
+                $chunkIndex,
+                $probeExecutionUuid,
+                $sourceAudioSha256,
+                $chunkAudioSha256,
+                $chunkStartTimeMs,
+                $chunkDurationMs,
+                $chunkByteLength,
+                $probeRuns,
+                $evidenceFilesByLabel,
+                $promptText
+            );
+
+            $verifier = Phase0PersistenceVerifier::fromPdo($this->pdo);
+            $verification = $verifier->verifyProbeExecution($probeExecutionUuid, $evidenceFilesByLabel);
+
+            return array(
+                'enabled' => true,
+                'mode' => 'typed_and_filesystem',
+                'typed_persistence_attempted' => true,
+                'typed_persistence_succeeded' => true,
+                'probe_execution_uuid' => $probeExecutionUuid,
+                'processing_run_id' => $result['processing_run_id'] ?? null,
+                'audio_chunk_id' => $result['audio_chunk_id'] ?? null,
+                'schema_version' => $result['schema_version'] ?? EvidenceSchema::SCHEMA_VERSION,
+                'provider_runs' => $result['provider_runs'] ?? array(),
+                'totals' => $result['totals'] ?? array(),
+                'filesystem_evidence_paths' => $evidenceFilesByLabel,
+                'verification' => $verification,
+            );
+        } catch (Throwable $e) {
+            return array(
+                'enabled' => true,
+                'mode' => 'failed',
+                'typed_persistence_attempted' => true,
+                'typed_persistence_succeeded' => false,
+                'error' => $e->getMessage(),
+            );
+        }
     }
 
     /**
@@ -503,7 +640,7 @@ final class Phase0InvestigationService
 
         if ($probeProvider) {
             $targetChunk = $probeChunk >= 0 ? $probeChunk : self::resolveProbeChunk($chunks, $probeChunk);
-            $probeReport = $this->runMandatoryProviderProbe($recordingId, $targetChunk, true);
+            $probeReport = $this->runMandatoryProviderProbe($recordingId, $targetChunk, true, 'storage/cockpit_recorder/phase0_evidence', 0, false);
             $report['provider_probe'] = $probeReport;
             if (!empty($probeReport['three_way_comparison']['inferred_conclusion'])) {
                 $report['conclusions'][] = (string)$probeReport['three_way_comparison']['inferred_conclusion'];
@@ -772,6 +909,9 @@ final class Phase0InvestigationService
             'match_production_request' => $matchProduction,
         );
 
+        $requestStartedAt = microtime(true);
+        $requestStartedIso = gmdate('Y-m-d H:i:s', (int)$requestStartedAt) . '.' . sprintf('%03d', (int)(($requestStartedAt - floor($requestStartedAt)) * 1000));
+
         $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
         curl_setopt_array($ch, array(
             CURLOPT_RETURNTRANSFER => true,
@@ -786,6 +926,10 @@ final class Phase0InvestigationService
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         curl_close($ch);
+
+        $requestCompletedAt = microtime(true);
+        $latencyMs = (int)round(($requestCompletedAt - $requestStartedAt) * 1000.0);
+        $requestCompletedIso = gmdate('Y-m-d H:i:s', (int)$requestCompletedAt) . '.' . sprintf('%03d', (int)(($requestCompletedAt - floor($requestCompletedAt)) * 1000));
 
         $headersRaw = is_string($rawResponse) ? substr($rawResponse, 0, $headerSize) : '';
         $body = is_string($rawResponse) ? substr($rawResponse, $headerSize) : '';
@@ -837,7 +981,26 @@ final class Phase0InvestigationService
             'raw_provider_text' => $rawText,
             'error' => is_array($json) ? ($json['error']['message'] ?? null) : 'non-json response',
             'raw_json' => $json,
+            'request_started_at' => $requestStartedIso,
+            'request_completed_at' => $requestCompletedIso,
+            'latency_ms' => $latencyMs,
         );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function verifyProbePersistence(string $probeExecutionUuid, ?array $filesystemEvidencePaths = null): array
+    {
+        return Phase0PersistenceVerifier::fromPdo($this->pdo)->verifyProbeExecution($probeExecutionUuid, $filesystemEvidencePaths);
+    }
+
+    private static function uuid(): string
+    {
+        $data = random_bytes(16);
+        $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+        $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
     }
 
     /**

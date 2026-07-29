@@ -14,6 +14,16 @@ private func completeSimulationDemo(
     }
 }
 
+@MainActor
+private func operationalToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+    Toggle(isOn: isOn) {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white)
+    }
+    .tint(CVROperationalPalette.success)
+}
+
 struct OperationalTabsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
@@ -74,6 +84,10 @@ struct DispatchWorkflowView: View {
     @State private var isEditingDispatch = false
     @State private var recoveryExportURL: URL?
     @State private var recoveryExportError = ""
+    @State private var repairRefueledSincePreviousFlight = false
+    @State private var repairOilServicedSincePreviousFlight = false
+    @State private var repairOilPercent = 0.0
+    @State private var repairHasOilSelection = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -84,7 +98,9 @@ struct DispatchWorkflowView: View {
                     header(metrics)
                     statusCard(metrics)
                     dispatchTiles(metrics)
+                    dispatchOilUploadSection
                     warningCard
+                    continuityUploadRepairCard
                     actionButtons
                 }
                 .padding(.horizontal, metrics.outerHorizontalPadding)
@@ -92,11 +108,18 @@ struct DispatchWorkflowView: View {
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
+        .onAppear {
+            syncContinuityRepairState()
+        }
+        .onChange(of: workflow.state.activeDispatch?.modifiedAt) {
+            syncContinuityRepairState()
+        }
         .sheet(isPresented: $isEditingDispatch) {
             DispatchEditorView()
                 .environmentObject(workflow)
                 .environmentObject(settings)
                 .environmentObject(missionCatalog)
+                .environmentObject(uploadManager)
                 .presentationDetents([.large])
         }
     }
@@ -160,16 +183,104 @@ struct DispatchWorkflowView: View {
         }
     }
 
+    @ViewBuilder
+    private var dispatchOilUploadSection: some View {
+        if workflow.dispatchUploadVerified() {
+            Text("Oil has been uploaded")
+                .font(.caption.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var continuityUploadRepairCard: some View {
+        if workflow.dispatchContinuityUploadIssue() != nil || workflow.canRepairFailedDispatchUpload {
+            VStack(alignment: .leading, spacing: 10) {
+                if workflow.dispatchContinuityUploadIssue() != nil {
+                    Text("CONTINUITY CONFIRMATION REQUIRED")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.1)
+                        .foregroundStyle(CVROperationalPalette.warning)
+                    Text("The server rejected Dispatch because fuel or oil changed more than 20% from the previous flight. Adjust oil if needed, confirm servicing below, then retry upload.")
+                        .font(.caption)
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                } else if workflow.canRepairFailedDispatchUpload {
+                    Text("DISPATCH UPLOAD REPAIR")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.1)
+                        .foregroundStyle(CVROperationalPalette.warning)
+                    Text("Adjust dispatch oil if the reading was wrong, then retry upload.")
+                        .font(.caption)
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                }
+
+                if !workflow.dispatchUploadVerified() {
+                    HStack {
+                        Spacer(minLength: 0)
+                        CVRFluidCylinderPicker(
+                            title: "OIL",
+                            unit: "%",
+                            value: $repairOilPercent,
+                            hasSelection: $repairHasOilSelection,
+                            maxValue: 100,
+                            warningThreshold: nil,
+                            fillColor: CVROperationalPalette.standby,
+                            warningColor: CVROperationalPalette.standby
+                        )
+                        .frame(width: 132)
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                if showsRepairRefuelConfirmation {
+                    operationalToggle("Aircraft was refueled before this flight", isOn: $repairRefueledSincePreviousFlight)
+                }
+                if showsRepairOilServiceConfirmation {
+                    operationalToggle("Oil was serviced before this flight", isOn: $repairOilServicedSincePreviousFlight)
+                }
+                CVROperationalActionButton(
+                    title: "CONFIRM & RETRY DISPATCH UPLOAD",
+                    subtitle: "Apply changes and resend",
+                    color: CVROperationalPalette.success
+                ) {
+                    applyContinuityRepairAndRetryUpload()
+                }
+            }
+            .padding(14)
+            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.warning.opacity(0.55), lineWidth: 1))
+        }
+    }
+
     private var actionButtons: some View {
         VStack(spacing: 8) {
             if workflow.dispatchUploadFailure() != nil || workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
-                CVROperationalActionButton(
-                    title: "FIX AIRCRAFT & RETRY UPLOAD",
-                    subtitle: settings.selectedAircraft?.registration ?? "Select enrolled aircraft in Admin",
-                    color: CVROperationalPalette.secondaryBlue
-                ) {
-                    _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
-                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                if workflow.canRepairFailedDispatchUpload {
+                    CVROperationalActionButton(
+                        title: "EDIT DISPATCH DETAILS",
+                        subtitle: "Adjust meters, fuel, oil, or crew",
+                        color: CVROperationalPalette.secondaryBlue
+                    ) {
+                        isEditingDispatch = true
+                    }
+                }
+                if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
+                    CVROperationalActionButton(
+                        title: "FIX AIRCRAFT & RETRY UPLOAD",
+                        subtitle: settings.selectedAircraft?.registration ?? "Select enrolled aircraft in Admin",
+                        color: CVROperationalPalette.secondaryBlue
+                    ) {
+                        _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    }
+                } else if workflow.dispatchContinuityUploadIssue() == nil {
+                    CVROperationalActionButton(title: "RETRY DISPATCH UPLOAD", subtitle: "Resend failed Dispatch metadata", color: CVROperationalPalette.warning) {
+                        workflow.requeueFailedUploads(componentTypes: ["dispatch_metadata"])
+                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    }
                 }
                 if !workflow.failedActiveUploadComponents().isEmpty {
                     CVROperationalActionButton(title: "RETRY ALL FAILED UPLOADS", subtitle: "Dispatch, events, closure, Garmin", color: CVROperationalPalette.warning) {
@@ -216,10 +327,10 @@ struct DispatchWorkflowView: View {
                     }
                 }
             } else {
-                if workflow.isDispatchLocked {
+                if workflow.isDispatchLocked && workflow.dispatchUploadFailure() == nil {
                     CVROperationalActionButton(title: "Dispatch Confirmed", subtitle: "Flight Record Created", color: CVROperationalPalette.success) {}
-                } else {
-                    CVROperationalActionButton(title: "Edit Dispatch", subtitle: "Crew / meters", color: CVROperationalPalette.secondaryBlue) {
+                } else if !workflow.isDispatchLocked {
+                    CVROperationalActionButton(title: "Edit Dispatch", subtitle: "Crew / meters / oil", color: CVROperationalPalette.secondaryBlue) {
                         isEditingDispatch = true
                     }
                     consentButtons
@@ -293,7 +404,55 @@ struct DispatchWorkflowView: View {
     }
 
     private var canConfirmDispatch: Bool {
-        workflow.dispatchMissingItems.isEmpty || workflow.isDispatchVerified
+        workflow.dispatchMissingItems.isEmpty
+    }
+
+    private var showsRepairRefuelConfirmation: Bool {
+        switch workflow.dispatchContinuityUploadIssue() {
+        case .refueling:
+            return true
+        case .oilServicing, nil:
+            return workflow.dispatchMissingItems.contains(where: { $0.contains("CONFIRM AIRCRAFT WAS REFUELED") })
+        }
+    }
+
+    private var showsRepairOilServiceConfirmation: Bool {
+        switch workflow.dispatchContinuityUploadIssue() {
+        case .oilServicing:
+            return true
+        case .refueling, nil:
+            return workflow.dispatchMissingItems.contains(where: { $0.contains("CONFIRM OIL WAS SERVICED") })
+        }
+    }
+
+    private func syncContinuityRepairState() {
+        guard let dispatch = workflow.state.activeDispatch else { return }
+        repairRefueledSincePreviousFlight = dispatch.refueledSincePreviousFlight ?? false
+        repairOilServicedSincePreviousFlight = dispatch.oilServicedSincePreviousFlight ?? false
+        if let oil = dispatch.oilPercentage {
+            repairOilPercent = min(max(Double(oil), 0), 100)
+            repairHasOilSelection = true
+        } else {
+            repairOilPercent = 50
+            repairHasOilSelection = false
+        }
+    }
+
+    private func applyContinuityRepairAndRetryUpload() {
+        guard workflow.updateActiveDispatchForUploadRepair({ dispatch in
+            if repairHasOilSelection {
+                dispatch.oilPercentage = Int(repairOilPercent.rounded())
+            }
+            if showsRepairRefuelConfirmation {
+                dispatch.refueledSincePreviousFlight = repairRefueledSincePreviousFlight
+            }
+            if showsRepairOilServiceConfirmation {
+                dispatch.oilServicedSincePreviousFlight = repairOilServicedSincePreviousFlight
+            }
+        }) else {
+            return
+        }
+        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
     }
 
     private var aircraftRegistration: String {
@@ -1332,6 +1491,7 @@ struct DispatchEditorView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var missionCatalog: MissionCatalogStore
+    @EnvironmentObject private var uploadManager: UploadManager
     @Environment(\.dismiss) private var dismiss
     @State private var missionCode = ""
     @State private var selectedMissionCode = ""
@@ -1432,15 +1592,11 @@ struct DispatchEditorView: View {
                             .padding(10)
                             .background(CVROperationalPalette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                         }
-                        if requiresRefuelConfirmation {
-                            Toggle("Aircraft was refueled before this flight", isOn: $refueledSincePreviousFlight)
-                                .font(.caption.weight(.bold))
-                                .tint(CVROperationalPalette.success)
+                        if requiresRefuelConfirmation || workflow.dispatchContinuityUploadIssue() == .refueling {
+                            operationalToggle("Aircraft was refueled before this flight", isOn: $refueledSincePreviousFlight)
                         }
-                        if requiresOilServiceConfirmation {
-                            Toggle("Oil was serviced before this flight", isOn: $oilServicedSincePreviousFlight)
-                                .font(.caption.weight(.bold))
-                                .tint(CVROperationalPalette.success)
+                        if requiresOilServiceConfirmation || workflow.dispatchContinuityUploadIssue() == .oilServicing {
+                            operationalToggle("Oil was serviced before this flight", isOn: $oilServicedSincePreviousFlight)
                         }
                     }
 
@@ -1491,6 +1647,9 @@ struct DispatchEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         save()
+                        if workflow.canRepairFailedDispatchUpload {
+                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        }
                         dismiss()
                     }
                 }
@@ -1700,15 +1859,24 @@ struct DispatchEditorView: View {
     }
 
     private func save() {
-        workflow.updateActiveDispatch { dispatch in
+        let applyChanges = { (dispatch: inout CVRDispatchRecord) in
             let selectedCode = selectedMissionCode.trimmingCharacters(in: .whitespacesAndNewlines)
             dispatch.missionCode = (selectedCode.isEmpty ? missionCode : selectedCode).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             dispatch.startingHobbs = Double(startingHobbs)
             dispatch.startingTacho = Double(startingTacho)
             dispatch.fuelOnboard = hasFuelSelection ? Self.gallonText(fuelGallons) : ""
             dispatch.oilPercentage = hasOilSelection ? Int(oilPercent.rounded()) : nil
-            dispatch.refueledSincePreviousFlight = requiresRefuelConfirmation ? refueledSincePreviousFlight : false
-            dispatch.oilServicedSincePreviousFlight = requiresOilServiceConfirmation ? oilServicedSincePreviousFlight : false
+            dispatch.refueledSincePreviousFlight = (requiresRefuelConfirmation || workflow.dispatchContinuityUploadIssue() == .refueling)
+                ? refueledSincePreviousFlight
+                : (dispatch.refueledSincePreviousFlight ?? false)
+            dispatch.oilServicedSincePreviousFlight = (requiresOilServiceConfirmation || workflow.dispatchContinuityUploadIssue() == .oilServicing)
+                ? oilServicedSincePreviousFlight
+                : (dispatch.oilServicedSincePreviousFlight ?? false)
+        }
+        if workflow.canRepairFailedDispatchUpload {
+            _ = workflow.updateActiveDispatchForUploadRepair(applyChanges)
+        } else {
+            workflow.updateActiveDispatch(applyChanges)
         }
     }
 
