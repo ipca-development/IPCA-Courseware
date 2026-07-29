@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CvrDataIntakeReadService.php';
 require_once __DIR__ . '/../../src/CvrIntakeDisplayService.php';
 require_once __DIR__ . '/../../src/CvrIntakeAdminUploadService.php';
+require_once __DIR__ . '/../../src/CvrAudioIntakeMetricsService.php';
 require_once __DIR__ . '/../../src/CvrDeviceEnrollmentService.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
@@ -117,7 +118,10 @@ try {
                 (string)($_POST['started_at_local'] ?? ''),
                 isset($_POST['duration_seconds']) && $_POST['duration_seconds'] !== ''
                     ? (float)$_POST['duration_seconds']
-                    : null
+                    : null,
+                trim((string)($_POST['student_name'] ?? '')),
+                trim((string)($_POST['instructor_name'] ?? '')),
+                trim((string)($_POST['mission_code'] ?? ''))
             );
             $reconstructionNotice = (string)($uploadResult['message'] ?? 'Cockpit Audio uploaded.');
         } elseif ($action === 'retry_reconstruction_bundle') {
@@ -195,6 +199,9 @@ try {
 }
 $dispatch = $intake->dispatchRows();
 $audio = $intake->audioRows();
+if ($audio['available'] && $audio['rows'] !== array()) {
+    $audio['rows'] = (new CvrAudioIntakeMetricsService($pdo))->enrichRows($audio['rows']);
+}
 $audioShortThresholdSeconds = 600;
 $audioShortRowCount = 0;
 foreach ($audio['rows'] as $audioRow) {
@@ -568,9 +575,16 @@ cw_header('Master Logbook');
 .intake-audio-toggle{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:850;cursor:pointer}
 .intake-audio-toggle.is-on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
 .intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
-.intake-table-audio{min-width:760px;font-size:10px}
+.intake-table-audio{min-width:1180px;font-size:10px}
 .intake-table-audio th{font-size:8px;padding:7px 8px}
 .intake-table-audio td{padding:7px 8px;font-size:10px;white-space:nowrap}
+.intake-audio-crew{font-size:10px;line-height:1.35;white-space:normal;min-width:130px}
+.intake-audio-crew-line{color:#334155}
+.intake-audio-mission{font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a}
+.intake-audio-input-mix{display:grid;gap:3px}
+.intake-audio-input-detail{font-size:9px;color:#64748b;font-weight:700;white-space:nowrap}
+.intake-audio-transcript-head{display:flex;align-items:center;gap:6px}
+.intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums}
 .intake-audio-received{font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap}
 .intake-audio-start{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;font-weight:700}
 .intake-audio-duration{font-size:10px;font-variant-numeric:tabular-nums;font-weight:800;color:#0f172a}
@@ -854,6 +868,9 @@ cw_header('Master Logbook');
           </label>
           <label class="intake-field"><span>Recording start (local)</span><input class="intake-select" type="datetime-local" name="started_at_local" required></label>
           <label class="intake-field"><span>Duration (seconds, optional)</span><input class="intake-select" type="number" min="0" step="1" name="duration_seconds" placeholder="Auto if unknown"></label>
+          <label class="intake-field"><span>Student name</span><input class="intake-select" type="text" name="student_name" placeholder="Required for manual intake"></label>
+          <label class="intake-field"><span>Instructor name</span><input class="intake-select" type="text" name="instructor_name" placeholder="Required for manual intake"></label>
+          <label class="intake-field"><span>Mission code</span><input class="intake-select" type="text" name="mission_code" placeholder="e.g. 1-2-5"></label>
           <label class="intake-field"><span>Audio file</span><input class="intake-select" type="file" name="cockpit_audio" accept=".m4a,.mp4,.wav,.aac,audio/*" required></label>
           <div><button class="intake-button" type="submit">Upload Cockpit Audio</button></div>
         </div>
@@ -866,7 +883,7 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap intake-audio-table" data-audio-table data-hide-short="true" data-audio-total="<?= count($audio['rows']) ?>" data-audio-short="<?= (int)$audioShortRowCount ?>">
         <table class="intake-table intake-table-audio">
-          <thead><tr><th>Received</th><th></th><th>Aircraft</th><th>Start</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>Error</th></tr></thead>
+          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($audio['rows'] as $row): ?>
             <?php
@@ -874,15 +891,21 @@ cw_header('Master Logbook');
               $tail = (string)($row['aircraft_registration'] ?? '');
               $durationSeconds = (float)($row['duration_seconds'] ?? 0);
               $isShortRecording = $durationSeconds > 0 && $durationSeconds < $audioShortThresholdSeconds;
-              $inputPill = cvr_intake_audio_input_pill($row['input_device'] ?? '');
+              $inputMix = is_array($row['intake_input_mix'] ?? null) ? $row['intake_input_mix'] : array();
+              $inputMixClass = (($inputMix['dominant'] ?? '') === 'usb') ? 'intake-input-good' : 'intake-input-bad';
               $audioError = cvr_intake_audio_relevant_error($row['error_message'] ?? '');
               $recordingId = (int)($row['id'] ?? 0);
               $transcriptionStatus = strtolower(trim((string)($row['transcription_status'] ?? '')));
               $canOpenTranscript = $recordingId > 0 && $transcriptionStatus === 'ready';
               $infoTooltip = cvr_intake_audio_info_tooltip($row);
+              $crewLines = is_array($row['intake_crew_lines'] ?? null) ? $row['intake_crew_lines'] : array();
+              $missionCode = trim((string)($row['intake_mission_code'] ?? ''));
+              $sourceLabel = trim((string)($row['intake_source_label'] ?? 'MANUAL'));
+              $sourceClass = trim((string)($row['intake_source_class'] ?? 'intake-source-manual'));
             ?>
             <tr class="<?= $isShortRecording ? 'intake-audio-row-short' : '' ?>" data-audio-duration-seconds="<?= cvr_intake_h((string)$durationSeconds) ?>">
               <td class="intake-audio-received"><?= cvr_intake_h(cvr_intake_audio_received_label($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></td>
+              <td><span class="intake-status <?= cvr_intake_h($sourceClass) ?>"><?= cvr_intake_h($sourceLabel) ?></span></td>
               <td>
                 <span class="intake-info-tip" tabindex="0" aria-label="Recording details">
                   i
@@ -890,22 +913,48 @@ cw_header('Master Logbook');
                 </span>
               </td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
+              <td class="intake-audio-crew">
+                <?php if ($crewLines === array()): ?>
+                  —
+                <?php else: ?>
+                  <?php foreach ($crewLines as $crewLine): ?>
+                    <div class="intake-audio-crew-line"><?= cvr_intake_h((string)($crewLine['role'] ?? 'Crew')) ?>: <?= cvr_intake_h((string)($crewLine['name'] ?? '')) ?></div>
+                  <?php endforeach; ?>
+                <?php endif; ?>
+              </td>
+              <td class="intake-audio-mission"><?= $missionCode !== '' ? cvr_intake_h($missionCode) : '—' ?></td>
               <td class="intake-audio-start"><?= cvr_intake_h(cvr_intake_audio_start_label($pdo, $row['started_at'] ?? null, $tail)) ?></td>
               <td class="intake-audio-duration"><?= $durationSeconds > 0 ? cvr_intake_h(cvr_intake_duration_hms($durationSeconds)) : '—' ?></td>
-              <td><span class="intake-input-pill <?= cvr_intake_h($inputPill['class']) ?>"><?= cvr_intake_h($inputPill['label']) ?></span></td>
-              <td><?= cvr_intake_badge($row['upload_status'] ?? '') ?></td>
               <td>
-                <div><?= cvr_intake_badge($row['transcription_status'] ?? '') ?> <span class="intake-muted"><?= $transcriptionProgress ?>%</span></div>
-                <div class="intake-progress-bar" style="margin-top:4px"><div class="intake-progress-fill" style="width:<?= $transcriptionProgress ?>%"></div></div>
+                <div class="intake-audio-input-mix">
+                  <span class="intake-input-pill <?= cvr_intake_h($inputMixClass) ?>"><?= cvr_intake_h((string)($inputMix['label'] ?? 'iPhone Mic')) ?></span>
+                  <span class="intake-audio-input-detail"><?= cvr_intake_h((string)($inputMix['detail'] ?? 'USB 0% · iPhone 100%')) ?></span>
+                </div>
+              </td>
+              <td><?= cvr_intake_badge($row['upload_status'] ?? '') ?></td>
+              <td data-audio-recording-id="<?= $recordingId ?>">
+                <div class="intake-audio-transcript-head">
+                  <?php
+                    $transcriptStatusText = trim((string)($row['transcription_status'] ?? ''));
+                    if ($transcriptStatusText === '') {
+                        $transcriptStatusText = 'Unknown';
+                    }
+                  ?>
+                  <span class="intake-status <?= cvr_intake_h(cvr_intake_status_class($transcriptStatusText)) ?>" data-audio-transcription-status><?= cvr_intake_h(strtoupper(str_replace('_', ' ', $transcriptStatusText))) ?></span>
+                  <span class="intake-audio-transcript-progress" data-audio-transcription-progress><?= $transcriptionProgress ?>%</span>
+                </div>
+                <div class="intake-progress-bar" style="margin-top:4px"><div class="intake-progress-fill" data-audio-transcription-fill style="width:<?= $transcriptionProgress ?>%"></div></div>
+              </td>
+              <td>
                 <button
                   class="intake-audio-transcript-btn"
                   type="button"
                   data-audio-transcript-open
                   data-recording-id="<?= $recordingId ?>"
                   <?= $canOpenTranscript ? '' : 'disabled' ?>
-                >Transcript</button>
+                >View Transcript</button>
               </td>
-              <td class="intake-error"><?= $audioError !== '' ? cvr_intake_h($audioError) : '—' ?></td>
+              <td class="intake-error" data-audio-error-cell><?= $audioError !== '' ? cvr_intake_h($audioError) : '—' ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>
@@ -1770,6 +1819,87 @@ cw_header('Master Logbook');
       }
     });
   });
+
+  const audioStatusCells = page.querySelectorAll('[data-audio-recording-id]');
+  if (audioStatusCells.length > 0) {
+    const audioStatusClass = (status) => {
+      const normalized = String(status || '').toLowerCase();
+      if (['ready', 'uploaded', 'received', 'finalized', 'complete', 'completed', 'ok', 'valid', 'active'].includes(normalized)) {
+        return 'intake-status-good';
+      }
+      if (['failed', 'error', 'invalid', 'rejected'].includes(normalized)) {
+        return 'intake-status-bad';
+      }
+      if (normalized === '') {
+        return 'intake-status-muted';
+      }
+      return 'intake-status-pending';
+    };
+    const formatAudioStatusLabel = (status) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      if (normalized === '') {
+        return 'UNKNOWN';
+      }
+      return normalized.replace(/_/g, ' ').toUpperCase();
+    };
+    const pollAudioStatus = async () => {
+      const ids = Array.from(audioStatusCells)
+        .map((cell) => cell.getAttribute('data-audio-recording-id'))
+        .filter((id) => id && id !== '0');
+      if (ids.length === 0) {
+        return;
+      }
+      try {
+        const response = await fetch('/admin/api/cockpit_recorder_intake_audio_status.php?ids=' + encodeURIComponent(ids.join(',')), { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          return;
+        }
+        const byId = {};
+        (payload.recordings || []).forEach((recording) => {
+          byId[String(recording.id)] = recording;
+        });
+        audioStatusCells.forEach((cell) => {
+          const recordingId = cell.getAttribute('data-audio-recording-id');
+          const recording = byId[String(recordingId)];
+          if (!recording) {
+            return;
+          }
+          const progress = Math.max(0, Math.min(100, Number(recording.transcription_progress || 0)));
+          const progressEl = cell.querySelector('[data-audio-transcription-progress]');
+          const fillEl = cell.querySelector('[data-audio-transcription-fill]');
+          const statusEl = cell.querySelector('[data-audio-transcription-status]');
+          if (progressEl) {
+            progressEl.textContent = progress + '%';
+          }
+          if (fillEl) {
+            fillEl.style.width = progress + '%';
+          }
+          if (statusEl) {
+            const status = String(recording.transcription_status || '');
+            statusEl.textContent = formatAudioStatusLabel(status);
+            statusEl.className = 'intake-status ' + audioStatusClass(status);
+          }
+          const row = cell.closest('tr');
+          if (!row) {
+            return;
+          }
+          const transcriptButton = row.querySelector('[data-audio-transcript-open]');
+          if (transcriptButton) {
+            transcriptButton.disabled = !recording.can_view_transcript;
+          }
+          const errorCell = row.querySelector('[data-audio-error-cell]');
+          if (errorCell) {
+            errorCell.textContent = recording.error_message || '—';
+          }
+        });
+      } catch (error) {
+        // Ignore transient polling failures.
+      }
+    };
+    pollAudioStatus();
+    window.setInterval(pollAudioStatus, 3000);
+  }
 })();
 </script>
 <?php cw_footer(); ?>

@@ -33,8 +33,26 @@ $uploadSource = file_get_contents(__DIR__ . '/../src/CvrIntakeAdminUploadService
 if ($uploadSource === false
     || !str_contains($uploadSource, 'uploadGarminCsv')
     || !str_contains($uploadSource, 'uploadAudio')
+    || !str_contains($uploadSource, 'CvrAudioIntakeMetricsService')
     || !str_contains($uploadSource, "'admin_manual'")) {
     fwrite(STDERR, "CvrIntakeAdminUploadService contract failed.\n");
+    exit(1);
+}
+
+$metricsSource = file_get_contents(__DIR__ . '/../src/CvrAudioIntakeMetricsService.php');
+if ($metricsSource === false
+    || !str_contains($metricsSource, 'enrichRows')
+    || !str_contains($metricsSource, 'inputMix')
+    || !str_contains($metricsSource, 'crewLines')) {
+    fwrite(STDERR, "CvrAudioIntakeMetricsService contract failed.\n");
+    exit(1);
+}
+
+$statusApiSource = file_get_contents(__DIR__ . '/../public/admin/api/cockpit_recorder_intake_audio_status.php');
+if ($statusApiSource === false
+    || !str_contains($statusApiSource, 'transcription_progress')
+    || !str_contains($statusApiSource, 'can_view_transcript')) {
+    fwrite(STDERR, "cockpit_recorder_intake_audio_status contract failed.\n");
     exit(1);
 }
 
@@ -47,6 +65,10 @@ if ($pageSource === false
     || !str_contains($pageSource, 'data-audio-short-toggle')
     || !str_contains($pageSource, 'intake-audio-row-short')
     || !str_contains($pageSource, 'cockpit_recorder_intake_transcript.php')
+    || !str_contains($pageSource, 'cockpit_recorder_intake_audio_status.php')
+    || !str_contains($pageSource, 'CvrAudioIntakeMetricsService')
+    || !str_contains($pageSource, 'intake-audio-crew')
+    || !str_contains($pageSource, 'data-audio-transcription-progress')
     || !str_contains($pageSource, 'cvr_intake_audio_relevant_error')) {
     fwrite(STDERR, "master_logbook_intake contract failed.\n");
     exit(1);

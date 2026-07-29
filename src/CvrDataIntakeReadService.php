@@ -100,28 +100,66 @@ final class CvrDataIntakeReadService
         }
 
         $columns = $this->columns($table);
+        $tableAlias = 'r';
         $select = array(
-            $this->columnExpression($columns, array('id'), 'id', '0'),
-            $this->columnExpression($columns, array('recording_uid'), 'recording_uid'),
-            $this->columnExpression($columns, array('aircraft_registration', 'aircraft_ident'), 'aircraft_registration'),
-            $this->columnExpression($columns, array('flight_session_uid', 'session_uuid'), 'session_uuid'),
-            $this->columnExpression($columns, array('started_at'), 'started_at', 'NULL'),
-            $this->columnExpression($columns, array('duration_seconds'), 'duration_seconds', '0'),
-            $this->columnExpression($columns, array('input_device'), 'input_device'),
-            $this->columnExpression($columns, array('original_filename'), 'original_filename'),
-            $this->columnExpression($columns, array('file_size_bytes'), 'file_size_bytes', '0'),
-            $this->columnExpression($columns, array('storage_path'), 'storage_path'),
-            $this->columnExpression($columns, array('upload_status'), 'upload_status'),
-            $this->columnExpression($columns, array('transcription_status'), 'transcription_status'),
-            $this->columnExpression($columns, array('transcription_progress'), 'transcription_progress', '0'),
-            $this->columnExpression($columns, array('error_message'), 'error_message'),
-            $this->columnExpression($columns, array('uploaded_at', 'created_at'), 'received_at', 'NULL'),
-            $this->columnExpression($columns, array('created_at'), 'created_at', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('id'), 'id', '0'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('recording_uid'), 'recording_uid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('aircraft_registration', 'aircraft_ident'), 'aircraft_registration'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('flight_session_uid', 'session_uuid'), 'session_uuid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('started_at'), 'started_at', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('duration_seconds'), 'duration_seconds', '0'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('input_device'), 'input_device'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('intake_source'), 'intake_source'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('intake_mission_code'), 'intake_mission_code'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('intake_crew_json'), 'intake_crew_json', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('original_filename'), 'original_filename'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('file_size_bytes'), 'file_size_bytes', '0'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('storage_path'), 'storage_path'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('recording_events_storage_path'), 'recording_events_storage_path'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('upload_status'), 'upload_status'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('transcription_status'), 'transcription_status'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('transcription_progress'), 'transcription_progress', '0'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('error_message'), 'error_message'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('uploaded_at', 'created_at'), 'received_at', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('created_at'), 'created_at', 'NULL'),
         );
+
+        $dispatchTable = $this->firstExistingTable(array('ipca_cvr_dispatches', 'ipca_cvr_dispatch_records'));
+        $sessionColumn = $this->firstColumn($columns, array('flight_session_uid', 'session_uuid'));
+        if ($dispatchTable !== null && $sessionColumn !== null) {
+            $dispatchColumns = $this->columns($dispatchTable);
+            $dispatchAlias = 'd';
+            $dispatchFlightColumn = $this->firstColumn($dispatchColumns, array('workflow_flight_record_uuid', 'flight_record_uuid'));
+            $missionColumn = $this->firstColumn($dispatchColumns, array('mission_code'));
+            $crewColumn = $this->firstColumn($dispatchColumns, array('crew_json', 'crew'));
+            $receivedColumn = $this->firstColumn($dispatchColumns, array('last_received_at', 'received_at', 'created_at', 'updated_at')) ?? 'id';
+            if ($dispatchFlightColumn !== null && $missionColumn !== null) {
+                $select[] = "(SELECT {$dispatchAlias}." . $this->quoteIdentifier($missionColumn) . "
+                    FROM " . $this->quoteIdentifier($dispatchTable) . " {$dispatchAlias}
+                    WHERE {$dispatchAlias}." . $this->quoteIdentifier($dispatchFlightColumn) . " = {$tableAlias}." . $this->quoteIdentifier($sessionColumn) . "
+                    ORDER BY {$dispatchAlias}." . $this->quoteIdentifier($receivedColumn) . " DESC
+                    LIMIT 1) AS dispatch_mission_code";
+            } else {
+                $select[] = "'' AS dispatch_mission_code";
+            }
+            if ($dispatchFlightColumn !== null && $crewColumn !== null) {
+                $select[] = "(SELECT {$dispatchAlias}." . $this->quoteIdentifier($crewColumn) . "
+                    FROM " . $this->quoteIdentifier($dispatchTable) . " {$dispatchAlias}
+                    WHERE {$dispatchAlias}." . $this->quoteIdentifier($dispatchFlightColumn) . " = {$tableAlias}." . $this->quoteIdentifier($sessionColumn) . "
+                    ORDER BY {$dispatchAlias}." . $this->quoteIdentifier($receivedColumn) . " DESC
+                    LIMIT 1) AS dispatch_crew_json";
+            } else {
+                $select[] = 'NULL AS dispatch_crew_json';
+            }
+        } else {
+            $select[] = "'' AS dispatch_mission_code";
+            $select[] = 'NULL AS dispatch_crew_json';
+        }
+
         $orderColumn = $this->firstColumn($columns, array('uploaded_at', 'created_at', 'id')) ?? 'id';
         $sql = 'SELECT ' . implode(', ', $select)
-            . ' FROM ' . $this->quoteIdentifier($table)
-            . ' ORDER BY ' . $this->quoteIdentifier($orderColumn) . ' DESC'
+            . ' FROM ' . $this->quoteIdentifier($table) . ' ' . $tableAlias
+            . ' ORDER BY ' . $tableAlias . '.' . $this->quoteIdentifier($orderColumn) . ' DESC'
             . ' LIMIT ' . $this->normalizeLimit($limit);
 
         return array(

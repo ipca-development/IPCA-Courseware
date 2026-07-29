@@ -6,6 +6,7 @@ require_once __DIR__ . '/AsyncJobService.php';
 require_once __DIR__ . '/CockpitRecorderService.php';
 require_once __DIR__ . '/GarminCsvFingerprintService.php';
 require_once __DIR__ . '/GarminCsvValidationService.php';
+require_once __DIR__ . '/CvrAudioIntakeMetricsService.php';
 
 final class CvrIntakeAdminUploadService
 {
@@ -66,8 +67,15 @@ final class CvrIntakeAdminUploadService
      * @param array<string,mixed> $file
      * @return array<string,mixed>
      */
-    public function uploadAudio(array $file, int $aircraftId, string $startedAtLocal, ?float $durationSeconds = null): array
-    {
+    public function uploadAudio(
+        array $file,
+        int $aircraftId,
+        string $startedAtLocal,
+        ?float $durationSeconds = null,
+        string $studentName = '',
+        string $instructorName = '',
+        string $missionCode = ''
+    ): array {
         if ($aircraftId <= 0) {
             throw new RuntimeException('Select a valid aircraft for Cockpit Audio upload.');
         }
@@ -85,10 +93,20 @@ final class CvrIntakeAdminUploadService
             'language' => 'en',
         ));
 
+        $recordingId = (int)($result['recording']['id'] ?? 0);
+        if ($recordingId > 0) {
+            $crew = CvrAudioIntakeMetricsService::crewFromManualForm($studentName, $instructorName);
+            (new CvrAudioIntakeMetricsService($this->pdo))->saveIntakeMetadata($recordingId, array(
+                'intake_source' => 'manual',
+                'intake_mission_code' => strtoupper(trim($missionCode)),
+                'intake_crew_json' => $crew === array() ? null : $crew,
+            ));
+        }
+
         return array(
             'ok' => true,
             'status' => 'uploaded',
-            'recording_id' => (int)($result['recording']['id'] ?? 0),
+            'recording_id' => $recordingId,
             'recording_uid' => (string)($result['recording']['recording_uid'] ?? ''),
             'message' => 'Cockpit Audio uploaded and queued for transcription.',
         );

@@ -328,6 +328,13 @@ final class CockpitRecorderService
         $this->storeRecordingHealthAnalysis((int)$recording['id']);
         $recording = $this->recordingByUid($recordingUid) ?: $recording;
 
+        if (trim((string)($metadata['flight_session_uid'] ?? '')) !== '') {
+            require_once __DIR__ . '/CvrAudioIntakeMetricsService.php';
+            (new CvrAudioIntakeMetricsService($this->pdo))->saveIntakeMetadata((int)$recording['id'], array(
+                'intake_source' => 'ipca_cvr',
+            ));
+        }
+
         $workerSpawned = $this->spawnTranscriptionWorker((int)$recording['id']);
 
         return array(
