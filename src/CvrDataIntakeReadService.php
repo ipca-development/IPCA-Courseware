@@ -28,31 +28,45 @@ final class CvrDataIntakeReadService
         }
 
         $columns = $this->columns($table);
+        $tableAlias = 'd';
+        $quotedTable = $this->quoteIdentifier($table) . ' ' . $tableAlias;
         $deviceExpression = $table === 'ipca_cvr_dispatches'
             && isset($columns['device_id'])
             && $this->tableExists('ipca_cvr_devices')
-            ? "COALESCE((SELECT d.device_uuid FROM ipca_cvr_devices d WHERE d.id = ipca_cvr_dispatches.device_id LIMIT 1), '') AS device_identifier"
-            : $this->columnExpression($columns, array('device_uuid', 'device_id'), 'device_identifier');
+            ? "COALESCE((SELECT dev.device_uuid FROM ipca_cvr_devices dev WHERE dev.id = {$tableAlias}.device_id LIMIT 1), '') AS device_identifier"
+            : $this->prefixedColumnExpression($columns, $tableAlias, array('device_uuid', 'device_id'), 'device_identifier');
         $select = array(
-            $this->columnExpression($columns, array('id'), 'id', '0'),
-            $this->columnExpression($columns, array('dispatch_uuid', 'dispatch_id', 'id'), 'dispatch_uuid'),
-            $this->columnExpression($columns, array('current_version', 'version', 'dispatch_version'), 'dispatch_version', '1'),
-            $this->columnExpression($columns, array('aircraft_registration', 'tail_number'), 'aircraft_registration'),
-            $this->columnExpression($columns, array('mission_code'), 'mission_code'),
-            $this->columnExpression($columns, array('status'), 'status'),
-            $this->columnExpression($columns, array('source', 'dispatch_source'), 'source'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('id'), 'id', '0'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('dispatch_uuid', 'dispatch_id', 'id'), 'dispatch_uuid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('current_version', 'version', 'dispatch_version'), 'dispatch_version', '1'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('aircraft_registration', 'tail_number'), 'aircraft_registration'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('mission_code'), 'mission_code'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('status'), 'status'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('source', 'dispatch_source'), 'source'),
             $deviceExpression,
-            $this->columnExpression($columns, array('crew_json', 'crew'), 'crew_json', 'NULL'),
-            $this->columnExpression($columns, array('error_message', 'last_error'), 'error_message'),
-            $this->columnExpression($columns, array('workflow_flight_record_uuid', 'flight_record_uuid'), 'workflow_flight_record_uuid'),
-            $this->columnExpression($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('crew_json', 'crew'), 'crew_json', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('error_message', 'last_error'), 'error_message'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('workflow_flight_record_uuid', 'flight_record_uuid'), 'workflow_flight_record_uuid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
         );
+        if ($this->tableExists('ipca_cvr_flight_events')
+            && isset($columns['workflow_flight_record_uuid'])) {
+            $select[] = "(SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                WHERE fe.workflow_flight_record_uuid = {$tableAlias}.workflow_flight_record_uuid
+                  AND fe.event_type = 'engine_start_off_block') AS off_block_utc";
+            $select[] = "(SELECT MAX(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                WHERE fe.workflow_flight_record_uuid = {$tableAlias}.workflow_flight_record_uuid
+                  AND fe.event_type = 'engine_shutdown_on_block') AS on_block_utc";
+        } else {
+            $select[] = 'NULL AS off_block_utc';
+            $select[] = 'NULL AS on_block_utc';
+        }
         if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
             $select[] = "COALESCE((
                 SELECT v.receipt_uuid
                 FROM ipca_cvr_dispatch_versions v
-                WHERE v.dispatch_id = ipca_cvr_dispatches.id
-                  AND v.dispatch_version = ipca_cvr_dispatches.current_version
+                WHERE v.dispatch_id = {$tableAlias}.id
+                  AND v.dispatch_version = {$tableAlias}.current_version
                 LIMIT 1
             ), '') AS server_receipt_id";
         } else {
@@ -60,8 +74,8 @@ final class CvrDataIntakeReadService
         }
         $orderColumn = $this->firstColumn($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at', 'id')) ?? 'id';
         $sql = 'SELECT ' . implode(', ', $select)
-            . ' FROM ' . $this->quoteIdentifier($table)
-            . ' ORDER BY ' . $this->quoteIdentifier($orderColumn) . ' DESC'
+            . ' FROM ' . $quotedTable
+            . ' ORDER BY ' . $tableAlias . '.' . $this->quoteIdentifier($orderColumn) . ' DESC'
             . ' LIMIT ' . $this->normalizeLimit($limit);
 
         return array(
@@ -156,8 +170,8 @@ final class CvrDataIntakeReadService
             : (isset($columns['updated_at']) ? 'f.updated_at' : 'NULL');
 
         $where = "(
-              {$uploadSourceExpression} IN ('iphone_files_import','cvr_app','ios_share','desktop_sync_agent')
-              OR {$sourceExpression} IN ('iphone_files_import','cvr_device','cvr_app','garmin_cloud')
+              {$uploadSourceExpression} IN ('iphone_files_import','cvr_app','ios_share','desktop_sync_agent','admin_manual')
+              OR {$sourceExpression} IN ('iphone_files_import','cvr_device','cvr_app','garmin_cloud','cvr_admin_intake')
             )
             AND LOWER({$sourceExpression}) NOT LIKE '%historical%'
             AND LOWER({$sourceExpression}) NOT LIKE '%flightcircle%'";
@@ -194,9 +208,13 @@ final class CvrDataIntakeReadService
         foreach ($rows as &$row) {
             $uploadSource = strtolower(trim((string)($row['upload_source'] ?? '')));
             $source = strtolower(trim((string)($row['source'] ?? '')));
-            $row['source_label'] = $uploadSource === 'desktop_sync_agent' || $source === 'garmin_cloud'
-                ? 'IPCA SYNC AGENT'
-                : 'CVR APP';
+            if ($uploadSource === 'admin_manual' || $source === 'cvr_admin_intake') {
+                $row['source_label'] = 'MANUAL UPLOAD';
+            } elseif ($uploadSource === 'desktop_sync_agent' || $source === 'garmin_cloud') {
+                $row['source_label'] = 'IPCA SYNC AGENT';
+            } else {
+                $row['source_label'] = 'CVR APP';
+            }
         }
         unset($row);
 

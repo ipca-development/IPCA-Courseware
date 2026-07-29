@@ -5,6 +5,15 @@ import UIKit
 
 private let cvrUppercaseHexTable = Array("0123456789ABCDEF".utf8)
 
+private enum CVRUnitDateFormatting {
+    static let eventDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+}
+
 enum CVRUnitMode: String {
     case standby = "Standby"
     case starting = "Starting"
@@ -18,12 +27,6 @@ enum CVRUnitMode: String {
 @MainActor
 final class CVRUnitCoordinator: ObservableObject {
     private static let maximumRecoveredContinuationGap: TimeInterval = 10 * 60
-    private static let eventDateFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
-    }()
 
     @Published private(set) var mode: CVRUnitMode = .standby
     @Published private(set) var eventLog: [String] = []
@@ -249,12 +252,22 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     private func handleAvionicsPowerState(_ state: AvionicsPowerState) async {
-        guard settings?.isBeaconTriggerEnabled == true else { return }
+        let simulationActive = settings?.isSimulationModeEnabled == true
+        guard settings?.isBeaconTriggerEnabled == true || simulationActive else { return }
         switch state {
         case .on:
             guard audio?.isRecording != true, mode != .starting else { return }
+            if simulationActive && activeRecordingSessionID != nil && mode == .recording {
+                return
+            }
             await startRecording()
         case .off:
+            if simulationActive {
+                if activeRecordingSessionID != nil || mode == .recording {
+                    await stopRecording(reason: "Simulation avionics OFF.")
+                }
+                return
+            }
             guard audio?.isRecording == true else { return }
             await stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
         }
@@ -274,6 +287,31 @@ final class CVRUnitCoordinator: ObservableObject {
     private func startRecording() async {
         guard let audio, let settings else { return }
         mode = .starting
+
+        if settings.isSimulationModeEnabled {
+            log("Starting simulation session (no audio logging).")
+            UIApplication.shared.isIdleTimerDisabled = true
+            let fakeID = "sim-\(UUID().uuidString.lowercased())"
+            let startedAt = Date()
+            activeRecordingSessionID = fakeID
+            activeRecorderToken = Self.randomRecorderToken()
+            activeSegmentIndex = 1
+            activePreviousSegmentID = nil
+            activeRecordingEvents = []
+            activeFinalizedSegments = []
+            activeSegmentPath = nil
+            activeSourceGapSummary = nil
+            recordEvent(severity: "info", type: "simulation_session_started", message: "Simulation session started without audio capture.")
+            let airportICAOs = [
+                workflow?.state.activeDispatch?.plannedDepartureAirport ?? "",
+                workflow?.state.activeDispatch?.plannedDestinationAirport ?? "",
+            ]
+            gps?.startCapture(recordingID: fakeID, startedAt: startedAt, airportICAOs: airportICAOs)
+            workflow?.linkRecordingSession(recordingID: fakeID, startedAt: startedAt)
+            mode = .recording
+            return
+        }
+
         log("Starting cockpit voice recording.")
         UIApplication.shared.isIdleTimerDisabled = true
 
@@ -315,7 +353,11 @@ final class CVRUnitCoordinator: ObservableObject {
             recordCurrentThermalStateIfNeeded(source: "recording_start")
             refreshBeaconRecorderToken(reason: "Recording started.")
             if let recordingID = audio.activeRecordingID, let startedAt = audio.activeRecordingStartedAt {
-                gps?.startCapture(recordingID: recordingID, startedAt: startedAt)
+                let airportICAOs = [
+                    workflow?.state.activeDispatch?.plannedDepartureAirport ?? "",
+                    workflow?.state.activeDispatch?.plannedDestinationAirport ?? "",
+                ]
+                gps?.startCapture(recordingID: recordingID, startedAt: startedAt, airportICAOs: airportICAOs)
                 saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: [], activeSegmentPath: nil)
                 workflow?.linkRecordingSession(recordingID: activeRecordingSessionID ?? recordingID, startedAt: startedAt)
             }
@@ -332,8 +374,21 @@ final class CVRUnitCoordinator: ObservableObject {
         guard let audio, let store, let settings else { return }
         let sessionID = activeRecordingSessionID
         mode = .stopping
-        log("\(reason) Stopping and storing cockpit voice recording.")
         UIApplication.shared.isIdleTimerDisabled = false
+
+        if settings.isSimulationModeEnabled {
+            log("\(reason) Ending simulation session.")
+            if let sessionID {
+                _ = gps?.stopCaptureAndSave(recordingID: sessionID)
+            }
+            activeRecordingSessionID = nil
+            activeRecorderToken = nil
+            mode = .standby
+            recordEvent(severity: "info", type: "simulation_session_stopped", message: reason)
+            return
+        }
+
+        log("\(reason) Stopping and storing cockpit voice recording.")
 
         guard var recording = await audio.stopRecording(language: settings.language, postGainDB: settings.postRecordingGainDB) else {
             mode = .standby
@@ -560,7 +615,7 @@ final class CVRUnitCoordinator: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .custom { date, encoder in
                 var container = encoder.singleValueContainer()
-                try container.encode(Self.eventDateFormatter.string(from: date))
+                try container.encode(CVRUnitDateFormatting.eventDateFormatter.string(from: date))
             }
             let data = try encoder.encode(events)
             try data.write(to: url, options: [.atomic])
@@ -665,7 +720,7 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     private func log(_ message: String) {
-        let line = "\(Self.eventDateFormatter.string(from: Date())) \(message)"
+        let line = "\(CVRUnitDateFormatting.eventDateFormatter.string(from: Date())) \(message)"
         eventLog.insert(line, at: 0)
         if eventLog.count > 200 {
             eventLog.removeLast(eventLog.count - 200)

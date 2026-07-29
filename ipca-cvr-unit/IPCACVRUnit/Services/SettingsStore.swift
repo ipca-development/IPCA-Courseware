@@ -40,6 +40,10 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(postRecordingGainDB, forKey: Keys.postRecordingGainDB) }
     }
 
+    @Published var isSimulationModeEnabled: Bool {
+        didSet { UserDefaults.standard.set(isSimulationModeEnabled, forKey: Keys.isSimulationModeEnabled) }
+    }
+
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
     @Published private(set) var crewUsers: [CVRCrewUser] = []
@@ -62,6 +66,7 @@ final class SettingsStore: ObservableObject {
         expectedBeaconIdentityHex = Self.normalizedBeaconIdentity(UserDefaults.standard.string(forKey: Keys.expectedBeaconIdentityHex) ?? "")
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
         postRecordingGainDB = UserDefaults.standard.object(forKey: Keys.postRecordingGainDB) as? Double ?? 0
+        isSimulationModeEnabled = UserDefaults.standard.object(forKey: Keys.isSimulationModeEnabled) as? Bool ?? false
         deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
     }
 
@@ -243,6 +248,7 @@ final class SettingsStore: ObservableObject {
         static let expectedBeaconIdentityHex = "ipca.cvrUnit.expectedBeaconIdentityHex"
         static let adminPIN = "ipca.cvrUnit.adminPIN"
         static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
+        static let isSimulationModeEnabled = "ipca.cvrUnit.isSimulationModeEnabled"
         static let deviceUUID = "ipca.cvrUnit.deviceUUID"
         static let deviceCredential = "ipca.cvrUnit.deviceCredential"
     }

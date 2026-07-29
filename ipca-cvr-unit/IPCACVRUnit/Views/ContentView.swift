@@ -15,6 +15,11 @@ struct ContentView: View {
             }
         }
         .background(IPCATheme.pageBackground.ignoresSafeArea())
+        .onChange(of: settings.isSimulationModeEnabled) { _, enabled in
+            if enabled {
+                adminUnlocked = false
+            }
+        }
         .onChange(of: showAdminUnlock) { _, presented in
             if presented {
                 adminPIN = ""
@@ -308,6 +313,26 @@ private struct AdminSettingsView: View {
                         Text(settings.crewUsersError)
                             .font(.caption)
                             .foregroundStyle(IPCATheme.danger)
+                    }
+                }
+
+                Section("Simulation Demo") {
+                    Toggle("Simulation Mode", isOn: $settings.isSimulationModeEnabled)
+                    Text("Walk through Dispatch → Recorder → In-Flight → Garmin without audio logging or server uploads. Enabling simulation returns you to the operational tabs; use the bottom bar for avionics and takeoff/landing controls.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
+                    if settings.isSimulationModeEnabled {
+                        Button("Simulate Avionics ON") {
+                            beacon.simulateAvionicsOn()
+                        }
+                        Button("Simulate Avionics OFF") {
+                            beacon.simulateAvionicsOff()
+                        }
+                        Button("Reset Simulation Workflow", role: .destructive) {
+                            workflow.resetSimulationWorkflow {
+                                beacon.clearSimulationOverride()
+                            }
+                        }
                     }
                 }
 

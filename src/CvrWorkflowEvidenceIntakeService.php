@@ -206,11 +206,17 @@ final class CvrWorkflowEvidenceIntakeService
         if ($fuel === '' || !is_numeric($fuel) || (float)$fuel < 0) {
             throw new RuntimeException('fuel_remaining must be a valid non-negative quantity.');
         }
-        if (!array_key_exists('ending_oil_percentage', $evidence)
-            || !is_numeric($evidence['ending_oil_percentage'])
-            || (int)$evidence['ending_oil_percentage'] < 0
-            || (int)$evidence['ending_oil_percentage'] > 100) {
-            throw new RuntimeException('ending_oil_percentage is required and must be between 0 and 100.');
+        if (array_key_exists('ending_oil_percentage', $evidence)
+            && (!is_numeric($evidence['ending_oil_percentage'])
+                || (int)$evidence['ending_oil_percentage'] < 0
+                || (int)$evidence['ending_oil_percentage'] > 100)) {
+            throw new RuntimeException('ending_oil_percentage must be between 0 and 100 when provided.');
+        }
+        foreach (array('verified_takeoff_count', 'verified_landing_count') as $countField) {
+            if (array_key_exists($countField, $evidence)
+                && (!is_numeric($evidence[$countField]) || (int)$evidence[$countField] < 0)) {
+                throw new RuntimeException($countField . ' must be zero or greater when provided.');
+            }
         }
         $dispatch = $this->pdo->prepare(
             'SELECT starting_hobbs, starting_tacho

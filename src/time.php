@@ -249,6 +249,23 @@ function cw_logbook_date(?string $utc, string $timezone): ?string
     return $dt === null ? null : $dt->format('Y-m-d');
 }
 
+function cw_local_input_to_utc(string $localInput, string $timezone): ?string
+{
+    $localInput = trim($localInput);
+    if ($localInput === '') {
+        return null;
+    }
+    $timezone = cw_time_valid_timezone($timezone) ?? 'UTC';
+    $formats = array('Y-m-d\TH:i', 'Y-m-d H:i:s', 'Y-m-d H:i');
+    foreach ($formats as $format) {
+        $dt = DateTimeImmutable::createFromFormat($format, $localInput, new DateTimeZone($timezone));
+        if ($dt instanceof DateTimeImmutable) {
+            return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        }
+    }
+    return null;
+}
+
 function cw_airport_timezone(PDO $pdo, string $icao): ?string
 {
     static $cache = array();

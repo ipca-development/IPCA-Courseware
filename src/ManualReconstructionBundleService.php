@@ -148,6 +148,37 @@ final class ManualReconstructionBundleService
     }
 
     /** @return array<string,mixed> */
+    public function supersedeBundleSources(
+        int $bundleId,
+        int $dispatchId,
+        int $recordingId,
+        int $garminCsvId,
+        bool $includeAdsb,
+        ?int $actorUserId
+    ): array {
+        $existing = $this->bundle($bundleId);
+        if (!$existing) {
+            throw new RuntimeException('Reconstruction bundle not found.');
+        }
+        $bundle = $this->freezeAndPrepare(
+            $dispatchId > 0 ? $dispatchId : (int)$existing['dispatch_id'],
+            $recordingId > 0 ? $recordingId : (int)$existing['cockpit_recording_id'],
+            $garminCsvId > 0 ? $garminCsvId : (int)$existing['garmin_csv_file_id'],
+            $includeAdsb,
+            $actorUserId
+        );
+        if ((int)($bundle['id'] ?? 0) > 0) {
+            $this->audit((int)$bundle['id'], 'bundle_superseded_sources', $actorUserId, array(
+                'supersedes_bundle_id' => $bundleId,
+                'dispatch_id' => (int)($bundle['dispatch_id'] ?? 0),
+                'cockpit_recording_id' => (int)($bundle['cockpit_recording_id'] ?? 0),
+                'garmin_csv_file_id' => (int)($bundle['garmin_csv_file_id'] ?? 0),
+            ));
+        }
+        return $bundle;
+    }
+
+    /** @return array<string,mixed> */
     public function retryPreparation(int $bundleId, ?int $actorUserId): array
     {
         $bundle = $this->bundle($bundleId);
@@ -459,7 +490,7 @@ final class ManualReconstructionBundleService
             throw new RuntimeException('FlightCircle and historical evidence are prohibited from Reconstruction bundles.');
         }
         if ($type === 'garmin_csv') {
-            $allowed = array('iphone_files_import', 'cvr_app', 'ios_share', 'desktop_sync_agent', 'cvr_device', 'garmin_cloud', '');
+            $allowed = array('iphone_files_import', 'cvr_app', 'ios_share', 'desktop_sync_agent', 'cvr_device', 'garmin_cloud', 'admin_manual', 'cvr_admin_intake', '');
             foreach (array('upload_source', 'source') as $field) {
                 $value = strtolower(trim((string)($row[$field] ?? '')));
                 if (!in_array($value, $allowed, true)) {

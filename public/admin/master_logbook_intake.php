@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CvrDataIntakeReadService.php';
+require_once __DIR__ . '/../../src/CvrIntakeDisplayService.php';
+require_once __DIR__ . '/../../src/CvrIntakeAdminUploadService.php';
 require_once __DIR__ . '/../../src/CvrDeviceEnrollmentService.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
@@ -50,9 +52,8 @@ try {
 }
 
 $intake = new CvrDataIntakeReadService($pdo);
-$dispatch = $intake->dispatchRows();
-$audio = $intake->audioRows();
-$garmin = $intake->garminRows();
+$intakeDisplay = new CvrIntakeDisplayService($pdo);
+$intakeUpload = new CvrIntakeAdminUploadService($pdo);
 $reconstructionService = new ManualReconstructionBundleService($pdo);
 $debriefService = new FlightDebriefService($pdo);
 $replayShareService = new ReplayShareService($pdo);
@@ -85,6 +86,40 @@ try {
                 $actorUserId > 0 ? $actorUserId : null
             );
             $reconstructionNotice = 'Immutable evidence bundle created. Review it below, then start Reconstruction.';
+        } elseif ($action === 'supersede_reconstruction_bundle') {
+            $reconstructionService->supersedeBundleSources(
+                (int)($_POST['bundle_id'] ?? 0),
+                (int)($_POST['dispatch_id'] ?? 0),
+                (int)($_POST['recording_id'] ?? 0),
+                (int)($_POST['garmin_csv_file_id'] ?? 0),
+                !empty($_POST['include_adsb']),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Superseding bundle created with updated evidence sources. Re-derive Flight Record if Garmin CSV changed.';
+        } elseif ($action === 'upload_manual_garmin_csv') {
+            $aircraftRegistration = (string)($_POST['aircraft_registration'] ?? '');
+            foreach ($aircraftOptions as $aircraftOption) {
+                if ((int)($aircraftOption['id'] ?? 0) === (int)($_POST['aircraft_id'] ?? 0)) {
+                    $aircraftRegistration = (string)($aircraftOption['registration'] ?? $aircraftRegistration);
+                    break;
+                }
+            }
+            $uploadResult = $intakeUpload->uploadGarminCsv(
+                $_FILES['garmin_csv'] ?? array(),
+                $aircraftRegistration,
+                trim((string)($_POST['workflow_flight_record_uuid'] ?? '')) ?: null
+            );
+            $reconstructionNotice = (string)($uploadResult['message'] ?? 'Garmin CSV uploaded.');
+        } elseif ($action === 'upload_manual_audio') {
+            $uploadResult = $intakeUpload->uploadAudio(
+                $_FILES['cockpit_audio'] ?? array(),
+                (int)($_POST['aircraft_id'] ?? 0),
+                (string)($_POST['started_at_local'] ?? ''),
+                isset($_POST['duration_seconds']) && $_POST['duration_seconds'] !== ''
+                    ? (float)$_POST['duration_seconds']
+                    : null
+            );
+            $reconstructionNotice = (string)($uploadResult['message'] ?? 'Cockpit Audio uploaded.');
         } elseif ($action === 'retry_reconstruction_bundle') {
             $reconstructionService->retryPreparation(
                 (int)($_POST['bundle_id'] ?? 0),
@@ -158,6 +193,9 @@ try {
 } catch (Throwable $e) {
     $reconstructionError = $e->getMessage();
 }
+$dispatch = $intake->dispatchRows();
+$audio = $intake->audioRows();
+$garmin = $intake->garminRows();
 $reconstructionBundles = $reconstructionService->recentBundles();
 $selectedDebrief = null;
 if ((int)($_GET['debrief_id'] ?? 0) > 0) {
@@ -194,6 +232,26 @@ function cvr_intake_timestamp(mixed $value, string $timezone = 'UTC'): string
         return '—';
     }
     return cw_logbook_datetime($text, $timezone);
+}
+
+function cvr_intake_local_datetime(PDO $pdo, mixed $value, string $registration = ''): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '—';
+    }
+    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
+    return cw_logbook_datetime($text, $timezone);
+}
+
+function cvr_intake_local_time(PDO $pdo, mixed $value, string $registration = ''): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '—';
+    }
+    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
+    return cw_logbook_time($text, $timezone) . ' LT';
 }
 
 function cvr_debrief_time(mixed $value, string $timezone = 'UTC'): string
@@ -409,6 +467,7 @@ cw_header('Master Logbook');
 .intake-status-muted{background:#e2e8f0;color:#64748b}
 .intake-source-app{background:#dbeafe;color:#1e40af}
 .intake-source-sync{background:#ede9fe;color:#5b21b6}
+.intake-source-manual{background:#fef3c7;color:#92400e}
 .intake-empty{padding:28px;text-align:center;color:#64748b}
 .intake-notice{border:1px solid #fbbf24;background:#fffbeb;color:#92400e;border-radius:12px;padding:12px;font-size:12px}
 .intake-error{color:#991b1b;max-width:280px;white-space:normal}
@@ -426,6 +485,13 @@ cw_header('Master Logbook');
 .reconstruction-grid .intake-field{min-width:0}
 .reconstruction-grid .intake-select{width:100%}
 .reconstruction-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.intake-upload-panel{border:1px dashed #cbd5e1;border-radius:12px;padding:14px;margin-bottom:14px;background:#f8fafc}
+.intake-upload-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end}
+.intake-upload-grid .intake-field{margin:0}
+.intake-reassign{margin-top:8px}
+.intake-reassign summary{cursor:pointer;color:#1d4ed8;font-size:12px;font-weight:700}
+.intake-reassign .reconstruction-grid{margin-top:10px}
+.intake-select option{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px}
 .intake-code{display:inline-flex;margin-top:10px;border:1px solid #86efac;border-radius:10px;background:#f0fdf4;color:#166534;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:18px;font-weight:900;letter-spacing:.08em}
 .debrief-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:24px 0 10px}
 .debrief-toolbar-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -581,16 +647,19 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap">
         <table class="intake-table">
-          <thead><tr><th>Received</th><th>Dispatch</th><th>Flight Record</th><th>Aircraft</th><th>Mission</th><th>Crew</th><th>Source</th><th>Device</th><th>Status</th><th>Server Receipt</th><th>Error</th></tr></thead>
+          <thead><tr><th>Received (LT)</th><th>Dispatch</th><th>Flight Record</th><th>Aircraft</th><th>Mission</th><th>Crew</th><th>OFF Block</th><th>ON Block</th><th>Source</th><th>Device</th><th>Status</th><th>Server Receipt</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($dispatch['rows'] as $row): ?>
+            <?php $tail = (string)($row['aircraft_registration'] ?? ''); ?>
             <tr>
-              <td><?= cvr_intake_h(cvr_intake_timestamp($row['received_at'] ?? null)) ?></td>
+              <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? null, $tail)) ?></td>
               <td><div class="intake-primary intake-mono"><?= cvr_intake_h($row['dispatch_uuid'] ?? '—') ?></div><div class="intake-muted">Version <?= cvr_intake_h($row['dispatch_version'] ?? '1') ?></div></td>
               <td class="intake-mono"><?= cvr_intake_h($row['workflow_flight_record_uuid'] ?: '—') ?></td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
               <td><?= cvr_intake_h($row['mission_code'] ?: '—') ?></td>
               <td><?= cvr_intake_h(cvr_intake_crew($row['crew_json'] ?? null)) ?></td>
+              <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail)) ?></td>
+              <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail)) ?></td>
               <td><?= cvr_intake_h($row['source'] ?: '—') ?></td>
               <td class="intake-mono"><?= cvr_intake_h($row['device_identifier'] ?: '—') ?></td>
               <td><?= cvr_intake_badge($row['status'] ?? '') ?></td>
@@ -611,6 +680,27 @@ cw_header('Master Logbook');
         <div class="intake-muted">Audio upload and transcription status received from recorder units.</div>
       </div>
     </div>
+    <div class="intake-upload-panel">
+      <div class="intake-muted" style="margin-bottom:10px">Manual Upload Audio — use when a recording is missing from intake. Times are interpreted in the aircraft&apos;s operational timezone (California local for IPCA fleet).</div>
+      <form method="post" action="/admin/master_logbook.php?tab=audio" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="upload_manual_audio">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <div class="intake-upload-grid">
+          <label class="intake-field"><span>Aircraft</span>
+            <select class="intake-select" name="aircraft_id" required>
+              <option value="">Select aircraft</option>
+              <?php foreach ($aircraftOptions as $aircraftOption): ?>
+                <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>"><?= cvr_intake_h($aircraftOption['registration'] ?? '') ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label class="intake-field"><span>Recording start (local)</span><input class="intake-select" type="datetime-local" name="started_at_local" required></label>
+          <label class="intake-field"><span>Duration (seconds, optional)</span><input class="intake-select" type="number" min="0" step="1" name="duration_seconds" placeholder="Auto if unknown"></label>
+          <label class="intake-field"><span>Audio file</span><input class="intake-select" type="file" name="cockpit_audio" accept=".m4a,.mp4,.wav,.aac,audio/*" required></label>
+          <div><button class="intake-button" type="submit">Upload Cockpit Audio</button></div>
+        </div>
+      </form>
+    </div>
     <?php if (!$audio['available']): ?>
       <div class="intake-notice"><?= cvr_intake_h($audio['message']) ?></div>
     <?php elseif ($audio['rows'] === array()): ?>
@@ -618,15 +708,18 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap">
         <table class="intake-table">
-          <thead><tr><th>Received</th><th>Recording</th><th>Aircraft</th><th>Start</th><th>Duration</th><th>Input</th><th>File</th><th>Upload</th><th>Transcription</th><th>Error</th></tr></thead>
+          <thead><tr><th>Received (LT)</th><th>Recording</th><th>Aircraft</th><th>Start (LT)</th><th>Duration</th><th>Input</th><th>File</th><th>Upload</th><th>Transcription</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($audio['rows'] as $row): ?>
-            <?php $transcriptionProgress = max(0, min(100, (int)($row['transcription_progress'] ?? 0))); ?>
+            <?php
+              $transcriptionProgress = max(0, min(100, (int)($row['transcription_progress'] ?? 0)));
+              $tail = (string)($row['aircraft_registration'] ?? '');
+            ?>
             <tr>
-              <td><?= cvr_intake_h(cvr_intake_timestamp($row['received_at'] ?? $row['created_at'] ?? null)) ?></td>
+              <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></td>
               <td><div class="intake-primary intake-mono"><?= cvr_intake_h($row['recording_uid'] ?: '—') ?></div><div class="intake-muted"><?= cvr_intake_h($row['session_uuid'] ?: 'No session link') ?></div></td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
-              <td><?= cvr_intake_h(cvr_intake_timestamp($row['started_at'] ?? null)) ?></td>
+              <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['started_at'] ?? null, $tail)) ?></td>
               <td><?= (float)($row['duration_seconds'] ?? 0) > 0 ? cvr_intake_h(number_format((float)$row['duration_seconds'], 1) . ' s') : '—' ?></td>
               <td><?= cvr_intake_h($row['input_device'] ?: '—') ?></td>
               <td><div><?= cvr_intake_h($row['original_filename'] ?: '—') ?></div><div class="intake-muted"><?= cvr_intake_h(cvr_intake_bytes($row['file_size_bytes'] ?? 0)) ?></div></td>
@@ -650,8 +743,28 @@ cw_header('Master Logbook');
     <div class="intake-panel-head">
       <div>
         <h2 class="intake-panel-title">Garmin CSV</h2>
-        <div class="intake-muted">CSV evidence received through the CVR App or Automatic IPCA Sync Agent. Historical and FlightCircle sources are excluded.</div>
+        <div class="intake-muted">CSV evidence received through the CVR App, Automatic IPCA Sync Agent, or manual admin upload. Historical and FlightCircle sources are excluded.</div>
       </div>
+    </div>
+    <div class="intake-upload-panel">
+      <div class="intake-muted" style="margin-bottom:10px">Manual Upload CSV — use when Garmin evidence is missing from intake.</div>
+      <form method="post" action="/admin/master_logbook.php?tab=garmin" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="upload_manual_garmin_csv">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <div class="intake-upload-grid">
+          <label class="intake-field"><span>Aircraft</span>
+            <select class="intake-select" name="aircraft_id" required>
+              <option value="">Select aircraft</option>
+              <?php foreach ($aircraftOptions as $aircraftOption): ?>
+                <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>"><?= cvr_intake_h($aircraftOption['registration'] ?? '') ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label class="intake-field"><span>Flight Record UUID (optional)</span><input class="intake-select" type="text" name="workflow_flight_record_uuid" placeholder="Link to dispatch flight record"></label>
+          <label class="intake-field"><span>Garmin CSV file</span><input class="intake-select" type="file" name="garmin_csv" accept=".csv,text/csv" required></label>
+          <div><button class="intake-button" type="submit">Upload Garmin CSV</button></div>
+        </div>
+      </form>
     </div>
     <?php if (!$garmin['available']): ?>
       <div class="intake-notice"><?= cvr_intake_h($garmin['message']) ?></div>
@@ -660,17 +773,21 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap">
         <table class="intake-table">
-          <thead><tr><th>Received</th><th>Source</th><th>Filename</th><th>Linked Record</th><th>Aircraft</th><th>Coverage</th><th>Size</th><th>SHA-256</th><th>Rows</th><th>Evidence</th><th>Validation</th></tr></thead>
+          <thead><tr><th>Received (LT)</th><th>Source</th><th>Filename</th><th>Linked Record</th><th>Aircraft</th><th>Coverage (LT)</th><th>Size</th><th>SHA-256</th><th>Rows</th><th>Evidence</th><th>Validation</th></tr></thead>
           <tbody>
           <?php foreach ($garmin['rows'] as $row): ?>
-            <?php $sourceIsSync = ($row['source_label'] ?? '') === 'IPCA SYNC AGENT'; ?>
+            <?php
+              $sourceIsSync = ($row['source_label'] ?? '') === 'IPCA SYNC AGENT';
+              $sourceIsManual = ($row['source_label'] ?? '') === 'MANUAL UPLOAD';
+              $tail = (string)($row['aircraft_registration'] ?? '');
+            ?>
             <tr>
-              <td><?= cvr_intake_h(cvr_intake_timestamp($row['received_at'] ?? null)) ?></td>
-              <td><span class="intake-status <?= $sourceIsSync ? 'intake-source-sync' : 'intake-source-app' ?>"><?= cvr_intake_h($row['source_label'] ?? 'CVR APP') ?></span><div class="intake-muted"><?= cvr_intake_h($row['provider_name'] ?: '') ?></div></td>
+              <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? null, $tail)) ?></td>
+              <td><span class="intake-status <?= $sourceIsManual ? 'intake-source-manual' : ($sourceIsSync ? 'intake-source-sync' : 'intake-source-app') ?>"><?= cvr_intake_h($row['source_label'] ?? 'CVR APP') ?></span><div class="intake-muted"><?= cvr_intake_h($row['provider_name'] ?: '') ?></div></td>
               <td><div class="intake-primary"><?= cvr_intake_h($row['original_filename'] ?: '—') ?></div><div class="intake-muted intake-mono"><?= cvr_intake_h($row['csv_file_uuid'] ?: '—') ?></div></td>
               <td><div class="intake-mono"><?= cvr_intake_h($row['workflow_flight_record_uuid'] ?: '—') ?></div><div class="intake-muted"><?= !empty($row['session_id']) ? 'Session ' . cvr_intake_h($row['session_id']) : 'No canonical session' ?></div></td>
               <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
-              <td><div><?= cvr_intake_h(cvr_intake_timestamp($row['first_valid_sample_utc'] ?? null)) ?></div><div class="intake-muted">to <?= cvr_intake_h(cvr_intake_timestamp($row['last_valid_sample_utc'] ?? null)) ?></div></td>
+              <td><div><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['first_valid_sample_utc'] ?? null, $tail)) ?></div><div class="intake-muted">to <?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['last_valid_sample_utc'] ?? null, $tail)) ?></div></td>
               <td><?= cvr_intake_h(cvr_intake_bytes($row['file_size_bytes'] ?? 0)) ?></td>
               <td class="intake-mono" title="<?= cvr_intake_h($row['sha256'] ?? '') ?>"><?= cvr_intake_h(cvr_intake_short_hash($row['sha256'] ?? '')) ?></td>
               <td><?= cvr_intake_h(number_format((int)($row['valid_row_count'] ?? 0))) ?></td>
@@ -706,7 +823,7 @@ cw_header('Master Logbook');
           <select class="intake-select" id="bundle-dispatch" name="dispatch_id" required>
             <option value="">Select Dispatch</option>
             <?php foreach ($dispatch['rows'] as $row): ?>
-              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h(($row['aircraft_registration'] ?? '—') . ' · ' . ($row['mission_code'] ?? '—') . ' · ' . ($row['dispatch_uuid'] ?? '')) ?></option>
+              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h($intakeDisplay->dispatchOptionLabel($row)) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -715,7 +832,7 @@ cw_header('Master Logbook');
           <select class="intake-select" id="bundle-audio" name="recording_id" required>
             <option value="">Select Cockpit Audio</option>
             <?php foreach ($audio['rows'] as $row): ?>
-              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h(($row['aircraft_registration'] ?? '—') . ' · ' . cvr_intake_timestamp($row['started_at'] ?? null) . ' · Transcript ' . ($row['transcription_status'] ?? 'unknown')) ?></option>
+              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h($intakeDisplay->audioOptionLabel($row)) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -724,7 +841,7 @@ cw_header('Master Logbook');
           <select class="intake-select" id="bundle-garmin" name="garmin_csv_file_id" required>
             <option value="">Select Garmin CSV</option>
             <?php foreach ($garmin['rows'] as $row): ?>
-              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h(($row['aircraft_registration'] ?? '—') . ' · ' . ($row['source_label'] ?? 'CVR APP') . ' · ' . ($row['original_filename'] ?? '')) ?></option>
+              <option value="<?= (int)($row['id'] ?? 0) ?>"><?= cvr_intake_h($intakeDisplay->garminOptionLabel($row)) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -763,7 +880,7 @@ cw_header('Master Logbook');
               $latestDebrief = $bundleDebriefs[0] ?? null;
             ?>
             <tr>
-              <td><div class="intake-primary intake-mono"><?= cvr_intake_h($bundle['bundle_uuid']) ?></div><div class="intake-muted">Version <?= (int)$bundle['version_number'] ?> · <?= cvr_intake_h(cvr_intake_timestamp($bundle['frozen_at'] ?? null)) ?></div></td>
+              <td><div class="intake-primary intake-mono"><?= cvr_intake_h($bundle['bundle_uuid']) ?></div><div class="intake-muted">Version <?= (int)$bundle['version_number'] ?> · <?= cvr_intake_h(cvr_intake_local_datetime($pdo, $bundle['frozen_at'] ?? null, (string)$bundle['aircraft_registration'])) ?></div></td>
               <td><div class="intake-primary"><?= cvr_intake_h($bundle['aircraft_registration']) ?></div><div class="intake-muted"><?= cvr_intake_h($bundle['mission_code'] ?: 'No mission') ?></div></td>
               <td><div>Dispatch #<?= (int)$bundle['dispatch_id'] ?></div><div>Audio #<?= (int)$bundle['cockpit_recording_id'] ?></div><div>Garmin #<?= (int)$bundle['garmin_csv_file_id'] ?></div><div>ADS-B <?= !empty($bundle['adsb_enrichment_id']) ? '#' . (int)$bundle['adsb_enrichment_id'] : 'not linked' ?></div></td>
               <td class="intake-mono" title="<?= cvr_intake_h($bundle['manifest_sha256']) ?>"><?= cvr_intake_h(cvr_intake_short_hash($bundle['manifest_sha256'])) ?></td>
@@ -799,12 +916,13 @@ cw_header('Master Logbook');
                     <button class="intake-button" type="submit">Lock Raw Transcript</button>
                   </form>
                 <?php endif; ?>
-                <?php if (empty($bundle['operational_flight_record_version_id']) && in_array((string)($bundle['status'] ?? ''), array('reconstruction_ready','reconstruction_complete'), true)): ?>
+                <?php if (in_array((string)($bundle['status'] ?? ''), array('reconstruction_ready', 'reconstruction_complete'), true)): ?>
+                  <?php $hasFlightRecordVersion = (int)($bundle['operational_flight_record_version_id'] ?? 0) > 0; ?>
                   <form method="post" action="/admin/master_logbook.php?tab=reconstruction" style="margin-top:6px">
                     <input type="hidden" name="action" value="rebuild_bundle_flight_record">
                     <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                     <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
-                    <button class="intake-button" type="submit">Rebuild Flight Record</button>
+                    <button class="intake-button" type="submit" title="<?= cvr_intake_h($hasFlightRecordVersion ? 'Creates a new Flight Record version from the frozen Garmin CSV. Regenerate Debrief afterward to refresh logbook fields.' : 'Derives the canonical Flight Record from the frozen Garmin CSV.') ?>"><?= $hasFlightRecordVersion ? 'Re-derive Flight Record' : 'Rebuild Flight Record' ?></button>
                   </form>
                 <?php endif; ?>
                 <?php $debriefJobRunning = in_array((string)($bundle['debrief_job_status'] ?? ''), array('pending','claimed','running','retry_wait'), true); ?>
@@ -823,6 +941,50 @@ cw_header('Master Logbook');
                 <?php if (is_array($latestDebrief)): ?>
                   <a class="intake-refresh" style="margin-top:6px" href="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$latestDebrief['id'] ?>">Review Debrief · <?= cvr_intake_h($latestDebrief['suggested_overall']) ?></a>
                 <?php endif; ?>
+                <details class="intake-reassign">
+                  <summary>Reassign sources &amp; create superseding bundle</summary>
+                  <form method="post" action="/admin/master_logbook.php?tab=reconstruction">
+                    <input type="hidden" name="action" value="supersede_reconstruction_bundle">
+                    <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                    <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
+                    <div class="reconstruction-grid">
+                      <div class="intake-field">
+                        <label>Dispatch</label>
+                        <select class="intake-select" name="dispatch_id" required>
+                          <?php foreach ($dispatch['rows'] as $row): ?>
+                            <option value="<?= (int)($row['id'] ?? 0) ?>" <?= (int)($row['id'] ?? 0) === (int)$bundle['dispatch_id'] ? 'selected' : '' ?>><?= cvr_intake_h($intakeDisplay->dispatchOptionLabel($row)) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </div>
+                      <div class="intake-field">
+                        <label>Cockpit Audio</label>
+                        <select class="intake-select" name="recording_id" required>
+                          <?php foreach ($audio['rows'] as $row): ?>
+                            <option value="<?= (int)($row['id'] ?? 0) ?>" <?= (int)($row['id'] ?? 0) === (int)$bundle['cockpit_recording_id'] ? 'selected' : '' ?>><?= cvr_intake_h($intakeDisplay->audioOptionLabel($row)) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </div>
+                      <div class="intake-field">
+                        <label>Garmin CSV</label>
+                        <select class="intake-select" name="garmin_csv_file_id" required>
+                          <?php foreach ($garmin['rows'] as $row): ?>
+                            <option value="<?= (int)($row['id'] ?? 0) ?>" <?= (int)($row['id'] ?? 0) === (int)$bundle['garmin_csv_file_id'] ? 'selected' : '' ?>><?= cvr_intake_h($intakeDisplay->garminOptionLabel($row)) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </div>
+                      <div class="intake-field">
+                        <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:12px;color:#334155">
+                          <input type="checkbox" name="include_adsb" value="1" <?= !empty($bundle['adsb_enrichment_id']) ? 'checked' : '' ?>>
+                          Link ADS-B enrichment for selected audio
+                        </label>
+                      </div>
+                    </div>
+                    <div class="reconstruction-actions">
+                      <button class="intake-button" type="submit">Create Superseding Bundle</button>
+                      <span class="intake-muted">Use this to swap Garmin CSV, audio, or dispatch and reprocess.</span>
+                    </div>
+                  </form>
+                </details>
               </td>
               <td class="intake-error"><?= cvr_intake_h($bundle['processing_error'] ?: ($bundle['latest_job_error'] ?: '—')) ?></td>
             </tr>

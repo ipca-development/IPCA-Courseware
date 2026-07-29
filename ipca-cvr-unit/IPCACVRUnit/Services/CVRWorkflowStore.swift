@@ -193,6 +193,10 @@ final class CVRWorkflowStore: ObservableObject {
             endingTacho: nil,
             fuelRemaining: nil,
             endingOilPercentage: nil,
+            verifiedTakeoffCount: nil,
+            verifiedLandingCount: nil,
+            autoDetectedTakeoffCount: nil,
+            autoDetectedLandingCount: nil,
             maintenanceRemark: nil,
             createdAt: Date(),
             updatedAt: Date()
@@ -327,6 +331,30 @@ final class CVRWorkflowStore: ObservableObject {
         )
     }
 
+    func recordManualTakeoffAdjustment(gpsSample: GPSSample?) {
+        recordInFlightAction(eventType: "manual_takeoff_adjustment", creationMethod: "two_second_hold", gpsSample: gpsSample)
+    }
+
+    func recordManualLandingAdjustment(gpsSample: GPSSample?) {
+        recordInFlightAction(eventType: "manual_landing_adjustment", creationMethod: "two_second_hold", gpsSample: gpsSample)
+    }
+
+    func operationCounts(for flightRecordID: String) -> (autoTakeoffs: Int, autoLandings: Int, manualTakeoffs: Int, manualLandings: Int, displayTakeoffs: Int, displayLandings: Int) {
+        let events = state.flightEvents.filter { $0.flightRecordID == flightRecordID }
+        let autoTakeoffs = events.filter { $0.eventType == "gps_takeoff_provisional" }.count
+        let autoLandings = events.filter { $0.eventType == "gps_landing_provisional" }.count
+        let manualTakeoffs = events.filter { $0.eventType == "manual_takeoff_adjustment" }.count
+        let manualLandings = events.filter { $0.eventType == "manual_landing_adjustment" }.count
+        return (
+            autoTakeoffs,
+            autoLandings,
+            manualTakeoffs,
+            manualLandings,
+            autoTakeoffs + manualTakeoffs,
+            autoLandings + manualLandings
+        )
+    }
+
     func recordGPSFlightTransition(_ transition: GPSFlightTransition) {
         guard let flightRecord = state.activeFlightRecord,
               state.flightEvents.contains(where: {
@@ -341,8 +369,9 @@ final class CVRWorkflowStore: ObservableObject {
         let eventType: String
         let timestamp: Date
         let sample: GPSSample
+        var metadata: [String: String] = [:]
         switch transition {
-        case .takeoff(let detectedAt, let detectedSample):
+        case .takeoff(let detectedAt, let detectedSample, let kind):
             let takeoffs = state.flightEvents.filter {
                 $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
             }.count
@@ -353,7 +382,8 @@ final class CVRWorkflowStore: ObservableObject {
             eventType = "gps_takeoff_provisional"
             timestamp = detectedAt
             sample = detectedSample
-        case .landing(let detectedAt, let detectedSample):
+            metadata["takeoff_kind"] = kind.rawValue
+        case .landing(let detectedAt, let detectedSample, let kind):
             let takeoffs = state.flightEvents.filter {
                 $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
             }.count
@@ -364,6 +394,7 @@ final class CVRWorkflowStore: ObservableObject {
             eventType = "gps_landing_provisional"
             timestamp = detectedAt
             sample = detectedSample
+            metadata["landing_kind"] = kind.rawValue
         }
         let event = CVRFlightEventRecord(
             id: UUID().uuidString,
@@ -380,8 +411,9 @@ final class CVRWorkflowStore: ObservableObject {
             groundSpeed: sample.speedKnots,
             source: "gps_realtime_provisional",
             confidence: 0.85,
-            creationMethod: "speed_hysteresis",
-            userIdentity: nil
+            creationMethod: "airport_cycle_gates",
+            userIdentity: nil,
+            metadata: metadata
         )
         mutate {
             $0.flightEvents.append(event)
@@ -420,7 +452,8 @@ final class CVRWorkflowStore: ObservableObject {
         endingHobbs: Double?,
         endingTacho: Double?,
         fuelRemaining: String,
-        oilPercentage: Int?,
+        verifiedTakeoffCount: Int,
+        verifiedLandingCount: Int,
         maintenanceRemark: String,
         gpsSample: GPSSample?
     ) -> Bool {
@@ -443,24 +476,35 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Fuel remaining must be a valid quantity."
             return false
         }
-        guard let oilPercentage, (0...100).contains(oilPercentage) else {
-            lastError = "Ending oil percentage is required."
+        guard verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
+            lastError = "Takeoff and landing counts must be zero or greater."
             return false
         }
 
+        let counts = operationCounts(for: flightRecord.id)
         let event = makeFlightEvent(
             flightRecord: flightRecord,
             eventType: "shutdown_verification_completed",
             source: "manual_shutdown_verification",
             creationMethod: "post_flight_form",
-            gpsSample: gpsSample
+            gpsSample: gpsSample,
+            metadata: [
+                "verified_takeoff_count": String(verifiedTakeoffCount),
+                "verified_landing_count": String(verifiedLandingCount),
+                "auto_takeoff_count": String(counts.autoTakeoffs + counts.manualTakeoffs),
+                "auto_landing_count": String(counts.autoLandings + counts.manualLandings),
+            ]
         )
 
         let persisted = mutate {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
             flightRecord.fuelRemaining = normalizedFuel
-            flightRecord.endingOilPercentage = oilPercentage
+            flightRecord.endingOilPercentage = nil
+            flightRecord.verifiedTakeoffCount = verifiedTakeoffCount
+            flightRecord.verifiedLandingCount = verifiedLandingCount
+            flightRecord.autoDetectedTakeoffCount = counts.displayTakeoffs
+            flightRecord.autoDetectedLandingCount = counts.displayLandings
             flightRecord.maintenanceRemark = maintenanceRemark.trimmingCharacters(in: .whitespacesAndNewlines)
             flightRecord.status = .awaitingGarmin
             flightRecord.updatedAt = event.timestampUTC
@@ -651,7 +695,7 @@ final class CVRWorkflowStore: ObservableObject {
         return url
     }
 
-    func resetForNextFlightIfComplete() {
+    func resetForNextFlightIfComplete(archiveCompletedWorkflow: Bool = true) {
         guard let flightRecord = state.activeFlightRecord else { return }
         let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
         guard !components.isEmpty else { return }
@@ -659,7 +703,9 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component has a server verification receipt."
             return
         }
-        guard archiveActiveWorkflow() else { return }
+        if archiveCompletedWorkflow {
+            guard archiveActiveWorkflow() else { return }
+        }
 
         mutate {
             $0.activeDispatch = nil
@@ -672,6 +718,64 @@ final class CVRWorkflowStore: ObservableObject {
             $0.discrepancies = []
             $0.selectedTab = .dispatch
         }
+    }
+
+    func completeSimulationFlight() {
+        guard let flightRecord = state.activeFlightRecord else {
+            lastError = "No active flight record to complete in simulation."
+            return
+        }
+        let now = Date()
+        mutate {
+            for index in $0.uploadComponents.indices where $0.uploadComponents[index].flightRecordID == flightRecord.id {
+                $0.uploadComponents[index].state = .serverVerified
+                $0.uploadComponents[index].serverReceiptID = "simulation-local"
+                $0.uploadComponents[index].serverVerificationAt = now
+                $0.uploadComponents[index].lastError = ""
+                $0.uploadComponents[index].progress = 1
+            }
+            if var record = $0.activeFlightRecord {
+                record.status = .complete
+                record.updatedAt = now
+                $0.activeFlightRecord = record
+            }
+        }
+    }
+
+    @discardableResult
+    func finishSimulationDemo(clearAvionicsSimulation: () -> Void) -> Bool {
+        if state.activeFlightRecord == nil {
+            clearAvionicsSimulation()
+            return true
+        }
+        completeSimulationFlight()
+        guard let flightRecord = state.activeFlightRecord else {
+            clearAvionicsSimulation()
+            return true
+        }
+        let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+        if components.isEmpty {
+            lastError = "Complete Dispatch and post-flight verification before finishing the simulation demo."
+            return false
+        }
+        resetForNextFlightIfComplete(archiveCompletedWorkflow: false)
+        clearAvionicsSimulation()
+        return state.activeFlightRecord == nil
+    }
+
+    func resetSimulationWorkflow(clearAvionicsSimulation: () -> Void) {
+        mutate {
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .dispatch
+        }
+        clearAvionicsSimulation()
     }
 
     var isDispatchVerified: Bool {
@@ -936,14 +1040,16 @@ final class CVRWorkflowStore: ObservableObject {
         eventType: String,
         source: String,
         creationMethod: String,
-        gpsSample: GPSSample?
+        gpsSample: GPSSample?,
+        metadata: [String: String]? = nil
     ) {
         let event = makeFlightEvent(
             flightRecord: flightRecord,
             eventType: eventType,
             source: source,
             creationMethod: creationMethod,
-            gpsSample: gpsSample
+            gpsSample: gpsSample,
+            metadata: metadata
         )
         mutate {
             $0.flightEvents.append(event)
@@ -956,7 +1062,8 @@ final class CVRWorkflowStore: ObservableObject {
         eventType: String,
         source: String,
         creationMethod: String,
-        gpsSample: GPSSample?
+        gpsSample: GPSSample?,
+        metadata: [String: String]? = nil
     ) -> CVRFlightEventRecord {
         let now = Date()
         return CVRFlightEventRecord(
@@ -975,7 +1082,8 @@ final class CVRWorkflowStore: ObservableObject {
             source: source,
             confidence: 1.0,
             creationMethod: creationMethod,
-            userIdentity: "local_cvr_unit"
+            userIdentity: "local_cvr_unit",
+            metadata: metadata
         )
     }
 

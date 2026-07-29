@@ -2,11 +2,6 @@ import Combine
 import CoreLocation
 import Foundation
 
-enum GPSFlightTransition {
-    case takeoff(timestamp: Date, sample: GPSSample)
-    case landing(timestamp: Date, sample: GPSSample)
-}
-
 @MainActor
 final class GPSLocationManager: NSObject, ObservableObject {
     @Published private(set) var state: GPSConnectionState = .permissionNeeded
@@ -18,10 +13,6 @@ final class GPSLocationManager: NSObject, ObservableObject {
     private static let captureDistanceFilter: CLLocationDistance = 10
     private static let minimumCaptureSampleInterval: TimeInterval = 2
     private static let minimumCaptureDistance: CLLocationDistance = 8
-    private static let takeoffSpeedKnots = 40.0
-    private static let landingSpeedKnots = 30.0
-    private static let takeoffConfirmationSeconds: TimeInterval = 6
-    private static let landingConfirmationSeconds: TimeInterval = 4
 
     private var locationManager: CLLocationManager?
     private var captureRecordingID: String?
@@ -29,9 +20,7 @@ final class GPSLocationManager: NSObject, ObservableObject {
     private var capturedSamples: [GPSSample] = []
     private var lastCapturedLocation: CLLocation?
     private var lastCapturedSampleAt: Date?
-    private var isAirborne = false
-    private var takeoffCandidateAt: Date?
-    private var landingCandidateAt: Date?
+    private var landingCycleDetector = FlightLandingCycleDetector()
 
     func prepare() {
         ensureManager()
@@ -45,16 +34,14 @@ final class GPSLocationManager: NSObject, ObservableObject {
         updateAuthorizationState()
     }
 
-    func startCapture(recordingID: String, startedAt: Date) {
+    func startCapture(recordingID: String, startedAt: Date, airportICAOs: [String] = []) {
         ensureManager()
         captureRecordingID = recordingID
         captureStartedAt = startedAt
         capturedSamples = []
         lastCapturedLocation = nil
         lastCapturedSampleAt = nil
-        isAirborne = false
-        takeoffCandidateAt = nil
-        landingCandidateAt = nil
+        landingCycleDetector.reset(airportICAOs: airportICAOs)
 
         guard let locationManager else {
             state = .unavailable
@@ -76,6 +63,10 @@ final class GPSLocationManager: NSObject, ObservableObject {
         }
     }
 
+    func injectSimulatedTransition(_ transition: GPSFlightTransition) {
+        onFlightTransition?(transition)
+    }
+
     func stopCaptureAndSave(recordingID: String) -> String? {
         guard captureRecordingID == recordingID else {
             return nil
@@ -84,6 +75,7 @@ final class GPSLocationManager: NSObject, ObservableObject {
         captureStartedAt = nil
         lastCapturedLocation = nil
         lastCapturedSampleAt = nil
+        landingCycleDetector.reset()
         locationManager?.stopUpdatingLocation()
         updateAuthorizationState()
 
@@ -203,32 +195,8 @@ final class GPSLocationManager: NSObject, ObservableObject {
             return
         }
 
-        if isAirborne {
-            takeoffCandidateAt = nil
-            if sample.speedKnots <= Self.landingSpeedKnots {
-                let candidate = landingCandidateAt ?? sample.timestamp
-                landingCandidateAt = candidate
-                if sample.timestamp.timeIntervalSince(candidate) >= Self.landingConfirmationSeconds {
-                    isAirborne = false
-                    landingCandidateAt = nil
-                    onFlightTransition?(.landing(timestamp: candidate, sample: sample))
-                }
-            } else {
-                landingCandidateAt = nil
-            }
-        } else {
-            landingCandidateAt = nil
-            if sample.speedKnots >= Self.takeoffSpeedKnots {
-                let candidate = takeoffCandidateAt ?? sample.timestamp
-                takeoffCandidateAt = candidate
-                if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffConfirmationSeconds {
-                    isAirborne = true
-                    takeoffCandidateAt = nil
-                    onFlightTransition?(.takeoff(timestamp: candidate, sample: sample))
-                }
-            } else {
-                takeoffCandidateAt = nil
-            }
+        for transition in landingCycleDetector.evaluate(sample: sample) {
+            onFlightTransition?(transition)
         }
     }
 

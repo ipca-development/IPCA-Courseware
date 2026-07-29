@@ -43,7 +43,16 @@ $checks = array(
         str_contains($intake, 'assertCompleteClosure')
         && str_contains($intake, 'Ending Hobbs cannot be lower than Starting Hobbs.')
         && str_contains($intake, 'fuel_remaining must be a valid non-negative quantity.')
-        && str_contains($intake, 'ending_oil_percentage is required'),
+        && str_contains($intake, 'verified_takeoff_count'),
+    'landing cycle detection uses airport geofence gates' =>
+        str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/FlightLandingCycleDetector.swift'), 'touch_and_go')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/FlightLandingCycleDetector.swift'), 'stop_and_go')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'CVROperationalHoldTile')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'verifiedTakeoffCount'),
+    'postflight closure captures fuel and verified operation counts only' =>
+        str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'POST-FLIGHT FUEL')
+        && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'POST-FLIGHT FUEL / OIL')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'verified_takeoff_count'),
     'Garmin metadata verifies dispatch counter starts' =>
         str_contains($classification, "metadata['airframe_hours']")
         && str_contains($classification, "metadata['engine_hours']")

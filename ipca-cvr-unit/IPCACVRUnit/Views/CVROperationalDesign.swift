@@ -177,6 +177,97 @@ struct CVROperationalTile: View {
     }
 }
 
+struct CVROperationalHoldTile: View {
+    var title: String
+    var iconName: String
+    var value: String
+    var subtitle: String
+    var color: Color
+    var metrics: CVROperationalMetrics
+    var minimumDuration: TimeInterval = 2
+    var isEnabled: Bool = true
+    let action: () -> Void
+
+    @State private var isPressing = false
+    @State private var holdProgress = 0.0
+    @State private var confirmedFlash = false
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(systemName: iconName)
+                .font(.system(size: metrics.tileIconSize, weight: .semibold))
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                .frame(height: metrics.tileIconSize + 2)
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+                .lineLimit(1)
+                .frame(height: 13)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(confirmedFlash ? Color.white : color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(height: 18, alignment: .top)
+            Text(subtitle)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+                .lineLimit(1)
+                .frame(height: 11)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: metrics.tileHeight, maxHeight: metrics.tileHeight)
+        .background {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    CVROperationalPalette.cardBackground
+                    color.opacity(confirmedFlash ? 0.95 : 0.22)
+                        .frame(width: proxy.size.width * holdProgress)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(color.opacity(isEnabled ? 0.85 : 0.25), lineWidth: 1))
+        .opacity(isEnabled ? 1 : 0.55)
+        .scaleEffect(isPressing ? 0.985 : 1.0)
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onLongPressGesture(
+            minimumDuration: minimumDuration,
+            maximumDistance: 45,
+            pressing: { pressing in
+                guard isEnabled else { return }
+                isPressing = pressing
+                if pressing {
+                    confirmedFlash = false
+                    holdProgress = 0
+                    withAnimation(.linear(duration: minimumDuration)) {
+                        holdProgress = 1
+                    }
+                } else if !confirmedFlash {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        holdProgress = 0
+                    }
+                }
+            },
+            perform: {
+                guard isEnabled else { return }
+                confirmedFlash = true
+                holdProgress = 1
+                action()
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    confirmedFlash = false
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        holdProgress = 0
+                    }
+                }
+            }
+        )
+        .animation(.easeInOut(duration: 0.1), value: confirmedFlash)
+    }
+}
+
 struct CVROperationalWarningCard: View {
     var title: String
     var message: String

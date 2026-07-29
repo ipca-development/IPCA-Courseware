@@ -48,6 +48,9 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     @Published private(set) var latestStatus: AvionicsBeaconStatusPacket?
     @Published private(set) var lastGATTActivityAt: Date?
     @Published private(set) var expectedBeaconIdentityHex = ""
+    private var simulationOverrideActive = false
+
+    var isSimulationOverrideActive: Bool { simulationOverrideActive }
     @Published private(set) var lastIgnoredBeaconIdentityHex = ""
 
     var onAvionicsStateChanged: ((AvionicsPowerState) -> Void)?
@@ -139,6 +142,30 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
         #if DEBUG
         print("[AvionicsBeaconTest] scan stopped")
         #endif
+    }
+
+    func simulateAvionicsOn() {
+        simulationOverrideActive = true
+        beaconDetected = true
+        hasEverSeenBeacon = true
+        lastSeenAt = Date()
+        firstSeenAt = firstSeenAt ?? Date()
+        secondsSinceLastAdvertisement = 0
+        lastError = ""
+        logEvent("simulation: avionics ON")
+        transition(to: .avionicsOn)
+    }
+
+    func simulateAvionicsOff() {
+        simulationOverrideActive = true
+        logEvent("simulation: avionics OFF")
+        transition(to: .avionicsOff)
+    }
+
+    func clearSimulationOverride() {
+        simulationOverrideActive = false
+        logEvent("simulation override cleared")
+        updateState()
     }
 
     func clearLog() {
@@ -299,6 +326,9 @@ final class AvionicsBeaconManager: NSObject, ObservableObject {
     }
 
     private func updateState() {
+        if simulationOverrideActive {
+            return
+        }
         updateBluetoothAuthorization()
         guard centralManager?.state == .poweredOn else {
             transition(to: .bluetoothUnavailable)

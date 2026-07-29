@@ -257,6 +257,10 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var endingTacho: Double?
     var fuelRemaining: String?
     var endingOilPercentage: Int?
+    var verifiedTakeoffCount: Int?
+    var verifiedLandingCount: Int?
+    var autoDetectedTakeoffCount: Int?
+    var autoDetectedLandingCount: Int?
     var maintenanceRemark: String?
     var createdAt: Date
     var updatedAt: Date
@@ -322,6 +326,66 @@ struct CVRFlightEventRecord: Identifiable, Codable, Equatable {
     var confidence: Double
     var creationMethod: String
     var userIdentity: String?
+    var metadata: [String: String]?
+
+    init(
+        id: String,
+        flightRecordID: String,
+        recordingSessionID: String?,
+        eventType: String,
+        timestampUTC: Date,
+        timestampLocal: Date,
+        deviceMonotonicTime: Double?,
+        audioOffset: Double?,
+        latitude: Double?,
+        longitude: Double?,
+        altitude: Double?,
+        groundSpeed: Double?,
+        source: String,
+        confidence: Double,
+        creationMethod: String,
+        userIdentity: String?,
+        metadata: [String: String]? = nil
+    ) {
+        self.id = id
+        self.flightRecordID = flightRecordID
+        self.recordingSessionID = recordingSessionID
+        self.eventType = eventType
+        self.timestampUTC = timestampUTC
+        self.timestampLocal = timestampLocal
+        self.deviceMonotonicTime = deviceMonotonicTime
+        self.audioOffset = audioOffset
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
+        self.groundSpeed = groundSpeed
+        self.source = source
+        self.confidence = confidence
+        self.creationMethod = creationMethod
+        self.userIdentity = userIdentity
+        self.metadata = metadata
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        flightRecordID = try container.decode(String.self, forKey: .flightRecordID)
+        recordingSessionID = try container.decodeIfPresent(String.self, forKey: .recordingSessionID)
+        eventType = try container.decode(String.self, forKey: .eventType)
+        timestampUTC = try container.decode(Date.self, forKey: .timestampUTC)
+        timestampLocal = try container.decode(Date.self, forKey: .timestampLocal)
+        deviceMonotonicTime = try container.decodeIfPresent(Double.self, forKey: .deviceMonotonicTime)
+        audioOffset = try container.decodeIfPresent(Double.self, forKey: .audioOffset)
+        latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
+        altitude = try container.decodeIfPresent(Double.self, forKey: .altitude)
+        groundSpeed = try container.decodeIfPresent(Double.self, forKey: .groundSpeed)
+        source = try container.decode(String.self, forKey: .source)
+        confidence = try container.decode(Double.self, forKey: .confidence)
+        creationMethod = try container.decode(String.self, forKey: .creationMethod)
+        userIdentity = try container.decodeIfPresent(String.self, forKey: .userIdentity)
+        metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata)
+    }
 }
 
 struct CVRFlightLegRecord: Identifiable, Codable, Equatable {

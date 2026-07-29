@@ -18,6 +18,7 @@ final class UploadManager: ObservableObject {
     }()
 
     func uploadPending(store: RecordingStore, settings: SettingsStore, network: NetworkMonitor) {
+        guard !settings.isSimulationModeEnabled else { return }
         guard network.canUpload(allowCellular: settings.allowCellularUpload) else { return }
         for id in store.pendingUploadIDs() {
             upload(recordingID: id, store: store, settings: settings)
@@ -87,6 +88,7 @@ final class UploadManager: ObservableObject {
     }
 
     func uploadQueuedWorkflowComponents(workflow: CVRWorkflowStore, settings: SettingsStore) {
+        guard !settings.isSimulationModeEnabled else { return }
         guard let baseURL = settings.normalizedServerURL else {
             return
         }
@@ -402,6 +404,7 @@ final class UploadManager: ObservableObject {
             if let value = event.altitude { item["altitude"] = value }
             if let value = event.groundSpeed { item["ground_speed"] = value }
             if let value = event.userIdentity { item["user_identity"] = value }
+            if let metadata = event.metadata, !metadata.isEmpty { item["metadata"] = metadata }
             evidence = item
         case "recorder_verification":
             let verificationID = component.localFilePath.map { String($0.dropFirst("verification:".count)) }
@@ -435,7 +438,10 @@ final class UploadManager: ObservableObject {
             if let value = flight.endingHobbs { item["ending_hobbs"] = value }
             if let value = flight.endingTacho { item["ending_tacho"] = value }
             if let value = flight.fuelRemaining { item["fuel_remaining"] = value }
-            if let value = flight.endingOilPercentage { item["ending_oil_percentage"] = value }
+            if let value = flight.verifiedTakeoffCount { item["verified_takeoff_count"] = value }
+            if let value = flight.verifiedLandingCount { item["verified_landing_count"] = value }
+            if let value = flight.autoDetectedTakeoffCount { item["auto_detected_takeoff_count"] = value }
+            if let value = flight.autoDetectedLandingCount { item["auto_detected_landing_count"] = value }
             if let value = flight.maintenanceRemark { item["maintenance_remark"] = value }
             evidence = item
         default:

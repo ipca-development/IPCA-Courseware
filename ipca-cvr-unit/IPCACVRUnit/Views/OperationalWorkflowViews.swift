@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+private func completeSimulationDemo(
+    workflow: CVRWorkflowStore,
+    settings: SettingsStore,
+    beacon: AvionicsBeaconManager
+) {
+    if workflow.finishSimulationDemo(clearAvionicsSimulation: {
+        beacon.clearSimulationOverride()
+    }) {
+        settings.isSimulationModeEnabled = false
+    }
+}
+
 struct OperationalTabsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
@@ -8,39 +21,45 @@ struct OperationalTabsView: View {
     @Binding var showAdminUnlock: Bool
 
     var body: some View {
-        TabView(selection: Binding(
-            get: { workflow.state.selectedTab },
-            set: { workflow.selectTab($0) }
-        )) {
-            DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
-                .tabItem {
-                    Image(systemName: CVROperationalTab.dispatch.systemImage)
-                    Text(CVROperationalTab.dispatch.title)
-                }
-                .tag(CVROperationalTab.dispatch)
+        VStack(spacing: 0) {
+            TabView(selection: Binding(
+                get: { workflow.state.selectedTab },
+                set: { workflow.selectTab($0) }
+            )) {
+                DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
+                    .tabItem {
+                        Image(systemName: CVROperationalTab.dispatch.systemImage)
+                        Text(CVROperationalTab.dispatch.title)
+                    }
+                    .tag(CVROperationalTab.dispatch)
 
-            RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
-                .tabItem {
-                    Image(systemName: CVROperationalTab.recorder.systemImage)
-                    Text(CVROperationalTab.recorder.title)
-                }
-                .tag(CVROperationalTab.recorder)
+                RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                    .tabItem {
+                        Image(systemName: CVROperationalTab.recorder.systemImage)
+                        Text(CVROperationalTab.recorder.title)
+                    }
+                    .tag(CVROperationalTab.recorder)
 
-            InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
-                .tabItem {
-                    Image(systemName: CVROperationalTab.inFlight.systemImage)
-                    Text(CVROperationalTab.inFlight.title)
-                }
-                .tag(CVROperationalTab.inFlight)
+                InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
+                    .tabItem {
+                        Image(systemName: CVROperationalTab.inFlight.systemImage)
+                        Text(CVROperationalTab.inFlight.title)
+                    }
+                    .tag(CVROperationalTab.inFlight)
 
-            GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
-                .tabItem {
-                    Image(systemName: CVROperationalTab.garmin.systemImage)
-                    Text(CVROperationalTab.garmin.title)
-                }
-                .tag(CVROperationalTab.garmin)
+                GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
+                    .tabItem {
+                        Image(systemName: CVROperationalTab.garmin.systemImage)
+                        Text(CVROperationalTab.garmin.title)
+                    }
+                    .tag(CVROperationalTab.garmin)
+            }
+            .tint(CVROperationalPalette.primaryBlue)
+
+            if settings.isSimulationModeEnabled {
+                SimulationModeChrome()
+            }
         }
-        .tint(CVROperationalPalette.primaryBlue)
         .background(CVROperationalPalette.background.ignoresSafeArea())
     }
 }
@@ -441,8 +460,34 @@ struct InFlightWorkflowView: View {
                                 }
                                 inFlightControlPanel
                                 HStack(spacing: metrics.spacing) {
-                                    CVROperationalTile(title: "TAKE OFFS", iconName: "airplane.departure", value: "\(takeoffCount)", color: takeoffCount > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
-                                    CVROperationalTile(title: "LANDINGS", iconName: "airplane.arrival", value: "\(landingCount)", color: landingCount > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
+                                    CVROperationalHoldTile(
+                                        title: "TAKE OFFS",
+                                        iconName: "airplane.departure",
+                                        value: "\(operationCounts.displayTakeoffs)",
+                                        subtitle: "Hold 2s to +1",
+                                        color: operationCounts.displayTakeoffs > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
+                                        metrics: metrics,
+                                        minimumDuration: 2,
+                                        isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                    ) {
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                        workflow.recordManualTakeoffAdjustment(gpsSample: gps.latestSample)
+                                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                    }
+                                    CVROperationalHoldTile(
+                                        title: "LANDINGS",
+                                        iconName: "airplane.arrival",
+                                        value: "\(operationCounts.displayLandings)",
+                                        subtitle: "Hold 2s to +1",
+                                        color: operationCounts.displayLandings > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
+                                        metrics: metrics,
+                                        minimumDuration: 2,
+                                        isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                    ) {
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                        workflow.recordManualLandingAdjustment(gpsSample: gps.latestSample)
+                                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                    }
                                 }
                             }
                             .padding(.horizontal, metrics.outerHorizontalPadding)
@@ -462,7 +507,7 @@ struct InFlightWorkflowView: View {
     }
 
     private var avionicsReady: Bool {
-        beacon.currentState == .avionicsOn || beacon.currentState == .temporarilyMissing
+        beacon.isSimulationOverrideActive || beacon.currentState == .avionicsOn || beacon.currentState == .temporarilyMissing
     }
 
     private var hasEngineStartEvent: Bool {
@@ -519,9 +564,9 @@ struct InFlightWorkflowView: View {
     private var inFlightControlPanel: some View {
         if hasEngineShutdownEvent {
             VStack(spacing: 8) {
-                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VALUES SAVED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending meters, fuel, and oil are atomically stored locally and queued for an individual server receipt. NEXT FLIGHT remains blocked until verification." : "Official Engine Shutdown time is stored locally and queued for server verification.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
+                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VALUES SAVED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending meters, fuel, and operation counts are atomically stored locally and queued for an individual server receipt. NEXT FLIGHT remains blocked until verification." : "Official Engine Shutdown time is stored locally and queued for server verification.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
                 if !hasShutdownVerificationEvent {
-                    CVROperationalActionButton(title: "Complete Shutdown Verification", subtitle: "Ending meters / fuel / oil", color: CVROperationalPalette.secondaryBlue) {
+                    CVROperationalActionButton(title: "Complete Shutdown Verification", subtitle: "Ending meters / fuel / operations", color: CVROperationalPalette.secondaryBlue) {
                         isShowingShutdownVerification = true
                     }
                 }
@@ -562,12 +607,11 @@ struct InFlightWorkflowView: View {
         }
     }
 
-    private var takeoffCount: Int {
-        flightEvents.filter { $0.eventType == "gps_takeoff_provisional" }.count
-    }
-
-    private var landingCount: Int {
-        flightEvents.filter { $0.eventType == "gps_landing_provisional" }.count
+    private var operationCounts: (autoTakeoffs: Int, autoLandings: Int, manualTakeoffs: Int, manualLandings: Int, displayTakeoffs: Int, displayLandings: Int) {
+        guard let flightRecord = workflow.state.activeFlightRecord else {
+            return (0, 0, 0, 0, 0, 0)
+        }
+        return workflow.operationCounts(for: flightRecord.id)
     }
 
     private var flightEvents: [CVRFlightEventRecord] {
@@ -578,18 +622,31 @@ struct InFlightWorkflowView: View {
     }
 
     private func gpsAirborneSeconds(now: Date) -> TimeInterval {
-        var airborneStart: Date?
+        var sessionStart: Date?
         var total: TimeInterval = 0
         for event in flightEvents {
-            if event.eventType == "gps_takeoff_provisional", airborneStart == nil {
-                airborneStart = event.timestampUTC
-            } else if event.eventType == "gps_landing_provisional", let start = airborneStart {
-                total += max(0, event.timestampUTC.timeIntervalSince(start))
-                airborneStart = nil
+            switch event.eventType {
+            case "gps_takeoff_provisional", "manual_takeoff_adjustment":
+                if sessionStart == nil {
+                    sessionStart = event.timestampUTC
+                }
+            case "gps_landing_provisional":
+                let landingKind = event.metadata?["landing_kind"] ?? LandingCycleKind.fullStop.rawValue
+                if landingKind == LandingCycleKind.fullStop.rawValue, let start = sessionStart {
+                    total += max(0, event.timestampUTC.timeIntervalSince(start))
+                    sessionStart = nil
+                }
+            case "engine_shutdown_on_block":
+                if let start = sessionStart {
+                    total += max(0, event.timestampUTC.timeIntervalSince(start))
+                    sessionStart = nil
+                }
+            default:
+                break
             }
         }
-        if let airborneStart, !hasEngineShutdownEvent {
-            total += max(0, now.timeIntervalSince(airborneStart))
+        if let sessionStart, !hasEngineShutdownEvent {
+            total += max(0, now.timeIntervalSince(sessionStart))
         }
         return total
     }
@@ -688,9 +745,9 @@ private struct ShutdownVerificationView: View {
     @State private var endingHobbs = ""
     @State private var endingTacho = ""
     @State private var fuelRemaining = 0.0
-    @State private var oilPercent = 50.0
     @State private var hasFuelSelection = false
-    @State private var hasOilSelection = true
+    @State private var verifiedTakeoffs = 0
+    @State private var verifiedLandings = 0
     @State private var maintenanceRemark = ""
     @FocusState private var focusedField: NumericField?
 
@@ -710,8 +767,8 @@ private struct ShutdownVerificationView: View {
                         }
                     }
 
-                    section("POST-FLIGHT FUEL / OIL") {
-                        HStack(alignment: .top, spacing: 10) {
+                    section("POST-FLIGHT FUEL") {
+                        HStack {
                             Spacer(minLength: 0)
                             CVRFluidCylinderPicker(
                                 title: "FUEL",
@@ -724,18 +781,19 @@ private struct ShutdownVerificationView: View {
                                 warningColor: CVROperationalPalette.critical
                             )
                             .frame(width: 132)
-                            CVRFluidCylinderPicker(
-                                title: "OIL",
-                                unit: "%",
-                                value: $oilPercent,
-                                hasSelection: $hasOilSelection,
-                                maxValue: 100,
-                                warningThreshold: nil,
-                                fillColor: CVROperationalPalette.standby,
-                                warningColor: CVROperationalPalette.standby
-                            )
-                            .frame(width: 132)
                             Spacer(minLength: 0)
+                        }
+                    }
+
+                    section("TAKEOFFS / LANDINGS") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("GPS auto-detected \(detectedTakeoffs) takeoff(s) and \(detectedLandings) landing(s). Adjust if needed before upload.")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                            HStack(spacing: 12) {
+                                operationStepper(title: "TAKE OFFS", value: $verifiedTakeoffs)
+                                operationStepper(title: "LANDINGS", value: $verifiedLandings)
+                            }
                         }
                     }
 
@@ -774,7 +832,46 @@ private struct ShutdownVerificationView: View {
     }
 
     private var canSave: Bool {
-        Double(endingHobbs) != nil && Double(endingTacho) != nil && hasFuelSelection && hasOilSelection
+        Double(endingHobbs) != nil && Double(endingTacho) != nil && hasFuelSelection && verifiedTakeoffs >= 0 && verifiedLandings >= 0
+    }
+
+    private var detectedTakeoffs: Int {
+        guard let flightRecord = workflow.state.activeFlightRecord else { return 0 }
+        return workflow.operationCounts(for: flightRecord.id).displayTakeoffs
+    }
+
+    private var detectedLandings: Int {
+        guard let flightRecord = workflow.state.activeFlightRecord else { return 0 }
+        return workflow.operationCounts(for: flightRecord.id).displayLandings
+    }
+
+    private func operationStepper(title: String, value: Binding<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            HStack(spacing: 10) {
+                Button {
+                    value.wrappedValue = max(0, value.wrappedValue - 1)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+                Text("\(value.wrappedValue)")
+                    .font(.title2.weight(.bold))
+                    .frame(minWidth: 36)
+                Button {
+                    value.wrappedValue += 1
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundStyle(CVROperationalPalette.secondaryBlue)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -822,8 +919,8 @@ private struct ShutdownVerificationView: View {
             fuelRemaining = min(max(fuel, 0), 13)
             hasFuelSelection = true
         }
-        oilPercent = Double(flightRecord.endingOilPercentage ?? 50)
-        hasOilSelection = true
+        verifiedTakeoffs = flightRecord.verifiedTakeoffCount ?? workflow.operationCounts(for: flightRecord.id).displayTakeoffs
+        verifiedLandings = flightRecord.verifiedLandingCount ?? workflow.operationCounts(for: flightRecord.id).displayLandings
         maintenanceRemark = flightRecord.maintenanceRemark ?? ""
     }
 
@@ -832,7 +929,8 @@ private struct ShutdownVerificationView: View {
             endingHobbs: Double(endingHobbs),
             endingTacho: Double(endingTacho),
             fuelRemaining: String(format: "%.1f", fuelRemaining),
-            oilPercentage: Int(oilPercent.rounded()),
+            verifiedTakeoffCount: verifiedTakeoffs,
+            verifiedLandingCount: verifiedLandings,
             maintenanceRemark: maintenanceRemark,
             gpsSample: gps.latestSample
         )
@@ -870,7 +968,9 @@ struct GarminWorkflowView: View {
                     }
                     CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
-                        if allWorkflowComponentsVerified {
+                        if settings.isSimulationModeEnabled {
+                            completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
+                        } else if allWorkflowComponentsVerified {
                             workflow.resetForNextFlightIfComplete()
                         } else {
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
@@ -958,6 +1058,9 @@ struct GarminWorkflowView: View {
     }
 
     private var uploadButtonSubtitle: String {
+        if settings.isSimulationModeEnabled {
+            return "Skip Garmin and return to Dispatch"
+        }
         guard !garminComponents.isEmpty else { return "Waiting for CSV" }
         if allWorkflowComponentsVerified {
             return "Return to Dispatch"
@@ -972,6 +1075,9 @@ struct GarminWorkflowView: View {
     }
 
     private var uploadButtonTitle: String {
+        if settings.isSimulationModeEnabled {
+            return workflow.state.activeFlightRecord == nil ? "DEMO READY" : "FINISH SIMULATION"
+        }
         if allWorkflowComponentsVerified {
             return "NEXT FLIGHT"
         }
@@ -1701,6 +1807,114 @@ private struct CVRFluidCylinderPicker: View {
         .padding(12)
         .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+}
+
+private struct SimulationModeChrome: View {
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @EnvironmentObject private var gps: GPSLocationManager
+
+    var body: some View {
+        VStack(spacing: 0) {
+            simulationControls
+            simulationBanner
+        }
+        .background(CVROperationalPalette.background.opacity(0.98))
+    }
+
+    private var simulationControls: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                simButton("Avionics ON", icon: "bolt.fill") {
+                    beacon.simulateAvionicsOn()
+                }
+                simButton("Avionics OFF", icon: "bolt.slash.fill") {
+                    beacon.simulateAvionicsOff()
+                }
+                simButton("Takeoff", icon: "airplane.departure") {
+                    let kind: TakeoffCycleKind
+                    if let flightRecord = workflow.state.activeFlightRecord {
+                        let counts = workflow.operationCounts(for: flightRecord.id)
+                        kind = counts.displayTakeoffs <= counts.displayLandings ? .initial : .cycle
+                    } else {
+                        kind = .initial
+                    }
+                    injectTransition(.takeoff(timestamp: Date(), sample: sample(), kind: kind))
+                }
+                simButton("T&G Land", icon: "airplane.arrival") {
+                    injectTransition(.landing(timestamp: Date(), sample: sample(), kind: .touchAndGo))
+                }
+                simButton("Full Stop", icon: "parkingsign.circle.fill") {
+                    injectTransition(.landing(timestamp: Date(), sample: sample(), kind: .fullStop))
+                }
+                simButton("Finish Demo", icon: "flag.checkered") {
+                    completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
+                }
+                simButton("Reset", icon: "arrow.counterclockwise") {
+                    workflow.resetSimulationWorkflow {
+                        beacon.clearSimulationOverride()
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var simulationBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "play.rectangle.on.rectangle")
+                .font(.caption.weight(.bold))
+            Text("SIMULATION MODE")
+                .font(.caption.weight(.bold))
+                .tracking(1.1)
+            Spacer(minLength: 0)
+            Text("No logging · No uploads")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(Color.black.opacity(0.92))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(CVROperationalPalette.warning)
+    }
+
+    private func simButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(CVROperationalPalette.cardBackground, in: Capsule())
+                .overlay(Capsule().stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(CVROperationalPalette.textPrimary)
+    }
+
+    private func injectTransition(_ transition: GPSFlightTransition) {
+        guard workflow.state.activeFlightRecord != nil else { return }
+        gps.injectSimulatedTransition(transition)
+    }
+
+    private func sample() -> GPSSample {
+        if let latest = gps.latestSample {
+            return latest
+        }
+        return GPSSample(
+            timestamp: Date(),
+            secondsSinceRecordingStart: 0,
+            latitude: 33.626667,
+            longitude: -116.159722,
+            altitude: 120,
+            speedMetersPerSecond: 25,
+            speedKnots: 48.6,
+            course: 0,
+            horizontalAccuracy: 8,
+            verticalAccuracy: 12
+        )
     }
 }
 

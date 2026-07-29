@@ -126,7 +126,7 @@ $checks = array(
         str_contains($derivationService, "'flight_record_version_id' => (int)\$version['id']")
         && str_contains($bundleService, "\$derived['flight_record_version_id']")
         && str_contains($bundleService, 'rebuildFlightRecord')
-        && str_contains($debriefPage, 'Rebuild Flight Record'),
+        && (str_contains($debriefPage, 'Rebuild Flight Record') || str_contains($debriefPage, 'Re-derive Flight Record')),
     'approval and release remain immutable and instructor-authoritative' =>
         str_contains($debriefSource, 'accepted suggestions are now authoritative')
         && str_contains($debriefSource, 'Only an instructor-approved debrief can be released.')
