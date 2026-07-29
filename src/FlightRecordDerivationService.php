@@ -29,6 +29,7 @@ final class FlightRecordDerivationService
         if ($csv === null) {
             throw new RuntimeException('CSV file not found.');
         }
+        $csv['storage_path'] = $this->resolvedStoragePath((string)($csv['storage_path'] ?? ''));
 
         $parsed = G3XFlightStreamParser::parseFile((string)$csv['storage_path'], (string)$csv['import_profile']);
         $config = (new AircraftOperationalConfigService($this->pdo))->configForAircraft(isset($csv['aircraft_id']) ? (int)$csv['aircraft_id'] : null);
@@ -525,5 +526,28 @@ final class FlightRecordDerivationService
         $stmt->execute(array($csvFileId));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    private function resolvedStoragePath(string $storedPath): string
+    {
+        $storedPath = trim($storedPath);
+        if ($storedPath === '') {
+            throw new RuntimeException('Garmin CSV storage path is empty.');
+        }
+        $projectRoot = realpath(dirname(__DIR__));
+        $storageRoot = realpath(dirname(__DIR__) . '/storage');
+        if ($projectRoot === false || $storageRoot === false) {
+            throw new RuntimeException('Server evidence storage is unavailable.');
+        }
+        $candidate = str_starts_with($storedPath, '/')
+            ? $storedPath
+            : $projectRoot . '/' . ltrim($storedPath, '/');
+        $realPath = realpath($candidate);
+        if ($realPath === false
+            || !is_file($realPath)
+            || !str_starts_with($realPath, $storageRoot . DIRECTORY_SEPARATOR)) {
+            throw new RuntimeException('Garmin CSV storage file is unavailable.');
+        }
+        return $realPath;
     }
 }

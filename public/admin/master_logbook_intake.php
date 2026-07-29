@@ -77,6 +77,12 @@ try {
                 $actorUserId > 0 ? $actorUserId : null
             );
             $reconstructionNotice = 'Immutable evidence bundle created. Review it below, then start Reconstruction.';
+        } elseif ($action === 'retry_reconstruction_bundle') {
+            $reconstructionService->retryPreparation(
+                (int)($_POST['bundle_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Evidence bundle preparation completed successfully.';
         } elseif ($action === 'lock_bundle_transcript') {
             $reconstructionService->lockTranscript((int)($_POST['bundle_id'] ?? 0), $actorUserId > 0 ? $actorUserId : null);
             $reconstructionNotice = 'Raw transcript snapshot is version-locked and ready for AI debrief generation.';
@@ -546,6 +552,14 @@ cw_header('Master Logbook');
                   </form>
                 <?php elseif ((string)($bundle['latest_job_status'] ?? '') === 'processing'): ?>
                   <?= cvr_intake_badge($bundle['status'] ?? '') ?>
+                <?php endif; ?>
+                <?php if ((string)($bundle['status'] ?? '') === 'needs_review' && trim((string)($bundle['processing_error'] ?? '')) !== ''): ?>
+                  <form method="post" action="/admin/master_logbook.php?tab=reconstruction" style="margin-top:6px">
+                    <input type="hidden" name="action" value="retry_reconstruction_bundle">
+                    <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                    <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
+                    <button class="intake-button" type="submit">Retry Bundle Preparation</button>
+                  </form>
                 <?php endif; ?>
                 <?php if (empty($bundle['transcript_snapshot_id']) && strtolower((string)($bundle['transcription_status'] ?? '')) === 'ready'): ?>
                   <form method="post" action="/admin/master_logbook.php?tab=reconstruction" style="margin-top:6px">

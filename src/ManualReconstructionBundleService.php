@@ -147,6 +147,34 @@ final class ManualReconstructionBundleService
         return $this->bundle($bundleId) ?? array();
     }
 
+    /** @return array<string,mixed> */
+    public function retryPreparation(int $bundleId, ?int $actorUserId): array
+    {
+        $bundle = $this->bundle($bundleId);
+        if (!$bundle || (string)($bundle['status'] ?? '') !== 'needs_review') {
+            throw new RuntimeException('Only a bundle requiring technical review can be retried.');
+        }
+        $dispatch = $this->row(self::SOURCE_TABLES['dispatch'], (int)$bundle['dispatch_id']);
+        $recording = $this->row(self::SOURCE_TABLES['cockpit_audio'], (int)$bundle['cockpit_recording_id']);
+        $garmin = $this->row(self::SOURCE_TABLES['garmin_csv'], (int)$bundle['garmin_csv_file_id']);
+        $this->pdo->prepare(
+            'UPDATE ipca_manual_intake_bundles
+             SET status = \'frozen\', processing_error = NULL WHERE id = ? AND status = \'needs_review\''
+        )->execute(array($bundleId));
+        try {
+            $this->prepareCanonicalSession($bundleId, $dispatch, $recording, $garmin, $actorUserId);
+            $this->audit($bundleId, 'bundle_preparation_retried', $actorUserId, array(
+                'result' => 'reconstruction_ready',
+            ));
+        } catch (Throwable $e) {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_intake_bundles SET status = \'needs_review\', processing_error = ? WHERE id = ?'
+            )->execute(array($e->getMessage(), $bundleId));
+            throw $e;
+        }
+        return $this->bundle($bundleId) ?? array();
+    }
+
     /** @return list<array<string,mixed>> */
     public function recentBundles(int $limit = 30): array
     {
@@ -272,12 +300,9 @@ final class ManualReconstructionBundleService
                 ->execute(array((string)$session['session_uuid'], (int)$recording['id']));
         }
         if ($this->columnExists('ipca_cockpit_recordings', 'g3x_storage_path')) {
-            $path = trim((string)($garmin['storage_path'] ?? ''));
-            if ($path === '' || !is_file($path)) {
-                throw new RuntimeException('Selected Garmin CSV storage file is unavailable.');
-            }
+            $resolved = $this->resolveStoredGarminPath((string)($garmin['storage_path'] ?? ''));
             $this->pdo->prepare('UPDATE ipca_cockpit_recordings SET g3x_storage_path = ? WHERE id = ?')
-                ->execute(array($path, (int)$recording['id']));
+                ->execute(array($resolved['relative'], (int)$recording['id']));
         }
         $versionId = null;
         try {
@@ -479,6 +504,33 @@ final class ManualReconstructionBundleService
     private function normalizeTail(string $tail): string
     {
         return strtoupper((string)preg_replace('/[^A-Z0-9]/i', '', trim($tail)));
+    }
+
+    /** @return array{absolute:string,relative:string} */
+    private function resolveStoredGarminPath(string $storedPath): array
+    {
+        $storedPath = trim($storedPath);
+        if ($storedPath === '') {
+            throw new RuntimeException('Selected Garmin CSV storage path is empty.');
+        }
+        $projectRoot = realpath(dirname(__DIR__));
+        $storageRoot = realpath(dirname(__DIR__) . '/storage');
+        if ($projectRoot === false || $storageRoot === false) {
+            throw new RuntimeException('Server evidence storage is unavailable.');
+        }
+        $candidate = str_starts_with($storedPath, '/')
+            ? $storedPath
+            : $projectRoot . '/' . ltrim($storedPath, '/');
+        $realPath = realpath($candidate);
+        if ($realPath === false
+            || !is_file($realPath)
+            || !str_starts_with($realPath, $storageRoot . DIRECTORY_SEPARATOR)) {
+            throw new RuntimeException('Selected Garmin CSV storage file is unavailable.');
+        }
+        return array(
+            'absolute' => $realPath,
+            'relative' => ltrim(substr($realPath, strlen($projectRoot)), DIRECTORY_SEPARATOR),
+        );
     }
 
     private function uuid(string $value, string $label): string
