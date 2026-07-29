@@ -845,6 +845,37 @@ final class CockpitRecorderService
         }
     }
 
+    /**
+     * @return array<string,mixed>
+     */
+    public function requeueTranscription(int $recordingId): array
+    {
+        $this->requireTables();
+        if ($recordingId <= 0) {
+            return array('ok' => false, 'error' => 'Invalid recording id.');
+        }
+        $recording = $this->recordingByAnyId((string)$recordingId);
+        if (!is_array($recording)) {
+            return array('ok' => false, 'error' => 'Recording not found.');
+        }
+        if (trim((string)($recording['storage_path'] ?? '')) === '') {
+            return array('ok' => false, 'error' => 'Recording audio file is not available for re-processing.');
+        }
+
+        $this->resetTranscriptionForRetry($recordingId);
+        $spawned = $this->spawnTranscriptionWorker($recordingId);
+
+        return array(
+            'ok' => true,
+            'worker_spawned' => $spawned,
+            'transcription_status' => 'queued',
+            'transcription_progress' => 0,
+            'message' => $spawned
+                ? 'Transcript re-processing queued.'
+                : 'Transcript reset, but the background worker could not be started. Use Process on Cockpit Recorder admin if needed.',
+        );
+    }
+
     public function spawnTranscriptionWorker(int $recordingId): bool
     {
         if ($recordingId <= 0) {
@@ -2293,14 +2324,34 @@ final class CockpitRecorderService
 
     private static function cleanTranscriptText(string $text): string
     {
-        $text = trim(preg_replace('/[ \t]+/', ' ', $text) ?? $text);
+        $text = trim(preg_replace('/\r\n|\r|\n+/', "\n", $text) ?? $text);
         if ($text === '') {
             return '';
         }
 
-        $units = preg_split('/(?<=[.!?,;:])\s+/u', $text) ?: array($text);
-        if (count($units) < 3) {
+        $text = preg_replace('/(?:[ \t]*\[unclear\][ \t]*){2,}/iu', ' [unclear] ', $text) ?? $text;
+        $text = trim(preg_replace('/[ \t]+/', ' ', $text) ?? $text);
+
+        $units = array();
+        foreach (preg_split('/\n+/u', $text) ?: array($text) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            $lineUnits = preg_split('/(?<=[.!?,;:])\s+/u', $line) ?: array($line);
+            foreach ($lineUnits as $lineUnit) {
+                $lineUnit = trim($lineUnit);
+                if ($lineUnit !== '') {
+                    $units[] = $lineUnit;
+                }
+            }
+        }
+
+        if ($units === array()) {
             return $text;
+        }
+        if (count($units) < 2) {
+            return implode(' ', $units);
         }
 
         $clean = array();
@@ -2309,11 +2360,22 @@ final class CockpitRecorderService
         $lastUnitKey = '';
         $lastUnitRepeatCount = 0;
         $recentKeys = array();
+        $lastWasUnclear = false;
         foreach ($units as $unit) {
             $unit = trim($unit);
             if ($unit === '') {
                 continue;
             }
+
+            if (preg_match('/^\[unclear\]$/iu', $unit)) {
+                if ($lastWasUnclear) {
+                    continue;
+                }
+                $lastWasUnclear = true;
+                $clean[] = '[unclear]';
+                continue;
+            }
+            $lastWasUnclear = false;
 
             $key = self::transcriptRepeatKey($unit);
             if ($key !== '') {
@@ -2347,7 +2409,7 @@ final class CockpitRecorderService
                 }
             }
 
-            if ($key !== '' && strlen($key) > 30) {
+            if ($key !== '' && strlen($key) > 24) {
                 $count = (int)($seen[$key] ?? 0);
                 $seen[$key] = $count + 1;
                 if ($key === $lastKey || $count >= 1) {

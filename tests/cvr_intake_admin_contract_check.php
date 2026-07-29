@@ -56,6 +56,13 @@ if ($statusApiSource === false
     exit(1);
 }
 
+$reprocessApiSource = file_get_contents(__DIR__ . '/../public/admin/api/cockpit_recorder_intake_reprocess_transcript.php');
+if ($reprocessApiSource === false
+    || !str_contains($reprocessApiSource, 'requeueTranscription')) {
+    fwrite(STDERR, "cockpit_recorder_intake_reprocess_transcript contract failed.\n");
+    exit(1);
+}
+
 $pageSource = file_get_contents(__DIR__ . '/../public/admin/master_logbook_intake.php');
 if ($pageSource === false
     || !str_contains($pageSource, 'upload_manual_garmin_csv')
@@ -65,6 +72,8 @@ if ($pageSource === false
     || !str_contains($pageSource, 'data-audio-short-toggle')
     || !str_contains($pageSource, 'intake-audio-row-short')
     || !str_contains($pageSource, 'cockpit_recorder_intake_transcript.php')
+    || !str_contains($pageSource, 'cockpit_recorder_intake_reprocess_transcript.php')
+    || !str_contains($pageSource, 'data-audio-transcript-reprocess')
     || !str_contains($pageSource, 'cockpit_recorder_intake_audio_status.php')
     || !str_contains($pageSource, 'CvrAudioIntakeMetricsService')
     || !str_contains($pageSource, 'intake-audio-crew')

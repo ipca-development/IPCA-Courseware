@@ -32,6 +32,9 @@ try {
 
     $recordingId = (int)($recording['id'] ?? 0);
     $hasAudio = trim((string)($recording['storage_path'] ?? '')) !== '';
+    $rawTranscript = trim((string)($recording['transcript_text'] ?? ''));
+    $transcriptPayload = $service->transcript((string)$recordingId);
+    $cleanTranscript = trim((string)($transcriptPayload['transcript'] ?? $rawTranscript));
     cockpit_intake_transcript_json(200, array(
         'ok' => true,
         'recording_id' => $recordingId,
@@ -40,7 +43,9 @@ try {
         'transcription_status' => (string)($recording['transcription_status'] ?? ''),
         'transcription_progress' => (int)($recording['transcription_progress'] ?? 0),
         'audio_url' => $hasAudio ? ('/admin/cockpit_recorder_audio.php?id=' . rawurlencode((string)$recordingId)) : null,
-        'transcript_text' => trim((string)($recording['transcript_text'] ?? '')),
+        'transcript_text' => $cleanTranscript,
+        'transcript_raw' => $rawTranscript,
+        'transcript_cleaned' => $cleanTranscript !== $rawTranscript,
         'original_filename' => (string)($recording['original_filename'] ?? ''),
         'file_size_bytes' => (int)($recording['file_size_bytes'] ?? 0),
         'duration_seconds' => (float)($recording['duration_seconds'] ?? 0),

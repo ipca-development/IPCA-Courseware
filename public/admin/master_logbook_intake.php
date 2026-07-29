@@ -658,6 +658,10 @@ cw_header('Master Logbook');
 .intake-modal-backdrop[hidden]{display:none}
 .intake-modal{width:min(920px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;border:1px solid #dbe3ee;box-shadow:0 24px 60px rgba(15,23,42,.22)}
 .intake-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:14px 16px;border-bottom:1px solid #e2e8f0}
+.intake-modal-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.intake-modal-reprocess{border:1px solid #fbbf24;border-radius:9px;background:#fffbeb;color:#92400e;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
+.intake-modal-reprocess:disabled{opacity:.55;cursor:not-allowed}
+.intake-modal-note{margin:0 0 8px;color:#64748b;font-size:11px;line-height:1.45}
 .intake-modal-title{margin:0;font-size:16px;color:#0f172a}
 .intake-modal-body{display:grid;gap:14px;padding:16px}
 .intake-modal-audio{width:100%}
@@ -1727,9 +1731,13 @@ cw_header('Master Logbook');
         <h3 class="intake-modal-title" id="intake-audio-transcript-title">Cockpit Audio Transcript</h3>
         <div class="intake-muted" id="intake-audio-transcript-meta"></div>
       </div>
-      <button class="intake-modal-close" type="button" data-audio-transcript-close>Close</button>
+      <div class="intake-modal-actions">
+        <button class="intake-modal-reprocess" type="button" data-audio-transcript-reprocess>Re-Process Transcript</button>
+        <button class="intake-modal-close" type="button" data-audio-transcript-close>Close</button>
+      </div>
     </div>
     <div class="intake-modal-body">
+      <p class="intake-modal-note" id="intake-audio-transcript-note" hidden>Duplicates and repeated [unclear] markers are cleaned for display. Use Re-Process to regenerate the transcript from the audio file.</p>
       <audio class="intake-modal-audio" id="intake-audio-transcript-player" controls preload="none"></audio>
       <div class="intake-modal-transcript" id="intake-audio-transcript-body">Loading transcript…</div>
     </div>
@@ -1897,8 +1905,81 @@ cw_header('Master Logbook');
   const transcriptBody = document.getElementById('intake-audio-transcript-body');
   const transcriptMeta = document.getElementById('intake-audio-transcript-meta');
   const transcriptTitle = document.getElementById('intake-audio-transcript-title');
+  const transcriptNote = document.getElementById('intake-audio-transcript-note');
+  const transcriptReprocessButton = document.querySelector('[data-audio-transcript-reprocess]');
+  let activeTranscriptRecordingId = null;
+  let transcriptPollTimer = null;
+
+  const stopTranscriptPoll = () => {
+    if (transcriptPollTimer !== null) {
+      window.clearInterval(transcriptPollTimer);
+      transcriptPollTimer = null;
+    }
+  };
+
+  const loadTranscriptModal = async (recordingId, options = {}) => {
+    const allowPoll = options.allowPoll !== false;
+    if (!recordingId || !transcriptModal || !transcriptBody || !transcriptPlayer) {
+      return;
+    }
+    activeTranscriptRecordingId = recordingId;
+    transcriptModal.hidden = false;
+    if (transcriptBody.textContent === 'Loading transcript…' || !allowPoll) {
+      transcriptBody.textContent = 'Loading transcript…';
+    }
+    if (transcriptMeta && transcriptBody.textContent === 'Loading transcript…') transcriptMeta.textContent = '';
+    if (transcriptTitle && transcriptBody.textContent === 'Loading transcript…') transcriptTitle.textContent = 'Cockpit Audio Transcript';
+
+    const response = await fetch('/admin/api/cockpit_recorder_intake_transcript.php?id=' + encodeURIComponent(recordingId), { credentials: 'same-origin' });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || 'Could not load transcript.');
+    }
+    if (transcriptTitle) {
+      transcriptTitle.textContent = payload.recording_uid ? ('Transcript · ' + payload.recording_uid) : 'Cockpit Audio Transcript';
+    }
+    if (transcriptMeta) {
+      const metaParts = [];
+      if (payload.aircraft_registration) metaParts.push(payload.aircraft_registration);
+      if (payload.transcription_status) metaParts.push(String(payload.transcription_status).toUpperCase());
+      if (payload.transcription_progress != null) metaParts.push(String(payload.transcription_progress) + '%');
+      if (payload.original_filename) metaParts.push(payload.original_filename);
+      transcriptMeta.textContent = metaParts.join(' · ');
+    }
+    if (transcriptNote) {
+      transcriptNote.hidden = !payload.transcript_cleaned;
+    }
+    if (payload.audio_url && !transcriptPlayer.getAttribute('src')) {
+      transcriptPlayer.src = payload.audio_url;
+    }
+    const status = String(payload.transcription_status || '').toLowerCase();
+    const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
+    if (transcriptReprocessButton) {
+      transcriptReprocessButton.disabled = inProgress;
+    }
+    if (inProgress) {
+      transcriptBody.textContent = 'Transcription in progress… ' + String(payload.transcription_progress || 0) + '%';
+      if (allowPoll && transcriptPollTimer === null) {
+        transcriptPollTimer = window.setInterval(() => {
+          loadTranscriptModal(recordingId, { allowPoll: true }).catch(() => stopTranscriptPoll());
+        }, 3000);
+      }
+      return;
+    }
+    stopTranscriptPoll();
+    if (status === 'failed') {
+      transcriptBody.textContent = 'Transcription failed. Use Re-Process Transcript to try again.';
+      if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+      return;
+    }
+    transcriptBody.textContent = payload.transcript_text || 'Transcript is not available yet.';
+    if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+  };
+
   const closeTranscriptModal = () => {
     if (!transcriptModal) return;
+    stopTranscriptPoll();
+    activeTranscriptRecordingId = null;
     transcriptModal.hidden = true;
     if (transcriptPlayer) {
       transcriptPlayer.pause();
@@ -1917,38 +1998,61 @@ cw_header('Master Logbook');
   page.querySelectorAll('[data-audio-transcript-open]').forEach((button) => {
     button.addEventListener('click', async () => {
       const recordingId = button.getAttribute('data-recording-id');
-      if (!recordingId || !transcriptModal || !transcriptBody || !transcriptPlayer) return;
-      transcriptModal.hidden = false;
-      transcriptBody.textContent = 'Loading transcript…';
-      if (transcriptMeta) transcriptMeta.textContent = '';
-      if (transcriptTitle) transcriptTitle.textContent = 'Cockpit Audio Transcript';
-      transcriptPlayer.removeAttribute('src');
-      transcriptPlayer.load();
+      if (!recordingId) return;
+      stopTranscriptPoll();
+      if (transcriptNote) transcriptNote.hidden = true;
+      if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+      if (transcriptPlayer) {
+        transcriptPlayer.removeAttribute('src');
+        transcriptPlayer.load();
+      }
+      if (transcriptBody) transcriptBody.textContent = 'Loading transcript…';
       try {
-        const response = await fetch('/admin/api/cockpit_recorder_intake_transcript.php?id=' + encodeURIComponent(recordingId), { credentials: 'same-origin' });
-        const payload = await response.json();
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error || 'Could not load transcript.');
-        }
-        if (transcriptTitle) {
-          transcriptTitle.textContent = payload.recording_uid ? ('Transcript · ' + payload.recording_uid) : 'Cockpit Audio Transcript';
-        }
-        if (transcriptMeta) {
-          const metaParts = [];
-          if (payload.aircraft_registration) metaParts.push(payload.aircraft_registration);
-          if (payload.transcription_status) metaParts.push(String(payload.transcription_status).toUpperCase());
-          if (payload.original_filename) metaParts.push(payload.original_filename);
-          transcriptMeta.textContent = metaParts.join(' · ');
-        }
-        if (payload.audio_url) {
-          transcriptPlayer.src = payload.audio_url;
-        }
-        transcriptBody.textContent = payload.transcript_text || 'Transcript is not available yet.';
+        await loadTranscriptModal(recordingId, { allowPoll: true });
       } catch (error) {
-        transcriptBody.textContent = error instanceof Error ? error.message : 'Could not load transcript.';
+        if (transcriptBody) {
+          transcriptBody.textContent = error instanceof Error ? error.message : 'Could not load transcript.';
+        }
       }
     });
   });
+
+  if (transcriptReprocessButton) {
+    transcriptReprocessButton.addEventListener('click', async () => {
+      if (!activeTranscriptRecordingId) {
+        return;
+      }
+      if (!window.confirm('Re-process will delete the current transcript and regenerate it from the audio file. This may take several minutes. Continue?')) {
+        return;
+      }
+      transcriptReprocessButton.disabled = true;
+      if (transcriptBody) transcriptBody.textContent = 'Queuing transcript re-processing…';
+      if (transcriptMeta) transcriptMeta.textContent = 'QUEUED · 0%';
+      try {
+        stopTranscriptPoll();
+        const formData = new FormData();
+        formData.append('id', activeTranscriptRecordingId);
+        const response = await fetch('/admin/api/cockpit_recorder_intake_reprocess_transcript.php', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || payload.message || 'Could not queue transcript re-processing.');
+        }
+        if (transcriptBody) {
+          transcriptBody.textContent = payload.message || 'Transcript re-processing queued…';
+        }
+        await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: true });
+      } catch (error) {
+        transcriptReprocessButton.disabled = false;
+        if (transcriptBody) {
+          transcriptBody.textContent = error instanceof Error ? error.message : 'Could not queue transcript re-processing.';
+        }
+      }
+    });
+  }
 
   const audioStatusCells = page.querySelectorAll('[data-audio-recording-id]');
   if (audioStatusCells.length > 0) {
