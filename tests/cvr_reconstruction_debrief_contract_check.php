@@ -11,6 +11,9 @@ $debriefSource = file_get_contents($root . '/src/FlightDebriefService.php') ?: '
 $debriefMigration = file_get_contents($root . '/scripts/sql/2026_07_29_structured_ai_debrief.sql') ?: '';
 $manualWorker = file_get_contents($root . '/public/admin/api/manual_bundle_reconstruct.php') ?: '';
 $workerScript = file_get_contents($root . '/scripts/run_cockpit_recorder_reconstruction.php') ?: '';
+$debriefEndpoint = file_get_contents($root . '/public/admin/api/manual_bundle_debrief.php') ?: '';
+$debriefWorker = file_get_contents($root . '/scripts/run_structured_flight_debrief.php') ?: '';
+$debriefPage = file_get_contents($root . '/public/admin/master_logbook_intake.php') ?: '';
 
 $service = (new ReflectionClass(FlightDebriefService::class))->newInstanceWithoutConstructor();
 $calculate = new ReflectionMethod(FlightDebriefService::class, 'calculateSuggestedOverall');
@@ -47,6 +50,12 @@ $checks = array(
         str_contains($workerScript, 'updateManualBundleReconstruction')
         && str_contains($workerScript, "'reconstruction_complete'")
         && str_contains($workerScript, "'failed'"),
+    'debrief generation runs asynchronously outside web request' =>
+        str_contains($debriefEndpoint, 'run_structured_flight_debrief.php')
+        && str_contains($debriefEndpoint, "'generate_structured_debrief'")
+        && str_contains($debriefWorker, 'generateStructuredDebrief')
+        && str_contains($debriefWorker, "status = 'succeeded'")
+        && str_contains($debriefWorker, "status = 'failed'"),
     'canonical 1-4-9 includes scenario and rubric documents' =>
         str_contains($missionSeed, "'scenario_plan'")
         && str_contains($missionSeed, "'evaluation_rubric'")
@@ -62,8 +71,27 @@ $checks = array(
         && str_contains($debriefMigration, 'evidence_refs_json')
         && str_contains($debriefMigration, 'instructor_grade')
         && str_contains($debriefMigration, 'approved_at'),
-    'approval and release are instructor-authoritative and gated' =>
-        str_contains($debriefSource, 'Every task and SRM item requires an instructor grade before approval.')
+    'one-step verification accepts generated grades without manual regrading' =>
+        str_contains($debriefSource, "array('ai_draft', 'instructor_draft')")
+        && str_contains($debriefSource, 'SET instructor_grade = suggested_grade')
+        && str_contains($debriefSource, "'instructor_verified'")
+        && !str_contains($debriefSource, 'Every task and SRM item requires an instructor grade before approval.')
+        && str_contains($debriefSource, 'Only an instructor-approved debrief can be released.')
+        && str_contains($debriefSource, 'Approved debrief versions are immutable.'),
+    'debrief sheet uses modern printable grading layout' =>
+        str_contains($debriefPage, 'class="debrief-sheet"')
+        && str_contains($debriefPage, 'Verify Debriefing Sheet')
+        && str_contains($debriefPage, 'Adjust generated sheet (optional)')
+        && str_contains($debriefPage, 'Print / Save as PDF')
+        && str_contains($debriefPage, '@media print')
+        && str_contains($debriefPage, 'border-radius:22px'),
+    'evidence is rendered as readable disclosures instead of JSON' =>
+        str_contains($debriefPage, 'cvr_debrief_evidence_label')
+        && str_contains($debriefPage, 'Supporting evidence')
+        && !str_contains($debriefPage, "json_encode(\$segment['evidence_refs']")
+        && str_contains($debriefSource, 'Never put JSON syntax, array notation, hashes, database IDs'),
+    'approval and release remain immutable and instructor-authoritative' =>
+        str_contains($debriefSource, 'accepted suggestions are now authoritative')
         && str_contains($debriefSource, 'Only an instructor-approved debrief can be released.')
         && str_contains($debriefSource, 'Approved debrief versions are immutable.'),
     'missing transcript evidence never defaults to NO' =>

@@ -233,6 +233,21 @@ final class ManualReconstructionBundleService
                     WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_message
                    ,(SELECT j.error_message FROM ipca_cockpit_reconstruction_jobs j
                     WHERE j.recording_id = b.cockpit_recording_id ORDER BY j.id DESC LIMIT 1) AS latest_job_error
+                   ,(SELECT a.id FROM ipca_async_jobs a
+                    WHERE a.job_type = \'generate_structured_debrief\'
+                      AND a.entity_type = \'ipca_manual_intake_bundles\'
+                      AND CAST(a.entity_id AS UNSIGNED) = b.id
+                    ORDER BY a.id DESC LIMIT 1) AS debrief_job_id
+                   ,(SELECT a.status FROM ipca_async_jobs a
+                    WHERE a.job_type = \'generate_structured_debrief\'
+                      AND a.entity_type = \'ipca_manual_intake_bundles\'
+                      AND CAST(a.entity_id AS UNSIGNED) = b.id
+                    ORDER BY a.id DESC LIMIT 1) AS debrief_job_status
+                   ,(SELECT a.last_error FROM ipca_async_jobs a
+                    WHERE a.job_type = \'generate_structured_debrief\'
+                      AND a.entity_type = \'ipca_manual_intake_bundles\'
+                      AND CAST(a.entity_id AS UNSIGNED) = b.id
+                    ORDER BY a.id DESC LIMIT 1) AS debrief_job_error
             FROM ipca_manual_intake_bundles b
             INNER JOIN ipca_cockpit_recordings r ON r.id = b.cockpit_recording_id
             ORDER BY b.id DESC LIMIT ' . max(1, min(100, $limit));

@@ -6,7 +6,7 @@ require_once __DIR__ . '/openai.php';
 
 final class FlightDebriefService
 {
-    private const PROMPT_VERSION = '1-4-9-v1';
+    private const PROMPT_VERSION = '1-4-9-v2';
     private const LOGIC_VERSION = 'grading-v1';
     private const ALLOWED_EVIDENCE = array('transcript', 'event_marker', 'garmin', 'adsb', 'audio');
 
@@ -259,6 +259,17 @@ final class FlightDebriefService
         );
         $evaluations->execute(array($debriefId));
         $debrief['evaluations'] = $evaluations->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $context = $this->pdo->prepare(
+            'SELECT b.bundle_uuid, b.version_number, b.aircraft_registration, b.mission_code,
+                    d.scheduled_date, d.crew_json, d.aircraft_id,
+                    COALESCE(NULLIF(a.aircraft_type, \'\'), NULLIF(a.display_name, \'\'), \'\') AS aircraft_type
+             FROM ipca_manual_intake_bundles b
+             INNER JOIN ipca_cvr_dispatches d ON d.id = b.dispatch_id
+             LEFT JOIN ipca_aircraft_devices a ON a.id = d.aircraft_id
+             WHERE b.id = ? LIMIT 1'
+        );
+        $context->execute(array((int)$debrief['bundle_id']));
+        $debrief['context'] = $context->fetch(PDO::FETCH_ASSOC) ?: array();
         return $debrief;
     }
 
@@ -275,6 +286,9 @@ final class FlightDebriefService
             throw new RuntimeException('Approved debrief versions are immutable. Regenerate a superseding version.');
         }
         $overall = strtoupper(trim($overall));
+        if ($overall === '') {
+            $overall = strtoupper(trim((string)$debrief['suggested_overall']));
+        }
         if (!in_array($overall, array('BLUE', 'GREEN', 'YELLOW', 'RED', 'INCOMPLETE'), true)) {
             throw new RuntimeException('Select a valid instructor overall result.');
         }
@@ -320,25 +334,49 @@ final class FlightDebriefService
     public function approveStructuredDebrief(int $debriefId, int $actorUserId): void
     {
         $debrief = $this->structuredDebrief($debriefId);
-        if ((string)$debrief['status'] !== 'instructor_draft') {
-            throw new RuntimeException('Save the instructor review before approval.');
+        if (!in_array((string)$debrief['status'], array('ai_draft', 'instructor_draft'), true)) {
+            throw new RuntimeException('Only an unverified Debriefing Sheet can be verified.');
         }
-        if (trim((string)($debrief['instructor_overall'] ?? '')) === '') {
-            throw new RuntimeException('Instructor overall result is required.');
-        }
+        $acceptedSuggestions = 0;
+        $unassessedItems = 0;
         foreach ($debrief['evaluations'] as $evaluation) {
-            if (trim((string)($evaluation['instructor_grade'] ?? '')) === '') {
-                throw new RuntimeException('Every task and SRM item requires an instructor grade before approval.');
+            if (trim((string)($evaluation['instructor_grade'] ?? '')) !== '') {
+                continue;
+            }
+            if (trim((string)($evaluation['suggested_grade'] ?? '')) !== '') {
+                $acceptedSuggestions++;
+            } else {
+                $unassessedItems++;
             }
         }
-        $this->pdo->prepare(
-            'UPDATE ipca_structured_debriefs
-             SET status = \'approved\', approved_by = ?, approved_at = CURRENT_TIMESTAMP(3)
-             WHERE id = ? AND status = \'instructor_draft\''
-        )->execute(array($actorUserId, $debriefId));
-        $this->structuredAudit($debriefId, 'instructor_approved', $actorUserId, null, array(
-            'instructor_overall' => $debrief['instructor_overall'],
-        ), 'Instructor approval is authoritative; approved version is immutable.');
+        $finalOverall = trim((string)($debrief['instructor_overall'] ?? ''));
+        if ($finalOverall === '') {
+            $finalOverall = trim((string)$debrief['suggested_overall']);
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_structured_debrief_evaluations
+                 SET instructor_grade = suggested_grade, reviewed_by = ?,
+                     reviewed_at = CURRENT_TIMESTAMP(3)
+                 WHERE debrief_id = ? AND instructor_grade IS NULL AND suggested_grade IS NOT NULL'
+            )->execute(array($actorUserId, $debriefId));
+            $this->pdo->prepare(
+                'UPDATE ipca_structured_debriefs
+                 SET status = \'approved\', instructor_overall = ?,
+                     approved_by = ?, approved_at = CURRENT_TIMESTAMP(3)
+                 WHERE id = ? AND status IN (\'ai_draft\', \'instructor_draft\')'
+            )->execute(array($finalOverall, $actorUserId, $debriefId));
+            $this->structuredAudit($debriefId, 'instructor_verified', $actorUserId, null, array(
+                'instructor_overall' => $finalOverall,
+                'accepted_ai_suggestions' => $acceptedSuggestions,
+                'unassessed_items' => $unassessedItems,
+            ), 'Instructor verified the generated Debriefing Sheet; accepted suggestions are now authoritative.');
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
     }
 
     public function rejectStructuredDebrief(int $debriefId, string $reason, int $actorUserId): void
@@ -466,6 +504,7 @@ final class FlightDebriefService
             'The AI only suggests grades. Never claim authority over the instructor.',
             'Return JSON with: general (string), chronological_review (array of objects with title, narrative, evidence_refs), mission_standards_assessment (string), summary_next_steps (string), evaluations (array), uncertainties (array).',
             'Each evaluation requires rubric_type task|srm, rubric_item_id, suggested_grade or null, evidence_status supported|partial|insufficient_evidence, completion_status completed|not_completed|uncertain, rationale, confidence 0..1, evidence_refs, instructor_prompting, main_issue, improvement_suggestion.',
+            'Evidence references must be arrays of objects with type, time or time_range, and a short plain-language description. Never put JSON syntax, array notation, hashes, database IDs, or internal field names inside narrative text.',
             'Use task grades DE, EX, PR, PE, NO exactly and SRM grades EX, PR, MD, NO exactly.',
             'Do not use NO merely because a task is absent from transcript. Use null grade and insufficient_evidence.',
             'Exercise markers define chronological segment boundaries. Training Remark markers prioritize the transcript/audio immediately following the marker. Safety markers create separate safety windows.',

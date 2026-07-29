@@ -56,6 +56,11 @@ $reconstructionService = new ManualReconstructionBundleService($pdo);
 $debriefService = new FlightDebriefService($pdo);
 $reconstructionError = trim((string)($_GET['reconstruction_error'] ?? ''));
 $reconstructionNotice = '';
+if ((string)($_GET['debrief_generation'] ?? '') === 'started') {
+    $reconstructionNotice = 'AI Debrief generation started in the background. Refresh this tab to see completion status.';
+} elseif ((string)($_GET['debrief_generation'] ?? '') === 'running') {
+    $reconstructionNotice = 'AI Debrief generation is already running in the background.';
+}
 $reconstructionCsrf = (string)($_SESSION['cvr_reconstruction_csrf'] ?? '');
 if ($reconstructionCsrf === '') {
     $reconstructionCsrf = bin2hex(random_bytes(24));
@@ -86,13 +91,6 @@ try {
         } elseif ($action === 'lock_bundle_transcript') {
             $reconstructionService->lockTranscript((int)($_POST['bundle_id'] ?? 0), $actorUserId > 0 ? $actorUserId : null);
             $reconstructionNotice = 'Raw transcript snapshot is version-locked and ready for AI debrief generation.';
-        } elseif ($action === 'generate_bundle_debrief') {
-            $generated = $debriefService->generateStructuredDebrief(
-                (int)($_POST['bundle_id'] ?? 0),
-                $actorUserId > 0 ? $actorUserId : null
-            );
-            $reconstructionNotice = 'AI debrief suggestions generated. Instructor review remains authoritative.';
-            $_GET['debrief_id'] = (string)($generated['id'] ?? '');
         } elseif ($action === 'save_debrief_review') {
             if ($actorUserId <= 0) {
                 throw new RuntimeException('Instructor identity is required.');
@@ -104,13 +102,13 @@ try {
                 (string)($_POST['instructor_comments'] ?? ''),
                 $actorUserId
             );
-            $reconstructionNotice = 'Instructor review draft saved.';
+            $reconstructionNotice = 'Optional adjustments saved. The Debriefing Sheet is ready for verification.';
         } elseif ($action === 'approve_debrief') {
             if ($actorUserId <= 0) {
                 throw new RuntimeException('Instructor identity is required.');
             }
             $debriefService->approveStructuredDebrief((int)($_POST['debrief_id'] ?? 0), $actorUserId);
-            $reconstructionNotice = 'Instructor debrief approved and locked.';
+            $reconstructionNotice = 'Debriefing Sheet verified and locked.';
         } elseif ($action === 'reject_debrief') {
             if ($actorUserId <= 0) {
                 throw new RuntimeException('Instructor identity is required.');
@@ -233,6 +231,78 @@ function cvr_intake_crew(mixed $value): string
     return $names === array() ? '—' : implode(', ', $names);
 }
 
+/** @return array{student:string,instructor:string} */
+function cvr_debrief_people(mixed $value): array
+{
+    $crew = is_array($value) ? $value : json_decode((string)$value, true);
+    $people = array('student' => '—', 'instructor' => '—');
+    foreach (is_array($crew) ? $crew : array() as $member) {
+        if (!is_array($member)) {
+            continue;
+        }
+        $name = trim((string)($member['personName'] ?? $member['person_name'] ?? $member['name'] ?? ''));
+        $role = strtolower(trim((string)($member['role'] ?? $member['crew_role'] ?? '')));
+        if ($name === '') {
+            continue;
+        }
+        if (str_contains($role, 'student')) {
+            $people['student'] = $name;
+        } elseif (str_contains($role, 'instructor') || str_contains($role, 'supervisor')) {
+            $people['instructor'] = $name;
+        }
+    }
+    return $people;
+}
+
+function cvr_debrief_area(string $rubricItemId): string
+{
+    $prefix = strtolower(strtok($rubricItemId, '.') ?: '');
+    return array(
+        'preflight' => 'Preflight Preparation',
+        'procedures' => 'Preflight Procedures',
+        'airport' => 'Airport Operations',
+        'takeoff' => 'Takeoff, Landing and Go-Around',
+        'landing' => 'Takeoff, Landing and Go-Around',
+        'maneuvers' => 'Performance and Ground Reference Maneuvers',
+        'navigation' => 'Navigation',
+        'stalls' => 'Slow Flight and Stalls',
+        'instrument' => 'Basic Instrument Maneuvers',
+        'emergency' => 'Emergency Operations',
+        'postflight' => 'Postflight Operations',
+    )[$prefix] ?? 'Scenario Tasks';
+}
+
+function cvr_debrief_evidence_label(mixed $reference): string
+{
+    if (!is_array($reference)) {
+        return trim((string)$reference);
+    }
+    $type = ucfirst(str_replace('_', ' ', (string)($reference['type'] ?? 'Evidence')));
+    $parts = array();
+    foreach (array('time', 'timestamp', 'time_range', 'offset', 'chunk', 'title', 'description', 'claim', 'text') as $key) {
+        if (!array_key_exists($key, $reference) || is_array($reference[$key])) {
+            continue;
+        }
+        $value = trim((string)$reference[$key]);
+        if ($value !== '') {
+            $parts[] = $key === 'chunk' ? 'Chunk ' . $value : $value;
+        }
+    }
+    return $type . ($parts === array() ? '' : ' · ' . implode(' · ', array_slice($parts, 0, 3)));
+}
+
+function cvr_debrief_overall_label(string $grade): string
+{
+    return array(
+        'RED' => 'Unsatisfactory',
+        'YELLOW' => 'To Be Improved',
+        'GREEN' => 'Normal Progress',
+        'BLUE' => 'Very Good Progress',
+        'INCOMPLETE' => 'Incomplete',
+        'PENDING INSTRUCTOR REVIEW' => 'Pending Review',
+    )[strtoupper($grade)] ?? ucwords(strtolower($grade));
+}
+
 cw_header('Master Logbook');
 ?>
 <style>
@@ -283,7 +353,68 @@ cw_header('Master Logbook');
 .reconstruction-grid .intake-select{width:100%}
 .reconstruction-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
 .intake-code{display:inline-flex;margin-top:10px;border:1px solid #86efac;border-radius:10px;background:#f0fdf4;color:#166534;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:18px;font-weight:900;letter-spacing:.08em}
+.debrief-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:24px 0 10px}
+.debrief-toolbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.debrief-sheet{background:#f8fafc;border:1px solid #dbe3ee;border-radius:22px;padding:18px;box-shadow:0 18px 50px rgba(15,23,42,.09);color:#1e293b}
+.debrief-section{background:#fff;border:1px solid #dbe3ee;border-radius:16px;overflow:hidden;margin-top:14px;box-shadow:0 6px 18px rgba(15,23,42,.04)}
+.debrief-section-head{padding:11px 14px;background:linear-gradient(135deg,#eff6ff,#f8fafc);border-bottom:1px solid #dbe3ee;font-size:13px;font-weight:900;letter-spacing:.03em;color:#0f3a6d}
+.debrief-meta{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#dbe3ee;border:1px solid #dbe3ee;border-radius:16px;overflow:hidden}
+.debrief-meta-item{background:#fff;padding:11px 13px;min-width:0}
+.debrief-meta-item.wide{grid-column:span 2}
+.debrief-label{display:block;color:#64748b;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.debrief-value{display:block;color:#0f172a;font-size:13px;font-weight:800;overflow-wrap:anywhere}
+.debrief-overall{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px}
+.debrief-overall-grade{position:relative;border:1px solid #dbe3ee;border-radius:12px;padding:10px;text-align:center;color:#64748b;background:#fff;font-size:11px;font-weight:800}
+.debrief-overall-grade.is-selected{border-width:2px;color:#0f172a;box-shadow:0 5px 12px rgba(15,23,42,.08)}
+.debrief-overall-grade.is-selected::before{content:"✓";display:inline-grid;place-items:center;width:18px;height:18px;border-radius:999px;margin-right:5px;background:currentColor;color:#fff;font-size:11px}
+.debrief-overall-grade.grade-red.is-selected{border-color:#dc2626;background:#fef2f2;color:#991b1b}
+.debrief-overall-grade.grade-yellow.is-selected{border-color:#d97706;background:#fffbeb;color:#92400e}
+.debrief-overall-grade.grade-green.is-selected{border-color:#16a34a;background:#f0fdf4;color:#166534}
+.debrief-overall-grade.grade-blue.is-selected{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
+.debrief-overall-grade.grade-incomplete.is-selected{border-color:#64748b;background:#f1f5f9;color:#334155}
+.debrief-grade-table{width:100%;border-collapse:collapse;font-size:11px}
+.debrief-grade-table th{padding:8px 6px;background:#f8fafc;border-bottom:1px solid #dbe3ee;color:#475569;font-size:9px;text-transform:uppercase;letter-spacing:.05em;text-align:center}
+.debrief-grade-table th:first-child{text-align:left;padding-left:14px}
+.debrief-grade-table td{padding:8px 6px;border-bottom:1px solid #edf2f7;text-align:center;vertical-align:middle}
+.debrief-grade-table td:first-child{text-align:left;padding-left:14px}
+.debrief-area-row td{padding:8px 14px!important;background:#eaf2fb;color:#153e68!important;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;text-align:left!important}
+.debrief-grade-cell{width:38px;color:#cbd5e1;font-weight:900}
+.debrief-grade-cell.is-selected{color:#0f3a6d;background:#dbeafe;font-size:14px}
+.debrief-required{color:#64748b;font-size:9px;font-weight:800}
+.debrief-unassessed{display:inline-flex;border-radius:999px;background:#fef3c7;color:#92400e;padding:4px 7px;font-size:9px;font-weight:900}
+.debrief-narrative{padding:14px;line-height:1.65;font-size:13px;color:#334155}
+.debrief-chronology{display:grid;gap:10px;padding:14px}
+.debrief-flight-segment{border:1px solid #e2e8f0;border-radius:13px;padding:12px;background:#fff}
+.debrief-flight-segment h5{margin:0 0 5px;color:#0f172a;font-size:12px}
+.debrief-flight-segment p{margin:0;color:#475569;font-size:12px;line-height:1.6}
+.debrief-evidence{margin-top:8px}
+.debrief-evidence summary{cursor:pointer;color:#2563eb;font-size:10px;font-weight:850}
+.debrief-evidence-list{margin:7px 0 0;padding-left:18px;color:#64748b;font-size:10px;line-height:1.55}
+.debrief-adjustments{margin-top:14px;border:1px dashed #94a3b8;border-radius:14px;background:#fff}
+.debrief-adjustments>summary{cursor:pointer;padding:12px 14px;font-size:11px;font-weight:900;color:#334155}
+.debrief-adjustments-body{padding:0 14px 14px}
+.debrief-signoff{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px;flex-wrap:wrap}
+.debrief-signature{color:#166534;font-weight:850;font-size:12px}
+.debrief-verify{background:#166534;padding:11px 17px}
 @media(max-width:720px){.intake-card{padding:12px}.intake-title{font-size:22px}.reconstruction-grid{grid-template-columns:1fr}}
+@media(max-width:860px){.debrief-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.debrief-meta-item.wide{grid-column:span 1}.debrief-overall{grid-template-columns:1fr}.debrief-sheet{padding:10px;border-radius:16px}.debrief-grade-table{min-width:640px}.debrief-section{overflow:auto}}
+@media print{
+  @page{size:A4 portrait;margin:11mm}
+  body{background:#fff!important;color:#000!important}
+  .app-sidebar,.app-topbar,.app-mobile-overlay,.no-print,.intake-page>.intake-card,.intake-panel[data-intake-panel="reconstruction"]>.intake-panel-head,.intake-panel[data-intake-panel="reconstruction"]>.intake-notice,.intake-panel[data-intake-panel="reconstruction"]>.reconstruction-grid,.intake-panel[data-intake-panel="reconstruction"]>.intake-table-wrap{display:none!important}
+  .app-shell,.app-main-shell,.app-main,.app-content,.intake-page,.intake-panel[data-intake-panel="reconstruction"]{display:block!important;width:100%!important;max-width:none!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important}
+  .intake-page>.intake-panel[data-intake-panel="reconstruction"]{display:block!important}
+  .debrief-toolbar{display:none!important}
+  .debrief-sheet{display:block!important;border:0!important;border-radius:0!important;box-shadow:none!important;padding:0!important;background:#fff!important}
+  .debrief-section,.debrief-meta{border-color:#94a3b8!important;border-radius:8px!important;box-shadow:none!important;break-inside:avoid}
+  .debrief-section-head,.debrief-area-row td{background:#eef2f7!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .debrief-grade-table{font-size:9px}
+  .debrief-grade-table thead{display:table-header-group}
+  .debrief-grade-table tr{break-inside:avoid}
+  .debrief-grade-cell.is-selected,.debrief-overall-grade.is-selected{background:#e5e7eb!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .debrief-adjustments,.debrief-evidence{display:none!important}
+  .debrief-flight-segment{break-inside:avoid;box-shadow:none}
+}
 </style>
 
 <div class="intake-page" data-intake-page>
@@ -573,12 +704,19 @@ cw_header('Master Logbook');
                     <button class="intake-button" type="submit">Lock Raw Transcript</button>
                   </form>
                 <?php endif; ?>
-                <form method="post" action="/admin/master_logbook.php?tab=reconstruction" style="margin-top:6px">
+                <?php $debriefJobRunning = in_array((string)($bundle['debrief_job_status'] ?? ''), array('pending','claimed','running','retry_wait'), true); ?>
+                <form method="post" action="/admin/api/manual_bundle_debrief.php" style="margin-top:6px">
                   <input type="hidden" name="action" value="generate_bundle_debrief">
                   <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                   <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
-                  <button class="intake-button" type="submit" <?= !$transcriptGate['ready'] ? 'disabled title="' . cvr_intake_h($transcriptGate['reason']) . '"' : '' ?>><?= $latestDebrief ? 'Regenerate Debrief' : 'Generate Debrief' ?></button>
+                  <button class="intake-button" type="submit" <?= (!$transcriptGate['ready'] || $debriefJobRunning) ? 'disabled title="' . cvr_intake_h($debriefJobRunning ? 'Debrief generation is running.' : $transcriptGate['reason']) . '"' : '' ?>><?= $debriefJobRunning ? 'Generating Debrief…' : ($latestDebrief ? 'Regenerate Debrief' : 'Generate Debrief') ?></button>
                 </form>
+                <?php if (!empty($bundle['debrief_job_id'])): ?>
+                  <div class="intake-muted" style="margin-top:4px">Debrief job #<?= (int)$bundle['debrief_job_id'] ?> · <?= cvr_intake_h(strtoupper((string)$bundle['debrief_job_status'])) ?></div>
+                <?php endif; ?>
+                <?php if (!empty($bundle['debrief_job_error'])): ?>
+                  <div class="intake-error" style="margin-top:4px"><?= cvr_intake_h($bundle['debrief_job_error']) ?></div>
+                <?php endif; ?>
                 <?php if (is_array($latestDebrief)): ?>
                   <a class="intake-refresh" style="margin-top:6px" href="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$latestDebrief['id'] ?>">Review Debrief · <?= cvr_intake_h($latestDebrief['suggested_overall']) ?></a>
                 <?php endif; ?>
@@ -594,131 +732,228 @@ cw_header('Master Logbook');
     <?php if (is_array($selectedDebrief)): ?>
       <?php
         $chronological = json_decode((string)$selectedDebrief['chronological_review_json'], true);
-        $overallOptions = array('BLUE', 'GREEN', 'YELLOW', 'RED', 'INCOMPLETE');
+        $context = is_array($selectedDebrief['context'] ?? null) ? $selectedDebrief['context'] : array();
+        $people = cvr_debrief_people($context['crew_json'] ?? null);
+        $overallOptions = array('RED', 'YELLOW', 'GREEN', 'BLUE', 'INCOMPLETE');
+        $effectiveOverall = trim((string)($selectedDebrief['instructor_overall'] ?? '')) ?: (string)$selectedDebrief['suggested_overall'];
         $isApprovedDebrief = in_array((string)$selectedDebrief['status'], array('approved', 'released'), true);
+        $canVerifyDebrief = in_array((string)$selectedDebrief['status'], array('ai_draft', 'instructor_draft'), true);
+        $taskEvaluations = array_values(array_filter($selectedDebrief['evaluations'], fn(array $row): bool => (string)$row['rubric_type'] === 'task'));
+        $srmEvaluations = array_values(array_filter($selectedDebrief['evaluations'], fn(array $row): bool => (string)$row['rubric_type'] === 'srm'));
       ?>
-      <div class="intake-panel-head" style="margin-top:24px">
+      <div class="debrief-toolbar no-print">
         <div>
-          <h3 class="intake-panel-title">Instructor Debrief Review</h3>
-          <div class="intake-muted">AI suggestions are evidence-backed drafts. Instructor grades, comments and approval are authoritative.</div>
+          <h3 class="intake-panel-title">Debriefing Sheet</h3>
+          <div class="intake-muted">Generated from the locked evidence bundle. Review the completed sheet, then verify it.</div>
         </div>
-        <?= cvr_intake_badge($selectedDebrief['status']) ?>
+        <div class="debrief-toolbar-actions">
+          <?= cvr_intake_badge($selectedDebrief['status']) ?>
+          <button class="intake-refresh" type="button" onclick="window.print()">Print / Save as PDF</button>
+        </div>
       </div>
-      <div class="reconstruction-grid">
-        <section class="intake-notice" style="border-color:#bfdbfe;background:#eff6ff;color:#1e3a8a">
-          <strong>General</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['general_text'])) ?>
-        </section>
-        <section class="intake-notice" style="border-color:#bfdbfe;background:#eff6ff;color:#1e3a8a">
-          <strong>Mission Standards Assessment</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['mission_assessment_text'])) ?>
-        </section>
-      </div>
-      <section class="intake-card" style="margin-top:12px;background:#f8fafc">
-        <h4 class="intake-panel-title">Chronological Flight Review</h4>
-        <?php foreach (is_array($chronological) ? $chronological : array() as $segment): ?>
-          <div style="margin-top:10px">
-            <strong><?= cvr_intake_h($segment['title'] ?? 'Flight Segment') ?></strong>
-            <div class="intake-muted" style="font-size:12px"><?= nl2br(cvr_intake_h($segment['narrative'] ?? '')) ?></div>
-            <?php if (!empty($segment['evidence_refs'])): ?>
-              <div class="intake-mono intake-muted"><?= cvr_intake_h(json_encode($segment['evidence_refs'], JSON_UNESCAPED_SLASHES)) ?></div>
-            <?php endif; ?>
-          </div>
-        <?php endforeach; ?>
-      </section>
-      <section class="intake-notice" style="margin-top:12px;border-color:#86efac;background:#f0fdf4;color:#166534">
-        <strong>Summary and Next Steps</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['summary_next_steps_text'])) ?>
-      </section>
 
-      <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:14px">
-        <input type="hidden" name="action" value="save_debrief_review">
-        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-        <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-        <div class="intake-table-wrap">
-          <table class="intake-table">
-            <thead><tr><th>Task / SRM</th><th>Required</th><th>AI Suggestion</th><th>Evidence / Rationale</th><th>Issue / Improvement</th><th>Instructor Grade</th><th>Instructor Comment</th></tr></thead>
-            <tbody>
-            <?php foreach ($selectedDebrief['evaluations'] as $evaluation): ?>
-              <?php
-                $scale = (string)$evaluation['rubric_type'] === 'srm' ? array('EX','PR','MD','NO') : array('DE','EX','PR','PE','NO');
-                $refs = json_decode((string)$evaluation['evidence_refs_json'], true);
-              ?>
-              <tr>
-                <td><div class="intake-primary"><?= cvr_intake_h($evaluation['title']) ?></div><div class="intake-muted intake-mono"><?= cvr_intake_h($evaluation['rubric_item_id']) ?></div></td>
-                <td><?= cvr_intake_badge($evaluation['required_standard']) ?></td>
-                <td><?= cvr_intake_badge($evaluation['suggested_grade'] ?: 'insufficient evidence') ?><div class="intake-muted">Confidence <?= cvr_intake_h(number_format((float)$evaluation['confidence'] * 100, 0)) ?>%</div></td>
-                <td><div><?= cvr_intake_h($evaluation['rationale']) ?></div><div class="intake-mono intake-muted"><?= cvr_intake_h(json_encode($refs, JSON_UNESCAPED_SLASHES)) ?></div></td>
-                <td><div><?= cvr_intake_h($evaluation['main_issue'] ?: '—') ?></div><div class="intake-muted"><?= cvr_intake_h($evaluation['improvement_suggestion'] ?: '—') ?></div></td>
-                <td>
-                  <input type="hidden" name="review[<?= (int)$evaluation['id'] ?>][rubric_type]" value="<?= cvr_intake_h($evaluation['rubric_type']) ?>">
-                  <select class="intake-select" name="review[<?= (int)$evaluation['id'] ?>][grade]" <?= $isApprovedDebrief ? 'disabled' : '' ?>>
-                    <option value="">Select</option>
-                    <?php foreach ($scale as $grade): ?>
-                      <option value="<?= $grade ?>" <?= (string)$evaluation['instructor_grade'] === $grade ? 'selected' : '' ?>><?= $grade ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                </td>
-                <td><input class="intake-select" type="text" name="review[<?= (int)$evaluation['id'] ?>][comment]" value="<?= cvr_intake_h($evaluation['instructor_comment']) ?>" <?= $isApprovedDebrief ? 'disabled' : '' ?>></td>
-              </tr>
+      <article class="debrief-sheet">
+        <header class="debrief-meta">
+          <div class="debrief-meta-item wide"><span class="debrief-label">Customer</span><span class="debrief-value"><?= cvr_intake_h($people['student']) ?></span></div>
+          <div class="debrief-meta-item wide"><span class="debrief-label">Instructor</span><span class="debrief-value"><?= cvr_intake_h($people['instructor']) ?></span></div>
+          <div class="debrief-meta-item"><span class="debrief-label">Form No.</span><span class="debrief-value">DB-<?= (int)$selectedDebrief['id'] ?></span></div>
+          <div class="debrief-meta-item"><span class="debrief-label">Scenario</span><span class="debrief-value"><?= cvr_intake_h(($context['mission_code'] ?? '—') . ' (ACFT)') ?></span></div>
+          <div class="debrief-meta-item wide"><span class="debrief-label">Aircraft Type</span><span class="debrief-value"><?= cvr_intake_h($context['aircraft_type'] ?: '—') ?></span></div>
+          <div class="debrief-meta-item wide"><span class="debrief-label">Registration</span><span class="debrief-value"><?= cvr_intake_h($context['aircraft_registration'] ?? '—') ?></span></div>
+          <div class="debrief-meta-item"><span class="debrief-label">Date</span><span class="debrief-value"><?= cvr_intake_h($context['scheduled_date'] ?? '—') ?></span></div>
+          <div class="debrief-meta-item"><span class="debrief-label">Version</span><span class="debrief-value"><?= (int)($context['version_number'] ?? 1) ?></span></div>
+        </header>
+
+        <section class="debrief-section">
+          <div class="debrief-section-head">Overall Grading</div>
+          <div class="debrief-overall">
+            <?php foreach ($overallOptions as $grade): ?>
+              <div class="debrief-overall-grade grade-<?= strtolower($grade) ?> <?= strtoupper($effectiveOverall) === $grade ? 'is-selected' : '' ?>">
+                <?= cvr_intake_h(cvr_debrief_overall_label($grade)) ?>
+              </div>
             <?php endforeach; ?>
+          </div>
+        </section>
+
+        <section class="debrief-section">
+          <div class="debrief-section-head">Scenario Grading</div>
+          <table class="debrief-grade-table">
+            <thead><tr><th>Task Element</th><th>Req.</th><th>DE</th><th>EX</th><th>PR</th><th>PE</th><th>NO</th></tr></thead>
+            <tbody>
+              <?php $currentArea = ''; ?>
+              <?php foreach ($taskEvaluations as $evaluation): ?>
+                <?php
+                  $area = cvr_debrief_area((string)$evaluation['rubric_item_id']);
+                  $effectiveGrade = trim((string)($evaluation['instructor_grade'] ?? '')) ?: trim((string)($evaluation['suggested_grade'] ?? ''));
+                  $refs = json_decode((string)$evaluation['evidence_refs_json'], true);
+                ?>
+                <?php if ($area !== $currentArea): $currentArea = $area; ?>
+                  <tr class="debrief-area-row"><td colspan="7"><?= cvr_intake_h($area) ?></td></tr>
+                <?php endif; ?>
+                <tr>
+                  <td>
+                    <strong><?= cvr_intake_h($evaluation['title']) ?></strong>
+                    <?php if ($effectiveGrade === ''): ?><span class="debrief-unassessed">Insufficient evidence</span><?php endif; ?>
+                    <details class="debrief-evidence no-print">
+                      <summary>Supporting evidence and rationale</summary>
+                      <div class="intake-muted"><?= cvr_intake_h($evaluation['rationale']) ?></div>
+                      <?php if (is_array($refs) && $refs !== array()): ?>
+                        <ul class="debrief-evidence-list">
+                          <?php foreach ($refs as $reference): ?><li><?= cvr_intake_h(cvr_debrief_evidence_label($reference)) ?></li><?php endforeach; ?>
+                        </ul>
+                      <?php endif; ?>
+                    </details>
+                  </td>
+                  <td class="debrief-required"><?= cvr_intake_h($evaluation['required_standard']) ?></td>
+                  <?php foreach (array('DE','EX','PR','PE','NO') as $grade): ?>
+                    <td class="debrief-grade-cell <?= $effectiveGrade === $grade ? 'is-selected' : '' ?>"><?= $effectiveGrade === $grade ? 'X' : '·' ?></td>
+                  <?php endforeach; ?>
+                </tr>
+              <?php endforeach; ?>
             </tbody>
           </table>
-        </div>
-        <div class="reconstruction-grid" style="margin-top:12px">
-          <div class="intake-field">
-            <label>Suggested Overall</label>
-            <div><?= cvr_intake_badge($selectedDebrief['suggested_overall']) ?></div>
+        </section>
+
+        <section class="debrief-section">
+          <div class="debrief-section-head">Instructor Comments</div>
+          <div class="debrief-narrative"><strong>General</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['general_text'])) ?></div>
+          <div class="debrief-section-head">Chronological Flight Review</div>
+          <div class="debrief-chronology">
+            <?php foreach (is_array($chronological) ? $chronological : array() as $segment): ?>
+              <article class="debrief-flight-segment">
+                <h5><?= cvr_intake_h($segment['title'] ?? 'Flight Segment') ?></h5>
+                <p><?= nl2br(cvr_intake_h($segment['narrative'] ?? '')) ?></p>
+                <?php if (!empty($segment['evidence_refs'])): ?>
+                  <details class="debrief-evidence no-print">
+                    <summary>Supporting evidence</summary>
+                    <ul class="debrief-evidence-list">
+                      <?php foreach ((array)$segment['evidence_refs'] as $reference): ?><li><?= cvr_intake_h(cvr_debrief_evidence_label($reference)) ?></li><?php endforeach; ?>
+                    </ul>
+                  </details>
+                <?php endif; ?>
+              </article>
+            <?php endforeach; ?>
           </div>
-          <div class="intake-field">
-            <label for="instructor-overall">Instructor Overall</label>
-            <select class="intake-select" id="instructor-overall" name="instructor_overall" required <?= $isApprovedDebrief ? 'disabled' : '' ?>>
-              <option value="">Select authoritative result</option>
-              <?php foreach ($overallOptions as $option): ?>
-                <option value="<?= $option ?>" <?= (string)$selectedDebrief['instructor_overall'] === $option ? 'selected' : '' ?>><?= $option ?></option>
+          <div class="debrief-narrative"><strong>Mission Standards Assessment</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['mission_assessment_text'])) ?></div>
+          <div class="debrief-narrative"><strong>Summary and Next Steps</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['summary_next_steps_text'])) ?></div>
+          <?php if (trim((string)($selectedDebrief['instructor_comments'] ?? '')) !== ''): ?>
+            <div class="debrief-narrative"><strong>Instructor Addendum</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['instructor_comments'])) ?></div>
+          <?php endif; ?>
+        </section>
+
+        <section class="debrief-section">
+          <div class="debrief-section-head">Single Pilot Resource Management (SRM) Grading</div>
+          <table class="debrief-grade-table">
+            <thead><tr><th>SRM Element</th><th>Req.</th><th>EX</th><th>PR</th><th>MD</th><th>NO</th></tr></thead>
+            <tbody>
+              <?php foreach ($srmEvaluations as $evaluation): ?>
+                <?php
+                  $effectiveGrade = trim((string)($evaluation['instructor_grade'] ?? '')) ?: trim((string)($evaluation['suggested_grade'] ?? ''));
+                  $refs = json_decode((string)$evaluation['evidence_refs_json'], true);
+                ?>
+                <tr>
+                  <td>
+                    <strong><?= cvr_intake_h($evaluation['title']) ?></strong>
+                    <?php if ($effectiveGrade === ''): ?><span class="debrief-unassessed">Insufficient evidence</span><?php endif; ?>
+                    <details class="debrief-evidence no-print">
+                      <summary>Supporting evidence and rationale</summary>
+                      <div class="intake-muted"><?= cvr_intake_h($evaluation['rationale']) ?></div>
+                      <?php if (is_array($refs) && $refs !== array()): ?><ul class="debrief-evidence-list"><?php foreach ($refs as $reference): ?><li><?= cvr_intake_h(cvr_debrief_evidence_label($reference)) ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    </details>
+                  </td>
+                  <td class="debrief-required"><?= cvr_intake_h($evaluation['required_standard']) ?></td>
+                  <?php foreach (array('EX','PR','MD','NO') as $grade): ?>
+                    <td class="debrief-grade-cell <?= $effectiveGrade === $grade ? 'is-selected' : '' ?>"><?= $effectiveGrade === $grade ? 'X' : '·' ?></td>
+                  <?php endforeach; ?>
+                </tr>
               <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="intake-field" style="grid-column:1/-1">
-            <label for="instructor-comments">Instructor Comments, Main Issues and Improvements</label>
-            <textarea class="intake-select" id="instructor-comments" name="instructor_comments" rows="5" <?= $isApprovedDebrief ? 'disabled' : '' ?>><?= cvr_intake_h($selectedDebrief['instructor_comments']) ?></textarea>
-          </div>
-        </div>
+            </tbody>
+          </table>
+        </section>
+
         <?php if (!$isApprovedDebrief): ?>
-          <div class="reconstruction-actions">
-            <button class="intake-button" type="submit">Save Instructor Draft</button>
-          </div>
+          <details class="debrief-adjustments no-print">
+            <summary>Adjust generated sheet (optional)</summary>
+            <div class="debrief-adjustments-body">
+              <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>">
+                <input type="hidden" name="action" value="save_debrief_review">
+                <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+                <div class="intake-table-wrap">
+                  <table class="intake-table">
+                    <thead><tr><th>Element</th><th>Generated</th><th>Override</th><th>Optional Comment</th></tr></thead>
+                    <tbody>
+                      <?php foreach ($selectedDebrief['evaluations'] as $evaluation): ?>
+                        <?php $scale = (string)$evaluation['rubric_type'] === 'srm' ? array('EX','PR','MD','NO') : array('DE','EX','PR','PE','NO'); ?>
+                        <tr>
+                          <td class="intake-primary"><?= cvr_intake_h($evaluation['title']) ?></td>
+                          <td><?= cvr_intake_badge($evaluation['suggested_grade'] ?: 'insufficient evidence') ?></td>
+                          <td>
+                            <input type="hidden" name="review[<?= (int)$evaluation['id'] ?>][rubric_type]" value="<?= cvr_intake_h($evaluation['rubric_type']) ?>">
+                            <select class="intake-select" name="review[<?= (int)$evaluation['id'] ?>][grade]">
+                              <option value="">Use generated result</option>
+                              <?php foreach ($scale as $grade): ?><option value="<?= $grade ?>" <?= (string)$evaluation['instructor_grade'] === $grade ? 'selected' : '' ?>><?= $grade ?></option><?php endforeach; ?>
+                            </select>
+                          </td>
+                          <td><input class="intake-select" type="text" name="review[<?= (int)$evaluation['id'] ?>][comment]" value="<?= cvr_intake_h($evaluation['instructor_comment']) ?>"></td>
+                        </tr>
+                      <?php endforeach; ?>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="reconstruction-grid" style="margin-top:12px">
+                  <label class="intake-field"><span>Overall Override</span><select class="intake-select" name="instructor_overall"><option value="">Use generated result (<?= cvr_intake_h($selectedDebrief['suggested_overall']) ?>)</option><?php foreach ($overallOptions as $option): ?><option value="<?= $option ?>" <?= (string)$selectedDebrief['instructor_overall'] === $option ? 'selected' : '' ?>><?= cvr_intake_h(cvr_debrief_overall_label($option)) ?></option><?php endforeach; ?></select></label>
+                  <label class="intake-field"><span>Instructor Addendum</span><textarea class="intake-select" name="instructor_comments" rows="4"><?= cvr_intake_h($selectedDebrief['instructor_comments']) ?></textarea></label>
+                </div>
+                <div class="reconstruction-actions"><button class="intake-button" type="submit">Save Adjustments</button></div>
+              </form>
+            </div>
+          </details>
         <?php endif; ?>
-      </form>
-      <?php if (!$isApprovedDebrief && (string)$selectedDebrief['status'] === 'instructor_draft'): ?>
-        <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:8px" onsubmit="return confirm('Approve and lock this instructor debrief?');">
-          <input type="hidden" name="action" value="approve_debrief">
-          <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-          <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-          <button class="intake-button" type="submit" style="background:#166534">Approve and Sign Debrief</button>
-        </form>
-      <?php endif; ?>
-      <?php if (!$isApprovedDebrief && (string)$selectedDebrief['status'] !== 'rejected'): ?>
-        <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:8px" onsubmit="return confirm('Reject this AI draft?');">
-          <input type="hidden" name="action" value="reject_debrief">
-          <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-          <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-          <label class="intake-field" style="max-width:560px">
-            <span>Rejection Reason</span>
-            <input class="intake-select" type="text" name="rejection_reason" required>
-          </label>
-          <button class="intake-button" type="submit" style="margin-top:8px;background:#991b1b">Reject AI Draft</button>
-        </form>
-      <?php endif; ?>
-      <?php if ((string)$selectedDebrief['status'] === 'approved'): ?>
-        <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:8px" onsubmit="return confirm('Release this approved debrief to the selected user?');">
-          <input type="hidden" name="action" value="release_debrief">
-          <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-          <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-          <label class="intake-field" style="max-width:260px">
-            <span>Recipient User ID</span>
-            <input class="intake-select" type="number" min="1" name="recipient_user_id" required>
-          </label>
-          <button class="intake-button" type="submit" style="margin-top:8px;background:#7c3aed">Release Approved Debrief</button>
-        </form>
-      <?php endif; ?>
+
+        <footer class="debrief-section">
+          <div class="debrief-signoff">
+            <?php if ($isApprovedDebrief): ?>
+              <div class="debrief-signature">Verified by instructor on <?= cvr_intake_h(cvr_intake_timestamp($selectedDebrief['approved_at'])) ?></div>
+              <?= cvr_intake_badge('Instructor Verified') ?>
+            <?php else: ?>
+              <div><strong>Instructor Verification</strong><div class="intake-muted">Verification accepts and locks this generated Debriefing Sheet as presented, including any saved adjustments.</div></div>
+              <?php if ($canVerifyDebrief): ?>
+                <form class="no-print" method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" onsubmit="return confirm('Verify and lock this Debriefing Sheet as presented?');">
+                  <input type="hidden" name="action" value="approve_debrief">
+                  <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                  <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+                  <button class="intake-button debrief-verify" type="submit">Verify Debriefing Sheet</button>
+                </form>
+              <?php endif; ?>
+            <?php endif; ?>
+          </div>
+        </footer>
+      </article>
+
+      <div class="reconstruction-actions no-print">
+        <?php if (!$isApprovedDebrief && (string)$selectedDebrief['status'] !== 'rejected'): ?>
+          <details class="debrief-adjustments" style="flex:1">
+            <summary>Reject generated sheet</summary>
+            <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="padding:0 14px 14px" onsubmit="return confirm('Reject this generated sheet?');">
+              <input type="hidden" name="action" value="reject_debrief">
+              <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+              <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+              <label class="intake-field"><span>Reason</span><input class="intake-select" type="text" name="rejection_reason" required></label>
+              <button class="intake-button" type="submit" style="margin-top:8px;background:#991b1b">Reject Sheet</button>
+            </form>
+          </details>
+        <?php endif; ?>
+        <?php if ((string)$selectedDebrief['status'] === 'approved'): ?>
+          <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" onsubmit="return confirm('Release this verified debrief to the selected user?');">
+            <input type="hidden" name="action" value="release_debrief">
+            <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+            <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+            <label class="intake-field"><span>Recipient User ID</span><input class="intake-select" type="number" min="1" name="recipient_user_id" required></label>
+            <button class="intake-button" type="submit" style="margin-top:8px;background:#7c3aed">Release Verified Debrief</button>
+          </form>
+        <?php endif; ?>
+      </div>
     <?php endif; ?>
   </section>
 </div>
