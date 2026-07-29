@@ -613,9 +613,25 @@ cw_header('Master Logbook');
 .intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
 .intake-audio-table.intake-table-wrap{overflow-x:hidden}
 .intake-table-audio{table-layout:fixed;width:100%;min-width:0;font-size:10px}
+.intake-table-audio col.intake-col-received{width:133px}
+.intake-table-audio col.intake-col-source{width:6%}
+.intake-table-audio col.intake-col-info{width:32px}
+.intake-table-audio col.intake-col-aircraft{width:4.5%}
+.intake-table-audio col.intake-col-crew{width:15%}
+.intake-table-audio col.intake-col-mission{width:5%}
+.intake-table-audio col.intake-col-startstop{width:9%}
+.intake-table-audio col.intake-col-duration{width:4%}
+.intake-table-audio col.intake-col-input{width:11%}
+.intake-table-audio col.intake-col-upload{width:5.5%}
+.intake-table-audio col.intake-col-transcript{width:10%}
+.intake-table-audio col.intake-col-view{width:7.5%}
+.intake-table-audio col.intake-col-error{width:7.5%}
 .intake-table-audio th{font-size:8px;padding:7px 8px}
 .intake-table-audio td{padding:7px 8px;font-size:10px;white-space:nowrap}
-.intake-audio-crew{font-size:10px;line-height:1.35;white-space:normal;min-width:130px}
+.intake-table-audio th.intake-col-duration-h,
+.intake-table-audio td.intake-audio-duration{text-align:center}
+.intake-table-audio td.intake-audio-info-cell{padding-left:2px;padding-right:2px;text-align:center;overflow:visible}
+.intake-audio-crew{font-size:10px;line-height:1.35;white-space:normal;min-width:221px}
 .intake-audio-crew-line{color:#334155}
 .intake-audio-crew-role{font-weight:800;color:#0f172a}
 .intake-audio-mission{font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a}
@@ -631,10 +647,11 @@ cw_header('Master Logbook');
 .intake-input-pill{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:9px;font-weight:900;white-space:nowrap}
 .intake-input-good{background:#dcfce7;color:#166534}
 .intake-input-bad{background:#fee2e2;color:#991b1b}
-.intake-info-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#475569;font-size:11px;font-weight:900;cursor:help}
+.intake-info-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#475569;font-size:11px;font-weight:900;cursor:help;vertical-align:middle}
 .intake-info-tip:hover,.intake-info-tip:focus-visible{border-color:#93c5fd;color:#1d4ed8;outline:none}
-.intake-info-popover{display:none;position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);min-width:240px;max-width:320px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:10px;line-height:1.5;white-space:pre-wrap;z-index:30;box-shadow:0 10px 24px rgba(15,23,42,.18);font-weight:500;text-align:left}
-.intake-info-tip:hover .intake-info-popover,.intake-info-tip:focus-visible .intake-info-popover{display:block}
+.intake-info-popover{display:none}
+.intake-info-popover-float{position:fixed;z-index:2000;min-width:240px;max-width:320px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:10px;line-height:1.5;white-space:pre-wrap;box-shadow:0 10px 24px rgba(15,23,42,.18);font-weight:500;text-align:left;pointer-events:none}
+.intake-info-popover-float[hidden]{display:none}
 .intake-audio-transcript-btn{border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;padding:3px 8px;font-size:9px;font-weight:900;cursor:pointer;margin-top:4px}
 .intake-audio-transcript-btn:disabled{opacity:.45;cursor:not-allowed;color:#64748b}
 .intake-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;padding:20px;z-index:1200}
@@ -924,7 +941,22 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap intake-audio-table" data-audio-table data-hide-short="true" data-audio-total="<?= count($audio['rows']) ?>" data-audio-short="<?= (int)$audioShortRowCount ?>">
         <table class="intake-table intake-table-audio">
-          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start/Stop</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
+          <colgroup>
+            <col class="intake-col-received">
+            <col class="intake-col-source">
+            <col class="intake-col-info">
+            <col class="intake-col-aircraft">
+            <col class="intake-col-crew">
+            <col class="intake-col-mission">
+            <col class="intake-col-startstop">
+            <col class="intake-col-duration">
+            <col class="intake-col-input">
+            <col class="intake-col-upload">
+            <col class="intake-col-transcript">
+            <col class="intake-col-view">
+            <col class="intake-col-error">
+          </colgroup>
+          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start/Stop</th><th class="intake-col-duration-h">Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($audio['rows'] as $row): ?>
             <?php
@@ -948,8 +980,8 @@ cw_header('Master Logbook');
             <tr class="<?= $isShortRecording ? 'intake-audio-row-short' : '' ?>" data-audio-duration-seconds="<?= cvr_intake_h((string)$durationSeconds) ?>">
               <td class="intake-audio-received"><?= cvr_intake_h(cvr_intake_audio_received_label($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></td>
               <td><span class="intake-status <?= cvr_intake_h($sourceClass) ?>"><?= cvr_intake_h($sourceLabel) ?></span></td>
-              <td>
-                <span class="intake-info-tip" tabindex="0" aria-label="Recording details">
+              <td class="intake-audio-info-cell">
+                <span class="intake-info-tip" tabindex="0" aria-label="Recording details" data-intake-info-tip>
                   i
                   <span class="intake-info-popover"><?= cvr_intake_h($infoTooltip) ?></span>
                 </span>
@@ -1806,6 +1838,59 @@ cw_header('Master Logbook');
       updateAudioFilter(showShort);
     });
   }
+
+  let intakeInfoPopoverFloat = document.getElementById('intake-info-popover-float');
+  if (!intakeInfoPopoverFloat) {
+    intakeInfoPopoverFloat = document.createElement('div');
+    intakeInfoPopoverFloat.id = 'intake-info-popover-float';
+    intakeInfoPopoverFloat.className = 'intake-info-popover-float';
+    intakeInfoPopoverFloat.hidden = true;
+    document.body.appendChild(intakeInfoPopoverFloat);
+  }
+  const hideIntakeInfoPopover = () => {
+    intakeInfoPopoverFloat.hidden = true;
+  };
+  const positionIntakeInfoPopover = (tip) => {
+    const popover = tip.querySelector('.intake-info-popover');
+    if (!popover) {
+      return;
+    }
+    intakeInfoPopoverFloat.textContent = popover.textContent || '';
+    intakeInfoPopoverFloat.hidden = false;
+    intakeInfoPopoverFloat.style.left = '0px';
+    intakeInfoPopoverFloat.style.top = '0px';
+    intakeInfoPopoverFloat.style.transform = 'none';
+    const tipRect = tip.getBoundingClientRect();
+    const floatRect = intakeInfoPopoverFloat.getBoundingClientRect();
+    const margin = 12;
+    let left = tipRect.right + 8;
+    let top = tipRect.top + (tipRect.height / 2) - (floatRect.height / 2);
+    if (left + floatRect.width > window.innerWidth - margin) {
+      left = tipRect.left - floatRect.width - 8;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+    if (top < margin) {
+      top = margin;
+    }
+    if (top + floatRect.height > window.innerHeight - margin) {
+      top = window.innerHeight - floatRect.height - margin;
+    }
+    intakeInfoPopoverFloat.style.left = left + 'px';
+    intakeInfoPopoverFloat.style.top = top + 'px';
+  };
+  page.querySelectorAll('[data-intake-info-tip]').forEach((tip) => {
+    tip.addEventListener('mouseenter', () => positionIntakeInfoPopover(tip));
+    tip.addEventListener('focus', () => positionIntakeInfoPopover(tip));
+    tip.addEventListener('mouseleave', hideIntakeInfoPopover);
+    tip.addEventListener('blur', hideIntakeInfoPopover);
+  });
+  if (audioTable) {
+    audioTable.addEventListener('scroll', hideIntakeInfoPopover, { passive: true });
+  }
+  window.addEventListener('scroll', hideIntakeInfoPopover, { passive: true });
+  window.addEventListener('resize', hideIntakeInfoPopover, { passive: true });
 
   const transcriptModal = document.getElementById('intake-audio-transcript-modal');
   const transcriptPlayer = document.getElementById('intake-audio-transcript-player');
