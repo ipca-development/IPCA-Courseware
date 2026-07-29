@@ -44,15 +44,15 @@ $checks = array(
         && str_contains($intake, 'Ending Hobbs cannot be lower than Starting Hobbs.')
         && str_contains($intake, 'fuel_remaining must be a valid non-negative quantity.')
         && str_contains($intake, 'ending_oil_percentage is required'),
-    'Garmin metadata supplies authoritative counter starts' =>
+    'Garmin metadata verifies dispatch counter starts' =>
         str_contains($classification, "metadata['airframe_hours']")
         && str_contains($classification, "metadata['engine_hours']")
-        && str_contains($derivation, "'authority' => 'garmin_start_crew_end'")
-        && str_contains($derivation, 'Garmin airframe_hours')
-        && str_contains($derivation, 'Garmin engine_hours'),
+        && str_contains($derivation, "'authority' => 'dispatch_start_crew_end'")
+        && str_contains($derivation, 'verify the dispatch entry')
+        && str_contains($derivation, 'Garmin airframe_hours'),
     'crew endings override derived durations with discrepancy reporting' =>
         str_contains($derivation, 'crew_hobbs_duration_hours')
-        && str_contains($derivation, 'crew_tacho_duration_hours')
+        && str_contains($derivation, 'crew_hobbs_end')
         && str_contains($derivation, 'crew counter remains authoritative')
         && str_contains($derivation, 'UPDATE ipca_operational_flight_record_versions'),
     'fuel and oil continuity require service declarations beyond twenty percent' =>

@@ -358,6 +358,7 @@ function logbook_times_use_aircraft_local_timezone(): bool
     $time = (string)file_get_contents(__DIR__ . '/../src/time.php');
     return str_contains($service, 'logbookLocalTimeProvenance')
         && str_contains($service, 'cw_logbook_time')
+        && str_contains($service, 'cw_logbook_display_timezone')
         && str_contains($service, 'aircraftOperationalTimezoneFromRow')
-        && str_contains($time, 'cw_aircraft_operational_timezone');
+        && str_contains($time, 'cw_airport_timezone');
 }

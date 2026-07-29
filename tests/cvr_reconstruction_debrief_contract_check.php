@@ -106,8 +106,9 @@ $checks = array(
         && str_contains($debriefPage, "\$context['engine_stop_utc']"),
     'logbook block times display in aircraft operational local time' =>
         str_contains($debriefSource, 'operational_timezone')
-        && str_contains($debriefSource, 'cw_aircraft_operational_timezone')
+        && str_contains($debriefSource, 'cw_logbook_display_timezone')
         && str_contains($debriefSource, 'cw_logbook_time')
+        && str_contains((string) file_get_contents($root . '/src/time.php'), 'cw_airport_timezone')
         && str_contains($debriefPage, 'cvr_intake_timestamp($context[\'engine_start_utc\']')
         && str_contains($debriefPage, '$logbookTimezone'),
     'logbook block times fall back to flight record legs and hobbs duration' =>
@@ -115,6 +116,12 @@ $checks = array(
         && str_contains($debriefSource, 'allocation_start_utc')
         && str_contains($debriefSource, 'off_block_plus_hobbs_delta')
         && str_contains($debriefSource, 'flightRecordEventUtc'),
+    'logbook hobbs uses garmin start and crew end with one decimal' =>
+        str_contains($debriefSource, 'garmin_hobbs_start_hours')
+        && str_contains($debriefSource, 'starting_hobbs')
+        && str_contains($debriefSource, 'appendDispatchStartVerification')
+        && str_contains($debriefSource, 'roundLogbookMeter')
+        && str_contains($debriefSource, 'ending_hobbs'),
     'canonical derivation returns linkable Flight Record version' =>
         str_contains($derivationService, "'flight_record_version_id' => (int)\$version['id']")
         && str_contains($bundleService, "\$derived['flight_record_version_id']")

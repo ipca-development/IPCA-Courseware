@@ -223,9 +223,9 @@ final class FlightRecordDerivationService
                      tacho_start_hours = ?, tacho_end_hours = ?
                  WHERE id = ?'
             )->execute(array(
-                $crew['crew_hobbs_start'] ?? null,
+                $crew['crew_provided_hobbs_start'] ?? $crew['crew_hobbs_start'] ?? null,
                 $crew['crew_hobbs_end'] ?? null,
-                $crew['crew_tacho_start'] ?? null,
+                $crew['crew_provided_tacho_start'] ?? $crew['crew_tacho_start'] ?? null,
                 $crew['crew_tacho_end'] ?? null,
                 (int)$version['id'],
             ));
@@ -570,7 +570,8 @@ final class FlightRecordDerivationService
     }
 
     /**
-     * Crew absolute counters are authoritative; Garmin validates elapsed durations and fuel.
+     * Dispatch start meters lead the logbook; Garmin CSV counters verify human input.
+     * Crew shutdown/closure endings remain authoritative for Hobbs/Tacho end.
      *
      * @param array<string,mixed> $csv
      * @param array<string,mixed> $hobbs
@@ -606,23 +607,23 @@ final class FlightRecordDerivationService
         $crewProvidedTachoStart = (float)$crew['starting_tacho'];
         $garminHobbsStart = is_numeric($metadata['airframe_hours'] ?? null) ? (float)$metadata['airframe_hours'] : null;
         $garminTachoStart = is_numeric($metadata['engine_hours'] ?? null) ? (float)$metadata['engine_hours'] : null;
-        $authoritativeHobbsStart = $garminHobbsStart ?? $crewProvidedHobbsStart;
-        $authoritativeTachoStart = $garminTachoStart ?? $crewProvidedTachoStart;
-        $crewHobbsDuration = ((float)$crew['ending_hobbs'] - $authoritativeHobbsStart);
-        $crewTachoDuration = ((float)$crew['ending_tacho'] - $authoritativeTachoStart);
+        $logbookHobbsStart = $crewProvidedHobbsStart;
+        $logbookTachoStart = $crewProvidedTachoStart;
+        $crewHobbsDuration = ((float)$crew['ending_hobbs'] - $logbookHobbsStart);
+        $crewTachoDuration = ((float)$crew['ending_tacho'] - $logbookTachoStart);
         $garminHobbsDuration = isset($hobbs['duration_ms']) ? (float)$hobbs['duration_ms'] / 3600000 : null;
         $garminTachoDuration = isset($tacho['duration_ms']) ? (float)$tacho['duration_ms'] / 3600000 : null;
         $discrepancies = array();
         if ($garminHobbsStart !== null && abs($crewProvidedHobbsStart - $garminHobbsStart) > 0.1) {
             $discrepancies[] = sprintf(
-                'Starting Hobbs input discrepancy: crew %.1f versus Garmin airframe_hours %.1f; Garmin start is authoritative.',
+                'Dispatch Hobbs start %.1f differs from Garmin airframe_hours %.1f; verify the dispatch entry.',
                 $crewProvidedHobbsStart,
                 $garminHobbsStart
             );
         }
         if ($garminTachoStart !== null && abs($crewProvidedTachoStart - $garminTachoStart) > 0.1) {
             $discrepancies[] = sprintf(
-                'Starting Tacho input discrepancy: crew %.1f versus Garmin engine_hours %.1f; Garmin start is authoritative.',
+                'Dispatch Tacho start %.1f differs from Garmin engine_hours %.1f; verify the dispatch entry.',
                 $crewProvidedTachoStart,
                 $garminTachoStart
             );
@@ -670,17 +671,17 @@ final class FlightRecordDerivationService
         }
         return array(
             'available' => true,
-            'authority' => 'garmin_start_crew_end',
-            'garmin_role' => 'authoritative_counter_start_and_fuel_validation',
+            'authority' => 'dispatch_start_crew_end',
+            'garmin_role' => 'counter_start_verification',
             'tolerance_hours' => 0.1,
             'tolerance_percent' => 20,
             'crew_provided_hobbs_start' => $crewProvidedHobbsStart,
             'crew_provided_tacho_start' => $crewProvidedTachoStart,
             'garmin_hobbs_start' => $garminHobbsStart,
             'garmin_tacho_start' => $garminTachoStart,
-            'crew_hobbs_start' => $authoritativeHobbsStart,
+            'crew_hobbs_start' => $logbookHobbsStart,
             'crew_hobbs_end' => (float)$crew['ending_hobbs'],
-            'crew_tacho_start' => $authoritativeTachoStart,
+            'crew_tacho_start' => $logbookTachoStart,
             'crew_tacho_end' => (float)$crew['ending_tacho'],
             'crew_hobbs_duration_hours' => $crewHobbsDuration,
             'crew_tacho_duration_hours' => $crewTachoDuration,

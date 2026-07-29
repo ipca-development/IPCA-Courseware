@@ -2420,15 +2420,16 @@ final class MasterLogbookReadService
      */
     private function aircraftOperationalTimezoneFromRow(array $row): string
     {
+        if (!$this->pdo instanceof PDO) {
+            return 'UTC';
+        }
         $aircraftId = (int)($row['aircraft_id'] ?? 0);
-        if ($aircraftId > 0 && $this->pdo instanceof PDO) {
-            return cw_aircraft_operational_timezone($this->pdo, $aircraftId);
-        }
-        $registration = trim((string)($row['aircraft_registration'] ?? $row['tail_number'] ?? ''));
-        if ($registration !== '' && $this->pdo instanceof PDO) {
-            return cw_aircraft_operational_timezone_by_registration($this->pdo, $registration);
-        }
-        return 'UTC';
+        return cw_logbook_display_timezone(
+            $this->pdo,
+            $aircraftId > 0 ? $aircraftId : null,
+            (string)($row['departure_airport_code'] ?? ''),
+            (string)($row['arrival_airport_code'] ?? '')
+        );
     }
 
     /**

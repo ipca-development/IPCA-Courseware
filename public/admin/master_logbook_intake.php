@@ -1034,10 +1034,10 @@ cw_header('Master Logbook');
             <div><span class="debrief-label">OFF Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_start_utc'] ?? null, $logbookTimezone)) ?></span></div>
             <div><span class="debrief-label">ON Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_stop_utc'] ?? null, $logbookTimezone)) ?></span></div>
             <div class="no-print" style="grid-column:1 / -1"><span class="intake-muted">Logbook times shown in aircraft operational local time (<?= cvr_intake_h($logbookTimezone) ?>). Source timestamps remain stored in UTC.</span></div>
-            <div><span class="debrief-label">Hobbs Start</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_start_hours'] ?? $context['starting_hobbs'] ?? '—') ?></span></div>
-            <div><span class="debrief-label">Hobbs End</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_end_hours'] ?? $context['ending_hobbs'] ?? '—') ?></span></div>
-            <div><span class="debrief-label">Tacho Start</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_start_hours'] ?? $context['starting_tacho'] ?? '—') ?></span></div>
-            <div><span class="debrief-label">Tacho End</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_end_hours'] ?? $context['ending_tacho'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Hobbs Start</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_start_hours'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Hobbs End</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_end_hours'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Tacho Start</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_start_hours'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Tacho End</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_end_hours'] ?? '—') ?></span></div>
           </div>
           <?php if ($meterDiscrepancies !== array()): ?>
             <div class="intake-notice no-print" style="margin:12px">
@@ -1047,7 +1047,7 @@ cw_header('Master Logbook');
               </ul>
             </div>
           <?php elseif (!empty($crewReconciliation['available'])): ?>
-            <div class="debrief-narrative no-print"><span class="intake-muted">Garmin airframe_hours and engine_hours supplied the authoritative starting Hobbs/Tacho. Crew-provided ending counters remained authoritative and were checked against Garmin-derived durations. Fuel was checked against Garmin quantity samples.</span></div>
+            <div class="debrief-narrative no-print"><span class="intake-muted">Dispatch Hobbs/Tacho starts lead the logbook. Garmin airframe_hours and engine_hours verify those entries. Crew shutdown endings remain authoritative and were checked against Garmin-derived durations.</span></div>
           <?php endif; ?>
           <div class="debrief-logbook-wrap">
             <table class="debrief-logbook">

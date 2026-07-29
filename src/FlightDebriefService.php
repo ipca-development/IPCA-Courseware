@@ -288,6 +288,8 @@ final class FlightDebriefService
                     COALESCE(s.avionics_off_utc, gs.avionics_off_utc, g.last_valid_sample_utc) AS avionics_off_utc,
                     g.first_valid_sample_utc AS garmin_start_utc,
                     g.last_valid_sample_utc AS garmin_end_utc,
+                    g.airframe_hours_start AS garmin_hobbs_start_hours,
+                    g.engine_hours_start AS garmin_tacho_start_hours,
                     cr.started_at AS recording_start_utc, cr.duration_seconds AS recording_duration_seconds,
                     (SELECT COUNT(*) FROM ipca_cvr_flight_events fl
                      WHERE fl.workflow_flight_record_uuid = b.workflow_flight_record_uuid
@@ -312,10 +314,6 @@ final class FlightDebriefService
         );
         $context->execute(array((int)$debrief['bundle_id']));
         $debrief['context'] = $context->fetch(PDO::FETCH_ASSOC) ?: array();
-        $debrief['context']['operational_timezone'] = cw_aircraft_operational_timezone(
-            $this->pdo,
-            (int)($debrief['context']['aircraft_id'] ?? 0) > 0 ? (int)$debrief['context']['aircraft_id'] : null
-        );
         $debrief['context']['block_time_discrepancies'] = array();
         $flightRecordVersionId = (int)($debrief['context']['operational_flight_record_version_id'] ?? 0);
         $debrief['context']['legs'] = array();
@@ -356,6 +354,12 @@ final class FlightDebriefService
         $legs = is_array($context['legs'] ?? null) ? $context['legs'] : array();
         $firstLeg = $legs[0] ?? null;
         $lastLeg = $legs !== array() ? $legs[array_key_last($legs)] : null;
+        $context['operational_timezone'] = cw_logbook_display_timezone(
+            $this->pdo,
+            (int)($context['aircraft_id'] ?? 0) > 0 ? (int)$context['aircraft_id'] : null,
+            is_array($firstLeg) ? (string)($firstLeg['departure_airport_code'] ?? '') : null,
+            is_array($lastLeg) ? (string)($lastLeg['arrival_airport_code'] ?? '') : null
+        );
         $flightRecordVersionId = (int)($context['operational_flight_record_version_id'] ?? 0);
         $logbookTimezone = (string)($context['operational_timezone'] ?? 'UTC');
         $recordEngineStart = $this->flightRecordEventUtc($flightRecordVersionId, 'ENGINE_START', false);
@@ -427,24 +431,34 @@ final class FlightDebriefService
             : array();
 
         $hobbsStart = $this->firstNumeric(
-            $context['hobbs_start_hours'] ?? null,
             $context['starting_hobbs'] ?? null,
-            $crew['crew_hobbs_start'] ?? null
+            $crew['crew_provided_hobbs_start'] ?? null,
+            $crew['crew_hobbs_start'] ?? null,
+            $context['hobbs_start_hours'] ?? null
         );
         $tachoStart = $this->firstNumeric(
-            $context['tacho_start_hours'] ?? null,
             $context['starting_tacho'] ?? null,
-            $crew['crew_tacho_start'] ?? null
+            $crew['crew_provided_tacho_start'] ?? null,
+            $crew['crew_tacho_start'] ?? null,
+            $context['tacho_start_hours'] ?? null
         );
         $hobbsEnd = $this->firstNumeric(
-            $context['hobbs_end_hours'] ?? null,
             $context['ending_hobbs'] ?? null,
-            $crew['crew_hobbs_end'] ?? null
+            $crew['crew_hobbs_end'] ?? null,
+            $context['hobbs_end_hours'] ?? null
         );
         $tachoEnd = $this->firstNumeric(
-            $context['tacho_end_hours'] ?? null,
             $context['ending_tacho'] ?? null,
-            $crew['crew_tacho_end'] ?? null
+            $crew['crew_tacho_end'] ?? null,
+            $context['tacho_end_hours'] ?? null
+        );
+
+        $this->appendDispatchStartVerification(
+            $context,
+            $hobbsStart,
+            $tachoStart,
+            $crew,
+            0.1
         );
 
         if ($hobbsEnd === null && $hobbsStart !== null && is_numeric($hobbsDurationMs)) {
@@ -455,16 +469,48 @@ final class FlightDebriefService
         }
 
         if ($hobbsStart !== null) {
-            $context['hobbs_start_hours'] = $hobbsStart;
+            $context['hobbs_start_hours'] = $this->roundLogbookMeter($hobbsStart);
         }
         if ($tachoStart !== null) {
-            $context['tacho_start_hours'] = $tachoStart;
+            $context['tacho_start_hours'] = $this->roundLogbookMeter($tachoStart);
         }
         if ($hobbsEnd !== null) {
-            $context['hobbs_end_hours'] = $hobbsEnd;
+            $context['hobbs_end_hours'] = $this->roundLogbookMeter($hobbsEnd);
         }
         if ($tachoEnd !== null) {
-            $context['tacho_end_hours'] = $tachoEnd;
+            $context['tacho_end_hours'] = $this->roundLogbookMeter($tachoEnd);
+        }
+    }
+
+    private function roundLogbookMeter(float $value): float
+    {
+        return round($value, 1);
+    }
+
+    /** @param array<string,mixed> $context @param array<string,mixed> $crew */
+    private function appendDispatchStartVerification(array &$context, ?float $hobbsStart, ?float $tachoStart, array $crew, float $toleranceHours): void
+    {
+        $garminHobbsStart = $this->firstNumeric(
+            $crew['garmin_hobbs_start'] ?? null,
+            $context['garmin_hobbs_start_hours'] ?? null
+        );
+        $garminTachoStart = $this->firstNumeric(
+            $crew['garmin_tacho_start'] ?? null,
+            $context['garmin_tacho_start_hours'] ?? null
+        );
+        if ($hobbsStart !== null && $garminHobbsStart !== null && abs($hobbsStart - $garminHobbsStart) > $toleranceHours) {
+            $context['block_time_discrepancies'][] = sprintf(
+                'Dispatch Hobbs start %.1f differs from Garmin airframe_hours %.1f; verify the dispatch entry.',
+                $hobbsStart,
+                $garminHobbsStart
+            );
+        }
+        if ($tachoStart !== null && $garminTachoStart !== null && abs($tachoStart - $garminTachoStart) > $toleranceHours) {
+            $context['block_time_discrepancies'][] = sprintf(
+                'Dispatch Tacho start %.1f differs from Garmin engine_hours %.1f; verify the dispatch entry.',
+                $tachoStart,
+                $garminTachoStart
+            );
         }
     }
 
