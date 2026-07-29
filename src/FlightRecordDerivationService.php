@@ -91,6 +91,13 @@ final class FlightRecordDerivationService
         $crossCountry = (new CrossCountryCalculationService())->calculate($legs, $airport['departure_airport_code'] ?? null);
         $legs = is_array($crossCountry['legs'] ?? null) ? $crossCountry['legs'] : $legs;
         $continuity = $this->previousFlightContinuity($csv, $hobbs, $tacho);
+        $crewReconciliation = $this->crewReconciliation(
+            $csv,
+            $hobbs,
+            $tacho,
+            is_array($parsed['metadata'] ?? null) ? $parsed['metadata'] : array(),
+            $parsed['rows']
+        );
 
         $exceptions = array_merge(
             $this->exceptionsFromCalculation($hobbs),
@@ -99,10 +106,35 @@ final class FlightRecordDerivationService
             $legExceptions,
             $this->exceptionsFromCalculation($dayNight),
             $this->exceptionsFromCalculation($crossCountry),
-            $this->exceptionsFromContinuity($continuity)
+            $this->exceptionsFromContinuity($continuity),
+            is_array($crewReconciliation['discrepancies'] ?? null) ? $crewReconciliation['discrepancies'] : array()
         );
 
         $readiness = $exceptions ? 'needs_review' : 'ready';
+        $authoritativeHobbsDurationMs = !empty($crewReconciliation['available'])
+            ? (int)round(max(0, (float)$crewReconciliation['crew_hobbs_duration_hours']) * 3600000)
+            : ($hobbs['duration_ms'] ?? null);
+        $authoritativeTachoDurationMs = !empty($crewReconciliation['available'])
+            ? (int)round(max(0, (float)$crewReconciliation['crew_tacho_duration_hours']) * 3600000)
+            : ($tacho['duration_ms'] ?? null);
+        if (!empty($crewReconciliation['available']) && $authoritativeHobbsDurationMs !== null && $legs !== array()) {
+            $derivedTotal = array_sum(array_map(
+                static fn(array $leg): int => max(0, (int)($leg['allocated_hobbs_duration_ms'] ?? 0)),
+                $legs
+            ));
+            $remaining = $authoritativeHobbsDurationMs;
+            foreach ($legs as $index => &$leg) {
+                $isLast = $index === array_key_last($legs);
+                $allocated = $isLast
+                    ? $remaining
+                    : ($derivedTotal > 0
+                        ? (int)round($authoritativeHobbsDurationMs * ((int)($leg['allocated_hobbs_duration_ms'] ?? 0) / $derivedTotal))
+                        : 0);
+                $leg['allocated_hobbs_duration_ms'] = max(0, $allocated);
+                $remaining -= $leg['allocated_hobbs_duration_ms'];
+            }
+            unset($leg);
+        }
         return array(
             'ok' => true,
             'preview' => true,
@@ -127,15 +159,16 @@ final class FlightRecordDerivationService
                 'day_night' => $dayNight,
                 'cross_country' => $crossCountry,
                 'previous_flight_continuity' => $continuity,
+                'crew_reconciliation' => $crewReconciliation,
             ),
             'events' => $events,
             'legs' => $legs,
             'route' => $this->routePreview($parsed['rows']),
             'summary' => array(
-                'exact_hobbs_duration_ms' => $hobbs['duration_ms'] ?? null,
-                'display_hobbs_hours' => $hobbs['duration_hours_display'] ?? null,
-                'exact_tacho_duration_ms' => $tacho['duration_ms'] ?? null,
-                'display_tacho_hours' => $tacho['duration_hours_display'] ?? null,
+                'exact_hobbs_duration_ms' => $authoritativeHobbsDurationMs,
+                'display_hobbs_hours' => $authoritativeHobbsDurationMs !== null ? number_format($authoritativeHobbsDurationMs / 3600000, 1, '.', '') : null,
+                'exact_tacho_duration_ms' => $authoritativeTachoDurationMs,
+                'display_tacho_hours' => $authoritativeTachoDurationMs !== null ? number_format($authoritativeTachoDurationMs / 3600000, 1, '.', '') : null,
                 'total_night_duration_ms' => $dayNight['session_night_duration_ms'] ?? null,
                 'display_night_hours' => $dayNight['session_night_hours_display'] ?? null,
                 'landing_event_count' => count(array_filter($events, static fn(array $event): bool => ($event['event_type'] ?? '') === 'LANDING')),
@@ -180,6 +213,23 @@ final class FlightRecordDerivationService
             'calculation_version' => 'phase3-v1',
             'summary' => $summary,
         ), 'garmin_csv');
+        $crew = is_array($preview['calculations']['crew_reconciliation'] ?? null)
+            ? $preview['calculations']['crew_reconciliation']
+            : array();
+        if (!empty($crew['available'])) {
+            $this->pdo->prepare(
+                'UPDATE ipca_operational_flight_record_versions
+                 SET hobbs_start_hours = ?, hobbs_end_hours = ?,
+                     tacho_start_hours = ?, tacho_end_hours = ?
+                 WHERE id = ?'
+            )->execute(array(
+                $crew['crew_hobbs_start'] ?? null,
+                $crew['crew_hobbs_end'] ?? null,
+                $crew['crew_tacho_start'] ?? null,
+                $crew['crew_tacho_end'] ?? null,
+                (int)$version['id'],
+            ));
+        }
 
         foreach ($preview['legs'] as $leg) {
             $recordService->addLegVersion((int)$version['id'], $leg);
@@ -471,6 +521,7 @@ final class FlightRecordDerivationService
     }
 
     /**
+     * @param array<string,string> $metadata
      * @param list<array<string,string>> $rows
      * @return array{points:list<array{lat:float,lon:float,t:string|null}>,bounds:array{min_lat:float,max_lat:float,min_lon:float,max_lon:float}|null}
      */
@@ -516,6 +567,143 @@ final class FlightRecordDerivationService
         $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
         $stmt->execute(array($table, $column));
         return (int)$stmt->fetchColumn() > 0;
+    }
+
+    /**
+     * Crew absolute counters are authoritative; Garmin validates elapsed durations and fuel.
+     *
+     * @param array<string,mixed> $csv
+     * @param array<string,mixed> $hobbs
+     * @param array<string,mixed> $tacho
+     * @param list<array<string,string>> $rows
+     * @return array<string,mixed>
+     */
+    private function crewReconciliation(array $csv, array $hobbs, array $tacho, array $metadata, array $rows): array
+    {
+        $sessionId = (int)($csv['session_id'] ?? 0);
+        if ($sessionId <= 0 || !$this->tablePresent('ipca_cvr_dispatches') || !$this->tablePresent('ipca_cvr_flight_closures')) {
+            return array('available' => false, 'discrepancies' => array());
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT d.starting_hobbs, d.starting_tacho, d.fuel_onboard,
+                    c.ending_hobbs, c.ending_tacho, c.fuel_remaining, c.oil_percentage
+             FROM ipca_flight_sessions s
+             INNER JOIN ipca_cvr_dispatches d
+               ON d.workflow_flight_record_uuid = s.session_uuid
+             LEFT JOIN ipca_cvr_flight_closures c ON c.id = (
+               SELECT fc.id FROM ipca_cvr_flight_closures fc
+               WHERE fc.workflow_flight_record_uuid = s.session_uuid
+               ORDER BY fc.received_at DESC, fc.id DESC LIMIT 1
+             )
+             WHERE s.id = ? LIMIT 1'
+        );
+        $statement->execute(array($sessionId));
+        $crew = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($crew) || $crew['ending_hobbs'] === null || $crew['ending_tacho'] === null) {
+            return array('available' => false, 'discrepancies' => array('Crew post-flight meter closure is unavailable.'));
+        }
+        $crewProvidedHobbsStart = (float)$crew['starting_hobbs'];
+        $crewProvidedTachoStart = (float)$crew['starting_tacho'];
+        $garminHobbsStart = is_numeric($metadata['airframe_hours'] ?? null) ? (float)$metadata['airframe_hours'] : null;
+        $garminTachoStart = is_numeric($metadata['engine_hours'] ?? null) ? (float)$metadata['engine_hours'] : null;
+        $authoritativeHobbsStart = $garminHobbsStart ?? $crewProvidedHobbsStart;
+        $authoritativeTachoStart = $garminTachoStart ?? $crewProvidedTachoStart;
+        $crewHobbsDuration = ((float)$crew['ending_hobbs'] - $authoritativeHobbsStart);
+        $crewTachoDuration = ((float)$crew['ending_tacho'] - $authoritativeTachoStart);
+        $garminHobbsDuration = isset($hobbs['duration_ms']) ? (float)$hobbs['duration_ms'] / 3600000 : null;
+        $garminTachoDuration = isset($tacho['duration_ms']) ? (float)$tacho['duration_ms'] / 3600000 : null;
+        $discrepancies = array();
+        if ($garminHobbsStart !== null && abs($crewProvidedHobbsStart - $garminHobbsStart) > 0.1) {
+            $discrepancies[] = sprintf(
+                'Starting Hobbs input discrepancy: crew %.1f versus Garmin airframe_hours %.1f; Garmin start is authoritative.',
+                $crewProvidedHobbsStart,
+                $garminHobbsStart
+            );
+        }
+        if ($garminTachoStart !== null && abs($crewProvidedTachoStart - $garminTachoStart) > 0.1) {
+            $discrepancies[] = sprintf(
+                'Starting Tacho input discrepancy: crew %.1f versus Garmin engine_hours %.1f; Garmin start is authoritative.',
+                $crewProvidedTachoStart,
+                $garminTachoStart
+            );
+        }
+        if ($garminHobbsDuration !== null && abs($crewHobbsDuration - $garminHobbsDuration) > 0.1) {
+            $discrepancies[] = sprintf(
+                'Hobbs discrepancy: crew counter delta %.1f h versus Garmin-derived duration %.1f h; crew counter remains authoritative.',
+                $crewHobbsDuration,
+                $garminHobbsDuration
+            );
+        }
+        if ($garminTachoDuration !== null && abs($crewTachoDuration - $garminTachoDuration) > 0.1) {
+            $discrepancies[] = sprintf(
+                'Tacho discrepancy: crew counter delta %.1f h versus Garmin-derived duration %.1f h; crew counter remains authoritative.',
+                $crewTachoDuration,
+                $garminTachoDuration
+            );
+        }
+        $fuelSamples = array();
+        foreach ($rows as $row) {
+            $value = G3XFlightStreamParser::numericValue($row, 'Fuel Qty (gal)', 'FQty1');
+            if ($value !== null) {
+                $fuelSamples[] = $value;
+            }
+        }
+        $garminFuelStart = $fuelSamples !== array() ? $fuelSamples[0] : null;
+        $garminFuelEnd = $fuelSamples !== array() ? $fuelSamples[count($fuelSamples) - 1] : null;
+        $crewFuelStart = $this->numericQuantity((string)$crew['fuel_onboard']);
+        $crewFuelEnd = $this->numericQuantity((string)$crew['fuel_remaining']);
+        if ($garminFuelStart !== null && $crewFuelStart !== null
+            && $this->relativeDifference($crewFuelStart, $garminFuelStart) > 0.20) {
+            $discrepancies[] = sprintf(
+                'Starting fuel discrepancy exceeds 20%%: crew %.1f USG versus Garmin %.1f USG.',
+                $crewFuelStart,
+                $garminFuelStart
+            );
+        }
+        if ($garminFuelEnd !== null && $crewFuelEnd !== null
+            && $this->relativeDifference($crewFuelEnd, $garminFuelEnd) > 0.20) {
+            $discrepancies[] = sprintf(
+                'Ending fuel discrepancy exceeds 20%%: crew %.1f USG versus Garmin %.1f USG.',
+                $crewFuelEnd,
+                $garminFuelEnd
+            );
+        }
+        return array(
+            'available' => true,
+            'authority' => 'garmin_start_crew_end',
+            'garmin_role' => 'authoritative_counter_start_and_fuel_validation',
+            'tolerance_hours' => 0.1,
+            'tolerance_percent' => 20,
+            'crew_provided_hobbs_start' => $crewProvidedHobbsStart,
+            'crew_provided_tacho_start' => $crewProvidedTachoStart,
+            'garmin_hobbs_start' => $garminHobbsStart,
+            'garmin_tacho_start' => $garminTachoStart,
+            'crew_hobbs_start' => $authoritativeHobbsStart,
+            'crew_hobbs_end' => (float)$crew['ending_hobbs'],
+            'crew_tacho_start' => $authoritativeTachoStart,
+            'crew_tacho_end' => (float)$crew['ending_tacho'],
+            'crew_hobbs_duration_hours' => $crewHobbsDuration,
+            'crew_tacho_duration_hours' => $crewTachoDuration,
+            'garmin_hobbs_duration_hours' => $garminHobbsDuration,
+            'garmin_tacho_duration_hours' => $garminTachoDuration,
+            'crew_fuel_start_gal' => $crewFuelStart,
+            'crew_fuel_end_gal' => $crewFuelEnd,
+            'garmin_fuel_start_gal' => $garminFuelStart,
+            'garmin_fuel_end_gal' => $garminFuelEnd,
+            'oil_validation' => 'crew_continuity_and_service_declaration_only',
+            'discrepancies' => $discrepancies,
+        );
+    }
+
+    private function numericQuantity(string $value): ?float
+    {
+        $normalized = trim(str_ireplace('USG', '', $value));
+        return $normalized !== '' && is_numeric($normalized) ? (float)$normalized : null;
+    }
+
+    private function relativeDifference(float $value, float $baseline): float
+    {
+        return abs($value - $baseline) / max(abs($baseline), 0.1);
     }
 
     /**

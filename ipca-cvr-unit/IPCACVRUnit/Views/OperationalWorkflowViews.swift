@@ -519,7 +519,7 @@ struct InFlightWorkflowView: View {
     private var inFlightControlPanel: some View {
         if hasEngineShutdownEvent {
             VStack(spacing: 8) {
-                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VERIFIED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Post-flight data is stored locally. Continue with Garmin import." : "Official Engine Shutdown time is stored locally.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
+                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VALUES SAVED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending meters, fuel, and oil are atomically stored locally and queued for an individual server receipt. NEXT FLIGHT remains blocked until verification." : "Official Engine Shutdown time is stored locally and queued for server verification.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
                 if !hasShutdownVerificationEvent {
                     CVROperationalActionButton(title: "Complete Shutdown Verification", subtitle: "Ending meters / fuel / oil", color: CVROperationalPalette.secondaryBlue) {
                         isShowingShutdownVerification = true
@@ -681,6 +681,8 @@ private struct CVRHoldActionButton: View {
 
 private struct ShutdownVerificationView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var gps: GPSLocationManager
     @Environment(\.dismiss) private var dismiss
     @State private var endingHobbs = ""
@@ -758,8 +760,10 @@ private struct ShutdownVerificationView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        save()
-                        dismiss()
+                        if save() {
+                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            dismiss()
+                        }
                     }
                     .disabled(!canSave)
                 }
@@ -823,7 +827,7 @@ private struct ShutdownVerificationView: View {
         maintenanceRemark = flightRecord.maintenanceRemark ?? ""
     }
 
-    private func save() {
+    private func save() -> Bool {
         workflow.recordShutdownVerification(
             endingHobbs: Double(endingHobbs),
             endingTacho: Double(endingTacho),
@@ -849,7 +853,6 @@ struct GarminWorkflowView: View {
     @EnvironmentObject private var recordingStore: RecordingStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @Binding var showAdminUnlock: Bool
-    @State private var confirmOfflineArchive = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -873,31 +876,11 @@ struct GarminWorkflowView: View {
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
                     }
-                    if canArchiveWithPendingUploads {
-                        Button("ARCHIVE LOCALLY & START NEXT FLIGHT") {
-                            confirmOfflineArchive = true
-                        }
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                    }
                 }
                 .padding(.horizontal, metrics.outerHorizontalPadding)
                 .padding(.vertical, metrics.outerVerticalPadding)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
-        }
-        .confirmationDialog(
-            "Start the next flight?",
-            isPresented: $confirmOfflineArchive,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Locally & Start Next Flight") {
-                workflow.resetForNextFlightIfComplete()
-                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("All workflow evidence will be retained in Admin Flight History. Pending components will continue retrying from the archive.")
         }
         .task {
             await pollRecoveryProcessingStatus()
@@ -999,14 +982,6 @@ struct GarminWorkflowView: View {
         !workflowComponents.isEmpty && workflowComponents.allSatisfy { $0.state == .serverVerified }
     }
 
-    private var canArchiveWithPendingUploads: Bool {
-        guard !allWorkflowComponentsVerified,
-              let flightRecord = workflow.state.activeFlightRecord else { return false }
-        return flightRecord.status == .awaitingGarmin
-            || flightRecord.status == .awaitingUpload
-            || flightRecord.status == .complete
-    }
-
     private var failedWorkflowComponent: CVRUploadComponentRecord? {
         workflowComponents.first { $0.state == .failed || $0.state == .needsUserAction }
     }
@@ -1014,7 +989,13 @@ struct GarminWorkflowView: View {
     private var garminWarningTitle: String {
         if garminComponents.isEmpty { return "GARMIN TAB AVAILABLE" }
         if let failedWorkflowComponent {
-            return failedWorkflowComponent.componentType == "dispatch_metadata" ? "DISPATCH UPLOAD FAILED" : "GARMIN UPLOAD FAILED"
+            return switch failedWorkflowComponent.componentType {
+            case "dispatch_metadata": "DISPATCH UPLOAD FAILED"
+            case "flight_record_closure": "ENDING METERS / FUEL UPLOAD FAILED"
+            case "flight_events": "FLIGHT EVENT UPLOAD FAILED"
+            case "recorder_verification": "RECORDER VERIFICATION UPLOAD FAILED"
+            default: "GARMIN UPLOAD FAILED"
+            }
         }
         if allWorkflowComponentsVerified { return "FLIGHT DATA SERVER VERIFIED" }
         return "GARMIN CSV IMPORTED"
@@ -1118,6 +1099,8 @@ struct DispatchEditorView: View {
     @State private var oilPercent = 0.0
     @State private var hasFuelSelection = false
     @State private var hasOilSelection = false
+    @State private var refueledSincePreviousFlight = false
+    @State private var oilServicedSincePreviousFlight = false
     @State private var selectedCrewUserID = 0
     @State private var selectedCrewRole: CVRCrewRole = .student
     @State private var showCrewUserList = false
@@ -1157,6 +1140,14 @@ struct DispatchEditorView: View {
                     }
 
                     editorSection("DISPATCH DETAILS") {
+                        if workflow.state.activeDispatch?.dispatchSource == "verified_previous_flight_carryover" {
+                            CVROperationalWarningCard(
+                                title: "VERIFIED PREVIOUS FLIGHT VALUES",
+                                message: "Starting Hobbs, Starting Tacho, fuel, and oil were prefilled from the latest locally archived flight for this aircraft after all server receipts were verified. Confirm the physical indications before dispatch.",
+                                iconName: "checkmark.icloud.fill",
+                                color: CVROperationalPalette.success
+                            )
+                        }
                         missionPicker
                         HStack(spacing: 8) {
                             numericTextField("Starting Hobbs", text: $startingHobbs, field: .hobbs)
@@ -1187,6 +1178,27 @@ struct DispatchEditorView: View {
                             )
                             .frame(width: 132)
                             Spacer(minLength: 0)
+                        }
+                        if !continuityMessages.isEmpty {
+                            VStack(alignment: .leading, spacing: 7) {
+                                ForEach(continuityMessages, id: \.self) { message in
+                                    Text(message)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(CVROperationalPalette.warning)
+                                }
+                            }
+                            .padding(10)
+                            .background(CVROperationalPalette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        if requiresRefuelConfirmation {
+                            Toggle("Aircraft was refueled before this flight", isOn: $refueledSincePreviousFlight)
+                                .font(.caption.weight(.bold))
+                                .tint(CVROperationalPalette.success)
+                        }
+                        if requiresOilServiceConfirmation {
+                            Toggle("Oil was serviced before this flight", isOn: $oilServicedSincePreviousFlight)
+                                .font(.caption.weight(.bold))
+                                .tint(CVROperationalPalette.success)
                         }
                     }
 
@@ -1441,6 +1453,8 @@ struct DispatchEditorView: View {
             oilPercent = 50
             hasOilSelection = true
         }
+        refueledSincePreviousFlight = dispatch.refueledSincePreviousFlight ?? false
+        oilServicedSincePreviousFlight = dispatch.oilServicedSincePreviousFlight ?? false
     }
 
     private func save() {
@@ -1451,7 +1465,58 @@ struct DispatchEditorView: View {
             dispatch.startingTacho = Double(startingTacho)
             dispatch.fuelOnboard = hasFuelSelection ? Self.gallonText(fuelGallons) : ""
             dispatch.oilPercentage = hasOilSelection ? Int(oilPercent.rounded()) : nil
+            dispatch.refueledSincePreviousFlight = requiresRefuelConfirmation ? refueledSincePreviousFlight : false
+            dispatch.oilServicedSincePreviousFlight = requiresOilServiceConfirmation ? oilServicedSincePreviousFlight : false
         }
+    }
+
+    private var requiresRefuelConfirmation: Bool {
+        guard let dispatch = workflow.state.activeDispatch,
+              let previous = dispatch.previousFuelRemaining.flatMap(Self.fuelGallons(from:)),
+              hasFuelSelection,
+              fuelGallons > previous else { return false }
+        return Self.relativeDifference(fuelGallons, previous) > 0.20
+    }
+
+    private var requiresOilServiceConfirmation: Bool {
+        guard let previous = workflow.state.activeDispatch?.previousOilPercentage,
+              hasOilSelection,
+              oilPercent > Double(previous) else { return false }
+        return Self.relativeDifference(oilPercent, Double(previous)) > 0.20
+    }
+
+    private var continuityMessages: [String] {
+        guard let dispatch = workflow.state.activeDispatch else { return [] }
+        var messages: [String] = []
+        if let expected = dispatch.previousEndingHobbs,
+           let actual = Double(startingHobbs),
+           abs(actual - expected) > 0.1 {
+            messages.append(String(format: "Hobbs discrepancy: previous ending value was %.1f.", expected))
+        }
+        if let expected = dispatch.previousEndingTacho,
+           let actual = Double(startingTacho),
+           abs(actual - expected) > 0.1 {
+            messages.append(String(format: "Tacho discrepancy: previous ending value was %.1f.", expected))
+        }
+        if let previous = dispatch.previousFuelRemaining.flatMap(Self.fuelGallons(from:)),
+           hasFuelSelection,
+           Self.relativeDifference(fuelGallons, previous) > 0.20 {
+            messages.append(fuelGallons > previous
+                ? "Fuel differs by more than 20%. Confirm refueling."
+                : "Fuel is more than 20% below the previous ending value; refueling cannot explain this.")
+        }
+        if let previous = dispatch.previousOilPercentage,
+           hasOilSelection,
+           Self.relativeDifference(oilPercent, Double(previous)) > 0.20 {
+            messages.append(oilPercent > Double(previous)
+                ? "Oil differs by more than 20%. Confirm oil servicing."
+                : "Oil is more than 20% below the previous ending value; servicing cannot explain this.")
+        }
+        return messages
+    }
+
+    private static func relativeDifference(_ lhs: Double, _ rhs: Double) -> Double {
+        abs(lhs - rhs) / max(abs(rhs), 0.1)
     }
 
     private func addCrew() {

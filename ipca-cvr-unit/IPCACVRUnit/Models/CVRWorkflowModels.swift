@@ -160,6 +160,13 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var status: CVRDispatchStatus
     var configuredCVRUnitID: String
     var configuredBeaconID: String
+    var previousFlightRecordID: String?
+    var previousEndingHobbs: Double?
+    var previousEndingTacho: Double?
+    var previousFuelRemaining: String?
+    var previousOilPercentage: Int?
+    var refueledSincePreviousFlight: Bool?
+    var oilServicedSincePreviousFlight: Bool?
 
     var missingItems: [String] {
         var items: [String] = []
@@ -172,7 +179,49 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
         if startingTacho == nil { items.append("STARTING TACHO REQUIRED") }
         if fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("FUEL QUANTITY REQUIRED") }
         if oilPercentage == nil { items.append("OIL PERCENTAGE REQUIRED") }
+        items.append(contentsOf: continuityDiscrepancies)
         return items
+    }
+
+    var continuityDiscrepancies: [String] {
+        var items: [String] = []
+        if let expected = previousEndingHobbs, let actual = startingHobbs, abs(actual - expected) > 0.1 {
+            items.append(String(format: "HOBBS DISCREPANCY: EXPECTED %.1f FROM PREVIOUS END", expected))
+        }
+        if let expected = previousEndingTacho, let actual = startingTacho, abs(actual - expected) > 0.1 {
+            items.append(String(format: "TACHO DISCREPANCY: EXPECTED %.1f FROM PREVIOUS END", expected))
+        }
+        if let expected = previousFuelRemaining.flatMap(Self.numericQuantity),
+           let actual = Self.numericQuantity(fuelOnboard),
+           Self.relativeDifference(actual, expected) > 0.20 {
+            if actual > expected {
+                if refueledSincePreviousFlight != true {
+                    items.append("FUEL DISCREPANCY >20%: CONFIRM AIRCRAFT WAS REFUELED")
+                }
+            } else {
+                items.append("FUEL DISCREPANCY >20%: REFUELING DOES NOT EXPLAIN LOWER QUANTITY")
+            }
+        }
+        if let expected = previousOilPercentage, let actual = oilPercentage,
+           Self.relativeDifference(Double(actual), Double(expected)) > 0.20 {
+            if actual > expected {
+                if oilServicedSincePreviousFlight != true {
+                    items.append("OIL DISCREPANCY >20%: CONFIRM OIL WAS SERVICED")
+                }
+            } else {
+                items.append("OIL DISCREPANCY >20%: SERVICING DOES NOT EXPLAIN LOWER QUANTITY")
+            }
+        }
+        return items
+    }
+
+    private static func numericQuantity(_ value: String) -> Double? {
+        Double(value.replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func relativeDifference(_ lhs: Double, _ rhs: Double) -> Double {
+        abs(lhs - rhs) / max(abs(rhs), 0.1)
     }
 }
 

@@ -289,6 +289,13 @@ final class UploadManager: ObservableObject {
         if let oilPercentage = dispatch.oilPercentage {
             dispatchPayload["oil_percentage"] = oilPercentage
         }
+        if let value = dispatch.previousFlightRecordID { dispatchPayload["previous_flight_record_id"] = value.lowercased() }
+        if let value = dispatch.previousEndingHobbs { dispatchPayload["previous_ending_hobbs"] = value }
+        if let value = dispatch.previousEndingTacho { dispatchPayload["previous_ending_tacho"] = value }
+        if let value = dispatch.previousFuelRemaining { dispatchPayload["previous_fuel_remaining"] = value }
+        if let value = dispatch.previousOilPercentage { dispatchPayload["previous_oil_percentage"] = value }
+        if let value = dispatch.refueledSincePreviousFlight { dispatchPayload["refueled_since_previous_flight"] = value }
+        if let value = dispatch.oilServicedSincePreviousFlight { dispatchPayload["oil_serviced_since_previous_flight"] = value }
         if let schedulerRecordID = dispatch.schedulerRecordID {
             dispatchPayload["scheduler_record_id"] = schedulerRecordID
         }

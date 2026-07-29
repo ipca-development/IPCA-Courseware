@@ -18,6 +18,9 @@ final class CvrWorkflowEvidenceIntakeService
         $normalized = $this->normalize($payload);
         $deviceId = (int)($device['id'] ?? 0);
         $this->assertDispatchOwnership($normalized['dispatch_uuid'], $normalized['flight_record_uuid'], $deviceId);
+        if ($normalized['component_type'] === 'flight_record_closure') {
+            $this->assertCompleteClosure($normalized);
+        }
         $canonical = AuditEventService::jsonEncode($this->canonicalize($normalized));
         $hash = hash('sha256', $canonical);
 
@@ -187,6 +190,43 @@ final class CvrWorkflowEvidenceIntakeService
         }
         if (strtolower((string)$dispatch['workflow_flight_record_uuid']) !== $flightUuid) {
             throw new RuntimeException('Evidence Flight Record does not match the Dispatch.');
+        }
+    }
+
+    /** @param array<string,mixed> $normalized */
+    private function assertCompleteClosure(array $normalized): void
+    {
+        $evidence = $normalized['evidence'];
+        foreach (array('ending_hobbs', 'ending_tacho') as $field) {
+            if (!array_key_exists($field, $evidence) || !is_numeric($evidence[$field])) {
+                throw new RuntimeException($field . ' is required for a verified Flight Closure.');
+            }
+        }
+        $fuel = trim((string)($evidence['fuel_remaining'] ?? ''));
+        if ($fuel === '' || !is_numeric($fuel) || (float)$fuel < 0) {
+            throw new RuntimeException('fuel_remaining must be a valid non-negative quantity.');
+        }
+        if (!array_key_exists('ending_oil_percentage', $evidence)
+            || !is_numeric($evidence['ending_oil_percentage'])
+            || (int)$evidence['ending_oil_percentage'] < 0
+            || (int)$evidence['ending_oil_percentage'] > 100) {
+            throw new RuntimeException('ending_oil_percentage is required and must be between 0 and 100.');
+        }
+        $dispatch = $this->pdo->prepare(
+            'SELECT starting_hobbs, starting_tacho
+             FROM ipca_cvr_dispatches
+             WHERE dispatch_uuid = ? AND workflow_flight_record_uuid = ? LIMIT 1'
+        );
+        $dispatch->execute(array($normalized['dispatch_uuid'], $normalized['flight_record_uuid']));
+        $starting = $dispatch->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($starting)) {
+            throw new RuntimeException('Dispatch meter baseline is unavailable.');
+        }
+        if ((float)$evidence['ending_hobbs'] < (float)$starting['starting_hobbs']) {
+            throw new RuntimeException('Ending Hobbs cannot be lower than Starting Hobbs.');
+        }
+        if ((float)$evidence['ending_tacho'] < (float)$starting['starting_tacho']) {
+            throw new RuntimeException('Ending Tacho cannot be lower than Starting Tacho.');
         }
     }
 

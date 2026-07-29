@@ -2,12 +2,17 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
-require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 
-cw_require_admin();
+$isPublicReplay = defined('IPCA_PUBLIC_REPLAY') && IPCA_PUBLIC_REPLAY === true;
+if (!$isPublicReplay) {
+    require_once __DIR__ . '/../../src/layout.php';
+    cw_require_admin();
+}
 
-$id = trim((string)($_GET['id'] ?? ''));
+$id = $isPublicReplay
+    ? (string)(defined('IPCA_PUBLIC_REPLAY_RECORDING_ID') ? IPCA_PUBLIC_REPLAY_RECORDING_ID : '')
+    : trim((string)($_GET['id'] ?? ''));
 $standaloneReplay = trim((string)($_GET['standalone'] ?? ''));
 $error = '';
 $recording = null;
@@ -171,7 +176,19 @@ try {
     $error = $e->getMessage();
 }
 
-cw_header('Cockpit Recorder Replay');
+if ($isPublicReplay) {
+    ?><!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex,nofollow,noarchive">
+      <title>Private Flight Replay</title>
+    </head>
+    <body style="margin:0;background:#020617"><?php
+} else {
+    cw_header('Cockpit Recorder Replay');
+}
 ?>
 <link href="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -2128,7 +2145,7 @@ cw_header('Cockpit Recorder Replay');
   <div id="replayFullscreenShell" class="replay-fullscreen-shell">
   <div class="replay-avionics-header" aria-label="Avionics data header">
     <div class="replay-avionics-brand">Avionics data</div>
-    <?php if (is_array($recording) && (int)($recording['aircraft_id'] ?? 0) > 0): ?>
+    <?php if (!$isPublicReplay && is_array($recording) && (int)($recording['aircraft_id'] ?? 0) > 0): ?>
       <a class="replay-avionics-brand" style="text-decoration:none" href="/admin/aircraft_settings.php?aircraft_id=<?= (int)$recording['aircraft_id'] ?>">Aircraft Settings</a>
     <?php endif; ?>
     <div id="radioStackGroup" class="replay-avionics-group" aria-label="Radio stack"></div>
@@ -2233,6 +2250,7 @@ cw_header('Cockpit Recorder Replay');
       </div>
     </div>
     <div id="systemWarningBox" class="system-warning-box" aria-label="System warnings" hidden></div>
+    <?php if (!$isPublicReplay): ?>
     <div id="settingsPanel" class="replay-modal replay-settings-panel" aria-label="Replay settings" hidden>
       <div class="replay-settings-tabs" role="tablist" aria-label="Replay settings tabs">
         <button class="replay-settings-tab-button is-active" type="button" id="settingsCameraTabButton" data-settings-tab="camera" role="tab" aria-selected="true">Camera</button>
@@ -2385,10 +2403,11 @@ cw_header('Cockpit Recorder Replay');
       </div>
       <div id="calibrationValues" class="replay-calibration-values">F +0.0m | R +0.0m | U +0.0m</div>
     </div>
+    <?php endif; ?>
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock" aria-label="Replay controls">
       <div class="replay-control-cluster">
-        <a class="replay-icon-button" href="/admin/cockpit_recorder.php" aria-label="Back to cockpit recorder">←</a>
+        <?php if (!$isPublicReplay): ?><a class="replay-icon-button" href="/admin/cockpit_recorder.php" aria-label="Back to cockpit recorder">←</a><?php endif; ?>
         <button class="replay-icon-button" type="button" id="fullscreenButton" aria-label="Toggle full screen">⛶</button>
         <button class="replay-button replay-skip-button" type="button" id="rewindButton" aria-label="Rewind 10 seconds">↶10</button>
         <button class="replay-button replay-play-button" type="button" id="playButton" aria-label="Play replay">▶</button>
@@ -2397,10 +2416,10 @@ cw_header('Cockpit Recorder Replay');
         <span id="timeLabel" class="replay-time">00:00:00</span>
         <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
       </div>
-      <div class="replay-settings-cluster">
+      <?php if (!$isPublicReplay): ?><div class="replay-settings-cluster">
         <input type="hidden" id="cameraMode" value="synthetic_vision">
         <button class="replay-icon-button replay-settings-button" type="button" id="settingsButton" aria-label="Open replay settings">⚙</button>
-      </div>
+      </div><?php else: ?><input type="hidden" id="cameraMode" value="synthetic_vision"><?php endif; ?>
     </div>
   </div>
   </div>
@@ -8379,4 +8398,8 @@ cw_header('Cockpit Recorder Replay');
 <?php endif; ?>
 
 <?php
-cw_footer();
+if ($isPublicReplay) {
+    ?></body></html><?php
+} else {
+    cw_footer();
+}

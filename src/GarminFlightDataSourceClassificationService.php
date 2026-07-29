@@ -33,6 +33,16 @@ final class GarminFlightDataSourceClassificationService
             $report['system_identifier'] = (string)($metadata['system_id'] ?? $metadata['system_identifier'] ?? '');
             $report['airframe_hours_start'] = is_numeric($metadata['airframe_hours'] ?? null) ? (float)$metadata['airframe_hours'] : null;
             $report['engine_hours_start'] = is_numeric($metadata['engine_hours'] ?? null) ? (float)$metadata['engine_hours'] : null;
+            if ($report['airframe_hours_start'] !== null) {
+                $report['capabilities']['has_airframe_hours'] = true;
+                $report['capabilities']['supports_hobbs_calculation'] = true;
+                $report['capabilities']['supports_operational_flight_record'] = true;
+            }
+            if ($report['engine_hours_start'] !== null) {
+                $report['capabilities']['has_engine_hours'] = true;
+                $report['capabilities']['supports_tacho_calculation'] = true;
+                $report['capabilities']['supports_operational_flight_record'] = true;
+            }
             $report['airframe_info_metadata'] = $metadata;
             $report['raw_header'] = (string)($parsed['raw_header'] ?? '');
             $report['flightstream_header'] = (string)($parsed['flightstream_header'] ?? ($metadata['flightstream_header'] ?? ''));

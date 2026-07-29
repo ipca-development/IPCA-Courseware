@@ -59,7 +59,12 @@ final class CVRWorkflowStore: ObservableObject {
             }
             return
         }
+        if state.activeDispatch != nil || state.activeFlightRecord != nil {
+            lastError = "The current Dispatch must be fully server verified and archived before another Dispatch can be created."
+            return
+        }
 
+        let carryover = latestVerifiedCarryover(for: registration)
         let dispatch = CVRDispatchRecord(
             id: UUID().uuidString,
             serverDispatchID: nil,
@@ -73,11 +78,11 @@ final class CVRWorkflowStore: ObservableObject {
             plannedDepartureAirport: selectedAircraft.homeAirport,
             plannedDestinationAirport: "",
             crew: [],
-            startingHobbs: nil,
-            startingTacho: nil,
-            fuelOnboard: "",
-            oilPercentage: nil,
-            dispatchSource: "iphone_offline_local",
+            startingHobbs: carryover?.endingHobbs,
+            startingTacho: carryover?.endingTacho,
+            fuelOnboard: carryover?.fuelRemaining ?? "",
+            oilPercentage: carryover?.oilPercentage,
+            dispatchSource: carryover == nil ? "iphone_offline_local" : "verified_previous_flight_carryover",
             schedulerRecordID: nil,
             creatorIdentity: "local_cvr_unit",
             createdAt: Date(),
@@ -86,7 +91,14 @@ final class CVRWorkflowStore: ObservableObject {
             consentStatus: "not_required_yet",
             status: .dispatchIncomplete,
             configuredCVRUnitID: cvrUnitID,
-            configuredBeaconID: beaconID
+            configuredBeaconID: beaconID,
+            previousFlightRecordID: carryover?.flightRecordID,
+            previousEndingHobbs: carryover?.endingHobbs,
+            previousEndingTacho: carryover?.endingTacho,
+            previousFuelRemaining: carryover?.fuelRemaining,
+            previousOilPercentage: carryover?.oilPercentage,
+            refueledSincePreviousFlight: nil,
+            oilServicedSincePreviousFlight: nil
         )
 
         mutate {
@@ -403,6 +415,7 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    @discardableResult
     func recordShutdownVerification(
         endingHobbs: Double?,
         endingTacho: Double?,
@@ -410,10 +423,29 @@ final class CVRWorkflowStore: ObservableObject {
         oilPercentage: Int?,
         maintenanceRemark: String,
         gpsSample: GPSSample?
-    ) {
-        guard var flightRecord = state.activeFlightRecord else { return }
+    ) -> Bool {
+        guard var flightRecord = state.activeFlightRecord,
+              let dispatch = state.activeDispatch else { return false }
         guard state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block" }) else {
-            return
+            lastError = "Engine shutdown must be recorded before post-flight values can be saved."
+            return false
+        }
+        guard let endingHobbs, endingHobbs >= (dispatch.startingHobbs ?? 0) else {
+            lastError = "Ending Hobbs must be present and cannot be lower than Starting Hobbs."
+            return false
+        }
+        guard let endingTacho, endingTacho >= (dispatch.startingTacho ?? 0) else {
+            lastError = "Ending Tacho must be present and cannot be lower than Starting Tacho."
+            return false
+        }
+        let normalizedFuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Double(normalizedFuel) != nil else {
+            lastError = "Fuel remaining must be a valid quantity."
+            return false
+        }
+        guard let oilPercentage, (0...100).contains(oilPercentage) else {
+            lastError = "Ending oil percentage is required."
+            return false
         }
 
         let event = makeFlightEvent(
@@ -424,10 +456,10 @@ final class CVRWorkflowStore: ObservableObject {
             gpsSample: gpsSample
         )
 
-        mutate {
+        let persisted = mutate {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
-            flightRecord.fuelRemaining = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
+            flightRecord.fuelRemaining = normalizedFuel
             flightRecord.endingOilPercentage = oilPercentage
             flightRecord.maintenanceRemark = maintenanceRemark.trimmingCharacters(in: .whitespacesAndNewlines)
             flightRecord.status = .awaitingGarmin
@@ -454,6 +486,7 @@ final class CVRWorkflowStore: ObservableObject {
             ))
             $0.selectedTab = .garmin
         }
+        return persisted
     }
 
     func importGarminCSV(from sourceURL: URL) {
@@ -622,6 +655,10 @@ final class CVRWorkflowStore: ObservableObject {
         guard let flightRecord = state.activeFlightRecord else { return }
         let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
         guard !components.isEmpty else { return }
+        guard components.allSatisfy({ $0.state == .serverVerified && !($0.serverReceiptID ?? "").isEmpty }) else {
+            lastError = "NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component has a server verification receipt."
+            return
+        }
         guard archiveActiveWorkflow() else { return }
 
         mutate {
@@ -674,10 +711,23 @@ final class CVRWorkflowStore: ObservableObject {
         return Array(Set(items)).sorted()
     }
 
-    private func mutate(_ update: (inout CVRWorkflowState) -> Void) {
-        update(&state)
-        state.updatedAt = Date()
-        save()
+    @discardableResult
+    private func mutate(_ update: (inout CVRWorkflowState) -> Void) -> Bool {
+        var candidate = state
+        update(&candidate)
+        candidate.updatedAt = Date()
+        do {
+            let url = try storeURL()
+            let data = try encoder.encode(candidate)
+            try data.write(to: url, options: [.atomic])
+            _ = try decoder.decode(CVRWorkflowState.self, from: Data(contentsOf: url))
+            state = candidate
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Workflow save failed; the change was not accepted: \(error.localizedDescription)"
+            return false
+        }
     }
 
     private func updateComponent(
@@ -745,6 +795,34 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Flight history archive failed. NEXT FLIGHT was blocked: \(error.localizedDescription)"
             return false
         }
+    }
+
+    private func latestVerifiedCarryover(for registration: String) -> (
+        flightRecordID: String,
+        endingHobbs: Double,
+        endingTacho: Double,
+        fuelRemaining: String,
+        oilPercentage: Int?
+    )? {
+        let normalizedRegistration = registration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return archives
+            .filter {
+                $0.status == .serverVerified
+                    && $0.dispatch.tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedRegistration
+                    && $0.flightRecord.endingHobbs != nil
+                    && $0.flightRecord.endingTacho != nil
+                    && !($0.flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            .sorted { $0.archivedAt > $1.archivedAt }
+            .compactMap { archive in
+                guard let endingHobbs = archive.flightRecord.endingHobbs,
+                      let endingTacho = archive.flightRecord.endingTacho,
+                      let fuelRemaining = archive.flightRecord.fuelRemaining else {
+                    return nil
+                }
+                return (archive.flightRecordID, endingHobbs, endingTacho, fuelRemaining, archive.flightRecord.endingOilPercentage)
+            }
+            .first
     }
 
     @discardableResult
@@ -1012,11 +1090,21 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     private static func materialSignature(_ dispatch: CVRDispatchRecord) -> String {
-        [
+        let crewSignature = dispatch.crew
+            .map { assignment in assignment.personName + ":" + assignment.role.rawValue }
+            .joined(separator: "|")
+        let values: [String] = [
             dispatch.tailNumber,
             String(dispatch.aircraftID ?? 0),
             dispatch.missionCode,
-            dispatch.crew.map { "\($0.personName):\($0.role.rawValue)" }.joined(separator: "|")
-        ].joined(separator: "#")
+            dispatch.startingHobbs.map { String(format: "%.4f", $0) } ?? "",
+            dispatch.startingTacho.map { String(format: "%.4f", $0) } ?? "",
+            dispatch.fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines),
+            dispatch.oilPercentage.map(String.init) ?? "",
+            dispatch.refueledSincePreviousFlight.map(String.init) ?? "",
+            dispatch.oilServicedSincePreviousFlight.map(String.init) ?? "",
+            crewSignature
+        ]
+        return values.joined(separator: "#")
     }
 }

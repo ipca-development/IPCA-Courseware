@@ -6,7 +6,7 @@ require_once __DIR__ . '/openai.php';
 
 final class FlightDebriefService
 {
-    private const PROMPT_VERSION = '1-4-9-v3';
+    private const PROMPT_VERSION = '1-4-9-v4-supportive-instructor';
     private const LOGIC_VERSION = 'grading-v1';
     private const ALLOWED_EVIDENCE = array('transcript', 'event_marker', 'garmin', 'adsb', 'audio');
 
@@ -270,14 +270,19 @@ final class FlightDebriefService
                     v.hobbs_start_hours, v.hobbs_end_hours, v.tacho_start_hours, v.tacho_end_hours,
                     v.total_night_duration_ms, v.cross_country_easa_qualified,
                     v.cross_country_faa_qualified, v.landing_event_count, v.summary_json,
-                    COALESCE(s.engine_start_utc, gs.engine_start_utc,
+                    COALESCE(
                       (SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
                        WHERE fe.workflow_flight_record_uuid = b.workflow_flight_record_uuid
-                         AND fe.event_type = \'engine_start_off_block\')) AS engine_start_utc,
-                    COALESCE(s.engine_stop_utc, gs.engine_stop_utc,
+                         AND fe.event_type = \'engine_start_off_block\'),
+                      s.engine_start_utc, gs.engine_start_utc) AS engine_start_utc,
+                    (SELECT MAX(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                     WHERE fe.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+                       AND fe.event_type = \'engine_shutdown_on_block\') AS app_engine_stop_utc,
+                    COALESCE(
                       (SELECT MAX(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
                        WHERE fe.workflow_flight_record_uuid = b.workflow_flight_record_uuid
-                         AND fe.event_type = \'engine_shutdown_on_block\')) AS engine_stop_utc,
+                         AND fe.event_type = \'engine_shutdown_on_block\'),
+                      s.engine_stop_utc, gs.engine_stop_utc) AS engine_stop_utc,
                     COALESCE(s.avionics_on_utc, gs.avionics_on_utc, g.first_valid_sample_utc) AS avionics_on_utc,
                     COALESCE(s.avionics_off_utc, gs.avionics_off_utc, g.last_valid_sample_utc) AS avionics_off_utc,
                     g.first_valid_sample_utc AS garmin_start_utc,
@@ -306,6 +311,22 @@ final class FlightDebriefService
         );
         $context->execute(array((int)$debrief['bundle_id']));
         $debrief['context'] = $context->fetch(PDO::FETCH_ASSOC) ?: array();
+        $debrief['context']['block_time_discrepancies'] = array();
+        $offBlock = strtotime((string)($debrief['context']['engine_start_utc'] ?? ''));
+        $hobbsDurationMs = $debrief['context']['exact_hobbs_duration_ms'] ?? null;
+        if ($offBlock !== false && is_numeric($hobbsDurationMs) && (int)$hobbsDurationMs >= 0) {
+            $computedOnBlock = $offBlock + ((int)$hobbsDurationMs / 1000);
+            $observedEngineStop = strtotime((string)($debrief['context']['app_engine_stop_utc'] ?? ''));
+            $debrief['context']['engine_stop_utc'] = gmdate('Y-m-d H:i:s', (int)round($computedOnBlock));
+            $debrief['context']['on_block_derivation'] = 'off_block_plus_crew_hobbs_delta';
+            if ($observedEngineStop !== false && abs($observedEngineStop - $computedOnBlock) > 60) {
+                $debrief['context']['block_time_discrepancies'][] = sprintf(
+                    'ON Block discrepancy: App Engine Stop was %s UTC, while OFF Block plus Hobbs END minus START gives %s UTC.',
+                    gmdate('H:i:s', $observedEngineStop),
+                    gmdate('H:i:s', (int)round($computedOnBlock))
+                );
+            }
+        }
         $flightRecordVersionId = (int)($debrief['context']['operational_flight_record_version_id'] ?? 0);
         $debrief['context']['legs'] = array();
         $debrief['context']['logbook_proposal'] = array();
@@ -576,7 +597,13 @@ final class FlightDebriefService
             'Exercise markers define chronological segment boundaries. Training Remark markers prioritize the transcript/audio immediately following the marker. Safety markers create separate safety windows.',
             'Every factual claim and suggested grade must cite transcript chunk/time, marker, Garmin timeline, ADS-B context, or audio offset.',
             'Garmin supports performance; transcript supports instruction, prompting, checklists and decisions. ADS-B does not prove visual acquisition.',
-            'Write the chronological review as detailed, copy-ready instructor prose. Use meaningful lettered section titles, numbered subsections when useful, and plain-text subheadings such as Key learning points, Root cause, Main reminders, Main takeaway, and Overall assessment. Keep citations outside the narrative.',
+            'Write the chronological review as detailed, copy-ready instructor prose. Use meaningful lettered section titles, numbered subsections when useful, and natural plain-text subheadings such as Key learning points, Main reminders, Main takeaway, and Next time. Keep citations outside the narrative.',
+            'DEFAULT STUDENT VOICE: Write as an experienced, professional, supportive flight instructor speaking directly to the student after the lesson. The student should clearly understand what went well, what to improve, why it matters, and feel motivated to fly again.',
+            'Lead with deserved strengths before improvements. Explicitly acknowledge improvement during the lesson with natural phrases such as “You’re making good progress”, “This became noticeably better during the lesson”, “With a little more practice”, “Once this becomes more consistent”, “The foundation is clearly there”, or “Keep building on”, without overpraising.',
+            'Present weaknesses honestly as coaching opportunities. Explain what happened, why the correction matters, and finish each concern with a constructive next action. Focus on confidence, judgment, understanding, and development rather than judging isolated events.',
+            'Student-facing prose must not sound like an audit, compliance report, checkride report, FAA evaluation, or examiner narrative. Avoid phrases including “the evidence suggests”, “supports coached execution”, “required prompting”, “root cause”, “overall assessment”, and “performance concern”. Evidence and confidence terminology belongs only in evaluation rationale and evidence_refs, never in general, chronological_review narratives, mission_standards_assessment, or summary_next_steps.',
+            'Keep the tone conversational, natural, coherent, and human, as if instructor and student are sitting together in the briefing room. Vary section structure so the flight reads as one connected lesson rather than repeated independent reports.',
+            'Reduce repetitive wording by approximately 20–30 percent while preserving every important learning point.',
             'Be specific and constructive. Do not fabricate events, measurements, dialogue, traffic awareness, or task completion.',
         ));
     }

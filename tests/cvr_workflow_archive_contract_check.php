@@ -6,6 +6,11 @@ $store = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkf
 $models = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Models/CVRWorkflowModels.swift') ?: '';
 $coordinator = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRUnitCoordinator.swift') ?: '';
 $upload = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
+$views = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
+$intake = file_get_contents($root . '/src/CvrWorkflowEvidenceIntakeService.php') ?: '';
+$dispatchIntake = file_get_contents($root . '/src/CvrDispatchIntakeService.php') ?: '';
+$derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
+$classification = file_get_contents($root . '/src/GarminFlightDataSourceClassificationService.php') ?: '';
 
 $checks = array(
     'archive model retains all evidence categories' =>
@@ -17,9 +22,46 @@ $checks = array(
         strpos($store, 'guard archiveActiveWorkflow() else { return }')
         < strpos($store, '$0.activeDispatch = nil')
         && str_contains($store, 'verification.map(\\.id) == records.map(\\.id)'),
-    'next flight supports retained pending uploads' =>
+    'archives retain interrupted uploads for recovery' =>
         str_contains($store, 'archives.flatMap(\\.uploadComponents)')
         && str_contains($models, 'case uploadPending'),
+    'next flight requires every server verification receipt' =>
+        str_contains($store, 'components.allSatisfy({ $0.state == .serverVerified')
+        && str_contains($store, 'NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component'),
+    'verified aircraft carryover prefills next dispatch meters and fuel' =>
+        str_contains($store, 'latestVerifiedCarryover(for: registration)')
+        && str_contains($store, 'startingHobbs: carryover?.endingHobbs')
+        && str_contains($store, 'startingTacho: carryover?.endingTacho')
+        && str_contains($store, 'fuelOnboard: carryover?.fuelRemaining')
+        && str_contains($views, 'VERIFIED PREVIOUS FLIGHT VALUES'),
+    'shutdown save persists locally before immediate closure upload' =>
+        str_contains($store, 'let persisted = mutate')
+        && str_contains($store, 'return persisted')
+        && str_contains($views, 'if save()')
+        && str_contains($views, 'uploadManager.uploadQueuedWorkflowComponents'),
+    'server rejects incomplete or regressing closure values' =>
+        str_contains($intake, 'assertCompleteClosure')
+        && str_contains($intake, 'Ending Hobbs cannot be lower than Starting Hobbs.')
+        && str_contains($intake, 'fuel_remaining must be a valid non-negative quantity.')
+        && str_contains($intake, 'ending_oil_percentage is required'),
+    'Garmin metadata supplies authoritative counter starts' =>
+        str_contains($classification, "metadata['airframe_hours']")
+        && str_contains($classification, "metadata['engine_hours']")
+        && str_contains($derivation, "'authority' => 'garmin_start_crew_end'")
+        && str_contains($derivation, 'Garmin airframe_hours')
+        && str_contains($derivation, 'Garmin engine_hours'),
+    'crew endings override derived durations with discrepancy reporting' =>
+        str_contains($derivation, 'crew_hobbs_duration_hours')
+        && str_contains($derivation, 'crew_tacho_duration_hours')
+        && str_contains($derivation, 'crew counter remains authoritative')
+        && str_contains($derivation, 'UPDATE ipca_operational_flight_record_versions'),
+    'fuel and oil continuity require service declarations beyond twenty percent' =>
+        str_contains($models, 'refueledSincePreviousFlight')
+        && str_contains($models, 'oilServicedSincePreviousFlight')
+        && str_contains($views, 'Aircraft was refueled before this flight')
+        && str_contains($views, 'Oil was serviced before this flight')
+        && str_contains($dispatchIntake, 'assertPreviousFlightContinuity')
+        && str_contains($dispatchIntake, '> 0.20'),
     'audio session links and backfills event offsets' =>
         str_contains($coordinator, 'workflow?.linkRecordingSession')
         && str_contains($store, 'timestampUTC.timeIntervalSince(startedAt)'),

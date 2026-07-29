@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../src/CvrDeviceEnrollmentService.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
 require_once __DIR__ . '/../../src/FlightDebriefService.php';
+require_once __DIR__ . '/../../src/ReplayShareService.php';
 
 cw_require_admin();
 
@@ -54,6 +55,8 @@ $audio = $intake->audioRows();
 $garmin = $intake->garminRows();
 $reconstructionService = new ManualReconstructionBundleService($pdo);
 $debriefService = new FlightDebriefService($pdo);
+$replayShareService = new ReplayShareService($pdo);
+$createdReplayShare = null;
 $reconstructionError = trim((string)($_GET['reconstruction_error'] ?? ''));
 $reconstructionNotice = '';
 if ((string)($_GET['debrief_generation'] ?? '') === 'started') {
@@ -135,6 +138,21 @@ try {
                 $actorUserId
             );
             $reconstructionNotice = 'Approved debrief released to the selected recipient.';
+        } elseif ($action === 'create_replay_share') {
+            if ($actorUserId <= 0) {
+                throw new RuntimeException('Instructor identity is required.');
+            }
+            $createdReplayShare = $replayShareService->create(
+                (int)($_POST['debrief_id'] ?? 0),
+                $actorUserId
+            );
+            $reconstructionNotice = 'A new 12-hour replay link was created. Any previous link is now revoked.';
+        } elseif ($action === 'revoke_replay_share') {
+            if ($actorUserId <= 0) {
+                throw new RuntimeException('Instructor identity is required.');
+            }
+            $replayShareService->revoke((int)($_POST['debrief_id'] ?? 0), $actorUserId);
+            $reconstructionNotice = 'Replay access revoked immediately.';
         }
     }
 } catch (Throwable $e) {
@@ -153,6 +171,20 @@ if ((int)($_GET['debrief_id'] ?? 0) > 0) {
 function cvr_intake_h(mixed $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function cvr_replay_share_base_url(): string
+{
+    $configured = trim((string)(getenv('CW_PUBLIC_BASE_URL') ?: getenv('PUBLIC_BASE_URL') ?: getenv('APP_URL') ?: ''));
+    if ($configured !== '') {
+        return rtrim($configured, '/');
+    }
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '' || !preg_match('/^[A-Za-z0-9.-]+(?::\d{1,5})?$/', $host)) {
+        return '';
+    }
+    $https = !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off';
+    return ($https ? 'https' : 'http') . '://' . $host;
 }
 
 function cvr_intake_timestamp(mixed $value): string
@@ -434,7 +466,17 @@ cw_header('Master Logbook');
 .debrief-logbook td{padding:7px 5px;border:1px solid #dbe3ee;color:#334155}
 .debrief-logbook-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#dbe3ee;border-bottom:1px solid #dbe3ee}
 .debrief-logbook-summary>div{padding:10px;background:#fff}
+.replay-share-card{margin-top:16px;padding:18px;border:1px solid #bfdbfe;border-radius:16px;background:linear-gradient(135deg,#eff6ff,#fff);box-shadow:0 8px 24px rgba(30,64,175,.07)}
+.replay-share-head{display:flex;align-items:start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.replay-share-head h4{margin:0;color:#173a66;font-size:15px}
+.replay-share-grid{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:10px;margin-top:14px}
+.replay-share-field{display:grid;gap:5px}
+.replay-share-field span{color:#64748b;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.07em}
+.replay-share-value{width:100%;border:1px solid #bfcee0;border-radius:10px;padding:10px;background:#fff;color:#172033;font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace}
+.replay-share-passcode{font-size:17px;font-weight:900;letter-spacing:.13em;text-align:center}
+.replay-share-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 @media(max-width:720px){.intake-card{padding:12px}.intake-title{font-size:22px}.reconstruction-grid{grid-template-columns:1fr}}
+@media(max-width:720px){.replay-share-grid{grid-template-columns:1fr}}
 @media(max-width:860px){.debrief-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.debrief-meta-item.wide{grid-column:span 1}.debrief-overall{grid-template-columns:1fr}.debrief-sheet{padding:10px;border-radius:16px}.debrief-grade-table{min-width:640px}.debrief-section{overflow:auto}}
 @media print{
   @page{size:A4 portrait;margin:11mm}
@@ -792,6 +834,16 @@ cw_header('Master Logbook');
         $legs = is_array($context['legs'] ?? null) ? $context['legs'] : array();
         $proposal = is_array($context['logbook_proposal'] ?? null) ? $context['logbook_proposal'] : array();
         $proposalValues = is_array($proposal['proposed_values'] ?? null) ? $proposal['proposed_values'] : array();
+        $flightRecordSummary = json_decode((string)($context['summary_json'] ?? ''), true);
+        $crewReconciliation = is_array($flightRecordSummary['preview']['calculations']['crew_reconciliation'] ?? null)
+            ? $flightRecordSummary['preview']['calculations']['crew_reconciliation']
+            : array();
+        $meterDiscrepancies = is_array($crewReconciliation['discrepancies'] ?? null)
+            ? $crewReconciliation['discrepancies']
+            : array();
+        if (is_array($context['block_time_discrepancies'] ?? null)) {
+            $meterDiscrepancies = array_values(array_merge($meterDiscrepancies, $context['block_time_discrepancies']));
+        }
         $durationStart = strtotime((string)($context['engine_start_utc'] ?? $context['garmin_start_utc'] ?? ''));
         $durationEnd = strtotime((string)($context['engine_stop_utc'] ?? $context['garmin_end_utc'] ?? ''));
         $fallbackDurationMs = $durationStart !== false && $durationEnd !== false && $durationEnd >= $durationStart
@@ -808,6 +860,24 @@ cw_header('Master Logbook');
         $copySections[] = "Overall Assessment\n" . trim((string)$selectedDebrief['mission_assessment_text']);
         $copySections[] = "Main Takeaways\n" . trim((string)$selectedDebrief['summary_next_steps_text']);
         $chronologicalCopyText = trim(implode("\n\n", array_filter($copySections)));
+        $replayShareReady = $replayShareService->isReady();
+        $replayShare = $replayShareReady
+            ? $replayShareService->currentForDebrief((int)$selectedDebrief['id'])
+            : array();
+        $newShareForDebrief = is_array($createdReplayShare)
+            && (int)($createdReplayShare['debrief_id'] ?? 0) === (int)$selectedDebrief['id']
+            ? $createdReplayShare
+            : null;
+        $replayShareUrl = $newShareForDebrief !== null
+            ? cvr_replay_share_base_url() . '/replay-debrief.php?t=' . rawurlencode((string)$newShareForDebrief['token'])
+            : '';
+        $replayShareActive = $replayShare !== array()
+            && (string)($replayShare['status'] ?? '') === 'active'
+            && empty($replayShare['revoked_at'])
+            && strtotime((string)($replayShare['expires_at'] ?? '')) > time();
+        $replayShareDisplayStatus = $replayShareActive
+            ? 'active'
+            : ((string)($replayShare['status'] ?? '') === 'revoked' ? 'revoked' : 'expired');
       ?>
       <div class="debrief-toolbar no-print">
         <div>
@@ -956,6 +1026,16 @@ cw_header('Master Logbook');
             <div><span class="debrief-label">Tacho Start</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_start_hours'] ?? $context['starting_tacho'] ?? '—') ?></span></div>
             <div><span class="debrief-label">Tacho End</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_end_hours'] ?? $context['ending_tacho'] ?? '—') ?></span></div>
           </div>
+          <?php if ($meterDiscrepancies !== array()): ?>
+            <div class="intake-notice no-print" style="margin:12px">
+              <strong>Meter / fuel reconciliation requires attention</strong>
+              <ul style="margin:7px 0 0;padding-left:18px">
+                <?php foreach ($meterDiscrepancies as $message): ?><li><?= cvr_intake_h($message) ?></li><?php endforeach; ?>
+              </ul>
+            </div>
+          <?php elseif (!empty($crewReconciliation['available'])): ?>
+            <div class="debrief-narrative no-print"><span class="intake-muted">Garmin airframe_hours and engine_hours supplied the authoritative starting Hobbs/Tacho. Crew-provided ending counters remained authoritative and were checked against Garmin-derived durations. Fuel was checked against Garmin quantity samples.</span></div>
+          <?php endif; ?>
           <div class="debrief-logbook-wrap">
             <table class="debrief-logbook">
               <thead><tr><th>Sect</th><th>DEP</th><th>TIME</th><th>DEST</th><th>TIME</th><th>ACFT</th><th>REG</th><th>SE</th><th>ME</th><th>TOTAL</th><th>LD-D</th><th>LD-N</th><th>NIGHT</th><th>IFR</th><th>FNPT</th><th>PIC</th><th>DUAL</th><th>X-C</th></tr></thead>
@@ -971,7 +1051,7 @@ cw_header('Master Logbook');
                     'cross_country_easa_qualified' => $context['cross_country_easa_qualified'] ?? 0,
                     'landing_event_count' => $recordLandingCount,
                 )); ?>
-                <?php foreach ($logbookLegs as $leg): ?>
+                <?php foreach ($logbookLegs as $legIndex => $leg): ?>
                   <?php
                     $durationMs = $leg['allocated_hobbs_duration_ms'] ?? $context['exact_hobbs_duration_ms'] ?? null;
                     $durationHours = cvr_debrief_hours($durationMs);
@@ -979,17 +1059,23 @@ cw_header('Master Logbook');
                     $landingCount = (int)($leg['landing_event_count'] ?? 0);
                     $singleLeg = count($logbookLegs) === 1;
                     $dayLandings = $singleLeg
-                        ? cvr_debrief_proposed_value($proposalValues, array('day_landings'), is_numeric($nightMs) && (int)$nightMs === 0 ? $landingCount : '—')
-                        : (is_numeric($nightMs) && (int)$nightMs === 0 ? $landingCount : '—');
+                        ? cvr_debrief_proposed_value($proposalValues, array('day_landings'), (!is_numeric($nightMs) || (int)$nightMs === 0) && $landingCount > 0 ? $landingCount : '—')
+                        : ((!is_numeric($nightMs) || (int)$nightMs === 0) && $landingCount > 0 ? $landingCount : '—');
                     $nightLandings = $singleLeg ? cvr_debrief_proposed_value($proposalValues, array('night_landings'), '—') : '—';
                     $crossCountry = !empty($leg['cross_country_easa_qualified']) || !empty($leg['cross_country_faa_qualified']) ? $durationHours : '—';
+                    $departureTime = $legIndex === array_key_first($logbookLegs)
+                        ? ($context['engine_start_utc'] ?? $leg['departure_utc'] ?? null)
+                        : ($leg['departure_utc'] ?? null);
+                    $arrivalTime = $legIndex === array_key_last($logbookLegs)
+                        ? ($context['engine_stop_utc'] ?? $leg['arrival_utc'] ?? null)
+                        : ($leg['arrival_utc'] ?? null);
                   ?>
                   <tr>
                     <td><?= (int)($leg['leg_index'] ?? 1) ?></td>
                     <td><?= cvr_intake_h($leg['departure_airport_code'] ?: '—') ?></td>
-                    <td><?= cvr_intake_h(cvr_debrief_time($leg['departure_utc'] ?? null)) ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($departureTime)) ?></td>
                     <td><?= cvr_intake_h($leg['arrival_airport_code'] ?: '—') ?></td>
-                    <td><?= cvr_intake_h(cvr_debrief_time($leg['arrival_utc'] ?? null)) ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($arrivalTime)) ?></td>
                     <td><?= cvr_intake_h($context['aircraft_type'] ?: '—') ?></td>
                     <td><?= cvr_intake_h($context['aircraft_registration'] ?: '—') ?></td>
                     <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('single_engine_time'), '—') : '—') ?></td>
@@ -1071,6 +1157,61 @@ cw_header('Master Logbook');
         </footer>
       </article>
 
+      <section class="replay-share-card no-print" aria-labelledby="replay-share-title">
+        <div class="replay-share-head">
+          <div>
+            <h4 id="replay-share-title">Secure Replay Debrief Link</h4>
+            <div class="intake-muted">Shares only this flight’s Cockpit Recorder replay for 12 hours. The viewer must enter the separate passcode and accept the privacy notice.</div>
+          </div>
+          <?php if ($replayShare !== array()): ?>
+            <?= cvr_intake_badge($replayShareDisplayStatus) ?>
+          <?php endif; ?>
+        </div>
+
+        <?php if (!$replayShareReady): ?>
+          <div class="intake-notice" style="margin-top:12px">Install <span class="intake-mono">scripts/sql/2026_07_28_replay_debrief_shares.sql</span> before enabling replay sharing.</div>
+        <?php else: ?>
+          <?php if ($newShareForDebrief !== null): ?>
+            <div class="intake-notice" style="margin-top:12px">Copy both values now. For security, the link token and passcode are not shown again after this page is refreshed.</div>
+            <div class="replay-share-grid">
+              <label class="replay-share-field">
+                <span>Private replay link</span>
+                <input id="replay-share-url-<?= (int)$selectedDebrief['id'] ?>" class="replay-share-value" type="text" readonly value="<?= cvr_intake_h($replayShareUrl) ?>">
+              </label>
+              <label class="replay-share-field">
+                <span>Separate passcode</span>
+                <input id="replay-share-passcode-<?= (int)$selectedDebrief['id'] ?>" class="replay-share-value replay-share-passcode" type="text" readonly value="<?= cvr_intake_h($newShareForDebrief['passcode']) ?>">
+              </label>
+            </div>
+            <div class="replay-share-actions">
+              <button class="intake-refresh" type="button" data-copy-input="replay-share-url-<?= (int)$selectedDebrief['id'] ?>">Copy Link</button>
+              <button class="intake-refresh" type="button" data-copy-input="replay-share-passcode-<?= (int)$selectedDebrief['id'] ?>">Copy Passcode</button>
+            </div>
+          <?php elseif ($replayShareActive): ?>
+            <div class="intake-muted" style="margin-top:12px">Active until <?= cvr_intake_h(cvr_intake_timestamp($replayShare['expires_at'])) ?> · <?= (int)($replayShare['view_count'] ?? 0) ?> media requests. Regenerate to issue new credentials and immediately revoke the current link.</div>
+          <?php elseif ($replayShare !== array()): ?>
+            <div class="intake-muted" style="margin-top:12px">The most recent replay link is expired or revoked. Generate a new link to share this flight again.</div>
+          <?php endif; ?>
+
+          <div class="replay-share-actions">
+            <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" onsubmit="return confirm('<?= $replayShareActive ? 'Regenerate credentials and immediately revoke the current replay link?' : 'Generate a private replay link valid for 12 hours?' ?>');">
+              <input type="hidden" name="action" value="create_replay_share">
+              <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+              <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+              <button class="intake-button" type="submit"><?= $replayShareActive ? 'Regenerate Link & Passcode' : 'Generate Link & Passcode' ?></button>
+            </form>
+            <?php if ($replayShareActive): ?>
+              <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" onsubmit="return confirm('Revoke this replay link immediately?');">
+                <input type="hidden" name="action" value="revoke_replay_share">
+                <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
+                <button class="intake-refresh" type="submit" style="color:#991b1b;border-color:#fecaca">Revoke Access</button>
+              </form>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </section>
+
       <div class="reconstruction-actions no-print">
         <?php if (!$isApprovedDebrief && (string)$selectedDebrief['status'] !== 'rejected'): ?>
           <details class="debrief-adjustments" style="flex:1">
@@ -1134,6 +1275,22 @@ cw_header('Master Logbook');
         button.textContent = 'Copied';
       }
       window.setTimeout(() => { button.textContent = 'Copy Full Review'; }, 1800);
+    });
+  });
+  page.querySelectorAll('[data-copy-input]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const field = document.getElementById(button.getAttribute('data-copy-input'));
+      if (!field) return;
+      const originalText = button.textContent;
+      try {
+        await navigator.clipboard.writeText(field.value);
+      } catch (error) {
+        field.focus();
+        field.select();
+        document.execCommand('copy');
+      }
+      button.textContent = 'Copied';
+      window.setTimeout(() => { button.textContent = originalText; }, 1800);
     });
   });
 })();

@@ -221,6 +221,19 @@ final class CvrDispatchIntakeService
             }
         }
 
+        $refueled = filter_var($dispatch['refueled_since_previous_flight'] ?? false, FILTER_VALIDATE_BOOL);
+        $oilServiced = filter_var($dispatch['oil_serviced_since_previous_flight'] ?? false, FILTER_VALIDATE_BOOL);
+        $this->assertPreviousFlightContinuity(
+            $dispatchUuid,
+            $tailNumber,
+            $startingHobbs,
+            $startingTacho,
+            $fuelOnboard,
+            $oilPercentage,
+            $refueled,
+            $oilServiced
+        );
+
         return array(
             'dispatch_uuid' => $dispatchUuid,
             'flight_record_uuid' => $flightRecordUuid,
@@ -247,8 +260,84 @@ final class CvrDispatchIntakeService
             'status' => substr(trim((string)($dispatch['status'] ?? '')), 0, 64),
             'cvr_unit_identifier' => substr(trim((string)($dispatch['configured_cvr_unit_id'] ?? '')), 0, 32),
             'beacon_identifier' => substr(trim((string)($dispatch['configured_beacon_id'] ?? '')), 0, 64),
+            'previous_flight_record_id' => substr(strtolower(trim((string)($dispatch['previous_flight_record_id'] ?? ''))), 0, 36),
+            'refueled_since_previous_flight' => $refueled,
+            'oil_serviced_since_previous_flight' => $oilServiced,
             'consents' => $normalizedConsents,
         );
+    }
+
+    private function assertPreviousFlightContinuity(
+        string $dispatchUuid,
+        string $tailNumber,
+        float $startingHobbs,
+        float $startingTacho,
+        string $fuelOnboard,
+        int $oilPercentage,
+        bool $refueled,
+        bool $oilServiced
+    ): void {
+        $statement = $this->pdo->prepare(
+            'SELECT d.workflow_flight_record_uuid, c.ending_hobbs, c.ending_tacho,
+                    c.fuel_remaining, c.oil_percentage
+             FROM ipca_cvr_dispatches d
+             INNER JOIN ipca_cvr_flight_closures c ON c.id = (
+               SELECT fc.id FROM ipca_cvr_flight_closures fc
+               WHERE fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+               ORDER BY fc.received_at DESC, fc.id DESC LIMIT 1
+             )
+             WHERE d.aircraft_registration = ? AND d.dispatch_uuid <> ?
+             ORDER BY c.received_at DESC, c.id DESC LIMIT 1'
+        );
+        $statement->execute(array($tailNumber, $dispatchUuid));
+        $previous = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($previous)) {
+            return;
+        }
+        if (abs($startingHobbs - (float)$previous['ending_hobbs']) > 0.1) {
+            throw new RuntimeException(sprintf(
+                'Hobbs discrepancy: previous crew-provided ending value was %.1f; verify the new starting value.',
+                (float)$previous['ending_hobbs']
+            ));
+        }
+        if (abs($startingTacho - (float)$previous['ending_tacho']) > 0.1) {
+            throw new RuntimeException(sprintf(
+                'Tacho discrepancy: previous crew-provided ending value was %.1f; verify the new starting value.',
+                (float)$previous['ending_tacho']
+            ));
+        }
+        $fuel = $this->numericQuantity($fuelOnboard);
+        $previousFuel = $this->numericQuantity((string)$previous['fuel_remaining']);
+        if ($fuel !== null && $previousFuel !== null && $this->relativeDifference($fuel, $previousFuel) > 0.20) {
+            if ($fuel <= $previousFuel || !$refueled) {
+                throw new RuntimeException(
+                    $fuel > $previousFuel
+                        ? 'Fuel differs by more than 20%; confirm that the aircraft was refueled.'
+                        : 'Fuel is more than 20% below the previous ending quantity; refueling does not explain the discrepancy.'
+                );
+            }
+        }
+        $previousOil = (int)$previous['oil_percentage'];
+        if ($this->relativeDifference((float)$oilPercentage, (float)$previousOil) > 0.20) {
+            if ($oilPercentage <= $previousOil || !$oilServiced) {
+                throw new RuntimeException(
+                    $oilPercentage > $previousOil
+                        ? 'Oil differs by more than 20%; confirm that oil was serviced.'
+                        : 'Oil is more than 20% below the previous ending quantity; servicing does not explain the discrepancy.'
+                );
+            }
+        }
+    }
+
+    private function numericQuantity(string $value): ?float
+    {
+        $normalized = trim(str_ireplace('USG', '', $value));
+        return $normalized !== '' && is_numeric($normalized) ? (float)$normalized : null;
+    }
+
+    private function relativeDifference(float $value, float $baseline): float
+    {
+        return abs($value - $baseline) / max(abs($baseline), 0.1);
     }
 
     /**

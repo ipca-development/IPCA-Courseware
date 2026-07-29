@@ -98,6 +98,12 @@ $checks = array(
         && str_contains($debriefPage, '<th>LD-D</th>')
         && str_contains($debriefSource, 'ipca_operational_flight_leg_versions')
         && str_contains($debriefSource, 'ipca_flight_record_logbook_proposals'),
+    'logbook block times use App OFF Block and crew Hobbs duration' =>
+        str_contains($debriefSource, "event_type = \\'engine_start_off_block\\'")
+        && str_contains($debriefSource, 'off_block_plus_crew_hobbs_delta')
+        && str_contains($debriefSource, 'ON Block discrepancy: App Engine Stop')
+        && str_contains($debriefPage, "\$context['engine_start_utc']")
+        && str_contains($debriefPage, "\$context['engine_stop_utc']"),
     'canonical derivation returns linkable Flight Record version' =>
         str_contains($derivationService, "'flight_record_version_id' => (int)\$version['id']")
         && str_contains($bundleService, "\$derived['flight_record_version_id']")

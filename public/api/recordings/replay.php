@@ -5,9 +5,10 @@ declare(strict_types=1);
 
 $replayApiFatalReserve = str_repeat('x', 262144);
 $replayApiJsonStarted = false;
+$replayApiPublic = false;
 ob_start();
 
-register_shutdown_function(static function () use (&$replayApiFatalReserve, &$replayApiJsonStarted): void {
+register_shutdown_function(static function () use (&$replayApiFatalReserve, &$replayApiJsonStarted, &$replayApiPublic): void {
     $error = error_get_last();
     $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR);
     if (!$error || !in_array((int)($error['type'] ?? 0), $fatalTypes, true) || $replayApiJsonStarted) {
@@ -26,7 +27,9 @@ register_shutdown_function(static function () use (&$replayApiFatalReserve, &$re
 
     echo json_encode(array(
         'ok' => false,
-        'error' => 'Replay API fatal error: ' . (string)($error['message'] ?? 'unknown fatal error'),
+        'error' => $replayApiPublic
+            ? 'Replay data is temporarily unavailable.'
+            : 'Replay API fatal error: ' . (string)($error['message'] ?? 'unknown fatal error'),
         'fatal_type' => (int)($error['type'] ?? 0),
         'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
     ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
@@ -34,9 +37,7 @@ register_shutdown_function(static function () use (&$replayApiFatalReserve, &$re
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/CockpitReconstructionService.php';
-
-// Phase 1 replay is admin-first because GPS flight tracks can be sensitive.
-cw_require_admin();
+require_once __DIR__ . '/../../../src/ReplayShareService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -67,6 +68,12 @@ if ($id === '') {
 }
 
 try {
+    $currentUser = cw_current_user($pdo);
+    $isAdmin = is_array($currentUser) && (string)($currentUser['role'] ?? '') === 'admin';
+    if (!$isAdmin) {
+        $replayApiPublic = true;
+        (new ReplayShareService($pdo))->mediaGrant($id);
+    }
     $service = new CockpitReconstructionService($pdo);
     if ($version === '2') {
         if ($manifestOnly) {
@@ -100,7 +107,7 @@ try {
 } catch (Throwable $e) {
     replay_api_json_response(array(
         'ok' => false,
-        'error' => $e->getMessage(),
+        'error' => $replayApiPublic ? 'Replay access is unavailable.' : $e->getMessage(),
         'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
-    ), 500);
+    ), $replayApiPublic ? 403 : 500);
 }

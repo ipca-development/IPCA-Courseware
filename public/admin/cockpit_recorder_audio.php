@@ -3,8 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
-
-cw_require_admin();
+require_once __DIR__ . '/../../src/ReplayShareService.php';
 
 $id = trim((string)($_GET['id'] ?? ''));
 if ($id === '') {
@@ -14,7 +13,13 @@ if ($id === '') {
     exit;
 }
 
+$isAdmin = false;
 try {
+    $currentUser = cw_current_user($pdo);
+    $isAdmin = is_array($currentUser) && (string)($currentUser['role'] ?? '') === 'admin';
+    if (!$isAdmin) {
+        (new ReplayShareService($pdo))->mediaGrant($id);
+    }
     $service = new CockpitRecorderService($pdo);
     $recording = $service->recordingByAnyId($id);
     if (!$recording) {
@@ -44,7 +49,7 @@ try {
         $filename = (string)($recording['recording_uid'] ?? 'recording') . '.' . (string)($recording['file_extension'] ?? 'm4a');
     }
 
-    if ((string)($_GET['download'] ?? '') === '1') {
+    if ($isAdmin && (string)($_GET['download'] ?? '') === '1') {
         header('Content-Type: ' . $mime);
         header('Content-Length: ' . (string)filesize($realPath));
         header('Accept-Ranges: bytes');
@@ -78,6 +83,9 @@ try {
 
     $length = $end - $start + 1;
     header('Content-Type: ' . $mime);
+    header('Content-Disposition: inline');
+    header('Cache-Control: private, no-store');
+    header('X-Content-Type-Options: nosniff');
     header('Accept-Ranges: bytes');
     header('Content-Length: ' . (string)$length);
 
@@ -102,8 +110,8 @@ try {
     fclose($handle);
     exit;
 } catch (Throwable $e) {
-    http_response_code(500);
+    http_response_code($isAdmin ? 500 : 403);
     header('Content-Type: text/plain; charset=utf-8');
-    echo $e->getMessage();
+    echo $isAdmin ? $e->getMessage() : 'Replay access is unavailable.';
     exit;
 }
