@@ -110,6 +110,7 @@ final class CvrDataIntakeReadService
             $this->columnExpression($columns, array('input_device'), 'input_device'),
             $this->columnExpression($columns, array('original_filename'), 'original_filename'),
             $this->columnExpression($columns, array('file_size_bytes'), 'file_size_bytes', '0'),
+            $this->columnExpression($columns, array('storage_path'), 'storage_path'),
             $this->columnExpression($columns, array('upload_status'), 'upload_status'),
             $this->columnExpression($columns, array('transcription_status'), 'transcription_status'),
             $this->columnExpression($columns, array('transcription_progress'), 'transcription_progress', '0'),

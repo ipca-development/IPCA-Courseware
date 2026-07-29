@@ -45,7 +45,9 @@ if ($pageSource === false
     || !str_contains($pageSource, 'supersede_reconstruction_bundle')
     || !str_contains($pageSource, 'dispatchOptionLabel')
     || !str_contains($pageSource, 'data-audio-short-toggle')
-    || !str_contains($pageSource, 'intake-audio-row-short')) {
+    || !str_contains($pageSource, 'intake-audio-row-short')
+    || !str_contains($pageSource, 'cockpit_recorder_intake_transcript.php')
+    || !str_contains($pageSource, 'cvr_intake_audio_relevant_error')) {
     fwrite(STDERR, "master_logbook_intake contract failed.\n");
     exit(1);
 }
