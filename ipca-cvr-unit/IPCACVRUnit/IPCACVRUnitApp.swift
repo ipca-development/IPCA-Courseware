@@ -15,6 +15,9 @@ struct IPCACVRUnitApp: App {
     @StateObject private var coordinator = CVRUnitCoordinator()
     @StateObject private var workflowStore = CVRWorkflowStore()
     @StateObject private var missionCatalog = MissionCatalogStore()
+    @StateObject private var garminVault = GarminCsvVaultStore()
+    @StateObject private var sdRecovery = GarminSDCardRecoveryService()
+    @StateObject private var garminSync = GarminCsvSyncManager()
 
     var body: some Scene {
         WindowGroup {
@@ -31,10 +34,14 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(coordinator)
                 .environmentObject(workflowStore)
                 .environmentObject(missionCatalog)
+                .environmentObject(garminVault)
+                .environmentObject(sdRecovery)
+                .environmentObject(garminSync)
                 .preferredColorScheme(.light)
                 .task {
                     await recordingStore.load()
                     await workflowStore.load()
+                    await garminVault.load()
                     missionCatalog.loadBundledFallback()
                     await audioRecorder.refreshInputs()
                     network.start()
@@ -44,6 +51,14 @@ struct IPCACVRUnitApp: App {
                     await settings.refreshCrewUsers()
                     await missionCatalog.refreshFromServer(settings: settings)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
+                    sdRecovery.refreshBookmarkState(settings: settings)
+                    await garminSync.syncPending(
+                        settings: settings,
+                        vault: garminVault,
+                        workflow: workflowStore,
+                        network: network,
+                        uploadManager: uploadManager
+                    )
                     coordinator.bind(
                         audio: audioRecorder,
                         beacon: beaconManager,
@@ -64,6 +79,21 @@ struct IPCACVRUnitApp: App {
                     case .active:
                         coordinator.appWillEnterForeground()
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
+                        Task {
+                            sdRecovery.refreshBookmarkState(settings: settings)
+                            _ = await sdRecovery.scanAndImportIfNeeded(
+                                settings: settings,
+                                vault: garminVault,
+                                workflow: workflowStore
+                            )
+                            await garminSync.syncPending(
+                                settings: settings,
+                                vault: garminVault,
+                                workflow: workflowStore,
+                                network: network,
+                                uploadManager: uploadManager
+                            )
+                        }
                     default:
                         break
                     }

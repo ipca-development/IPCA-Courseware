@@ -534,9 +534,14 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func importGarminCSV(from sourceURL: URL) {
+        _ = importGarminCSVFromRecovery(sourceURL: sourceURL, sourceLabel: "ios_share_sheet")
+    }
+
+    @discardableResult
+    func importGarminCSVFromRecovery(sourceURL: URL, sourceLabel: String) -> String? {
         guard var flightRecord = state.activeFlightRecord else {
             lastError = "Create or recover a Flight Record before importing Garmin CSV."
-            return
+            return nil
         }
 
         let accessed = sourceURL.startAccessingSecurityScopedResource()
@@ -549,7 +554,7 @@ final class CVRWorkflowStore: ObservableObject {
         do {
             guard sourceURL.pathExtension.caseInsensitiveCompare("csv") == .orderedSame else {
                 lastError = "Garmin import expects a CSV file."
-                return
+                return nil
             }
 
             let data = try Data(contentsOf: sourceURL)
@@ -562,6 +567,18 @@ final class CVRWorkflowStore: ObservableObject {
             try data.write(to: destination, options: [.atomic])
 
             let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            if state.uploadComponents.contains(where: {
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "garmin_csv"
+                    && ($0.sha256?.caseInsensitiveCompare(digest) == .orderedSame)
+            }) {
+                return state.uploadComponents.first(where: {
+                    $0.flightRecordID == flightRecord.id
+                        && $0.componentType == "garmin_csv"
+                        && ($0.sha256?.caseInsensitiveCompare(digest) == .orderedSame)
+                })?.id
+            }
+
             let component = CVRUploadComponentRecord(
                 id: UUID().uuidString,
                 serverID: nil,
@@ -581,8 +598,8 @@ final class CVRWorkflowStore: ObservableObject {
             let event = makeFlightEvent(
                 flightRecord: flightRecord,
                 eventType: "garmin_csv_imported",
-                source: "ios_share_sheet",
-                creationMethod: "document_open_url",
+                source: sourceLabel,
+                creationMethod: sourceLabel == "ios_share_sheet" ? "document_open_url" : "sd_card_auto_import",
                 gpsSample: nil
             )
 
@@ -595,8 +612,10 @@ final class CVRWorkflowStore: ObservableObject {
                 $0.uploadComponents.append(eventUploadComponent(event))
                 $0.selectedTab = .garmin
             }
+            return component.id
         } catch {
             lastError = "Could not import Garmin CSV: \(error.localizedDescription)"
+            return nil
         }
     }
 

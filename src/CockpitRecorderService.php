@@ -848,6 +848,47 @@ final class CockpitRecorderService
     /**
      * @return array<string,mixed>
      */
+    public function cleanupStoredTranscript(int $recordingId): array
+    {
+        $this->requireTables();
+        if ($recordingId <= 0) {
+            return array('ok' => false, 'error' => 'Invalid recording id.');
+        }
+        $recording = $this->recordingByAnyId((string)$recordingId);
+        if (!is_array($recording)) {
+            return array('ok' => false, 'error' => 'Recording not found.');
+        }
+
+        $raw = trim((string)($recording['transcript_text'] ?? ''));
+        if ($raw === '') {
+            return array('ok' => false, 'error' => 'No transcript is stored for this recording.');
+        }
+
+        $clean = self::cleanTranscriptText($raw);
+        if ($clean === '') {
+            return array('ok' => false, 'error' => 'Transcript cleanup removed all text.');
+        }
+
+        $changed = $clean !== $raw;
+        if ($changed) {
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLE . ' SET transcript_text = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?'
+            )->execute(array($clean, $recordingId));
+        }
+
+        return array(
+            'ok' => true,
+            'changed' => $changed,
+            'transcript_text' => $clean,
+            'message' => $changed
+                ? 'Transcript cleaned and saved.'
+                : 'Transcript was already clean.',
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
     public function requeueTranscription(int $recordingId): array
     {
         $this->requireTables();
@@ -2027,7 +2068,7 @@ final class CockpitRecorderService
             ")->execute(array($progress, $recordingId));
         }
 
-        $combined = self::cleanTranscriptText(trim(implode("\n\n", array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== ''))));
+        $combined = self::cleanTranscriptText(self::mergeTranscriptParts(array_values(array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== ''))));
         if ($failedChunks) {
             $failedLabel = implode(', ', array_map(fn(int $i): string => (string)($i + 1), $failedChunks));
             $message = 'Partial transcript: chunk(s) ' . $failedLabel . ' failed. '
@@ -2155,7 +2196,7 @@ final class CockpitRecorderService
             }
         }
 
-        $combined = self::cleanTranscriptText(trim(implode("\n\n", $texts)));
+        $combined = self::cleanTranscriptText(self::mergeTranscriptParts($texts));
         $status = $failed ? 'failed' : 'ready';
         $error = null;
         if ($failed) {
@@ -2319,7 +2360,48 @@ final class CockpitRecorderService
         return "You are transcribing cockpit audio for flight training analysis.\n\n"
             . "The audio may contain ATC radio transmissions, cockpit intercom speech, aircraft noise, static, clicks, clipped transmissions, English, Dutch, and accented speech.\n"
             . "Preserve aviation phraseology, callsigns, runway numbers, headings, altitudes, frequencies, readbacks, airport names, and short radio transmissions as accurately as possible.\n"
-            . "Do not invent words when unclear; mark unclear speech as [unclear] when necessary. Do not repeat a phrase to fill silence or noise.";
+            . "Do not invent words when unclear; mark unclear speech as [unclear] when necessary.\n"
+            . "Never repeat, loop, or re-print a phrase you already transcribed. Do not fill silence with duplicated text.\n"
+            . "If audio is silent, garbled, or unreadable, output [unclear] once and continue.";
+    }
+
+    /**
+     * @param list<string> $parts
+     */
+    private static function mergeTranscriptParts(array $parts): string
+    {
+        $out = '';
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            if ($out === '') {
+                $out = $part;
+                continue;
+            }
+            $wordsOut = preg_split('/\s+/u', $out, -1, PREG_SPLIT_NO_EMPTY) ?: array();
+            $wordsPart = preg_split('/\s+/u', $part, -1, PREG_SPLIT_NO_EMPTY) ?: array();
+            $maxOverlap = min(count($wordsOut), count($wordsPart), 16);
+            $overlap = 0;
+            for ($i = $maxOverlap; $i >= 1; $i--) {
+                $suffix = implode(' ', array_slice($wordsOut, -$i));
+                $prefix = implode(' ', array_slice($wordsPart, 0, $i));
+                if (strcasecmp($suffix, $prefix) === 0) {
+                    $overlap = $i;
+                    break;
+                }
+            }
+            if ($overlap > 0) {
+                $remainder = implode(' ', array_slice($wordsPart, $overlap));
+                if ($remainder !== '') {
+                    $out .= ' ' . $remainder;
+                }
+            } else {
+                $out .= "\n\n" . $part;
+            }
+        }
+        return trim($out);
     }
 
     private static function cleanTranscriptText(string $text): string
@@ -2330,44 +2412,28 @@ final class CockpitRecorderService
         }
 
         $text = preg_replace('/(?:[ \t]*\[unclear\][ \t]*){2,}/iu', ' [unclear] ', $text) ?? $text;
+        $text = preg_replace('/(?:[ \t]*\[ATC\][ \t]*){2,}/iu', ' [ATC] ', $text) ?? $text;
         $text = trim(preg_replace('/[ \t]+/', ' ', $text) ?? $text);
 
-        $units = array();
-        foreach (preg_split('/\n+/u', $text) ?: array($text) as $line) {
-            $line = trim($line);
-            if ($line === '') {
-                continue;
-            }
-            $lineUnits = preg_split('/(?<=[.!?,;:])\s+/u', $line) ?: array($line);
-            foreach ($lineUnits as $lineUnit) {
-                $lineUnit = trim($lineUnit);
-                if ($lineUnit !== '') {
-                    $units[] = $lineUnit;
-                }
-            }
-        }
-
-        if ($units === array()) {
+        $segments = self::transcriptSegments($text);
+        if ($segments === array()) {
             return $text;
         }
-        if (count($units) < 2) {
-            return implode(' ', $units);
+        if (count($segments) === 1) {
+            return $segments[0];
         }
 
         $clean = array();
         $seen = array();
         $lastKey = '';
-        $lastUnitKey = '';
-        $lastUnitRepeatCount = 0;
-        $recentKeys = array();
         $lastWasUnclear = false;
-        foreach ($units as $unit) {
-            $unit = trim($unit);
-            if ($unit === '') {
+        foreach ($segments as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
                 continue;
             }
 
-            if (preg_match('/^\[unclear\]$/iu', $unit)) {
+            if (preg_match('/^\[unclear\]$/iu', $segment)) {
                 if ($lastWasUnclear) {
                     continue;
                 }
@@ -2377,65 +2443,71 @@ final class CockpitRecorderService
             }
             $lastWasUnclear = false;
 
-            $key = self::transcriptRepeatKey($unit);
-            if ($key !== '') {
-                if ($key === $lastUnitKey) {
-                    $lastUnitRepeatCount++;
-                } else {
-                    $lastUnitKey = $key;
-                    $lastUnitRepeatCount = 1;
-                }
-
-                $maxConsecutive = strlen($key) <= 12 ? 3 : (strlen($key) <= 30 ? 2 : 1);
-                if ($lastUnitRepeatCount > $maxConsecutive) {
-                    $recentKeys[] = $key;
-                    if (count($recentKeys) > 8) {
-                        array_shift($recentKeys);
-                    }
-                    continue;
-                }
-
-                $recentCount = count($recentKeys);
-                if (
-                    $recentCount >= 4
-                    && $key === $recentKeys[$recentCount - 2]
-                    && $recentKeys[$recentCount - 1] === $recentKeys[$recentCount - 3]
-                ) {
-                    $recentKeys[] = $key;
-                    if (count($recentKeys) > 8) {
-                        array_shift($recentKeys);
-                    }
-                    continue;
-                }
+            $key = self::transcriptRepeatKey($segment);
+            if ($key === '') {
+                $clean[] = $segment;
+                continue;
             }
 
-            if ($key !== '' && strlen($key) > 24) {
-                $count = (int)($seen[$key] ?? 0);
-                $seen[$key] = $count + 1;
-                if ($key === $lastKey || $count >= 1) {
+            if (strlen($key) <= 8) {
+                if ($key === $lastKey) {
                     continue;
                 }
                 $lastKey = $key;
-            } else {
-                $lastKey = '';
+                $clean[] = $segment;
+                continue;
             }
 
-            $clean[] = $unit;
-            if ($key !== '') {
-                $recentKeys[] = $key;
-                if (count($recentKeys) > 8) {
-                    array_shift($recentKeys);
-                }
+            if (isset($seen[$key])) {
+                continue;
             }
+            $seen[$key] = true;
+            $lastKey = $key;
+            $clean[] = $segment;
         }
 
         $cleaned = trim(implode(' ', $clean));
         return $cleaned !== '' ? $cleaned : $text;
     }
 
+    /**
+     * @return list<string>
+     */
+    private static function transcriptSegments(string $text): array
+    {
+        $text = preg_replace('/\s+(?=\[ATC\])/iu', "\n", $text) ?? $text;
+        $segments = array();
+        foreach (preg_split('/\n+/u', $text) ?: array($text) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            $blocks = preg_split('/\s*(?=\[ATC\])/iu', $line, -1, PREG_SPLIT_NO_EMPTY) ?: array($line);
+            foreach ($blocks as $block) {
+                $block = trim($block);
+                if ($block === '') {
+                    continue;
+                }
+                if (preg_match('/^\[ATC\]/iu', $block)) {
+                    $segments[] = $block;
+                    continue;
+                }
+                foreach (preg_split('/(?<=[.!?])\s+/u', $block) ?: array($block) as $sentence) {
+                    $sentence = trim($sentence);
+                    if ($sentence !== '') {
+                        $segments[] = $sentence;
+                    }
+                }
+            }
+        }
+        return $segments;
+    }
+
     private static function transcriptRepeatKey(string $sentence): string
     {
-        $key = strtolower($sentence);
+        $key = preg_replace('/^\[(?:atc|unclear)\]\s*/iu', '', trim($sentence)) ?? trim($sentence);
+        $key = strtolower($key);
         $key = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $key) ?? $key;
         return trim(preg_replace('/\s+/', ' ', $key) ?? $key);
     }

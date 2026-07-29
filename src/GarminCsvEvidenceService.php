@@ -149,6 +149,48 @@ final class GarminCsvEvidenceService
 
     /**
      * @param array<string,mixed> $device
+     * @param list<string> $sha256List
+     * @return array<string,mixed>
+     */
+    public function knownHashes(array $device, array $sha256List, string $aircraftRegistration = ''): array
+    {
+        $normalized = array();
+        foreach ($sha256List as $sha256) {
+            $sha256 = strtolower(trim((string)$sha256));
+            if (preg_match('/^[a-f0-9]{64}$/', $sha256) === 1) {
+                $normalized[$sha256] = true;
+            }
+        }
+        if ($normalized === array()) {
+            return array('ok' => true, 'known' => array(), 'unknown' => array());
+        }
+
+        $known = array();
+        $unknown = array();
+        foreach (array_keys($normalized) as $sha256) {
+            $row = $this->csvBySha($sha256);
+            if ($row !== null) {
+                $known[] = array(
+                    'sha256' => $sha256,
+                    'csv_file_uuid' => (string)($row['csv_file_uuid'] ?? ''),
+                    'status' => 'finalized',
+                );
+            } else {
+                $unknown[] = $sha256;
+            }
+        }
+
+        return array(
+            'ok' => true,
+            'known' => $known,
+            'unknown' => $unknown,
+            'device_id' => (int)($device['id'] ?? 0),
+            'aircraft_registration' => trim($aircraftRegistration),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $device
      * @param array<string,mixed> $session
      * @return array<string,mixed>
      */

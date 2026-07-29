@@ -44,6 +44,16 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(isSimulationModeEnabled, forKey: Keys.isSimulationModeEnabled) }
     }
 
+    @Published var garminVaultRetentionDays: Int {
+        didSet { UserDefaults.standard.set(garminVaultRetentionDays, forKey: Keys.garminVaultRetentionDays) }
+    }
+
+    @Published var garminVaultMaxMegabytes: Int {
+        didSet { UserDefaults.standard.set(garminVaultMaxMegabytes, forKey: Keys.garminVaultMaxMegabytes) }
+    }
+
+    @Published private(set) var garminSDCardFolderLabel: String = ""
+
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
     @Published private(set) var crewUsers: [CVRCrewUser] = []
@@ -67,7 +77,50 @@ final class SettingsStore: ObservableObject {
         adminPIN = UserDefaults.standard.string(forKey: Keys.adminPIN) ?? "2468"
         postRecordingGainDB = UserDefaults.standard.object(forKey: Keys.postRecordingGainDB) as? Double ?? 0
         isSimulationModeEnabled = UserDefaults.standard.object(forKey: Keys.isSimulationModeEnabled) as? Bool ?? false
+        garminVaultRetentionDays = UserDefaults.standard.object(forKey: Keys.garminVaultRetentionDays) as? Int ?? 30
+        garminVaultMaxMegabytes = UserDefaults.standard.object(forKey: Keys.garminVaultMaxMegabytes) as? Int ?? 500
+        garminSDCardFolderLabel = UserDefaults.standard.string(forKey: Keys.garminSDCardFolderLabel) ?? ""
         deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
+    }
+
+    var garminVaultMaxBytes: Int64 {
+        Int64(max(50, garminVaultMaxMegabytes)) * 1024 * 1024
+    }
+
+    var garminSDCardBookmarkData: Data? {
+        UserDefaults.standard.data(forKey: Keys.garminSDCardBookmark)
+    }
+
+    func setGarminSDCardFolder(_ url: URL) {
+        do {
+            let bookmark = try url.bookmarkData(
+                options: [],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(bookmark, forKey: Keys.garminSDCardBookmark)
+            garminSDCardFolderLabel = url.lastPathComponent
+            UserDefaults.standard.set(garminSDCardFolderLabel, forKey: Keys.garminSDCardFolderLabel)
+        } catch {
+            garminSDCardFolderLabel = ""
+        }
+    }
+
+    func clearGarminSDCardFolder() {
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardBookmark)
+        garminSDCardFolderLabel = ""
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardFolderLabel)
+    }
+
+    func resolvedGarminSDCardRootURL() -> URL? {
+        guard let bookmark = garminSDCardBookmarkData else { return nil }
+        var stale = false
+        return try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        )
     }
 
     var normalizedServerURL: URL? {
@@ -249,6 +302,10 @@ final class SettingsStore: ObservableObject {
         static let adminPIN = "ipca.cvrUnit.adminPIN"
         static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
         static let isSimulationModeEnabled = "ipca.cvrUnit.isSimulationModeEnabled"
+        static let garminSDCardBookmark = "ipca.cvrUnit.garminSDCardBookmark"
+        static let garminSDCardFolderLabel = "ipca.cvrUnit.garminSDCardFolderLabel"
+        static let garminVaultRetentionDays = "ipca.cvrUnit.garminVaultRetentionDays"
+        static let garminVaultMaxMegabytes = "ipca.cvrUnit.garminVaultMaxMegabytes"
         static let deviceUUID = "ipca.cvrUnit.deviceUUID"
         static let deviceCredential = "ipca.cvrUnit.deviceCredential"
     }

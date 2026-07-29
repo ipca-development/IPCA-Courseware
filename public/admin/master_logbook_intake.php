@@ -1732,12 +1732,13 @@ cw_header('Master Logbook');
         <div class="intake-muted" id="intake-audio-transcript-meta"></div>
       </div>
       <div class="intake-modal-actions">
-        <button class="intake-modal-reprocess" type="button" data-audio-transcript-reprocess>Re-Process Transcript</button>
+        <button class="intake-modal-reprocess" type="button" data-audio-transcript-cleanup>Clean Up Transcript</button>
+        <button class="intake-modal-reprocess" type="button" data-audio-transcript-reprocess>Re-Process From Audio</button>
         <button class="intake-modal-close" type="button" data-audio-transcript-close>Close</button>
       </div>
     </div>
     <div class="intake-modal-body">
-      <p class="intake-modal-note" id="intake-audio-transcript-note" hidden>Duplicates and repeated [unclear] markers are cleaned for display. Use Re-Process to regenerate the transcript from the audio file.</p>
+      <p class="intake-modal-note" id="intake-audio-transcript-note">Use <strong>Clean Up</strong> to remove duplicate loops and repeated [unclear] markers from the stored transcript. Use <strong>Re-Process From Audio</strong> only when you need a fresh transcription from the audio file.</p>
       <audio class="intake-modal-audio" id="intake-audio-transcript-player" controls preload="none"></audio>
       <div class="intake-modal-transcript" id="intake-audio-transcript-body">Loading transcript…</div>
     </div>
@@ -1907,6 +1908,7 @@ cw_header('Master Logbook');
   const transcriptTitle = document.getElementById('intake-audio-transcript-title');
   const transcriptNote = document.getElementById('intake-audio-transcript-note');
   const transcriptReprocessButton = document.querySelector('[data-audio-transcript-reprocess]');
+  const transcriptCleanupButton = document.querySelector('[data-audio-transcript-cleanup]');
   let activeTranscriptRecordingId = null;
   let transcriptPollTimer = null;
 
@@ -1947,7 +1949,7 @@ cw_header('Master Logbook');
       transcriptMeta.textContent = metaParts.join(' · ');
     }
     if (transcriptNote) {
-      transcriptNote.hidden = !payload.transcript_cleaned;
+      transcriptNote.hidden = false;
     }
     if (payload.audio_url && !transcriptPlayer.getAttribute('src')) {
       transcriptPlayer.src = payload.audio_url;
@@ -1956,6 +1958,9 @@ cw_header('Master Logbook');
     const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
     if (transcriptReprocessButton) {
       transcriptReprocessButton.disabled = inProgress;
+    }
+    if (transcriptCleanupButton) {
+      transcriptCleanupButton.disabled = inProgress;
     }
     if (inProgress) {
       transcriptBody.textContent = 'Transcription in progress… ' + String(payload.transcription_progress || 0) + '%';
@@ -1970,10 +1975,12 @@ cw_header('Master Logbook');
     if (status === 'failed') {
       transcriptBody.textContent = 'Transcription failed. Use Re-Process Transcript to try again.';
       if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+      if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
       return;
     }
     transcriptBody.textContent = payload.transcript_text || 'Transcript is not available yet.';
     if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+    if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
   };
 
   const closeTranscriptModal = () => {
@@ -2002,6 +2009,7 @@ cw_header('Master Logbook');
       stopTranscriptPoll();
       if (transcriptNote) transcriptNote.hidden = true;
       if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
+      if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
       if (transcriptPlayer) {
         transcriptPlayer.removeAttribute('src');
         transcriptPlayer.load();
@@ -2017,21 +2025,57 @@ cw_header('Master Logbook');
     });
   });
 
+  if (transcriptCleanupButton) {
+    transcriptCleanupButton.addEventListener('click', async () => {
+      if (!activeTranscriptRecordingId) {
+        return;
+      }
+      transcriptCleanupButton.disabled = true;
+      if (transcriptBody) transcriptBody.textContent = 'Cleaning transcript…';
+      try {
+        const formData = new FormData();
+        formData.append('id', activeTranscriptRecordingId);
+        formData.append('mode', 'cleanup');
+        const response = await fetch('/admin/api/cockpit_recorder_intake_reprocess_transcript.php', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || payload.message || 'Could not clean transcript.');
+        }
+        await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: false });
+        if (transcriptBody && payload.transcript_text) {
+          transcriptBody.textContent = payload.transcript_text;
+        }
+      } catch (error) {
+        if (transcriptBody) {
+          transcriptBody.textContent = error instanceof Error ? error.message : 'Could not clean transcript.';
+        }
+      } finally {
+        transcriptCleanupButton.disabled = false;
+      }
+    });
+  }
+
   if (transcriptReprocessButton) {
     transcriptReprocessButton.addEventListener('click', async () => {
       if (!activeTranscriptRecordingId) {
         return;
       }
-      if (!window.confirm('Re-process will delete the current transcript and regenerate it from the audio file. This may take several minutes. Continue?')) {
+      if (!window.confirm('Re-process will delete the current transcript and regenerate it from the audio file. This may take several minutes. Try Clean Up first unless the audio itself was wrong. Continue?')) {
         return;
       }
       transcriptReprocessButton.disabled = true;
+      if (transcriptCleanupButton) transcriptCleanupButton.disabled = true;
       if (transcriptBody) transcriptBody.textContent = 'Queuing transcript re-processing…';
       if (transcriptMeta) transcriptMeta.textContent = 'QUEUED · 0%';
       try {
         stopTranscriptPoll();
         const formData = new FormData();
         formData.append('id', activeTranscriptRecordingId);
+        formData.append('mode', 'retry');
         const response = await fetch('/admin/api/cockpit_recorder_intake_reprocess_transcript.php', {
           method: 'POST',
           body: formData,
@@ -2047,6 +2091,7 @@ cw_header('Master Logbook');
         await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: true });
       } catch (error) {
         transcriptReprocessButton.disabled = false;
+        if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
         if (transcriptBody) {
           transcriptBody.textContent = error instanceof Error ? error.message : 'Could not queue transcript re-processing.';
         }

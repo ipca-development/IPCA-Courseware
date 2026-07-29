@@ -58,7 +58,8 @@ if ($statusApiSource === false
 
 $reprocessApiSource = file_get_contents(__DIR__ . '/../public/admin/api/cockpit_recorder_intake_reprocess_transcript.php');
 if ($reprocessApiSource === false
-    || !str_contains($reprocessApiSource, 'requeueTranscription')) {
+    || !str_contains($reprocessApiSource, 'requeueTranscription')
+    || !str_contains($reprocessApiSource, 'cleanupStoredTranscript')) {
     fwrite(STDERR, "cockpit_recorder_intake_reprocess_transcript contract failed.\n");
     exit(1);
 }
@@ -74,6 +75,7 @@ if ($pageSource === false
     || !str_contains($pageSource, 'cockpit_recorder_intake_transcript.php')
     || !str_contains($pageSource, 'cockpit_recorder_intake_reprocess_transcript.php')
     || !str_contains($pageSource, 'data-audio-transcript-reprocess')
+    || !str_contains($pageSource, 'data-audio-transcript-cleanup')
     || !str_contains($pageSource, 'cockpit_recorder_intake_audio_status.php')
     || !str_contains($pageSource, 'CvrAudioIntakeMetricsService')
     || !str_contains($pageSource, 'intake-audio-crew')

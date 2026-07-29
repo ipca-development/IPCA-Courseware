@@ -28,7 +28,13 @@ try {
         cockpit_intake_reprocess_json(400, array('ok' => false, 'error' => 'Recording id is required.'));
     }
 
-    $result = (new CockpitRecorderService($pdo))->requeueTranscription($id);
+    $mode = strtolower(trim((string)($_POST['mode'] ?? 'retry')));
+    $service = new CockpitRecorderService($pdo);
+    if ($mode === 'cleanup') {
+        $result = $service->cleanupStoredTranscript($id);
+    } else {
+        $result = $service->requeueTranscription($id);
+    }
     if (empty($result['ok'])) {
         cockpit_intake_reprocess_json(400, array(
             'ok' => false,

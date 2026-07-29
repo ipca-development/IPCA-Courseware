@@ -176,6 +176,65 @@ struct WorkflowEvidenceSyncResponse: Codable {
     }
 }
 
+struct CvrCsvKnownHashEntry: Codable {
+    var sha256: String
+    var csvFileUuid: String?
+    var status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sha256
+        case csvFileUuid = "csv_file_uuid"
+        case status
+    }
+}
+
+struct CvrCsvKnownHashesResponse: Codable {
+    var ok: Bool
+    var known: [CvrCsvKnownHashEntry]
+    var unknown: [String]
+    var error: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        known = try container.decodeIfPresent([CvrCsvKnownHashEntry].self, forKey: .known) ?? []
+        unknown = try container.decodeIfPresent([String].self, forKey: .unknown) ?? []
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+struct CvrCsvChunkUploadResponse: Codable {
+    var ok: Bool
+    var uploadUuid: String?
+    var receivedChunks: [Int]?
+    var complete: Bool?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case uploadUuid = "upload_uuid"
+        case receivedChunks = "received_chunks"
+        case complete
+        case error
+    }
+}
+
+struct CvrCsvFinalizeResponse: Codable {
+    var ok: Bool
+    var status: String?
+    var csvFileUuid: String?
+    var sha256: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case status
+        case csvFileUuid = "csv_file_uuid"
+        case sha256
+        case error
+    }
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
@@ -323,6 +382,80 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(WorkflowEvidenceSyncResponse.self, from: data, response: response)
+    }
+
+    func knownGarminCsvHashes(sha256List: [String], aircraftRegistration: String, credential: String) async throws -> CvrCsvKnownHashesResponse {
+        let url = serverURL.appending(path: "api/cvr/csv_known_hashes.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "sha256_list": sha256List,
+            "aircraft_registration": aircraftRegistration
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CvrCsvKnownHashesResponse.self, from: data, response: response)
+    }
+
+    func uploadCvrCsvChunk(
+        credential: String,
+        uploadUUID: String,
+        sessionUUID: String?,
+        chunkIndex: Int,
+        totalChunks: Int,
+        totalSize: Int64,
+        originalFilename: String,
+        chunkData: Data
+    ) async throws -> CvrCsvChunkUploadResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let url = serverURL.appending(path: "api/cvr/csv_upload_chunk.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        func appendField(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        appendField("upload_uuid", uploadUUID)
+        if let sessionUUID, !sessionUUID.isEmpty {
+            appendField("session_uuid", sessionUUID)
+        }
+        appendField("chunk_index", String(chunkIndex))
+        appendField("total_chunks", String(totalChunks))
+        appendField("total_size", String(totalSize))
+        appendField("original_filename", originalFilename)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"chunk\"; filename=\"chunk.part\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(chunkData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CvrCsvChunkUploadResponse.self, from: data, response: response)
+    }
+
+    func finalizeCvrCsvUpload(credential: String, uploadUUID: String) async throws -> CvrCsvFinalizeResponse {
+        let url = serverURL.appending(path: "api/cvr/csv_upload_finalize.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3600
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["upload_uuid": uploadUUID])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CvrCsvFinalizeResponse.self, from: data, response: response)
     }
 
     func decodeUploadResponse(data: Data, response: URLResponse) throws -> UploadResponse {

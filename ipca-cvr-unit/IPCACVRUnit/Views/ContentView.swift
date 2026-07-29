@@ -247,6 +247,10 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var gps: GPSLocationManager
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var garminVault: GarminCsvVaultStore
+    @EnvironmentObject private var sdRecovery: GarminSDCardRecoveryService
+
+    @State private var showGarminFolderPicker = false
 
     var body: some View {
         NavigationStack {
@@ -314,6 +318,36 @@ private struct AdminSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(IPCATheme.danger)
                     }
+                }
+
+                Section("Garmin SD Card Recovery") {
+                    LabeledContent("Folder") {
+                        Text(settings.garminSDCardFolderLabel.isEmpty ? "Not configured" : settings.garminSDCardFolderLabel)
+                    }
+                    Button("Select Garmin SD Card Folder") {
+                        showGarminFolderPicker = true
+                    }
+                    if settings.garminSDCardBookmarkData != nil {
+                        Button("Clear SD Card Folder", role: .destructive) {
+                            settings.clearGarminSDCardFolder()
+                            sdRecovery.refreshBookmarkState(settings: settings)
+                        }
+                    }
+                    Stepper(
+                        "Retain synced CSVs: \(settings.garminVaultRetentionDays) days",
+                        value: $settings.garminVaultRetentionDays,
+                        in: 7...180
+                    )
+                    Stepper(
+                        "Vault limit: \(settings.garminVaultMaxMegabytes) MB",
+                        value: $settings.garminVaultMaxMegabytes,
+                        in: 100...2000,
+                        step: 50
+                    )
+                    LabeledContent("Local vault files", value: "\(garminVault.records.count)")
+                    Text("One-time setup: choose the Garmin SD card root or data_log folder in Files. The Garmin Recovery tab scans automatically and imports data-rich CSV files only.")
+                        .font(.caption)
+                        .foregroundStyle(IPCATheme.secondaryText)
                 }
 
                 Section("Simulation Demo") {
@@ -420,6 +454,18 @@ private struct AdminSettingsView: View {
                 }
             }
             .navigationTitle("CVR Unit Admin")
+            .sheet(isPresented: $showGarminFolderPicker) {
+                GarminSDCardFolderPicker(
+                    onPick: { url in
+                        settings.setGarminSDCardFolder(url)
+                        sdRecovery.refreshBookmarkState(settings: settings)
+                        showGarminFolderPicker = false
+                    },
+                    onCancel: {
+                        showGarminFolderPicker = false
+                    }
+                )
+            }
         }
     }
 

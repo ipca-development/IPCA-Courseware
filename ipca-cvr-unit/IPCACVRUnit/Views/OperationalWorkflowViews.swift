@@ -1004,6 +1004,10 @@ struct GarminWorkflowView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var recordingStore: RecordingStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @EnvironmentObject private var sdRecovery: GarminSDCardRecoveryService
+    @EnvironmentObject private var garminVault: GarminCsvVaultStore
+    @EnvironmentObject private var garminSync: GarminCsvSyncManager
+    @EnvironmentObject private var network: NetworkMonitor
     @Binding var showAdminUnlock: Bool
 
     var body: some View {
@@ -1018,7 +1022,15 @@ struct GarminWorkflowView: View {
                         CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby, metrics: metrics)
                         CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
                         CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
-                        CVROperationalTile(title: "G3X BT", iconName: "antenna.radiowaves.left.and.right", value: "Not exposed", color: CVROperationalPalette.standby, metrics: metrics)
+                        CVROperationalTile(title: "SD CARD", iconName: "sdcard.fill", value: sdCardTileValue, color: sdCardTileColor, metrics: metrics)
+                    }
+                    if let summary = sdRecovery.lastSummary {
+                        CVROperationalWarningCard(
+                            title: "SD CARD SCAN",
+                            message: summary.message,
+                            iconName: summary.matchedFlightRecord ? "checkmark.circle.fill" : "externaldrive.fill",
+                            color: summary.matchedFlightRecord ? CVROperationalPalette.success : CVROperationalPalette.secondaryBlue
+                        )
                     }
                     CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
@@ -1041,8 +1053,51 @@ struct GarminWorkflowView: View {
             }
         }
         .task {
+            await runRecoveryPipelineOnce()
             await pollRecoveryProcessingStatus()
         }
+    }
+
+    private func runRecoveryPipelineOnce() async {
+        sdRecovery.refreshBookmarkState(settings: settings)
+        _ = await sdRecovery.scanAndImportIfNeeded(
+            settings: settings,
+            vault: garminVault,
+            workflow: workflow
+        )
+        await garminSync.syncPending(
+            settings: settings,
+            vault: garminVault,
+            workflow: workflow,
+            network: network,
+            uploadManager: uploadManager
+        )
+    }
+
+    private var sdCardTileValue: String {
+        if sdRecovery.isScanning || garminSync.isSyncing {
+            return "Busy"
+        }
+        if !sdRecovery.cardConfigured {
+            return "Setup"
+        }
+        if !sdRecovery.cardAvailable {
+            return "Waiting"
+        }
+        if let summary = sdRecovery.lastSummary, summary.matchedFlightRecord || summary.imported > 0 {
+            return "Ready"
+        }
+        return "Scan"
+    }
+
+    private var sdCardTileColor: Color {
+        if !sdRecovery.cardConfigured {
+            return CVROperationalPalette.warning
+        }
+        if sdRecovery.cardAvailable, sdRecovery.lastSummary?.matchedFlightRecord == true {
+            return CVROperationalPalette.success
+        }
+        return sdRecovery.cardAvailable ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby
     }
 
     private var garminComponents: [CVRUploadComponentRecord] {
@@ -1151,7 +1206,18 @@ struct GarminWorkflowView: View {
     }
 
     private var garminWarningTitle: String {
-        if garminComponents.isEmpty { return "GARMIN TAB AVAILABLE" }
+        if settings.isSimulationModeEnabled {
+            return "SIMULATION MODE"
+        }
+        if !sdRecovery.cardConfigured {
+            return "SD CARD SETUP REQUIRED"
+        }
+        if garminComponents.isEmpty {
+            if sdRecovery.isScanning {
+                return "SCANNING SD CARD"
+            }
+            return sdRecovery.cardAvailable ? "WAITING FOR MATCHING LOG" : "INSERT SD CARD READER"
+        }
         if let failedWorkflowComponent {
             return switch failedWorkflowComponent.componentType {
             case "dispatch_metadata": "DISPATCH UPLOAD FAILED"
@@ -1166,8 +1232,20 @@ struct GarminWorkflowView: View {
     }
 
     private var garminWarningMessage: String {
+        if settings.isSimulationModeEnabled {
+            return "Simulation mode skips SD card import and server uploads."
+        }
+        if !sdRecovery.cardConfigured {
+            return "Configure the Garmin SD card folder once in Admin, then insert the USB-C reader. The app imports data-rich logs automatically."
+        }
         if garminComponents.isEmpty {
-            return "Share a Garmin CSV to this app to attach it to the Flight Record."
+            if sdRecovery.isScanning {
+                return "Scanning the SD card for data-rich Garmin CSV files..."
+            }
+            if let summary = sdRecovery.lastSummary, !summary.cardAvailable {
+                return "Insert the USB-C SD card reader. GPS-only logs are skipped automatically."
+            }
+            return sdRecovery.lastSummary?.message ?? "Waiting for a matching data-rich Garmin CSV on the SD card."
         }
         if let failedWorkflowComponent {
             return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."

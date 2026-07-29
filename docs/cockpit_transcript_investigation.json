@@ -1,0 +1,1731 @@
+{
+    "ok": true,
+    "generated_at": "2026-07-29T22:09:35+00:00",
+    "recording": {
+        "id": 552,
+        "recording_uid": "CD71C6F8-2329-45CC-B48F-A371BFAFB58D",
+        "duration_seconds": 3939.915,
+        "transcription_status": "ready",
+        "language": "en",
+        "storage_path": "storage/cockpit_recorder/audio/2026/07/29/CD71C6F8-2329-45CC-B48F-A371BFAFB58D.m4a"
+    },
+    "provider_configuration": {
+        "production_model_default": "gpt-4o-transcribe",
+        "production_response_format": "json",
+        "production_segment_timestamps_requested": false,
+        "production_word_timestamps_requested": false,
+        "production_language_forced": true,
+        "production_language_value": "en",
+        "chunk_duration_seconds": 300,
+        "chunk_audio_overlap_seconds": 0,
+        "chunk_boundary_word_overlap_max": 16,
+        "vad_used": false,
+        "previous_text_conditioning": false,
+        "temperature_fallback": false,
+        "raw_provider_json_persisted": false,
+        "cleanTranscriptText_applied_on_provider_response": true,
+        "translation_in_pipeline": false
+    },
+    "audio": {
+        "available": false,
+        "error": "Uploaded audio file is missing."
+    },
+    "chunks": [
+        {
+            "chunk_index": 0,
+            "start_seconds": 0,
+            "end_seconds": 300,
+            "status": "ready",
+            "text_length": 4027,
+            "repeat_density": {
+                "total_words": 732,
+                "unique_words": 40,
+                "compression_ratio_estimate": 18.3,
+                "top_repeats": [
+                    {
+                        "word": "atc",
+                        "count": 86
+                    },
+                    {
+                        "word": "we",
+                        "count": 46
+                    },
+                    {
+                        "word": "snowball",
+                        "count": 45
+                    },
+                    {
+                        "word": "traffic",
+                        "count": 45
+                    },
+                    {
+                        "word": "30",
+                        "count": 44
+                    },
+                    {
+                        "word": "re",
+                        "count": 44
+                    },
+                    {
+                        "word": "you",
+                        "count": 44
+                    },
+                    {
+                        "word": "normal",
+                        "count": 44
+                    },
+                    {
+                        "word": "night",
+                        "count": 43
+                    },
+                    {
+                        "word": "3",
+                        "count": 43
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 1,
+            "start_seconds": 300,
+            "end_seconds": 600,
+            "status": "ready",
+            "text_length": 623,
+            "repeat_density": {
+                "total_words": 126,
+                "unique_words": 82,
+                "compression_ratio_estimate": 1.537,
+                "top_repeats": [
+                    {
+                        "word": "the",
+                        "count": 8
+                    },
+                    {
+                        "word": "to",
+                        "count": 7
+                    },
+                    {
+                        "word": "i",
+                        "count": 4
+                    },
+                    {
+                        "word": "we",
+                        "count": 4
+                    },
+                    {
+                        "word": "alpha",
+                        "count": 4
+                    },
+                    {
+                        "word": "for",
+                        "count": 3
+                    },
+                    {
+                        "word": "be",
+                        "count": 3
+                    },
+                    {
+                        "word": "just",
+                        "count": 3
+                    },
+                    {
+                        "word": "three",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 2,
+            "start_seconds": 600,
+            "end_seconds": 900,
+            "status": "ready",
+            "text_length": 563,
+            "repeat_density": {
+                "total_words": 115,
+                "unique_words": 85,
+                "compression_ratio_estimate": 1.353,
+                "top_repeats": [
+                    {
+                        "word": "you",
+                        "count": 6
+                    },
+                    {
+                        "word": "up",
+                        "count": 4
+                    },
+                    {
+                        "word": "to",
+                        "count": 4
+                    },
+                    {
+                        "word": "the",
+                        "count": 4
+                    },
+                    {
+                        "word": "we",
+                        "count": 3
+                    },
+                    {
+                        "word": "s",
+                        "count": 3
+                    },
+                    {
+                        "word": "on",
+                        "count": 3
+                    },
+                    {
+                        "word": "re",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 3,
+            "start_seconds": 900,
+            "end_seconds": 1200,
+            "status": "ready",
+            "text_length": 1423,
+            "repeat_density": {
+                "total_words": 270,
+                "unique_words": 135,
+                "compression_ratio_estimate": 2,
+                "top_repeats": [
+                    {
+                        "word": "flaps",
+                        "count": 13
+                    },
+                    {
+                        "word": "one",
+                        "count": 9
+                    },
+                    {
+                        "word": "it",
+                        "count": 9
+                    },
+                    {
+                        "word": "s",
+                        "count": 8
+                    },
+                    {
+                        "word": "takeoff",
+                        "count": 6
+                    },
+                    {
+                        "word": "open",
+                        "count": 6
+                    },
+                    {
+                        "word": "turn",
+                        "count": 6
+                    },
+                    {
+                        "word": "that",
+                        "count": 6
+                    },
+                    {
+                        "word": "to",
+                        "count": 5
+                    },
+                    {
+                        "word": "the",
+                        "count": 5
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 4,
+            "start_seconds": 1200,
+            "end_seconds": 1500,
+            "status": "ready",
+            "text_length": 1203,
+            "repeat_density": {
+                "total_words": 215,
+                "unique_words": 110,
+                "compression_ratio_estimate": 1.955,
+                "top_repeats": [
+                    {
+                        "word": "thermal",
+                        "count": 12
+                    },
+                    {
+                        "word": "the",
+                        "count": 11
+                    },
+                    {
+                        "word": "traffic",
+                        "count": 10
+                    },
+                    {
+                        "word": "we",
+                        "count": 7
+                    },
+                    {
+                        "word": "a",
+                        "count": 6
+                    },
+                    {
+                        "word": "runway",
+                        "count": 6
+                    },
+                    {
+                        "word": "to",
+                        "count": 5
+                    },
+                    {
+                        "word": "and",
+                        "count": 5
+                    },
+                    {
+                        "word": "on",
+                        "count": 5
+                    },
+                    {
+                        "word": "go",
+                        "count": 4
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 5,
+            "start_seconds": 1500,
+            "end_seconds": 1800,
+            "status": "ready",
+            "text_length": 1220,
+            "repeat_density": {
+                "total_words": 199,
+                "unique_words": 93,
+                "compression_ratio_estimate": 2.14,
+                "top_repeats": [
+                    {
+                        "word": "thermal",
+                        "count": 23
+                    },
+                    {
+                        "word": "traffic",
+                        "count": 13
+                    },
+                    {
+                        "word": "35",
+                        "count": 8
+                    },
+                    {
+                        "word": "to",
+                        "count": 8
+                    },
+                    {
+                        "word": "runway",
+                        "count": 6
+                    },
+                    {
+                        "word": "the",
+                        "count": 6
+                    },
+                    {
+                        "word": "left",
+                        "count": 6
+                    },
+                    {
+                        "word": "n392e",
+                        "count": 5
+                    },
+                    {
+                        "word": "we",
+                        "count": 5
+                    },
+                    {
+                        "word": "downwind",
+                        "count": 4
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 6,
+            "start_seconds": 1800,
+            "end_seconds": 2100,
+            "status": "ready",
+            "text_length": 23,
+            "repeat_density": {
+                "total_words": 4,
+                "unique_words": 4,
+                "compression_ratio_estimate": 1,
+                "top_repeats": []
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 7,
+            "start_seconds": 2100,
+            "end_seconds": 2400,
+            "status": "ready",
+            "text_length": 437,
+            "repeat_density": {
+                "total_words": 75,
+                "unique_words": 41,
+                "compression_ratio_estimate": 1.829,
+                "top_repeats": [
+                    {
+                        "word": "thermal",
+                        "count": 7
+                    },
+                    {
+                        "word": "traffic",
+                        "count": 4
+                    },
+                    {
+                        "word": "left",
+                        "count": 4
+                    },
+                    {
+                        "word": "nine",
+                        "count": 3
+                    },
+                    {
+                        "word": "to",
+                        "count": 3
+                    },
+                    {
+                        "word": "five",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 8,
+            "start_seconds": 2400,
+            "end_seconds": 2700,
+            "status": "ready",
+            "text_length": 471,
+            "repeat_density": {
+                "total_words": 83,
+                "unique_words": 55,
+                "compression_ratio_estimate": 1.509,
+                "top_repeats": [
+                    {
+                        "word": "unclear",
+                        "count": 7
+                    },
+                    {
+                        "word": "thermal",
+                        "count": 6
+                    },
+                    {
+                        "word": "we",
+                        "count": 4
+                    },
+                    {
+                        "word": "a",
+                        "count": 4
+                    },
+                    {
+                        "word": "left",
+                        "count": 3
+                    },
+                    {
+                        "word": "500",
+                        "count": 3
+                    },
+                    {
+                        "word": "so",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 9,
+            "start_seconds": 2700,
+            "end_seconds": 3000,
+            "status": "ready",
+            "text_length": 40,
+            "repeat_density": {
+                "total_words": 6,
+                "unique_words": 5,
+                "compression_ratio_estimate": 1.2,
+                "top_repeats": []
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 10,
+            "start_seconds": 3000,
+            "end_seconds": 3300,
+            "status": "ready",
+            "text_length": 691,
+            "repeat_density": {
+                "total_words": 107,
+                "unique_words": 51,
+                "compression_ratio_estimate": 2.098,
+                "top_repeats": [
+                    {
+                        "word": "unclear",
+                        "count": 11
+                    },
+                    {
+                        "word": "pre",
+                        "count": 6
+                    },
+                    {
+                        "word": "flight",
+                        "count": 6
+                    },
+                    {
+                        "word": "checklist",
+                        "count": 6
+                    },
+                    {
+                        "word": "runway",
+                        "count": 5
+                    },
+                    {
+                        "word": "35",
+                        "count": 5
+                    },
+                    {
+                        "word": "base",
+                        "count": 4
+                    },
+                    {
+                        "word": "left",
+                        "count": 4
+                    },
+                    {
+                        "word": "release",
+                        "count": 4
+                    },
+                    {
+                        "word": "the",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 11,
+            "start_seconds": 3300,
+            "end_seconds": 3600,
+            "status": "ready",
+            "text_length": 126,
+            "repeat_density": {
+                "total_words": 28,
+                "unique_words": 24,
+                "compression_ratio_estimate": 1.167,
+                "top_repeats": [
+                    {
+                        "word": "to",
+                        "count": 3
+                    }
+                ]
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 12,
+            "start_seconds": 3600,
+            "end_seconds": 3900,
+            "status": "ready",
+            "text_length": 91,
+            "repeat_density": {
+                "total_words": 16,
+                "unique_words": 16,
+                "compression_ratio_estimate": 1,
+                "top_repeats": []
+            },
+            "error_message": ""
+        },
+        {
+            "chunk_index": 13,
+            "start_seconds": 3900,
+            "end_seconds": 3939.915,
+            "status": "ready",
+            "text_length": 42,
+            "repeat_density": {
+                "total_words": 8,
+                "unique_words": 8,
+                "compression_ratio_estimate": 1,
+                "top_repeats": []
+            },
+            "error_message": ""
+        }
+    ],
+    "pattern_first_appearance": {
+        "stored_final_transcript_text": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": 0,
+                "count": 45
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": 371,
+                "count": 42
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "simulated_merge_from_chunks": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": 0,
+                "count": 45
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": 371,
+                "count": 42
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "simulated_clean_from_chunks": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": 0,
+                "count": 4
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": 364,
+                "count": 1
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "simulated_clean_from_stored_final": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": 0,
+                "count": 5
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": 364,
+                "count": 2
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_0_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": 0,
+                "count": 45
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": 371,
+                "count": 42
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_1_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_2_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_3_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_4_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_5_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_6_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_7_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_8_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_9_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_10_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_11_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_12_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ],
+        "chunk_13_stored": [
+            {
+                "key": "snowball_traffic",
+                "label": "Snowball traffic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "night_three_yankee",
+                "label": "Night Three Yankee",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "snowball_normal",
+                "label": "Snowball traffic, Normal",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "population_1038",
+                "label": "population of 1,038",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "municipality",
+                "label": "municipality",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "microsoft_garage",
+                "label": "Microsoft Garage",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "czech_republic",
+                "label": "Czech Republic",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "thermal_treatment",
+                "label": "thermal treatment of the material",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "pilot_program_malaysia",
+                "label": "pilot program in Malaysia",
+                "offset": null,
+                "count": 0
+            },
+            {
+                "key": "food_list",
+                "label": "most common types of food",
+                "offset": null,
+                "count": 0
+            }
+        ]
+    },
+    "layer_lengths": {
+        "stored_final_transcript_text": 10983,
+        "simulated_merge_from_chunks": 11006,
+        "simulated_clean_from_chunks": 7057,
+        "simulated_clean_from_stored_final": 7456,
+        "chunk_0_stored": 4027,
+        "chunk_1_stored": 623,
+        "chunk_2_stored": 563,
+        "chunk_3_stored": 1423,
+        "chunk_4_stored": 1203,
+        "chunk_5_stored": 1220,
+        "chunk_6_stored": 23,
+        "chunk_7_stored": 437,
+        "chunk_8_stored": 471,
+        "chunk_9_stored": 40,
+        "chunk_10_stored": 691,
+        "chunk_11_stored": 126,
+        "chunk_12_stored": 91,
+        "chunk_13_stored": 42
+    },
+    "retry_behavior": {
+        "resetTranscriptionForRetry_deletes_all_chunks": true,
+        "chunk_store_uses_upsert_on_recording_id_chunk_index": true,
+        "reprocess_deletes_chunks_before_new_run": true,
+        "concurrent_worker_risk": "Two workers can race on same queued chunk; last upsert wins, no duplicate rows due to UNIQUE(recording_id, chunk_index)"
+    },
+    "legacy_transcript_cache_consumers": [
+        "src/CockpitRecorderService.php",
+        "public/admin/api/cockpit_recorder_intake_transcript.php",
+        "public/api/recordings/transcript.php",
+        "src/FlightDebriefService.php",
+        "src/CockpitReconstructionService.php",
+        "src/ManualReconstructionBundleService.php",
+        "public/admin/cockpit_recorder.php"
+    ],
+    "raw_evidence_gaps": [
+        "Provider JSON is discarded; only cleaned text returned from transcribeAudioFile().",
+        "Chunk table stores cleaned text only; no raw_response_json column.",
+        "resetTranscriptionForRetry() DELETEs all chunk rows; prior chunk evidence is lost on reprocess.",
+        "cleanupStoredTranscript() overwrites ipca_cockpit_recordings.transcript_text in place.",
+        "No segment timestamps, word timestamps, or provider segment IDs are stored.",
+        "No idempotency key or audio SHA-256 on chunk runs."
+    ],
+    "provider_probes": [],
+    "conclusions": [
+        "Loop pattern appears in stored chunk 0 (post-cleanTranscriptText at transcription time).",
+        "Display cleanup removes substantial text (10983 -> 7456 chars)."
+    ]
+}
