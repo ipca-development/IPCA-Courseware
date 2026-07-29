@@ -414,7 +414,7 @@ final class FlightDebriefService
         $timeline = array();
         if ($this->tableExists('ipca_cockpit_timeline_events')) {
             $statement = $this->pdo->prepare(
-                'SELECT event_type, start_seconds, end_seconds, confidence, metadata_json
+                'SELECT event_type, start_seconds, end_seconds, confidence, evidence_json, notes
                  FROM ipca_cockpit_timeline_events WHERE recording_id = ? ORDER BY start_seconds'
             );
             $statement->execute(array((int)$bundle['cockpit_recording_id']));
