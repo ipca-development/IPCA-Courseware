@@ -307,6 +307,29 @@ function cvr_intake_audio_start_label(PDO $pdo, mixed $value, string $registrati
     return $dt instanceof DateTimeImmutable ? ($dt->format('H:i:s') . ' LT') : '—';
 }
 
+function cvr_intake_audio_stop_label(PDO $pdo, mixed $startedAt, float $durationSeconds, string $registration = ''): string
+{
+    $startText = trim((string)$startedAt);
+    if ($startText === '' || $durationSeconds <= 0) {
+        return '—';
+    }
+    $timezone = cvr_intake_california_timezone($pdo, $registration);
+    $start = cw_dt_obj($startText, $timezone);
+    if (!$start instanceof DateTimeImmutable) {
+        return '—';
+    }
+    $end = $start->modify('+' . max(0, (int)round($durationSeconds)) . ' seconds');
+    return $end->format('H:i:s') . ' LT';
+}
+
+function cvr_intake_duration_decimal(float $seconds): string
+{
+    if ($seconds <= 0) {
+        return '—';
+    }
+    return number_format(round($seconds / 3600.0, 1), 1, '.', '');
+}
+
 function cvr_intake_duration_hms(float $seconds): string
 {
     $total = max(0, (int)round($seconds));
@@ -351,6 +374,19 @@ function cvr_intake_audio_relevant_error(mixed $error): string
         }
     }
     return $text;
+}
+
+function cvr_intake_audio_error_display(mixed $error, int $maxLength = 52): string
+{
+    $text = cvr_intake_audio_relevant_error($error);
+    if ($text === '') {
+        return '';
+    }
+    if (strlen($text) <= $maxLength) {
+        return $text;
+    }
+    $truncated = rtrim(substr($text, 0, $maxLength));
+    return $truncated . '...';
 }
 
 function cvr_intake_audio_info_tooltip(array $row): string
@@ -575,18 +611,22 @@ cw_header('Master Logbook');
 .intake-audio-toggle{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:850;cursor:pointer}
 .intake-audio-toggle.is-on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
 .intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
-.intake-table-audio{min-width:1180px;font-size:10px}
+.intake-audio-table.intake-table-wrap{overflow-x:hidden}
+.intake-table-audio{table-layout:fixed;width:100%;min-width:0;font-size:10px}
 .intake-table-audio th{font-size:8px;padding:7px 8px}
 .intake-table-audio td{padding:7px 8px;font-size:10px;white-space:nowrap}
 .intake-audio-crew{font-size:10px;line-height:1.35;white-space:normal;min-width:130px}
 .intake-audio-crew-line{color:#334155}
+.intake-audio-crew-role{font-weight:800;color:#0f172a}
 .intake-audio-mission{font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a}
 .intake-audio-input-mix{display:grid;gap:3px}
 .intake-audio-input-detail{font-size:9px;color:#64748b;font-weight:700;white-space:nowrap}
 .intake-audio-transcript-head{display:flex;align-items:center;gap:6px}
 .intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums}
 .intake-audio-received{font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap}
-.intake-audio-start{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;font-weight:700}
+.intake-audio-start-stop{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;line-height:1.35;white-space:nowrap}
+.intake-audio-start-line{font-weight:700}
+.intake-audio-stop-line{font-weight:700;color:#475569}
 .intake-audio-duration{font-size:10px;font-variant-numeric:tabular-nums;font-weight:800;color:#0f172a}
 .intake-input-pill{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:9px;font-weight:900;white-space:nowrap}
 .intake-input-good{background:#dcfce7;color:#166534}
@@ -626,6 +666,7 @@ cw_header('Master Logbook');
 .intake-empty{padding:28px;text-align:center;color:#64748b}
 .intake-notice{border:1px solid #fbbf24;background:#fffbeb;color:#92400e;border-radius:12px;padding:12px;font-size:12px}
 .intake-error{color:#991b1b;max-width:280px;white-space:normal}
+.intake-audio-error{width:120px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
 .intake-progress{display:grid;gap:4px;min-width:120px}
 .intake-progress-bar{height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden}
 .intake-progress-fill{height:100%;background:#2563eb;border-radius:999px}
@@ -883,7 +924,7 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap intake-audio-table" data-audio-table data-hide-short="true" data-audio-total="<?= count($audio['rows']) ?>" data-audio-short="<?= (int)$audioShortRowCount ?>">
         <table class="intake-table intake-table-audio">
-          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
+          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start/Stop</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
           <tbody>
           <?php foreach ($audio['rows'] as $row): ?>
             <?php
@@ -893,7 +934,8 @@ cw_header('Master Logbook');
               $isShortRecording = $durationSeconds > 0 && $durationSeconds < $audioShortThresholdSeconds;
               $inputMix = is_array($row['intake_input_mix'] ?? null) ? $row['intake_input_mix'] : array();
               $inputMixClass = (($inputMix['dominant'] ?? '') === 'usb') ? 'intake-input-good' : 'intake-input-bad';
-              $audioError = cvr_intake_audio_relevant_error($row['error_message'] ?? '');
+              $audioError = cvr_intake_audio_error_display($row['error_message'] ?? '');
+              $audioErrorFull = cvr_intake_audio_relevant_error($row['error_message'] ?? '');
               $recordingId = (int)($row['id'] ?? 0);
               $transcriptionStatus = strtolower(trim((string)($row['transcription_status'] ?? '')));
               $canOpenTranscript = $recordingId > 0 && $transcriptionStatus === 'ready';
@@ -918,13 +960,16 @@ cw_header('Master Logbook');
                   —
                 <?php else: ?>
                   <?php foreach ($crewLines as $crewLine): ?>
-                    <div class="intake-audio-crew-line"><?= cvr_intake_h((string)($crewLine['role'] ?? 'Crew')) ?>: <?= cvr_intake_h((string)($crewLine['name'] ?? '')) ?></div>
+                    <div class="intake-audio-crew-line"><strong class="intake-audio-crew-role"><?= cvr_intake_h((string)($crewLine['role'] ?? 'Crew')) ?></strong>: <?= cvr_intake_h((string)($crewLine['name'] ?? '')) ?></div>
                   <?php endforeach; ?>
                 <?php endif; ?>
               </td>
               <td class="intake-audio-mission"><?= $missionCode !== '' ? cvr_intake_h($missionCode) : '—' ?></td>
-              <td class="intake-audio-start"><?= cvr_intake_h(cvr_intake_audio_start_label($pdo, $row['started_at'] ?? null, $tail)) ?></td>
-              <td class="intake-audio-duration"><?= $durationSeconds > 0 ? cvr_intake_h(cvr_intake_duration_hms($durationSeconds)) : '—' ?></td>
+              <td class="intake-audio-start-stop">
+                <div class="intake-audio-start-line"><?= cvr_intake_h(cvr_intake_audio_start_label($pdo, $row['started_at'] ?? null, $tail)) ?></div>
+                <div class="intake-audio-stop-line"><?= cvr_intake_h(cvr_intake_audio_stop_label($pdo, $row['started_at'] ?? null, $durationSeconds, $tail)) ?></div>
+              </td>
+              <td class="intake-audio-duration"><?= $durationSeconds > 0 ? cvr_intake_h(cvr_intake_duration_decimal($durationSeconds)) : '—' ?></td>
               <td>
                 <div class="intake-audio-input-mix">
                   <span class="intake-input-pill <?= cvr_intake_h($inputMixClass) ?>"><?= cvr_intake_h((string)($inputMix['label'] ?? 'iPhone Mic')) ?></span>
@@ -954,7 +999,7 @@ cw_header('Master Logbook');
                   <?= $canOpenTranscript ? '' : 'disabled' ?>
                 >View Transcript</button>
               </td>
-              <td class="intake-error" data-audio-error-cell><?= $audioError !== '' ? cvr_intake_h($audioError) : '—' ?></td>
+              <td class="intake-error intake-audio-error" data-audio-error-cell<?= $audioErrorFull !== '' ? ' title="' . cvr_intake_h($audioErrorFull) . '"' : '' ?>><?= $audioError !== '' ? cvr_intake_h($audioError) : '—' ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>
@@ -1842,6 +1887,16 @@ cw_header('Master Logbook');
       }
       return normalized.replace(/_/g, ' ').toUpperCase();
     };
+    const abbreviateAudioError = (text, maxLength = 52) => {
+      const normalized = String(text || '').trim();
+      if (normalized === '') {
+        return { display: '—', full: '' };
+      }
+      if (normalized.length <= maxLength) {
+        return { display: normalized, full: normalized };
+      }
+      return { display: normalized.slice(0, maxLength).trimEnd() + '...', full: normalized };
+    };
     const pollAudioStatus = async () => {
       const ids = Array.from(audioStatusCells)
         .map((cell) => cell.getAttribute('data-audio-recording-id'))
@@ -1890,7 +1945,13 @@ cw_header('Master Logbook');
           }
           const errorCell = row.querySelector('[data-audio-error-cell]');
           if (errorCell) {
-            errorCell.textContent = recording.error_message || '—';
+            const error = abbreviateAudioError(recording.error_message);
+            errorCell.textContent = error.display;
+            if (error.full !== '') {
+              errorCell.title = error.full;
+            } else {
+              errorCell.removeAttribute('title');
+            }
           }
         });
       } catch (error) {
