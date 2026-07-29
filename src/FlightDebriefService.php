@@ -3,10 +3,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/openai.php';
+require_once __DIR__ . '/time.php';
 
 final class FlightDebriefService
 {
-    private const PROMPT_VERSION = '1-4-9-v4-supportive-instructor';
+    private const PROMPT_VERSION = '1-4-9-v5-chief-instructor-voice';
     private const LOGIC_VERSION = 'grading-v1';
     private const ALLOWED_EVIDENCE = array('transcript', 'event_marker', 'garmin', 'adsb', 'audio');
 
@@ -311,30 +312,20 @@ final class FlightDebriefService
         );
         $context->execute(array((int)$debrief['bundle_id']));
         $debrief['context'] = $context->fetch(PDO::FETCH_ASSOC) ?: array();
+        $debrief['context']['operational_timezone'] = cw_aircraft_operational_timezone(
+            $this->pdo,
+            (int)($debrief['context']['aircraft_id'] ?? 0) > 0 ? (int)$debrief['context']['aircraft_id'] : null
+        );
         $debrief['context']['block_time_discrepancies'] = array();
-        $offBlock = strtotime((string)($debrief['context']['engine_start_utc'] ?? ''));
-        $hobbsDurationMs = $debrief['context']['exact_hobbs_duration_ms'] ?? null;
-        if ($offBlock !== false && is_numeric($hobbsDurationMs) && (int)$hobbsDurationMs >= 0) {
-            $computedOnBlock = $offBlock + ((int)$hobbsDurationMs / 1000);
-            $observedEngineStop = strtotime((string)($debrief['context']['app_engine_stop_utc'] ?? ''));
-            $debrief['context']['engine_stop_utc'] = gmdate('Y-m-d H:i:s', (int)round($computedOnBlock));
-            $debrief['context']['on_block_derivation'] = 'off_block_plus_crew_hobbs_delta';
-            if ($observedEngineStop !== false && abs($observedEngineStop - $computedOnBlock) > 60) {
-                $debrief['context']['block_time_discrepancies'][] = sprintf(
-                    'ON Block discrepancy: App Engine Stop was %s UTC, while OFF Block plus Hobbs END minus START gives %s UTC.',
-                    gmdate('H:i:s', $observedEngineStop),
-                    gmdate('H:i:s', (int)round($computedOnBlock))
-                );
-            }
-        }
         $flightRecordVersionId = (int)($debrief['context']['operational_flight_record_version_id'] ?? 0);
         $debrief['context']['legs'] = array();
         $debrief['context']['logbook_proposal'] = array();
         if ($flightRecordVersionId > 0) {
             $legs = $this->pdo->prepare(
                 'SELECT leg_index, departure_airport_code, arrival_airport_code,
-                        COALESCE(administrative_departure_utc, takeoff_utc) AS departure_utc,
-                        COALESCE(administrative_arrival_utc, landing_utc) AS arrival_utc,
+                        allocation_start_utc, allocation_end_utc,
+                        COALESCE(administrative_departure_utc, takeoff_utc, allocation_start_utc) AS departure_utc,
+                        COALESCE(administrative_arrival_utc, landing_utc, allocation_end_utc) AS arrival_utc,
                         allocated_hobbs_duration_ms, night_duration_ms,
                         cross_country_easa_qualified, cross_country_faa_qualified, landing_event_count
                  FROM ipca_operational_flight_leg_versions
@@ -355,7 +346,164 @@ final class FlightDebriefService
                 $debrief['context']['logbook_proposal'] = $proposalRow;
             }
         }
+        $this->enrichLogbookContext($debrief['context']);
         return $debrief;
+    }
+
+    /** @param array<string,mixed> $context */
+    private function enrichLogbookContext(array &$context): void
+    {
+        $legs = is_array($context['legs'] ?? null) ? $context['legs'] : array();
+        $firstLeg = $legs[0] ?? null;
+        $lastLeg = $legs !== array() ? $legs[array_key_last($legs)] : null;
+        $flightRecordVersionId = (int)($context['operational_flight_record_version_id'] ?? 0);
+        $logbookTimezone = (string)($context['operational_timezone'] ?? 'UTC');
+        $recordEngineStart = $this->flightRecordEventUtc($flightRecordVersionId, 'ENGINE_START', false);
+        $recordEngineStop = $this->flightRecordEventUtc($flightRecordVersionId, 'ENGINE_STOP', true);
+        $appEngineStart = $this->firstNonEmptyString(
+            $context['engine_start_utc'] ?? null,
+            $context['app_engine_start_utc'] ?? null
+        );
+        $appEngineStop = $this->firstNonEmptyString($context['app_engine_stop_utc'] ?? null);
+
+        $offBlockUtc = $this->firstNonEmptyString(
+            $appEngineStart,
+            $recordEngineStart,
+            is_array($firstLeg) ? ($firstLeg['allocation_start_utc'] ?? null) : null,
+            is_array($firstLeg) ? ($firstLeg['departure_utc'] ?? null) : null,
+            $context['avionics_on_utc'] ?? null,
+            $context['garmin_start_utc'] ?? null,
+            $context['recording_start_utc'] ?? null
+        );
+
+        $hobbsDurationMs = $context['exact_hobbs_duration_ms'] ?? null;
+        if (!is_numeric($hobbsDurationMs) && is_array($firstLeg) && is_numeric($firstLeg['allocated_hobbs_duration_ms'] ?? null)) {
+            $hobbsDurationMs = (int)$firstLeg['allocated_hobbs_duration_ms'];
+        }
+        $computedOnFromHobbs = null;
+        if ($offBlockUtc !== null && is_numeric($hobbsDurationMs) && (int)$hobbsDurationMs >= 0) {
+            $offBlockTs = strtotime($offBlockUtc);
+            if ($offBlockTs !== false) {
+                $computedOnFromHobbs = gmdate('Y-m-d H:i:s', (int)round($offBlockTs + ((int)$hobbsDurationMs / 1000)));
+            }
+        }
+
+        $onBlockUtc = $this->firstNonEmptyString(
+            $computedOnFromHobbs,
+            $appEngineStop,
+            $context['engine_stop_utc'] ?? null,
+            $recordEngineStop,
+            is_array($lastLeg) ? ($lastLeg['allocation_end_utc'] ?? null) : null,
+            is_array($lastLeg) ? ($lastLeg['arrival_utc'] ?? null) : null,
+            $context['avionics_off_utc'] ?? null,
+            $context['garmin_end_utc'] ?? null
+        );
+
+        if ($offBlockUtc !== null) {
+            $context['engine_start_utc'] = $offBlockUtc;
+        }
+        if ($onBlockUtc !== null) {
+            $context['engine_stop_utc'] = $onBlockUtc;
+            if ($computedOnFromHobbs !== null) {
+                $context['on_block_derivation'] = 'off_block_plus_hobbs_delta';
+            }
+        }
+
+        if ($computedOnFromHobbs !== null && $appEngineStop !== null) {
+            $observedEngineStop = strtotime($appEngineStop);
+            $computedTs = strtotime($computedOnFromHobbs);
+            if ($observedEngineStop !== false && $computedTs !== false && abs($observedEngineStop - $computedTs) > 60) {
+                $context['block_time_discrepancies'][] = sprintf(
+                    'ON Block discrepancy: App Engine Stop was %s LT, while OFF Block plus Hobbs END minus START gives %s LT.',
+                    cw_logbook_time(gmdate('Y-m-d H:i:s', $observedEngineStop), $logbookTimezone),
+                    cw_logbook_time(gmdate('Y-m-d H:i:s', $computedTs), $logbookTimezone)
+                );
+            }
+        }
+
+        $summary = json_decode((string)($context['summary_json'] ?? '{}'), true);
+        $crew = is_array($summary['preview']['calculations']['crew_reconciliation'] ?? null)
+            ? $summary['preview']['calculations']['crew_reconciliation']
+            : array();
+
+        $hobbsStart = $this->firstNumeric(
+            $context['hobbs_start_hours'] ?? null,
+            $context['starting_hobbs'] ?? null,
+            $crew['crew_hobbs_start'] ?? null
+        );
+        $tachoStart = $this->firstNumeric(
+            $context['tacho_start_hours'] ?? null,
+            $context['starting_tacho'] ?? null,
+            $crew['crew_tacho_start'] ?? null
+        );
+        $hobbsEnd = $this->firstNumeric(
+            $context['hobbs_end_hours'] ?? null,
+            $context['ending_hobbs'] ?? null,
+            $crew['crew_hobbs_end'] ?? null
+        );
+        $tachoEnd = $this->firstNumeric(
+            $context['tacho_end_hours'] ?? null,
+            $context['ending_tacho'] ?? null,
+            $crew['crew_tacho_end'] ?? null
+        );
+
+        if ($hobbsEnd === null && $hobbsStart !== null && is_numeric($hobbsDurationMs)) {
+            $hobbsEnd = $hobbsStart + ((int)$hobbsDurationMs / 3600000);
+        }
+        if ($tachoEnd === null && $tachoStart !== null && is_numeric($context['exact_tacho_duration_ms'] ?? null)) {
+            $tachoEnd = $tachoStart + ((int)$context['exact_tacho_duration_ms'] / 3600000);
+        }
+
+        if ($hobbsStart !== null) {
+            $context['hobbs_start_hours'] = $hobbsStart;
+        }
+        if ($tachoStart !== null) {
+            $context['tacho_start_hours'] = $tachoStart;
+        }
+        if ($hobbsEnd !== null) {
+            $context['hobbs_end_hours'] = $hobbsEnd;
+        }
+        if ($tachoEnd !== null) {
+            $context['tacho_end_hours'] = $tachoEnd;
+        }
+    }
+
+    private function flightRecordEventUtc(int $flightRecordVersionId, string $eventType, bool $latest): ?string
+    {
+        if ($flightRecordVersionId <= 0 || !$this->tableExists('ipca_flight_airport_event_versions')) {
+            return null;
+        }
+        $order = $latest ? 'DESC' : 'ASC';
+        $statement = $this->pdo->prepare(
+            'SELECT event_time_utc
+             FROM ipca_flight_airport_event_versions
+             WHERE flight_record_version_id = ? AND event_type = ?
+             ORDER BY event_time_utc ' . $order . ' LIMIT 1'
+        );
+        $statement->execute(array($flightRecordVersionId, $eventType));
+        $value = trim((string)$statement->fetchColumn());
+        return $value !== '' ? $value : null;
+    }
+
+    private function firstNonEmptyString(mixed ...$values): ?string
+    {
+        foreach ($values as $value) {
+            $text = trim((string)($value ?? ''));
+            if ($text !== '' && $text !== '0000-00-00 00:00:00') {
+                return $text;
+            }
+        }
+        return null;
+    }
+
+    private function firstNumeric(mixed ...$values): ?float
+    {
+        foreach ($values as $value) {
+            if (is_numeric($value)) {
+                return (float)$value;
+            }
+        }
+        return null;
     }
 
     /** @param array<int,array<string,mixed>> $reviews */
@@ -585,7 +733,7 @@ final class FlightDebriefService
     private function structuredSystemPrompt(): string
     {
         return implode("\n", array(
-            'You create a professional, factual, motivational flight-training debrief draft for instructor review.',
+            'You draft a post-flight debrief for instructor review—as if handwritten by a senior Part 141 Chief Flight Instructor with 15,000+ hours who genuinely enjoys teaching and is sitting with the student immediately after the lesson.',
             'The AI only suggests grades. Never claim authority over the instructor.',
             'Return JSON with: general (string), chronological_review (array of objects with title, narrative, evidence_refs), mission_standards_assessment (string), summary_next_steps (string), evaluations (array), uncertainties (array).',
             'Each evaluation requires rubric_type task|srm, rubric_item_id, suggested_grade or null, evidence_status supported|partial|insufficient_evidence, completion_status completed|not_completed|uncertain, rationale, confidence 0..1, evidence_refs, instructor_prompting, main_issue, improvement_suggestion.',
@@ -597,13 +745,22 @@ final class FlightDebriefService
             'Exercise markers define chronological segment boundaries. Training Remark markers prioritize the transcript/audio immediately following the marker. Safety markers create separate safety windows.',
             'Every factual claim and suggested grade must cite transcript chunk/time, marker, Garmin timeline, ADS-B context, or audio offset.',
             'Garmin supports performance; transcript supports instruction, prompting, checklists and decisions. ADS-B does not prove visual acquisition.',
-            'Write the chronological review as detailed, copy-ready instructor prose. Use meaningful lettered section titles, numbered subsections when useful, and natural plain-text subheadings such as Key learning points, Main reminders, Main takeaway, and Next time. Keep citations outside the narrative.',
-            'DEFAULT STUDENT VOICE: Write as an experienced, professional, supportive flight instructor speaking directly to the student after the lesson. The student should clearly understand what went well, what to improve, why it matters, and feel motivated to fly again.',
-            'Lead with deserved strengths before improvements. Explicitly acknowledge improvement during the lesson with natural phrases such as “You’re making good progress”, “This became noticeably better during the lesson”, “With a little more practice”, “Once this becomes more consistent”, “The foundation is clearly there”, or “Keep building on”, without overpraising.',
-            'Present weaknesses honestly as coaching opportunities. Explain what happened, why the correction matters, and finish each concern with a constructive next action. Focus on confidence, judgment, understanding, and development rather than judging isolated events.',
-            'Student-facing prose must not sound like an audit, compliance report, checkride report, FAA evaluation, or examiner narrative. Avoid phrases including “the evidence suggests”, “supports coached execution”, “required prompting”, “root cause”, “overall assessment”, and “performance concern”. Evidence and confidence terminology belongs only in evaluation rationale and evidence_refs, never in general, chronological_review narratives, mission_standards_assessment, or summary_next_steps.',
-            'Keep the tone conversational, natural, coherent, and human, as if instructor and student are sitting together in the briefing room. Vary section structure so the flight reads as one connected lesson rather than repeated independent reports.',
-            'Reduce repetitive wording by approximately 20–30 percent while preserving every important learning point.',
+            'CHRONOLOGICAL REVIEW — titles: Put only the descriptive segment name in title. Never prefix titles with letters or numbers (no "A.", "B.", "1."). Examples: "Preflight, Cockpit Setup & Taxi", "Takeoff & Departure", "Training Area – Slow Flight". The application adds lettering.',
+            'CHRONOLOGICAL REVIEW — structure: Vary each segment naturally. Do NOT use the same subsection template every time. Not every segment needs bullet lists or subheadings.',
+            'Some segments may be a short conversational paragraph only. Some may include a few coaching bullets. Some may end with one encouraging sentence. Some need no bullets at all.',
+            'Avoid repeating subsection labels such as "Key learning points", "Main takeaway", "Next time", "Main reminders" in every segment. If you use a subheading once, skip it elsewhere. Prefer flowing prose.',
+            'CHRONOLOGICAL REVIEW — voice: Write as the instructor speaking directly to the student ("you/your"), not about the student ("the customer", "the pilot in training"). Sound like a briefing-room conversation, not an evaluator report or FAA audit.',
+            'Prefer: "During slow flight you needed a bit of coaching with the setup, which is completely normal at this stage. Once the airplane was stabilized your control became much smoother."',
+            'Avoid: "The slow-flight sequence needed some coaching." / "The lesson showed readiness in some areas." / "Performance concern." / "The evidence suggests." / "Required prompting." / "Root cause."',
+            'Explain WHY corrections matter—not just what to do. Example: "Think of the runway centerline as something you protect continuously. Small corrections early are almost invisible; larger corrections later create unnecessary workload."',
+            'When the student improves during the lesson, acknowledge it in that same segment—not only at the end. Example: "After we discussed the correction, your very next approach was noticeably better. That is exactly what we want."',
+            'Connect segments so the student relives the flight chronologically. Each segment should flow naturally from the previous one.',
+            'Use human instructor phrasing naturally and sparingly, e.g. "One thing I would like you to pay attention to…", "The good news is…", "What impressed me here was…", "This became much better later in the lesson.", "Do not overthink this…", "Give yourself another second before…", "You are closer than you probably think.", "This will come with repetition."',
+            'Reduce repetitive stock phrases: avoid overusing "Next time", "Main takeaway", "Key learning points", "You needed coaching", "Continue to", and "Focus on". Vary wording.',
+            'GENERAL: Open with a warm, specific overview of the flight as a whole—what the lesson was about and the overall tone of progress.',
+            'MISSION_STANDARDS_ASSESSMENT: Honest, balanced, encouraging summary of scenario progress. Lead with strengths. Never read like a checkride sheet.',
+            'SUMMARY_NEXT_STEPS: End the entire debrief on encouragement. Highlight progress, what improved during the lesson, and confidence for the next flight while staying honest. The student should finish thinking: "I know what to improve, but I am excited to go fly again." Never end with a list of deficiencies alone.',
+            'Student-facing prose must not sound like an audit, compliance report, checkride report, FAA evaluation, or examiner narrative. Evidence and confidence terminology belongs only in evaluation rationale and evidence_refs—not in general, chronological_review narratives, mission_standards_assessment, or summary_next_steps.',
             'Be specific and constructive. Do not fabricate events, measurements, dialogue, traffic awareness, or task completion.',
         ));
     }
@@ -662,12 +819,44 @@ final class FlightDebriefService
         }
         return array(
             'general' => trim((string)($decoded['general'] ?? 'Instructor review required.')),
-            'chronological_review' => is_array($decoded['chronological_review'] ?? null) ? $decoded['chronological_review'] : array(),
+            'chronological_review' => $this->sanitizeChronologicalReview(
+                is_array($decoded['chronological_review'] ?? null) ? $decoded['chronological_review'] : array()
+            ),
             'mission_standards_assessment' => trim((string)($decoded['mission_standards_assessment'] ?? 'See task-level evidence suggestions.')),
             'summary_next_steps' => trim((string)($decoded['summary_next_steps'] ?? 'Review evidence and agree specific next steps with the student.')),
             'evaluations' => $evaluations,
             'uncertainties' => is_array($decoded['uncertainties'] ?? null) ? $decoded['uncertainties'] : array(),
         );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    private function sanitizeChronologicalReview(array $segments): array
+    {
+        $sanitized = array();
+        foreach ($segments as $segment) {
+            if (!is_array($segment)) {
+                continue;
+            }
+            $title = $this->sanitizeChronologicalTitle((string)($segment['title'] ?? 'Flight Segment'));
+            $sanitized[] = array_merge($segment, array(
+                'title' => $title !== '' ? $title : 'Flight Segment',
+                'narrative' => trim((string)($segment['narrative'] ?? '')),
+            ));
+        }
+        return $sanitized;
+    }
+
+    private function sanitizeChronologicalTitle(string $title): string
+    {
+        $title = trim($title);
+        while ($title !== '' && preg_match('/^[A-Z]\.\s*/', $title)) {
+            $title = preg_replace('/^[A-Z]\.\s*/', '', $title, 1) ?? $title;
+            $title = trim($title);
+        }
+        return trim($title, " \t\n\r\0\x0B.-");
     }
 
     /** @param list<array<string,mixed>> $evaluations @return array<string,mixed> */

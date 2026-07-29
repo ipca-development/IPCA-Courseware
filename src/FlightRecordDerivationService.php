@@ -291,7 +291,7 @@ final class FlightRecordDerivationService
             $flightRecordVersionId,
             $type,
             (string)($value['method'] ?? 'not_configured'),
-            (string)($value['calculation_version'] ?? 'phase3-v1'),
+            substr((string)($value['calculation_version'] ?? 'phase3-v1'), 0, 64),
             AuditEventService::jsonEncode($this->exactValue($value)),
             AuditEventService::jsonEncode($this->displayValue($value)),
             AuditEventService::jsonEncode(array('config_version_uuid' => $configVersionUuid)),

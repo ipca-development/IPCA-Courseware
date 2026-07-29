@@ -187,14 +187,18 @@ function cvr_replay_share_base_url(): string
     return ($https ? 'https' : 'http') . '://' . $host;
 }
 
-function cvr_intake_timestamp(mixed $value): string
+function cvr_intake_timestamp(mixed $value, string $timezone = 'UTC'): string
 {
     $text = trim((string)$value);
     if ($text === '') {
         return '—';
     }
-    $timestamp = strtotime($text);
-    return $timestamp === false ? $text : date('M j, Y H:i:s', $timestamp);
+    return cw_logbook_datetime($text, $timezone);
+}
+
+function cvr_debrief_time(mixed $value, string $timezone = 'UTC'): string
+{
+    return cw_logbook_time(trim((string)$value), $timezone);
 }
 
 function cvr_intake_bytes(mixed $value): string
@@ -341,18 +345,26 @@ function cvr_debrief_overall_label(string $grade): string
     )[strtoupper($grade)] ?? ucwords(strtolower($grade));
 }
 
+function cvr_debrief_segment_label(string $title, int $index): string
+{
+    $title = trim($title);
+    while ($title !== '' && preg_match('/^[A-Z]\.\s*/', $title)) {
+        $title = preg_replace('/^[A-Z]\.\s*/', '', $title, 1) ?? $title;
+        $title = trim($title);
+    }
+    $title = trim($title, " \t\n\r\0\x0B.-");
+    if ($title === '') {
+        $title = 'Flight Segment';
+    }
+    return ($index < 26 ? chr(65 + $index) . '. ' : '') . $title;
+}
+
 function cvr_debrief_hours(mixed $milliseconds, int $precision = 1): string
 {
     if (!is_numeric($milliseconds)) {
         return '—';
     }
     return number_format(max(0, (float)$milliseconds) / 3600000, $precision);
-}
-
-function cvr_debrief_time(mixed $value): string
-{
-    $timestamp = strtotime(trim((string)$value));
-    return $timestamp === false ? '—' : date('H:i', $timestamp);
 }
 
 function cvr_debrief_proposed_value(array $values, array $keys, mixed $fallback = '—'): mixed
@@ -844,6 +856,7 @@ cw_header('Master Logbook');
         if (is_array($context['block_time_discrepancies'] ?? null)) {
             $meterDiscrepancies = array_values(array_merge($meterDiscrepancies, $context['block_time_discrepancies']));
         }
+        $logbookTimezone = (string)($context['operational_timezone'] ?? 'UTC');
         $durationStart = strtotime((string)($context['engine_start_utc'] ?? $context['garmin_start_utc'] ?? ''));
         $durationEnd = strtotime((string)($context['engine_stop_utc'] ?? $context['garmin_end_utc'] ?? ''));
         $fallbackDurationMs = $durationStart !== false && $durationEnd !== false && $durationEnd >= $durationStart
@@ -853,8 +866,7 @@ cw_header('Master Logbook');
         $recordLandingCount = max((int)($context['landing_event_count'] ?? 0), (int)($context['gps_landing_count'] ?? 0));
         $copySections = array();
         foreach (is_array($chronological) ? $chronological : array() as $index => $segment) {
-            $prefix = $index < 26 ? chr(65 + $index) . '. ' : '';
-            $copySections[] = $prefix . trim((string)($segment['title'] ?? 'Flight Segment'))
+            $copySections[] = cvr_debrief_segment_label((string)($segment['title'] ?? 'Flight Segment'), $index)
                 . "\n" . trim((string)($segment['narrative'] ?? ''));
         }
         $copySections[] = "Overall Assessment\n" . trim((string)$selectedDebrief['mission_assessment_text']);
@@ -957,9 +969,9 @@ cw_header('Master Logbook');
           <div class="debrief-narrative"><strong>General</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['general_text'])) ?></div>
           <div class="debrief-section-head">Chronological Flight Review</div>
           <div class="debrief-chronology">
-            <?php foreach (is_array($chronological) ? $chronological : array() as $segment): ?>
+            <?php foreach (is_array($chronological) ? $chronological : array() as $segmentIndex => $segment): ?>
               <article class="debrief-flight-segment">
-                <h5><?= cvr_intake_h($segment['title'] ?? 'Flight Segment') ?></h5>
+                <h5><?= cvr_intake_h(cvr_debrief_segment_label((string)($segment['title'] ?? 'Flight Segment'), (int)$segmentIndex)) ?></h5>
                 <p><?= nl2br(cvr_intake_h($segment['narrative'] ?? '')) ?></p>
                 <?php if (!empty($segment['evidence_refs'])): ?>
                   <details class="debrief-evidence no-print">
@@ -1019,8 +1031,9 @@ cw_header('Master Logbook');
         <section class="debrief-section">
           <div class="debrief-section-head">Flight and Logbook Record</div>
           <div class="debrief-logbook-summary">
-            <div><span class="debrief-label">OFF Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_start_utc'] ?? null)) ?></span></div>
-            <div><span class="debrief-label">ON Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_stop_utc'] ?? null)) ?></span></div>
+            <div><span class="debrief-label">OFF Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_start_utc'] ?? null, $logbookTimezone)) ?></span></div>
+            <div><span class="debrief-label">ON Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_stop_utc'] ?? null, $logbookTimezone)) ?></span></div>
+            <div class="no-print" style="grid-column:1 / -1"><span class="intake-muted">Logbook times shown in aircraft operational local time (<?= cvr_intake_h($logbookTimezone) ?>). Source timestamps remain stored in UTC.</span></div>
             <div><span class="debrief-label">Hobbs Start</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_start_hours'] ?? $context['starting_hobbs'] ?? '—') ?></span></div>
             <div><span class="debrief-label">Hobbs End</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_end_hours'] ?? $context['ending_hobbs'] ?? '—') ?></span></div>
             <div><span class="debrief-label">Tacho Start</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_start_hours'] ?? $context['starting_tacho'] ?? '—') ?></span></div>
@@ -1073,9 +1086,9 @@ cw_header('Master Logbook');
                   <tr>
                     <td><?= (int)($leg['leg_index'] ?? 1) ?></td>
                     <td><?= cvr_intake_h($leg['departure_airport_code'] ?: '—') ?></td>
-                    <td><?= cvr_intake_h(cvr_debrief_time($departureTime)) ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($departureTime, $logbookTimezone)) ?></td>
                     <td><?= cvr_intake_h($leg['arrival_airport_code'] ?: '—') ?></td>
-                    <td><?= cvr_intake_h(cvr_debrief_time($arrivalTime)) ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($arrivalTime, $logbookTimezone)) ?></td>
                     <td><?= cvr_intake_h($context['aircraft_type'] ?: '—') ?></td>
                     <td><?= cvr_intake_h($context['aircraft_registration'] ?: '—') ?></td>
                     <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('single_engine_time'), '—') : '—') ?></td>

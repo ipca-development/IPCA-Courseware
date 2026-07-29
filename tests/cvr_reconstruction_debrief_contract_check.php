@@ -100,10 +100,21 @@ $checks = array(
         && str_contains($debriefSource, 'ipca_flight_record_logbook_proposals'),
     'logbook block times use App OFF Block and crew Hobbs duration' =>
         str_contains($debriefSource, "event_type = \\'engine_start_off_block\\'")
-        && str_contains($debriefSource, 'off_block_plus_crew_hobbs_delta')
+        && str_contains($debriefSource, 'off_block_plus_hobbs_delta')
         && str_contains($debriefSource, 'ON Block discrepancy: App Engine Stop')
         && str_contains($debriefPage, "\$context['engine_start_utc']")
         && str_contains($debriefPage, "\$context['engine_stop_utc']"),
+    'logbook block times display in aircraft operational local time' =>
+        str_contains($debriefSource, 'operational_timezone')
+        && str_contains($debriefSource, 'cw_aircraft_operational_timezone')
+        && str_contains($debriefSource, 'cw_logbook_time')
+        && str_contains($debriefPage, 'cvr_intake_timestamp($context[\'engine_start_utc\']')
+        && str_contains($debriefPage, '$logbookTimezone'),
+    'logbook block times fall back to flight record legs and hobbs duration' =>
+        str_contains($debriefSource, 'enrichLogbookContext')
+        && str_contains($debriefSource, 'allocation_start_utc')
+        && str_contains($debriefSource, 'off_block_plus_hobbs_delta')
+        && str_contains($debriefSource, 'flightRecordEventUtc'),
     'canonical derivation returns linkable Flight Record version' =>
         str_contains($derivationService, "'flight_record_version_id' => (int)\$version['id']")
         && str_contains($bundleService, "\$derived['flight_record_version_id']")
@@ -117,6 +128,16 @@ $checks = array(
         str_contains($debriefSource, "'suggested_grade' => \$grade")
         && str_contains($debriefSource, "\$grade = null")
         && str_contains($debriefSource, 'unassessed_items_do_not_default_to_no'),
+    'chief instructor voice avoids template debrief structure' =>
+        str_contains($debriefSource, 'v5-chief-instructor-voice')
+        && str_contains($debriefSource, 'Never prefix titles with letters or numbers')
+        && str_contains($debriefSource, 'Do NOT use the same subsection template every time')
+        && str_contains($debriefSource, 'Explain WHY corrections matter')
+        && str_contains($debriefSource, 'excited to go fly again'),
+    'chronological section labels are deduplicated in UI and normalization' =>
+        str_contains($debriefSource, 'sanitizeChronologicalTitle')
+        && str_contains($debriefPage, 'cvr_debrief_segment_label')
+        && str_contains($debriefPage, 'cvr_debrief_segment_label((string)($segment[\'title\']'),
 );
 
 $blue = $calculate->invoke($service, array(

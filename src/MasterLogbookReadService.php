@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/time.php';
+
 /**
  * Read-only orchestration service for the future Master Logbook.
  *
@@ -396,6 +398,7 @@ final class MasterLogbookReadService
                     r.status AS record_status,
                     s.id AS session_id,
                     s.session_uuid,
+                    s.aircraft_id,
                     s.aircraft_registration,
                     s.avionics_on_utc,
                     s.avionics_off_utc,
@@ -516,9 +519,11 @@ final class MasterLogbookReadService
                     MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out'))) AS garmin_tacho_out,
                     MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in'))) AS garmin_tacho_in,
                     MAX(JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time'))) AS garmin_tacho_time,
-                    s.row_count
+                    s.row_count,
+                    MAX(g.aircraft_id) AS aircraft_id
                 FROM ipca_flightcircle_garmin_matches m
                 INNER JOIN ipca_garmin_csv_flight_summaries s ON s.csv_file_id = m.csv_file_id
+                LEFT JOIN ipca_garmin_csv_files g ON g.id = s.csv_file_id
                 WHERE m.operation_id IS NOT NULL
                   AND m.csv_file_id IS NOT NULL
                   AND m.match_status IN ('high_confidence','probable')
@@ -569,8 +574,10 @@ final class MasterLogbookReadService
                     JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out')) AS garmin_tacho_out,
                     JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in')) AS garmin_tacho_in,
                     JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time')) AS garmin_tacho_time,
-                    s.row_count
+                    s.row_count,
+                    g.aircraft_id
                 FROM ipca_garmin_csv_flight_summaries s
+                LEFT JOIN ipca_garmin_csv_files g ON g.id = s.csv_file_id
                 LEFT JOIN ipca_flightcircle_garmin_matches m ON m.csv_file_id = s.csv_file_id AND m.operation_id IS NOT NULL AND m.match_status IN ('high_confidence','probable')
                 WHERE m.id IS NULL
                 ORDER BY COALESCE(s.departure_time_utc, s.arrival_time_utc) DESC, s.csv_file_id DESC
@@ -758,8 +765,10 @@ final class MasterLogbookReadService
                 JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_out')) AS garmin_tacho_out,
                 JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_in')) AS garmin_tacho_in,
                 JSON_UNQUOTE(JSON_EXTRACT(s.summary_json, '$.tacho_time')) AS garmin_tacho_time,
-                s.row_count
+                s.row_count,
+                g.aircraft_id
             FROM ipca_garmin_csv_flight_summaries s
+            LEFT JOIN ipca_garmin_csv_files g ON g.id = s.csv_file_id
             WHERE s.csv_file_id = ?
             LIMIT 1
         ", array($csvFileId));
@@ -810,6 +819,9 @@ final class MasterLogbookReadService
         $recordId = (int)$row['operational_flight_record_id'];
         $versionId = (int)$row['flight_record_version_id'];
         $legIndex = (int)$row['leg_index'];
+        $timezone = $this->aircraftOperationalTimezoneFromRow($row);
+        $departureUtc = $row['allocation_start_utc'] ?? null;
+        $arrivalUtc = $row['allocation_end_utc'] ?? null;
         return $this->normalizeCandidate(array(
             'event_key' => 'current-event:ofr:' . $recordId,
             'leg_key' => 'current-leg:ofrv:' . $versionId . ':leg:' . $legIndex,
@@ -825,15 +837,15 @@ final class MasterLogbookReadService
             'anchor_rank' => !empty($row['finalized_at']) ? 100 : (((string)$row['readiness_status'] === 'ready') ? 90 : 70),
             'leg_structure_type' => 'confirmed_leg',
             'leg_structure_status' => 'confirmed',
-            'date' => $this->datePart((string)($row['allocation_start_utc'] ?? $row['avionics_on_utc'] ?? '')),
-            'date_sort' => (string)($row['allocation_start_utc'] ?? $row['avionics_on_utc'] ?? ''),
+            'date' => cw_logbook_date((string)$departureUtc, $timezone) ?? $this->datePart((string)($departureUtc ?? $row['avionics_on_utc'] ?? '')),
+            'date_sort' => (string)($departureUtc ?? $row['avionics_on_utc'] ?? ''),
             'aircraft' => $this->provenanceValue((string)($row['aircraft_registration'] ?? ''), (string)($row['aircraft_registration'] ?? ''), 'ipca_flight_sessions.aircraft_registration', 1.0, 'system'),
             'pilot_1' => $this->emptyProvenanceValue(null, 'not_traced'),
             'pilot_1_role' => $this->emptyProvenanceValue(null, 'unresolved'),
             'pilot_2' => $this->emptyProvenanceValue(null, 'not_traced'),
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'unresolved'),
-            'departure_local_time' => $this->provenanceValue($row['allocation_start_utc'] ?? null, $row['allocation_start_utc'] ?? null, 'ipca_operational_flight_leg_versions.allocation_start_utc', 0.9, 'system'),
-            'arrival_local_time' => $this->provenanceValue($row['allocation_end_utc'] ?? null, $row['allocation_end_utc'] ?? null, 'ipca_operational_flight_leg_versions.allocation_end_utc', 0.9, 'system'),
+            'departure_local_time' => $this->logbookLocalTimeProvenance($departureUtc, $timezone, 'ipca_operational_flight_leg_versions.allocation_start_utc', 0.9, 'system'),
+            'arrival_local_time' => $this->logbookLocalTimeProvenance($arrivalUtc, $timezone, 'ipca_operational_flight_leg_versions.allocation_end_utc', 0.9, 'system'),
             'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.departure_airport_code', 0.85, 'system'),
             'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_operational_flight_leg_versions.arrival_airport_code', 0.85, 'system'),
             'departure_hobbs' => $this->provenanceValue($row['hobbs_start_hours'] ?? null, $row['hobbs_start_hours'] ?? null, 'ipca_operational_flight_record_versions.hobbs_start_hours', 0.9, 'system'),
@@ -912,6 +924,7 @@ final class MasterLogbookReadService
         $csvFileId = (int)$row['csv_file_id'];
         $start = (string)($row['departure_time_utc'] ?? '');
         $end = (string)($row['arrival_time_utc'] ?? '');
+        $timezone = $this->aircraftOperationalTimezoneFromRow($row);
         $sourceRecordKeys = array('aircraft_operation' => 'ao:' . $operationId, 'csv_file' => 'csv:' . $csvFileId);
         if ((int)($row['match_id'] ?? 0) > 0) {
             $sourceRecordKeys['flightcircle_garmin_match'] = 'fcgm:' . (int)$row['match_id'];
@@ -933,15 +946,15 @@ final class MasterLogbookReadService
             'anchor_rank' => 85,
             'leg_structure_type' => ((string)($row['match_status'] ?? '') === 'high_confidence') ? 'confirmed_leg' : 'inferred_leg',
             'leg_structure_status' => ((string)($row['match_status'] ?? '') === 'high_confidence') ? 'confirmed' : 'inferred',
-            'date' => $this->datePart($start),
+            'date' => cw_logbook_date($start, $timezone) ?? $this->datePart($start),
             'date_sort' => $start,
             'aircraft' => $this->provenanceValue($row['tail_number'] ?? null, $row['tail_number'] ?? null, 'ipca_garmin_csv_flight_summaries.tail_number', 0.85, 'needs_review'),
             'pilot_1' => $this->emptyProvenanceValue(null, 'not_traced'),
             'pilot_1_role' => $this->emptyProvenanceValue(null, 'unresolved'),
             'pilot_2' => $this->emptyProvenanceValue(null, 'not_traced'),
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'unresolved'),
-            'departure_local_time' => $this->provenanceValue($start, $start !== '' ? $start : null, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.75, 'needs_review'),
-            'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.75, 'needs_review'),
+            'departure_local_time' => $this->logbookLocalTimeProvenance($start !== '' ? $start : null, $timezone, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.75, 'needs_review'),
+            'arrival_local_time' => $this->logbookLocalTimeProvenance($end !== '' ? $end : null, $timezone, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.75, 'needs_review'),
             'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.75, 'needs_review'),
             'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.75, 'needs_review'),
             'departure_hobbs' => $this->counterProvenance($row['garmin_hobbs_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_out', 0.9, 'system'),
@@ -972,6 +985,7 @@ final class MasterLogbookReadService
         $csvFileId = (int)$row['csv_file_id'];
         $start = (string)($row['departure_time_utc'] ?? '');
         $end = (string)($row['arrival_time_utc'] ?? '');
+        $timezone = $this->aircraftOperationalTimezoneFromRow($row);
         return $this->normalizeCandidate(array(
             'event_key' => 'unresolved-garmin:csv:' . $csvFileId,
             'leg_key' => 'unresolved-garmin-leg:csv:' . $csvFileId . ':summary',
@@ -983,15 +997,15 @@ final class MasterLogbookReadService
             'anchor_rank' => 20,
             'leg_structure_type' => 'inferred_leg',
             'leg_structure_status' => 'inferred',
-            'date' => $this->datePart($start),
+            'date' => cw_logbook_date($start, $timezone) ?? $this->datePart($start),
             'date_sort' => $start,
             'aircraft' => $this->provenanceValue($row['tail_number'] ?? null, $row['tail_number'] ?? null, 'ipca_garmin_csv_flight_summaries.tail_number', 0.7, 'unreviewed'),
             'pilot_1' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_1_role' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_2' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'not_available'),
-            'departure_local_time' => $this->provenanceValue($start, $start !== '' ? $start : null, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.7, 'unreviewed'),
-            'arrival_local_time' => $this->provenanceValue($end, $end !== '' ? $end : null, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.7, 'unreviewed'),
+            'departure_local_time' => $this->logbookLocalTimeProvenance($start !== '' ? $start : null, $timezone, 'ipca_garmin_csv_flight_summaries.departure_time_utc', 0.7, 'unreviewed'),
+            'arrival_local_time' => $this->logbookLocalTimeProvenance($end !== '' ? $end : null, $timezone, 'ipca_garmin_csv_flight_summaries.arrival_time_utc', 0.7, 'unreviewed'),
             'departure_airport' => $this->airportProvenanceFromExplicitCode($row['departure_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.departure_airport_code', 0.7, 'unreviewed'),
             'arrival_airport' => $this->airportProvenanceFromExplicitCode($row['arrival_airport_code'] ?? null, 'ipca_garmin_csv_flight_summaries.arrival_airport_code', 0.7, 'unreviewed'),
             'departure_hobbs' => $this->counterProvenance($row['garmin_hobbs_out'] ?? null, 'ipca_garmin_csv_flight_summaries.summary_json.hobbs_out', 0.8, 'unreviewed'),
@@ -1021,6 +1035,7 @@ final class MasterLogbookReadService
     {
         $recordingId = (int)$row['id'];
         $started = (string)($row['started_at'] ?? '');
+        $timezone = $this->aircraftOperationalTimezoneFromRow($row);
         return $this->normalizeCandidate(array(
             'event_key' => 'orphan-recording:rec:' . $recordingId,
             'leg_key' => 'orphan-recording-leg:rec:' . $recordingId . ':recording',
@@ -1032,14 +1047,14 @@ final class MasterLogbookReadService
             'anchor_rank' => 10,
             'leg_structure_type' => 'unresolved_leg_structure',
             'leg_structure_status' => 'unresolved',
-            'date' => $this->datePart($started),
+            'date' => cw_logbook_date($started, $timezone) ?? $this->datePart($started),
             'date_sort' => $started,
             'aircraft' => $this->provenanceValue($row['aircraft_registration'] ?? null, $row['aircraft_registration'] ?? null, 'ipca_cockpit_recordings.aircraft_registration', 0.5, 'unreviewed'),
             'pilot_1' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_1_role' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_2' => $this->emptyProvenanceValue(null, 'not_available'),
             'pilot_2_role' => $this->emptyProvenanceValue(null, 'not_available'),
-            'departure_local_time' => $this->provenanceValue($started, $started !== '' ? $started : null, 'ipca_cockpit_recordings.started_at', 0.5, 'unreviewed'),
+            'departure_local_time' => $this->logbookLocalTimeProvenance($started !== '' ? $started : null, $timezone, 'ipca_cockpit_recordings.started_at', 0.5, 'unreviewed'),
             'arrival_local_time' => $this->emptyProvenanceValue(null, 'unresolved'),
             'departure_airport' => $this->emptyProvenanceValue(null, 'not_available'),
             'arrival_airport' => $this->emptyProvenanceValue(null, 'not_available'),
@@ -2398,6 +2413,35 @@ final class MasterLogbookReadService
             return null;
         }
         return substr($value, 0, 10);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function aircraftOperationalTimezoneFromRow(array $row): string
+    {
+        $aircraftId = (int)($row['aircraft_id'] ?? 0);
+        if ($aircraftId > 0 && $this->pdo instanceof PDO) {
+            return cw_aircraft_operational_timezone($this->pdo, $aircraftId);
+        }
+        $registration = trim((string)($row['aircraft_registration'] ?? $row['tail_number'] ?? ''));
+        if ($registration !== '' && $this->pdo instanceof PDO) {
+            return cw_aircraft_operational_timezone_by_registration($this->pdo, $registration);
+        }
+        return 'UTC';
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function logbookLocalTimeProvenance(mixed $utc, string $timezone, string $source, float $confidence, string $verificationState): array
+    {
+        $raw = $utc;
+        $resolved = null;
+        if ($utc !== null && trim((string)$utc) !== '') {
+            $resolved = cw_logbook_time((string)$utc, $timezone);
+        }
+        return $this->provenanceValue($raw, $resolved, $source, $confidence, $verificationState);
     }
 
     /**

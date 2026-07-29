@@ -139,7 +139,14 @@ function cw_dt_obj(?string $utc, string $tz): ?DateTimeImmutable
 {
     if (!$utc || $utc === '0000-00-00 00:00:00') return null;
 
+    $utc = trim($utc);
     try {
+        if (preg_match('/\.\d+$/', $utc)) {
+            $parsed = DateTimeImmutable::createFromFormat('Y-m-d H:i:s.u', $utc, new DateTimeZone('UTC'));
+            if ($parsed instanceof DateTimeImmutable) {
+                return $parsed->setTimezone(new DateTimeZone($tz));
+            }
+        }
         return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))
             ->setTimezone(new DateTimeZone($tz));
     } catch (Throwable $e) {
@@ -212,9 +219,6 @@ function cw_dt_cohort(?string $utc, PDO $pdo, ?int $cohortId = null, ?int $userI
     return $dt->format('D M j, Y') . ' – ' . $dt->format('H:i') . ' LT';
 }
 
-/* ---------------------------------------------------------
-   COHORT WITH TZ LABEL
---------------------------------------------------------- */
 function cw_dt_cohort_tz(?string $utc, PDO $pdo, ?int $cohortId = null, ?int $userId = null): string
 {
     $tz = cw_effective_cohort_timezone($pdo, $cohortId, $userId);
@@ -222,4 +226,65 @@ function cw_dt_cohort_tz(?string $utc, PDO $pdo, ?int $cohortId = null, ?int $us
     if (!$dt) return '—';
 
     return $dt->format('D M j, Y') . ' – ' . $dt->format('H:i T');
+}
+
+/* ---------------------------------------------------------
+   LOGBOOK LOCAL TIME (UTC storage, local display)
+--------------------------------------------------------- */
+function cw_logbook_time(?string $utc, string $timezone): string
+{
+    $dt = cw_dt_obj($utc, $timezone);
+    return $dt === null ? '—' : $dt->format('H:i');
+}
+
+function cw_logbook_datetime(?string $utc, string $timezone): string
+{
+    $dt = cw_dt_obj($utc, $timezone);
+    return $dt === null ? '—' : $dt->format('M j, Y H:i:s') . ' LT';
+}
+
+function cw_logbook_date(?string $utc, string $timezone): ?string
+{
+    $dt = cw_dt_obj($utc, $timezone);
+    return $dt === null ? null : $dt->format('Y-m-d');
+}
+
+function cw_aircraft_operational_timezone(PDO $pdo, ?int $aircraftId = null): string
+{
+    static $cache = array();
+    $key = 'id:' . (string)($aircraftId ?? 0);
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    if ($aircraftId === null || $aircraftId <= 0) {
+        return $cache[$key] = 'UTC';
+    }
+    try {
+        require_once __DIR__ . '/AircraftOperationalConfigService.php';
+        $config = (new AircraftOperationalConfigService($pdo))->configForAircraft($aircraftId);
+        $timezone = cw_time_valid_timezone((string)($config['timezone_identifier'] ?? 'UTC'));
+        return $cache[$key] = ($timezone ?? 'UTC');
+    } catch (Throwable $e) {
+        return $cache[$key] = 'UTC';
+    }
+}
+
+function cw_aircraft_operational_timezone_by_registration(PDO $pdo, string $registration): string
+{
+    static $cache = array();
+    $registration = strtoupper(trim($registration));
+    if ($registration === '') {
+        return 'UTC';
+    }
+    if (isset($cache[$registration])) {
+        return $cache[$registration];
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT id FROM ipca_aircraft_devices WHERE UPPER(registration) = ? ORDER BY active DESC, id DESC LIMIT 1');
+        $stmt->execute(array($registration));
+        $aircraftId = (int)$stmt->fetchColumn();
+        return $cache[$registration] = cw_aircraft_operational_timezone($pdo, $aircraftId > 0 ? $aircraftId : null);
+    } catch (Throwable $e) {
+        return $cache[$registration] = 'UTC';
+    }
 }

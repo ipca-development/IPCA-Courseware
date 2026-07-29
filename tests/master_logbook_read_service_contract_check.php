@@ -58,6 +58,7 @@ scenario('malformed route text does not produce airports', row_airport_pair($def
 scenario('four-letter non-airport word is rejected', row_airport_pair($default, 'historical-event:ao:313', null, null));
 scenario('conflicting airport route evidence is not silently resolved', row_airport_pair($default, 'historical-event:ao:314', null, null) && row_conflict($default, 'historical-event:ao:314', 'warning'));
 scenario('no Master Logbook airport fallback remains', no_hardcoded_airport_fallback());
+scenario('logbook departure and arrival times resolve UTC to aircraft local time', logbook_times_use_aircraft_local_timezone());
 
 foreach ($scenarioResults as $name => $passed) {
     echo ($passed ? 'PASS' : 'FAIL') . ' ' . $name . PHP_EOL;
@@ -349,4 +350,14 @@ function no_hardcoded_airport_fallback(): bool
         }
     }
     return true;
+}
+
+function logbook_times_use_aircraft_local_timezone(): bool
+{
+    $service = (string)file_get_contents(__DIR__ . '/../src/MasterLogbookReadService.php');
+    $time = (string)file_get_contents(__DIR__ . '/../src/time.php');
+    return str_contains($service, 'logbookLocalTimeProvenance')
+        && str_contains($service, 'cw_logbook_time')
+        && str_contains($service, 'aircraftOperationalTimezoneFromRow')
+        && str_contains($time, 'cw_aircraft_operational_timezone');
 }

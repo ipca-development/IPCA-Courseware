@@ -59,9 +59,10 @@ $checks = array(
         && str_contains($adminPage, 'revoke_replay_share')
         && str_contains($adminPage, 'data-copy-input'),
     'future debriefs use supportive direct instructor voice' =>
-        str_contains($debriefService, 'v4-supportive-instructor')
+        str_contains($debriefService, 'v5-chief-instructor-voice')
         && str_contains($debriefService, 'speaking directly to the student')
-        && str_contains($debriefService, 'Lead with deserved strengths before improvements')
+        && str_contains($debriefService, 'Chief Flight Instructor')
+        && str_contains($debriefService, 'Explain WHY corrections matter')
         && str_contains($debriefService, 'must not sound like an audit'),
 );
 

@@ -62,6 +62,10 @@ $checks = array(
         && str_contains($views, 'Oil was serviced before this flight')
         && str_contains($dispatchIntake, 'assertPreviousFlightContinuity')
         && str_contains($dispatchIntake, '> 0.20'),
+    'operational calculation versions accept long service version labels' =>
+        str_contains($derivation, "substr((string)(\$value['calculation_version'] ?? 'phase3-v1'), 0, 64)")
+        && str_contains((string) file_get_contents($root . '/src/TachoCalculationService.php'), 'tacho_rpm_threshold_cumulative_v2')
+        && str_contains((string) file_get_contents($root . '/scripts/sql/2026_07_28_operational_calculation_version_width.sql'), 'VARCHAR(64)'),
     'audio session links and backfills event offsets' =>
         str_contains($coordinator, 'workflow?.linkRecordingSession')
         && str_contains($store, 'timestampUTC.timeIntervalSince(startedAt)'),
