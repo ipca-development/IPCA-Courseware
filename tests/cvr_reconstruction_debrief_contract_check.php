@@ -14,6 +14,7 @@ $workerScript = file_get_contents($root . '/scripts/run_cockpit_recorder_reconst
 $debriefEndpoint = file_get_contents($root . '/public/admin/api/manual_bundle_debrief.php') ?: '';
 $debriefWorker = file_get_contents($root . '/scripts/run_structured_flight_debrief.php') ?: '';
 $debriefPage = file_get_contents($root . '/public/admin/master_logbook_intake.php') ?: '';
+$derivationService = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 
 $service = (new ReflectionClass(FlightDebriefService::class))->newInstanceWithoutConstructor();
 $calculate = new ReflectionMethod(FlightDebriefService::class, 'calculateSuggestedOverall');
@@ -90,6 +91,18 @@ $checks = array(
         && str_contains($debriefPage, 'Supporting evidence')
         && !str_contains($debriefPage, "json_encode(\$segment['evidence_refs']")
         && str_contains($debriefSource, 'Never put JSON syntax, array notation, hashes, database IDs'),
+    'debrief includes copy-ready chronology and canonical logbook fields' =>
+        str_contains($debriefPage, 'Copy-ready chronological review')
+        && str_contains($debriefPage, 'Copy Full Review')
+        && str_contains($debriefPage, 'Flight and Logbook Record')
+        && str_contains($debriefPage, '<th>LD-D</th>')
+        && str_contains($debriefSource, 'ipca_operational_flight_leg_versions')
+        && str_contains($debriefSource, 'ipca_flight_record_logbook_proposals'),
+    'canonical derivation returns linkable Flight Record version' =>
+        str_contains($derivationService, "'flight_record_version_id' => (int)\$version['id']")
+        && str_contains($bundleService, "\$derived['flight_record_version_id']")
+        && str_contains($bundleService, 'rebuildFlightRecord')
+        && str_contains($debriefPage, 'Rebuild Flight Record'),
     'approval and release remain immutable and instructor-authoritative' =>
         str_contains($debriefSource, 'accepted suggestions are now authoritative')
         && str_contains($debriefSource, 'Only an instructor-approved debrief can be released.')
@@ -131,13 +144,17 @@ $checks['overall grading boundaries are deterministic'] =
 $refs = $sanitize->invoke($service, array(
     array('type' => 'transcript', 'chunk' => 4),
     array('type' => 'adsb', 'claim' => 'traffic context only'),
+    "Transcript chunk 2 (600-900s): doors locked and flap checks",
+    array('source' => 'G3X replay', 'time_range' => '1200-1260s'),
     array('type' => 'transcript', 'source' => 'FlightCircle legacy'),
     array('type' => 'unknown', 'id' => 1),
 ));
 $checks['AI evidence sanitizer only allows CVR evidence types'] =
-    count($refs) === 2
+    count($refs) === 4
     && ($refs[0]['type'] ?? '') === 'transcript'
-    && ($refs[1]['type'] ?? '') === 'adsb';
+    && ($refs[1]['type'] ?? '') === 'adsb'
+    && ($refs[2]['type'] ?? '') === 'transcript'
+    && ($refs[3]['type'] ?? '') === 'garmin';
 
 $failed = array();
 foreach ($checks as $name => $passed) {

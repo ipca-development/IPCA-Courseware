@@ -6,7 +6,7 @@ require_once __DIR__ . '/openai.php';
 
 final class FlightDebriefService
 {
-    private const PROMPT_VERSION = '1-4-9-v2';
+    private const PROMPT_VERSION = '1-4-9-v3';
     private const LOGIC_VERSION = 'grading-v1';
     private const ALLOWED_EVIDENCE = array('transcript', 'event_marker', 'garmin', 'adsb', 'audio');
 
@@ -261,15 +261,79 @@ final class FlightDebriefService
         $debrief['evaluations'] = $evaluations->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $context = $this->pdo->prepare(
             'SELECT b.bundle_uuid, b.version_number, b.aircraft_registration, b.mission_code,
+                    COALESCE(b.operational_flight_record_version_id, gr.current_version_id) AS operational_flight_record_version_id,
                     d.scheduled_date, d.crew_json, d.aircraft_id,
-                    COALESCE(NULLIF(a.aircraft_type, \'\'), NULLIF(a.display_name, \'\'), \'\') AS aircraft_type
+                    d.starting_hobbs, d.starting_tacho,
+                    c.ending_hobbs, c.ending_tacho,
+                    COALESCE(NULLIF(a.aircraft_type, \'\'), NULLIF(a.display_name, \'\'), \'\') AS aircraft_type,
+                    v.exact_hobbs_duration_ms, v.exact_tacho_duration_ms,
+                    v.hobbs_start_hours, v.hobbs_end_hours, v.tacho_start_hours, v.tacho_end_hours,
+                    v.total_night_duration_ms, v.cross_country_easa_qualified,
+                    v.cross_country_faa_qualified, v.landing_event_count, v.summary_json,
+                    COALESCE(s.engine_start_utc, gs.engine_start_utc,
+                      (SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                       WHERE fe.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+                         AND fe.event_type = \'engine_start_off_block\')) AS engine_start_utc,
+                    COALESCE(s.engine_stop_utc, gs.engine_stop_utc,
+                      (SELECT MAX(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                       WHERE fe.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+                         AND fe.event_type = \'engine_shutdown_on_block\')) AS engine_stop_utc,
+                    COALESCE(s.avionics_on_utc, gs.avionics_on_utc, g.first_valid_sample_utc) AS avionics_on_utc,
+                    COALESCE(s.avionics_off_utc, gs.avionics_off_utc, g.last_valid_sample_utc) AS avionics_off_utc,
+                    g.first_valid_sample_utc AS garmin_start_utc,
+                    g.last_valid_sample_utc AS garmin_end_utc,
+                    cr.started_at AS recording_start_utc, cr.duration_seconds AS recording_duration_seconds,
+                    (SELECT COUNT(*) FROM ipca_cvr_flight_events fl
+                     WHERE fl.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+                       AND fl.event_type = \'gps_landing_provisional\') AS gps_landing_count
              FROM ipca_manual_intake_bundles b
              INNER JOIN ipca_cvr_dispatches d ON d.id = b.dispatch_id
+             INNER JOIN ipca_cockpit_recordings cr ON cr.id = b.cockpit_recording_id
+             INNER JOIN ipca_garmin_csv_files g ON g.id = b.garmin_csv_file_id
              LEFT JOIN ipca_aircraft_devices a ON a.id = d.aircraft_id
+             LEFT JOIN ipca_flight_sessions gs ON gs.id = g.session_id
+             LEFT JOIN ipca_operational_flight_records gr ON gr.id = gs.current_flight_record_id
+             LEFT JOIN ipca_cvr_flight_closures c ON c.id = (
+               SELECT fc.id FROM ipca_cvr_flight_closures fc
+               WHERE fc.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+               ORDER BY fc.id DESC LIMIT 1
+             )
+             LEFT JOIN ipca_operational_flight_record_versions v
+               ON v.id = COALESCE(b.operational_flight_record_version_id, gr.current_version_id)
+             LEFT JOIN ipca_operational_flight_records r ON r.id = v.flight_record_id
+             LEFT JOIN ipca_flight_sessions s ON s.id = r.session_id
              WHERE b.id = ? LIMIT 1'
         );
         $context->execute(array((int)$debrief['bundle_id']));
         $debrief['context'] = $context->fetch(PDO::FETCH_ASSOC) ?: array();
+        $flightRecordVersionId = (int)($debrief['context']['operational_flight_record_version_id'] ?? 0);
+        $debrief['context']['legs'] = array();
+        $debrief['context']['logbook_proposal'] = array();
+        if ($flightRecordVersionId > 0) {
+            $legs = $this->pdo->prepare(
+                'SELECT leg_index, departure_airport_code, arrival_airport_code,
+                        COALESCE(administrative_departure_utc, takeoff_utc) AS departure_utc,
+                        COALESCE(administrative_arrival_utc, landing_utc) AS arrival_utc,
+                        allocated_hobbs_duration_ms, night_duration_ms,
+                        cross_country_easa_qualified, cross_country_faa_qualified, landing_event_count
+                 FROM ipca_operational_flight_leg_versions
+                 WHERE flight_record_version_id = ? ORDER BY leg_index'
+            );
+            $legs->execute(array($flightRecordVersionId));
+            $debrief['context']['legs'] = $legs->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            $proposal = $this->pdo->prepare(
+                'SELECT entry_type, proposed_duration_ms, proposed_values_json, status
+                 FROM ipca_flight_record_logbook_proposals
+                 WHERE flight_record_version_id = ? ORDER BY id DESC LIMIT 1'
+            );
+            $proposal->execute(array($flightRecordVersionId));
+            $proposalRow = $proposal->fetch(PDO::FETCH_ASSOC);
+            if (is_array($proposalRow)) {
+                $proposalValues = json_decode((string)$proposalRow['proposed_values_json'], true);
+                $proposalRow['proposed_values'] = is_array($proposalValues) ? $proposalValues : array();
+                $debrief['context']['logbook_proposal'] = $proposalRow;
+            }
+        }
         return $debrief;
     }
 
@@ -507,9 +571,12 @@ final class FlightDebriefService
             'Evidence references must be arrays of objects with type, time or time_range, and a short plain-language description. Never put JSON syntax, array notation, hashes, database IDs, or internal field names inside narrative text.',
             'Use task grades DE, EX, PR, PE, NO exactly and SRM grades EX, PR, MD, NO exactly.',
             'Do not use NO merely because a task is absent from transcript. Use null grade and insufficient_evidence.',
+            'Use insufficient_evidence only when no relevant transcript, marker, Garmin, replay, or ADS-B evidence exists. Partial evidence can support a grade. Do not discard usable evidence merely because marker boundaries are absent.',
+            'When transcript shows coaching, prompting, a restart, or instructor assistance, normally suggest PR rather than returning no grade. When evidence supports independent, self-corrected performance, consider PE. Use Garmin/replay evidence for flight-path, timing, maneuver, altitude, speed, takeoff, landing, and approach-profile facts.',
             'Exercise markers define chronological segment boundaries. Training Remark markers prioritize the transcript/audio immediately following the marker. Safety markers create separate safety windows.',
             'Every factual claim and suggested grade must cite transcript chunk/time, marker, Garmin timeline, ADS-B context, or audio offset.',
             'Garmin supports performance; transcript supports instruction, prompting, checklists and decisions. ADS-B does not prove visual acquisition.',
+            'Write the chronological review as detailed, copy-ready instructor prose. Use meaningful lettered section titles, numbered subsections when useful, and plain-text subheadings such as Key learning points, Root cause, Main reminders, Main takeaway, and Overall assessment. Keep citations outside the narrative.',
             'Be specific and constructive. Do not fabricate events, measurements, dialogue, traffic awareness, or task completion.',
         ));
     }
@@ -643,19 +710,67 @@ final class FlightDebriefService
     {
         $result = array();
         foreach (is_array($refs) ? $refs : array() as $ref) {
+            if (is_string($ref)) {
+                $description = trim($ref);
+                $type = $this->inferEvidenceType(strtolower($description));
+                if ($description === '' || $type === null) {
+                    continue;
+                }
+                $result[] = array('type' => $type, 'description' => $description);
+                continue;
+            }
             if (!is_array($ref)) {
                 continue;
             }
-            $type = strtolower(trim((string)($ref['type'] ?? '')));
             $encoded = strtolower(AuditEventService::jsonEncode($ref));
-            if (!in_array($type, self::ALLOWED_EVIDENCE, true)
-                || str_contains($encoded, 'flightcircle')
+            if (str_contains($encoded, 'flightcircle')
                 || str_contains($encoded, 'historical')) {
                 continue;
             }
-            $result[] = $ref;
+            $type = strtolower(trim((string)($ref['type'] ?? $ref['source_type'] ?? $ref['source'] ?? $ref['evidence_type'] ?? '')));
+            $aliases = array(
+                'transcript_chunk' => 'transcript',
+                'cockpit_transcript' => 'transcript',
+                'marker' => 'event_marker',
+                'flight_event' => 'event_marker',
+                'timeline' => 'garmin',
+                'replay' => 'garmin',
+                'g3x' => 'garmin',
+                'garmin_csv' => 'garmin',
+                'traffic' => 'adsb',
+                'cockpit_audio' => 'audio',
+            );
+            $type = $aliases[$type] ?? $type;
+            if (!in_array($type, self::ALLOWED_EVIDENCE, true)) {
+                $type = $this->inferEvidenceType($encoded);
+            }
+            if ($type === null) {
+                continue;
+            }
+            $normalized = $ref;
+            $normalized['type'] = $type;
+            unset($normalized['source_type'], $normalized['evidence_type']);
+            $result[] = $normalized;
         }
         return $result;
+    }
+
+    private function inferEvidenceType(string $text): ?string
+    {
+        foreach (array(
+            'transcript' => array('transcript', 'chunk', 'spoken', 'dialogue'),
+            'event_marker' => array('marker', 'training remark', 'safety event', 'exercise start'),
+            'garmin' => array('garmin', 'g3x', 'csv', 'replay', 'timeline', 'flight path'),
+            'adsb' => array('ads-b', 'adsb', 'traffic'),
+            'audio' => array('audio', 'recording'),
+        ) as $type => $needles) {
+            foreach ($needles as $needle) {
+                if (str_contains($text, $needle)) {
+                    return $type;
+                }
+            }
+        }
+        return null;
     }
 
     /** @return array<string,mixed> */

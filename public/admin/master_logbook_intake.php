@@ -91,6 +91,12 @@ try {
         } elseif ($action === 'lock_bundle_transcript') {
             $reconstructionService->lockTranscript((int)($_POST['bundle_id'] ?? 0), $actorUserId > 0 ? $actorUserId : null);
             $reconstructionNotice = 'Raw transcript snapshot is version-locked and ready for AI debrief generation.';
+        } elseif ($action === 'rebuild_bundle_flight_record') {
+            $reconstructionService->rebuildFlightRecord(
+                (int)($_POST['bundle_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Canonical Flight Record and logbook fields rebuilt from the selected Garmin evidence.';
         } elseif ($action === 'save_debrief_review') {
             if ($actorUserId <= 0) {
                 throw new RuntimeException('Instructor identity is required.');
@@ -303,6 +309,30 @@ function cvr_debrief_overall_label(string $grade): string
     )[strtoupper($grade)] ?? ucwords(strtolower($grade));
 }
 
+function cvr_debrief_hours(mixed $milliseconds, int $precision = 1): string
+{
+    if (!is_numeric($milliseconds)) {
+        return '—';
+    }
+    return number_format(max(0, (float)$milliseconds) / 3600000, $precision);
+}
+
+function cvr_debrief_time(mixed $value): string
+{
+    $timestamp = strtotime(trim((string)$value));
+    return $timestamp === false ? '—' : date('H:i', $timestamp);
+}
+
+function cvr_debrief_proposed_value(array $values, array $keys, mixed $fallback = '—'): mixed
+{
+    foreach ($keys as $key) {
+        if (array_key_exists($key, $values) && $values[$key] !== '' && $values[$key] !== null) {
+            return $values[$key];
+        }
+    }
+    return $fallback;
+}
+
 cw_header('Master Logbook');
 ?>
 <style>
@@ -396,6 +426,14 @@ cw_header('Master Logbook');
 .debrief-signoff{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px;flex-wrap:wrap}
 .debrief-signature{color:#166534;font-weight:850;font-size:12px}
 .debrief-verify{background:#166534;padding:11px 17px}
+.debrief-copy-box{padding:14px}
+.debrief-copy-box textarea{width:100%;min-height:300px;resize:vertical;border:1px solid #cbd5e1;border-radius:12px;padding:12px;background:#f8fafc;color:#334155;font:12px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif}
+.debrief-logbook-wrap{overflow:auto}
+.debrief-logbook{width:100%;min-width:1050px;border-collapse:collapse;font-size:9px;text-align:center}
+.debrief-logbook th{padding:7px 5px;background:#eaf2fb;color:#153e68;border:1px solid #cbd5e1;font-weight:900}
+.debrief-logbook td{padding:7px 5px;border:1px solid #dbe3ee;color:#334155}
+.debrief-logbook-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#dbe3ee;border-bottom:1px solid #dbe3ee}
+.debrief-logbook-summary>div{padding:10px;background:#fff}
 @media(max-width:720px){.intake-card{padding:12px}.intake-title{font-size:22px}.reconstruction-grid{grid-template-columns:1fr}}
 @media(max-width:860px){.debrief-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.debrief-meta-item.wide{grid-column:span 1}.debrief-overall{grid-template-columns:1fr}.debrief-sheet{padding:10px;border-radius:16px}.debrief-grade-table{min-width:640px}.debrief-section{overflow:auto}}
 @media print{
@@ -413,6 +451,9 @@ cw_header('Master Logbook');
   .debrief-grade-table tr{break-inside:avoid}
   .debrief-grade-cell.is-selected,.debrief-overall-grade.is-selected{background:#e5e7eb!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .debrief-adjustments,.debrief-evidence{display:none!important}
+  .debrief-copy-box{display:none!important}
+  .debrief-logbook{font-size:7.5px;min-width:0}
+  .debrief-logbook-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
   .debrief-flight-segment{break-inside:avoid;box-shadow:none}
 }
 </style>
@@ -704,6 +745,14 @@ cw_header('Master Logbook');
                     <button class="intake-button" type="submit">Lock Raw Transcript</button>
                   </form>
                 <?php endif; ?>
+                <?php if (empty($bundle['operational_flight_record_version_id']) && in_array((string)($bundle['status'] ?? ''), array('reconstruction_ready','reconstruction_complete'), true)): ?>
+                  <form method="post" action="/admin/master_logbook.php?tab=reconstruction" style="margin-top:6px">
+                    <input type="hidden" name="action" value="rebuild_bundle_flight_record">
+                    <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                    <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
+                    <button class="intake-button" type="submit">Rebuild Flight Record</button>
+                  </form>
+                <?php endif; ?>
                 <?php $debriefJobRunning = in_array((string)($bundle['debrief_job_status'] ?? ''), array('pending','claimed','running','retry_wait'), true); ?>
                 <form method="post" action="/admin/api/manual_bundle_debrief.php" style="margin-top:6px">
                   <input type="hidden" name="action" value="generate_bundle_debrief">
@@ -740,6 +789,25 @@ cw_header('Master Logbook');
         $canVerifyDebrief = in_array((string)$selectedDebrief['status'], array('ai_draft', 'instructor_draft'), true);
         $taskEvaluations = array_values(array_filter($selectedDebrief['evaluations'], fn(array $row): bool => (string)$row['rubric_type'] === 'task'));
         $srmEvaluations = array_values(array_filter($selectedDebrief['evaluations'], fn(array $row): bool => (string)$row['rubric_type'] === 'srm'));
+        $legs = is_array($context['legs'] ?? null) ? $context['legs'] : array();
+        $proposal = is_array($context['logbook_proposal'] ?? null) ? $context['logbook_proposal'] : array();
+        $proposalValues = is_array($proposal['proposed_values'] ?? null) ? $proposal['proposed_values'] : array();
+        $durationStart = strtotime((string)($context['engine_start_utc'] ?? $context['garmin_start_utc'] ?? ''));
+        $durationEnd = strtotime((string)($context['engine_stop_utc'] ?? $context['garmin_end_utc'] ?? ''));
+        $fallbackDurationMs = $durationStart !== false && $durationEnd !== false && $durationEnd >= $durationStart
+            ? ($durationEnd - $durationStart) * 1000
+            : null;
+        $recordDurationMs = $context['exact_hobbs_duration_ms'] ?? $fallbackDurationMs;
+        $recordLandingCount = max((int)($context['landing_event_count'] ?? 0), (int)($context['gps_landing_count'] ?? 0));
+        $copySections = array();
+        foreach (is_array($chronological) ? $chronological : array() as $index => $segment) {
+            $prefix = $index < 26 ? chr(65 + $index) . '. ' : '';
+            $copySections[] = $prefix . trim((string)($segment['title'] ?? 'Flight Segment'))
+                . "\n" . trim((string)($segment['narrative'] ?? ''));
+        }
+        $copySections[] = "Overall Assessment\n" . trim((string)$selectedDebrief['mission_assessment_text']);
+        $copySections[] = "Main Takeaways\n" . trim((string)$selectedDebrief['summary_next_steps_text']);
+        $chronologicalCopyText = trim(implode("\n\n", array_filter($copySections)));
       ?>
       <div class="debrief-toolbar no-print">
         <div>
@@ -834,6 +902,13 @@ cw_header('Master Logbook');
               </article>
             <?php endforeach; ?>
           </div>
+          <div class="debrief-copy-box no-print">
+            <div class="debrief-toolbar-actions" style="justify-content:space-between;margin-bottom:8px">
+              <strong>Copy-ready chronological review</strong>
+              <button class="intake-refresh" type="button" data-copy-debrief="debrief-copy-<?= (int)$selectedDebrief['id'] ?>">Copy Full Review</button>
+            </div>
+            <textarea id="debrief-copy-<?= (int)$selectedDebrief['id'] ?>" readonly><?= cvr_intake_h($chronologicalCopyText) ?></textarea>
+          </div>
           <div class="debrief-narrative"><strong>Mission Standards Assessment</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['mission_assessment_text'])) ?></div>
           <div class="debrief-narrative"><strong>Summary and Next Steps</strong><br><?= nl2br(cvr_intake_h($selectedDebrief['summary_next_steps_text'])) ?></div>
           <?php if (trim((string)($selectedDebrief['instructor_comments'] ?? '')) !== ''): ?>
@@ -869,6 +944,71 @@ cw_header('Master Logbook');
               <?php endforeach; ?>
             </tbody>
           </table>
+        </section>
+
+        <section class="debrief-section">
+          <div class="debrief-section-head">Flight and Logbook Record</div>
+          <div class="debrief-logbook-summary">
+            <div><span class="debrief-label">OFF Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_start_utc'] ?? null)) ?></span></div>
+            <div><span class="debrief-label">ON Block</span><span class="debrief-value"><?= cvr_intake_h(cvr_intake_timestamp($context['engine_stop_utc'] ?? null)) ?></span></div>
+            <div><span class="debrief-label">Hobbs Start</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_start_hours'] ?? $context['starting_hobbs'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Hobbs End</span><span class="debrief-value"><?= cvr_intake_h($context['hobbs_end_hours'] ?? $context['ending_hobbs'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Tacho Start</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_start_hours'] ?? $context['starting_tacho'] ?? '—') ?></span></div>
+            <div><span class="debrief-label">Tacho End</span><span class="debrief-value"><?= cvr_intake_h($context['tacho_end_hours'] ?? $context['ending_tacho'] ?? '—') ?></span></div>
+          </div>
+          <div class="debrief-logbook-wrap">
+            <table class="debrief-logbook">
+              <thead><tr><th>Sect</th><th>DEP</th><th>TIME</th><th>DEST</th><th>TIME</th><th>ACFT</th><th>REG</th><th>SE</th><th>ME</th><th>TOTAL</th><th>LD-D</th><th>LD-N</th><th>NIGHT</th><th>IFR</th><th>FNPT</th><th>PIC</th><th>DUAL</th><th>X-C</th></tr></thead>
+              <tbody>
+                <?php $logbookLegs = $legs !== array() ? $legs : array(array(
+                    'leg_index' => 1,
+                    'departure_airport_code' => '',
+                    'arrival_airport_code' => '',
+                    'departure_utc' => $context['engine_start_utc'] ?? null,
+                    'arrival_utc' => $context['engine_stop_utc'] ?? null,
+                    'allocated_hobbs_duration_ms' => $recordDurationMs,
+                    'night_duration_ms' => $context['total_night_duration_ms'] ?? null,
+                    'cross_country_easa_qualified' => $context['cross_country_easa_qualified'] ?? 0,
+                    'landing_event_count' => $recordLandingCount,
+                )); ?>
+                <?php foreach ($logbookLegs as $leg): ?>
+                  <?php
+                    $durationMs = $leg['allocated_hobbs_duration_ms'] ?? $context['exact_hobbs_duration_ms'] ?? null;
+                    $durationHours = cvr_debrief_hours($durationMs);
+                    $nightMs = $leg['night_duration_ms'] ?? null;
+                    $landingCount = (int)($leg['landing_event_count'] ?? 0);
+                    $singleLeg = count($logbookLegs) === 1;
+                    $dayLandings = $singleLeg
+                        ? cvr_debrief_proposed_value($proposalValues, array('day_landings'), is_numeric($nightMs) && (int)$nightMs === 0 ? $landingCount : '—')
+                        : (is_numeric($nightMs) && (int)$nightMs === 0 ? $landingCount : '—');
+                    $nightLandings = $singleLeg ? cvr_debrief_proposed_value($proposalValues, array('night_landings'), '—') : '—';
+                    $crossCountry = !empty($leg['cross_country_easa_qualified']) || !empty($leg['cross_country_faa_qualified']) ? $durationHours : '—';
+                  ?>
+                  <tr>
+                    <td><?= (int)($leg['leg_index'] ?? 1) ?></td>
+                    <td><?= cvr_intake_h($leg['departure_airport_code'] ?: '—') ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($leg['departure_utc'] ?? null)) ?></td>
+                    <td><?= cvr_intake_h($leg['arrival_airport_code'] ?: '—') ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_time($leg['arrival_utc'] ?? null)) ?></td>
+                    <td><?= cvr_intake_h($context['aircraft_type'] ?: '—') ?></td>
+                    <td><?= cvr_intake_h($context['aircraft_registration'] ?: '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('single_engine_time'), '—') : '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('multi_engine_time'), '—') : '—') ?></td>
+                    <td><strong><?= cvr_intake_h($durationHours) ?></strong></td>
+                    <td><?= cvr_intake_h($dayLandings) ?></td>
+                    <td><?= cvr_intake_h($nightLandings) ?></td>
+                    <td><?= cvr_intake_h(cvr_debrief_hours($nightMs)) ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('instrument_time', 'ifr_time'), '—') : '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('fnpt_simulator_time', 'fnpt_time'), '—') : '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('pic_time'), '—') : '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('dual_received_time', 'dual_time'), '—') : '—') ?></td>
+                    <td><?= cvr_intake_h($singleLeg ? cvr_debrief_proposed_value($proposalValues, array('cross_country_time'), $crossCountry) : $crossCountry) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+          <div class="debrief-narrative no-print"><span class="intake-muted">Fields remain blank when the canonical Flight Record or logbook proposal has not supplied authoritative data.</span></div>
         </section>
 
         <?php if (!$isApprovedDebrief): ?>
@@ -980,6 +1120,22 @@ cw_header('Master Logbook');
     const requestedTab = tabs.find((tab) => tab.getAttribute('data-intake-tab') === requested);
     if (requestedTab) requestedTab.click();
   }
+  page.querySelectorAll('[data-copy-debrief]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const field = document.getElementById(button.getAttribute('data-copy-debrief'));
+      if (!field) return;
+      try {
+        await navigator.clipboard.writeText(field.value);
+        button.textContent = 'Copied';
+      } catch (error) {
+        field.focus();
+        field.select();
+        document.execCommand('copy');
+        button.textContent = 'Copied';
+      }
+      window.setTimeout(() => { button.textContent = 'Copy Full Review'; }, 1800);
+    });
+  });
 })();
 </script>
 <?php cw_footer(); ?>

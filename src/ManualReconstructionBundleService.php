@@ -175,6 +175,38 @@ final class ManualReconstructionBundleService
         return $this->bundle($bundleId) ?? array();
     }
 
+    /** @return array<string,mixed> */
+    public function rebuildFlightRecord(int $bundleId, ?int $actorUserId): array
+    {
+        $bundle = $this->bundle($bundleId);
+        if (!$bundle) {
+            throw new RuntimeException('Reconstruction bundle not found.');
+        }
+        try {
+            $versionId = $this->deriveFlightRecordVersion(
+                (int)$bundle['garmin_csv_file_id'],
+                (string)($bundle['mission_code'] ?? ''),
+                $actorUserId
+            );
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_intake_bundles
+                 SET operational_flight_record_version_id = ?, processing_error = NULL WHERE id = ?'
+            )->execute(array($versionId, $bundleId));
+            $this->audit($bundleId, 'flight_record_rebuilt', $actorUserId, array(
+                'operational_flight_record_version_id' => $versionId,
+            ));
+        } catch (Throwable $e) {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_intake_bundles SET processing_error = ? WHERE id = ?'
+            )->execute(array('Flight Record rebuild failed: ' . $e->getMessage(), $bundleId));
+            $this->audit($bundleId, 'flight_record_rebuild_failed', $actorUserId, array(
+                'error' => $e->getMessage(),
+            ));
+            throw $e;
+        }
+        return $this->bundle($bundleId) ?? array();
+    }
+
     /** @return array{recording_id:int,g3x_csv_path:string,g3x_sha256:string} */
     public function reconstructionSource(int $bundleId): array
     {
@@ -365,27 +397,11 @@ final class ManualReconstructionBundleService
         }
         $versionId = null;
         try {
-            $derived = (new FlightRecordDerivationService($this->pdo))->deriveFromCsvFile((int)$garmin['id']);
-            $versionId = (int)($derived['version']['id'] ?? $derived['flight_record_version']['id'] ?? 0) ?: null;
-            if ($versionId !== null) {
-                $missionStatement = $this->pdo->prepare(
-                    'SELECT current_version_id FROM ipca_missions WHERE UPPER(code) = UPPER(?) LIMIT 1'
-                );
-                $missionStatement->execute(array((string)($dispatch['mission_code'] ?? '')));
-                $missionVersionId = (int)$missionStatement->fetchColumn();
-                if ($missionVersionId > 0) {
-                    (new MissionCatalogService($this->pdo))->assignMission(
-                        $versionId,
-                        null,
-                        $missionVersionId,
-                        null,
-                        null,
-                        'manual_cvr_bundle',
-                        1.0,
-                        $actorUserId
-                    );
-                }
-            }
+            $versionId = $this->deriveFlightRecordVersion(
+                (int)$garmin['id'],
+                (string)($dispatch['mission_code'] ?? ''),
+                $actorUserId
+            );
         } catch (Throwable $e) {
             $this->pdo->prepare('UPDATE ipca_manual_intake_bundles SET processing_error = ? WHERE id = ?')
                 ->execute(array('Flight Record derivation pending: ' . $e->getMessage(), $bundleId));
@@ -401,6 +417,38 @@ final class ManualReconstructionBundleService
             'session_id' => $sessionId,
             'operational_flight_record_version_id' => $versionId,
         ));
+    }
+
+    private function deriveFlightRecordVersion(int $garminCsvFileId, string $missionCode, ?int $actorUserId): int
+    {
+        $derived = (new FlightRecordDerivationService($this->pdo))->deriveFromCsvFile($garminCsvFileId);
+        $versionId = (int)(
+            $derived['flight_record_version_id']
+            ?? $derived['version']['id']
+            ?? $derived['flight_record_version']['id']
+            ?? 0
+        );
+        if ($versionId <= 0) {
+            throw new RuntimeException('Flight Record derivation did not return a version.');
+        }
+        $missionStatement = $this->pdo->prepare(
+            'SELECT current_version_id FROM ipca_missions WHERE UPPER(code) = UPPER(?) LIMIT 1'
+        );
+        $missionStatement->execute(array($missionCode));
+        $missionVersionId = (int)$missionStatement->fetchColumn();
+        if ($missionVersionId > 0) {
+            (new MissionCatalogService($this->pdo))->assignMission(
+                $versionId,
+                null,
+                $missionVersionId,
+                null,
+                null,
+                'manual_cvr_bundle',
+                1.0,
+                $actorUserId
+            );
+        }
+        return $versionId;
     }
 
     /** @param array<string,mixed> $row */

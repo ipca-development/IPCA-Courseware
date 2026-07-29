@@ -194,6 +194,7 @@ final class FlightRecordDerivationService
         return array(
             'ok' => true,
             'flight_record_uuid' => $record['flight_record_uuid'],
+            'flight_record_version_id' => (int)$version['id'],
             'version_uuid' => $version['version_uuid'],
             'readiness_status' => $preview['readiness_status'],
             'leg_count' => count($preview['legs']),
