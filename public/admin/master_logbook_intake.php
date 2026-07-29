@@ -1906,7 +1906,7 @@ cw_header('Master Logbook');
       transcriptPlayer.load();
     }
   };
-  page.querySelectorAll('[data-audio-transcript-close]').forEach((button) => {
+  document.querySelectorAll('[data-audio-transcript-close]').forEach((button) => {
     button.addEventListener('click', closeTranscriptModal);
   });
   if (transcriptModal) {
