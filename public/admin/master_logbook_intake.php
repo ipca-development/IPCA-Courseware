@@ -291,9 +291,9 @@ function cvr_intake_audio_received_label(PDO $pdo, mixed $value, string $registr
     $today = $now->format('Y-m-d');
     $time = $dt->format('H:i');
     if ($dt->format('Y-m-d') === $today) {
-        return 'Today, ' . $time . ' LT';
+        return 'Today ' . $time . ' LT';
     }
-    return $dt->format('D M j, Y') . ' - ' . $time . ' LT';
+    return $dt->format('M j') . ' ' . $time . ' LT';
 }
 
 function cvr_intake_audio_start_label(PDO $pdo, mixed $value, string $registration = ''): string
@@ -327,7 +327,7 @@ function cvr_intake_duration_decimal(float $seconds): string
     if ($seconds <= 0) {
         return '—';
     }
-    return number_format(round($seconds / 3600.0, 1), 1, '.', '');
+    return number_format(round($seconds / 3600.0, 1), 1, '.', '') . 'h';
 }
 
 function cvr_intake_duration_hms(float $seconds): string
@@ -612,30 +612,59 @@ cw_header('Master Logbook');
 .intake-audio-toggle.is-on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
 .intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
 .intake-audio-table.intake-table-wrap{overflow-x:hidden}
-.intake-table-audio{table-layout:fixed;width:100%;min-width:0;font-size:10px}
-.intake-table-audio th{font-size:8px;padding:7px 8px}
-.intake-table-audio td{padding:7px 8px;font-size:10px;white-space:nowrap}
-.intake-audio-crew{font-size:10px;line-height:1.35;white-space:normal;min-width:130px}
-.intake-audio-crew-line{color:#334155}
+.intake-table.intake-table-audio{table-layout:fixed;width:100%;min-width:0;font-size:10px;border-collapse:collapse}
+.intake-table-audio th{font-size:8px;padding:7px 6px;overflow:hidden;text-overflow:ellipsis}
+.intake-table-audio td{padding:7px 6px;font-size:10px;vertical-align:top;overflow:hidden;max-width:0}
+.intake-table-audio td:first-child{overflow:visible}
+.intake-table-audio .intake-col-received{width:13%}
+.intake-table-audio .intake-col-source{width:6%}
+.intake-table-audio .intake-col-aircraft{width:5%}
+.intake-table-audio .intake-col-crew{width:18%}
+.intake-table-audio .intake-col-mission{width:5%}
+.intake-table-audio .intake-col-startstop{width:9%}
+.intake-table-audio .intake-col-duration{width:4%}
+.intake-table-audio .intake-col-input{width:11%}
+.intake-table-audio .intake-col-upload{width:5%}
+.intake-table-audio .intake-col-transcript{width:10%}
+.intake-table-audio .intake-col-view{width:7%}
+.intake-table-audio .intake-col-error{width:7%}
+.intake-audio-cell{display:block;min-width:0;max-width:100%;overflow:hidden}
+.intake-audio-received-cell{display:flex;align-items:flex-start;gap:4px;min-width:0;max-width:100%}
+.intake-audio-received-text{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700;color:#0f172a}
+.intake-info-tip-inline{width:16px;height:16px;min-width:16px;font-size:9px;flex-shrink:0}
+.intake-audio-crew{font-size:10px;line-height:1.5;white-space:normal}
+.intake-audio-crew-line{color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .intake-audio-crew-role{font-weight:800;color:#0f172a}
-.intake-audio-mission{font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a}
-.intake-audio-input-mix{display:grid;gap:3px}
-.intake-audio-input-detail{font-size:9px;color:#64748b;font-weight:700;white-space:nowrap}
-.intake-audio-transcript-head{display:flex;align-items:center;gap:6px}
-.intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums}
-.intake-audio-received{font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap}
-.intake-audio-start-stop{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;line-height:1.35;white-space:nowrap}
-.intake-audio-start-line{font-weight:700}
-.intake-audio-stop-line{font-weight:700;color:#475569}
-.intake-audio-duration{font-size:10px;font-variant-numeric:tabular-nums;font-weight:800;color:#0f172a}
-.intake-input-pill{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:9px;font-weight:900;white-space:nowrap}
+.intake-audio-mission{display:block;font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intake-audio-aircraft{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800;color:#0f172a}
+.intake-audio-input-mix{display:grid;gap:3px;min-width:0;max-width:100%}
+.intake-audio-input-detail{font-size:9px;color:#64748b;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.intake-audio-transcript-head{display:flex;align-items:center;gap:4px;min-width:0;max-width:100%;flex-wrap:nowrap}
+.intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums;flex-shrink:0}
+.intake-audio-transcript-bar{margin-top:4px}
+.intake-audio-transcript-bar.is-hidden{display:none}
+.intake-audio-transcript-progress.is-hidden{display:none}
+.intake-audio-start-stop{font-size:10px;font-variant-numeric:tabular-nums;line-height:1.45}
+.intake-audio-start-line{font-weight:700;color:#1e3a8a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intake-audio-stop-line{font-weight:500;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intake-audio-stop-line::before{content:"→ ";color:#cbd5e1;font-weight:400}
+.intake-audio-duration{display:block;font-size:10px;font-variant-numeric:tabular-nums;font-weight:800;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intake-audio-upload{display:block;overflow:hidden}
+.intake-audio-view{display:block;overflow:hidden}
+.intake-audio-empty{color:#cbd5e1}
+.intake-audio-group-intake{background:#fcfdff}
+.intake-audio-group-flight{background:#fff}
+.intake-audio-group-quality{background:#fcfdff}
+.intake-audio-group-process{background:#fff}
+.intake-input-pill{display:inline-flex;max-width:100%;border-radius:999px;padding:3px 7px;font-size:9px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.intake-table-audio .intake-status{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .intake-input-good{background:#dcfce7;color:#166534}
 .intake-input-bad{background:#fee2e2;color:#991b1b}
 .intake-info-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#475569;font-size:11px;font-weight:900;cursor:help}
 .intake-info-tip:hover,.intake-info-tip:focus-visible{border-color:#93c5fd;color:#1d4ed8;outline:none}
 .intake-info-popover{display:none;position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);min-width:240px;max-width:320px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#0f172a;color:#f8fafc;font-size:10px;line-height:1.5;white-space:pre-wrap;z-index:30;box-shadow:0 10px 24px rgba(15,23,42,.18);font-weight:500;text-align:left}
 .intake-info-tip:hover .intake-info-popover,.intake-info-tip:focus-visible .intake-info-popover{display:block}
-.intake-audio-transcript-btn{border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;padding:3px 8px;font-size:9px;font-weight:900;cursor:pointer;margin-top:4px}
+.intake-audio-transcript-btn{border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#1d4ed8;padding:3px 7px;font-size:9px;font-weight:900;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .intake-audio-transcript-btn:disabled{opacity:.45;cursor:not-allowed;color:#64748b}
 .intake-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;padding:20px;z-index:1200}
 .intake-modal-backdrop[hidden]{display:none}
@@ -666,7 +695,7 @@ cw_header('Master Logbook');
 .intake-empty{padding:28px;text-align:center;color:#64748b}
 .intake-notice{border:1px solid #fbbf24;background:#fffbeb;color:#92400e;border-radius:12px;padding:12px;font-size:12px}
 .intake-error{color:#991b1b;max-width:280px;white-space:normal}
-.intake-audio-error{width:120px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.intake-audio-error{display:block;width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
 .intake-progress{display:grid;gap:4px;min-width:120px}
 .intake-progress-bar{height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden}
 .intake-progress-fill{height:100%;background:#2563eb;border-radius:999px}
@@ -924,7 +953,21 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap intake-audio-table" data-audio-table data-hide-short="true" data-audio-total="<?= count($audio['rows']) ?>" data-audio-short="<?= (int)$audioShortRowCount ?>">
         <table class="intake-table intake-table-audio">
-          <thead><tr><th>Received</th><th>Source</th><th></th><th>Aircraft</th><th>Crew</th><th>Mission</th><th>Start/Stop</th><th>Duration</th><th>Input</th><th>Upload</th><th>Transcript</th><th>View Transcript</th><th>Error</th></tr></thead>
+          <colgroup>
+            <col class="intake-col-received">
+            <col class="intake-col-source">
+            <col class="intake-col-aircraft">
+            <col class="intake-col-crew">
+            <col class="intake-col-mission">
+            <col class="intake-col-startstop">
+            <col class="intake-col-duration">
+            <col class="intake-col-input">
+            <col class="intake-col-upload">
+            <col class="intake-col-transcript">
+            <col class="intake-col-view">
+            <col class="intake-col-error">
+          </colgroup>
+          <thead><tr><th class="intake-audio-group-intake">Received</th><th class="intake-audio-group-intake">Source</th><th class="intake-audio-group-intake">Aircraft</th><th class="intake-audio-group-flight">Crew</th><th class="intake-audio-group-flight">Mission</th><th class="intake-audio-group-flight">Start/Stop</th><th class="intake-audio-group-flight">Duration (h)</th><th class="intake-audio-group-quality">Input</th><th class="intake-audio-group-process">Upload</th><th class="intake-audio-group-process">Transcript</th><th class="intake-audio-group-process">View</th><th class="intake-audio-group-process">Error</th></tr></thead>
           <tbody>
           <?php foreach ($audio['rows'] as $row): ?>
             <?php
@@ -944,40 +987,55 @@ cw_header('Master Logbook');
               $missionCode = trim((string)($row['intake_mission_code'] ?? ''));
               $sourceLabel = trim((string)($row['intake_source_label'] ?? 'MANUAL'));
               $sourceClass = trim((string)($row['intake_source_class'] ?? 'intake-source-manual'));
+              $uploadStatus = strtolower(trim((string)($row['upload_status'] ?? '')));
+              $iphoneMixPercent = (int)($inputMix['iphone_percent'] ?? 0);
+              $usbMixPercent = (int)($inputMix['usb_percent'] ?? 0);
+              $showInputMixDetail = $iphoneMixPercent > 5 && $usbMixPercent > 5;
+              $showTranscriptProgress = !($transcriptionStatus === 'ready' && $transcriptionProgress >= 100);
             ?>
             <tr class="<?= $isShortRecording ? 'intake-audio-row-short' : '' ?>" data-audio-duration-seconds="<?= cvr_intake_h((string)$durationSeconds) ?>">
-              <td class="intake-audio-received"><?= cvr_intake_h(cvr_intake_audio_received_label($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></td>
-              <td><span class="intake-status <?= cvr_intake_h($sourceClass) ?>"><?= cvr_intake_h($sourceLabel) ?></span></td>
-              <td>
-                <span class="intake-info-tip" tabindex="0" aria-label="Recording details">
-                  i
-                  <span class="intake-info-popover"><?= cvr_intake_h($infoTooltip) ?></span>
-                </span>
+              <td class="intake-audio-group-intake">
+                <div class="intake-audio-received-cell">
+                  <span class="intake-audio-received-text"><?= cvr_intake_h(cvr_intake_audio_received_label($pdo, $row['received_at'] ?? $row['created_at'] ?? null, $tail)) ?></span>
+                  <span class="intake-info-tip intake-info-tip-inline" tabindex="0" aria-label="Recording details">
+                    i
+                    <span class="intake-info-popover"><?= cvr_intake_h($infoTooltip) ?></span>
+                  </span>
+                </div>
               </td>
-              <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
-              <td class="intake-audio-crew">
+              <td class="intake-audio-group-intake"><span class="intake-status <?= cvr_intake_h($sourceClass) ?>"><?= cvr_intake_h($sourceLabel) ?></span></td>
+              <td class="intake-audio-group-intake"><span class="intake-audio-aircraft"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></span></td>
+              <td class="intake-audio-group-flight intake-audio-crew">
                 <?php if ($crewLines === array()): ?>
-                  —
+                  <span class="intake-audio-empty">—</span>
                 <?php else: ?>
                   <?php foreach ($crewLines as $crewLine): ?>
                     <div class="intake-audio-crew-line"><strong class="intake-audio-crew-role"><?= cvr_intake_h((string)($crewLine['role'] ?? 'Crew')) ?></strong>: <?= cvr_intake_h((string)($crewLine['name'] ?? '')) ?></div>
                   <?php endforeach; ?>
                 <?php endif; ?>
               </td>
-              <td class="intake-audio-mission"><?= $missionCode !== '' ? cvr_intake_h($missionCode) : '—' ?></td>
-              <td class="intake-audio-start-stop">
+              <td class="intake-audio-group-flight"><span class="intake-audio-mission"><?= $missionCode !== '' ? cvr_intake_h($missionCode) : '—' ?></span></td>
+              <td class="intake-audio-group-flight intake-audio-start-stop">
                 <div class="intake-audio-start-line"><?= cvr_intake_h(cvr_intake_audio_start_label($pdo, $row['started_at'] ?? null, $tail)) ?></div>
                 <div class="intake-audio-stop-line"><?= cvr_intake_h(cvr_intake_audio_stop_label($pdo, $row['started_at'] ?? null, $durationSeconds, $tail)) ?></div>
               </td>
-              <td class="intake-audio-duration"><?= $durationSeconds > 0 ? cvr_intake_h(cvr_intake_duration_decimal($durationSeconds)) : '—' ?></td>
-              <td>
+              <td class="intake-audio-group-flight"><span class="intake-audio-duration"><?= $durationSeconds > 0 ? cvr_intake_h(cvr_intake_duration_decimal($durationSeconds)) : '—' ?></span></td>
+              <td class="intake-audio-group-quality">
                 <div class="intake-audio-input-mix">
                   <span class="intake-input-pill <?= cvr_intake_h($inputMixClass) ?>"><?= cvr_intake_h((string)($inputMix['label'] ?? 'iPhone Mic')) ?></span>
-                  <span class="intake-audio-input-detail"><?= cvr_intake_h((string)($inputMix['detail'] ?? 'USB 0% · iPhone 100%')) ?></span>
+                  <?php if ($showInputMixDetail): ?>
+                    <span class="intake-audio-input-detail"><?= cvr_intake_h((string)($inputMix['detail'] ?? '')) ?></span>
+                  <?php endif; ?>
                 </div>
               </td>
-              <td><?= cvr_intake_badge($row['upload_status'] ?? '') ?></td>
-              <td data-audio-recording-id="<?= $recordingId ?>">
+              <td class="intake-audio-group-process intake-audio-upload">
+                <?php if ($uploadStatus === 'uploaded' || $uploadStatus === ''): ?>
+                  <span class="intake-audio-empty">—</span>
+                <?php else: ?>
+                  <?= cvr_intake_badge($row['upload_status'] ?? '') ?>
+                <?php endif; ?>
+              </td>
+              <td class="intake-audio-group-process" data-audio-recording-id="<?= $recordingId ?>">
                 <div class="intake-audio-transcript-head">
                   <?php
                     $transcriptStatusText = trim((string)($row['transcription_status'] ?? ''));
@@ -986,20 +1044,20 @@ cw_header('Master Logbook');
                     }
                   ?>
                   <span class="intake-status <?= cvr_intake_h(cvr_intake_status_class($transcriptStatusText)) ?>" data-audio-transcription-status><?= cvr_intake_h(strtoupper(str_replace('_', ' ', $transcriptStatusText))) ?></span>
-                  <span class="intake-audio-transcript-progress" data-audio-transcription-progress><?= $transcriptionProgress ?>%</span>
+                  <span class="intake-audio-transcript-progress<?= $showTranscriptProgress ? '' : ' is-hidden' ?>" data-audio-transcription-progress><?= $transcriptionProgress ?>%</span>
                 </div>
-                <div class="intake-progress-bar" style="margin-top:4px"><div class="intake-progress-fill" data-audio-transcription-fill style="width:<?= $transcriptionProgress ?>%"></div></div>
+                <div class="intake-progress-bar intake-audio-transcript-bar<?= $showTranscriptProgress ? '' : ' is-hidden' ?>" data-audio-transcription-bar><div class="intake-progress-fill" data-audio-transcription-fill style="width:<?= $transcriptionProgress ?>%"></div></div>
               </td>
-              <td>
+              <td class="intake-audio-group-process intake-audio-view">
                 <button
                   class="intake-audio-transcript-btn"
                   type="button"
                   data-audio-transcript-open
                   data-recording-id="<?= $recordingId ?>"
                   <?= $canOpenTranscript ? '' : 'disabled' ?>
-                >View Transcript</button>
+                >View</button>
               </td>
-              <td class="intake-error intake-audio-error" data-audio-error-cell<?= $audioErrorFull !== '' ? ' title="' . cvr_intake_h($audioErrorFull) . '"' : '' ?>><?= $audioError !== '' ? cvr_intake_h($audioError) : '—' ?></td>
+              <td class="intake-audio-group-process intake-error intake-audio-error" data-audio-error-cell<?= $audioErrorFull !== '' ? ' title="' . cvr_intake_h($audioErrorFull) . '"' : '' ?>><?= $audioError !== '' ? cvr_intake_h($audioError) : '<span class="intake-audio-empty">—</span>' ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>
@@ -1923,15 +1981,23 @@ cw_header('Master Logbook');
           const progress = Math.max(0, Math.min(100, Number(recording.transcription_progress || 0)));
           const progressEl = cell.querySelector('[data-audio-transcription-progress]');
           const fillEl = cell.querySelector('[data-audio-transcription-fill]');
+          const barEl = cell.querySelector('[data-audio-transcription-bar]');
           const statusEl = cell.querySelector('[data-audio-transcription-status]');
+          const status = String(recording.transcription_status || '').toLowerCase();
+          const isTranscriptComplete = status === 'ready' && progress >= 100;
           if (progressEl) {
-            progressEl.textContent = progress + '%';
+            progressEl.classList.toggle('is-hidden', isTranscriptComplete);
+            if (!isTranscriptComplete) {
+              progressEl.textContent = progress + '%';
+            }
           }
-          if (fillEl) {
+          if (barEl) {
+            barEl.classList.toggle('is-hidden', isTranscriptComplete);
+          }
+          if (fillEl && !isTranscriptComplete) {
             fillEl.style.width = progress + '%';
           }
           if (statusEl) {
-            const status = String(recording.transcription_status || '');
             statusEl.textContent = formatAudioStatusLabel(status);
             statusEl.className = 'intake-status ' + audioStatusClass(status);
           }
@@ -1946,10 +2012,11 @@ cw_header('Master Logbook');
           const errorCell = row.querySelector('[data-audio-error-cell]');
           if (errorCell) {
             const error = abbreviateAudioError(recording.error_message);
-            errorCell.textContent = error.display;
             if (error.full !== '') {
+              errorCell.textContent = error.display;
               errorCell.title = error.full;
             } else {
+              errorCell.innerHTML = '<span class="intake-audio-empty">—</span>';
               errorCell.removeAttribute('title');
             }
           }
