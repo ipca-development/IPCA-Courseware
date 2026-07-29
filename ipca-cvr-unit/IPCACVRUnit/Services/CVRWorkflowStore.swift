@@ -28,6 +28,7 @@ final class CVRWorkflowStore: ObservableObject {
                 var changed = recoverInterruptedActiveUploads()
                 changed = ensureDispatchUploadComponent() || changed
                 changed = ensureEvidenceUploadComponents() || changed
+                changed = reconcileClosureUploadComponents() || changed
                 if changed {
                     save()
                 }
@@ -457,12 +458,72 @@ final class CVRWorkflowStore: ObservableObject {
         maintenanceRemark: String,
         gpsSample: GPSSample?
     ) -> Bool {
-        guard var flightRecord = state.activeFlightRecord,
-              let dispatch = state.activeDispatch else { return false }
-        guard state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block" }) else {
+        guard state.flightEvents.contains(where: {
+            $0.flightRecordID == state.activeFlightRecord?.id && $0.eventType == "engine_shutdown_on_block"
+        }) else {
             lastError = "Engine shutdown must be recorded before post-flight values can be saved."
             return false
         }
+        return saveFlightClosureValues(
+            endingHobbs: endingHobbs,
+            endingTacho: endingTacho,
+            fuelRemaining: fuelRemaining,
+            verifiedTakeoffCount: verifiedTakeoffCount,
+            verifiedLandingCount: verifiedLandingCount,
+            maintenanceRemark: maintenanceRemark,
+            gpsSample: gpsSample,
+            repairExistingClosureUpload: false
+        )
+    }
+
+    func flightClosureIsComplete(_ flightRecord: CVRIncompleteFlightRecord) -> Bool {
+        guard let endingHobbs = flightRecord.endingHobbs,
+              let endingTacho = flightRecord.endingTacho,
+              let verifiedTakeoffCount = flightRecord.verifiedTakeoffCount,
+              let verifiedLandingCount = flightRecord.verifiedLandingCount else {
+            return false
+        }
+        let fuel = (flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Double(fuel) != nil, verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
+            return false
+        }
+        guard let dispatch = state.activeDispatch else { return endingHobbs >= 0 && endingTacho >= 0 }
+        if let startingHobbs = dispatch.startingHobbs, endingHobbs < startingHobbs { return false }
+        if let startingTacho = dispatch.startingTacho, endingTacho < startingTacho { return false }
+        return true
+    }
+
+    func closureUploadFailure() -> CVRUploadComponentRecord? {
+        state.uploadComponents.first {
+            $0.componentType == "flight_record_closure" && ($0.state == .failed || $0.state == .needsUserAction)
+        }
+    }
+
+    var canEditFlightClosure: Bool {
+        guard state.activeFlightRecord != nil, state.activeDispatch != nil else { return false }
+        if closureUploadFailure() != nil { return true }
+        guard let flightRecord = state.activeFlightRecord else { return false }
+        if flightClosureIsComplete(flightRecord) { return false }
+        return state.uploadComponents.contains {
+            $0.componentType == "flight_record_closure" && $0.flightRecordID == flightRecord.id
+        } || state.flightEvents.contains {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+        }
+    }
+
+    @discardableResult
+    func saveFlightClosureValues(
+        endingHobbs: Double?,
+        endingTacho: Double?,
+        fuelRemaining: String,
+        verifiedTakeoffCount: Int,
+        verifiedLandingCount: Int,
+        maintenanceRemark: String,
+        gpsSample: GPSSample?,
+        repairExistingClosureUpload: Bool
+    ) -> Bool {
+        guard var flightRecord = state.activeFlightRecord,
+              let dispatch = state.activeDispatch else { return false }
         guard let endingHobbs, endingHobbs >= (dispatch.startingHobbs ?? 0) else {
             lastError = "Ending Hobbs must be present and cannot be lower than Starting Hobbs."
             return false
@@ -485,8 +546,8 @@ final class CVRWorkflowStore: ObservableObject {
         let event = makeFlightEvent(
             flightRecord: flightRecord,
             eventType: "shutdown_verification_completed",
-            source: "manual_shutdown_verification",
-            creationMethod: "post_flight_form",
+            source: repairExistingClosureUpload ? "closure_upload_repair" : "manual_shutdown_verification",
+            creationMethod: repairExistingClosureUpload ? "upload_repair_form" : "post_flight_form",
             gpsSample: gpsSample,
             metadata: [
                 "verified_takeoff_count": String(verifiedTakeoffCount),
@@ -518,17 +579,25 @@ final class CVRWorkflowStore: ObservableObject {
                     && supersededEventIDs.contains(String(($0.localFilePath ?? "").dropFirst("event:".count)))
             }
             $0.flightEvents.append(event)
-            $0.uploadComponents.removeAll {
-                $0.flightRecordID == flightRecord.id
-                    && $0.componentType == "flight_record_closure"
-            }
             $0.uploadComponents.append(eventUploadComponent(event))
-            $0.uploadComponents.append(evidenceComponent(
-                flightRecordID: flightRecord.id,
-                type: "flight_record_closure",
-                evidenceID: event.id
-            ))
-            $0.selectedTab = .garmin
+
+            var hasClosureComponent = false
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].flightRecordID == flightRecord.id,
+                      $0.uploadComponents[index].componentType == "flight_record_closure" else { continue }
+                hasClosureComponent = true
+                $0.uploadComponents[index].state = .queued
+                $0.uploadComponents[index].lastError = ""
+                $0.uploadComponents[index].progress = 0
+            }
+            if !hasClosureComponent {
+                $0.uploadComponents.append(evidenceComponent(
+                    flightRecordID: flightRecord.id,
+                    type: "flight_record_closure",
+                    evidenceID: flightRecord.id
+                ))
+            }
+            $0.selectedTab = repairExistingClosureUpload ? $0.selectedTab : .garmin
         }
         return persisted
     }
@@ -1141,7 +1210,8 @@ final class CVRWorkflowStore: ObservableObject {
             ))
             changed = true
         }
-        if flightRecord.status == .awaitingGarmin || flightRecord.status == .awaitingUpload || flightRecord.status == .complete,
+        if (flightRecord.status == .awaitingGarmin || flightRecord.status == .awaitingUpload || flightRecord.status == .complete),
+           flightClosureIsComplete(flightRecord),
            !state.uploadComponents.contains(where: { $0.componentType == "flight_record_closure" && $0.flightRecordID == flightRecord.id }) {
             state.uploadComponents.append(evidenceComponent(
                 flightRecordID: flightRecord.id,
@@ -1149,6 +1219,30 @@ final class CVRWorkflowStore: ObservableObject {
                 evidenceID: flightRecord.id
             ))
             changed = true
+        }
+        return changed
+    }
+
+    private func reconcileClosureUploadComponents() -> Bool {
+        guard let flightRecord = state.activeFlightRecord else { return false }
+        var changed = false
+        for index in state.uploadComponents.indices {
+            guard state.uploadComponents[index].componentType == "flight_record_closure",
+                  state.uploadComponents[index].flightRecordID == flightRecord.id else { continue }
+            if flightClosureIsComplete(flightRecord) {
+                if state.uploadComponents[index].state == .needsUserAction,
+                   state.uploadComponents[index].lastError.contains("Ending Hobbs") {
+                    state.uploadComponents[index].state = .queued
+                    state.uploadComponents[index].lastError = ""
+                    changed = true
+                }
+                continue
+            }
+            if state.uploadComponents[index].state == .queued || state.uploadComponents[index].state == .uploading {
+                state.uploadComponents[index].state = .needsUserAction
+                state.uploadComponents[index].lastError = "Ending Hobbs, Ending Tacho, and fuel remaining are required before closure upload."
+                changed = true
+            }
         }
         return changed
     }

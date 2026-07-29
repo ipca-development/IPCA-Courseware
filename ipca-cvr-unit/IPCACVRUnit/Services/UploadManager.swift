@@ -103,6 +103,16 @@ final class UploadManager: ObservableObject {
 
         for component in components {
             guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
+            if component.componentType == "flight_record_closure",
+               !workflow.flightClosureIsComplete(context.flightRecord) {
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .needsUserAction,
+                    progress: component.progress ?? 0,
+                    lastError: "Ending Hobbs, Ending Tacho, and fuel remaining are required before closure upload."
+                )
+                continue
+            }
             if component.componentType != "dispatch_metadata",
                component.componentType != "garmin_csv",
                context.dispatch.serverDispatchID == nil {

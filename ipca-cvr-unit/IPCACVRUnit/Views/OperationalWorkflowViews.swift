@@ -714,6 +714,8 @@ struct InFlightWorkflowView: View {
         .sheet(isPresented: $isShowingShutdownVerification) {
             ShutdownVerificationView()
                 .environmentObject(workflow)
+                .environmentObject(settings)
+                .environmentObject(uploadManager)
                 .environmentObject(gps)
                 .presentationDetents([.large])
         }
@@ -780,6 +782,10 @@ struct InFlightWorkflowView: View {
                 CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VALUES SAVED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending meters, fuel, and operation counts are atomically stored locally and queued for an individual server receipt. NEXT FLIGHT remains blocked until verification." : "Official Engine Shutdown time is stored locally and queued for server verification.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
                 if !hasShutdownVerificationEvent {
                     CVROperationalActionButton(title: "Complete Shutdown Verification", subtitle: "Ending meters / fuel / operations", color: CVROperationalPalette.secondaryBlue) {
+                        isShowingShutdownVerification = true
+                    }
+                } else if workflow.canEditFlightClosure {
+                    CVROperationalActionButton(title: "Edit Ending Meters / Fuel", subtitle: "Fix closure values before upload", color: CVROperationalPalette.warning) {
                         isShowingShutdownVerification = true
                     }
                 }
@@ -955,6 +961,7 @@ private struct ShutdownVerificationView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var gps: GPSLocationManager
     @Environment(\.dismiss) private var dismiss
+    var repairExistingClosureUpload = false
     @State private var endingHobbs = ""
     @State private var endingTacho = ""
     @State private var fuelRemaining = 0.0
@@ -1023,7 +1030,7 @@ private struct ShutdownVerificationView: View {
                 .padding(16)
             }
             .background(CVROperationalPalette.background.ignoresSafeArea())
-            .navigationTitle("Shutdown Verification")
+            .navigationTitle(repairExistingClosureUpload ? "Fix Ending Meters" : "Shutdown Verification")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1126,8 +1133,8 @@ private struct ShutdownVerificationView: View {
 
     private func load() {
         guard let flightRecord = workflow.state.activeFlightRecord else { return }
-        endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? ""
-        endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? ""
+        endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
+        endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingTacho.map { String(format: "%.1f", $0) } ?? ""
         if let fuel = flightRecord.fuelRemaining.flatMap(Self.fuelGallons(from:)) {
             fuelRemaining = min(max(fuel, 0), 13)
             hasFuelSelection = true
@@ -1138,15 +1145,30 @@ private struct ShutdownVerificationView: View {
     }
 
     private func save() -> Bool {
-        workflow.recordShutdownVerification(
-            endingHobbs: Double(endingHobbs),
-            endingTacho: Double(endingTacho),
-            fuelRemaining: String(format: "%.1f", fuelRemaining),
-            verifiedTakeoffCount: verifiedTakeoffs,
-            verifiedLandingCount: verifiedLandings,
-            maintenanceRemark: maintenanceRemark,
-            gpsSample: gps.latestSample
-        )
+        let saved: Bool
+        if repairExistingClosureUpload || workflow.closureUploadFailure() != nil {
+            saved = workflow.saveFlightClosureValues(
+                endingHobbs: Double(endingHobbs),
+                endingTacho: Double(endingTacho),
+                fuelRemaining: String(format: "%.1f", fuelRemaining),
+                verifiedTakeoffCount: verifiedTakeoffs,
+                verifiedLandingCount: verifiedLandings,
+                maintenanceRemark: maintenanceRemark,
+                gpsSample: gps.latestSample,
+                repairExistingClosureUpload: true
+            )
+        } else {
+            saved = workflow.recordShutdownVerification(
+                endingHobbs: Double(endingHobbs),
+                endingTacho: Double(endingTacho),
+                fuelRemaining: String(format: "%.1f", fuelRemaining),
+                verifiedTakeoffCount: verifiedTakeoffs,
+                verifiedLandingCount: verifiedLandings,
+                maintenanceRemark: maintenanceRemark,
+                gpsSample: gps.latestSample
+            )
+        }
+        return saved
     }
 
     private static func fuelGallons(from value: String) -> Double? {
@@ -1167,7 +1189,9 @@ struct GarminWorkflowView: View {
     @EnvironmentObject private var garminVault: GarminCsvVaultStore
     @EnvironmentObject private var garminSync: GarminCsvSyncManager
     @EnvironmentObject private var network: NetworkMonitor
+    @EnvironmentObject private var gps: GPSLocationManager
     @Binding var showAdminUnlock: Bool
+    @State private var isShowingClosureEditor = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -1192,11 +1216,15 @@ struct GarminWorkflowView: View {
                         )
                     }
                     CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
+                    workflowUploadRepairActions
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
                         if settings.isSimulationModeEnabled {
                             completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
+                        } else if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+                            isShowingClosureEditor = true
+                        } else if workflow.canRepairFailedDispatchUpload {
+                            workflow.selectTab(.dispatch)
                         } else if workflow.dispatchUploadFailure() != nil || !workflow.failedActiveUploadComponents().isEmpty {
-                            _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
                             workflow.requeueFailedUploads()
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         } else if allWorkflowComponentsVerified {
@@ -1210,6 +1238,14 @@ struct GarminWorkflowView: View {
                 .padding(.vertical, metrics.outerVerticalPadding)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
+        }
+        .sheet(isPresented: $isShowingClosureEditor) {
+            ShutdownVerificationView(repairExistingClosureUpload: true)
+                .environmentObject(workflow)
+                .environmentObject(settings)
+                .environmentObject(uploadManager)
+                .environmentObject(gps)
+                .presentationDetents([.large])
         }
         .task {
             await runRecoveryPipelineOnce()
@@ -1231,6 +1267,38 @@ struct GarminWorkflowView: View {
             network: network,
             uploadManager: uploadManager
         )
+    }
+
+    private var workflowUploadRepairActions: some View {
+        VStack(spacing: 8) {
+            if workflow.canEditFlightClosure {
+                CVROperationalActionButton(
+                    title: "FIX ENDING METERS / FUEL",
+                    subtitle: "Enter Hobbs, Tacho, fuel, and operation counts",
+                    color: CVROperationalPalette.warning
+                ) {
+                    isShowingClosureEditor = true
+                }
+            }
+            if workflow.canRepairFailedDispatchUpload {
+                CVROperationalActionButton(
+                    title: "FIX DISPATCH ON DISPATCH TAB",
+                    subtitle: "Oil, fuel continuity, crew, and meters",
+                    color: CVROperationalPalette.secondaryBlue
+                ) {
+                    workflow.selectTab(.dispatch)
+                }
+            }
+            if failedWorkflowComponent?.componentType == "recorder_verification" {
+                CVROperationalActionButton(
+                    title: "FIX RECORDER ON RECORDER TAB",
+                    subtitle: "Repeat recorder verification",
+                    color: CVROperationalPalette.secondaryBlue
+                ) {
+                    workflow.selectTab(.recorder)
+                }
+            }
+        }
     }
 
     private var sdCardTileValue: String {
@@ -1341,6 +1409,12 @@ struct GarminWorkflowView: View {
             return "Uploading \(Int(((uploading.progress ?? 0) * 100).rounded()))%"
         }
         if failedWorkflowComponent != nil {
+            if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+                return "Enter ending Hobbs, Tacho, and fuel"
+            }
+            if workflow.canRepairFailedDispatchUpload {
+                return "Open Dispatch tab to fix and retry"
+            }
             return "Retry missing / failed components"
         }
         return "CSV and flight data"
@@ -1353,7 +1427,16 @@ struct GarminWorkflowView: View {
         if allWorkflowComponentsVerified {
             return "NEXT FLIGHT"
         }
-        return failedWorkflowComponent != nil ? "RETRY FAILED ITEMS" : "UPLOAD QUEUED ITEMS"
+        if failedWorkflowComponent != nil {
+            if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+                return "FIX ENDING METERS"
+            }
+            if workflow.canRepairFailedDispatchUpload {
+                return "FIX DISPATCH"
+            }
+            return "RETRY FAILED ITEMS"
+        }
+        return "UPLOAD QUEUED ITEMS"
     }
 
     private var allWorkflowComponentsVerified: Bool {
@@ -1407,6 +1490,10 @@ struct GarminWorkflowView: View {
             return sdRecovery.lastSummary?.message ?? "Waiting for a matching data-rich Garmin CSV on the SD card."
         }
         if let failedWorkflowComponent {
+            if workflow.canEditFlightClosure {
+                let detail = failedWorkflowComponent.lastError.nilIfEmpty ?? "Ending Hobbs, Ending Tacho, and fuel remaining are required."
+                return "\(detail) Tap FIX ENDING METERS / FUEL below."
+            }
             return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
         }
         if allWorkflowComponentsVerified {

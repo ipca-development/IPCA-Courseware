@@ -78,6 +78,12 @@ $checks = array(
         && str_contains($views, 'CONFIRM & RETRY DISPATCH UPLOAD')
         && str_contains($views, 'Oil has been uploaded')
         && str_contains($views, 'CONTINUITY CONFIRMATION REQUIRED'),
+    'failed closure upload can be repaired from Garmin and In-Flight tabs' =>
+        str_contains($store, 'saveFlightClosureValues')
+        && str_contains($store, 'canEditFlightClosure')
+        && str_contains($store, 'reconcileClosureUploadComponents')
+        && str_contains($views, 'FIX ENDING METERS / FUEL')
+        && str_contains($views, 'Fix Ending Meters'),
     'operational calculation versions accept long service version labels' =>
         str_contains($derivation, "substr((string)(\$value['calculation_version'] ?? 'phase3-v1'), 0, 64)")
         && str_contains((string) file_get_contents($root . '/src/TachoCalculationService.php'), 'tacho_rpm_threshold_cumulative_v2')
