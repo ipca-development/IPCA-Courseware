@@ -36,21 +36,40 @@ final class ProcessingRunRepository
     ): array {
         EvidenceSchema::requireTables($this->pdo, array(EvidenceSchema::TABLE_PROCESSING_RUNS));
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO ' . EvidenceSchema::TABLE_PROCESSING_RUNS
-            . ' (run_uuid, recording_id, parent_run_id, status, canonical_timeline_source, canonical_asr_model, secondary_asr_model, created_by)'
-            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->execute(array(
-            $runUuid,
-            $recordingId,
-            $parentRunId,
-            'running',
-            'whisper_segment_timestamps',
-            $canonicalAsrModel,
-            $secondaryAsrModel,
-            $createdBy,
-        ));
+        if (EvidenceSchema::processingRunHasLifecycleColumns($this->pdo)) {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+                . ' (run_uuid, recording_id, parent_run_id, status, canonical_timeline_source, canonical_asr_model, secondary_asr_model, created_by, heartbeat_at, current_phase)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), ?)'
+            );
+            $stmt->execute(array(
+                $runUuid,
+                $recordingId,
+                $parentRunId,
+                'running',
+                'whisper_segment_timestamps',
+                $canonicalAsrModel,
+                $secondaryAsrModel,
+                $createdBy,
+                'starting',
+            ));
+        } else {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+                . ' (run_uuid, recording_id, parent_run_id, status, canonical_timeline_source, canonical_asr_model, secondary_asr_model, created_by)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute(array(
+                $runUuid,
+                $recordingId,
+                $parentRunId,
+                'running',
+                'whisper_segment_timestamps',
+                $canonicalAsrModel,
+                $secondaryAsrModel,
+                $createdBy,
+            ));
+        }
 
         return $this->findById((int)$this->pdo->lastInsertId()) ?? array('id' => (int)$this->pdo->lastInsertId(), 'run_uuid' => $runUuid);
     }
@@ -76,11 +95,64 @@ final class ProcessingRunRepository
 
     public function markCompleted(int $runId): void
     {
+        if (EvidenceSchema::processingRunHasLifecycleColumns($this->pdo)) {
+            $stmt = $this->pdo->prepare(
+                'UPDATE ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+                . ' SET status = ?, completed_at = CURRENT_TIMESTAMP(3), current_phase = ?, failure_reason = NULL'
+                . ' WHERE id = ?'
+            );
+            $stmt->execute(array('completed', 'completed', $runId));
+            return;
+        }
+
         $stmt = $this->pdo->prepare(
             'UPDATE ' . EvidenceSchema::TABLE_PROCESSING_RUNS
             . ' SET status = ?, completed_at = CURRENT_TIMESTAMP(3) WHERE id = ?'
         );
         $stmt->execute(array('completed', $runId));
+    }
+
+    public function markFailed(int $runId, string $reason, ?string $phase = null): bool
+    {
+        if ($runId <= 0 || !EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return false;
+        }
+
+        $reason = substr(trim($reason), 0, 512);
+        if ($reason === '') {
+            $reason = 'unknown_failure';
+        }
+
+        if (EvidenceSchema::processingRunHasLifecycleColumns($this->pdo)) {
+            $stmt = $this->pdo->prepare(
+                'UPDATE ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+                . ' SET status = ?, failure_reason = ?, completed_at = CURRENT_TIMESTAMP(3), current_phase = COALESCE(?, current_phase)'
+                . ' WHERE id = ? AND status = ?'
+            );
+            $stmt->execute(array('failed', $reason, $phase, $runId, 'running'));
+            return $stmt->rowCount() > 0;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+            . ' SET status = ?, completed_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = ?'
+        );
+        $stmt->execute(array('failed', $runId, 'running'));
+        return $stmt->rowCount() > 0;
+    }
+
+    public function touchHeartbeat(int $runId, string $phase): void
+    {
+        if ($runId <= 0 || !EvidenceSchema::processingRunHasLifecycleColumns($this->pdo)) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+            . ' SET heartbeat_at = CURRENT_TIMESTAMP(3), current_phase = ?'
+            . ' WHERE id = ? AND status = ?'
+        );
+        $stmt->execute(array(substr(trim($phase), 0, 64), $runId, 'running'));
     }
 
     public function updateStatus(int $runId, string $status): void
@@ -185,13 +257,21 @@ final class ProcessingRunRepository
         return is_array($rows) ? $rows : array();
     }
 
-    public function abandonRun(int $runId): void
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function findLatestFailedForRecording(int $recordingId): ?array
     {
-        if ($runId <= 0 || !EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
-            return;
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return null;
         }
-        $stmt = $this->pdo->prepare('DELETE FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE id = ? AND status = ?');
-        $stmt->execute(array($runId, 'running'));
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+            . ' WHERE recording_id = ? AND status = ? ORDER BY completed_at DESC, id DESC LIMIT 1'
+        );
+        $stmt->execute(array($recordingId, 'failed'));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
     }
 
     /**

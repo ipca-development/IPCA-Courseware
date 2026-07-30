@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/CockpitRecorderService.php';
 require_once __DIR__ . '/../src/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+require_once __DIR__ . '/../src/AviationEvidence/ProcessingRunRepository.php';
 
 @set_time_limit(0);
 @ini_set('memory_limit', '1024M');
@@ -31,6 +32,26 @@ function cockpit_evidence_log(string $logFile, string $message): void
     @file_put_contents($logFile, '[' . gmdate('c') . '] ' . $message . PHP_EOL, FILE_APPEND);
 }
 
+register_shutdown_function(static function () use ($pdo): void {
+    $runId = (int)($GLOBALS['cockpit_evidence_active_run_id'] ?? 0);
+    if ($runId <= 0) {
+        return;
+    }
+    $error = error_get_last();
+    if (!is_array($error) || !in_array((int)($error['type'] ?? 0), array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) {
+        return;
+    }
+    try {
+        $repo = new ProcessingRunRepository($pdo);
+        $run = $repo->findById($runId);
+        if (is_array($run) && (string)($run['status'] ?? '') === 'running') {
+            $repo->markFailed($runId, 'worker_fatal: ' . substr((string)($error['message'] ?? 'unknown'), 0, 400));
+        }
+    } catch (Throwable) {
+    }
+    $GLOBALS['cockpit_evidence_active_run_id'] = null;
+});
+
 try {
     cockpit_evidence_log($logFile, 'Evidence worker started for recording ' . $recordingId);
 
@@ -49,8 +70,8 @@ try {
     }
 
     $reason = (string)($result['reason'] ?? 'unknown');
-    if ($reason === 'in_progress') {
-        cockpit_evidence_log($logFile, 'Evidence processing already in progress.');
+    if (in_array($reason, array('in_progress', 'stalled_needs_restart', 'failed_needs_restart'), true)) {
+        cockpit_evidence_log($logFile, 'Evidence processing not started: ' . $reason);
         exit(0);
     }
 

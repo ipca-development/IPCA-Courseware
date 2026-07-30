@@ -223,4 +223,27 @@ final class EvidenceSchema
         )->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
     }
+
+    public static function processingRunHasLifecycleColumns(PDO $pdo): bool
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        if (!self::tablePresent($pdo, self::TABLE_PROCESSING_RUNS)) {
+            $cache = false;
+            return false;
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS'
+                . ' WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+            );
+            $stmt->execute(array(self::TABLE_PROCESSING_RUNS, 'heartbeat_at'));
+            $cache = (int)$stmt->fetchColumn() > 0;
+        } catch (Throwable) {
+            $cache = false;
+        }
+        return $cache;
+    }
 }

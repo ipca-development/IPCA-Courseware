@@ -65,9 +65,6 @@ try {
             $recordingId = (int)($row['id'] ?? 0);
             $recording = $recordingId > 0 ? $recorder->recordingByAnyId((string)$recordingId) : null;
             if (is_array($recording) && strtolower(trim((string)($recording['transcription_status'] ?? ''))) === 'ready') {
-                if ($evidenceQueue->needsEvidenceProcessing($recording)) {
-                    $evidenceQueue->ensureQueued($recordingId);
-                }
                 CockpitRecorderDebriefQueueService::fromPdo($pdo)->onTranscriptionReady($recordingId);
                 $recording = $recorder->recordingByAnyId((string)$recordingId) ?? $recording;
             }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/CockpitRecorderService.php';
 require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
 require_once __DIR__ . '/AviationEvidence/ProcessingRunRepository.php';
+require_once __DIR__ . '/AviationEvidence/EvidenceWorkerDiagnosticsService.php';
 require_once __DIR__ . '/AviationEvidence/InterpretationRevisionRepository.php';
 require_once __DIR__ . '/AviationEvidence/SpeechSegmentRepository.php';
 require_once __DIR__ . '/AviationEvidence/DisplayBlockRepository.php';
@@ -11,14 +12,11 @@ require_once __DIR__ . '/AviationEvidence/EvidenceProgressEstimator.php';
 
 final class CockpitRecorderEvidenceQueueService
 {
-    private const RUNNING_STALE_SECONDS = 14400;
-    private const WORKER_ACTIVE_SECONDS = 300;
-    private const STALLED_QUEUED_SECONDS = 45;
-
     public function __construct(
         private readonly PDO $pdo,
         private readonly CockpitRecorderService $recorder,
         private readonly ProcessingRunRepository $processingRuns,
+        private readonly EvidenceWorkerDiagnosticsService $diagnostics,
     ) {
     }
 
@@ -45,17 +43,12 @@ final class CockpitRecorderEvidenceQueueService
         if ($recordingId <= 0) {
             return false;
         }
-        if ($this->workerRecentlyActive($recordingId)) {
-            return true;
-        }
-        $running = $this->processingRuns->findRunningForRecording($recordingId);
-        if ($running === null) {
-            return false;
-        }
-        return !$this->isStaleRun($running);
+        return $this->diagnostics->findLiveRunningForRecording($recordingId) !== null;
     }
 
     /**
+     * Start evidence processing once after transcription. Does not retry stalled runs.
+     *
      * @return array<string,mixed>
      */
     public function ensureQueued(int $recordingId): array
@@ -78,10 +71,23 @@ final class CockpitRecorderEvidenceQueueService
             );
         }
 
-        $this->abandonStaleRuns($recordingId);
-
         if ($this->isEvidenceInProgress($recordingId)) {
             return array('ok' => true, 'queued' => false, 'reason' => 'already_running');
+        }
+
+        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
+        $failure = $this->diagnostics->diagnose($recordingId, $recording, $runningRun);
+        if (is_array($failure)) {
+            return array(
+                'ok' => true,
+                'queued' => false,
+                'reason' => 'needs_manual_restart',
+                'failure' => $failure,
+            );
+        }
+
+        if ($this->processingRuns->findLatestFailedForRecording($recordingId) !== null) {
+            return array('ok' => true, 'queued' => false, 'reason' => 'needs_manual_restart');
         }
 
         $spawned = $this->spawnWorker($recordingId);
@@ -151,7 +157,7 @@ final class CockpitRecorderEvidenceQueueService
     }
 
     /**
-     * Retry evidence processing: spawn background worker, or run inline when spawn is unavailable.
+     * Explicit operator restart: diagnose, seal any dead run, then start a fresh attempt.
      *
      * @return array<string,mixed>
      */
@@ -174,21 +180,55 @@ final class CockpitRecorderEvidenceQueueService
             );
         }
 
-        $this->abandonStaleRuns($recordingId);
-        $queueResult = $this->ensureQueued($recordingId);
-        $inlineFallback = false;
-        $inlineResult = null;
-        $inlineError = null;
-
-        if (($queueResult['reason'] ?? '') === 'worker_spawn_failed') {
-            require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
-            try {
-                $inlineFallback = true;
-                $inlineResult = ProductionTranscriptionEvidenceService::fromPdo($this->pdo)
-                    ->persistAfterTranscription($recordingId, $recording);
-            } catch (Throwable $e) {
-                $inlineError = $e->getMessage();
+        $runningRuns = $this->processingRuns->listRunningForRecording($recordingId);
+        $diagnosis = null;
+        foreach ($runningRuns as $runningRun) {
+            if ($this->diagnostics->isRunLive($runningRun)) {
+                return array(
+                    'ok' => false,
+                    'error' => 'Evidence processing is still running for this recording.',
+                    'pipeline' => $this->publicStatusForRecording($recording),
+                );
             }
+            $runDiagnosis = $this->diagnostics->diagnose($recordingId, $recording, $runningRun);
+            if ($diagnosis === null && is_array($runDiagnosis)) {
+                $diagnosis = $runDiagnosis;
+            }
+            $this->diagnostics->sealDiagnosedFailure(
+                (int)($runningRun['id'] ?? 0),
+                is_array($runDiagnosis) ? $runDiagnosis : array(
+                    'code' => 'operator_restart',
+                    'reason' => 'Evidence processing was restarted by an operator.',
+                    'detail' => 'The previous run was sealed before starting a new attempt.',
+                    'phase' => trim((string)($runningRun['current_phase'] ?? '')) ?: null,
+                    'log_excerpt' => null,
+                    'can_restart' => true,
+                )
+            );
+        }
+
+        if ($this->isEvidenceInProgress($recordingId)) {
+            return array(
+                'ok' => false,
+                'error' => 'Evidence processing is still running for this recording.',
+                'pipeline' => $this->publicStatusForRecording($recording),
+            );
+        }
+
+        require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+        $inlineError = null;
+        $inlineResult = null;
+        try {
+            @set_time_limit(0);
+            $inlineResult = ProductionTranscriptionEvidenceService::fromPdo($this->pdo)
+                ->persistAfterTranscription($recordingId, $recording, true);
+            if (($inlineResult['reason'] ?? '') === 'in_progress') {
+                $inlineError = 'Evidence processing is already running.';
+            } elseif (empty($inlineResult['ok']) && empty($inlineResult['skipped'])) {
+                $inlineError = (string)($inlineResult['error'] ?? $inlineResult['reason'] ?? 'Evidence processing failed.');
+            }
+        } catch (Throwable $e) {
+            $inlineError = $e->getMessage();
         }
 
         $recording = $this->recorder->recordingByAnyId((string)$recordingId) ?? $recording;
@@ -197,48 +237,11 @@ final class CockpitRecorderEvidenceQueueService
         return array(
             'ok' => $inlineError === null,
             'recording_id' => $recordingId,
-            'queue' => $queueResult,
-            'inline_fallback' => $inlineFallback,
+            'diagnosis' => $diagnosis,
             'inline_result' => $inlineResult,
-            'inline_error' => $inlineError,
             'pipeline' => $pipeline,
             'error' => $inlineError,
         );
-    }
-
-    private function abandonStaleRuns(int $recordingId): void
-    {
-        foreach ($this->processingRuns->listRunningForRecording($recordingId) as $run) {
-            if (!$this->isStaleRun($run)) {
-                continue;
-            }
-            $runId = (int)($run['id'] ?? 0);
-            if ($runId > 0) {
-                $this->processingRuns->abandonRun($runId);
-            }
-        }
-    }
-
-    /**
-     * @param array<string,mixed> $run
-     */
-    private function isStaleRun(array $run): bool
-    {
-        $createdAt = strtotime((string)($run['created_at'] ?? ''));
-        if ($createdAt === false) {
-            return true;
-        }
-        return (time() - $createdAt) > self::RUNNING_STALE_SECONDS;
-    }
-
-    private function workerRecentlyActive(int $recordingId): bool
-    {
-        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_evidence_' . $recordingId . '.log';
-        if (!is_file($logFile)) {
-            return false;
-        }
-        $mtime = filemtime($logFile);
-        return $mtime !== false && (time() - $mtime) < self::WORKER_ACTIVE_SECONDS;
     }
 
     /**
@@ -253,14 +256,7 @@ final class CockpitRecorderEvidenceQueueService
         $publishableRun = $this->processingRuns->findLatestPublishableForRecording($recordingId);
         $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
         $needsEvidence = $this->needsEvidenceProcessing($recording);
-        $transcriptionWorkerActive = $this->transcriptionWorkerRecentlyActive($recordingId);
-        $evidenceWorkerActive = $this->workerRecentlyActive($recordingId);
-        $evidenceInProgress = $needsEvidence && (
-            $evidenceWorkerActive
-            || $transcriptionWorkerActive
-            || ($transcriptionStatus === 'ready' && is_array($runningRun) && !$this->isStaleRun($runningRun))
-            || $this->isEvidenceInProgress($recordingId)
-        );
+        $evidenceInProgress = $needsEvidence && $this->isEvidenceInProgress($recordingId);
 
         $pipelineStage = 'legacy';
         if (in_array($transcriptionStatus, array('queued', 'transcribing', 'pending'), true)) {
@@ -281,35 +277,40 @@ final class CockpitRecorderEvidenceQueueService
         $evidenceEstimatedRemainingSeconds = null;
         $evidenceElapsedSeconds = null;
         if ($pipelineStage === 'processing_evidence') {
-            $evidenceStep = $this->inferEvidenceStep($recordingId, $runningRun);
-            $evidenceStepLabel = $this->evidenceStepLabel($evidenceStep);
+            $liveRun = $evidenceInProgress ? ($runningRun ?? $this->diagnostics->findLiveRunningForRecording($recordingId)) : $runningRun;
+            $evidenceStep = $this->inferEvidenceStep($recordingId, is_array($liveRun) ? $liveRun : $runningRun);
+            $evidenceStepLabel = $this->evidenceStepLabel($evidenceStep, is_array($liveRun) ? $liveRun : $runningRun);
             $progressEstimate = EvidenceProgressEstimator::fromPdo($this->pdo)->estimate(
                 $recording,
                 $evidenceStep,
-                $runningRun
+                is_array($liveRun) ? $liveRun : $runningRun
             );
             $evidenceProgress = (int)($progressEstimate['evidence_progress'] ?? 0);
             $evidenceEstimatedRemainingSeconds = (int)($progressEstimate['evidence_estimated_remaining_seconds'] ?? 0);
             $evidenceElapsedSeconds = (int)($progressEstimate['evidence_elapsed_seconds'] ?? 0);
         }
 
-        $workerFailure = $this->workerFailureState(
+        $workerFailure = $this->diagnostics->diagnose(
             $recordingId,
             $recording,
-            $evidenceStep,
-            $evidenceInProgress,
-            $needsEvidence
+            $runningRun,
+            $evidenceStepLabel
         );
+        if (is_array($workerFailure)) {
+            $evidenceInProgress = false;
+        }
 
-        $displayStatus = $pipelineStage === 'processing_evidence' ? 'processing_evidence' : $transcriptionStatus;
+        $displayStatus = is_array($workerFailure) && $needsEvidence
+            ? 'evidence_failed'
+            : ($pipelineStage === 'processing_evidence' ? 'processing_evidence' : $transcriptionStatus);
         $displayProgress = $pipelineStage === 'transcribing'
             ? $transcriptionProgress
-            : ($pipelineStage === 'processing_evidence'
+            : ($pipelineStage === 'processing_evidence' && !is_array($workerFailure)
                 ? ($evidenceProgress ?? 0)
                 : $transcriptionProgress);
 
         return array(
-            'pipeline_stage' => $pipelineStage,
+            'pipeline_stage' => is_array($workerFailure) && $needsEvidence ? 'evidence_failed' : $pipelineStage,
             'display_status' => $displayStatus,
             'display_progress' => $displayProgress,
             'transcription_status' => $transcriptionStatus,
@@ -324,7 +325,9 @@ final class CockpitRecorderEvidenceQueueService
             'evidence_worker_failed' => is_array($workerFailure),
             'evidence_worker_failure_reason' => is_array($workerFailure) ? (string)($workerFailure['reason'] ?? '') : null,
             'evidence_worker_failure_code' => is_array($workerFailure) ? (string)($workerFailure['code'] ?? '') : null,
-            'can_retry_evidence' => is_array($workerFailure) && $needsEvidence,
+            'evidence_worker_failure_detail' => is_array($workerFailure) ? (string)($workerFailure['detail'] ?? '') : null,
+            'evidence_worker_log_excerpt' => is_array($workerFailure) ? ($workerFailure['log_excerpt'] ?? null) : null,
+            'can_retry_evidence' => is_array($workerFailure) && !empty($workerFailure['can_restart']) && $needsEvidence,
             'publishable' => $publishableRun !== null,
             'running_processing_run_id' => is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : null,
             'latest_publishable_processing_run_id' => is_array($publishableRun) ? (int)($publishableRun['id'] ?? 0) : null,
@@ -339,8 +342,13 @@ final class CockpitRecorderEvidenceQueueService
     private function inferEvidenceStep(int $recordingId, ?array $runningRun): string
     {
         $processingRunId = is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : 0;
+        $phase = is_array($runningRun) ? trim((string)($runningRun['current_phase'] ?? '')) : '';
+        if ($phase !== '' && in_array($phase, array('queued', 'starting', 'persisting', 'pass_4', 'pass_5', 'finishing'), true)) {
+            return $phase === 'starting' ? 'persisting' : $phase;
+        }
+
         if ($processingRunId <= 0) {
-            return $this->transcriptionWorkerRecentlyActive($recordingId) ? 'persisting' : 'queued';
+            return $this->diagnostics->findLiveRunningForRecording($recordingId) !== null ? 'persisting' : 'queued';
         }
 
         if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_SPEECH_SEGMENTS)) {
@@ -373,8 +381,23 @@ final class CockpitRecorderEvidenceQueueService
         return 'finishing';
     }
 
-    private function evidenceStepLabel(?string $step): ?string
+    /**
+     * @param array<string,mixed>|null $runningRun
+     */
+    private function evidenceStepLabel(?string $step, ?array $runningRun = null): ?string
     {
+        $phase = is_array($runningRun) ? trim((string)($runningRun['current_phase'] ?? '')) : '';
+        if ($phase !== '' && $phase !== 'starting') {
+            return match ($phase) {
+                'queued' => 'Waiting to start evidence worker',
+                'persisting' => 'Persisting timestamped transcript',
+                'pass_4' => 'Pass 4 — quality + readable layer',
+                'pass_5' => 'Pass 5 — blocks + flight outline',
+                'finishing' => 'Finalizing evidence run',
+                default => null,
+            };
+        }
+
         return match ($step) {
             'queued' => 'Waiting to start evidence worker',
             'persisting' => 'Persisting timestamped transcript',
@@ -385,103 +408,13 @@ final class CockpitRecorderEvidenceQueueService
         };
     }
 
-    private function transcriptionWorkerRecentlyActive(int $recordingId): bool
-    {
-        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_recorder_' . $recordingId . '.log';
-        if (!is_file($logFile)) {
-            return false;
-        }
-        $mtime = filemtime($logFile);
-        return $mtime !== false && (time() - $mtime) < self::WORKER_ACTIVE_SECONDS;
-    }
-
-    /**
-     * @param array<string,mixed> $recording
-     * @return array{reason:string,code:string}|null
-     */
-    private function workerFailureState(
-        int $recordingId,
-        array $recording,
-        ?string $evidenceStep,
-        bool $evidenceInProgress,
-        bool $needsEvidence
-    ): ?array {
-        if (!$needsEvidence || $evidenceInProgress || $evidenceStep !== 'queued') {
-            return null;
-        }
-
-        if ($this->workerRecentlyActive($recordingId) || $this->transcriptionWorkerRecentlyActive($recordingId)) {
-            return null;
-        }
-
-        if (!function_exists('exec')) {
-            return array(
-                'code' => 'exec_disabled',
-                'reason' => 'Background worker cannot start because PHP exec() is disabled on this server.',
-            );
-        }
-
-        $spawnReason = $this->readSpawnFailureFromLog($recordingId);
-        if ($spawnReason !== null) {
-            return array(
-                'code' => 'spawn_failed',
-                'reason' => $spawnReason,
-            );
-        }
-
-        $elapsed = $this->secondsSinceTranscriptionReady($recording);
-        if ($elapsed !== null && $elapsed >= self::STALLED_QUEUED_SECONDS) {
-            return array(
-                'code' => 'stalled',
-                'reason' => 'Evidence worker did not start after transcription finished. Click Restart Evidence to retry.',
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * @param array<string,mixed> $recording
-     */
-    private function secondsSinceTranscriptionReady(array $recording): ?int
-    {
-        $startedAt = strtotime((string)($recording['transcription_completed_at'] ?? ''));
-        if ($startedAt === false) {
-            $startedAt = strtotime((string)($recording['updated_at'] ?? ''));
-        }
-        if ($startedAt === false) {
-            return null;
-        }
-        return max(0, time() - $startedAt);
-    }
-
-    private function readSpawnFailureFromLog(int $recordingId): ?string
-    {
-        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_evidence_' . $recordingId . '.log';
-        if (!is_file($logFile)) {
-            return null;
-        }
-        $lines = @file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if (!is_array($lines) || $lines === array()) {
-            return null;
-        }
-        foreach (array_reverse(array_slice($lines, -12)) as $line) {
-            $text = trim((string)$line);
-            if ($text === '') {
-                continue;
-            }
-            if (str_contains($text, 'Worker spawn exited with code')) {
-                return 'Evidence worker spawn failed. Check storage/logs/cockpit_evidence_' . $recordingId . '.log.';
-            }
-            if (str_contains($text, 'ERROR:')) {
-                return preg_replace('/^\[[^\]]+\]\s*/', '', $text) ?: 'Evidence worker failed. See cockpit evidence log.';
-            }
-        }
-        return null;
-    }
-
     public static function fromPdo(PDO $pdo): self
     {
-        return new self($pdo, new CockpitRecorderService($pdo), new ProcessingRunRepository($pdo));
+        return new self(
+            $pdo,
+            new CockpitRecorderService($pdo),
+            new ProcessingRunRepository($pdo),
+            EvidenceWorkerDiagnosticsService::fromPdo($pdo),
+        );
     }
 }

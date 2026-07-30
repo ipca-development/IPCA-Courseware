@@ -572,3 +572,35 @@ CREATE TABLE IF NOT EXISTS ipca_evidence_schema_versions (
 INSERT INTO ipca_evidence_schema_versions (version, migration_file, notes)
 VALUES ('2026.07.30', 'scripts/sql/2026_07_30_aviation_evidence_platform.sql', 'Phase 1 frozen schema with provider observations')
 ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP(3), notes = VALUES(notes);
+
+-- Processing run lifecycle (heartbeat lease — no silent stale-worker deletion)
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_evidence_processing_runs' AND COLUMN_NAME = 'heartbeat_at'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_evidence_processing_runs ADD COLUMN heartbeat_at DATETIME(3) NULL AFTER completed_at',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_evidence_processing_runs' AND COLUMN_NAME = 'current_phase'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_evidence_processing_runs ADD COLUMN current_phase VARCHAR(64) NULL AFTER heartbeat_at',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_evidence_processing_runs' AND COLUMN_NAME = 'failure_reason'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE ipca_evidence_processing_runs ADD COLUMN failure_reason VARCHAR(512) NULL AFTER current_phase',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+INSERT INTO ipca_evidence_schema_versions (version, migration_file, notes)
+VALUES ('2026.07.30.1', 'scripts/sql/2026_07_30_aviation_evidence_platform.sql', 'Processing run heartbeat lifecycle columns')
+ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP(3), notes = VALUES(notes);

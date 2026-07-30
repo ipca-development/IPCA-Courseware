@@ -11,6 +11,8 @@ require_once __DIR__ . '/ProviderModelCapabilitiesRepository.php';
 require_once __DIR__ . '/InterpretationRevisionRepository.php';
 require_once __DIR__ . '/EvidencePass4Runner.php';
 require_once __DIR__ . '/EvidencePass5Runner.php';
+require_once __DIR__ . '/ProcessingRunLifecycleService.php';
+require_once __DIR__ . '/EvidenceWorkerDiagnosticsService.php';
 require_once __DIR__ . '/../CockpitRecorderService.php';
 
 /**
@@ -34,7 +36,7 @@ final class ProductionTranscriptionEvidenceService
      * @param array<string,mixed> $recording
      * @return array<string,mixed>
      */
-    public function persistAfterTranscription(int $recordingId, array $recording): array
+    public function persistAfterTranscription(int $recordingId, array $recording, bool $explicitRetry = false): array
     {
         if (!EvidenceSchema::persistenceReady($this->pdo)) {
             return array('ok' => false, 'skipped' => true, 'reason' => 'schema_not_ready');
@@ -73,6 +75,7 @@ final class ProductionTranscriptionEvidenceService
             $sourceAudioSha256
         );
 
+        $diagnostics = EvidenceWorkerDiagnosticsService::fromPdo($this->pdo);
         $existingRun = $this->processingRuns->findByRunUuid($executionUuid);
         if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'completed') {
             return array(
@@ -84,9 +87,7 @@ final class ProductionTranscriptionEvidenceService
             );
         }
         if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'running') {
-            $createdAt = strtotime((string)($existingRun['created_at'] ?? ''));
-            $ageSeconds = $createdAt !== false ? max(0, time() - $createdAt) : PHP_INT_MAX;
-            if ($ageSeconds < 14400) {
+            if ($diagnostics->isRunLive($existingRun)) {
                 return array(
                     'ok' => true,
                     'skipped' => true,
@@ -95,7 +96,34 @@ final class ProductionTranscriptionEvidenceService
                     'execution_uuid' => $executionUuid,
                 );
             }
-            $this->processingRuns->abandonRun((int)($existingRun['id'] ?? 0));
+            if (!$explicitRetry) {
+                return array(
+                    'ok' => false,
+                    'skipped' => true,
+                    'reason' => 'stalled_needs_restart',
+                    'processing_run_id' => (int)($existingRun['id'] ?? 0),
+                    'execution_uuid' => $executionUuid,
+                );
+            }
+        }
+        if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'failed' && !$explicitRetry) {
+            return array(
+                'ok' => false,
+                'skipped' => true,
+                'reason' => 'failed_needs_restart',
+                'processing_run_id' => (int)($existingRun['id'] ?? 0),
+                'execution_uuid' => $executionUuid,
+            );
+        }
+
+        $retryAttempt = 1;
+        if ($explicitRetry) {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE recording_id = ? AND status = ?'
+            );
+            $stmt->execute(array($recordingId, 'failed'));
+            $retryAttempt = max(1, (int)$stmt->fetchColumn() + 1);
+            $executionUuid = IdempotencyKeyBuilder::productionRetryExecutionUuid($executionUuid, $retryAttempt);
         }
 
         $productionModel = EvidenceSchema::defaultAsrModel();
@@ -107,19 +135,26 @@ final class ProductionTranscriptionEvidenceService
         $processingRun = $this->processingRuns->createWithUuid(
             $recordingId,
             $executionUuid,
-            EvidenceSchema::RUN_PURPOSE_INITIAL
+            $explicitRetry ? EvidenceSchema::RUN_PURPOSE_RETRY : EvidenceSchema::RUN_PURPOSE_INITIAL
         );
         $processingRunId = (int)($processingRun['id'] ?? 0);
         if ($processingRunId <= 0) {
             throw new RuntimeException('Failed to create processing run for recording ' . $recordingId);
         }
 
+        $execution = ProcessingRunLifecycleService::fromPdo($this->pdo)->beginExecution($processingRunId);
+        $GLOBALS['cockpit_evidence_active_run_id'] = $processingRunId;
+
         $runsOut = array();
         $totalSegments = 0;
         $totalWords = 0;
         $totalObservations = 0;
 
-        foreach ($legacyChunks as $chunk) {
+        try {
+            $execution->heartbeat('persisting');
+            $this->evidenceProgressLog($recordingId, 'Evidence persist started (' . count($legacyChunks) . ' chunks).');
+
+            foreach ($legacyChunks as $chunk) {
             $chunkIndex = (int)($chunk['chunk_index'] ?? 0);
             $startSeconds = (float)($chunk['start_seconds'] ?? 0);
             $endSeconds = (float)($chunk['end_seconds'] ?? ($startSeconds + CockpitRecorderService::TRANSCRIPTION_CHUNK_SECONDS));
@@ -281,10 +316,14 @@ final class ProductionTranscriptionEvidenceService
                     @unlink($chunkPath);
                 }
             }
-        }
+            $execution->heartbeat('persisting');
+            $this->evidenceProgressLog($recordingId, 'Persisting chunk ' . ($chunkIndex + 1) . ' of ' . count($legacyChunks));
+            }
 
         $pass4Result = null;
         if (!$skipWhisper && EvidenceSchema::runPass4AfterPersist() && EvidenceSchema::pass4Ready($this->pdo)) {
+            $execution->heartbeat('pass_4');
+            $this->evidenceProgressLog($recordingId, 'Pass 4 started.');
             try {
                 $pass4Result = EvidencePass4Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
             } catch (Throwable $e) {
@@ -302,6 +341,8 @@ final class ProductionTranscriptionEvidenceService
             is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])
             && EvidenceSchema::runPass5AfterPersist() && EvidenceSchema::pass5Ready($this->pdo)
         ) {
+            $execution->heartbeat('pass_5');
+            $this->evidenceProgressLog($recordingId, 'Pass 5 started.');
             try {
                 $pass5Result = EvidencePass5Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
             } catch (Throwable $e) {
@@ -309,7 +350,9 @@ final class ProductionTranscriptionEvidenceService
             }
         }
 
-        $this->processingRuns->markCompleted($processingRunId);
+        $execution->heartbeat('finishing');
+        $execution->complete();
+        $GLOBALS['cockpit_evidence_active_run_id'] = null;
 
         return array(
             'ok' => true,
@@ -326,6 +369,11 @@ final class ProductionTranscriptionEvidenceService
             'pass_4' => $pass4Result,
             'pass_5' => $pass5Result,
         );
+        } catch (Throwable $e) {
+            $execution->fail($e->getMessage());
+            $GLOBALS['cockpit_evidence_active_run_id'] = null;
+            throw $e;
+        }
     }
 
     public static function fromPdo(PDO $pdo): self
@@ -551,6 +599,15 @@ final class ProductionTranscriptionEvidenceService
         } catch (Throwable $e) {
             error_log('[CockpitRecorderDebriefQueue] recording ' . $recordingId . ': ' . $e->getMessage());
         }
+    }
+
+    private function evidenceProgressLog(int $recordingId, string $message): void
+    {
+        if ($recordingId <= 0 || trim($message) === '') {
+            return;
+        }
+        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_evidence_' . $recordingId . '.log';
+        @file_put_contents($logFile, '[' . gmdate('c') . '] ' . $message . PHP_EOL, FILE_APPEND);
     }
 
     /**

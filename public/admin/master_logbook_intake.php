@@ -2189,7 +2189,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       if (['ready', 'uploaded', 'received', 'finalized', 'complete', 'completed', 'ok', 'valid', 'active'].includes(normalized)) {
         return 'intake-status-good';
       }
-      if (['failed', 'error', 'invalid', 'rejected'].includes(normalized)) {
+      if (['failed', 'error', 'invalid', 'rejected', 'evidence_failed'].includes(normalized)) {
         return 'intake-status-bad';
       }
       if (normalized === '') {
@@ -2289,9 +2289,12 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           if (evidenceWarningEl && evidenceWarningTextEl) {
             const workerFailed = !!recording.evidence_worker_failed;
             const failureReason = String(recording.evidence_worker_failure_reason || '').trim();
+            const failureDetail = String(recording.evidence_worker_failure_detail || '').trim();
             if (workerFailed && failureReason !== '') {
               evidenceWarningEl.hidden = false;
-              evidenceWarningTextEl.textContent = failureReason;
+              evidenceWarningTextEl.textContent = failureDetail !== ''
+                ? (failureReason + ' ' + failureDetail)
+                : failureReason;
             } else {
               evidenceWarningEl.hidden = true;
               evidenceWarningTextEl.textContent = '';

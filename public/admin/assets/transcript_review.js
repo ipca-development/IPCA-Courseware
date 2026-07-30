@@ -257,8 +257,11 @@
         legacyBody.hidden = false;
         legacyBody.innerHTML = ''
           + '<div class="trv-evidence-warning">'
-          + '<strong>Evidence worker failed to start</strong>'
+          + '<strong>Evidence processing failed</strong>'
           + '<p>' + escapeHtml(failureReason) + '</p>'
+          + (String(pipeline.evidence_worker_failure_detail || '').trim() !== ''
+            ? '<p class="trv-muted">' + escapeHtml(String(pipeline.evidence_worker_failure_detail || '')) + '</p>'
+            : '')
           + (pipeline.can_retry_evidence
             ? '<button type="button" class="trv-btn-primary" data-trv-evidence-retry>Restart Evidence</button>'
             : '')

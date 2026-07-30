@@ -28,6 +28,19 @@ final class IdempotencyKeyBuilder
         );
     }
 
+    public static function productionRetryExecutionUuid(string $baseExecutionUuid, int $retryAttempt): string
+    {
+        $hash = hash('sha256', 'production_retry|' . strtolower($baseExecutionUuid) . '|' . max(1, $retryAttempt));
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12)
+        );
+    }
+
     public static function forProductionTranscriptionChunk(string $executionUuid, int $chunkIndex, string $probeLabel): string
     {
         return hash('sha256', 'production_persist|' . strtolower($executionUuid) . '|' . $chunkIndex . '|' . $probeLabel);
