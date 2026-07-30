@@ -8,6 +8,7 @@ require_once __DIR__ . '/AudioChunkRepository.php';
 require_once __DIR__ . '/ProviderRunRepository.php';
 require_once __DIR__ . '/ProviderObservationRepository.php';
 require_once __DIR__ . '/ProviderModelCapabilitiesRepository.php';
+require_once __DIR__ . '/EvidencePass4Runner.php';
 
 /**
  * Persists immutable Phase 0 probe evidence into typed tables.
@@ -181,6 +182,15 @@ final class ProviderRunPersister
             );
         }
 
+        $pass4Result = null;
+        if (EvidenceSchema::runPass4AfterPersist() && EvidenceSchema::pass4Ready($this->pdo)) {
+            try {
+                $pass4Result = EvidencePass4Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
+            } catch (Throwable $e) {
+                $pass4Result = array('ok' => false, 'error' => $e->getMessage());
+            }
+        }
+
         $this->processingRuns->markCompleted($processingRunId);
 
         $schemaVersion = EvidenceSchema::currentSchemaVersion($this->pdo);
@@ -199,6 +209,7 @@ final class ProviderRunPersister
                 'words_inserted' => $totalWords,
             ),
             'filesystem_evidence_paths' => $evidenceFilesByLabel,
+            'pass_4' => $pass4Result,
         );
     }
 

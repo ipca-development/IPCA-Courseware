@@ -110,6 +110,16 @@ final class Phase0PersistenceVerifier
             }
         }
 
+        $processingRunId = count($runs) > 0 ? (int)($runs[0]['processing_run_id'] ?? 0) : 0;
+        if ($processingRunId > 0 && EvidenceSchema::pass4Ready($this->pdo)) {
+            foreach ($this->verifyPass4Artifacts($processingRunId) as $check) {
+                $checks[] = $check;
+                if (empty($check['ok'])) {
+                    $ok = false;
+                }
+            }
+        }
+
         return array(
             'ok' => $ok,
             'probe_execution_uuid' => $probeExecutionUuid,
@@ -128,6 +138,70 @@ final class Phase0PersistenceVerifier
             }, $runs),
             'verification_sql' => self::documentedVerificationSql(),
         );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function verifyPass4Artifacts(int $processingRunId): array
+    {
+        $checks = array();
+
+        $runStmt = $this->pdo->prepare(
+            'SELECT speech_quality_version, semantic_validation_version FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE id = ? LIMIT 1'
+        );
+        $runStmt->execute(array($processingRunId));
+        $runRow = $runStmt->fetch(PDO::FETCH_ASSOC) ?: array();
+
+        $segmentStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' WHERE processing_run_id = ?'
+        );
+        $segmentStmt->execute(array($processingRunId));
+        $segmentCount = (int)$segmentStmt->fetchColumn();
+
+        $checks[] = self::result(
+            'pass4_speech_segments_materialized',
+            $segmentCount === 71,
+            'Expected 71 speech segments materialized from whisper timeline',
+            array('processing_run_id' => $processingRunId, 'speech_segment_count' => $segmentCount)
+        );
+
+        $layerStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ' . EvidenceSchema::TABLE_INTERPRETATION_REVISIONS . ' i'
+            . ' INNER JOIN ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' s ON s.id = i.speech_segment_id'
+            . ' WHERE s.processing_run_id = ? AND i.layer = ?'
+        );
+        $layerStmt->execute(array($processingRunId, EvidenceSchema::LAYER_PASS4B));
+        $pass4bCount = (int)$layerStmt->fetchColumn();
+        $checks[] = self::result(
+            'pass4b_interpretation_present',
+            $pass4bCount >= 1,
+            'Expected Pass 4B interpretation revision',
+            array('processing_run_id' => $processingRunId, 'pass_4b_revision_count' => $pass4bCount)
+        );
+
+        $layerStmt->execute(array($processingRunId, EvidenceSchema::LAYER_READABLE));
+        $readableCount = (int)$layerStmt->fetchColumn();
+        $checks[] = self::result(
+            'pass4_readable_primary_present',
+            $readableCount >= 1,
+            'Expected readable_primary interpretation revision',
+            array('processing_run_id' => $processingRunId, 'readable_revision_count' => $readableCount)
+        );
+
+        $checks[] = self::result(
+            'pass4_version_fields_set',
+            (string)($runRow['speech_quality_version'] ?? '') === EvidenceSchema::PASS4A_VERSION
+            && (string)($runRow['semantic_validation_version'] ?? '') === EvidenceSchema::PASS4B_VERSION,
+            'Processing run Pass 4 version fields must be set',
+            array(
+                'processing_run_id' => $processingRunId,
+                'speech_quality_version' => $runRow['speech_quality_version'] ?? null,
+                'semantic_validation_version' => $runRow['semantic_validation_version'] ?? null,
+            )
+        );
+
+        return $checks;
     }
 
     /**

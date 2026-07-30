@@ -68,6 +68,10 @@ if ($replayEvidence !== null) {
     echo is_string($body) ? $body : '' . PHP_EOL;
     $json = is_string($body) ? json_decode($body, true) : null;
     $uuid = is_array($json) ? (string)($json['probe_execution_uuid'] ?? '') : '';
+    if (is_array($json) && isset($json['persistence']['pass_4'])) {
+        echo "\n=== Pass 4 (from replay) ===\n";
+        echo json_encode($json['persistence']['pass_4'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+    }
     if ($uuid !== '') {
         require_once __DIR__ . '/../../src/CockpitRecorderService.php';
         require_once __DIR__ . '/../../src/AviationEvidence/Phase0InvestigationService.php';
@@ -75,7 +79,10 @@ if ($replayEvidence !== null) {
         $verification = $service->verifyProbePersistence($uuid);
         echo "\n=== DB verification ===\n";
         echo json_encode($verification, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-        exit(!empty($json['ok']) && !empty($verification['ok']) ? 0 : 1);
+        $pass4Ok = !isset($json['persistence']['pass_4'])
+            || !is_array($json['persistence']['pass_4'])
+            || (!empty($json['persistence']['pass_4']['skipped']) || !empty($json['persistence']['pass_4']['ok']));
+        exit(!empty($json['ok']) && $pass4Ok && !empty($verification['ok']) ? 0 : 1);
     }
     exit(is_array($json) && !empty($json['ok']) ? 0 : 1);
 }
@@ -120,6 +127,9 @@ if (!is_array($json)) {
 $uuid = (string)($json['probe_execution_uuid'] ?? ($json['persistence']['probe_execution_uuid'] ?? ''));
 $persistOk = is_array($json['persistence'] ?? null)
     && (($json['persistence']['typed_persistence_succeeded'] ?? false) === true);
+$pass4Ok = !isset($json['persistence']['pass_4'])
+    || !is_array($json['persistence']['pass_4'])
+    || (!empty($json['persistence']['pass_4']['skipped']) || !empty($json['persistence']['pass_4']['ok']));
 $probeOk = !empty($json['ok']);
 
 if ($uuid !== '') {
@@ -129,7 +139,7 @@ if ($uuid !== '') {
     $verification = $service->verifyProbePersistence($uuid);
     echo "\n=== DB verification ===\n";
     echo json_encode($verification, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-    exit($probeOk && $persistOk && !empty($verification['ok']) ? 0 : 1);
+    exit($probeOk && $persistOk && $pass4Ok && !empty($verification['ok']) ? 0 : 1);
 }
 
-exit($probeOk && $persistOk ? 0 : 1);
+exit($probeOk && $persistOk && $pass4Ok ? 0 : 1);

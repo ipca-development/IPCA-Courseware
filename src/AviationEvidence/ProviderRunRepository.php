@@ -263,6 +263,60 @@ final class ProviderRunRepository
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    public function listSegments(int $providerRunId): array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_SEGMENTS)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_SEGMENTS
+            . ' WHERE provider_run_id = ? ORDER BY segment_index ASC'
+        );
+        $stmt->execute(array($providerRunId));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function findByProcessingRunAndLabel(int $processingRunId, string $probeLabel): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_RUNS
+            . ' WHERE processing_run_id = ? AND probe_label = ? ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute(array($processingRunId, $probeLabel));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function findCanonicalForProcessingRun(int $processingRunId): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_RUNS
+            . ' WHERE processing_run_id = ? AND is_canonical_timeline = 1'
+            . ' ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute(array($processingRunId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($row)) {
+            return $row;
+        }
+        return $this->findByProcessingRunAndLabel($processingRunId, 'whisper1_verbose_json');
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     public function findByIdempotencyKey(string $idempotencyKey): ?array

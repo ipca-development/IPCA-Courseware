@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/Phase0InvestigationService.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/Phase0ProbeAuth.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/Phase0EvidenceReplayService.php';
+require_once __DIR__ . '/../../../src/AviationEvidence/EvidencePass4Runner.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -71,6 +72,32 @@ try {
             'sha256' => hash('sha256', (string)file_get_contents($path)),
             'json' => $json,
         ));
+    }
+
+    if ($action === 'run_pass4') {
+        if ($recordingId <= 0) {
+            $recordingId = 552;
+        }
+        if (!$isAdmin && !Phase0ProbeAuth::isAuthorized($recordingId, $probeChunk)) {
+            phase0_api_json(403, array('ok' => false, 'error' => 'Admin or probe token required.'));
+        }
+        $runId = (int)($_GET['processing_run_id'] ?? 0);
+        if ($runId <= 0) {
+            $uuid = trim((string)($_GET['probe_execution_uuid'] ?? ''));
+            if ($uuid !== '') {
+                $stmt = $pdo->prepare(
+                    'SELECT processing_run_id FROM ipca_evidence_provider_runs WHERE probe_execution_uuid = ? LIMIT 1'
+                );
+                $stmt->execute(array($uuid));
+                $runId = (int)$stmt->fetchColumn();
+            }
+        }
+        if ($runId <= 0) {
+            phase0_api_json(400, array('ok' => false, 'error' => 'processing_run_id or probe_execution_uuid required.'));
+        }
+        $force = filter_var($_GET['force'] ?? '0', FILTER_VALIDATE_BOOLEAN);
+        $result = EvidencePass4Runner::fromPdo($pdo)->runForProcessingRun($runId, $force);
+        phase0_api_json(!empty($result['ok']) ? 200 : 500, $result);
     }
 
     if ($action === 'replay_evidence') {

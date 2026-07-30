@@ -15,6 +15,17 @@ final class EvidenceSchema
     public const TABLE_MODEL_CAPABILITIES = 'ipca_provider_model_capabilities';
     public const TABLE_PUBLISHED_VERSIONS = 'ipca_evidence_published_transcript_versions';
     public const TABLE_SCHEMA_VERSIONS = 'ipca_evidence_schema_versions';
+    public const TABLE_SPEECH_SEGMENTS = 'ipca_evidence_speech_segments';
+    public const TABLE_INTERPRETATION_REVISIONS = 'ipca_evidence_interpretation_revisions';
+    public const TABLE_INTERPRETATION_CONFIDENCE = 'ipca_evidence_interpretation_confidence_factors';
+    public const TABLE_SUPPRESSIONS = 'ipca_evidence_suppressions';
+
+    public const PASS4A_VERSION = '2026.07.30.1';
+    public const PASS4B_VERSION = '2026.07.30.1';
+
+    public const LAYER_PASS4A = 'pass_4a_speech_quality';
+    public const LAYER_PASS4B = 'pass_4b_repetition';
+    public const LAYER_READABLE = 'readable_primary';
 
     public const RUN_PURPOSE_INITIAL = 'initial_transcription';
     public const RUN_PURPOSE_RETRY = 'retry_same_run';
@@ -106,6 +117,28 @@ final class EvidenceSchema
     {
         $env = getenv('CW_EVIDENCE_STORE_PROMPT_TEXT');
         return $env === '1' || $env === 'true';
+    }
+
+    public static function pass4Ready(PDO $pdo): bool
+    {
+        foreach (array(
+            self::TABLE_SPEECH_SEGMENTS,
+            self::TABLE_INTERPRETATION_REVISIONS,
+            self::TABLE_SUPPRESSIONS,
+        ) as $table) {
+            if (!self::tablePresent($pdo, $table)) {
+                return false;
+            }
+        }
+        return self::persistenceReady($pdo);
+    }
+
+    public static function runPass4AfterPersist(): bool
+    {
+        if (getenv('CW_EVIDENCE_SKIP_PASS4') === '1' || getenv('CW_EVIDENCE_SKIP_PASS4') === 'true') {
+            return false;
+        }
+        return true;
     }
 
     /**
