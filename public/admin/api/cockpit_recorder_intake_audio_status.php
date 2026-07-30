@@ -55,33 +55,43 @@ try {
     $stmt->execute($ids);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $recorder = new CockpitRecorderService($pdo);
-    $evidenceQueue = CockpitRecorderEvidenceQueueService::fromPdo($pdo);
-    $recordings = array();
-    foreach (is_array($rows) ? $rows : array() as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-        $status = strtolower(trim((string)($row['transcription_status'] ?? '')));
-        $progress = max(0, min(100, (int)($row['transcription_progress'] ?? 0)));
-        $recordingId = (int)($row['id'] ?? 0);
-        if ($status === 'ready' && $recordingId > 0) {
-            $recording = $recorder->recordingByAnyId((string)$recordingId);
-            if (is_array($recording)) {
+        $recorder = new CockpitRecorderService($pdo);
+        $evidenceQueue = CockpitRecorderEvidenceQueueService::fromPdo($pdo);
+        $recordings = array();
+        foreach (is_array($rows) ? $rows : array() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $recordingId = (int)($row['id'] ?? 0);
+            $recording = $recordingId > 0 ? $recorder->recordingByAnyId((string)$recordingId) : null;
+            if (is_array($recording) && strtolower(trim((string)($recording['transcription_status'] ?? ''))) === 'ready') {
                 if ($evidenceQueue->needsEvidenceProcessing($recording)) {
                     $evidenceQueue->ensureQueued($recordingId);
                 }
                 CockpitRecorderDebriefQueueService::fromPdo($pdo)->onTranscriptionReady($recordingId);
+                $recording = $recorder->recordingByAnyId((string)$recordingId) ?? $recording;
             }
+
+            $pipeline = is_array($recording) ? $evidenceQueue->publicStatusForRecording($recording) : array(
+                'pipeline_stage' => strtolower(trim((string)($row['transcription_status'] ?? ''))),
+                'display_status' => strtolower(trim((string)($row['transcription_status'] ?? ''))),
+                'display_progress' => max(0, min(100, (int)($row['transcription_progress'] ?? 0))),
+                'transcription_status' => strtolower(trim((string)($row['transcription_status'] ?? ''))),
+                'transcription_progress' => max(0, min(100, (int)($row['transcription_progress'] ?? 0))),
+                'evidence_in_progress' => false,
+                'needs_evidence_processing' => false,
+                'evidence_step' => null,
+                'evidence_step_label' => null,
+                'publishable' => false,
+                'can_view_transcript' => strtolower(trim((string)($row['transcription_status'] ?? ''))) === 'ready',
+                'can_view_structured_transcript' => false,
+            );
+
+            $recordings[] = array_merge(array(
+                'id' => $recordingId,
+                'error_message' => cockpit_intake_audio_relevant_error($row['error_message'] ?? ''),
+            ), $pipeline);
         }
-        $recordings[] = array(
-            'id' => $recordingId,
-            'transcription_status' => $status,
-            'transcription_progress' => $progress,
-            'can_view_transcript' => $status === 'ready',
-            'error_message' => cockpit_intake_audio_relevant_error($row['error_message'] ?? ''),
-        );
-    }
 
     cockpit_intake_audio_status_json(200, array('ok' => true, 'recordings' => $recordings));
 } catch (Throwable $e) {

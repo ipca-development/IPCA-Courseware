@@ -755,6 +755,9 @@ cw_header('Master Logbook');
 .intake-progress{display:grid;gap:4px;min-width:120px}
 .intake-progress-bar{height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden}
 .intake-progress-fill{height:100%;background:#2563eb;border-radius:999px}
+.intake-progress-fill.is-evidence-active{background:linear-gradient(90deg,#2563eb 0%,#7c3aed 50%,#2563eb 100%);background-size:200% 100%;animation:intake-evidence-progress 1.6s linear infinite}
+.intake-audio-evidence-step{display:block;font-size:10px;line-height:1.35;margin-top:2px}
+@keyframes intake-evidence-progress{0%{background-position:100% 0}100%{background-position:-100% 0}}
 .intake-refresh{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#334155;padding:7px 10px;text-decoration:none;font-size:11px;font-weight:800}
 .intake-enrollment{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
 .intake-field{display:grid;gap:5px;min-width:230px}
@@ -1086,6 +1089,7 @@ cw_header('Master Logbook');
                     }
                   ?>
                   <span class="intake-status <?= cvr_intake_h(cvr_intake_status_class($transcriptStatusText)) ?>" data-audio-transcription-status><?= cvr_intake_h(strtoupper(str_replace('_', ' ', $transcriptStatusText))) ?></span>
+                  <span class="intake-audio-evidence-step intake-muted" data-audio-evidence-step hidden></span>
                   <span class="intake-audio-transcript-progress" data-audio-transcription-progress><?= $transcriptionProgress ?>%</span>
                 </div>
                 <div class="intake-progress-bar" style="margin-top:4px"><div class="intake-progress-fill" data-audio-transcription-fill style="width:<?= $transcriptionProgress ?>%"></div></div>
@@ -2184,6 +2188,9 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       if (normalized === '') {
         return 'UNKNOWN';
       }
+      if (normalized === 'processing_evidence') {
+        return 'PROCESSING EVIDENCE';
+      }
       return normalized.replace(/_/g, ' ').toUpperCase();
     };
     const abbreviateAudioError = (text, maxLength = 52) => {
@@ -2219,20 +2226,32 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           if (!recording) {
             return;
           }
-          const progress = Math.max(0, Math.min(100, Number(recording.transcription_progress || 0)));
+          const progress = Math.max(0, Math.min(100, Number(recording.display_progress ?? recording.transcription_progress ?? 0)));
+          const displayStatus = String(recording.display_status || recording.pipeline_stage || recording.transcription_status || '');
           const progressEl = cell.querySelector('[data-audio-transcription-progress]');
           const fillEl = cell.querySelector('[data-audio-transcription-fill]');
           const statusEl = cell.querySelector('[data-audio-transcription-status]');
+          const evidenceStepEl = cell.querySelector('[data-audio-evidence-step]');
           if (progressEl) {
             progressEl.textContent = progress + '%';
           }
           if (fillEl) {
             fillEl.style.width = progress + '%';
+            fillEl.classList.toggle('is-evidence-active', displayStatus === 'processing_evidence');
           }
           if (statusEl) {
-            const status = String(recording.transcription_status || '');
-            statusEl.textContent = formatAudioStatusLabel(status);
-            statusEl.className = 'intake-status ' + audioStatusClass(status);
+            statusEl.textContent = formatAudioStatusLabel(displayStatus);
+            statusEl.className = 'intake-status ' + audioStatusClass(displayStatus);
+          }
+          if (evidenceStepEl) {
+            const stepLabel = String(recording.evidence_step_label || '').trim();
+            if (displayStatus === 'processing_evidence' && stepLabel !== '') {
+              evidenceStepEl.hidden = false;
+              evidenceStepEl.textContent = stepLabel;
+            } else {
+              evidenceStepEl.hidden = true;
+              evidenceStepEl.textContent = '';
+            }
           }
           const row = cell.closest('tr');
           if (!row) {

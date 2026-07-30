@@ -4,6 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/CockpitRecorderService.php';
 require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
 require_once __DIR__ . '/AviationEvidence/ProcessingRunRepository.php';
+require_once __DIR__ . '/AviationEvidence/InterpretationRevisionRepository.php';
+require_once __DIR__ . '/AviationEvidence/SpeechSegmentRepository.php';
+require_once __DIR__ . '/AviationEvidence/DisplayBlockRepository.php';
 
 final class CockpitRecorderEvidenceQueueService
 {
@@ -173,6 +176,132 @@ final class CockpitRecorderEvidenceQueueService
     private function workerRecentlyActive(int $recordingId): bool
     {
         $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_evidence_' . $recordingId . '.log';
+        if (!is_file($logFile)) {
+            return false;
+        }
+        $mtime = filemtime($logFile);
+        return $mtime !== false && (time() - $mtime) < self::WORKER_ACTIVE_SECONDS;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array<string,mixed>
+     */
+    public function publicStatusForRecording(array $recording): array
+    {
+        $recordingId = (int)($recording['id'] ?? 0);
+        $transcriptionStatus = strtolower(trim((string)($recording['transcription_status'] ?? '')));
+        $transcriptionProgress = max(0, min(100, (int)($recording['transcription_progress'] ?? 0)));
+        $publishableRun = $this->processingRuns->findLatestPublishableForRecording($recordingId);
+        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
+        $needsEvidence = $this->needsEvidenceProcessing($recording);
+        $transcriptionWorkerActive = $this->transcriptionWorkerRecentlyActive($recordingId);
+        $evidenceWorkerActive = $this->workerRecentlyActive($recordingId);
+        $evidenceInProgress = $needsEvidence && (
+            $evidenceWorkerActive
+            || $transcriptionWorkerActive
+            || ($transcriptionStatus === 'ready' && is_array($runningRun) && !$this->isStaleRun($runningRun))
+            || $this->isEvidenceInProgress($recordingId)
+        );
+
+        $pipelineStage = 'legacy';
+        if (in_array($transcriptionStatus, array('queued', 'transcribing', 'pending'), true)) {
+            $pipelineStage = 'transcribing';
+        } elseif ($needsEvidence || $evidenceInProgress) {
+            $pipelineStage = 'processing_evidence';
+        } elseif ($publishableRun !== null) {
+            $pipelineStage = (int)($recording['published_transcript_version_id'] ?? 0) > 0 ? 'published' : 'publishable';
+        } elseif ($transcriptionStatus === 'ready') {
+            $pipelineStage = 'transcribed';
+        } elseif ($transcriptionStatus === 'failed') {
+            $pipelineStage = 'failed';
+        }
+
+        $evidenceStep = null;
+        $evidenceStepLabel = null;
+        if ($pipelineStage === 'processing_evidence') {
+            $evidenceStep = $this->inferEvidenceStep($recordingId, $runningRun);
+            $evidenceStepLabel = $this->evidenceStepLabel($evidenceStep);
+        }
+
+        $displayStatus = $pipelineStage === 'processing_evidence' ? 'processing_evidence' : $transcriptionStatus;
+        $displayProgress = $pipelineStage === 'transcribing'
+            ? $transcriptionProgress
+            : ($pipelineStage === 'processing_evidence' ? 100 : $transcriptionProgress);
+
+        return array(
+            'pipeline_stage' => $pipelineStage,
+            'display_status' => $displayStatus,
+            'display_progress' => $displayProgress,
+            'transcription_status' => $transcriptionStatus,
+            'transcription_progress' => $transcriptionProgress,
+            'evidence_in_progress' => $evidenceInProgress,
+            'needs_evidence_processing' => $needsEvidence,
+            'evidence_step' => $evidenceStep,
+            'evidence_step_label' => $evidenceStepLabel,
+            'publishable' => $publishableRun !== null,
+            'running_processing_run_id' => is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : null,
+            'latest_publishable_processing_run_id' => is_array($publishableRun) ? (int)($publishableRun['id'] ?? 0) : null,
+            'can_view_transcript' => $transcriptionStatus === 'ready',
+            'can_view_structured_transcript' => $publishableRun !== null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $runningRun
+     */
+    private function inferEvidenceStep(int $recordingId, ?array $runningRun): string
+    {
+        $processingRunId = is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : 0;
+        if ($processingRunId <= 0) {
+            return $this->transcriptionWorkerRecentlyActive($recordingId) ? 'persisting' : 'queued';
+        }
+
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_SPEECH_SEGMENTS)) {
+            return 'persisting';
+        }
+
+        $speechSegments = new SpeechSegmentRepository($this->pdo);
+        if ($speechSegments->listForProcessingRun($processingRunId) === array()) {
+            return 'persisting';
+        }
+
+        if (!EvidenceSchema::pass4Ready($this->pdo)) {
+            return 'pass_4';
+        }
+
+        $interpretations = new InterpretationRevisionRepository($this->pdo);
+        if ($interpretations->findLatestForRunByLayer($processingRunId, EvidenceSchema::LAYER_PASS4B) === null) {
+            return 'pass_4';
+        }
+
+        if (!EvidenceSchema::pass5Ready($this->pdo)) {
+            return 'pass_5';
+        }
+
+        $displayBlocks = new DisplayBlockRepository($this->pdo);
+        if ($displayBlocks->listForProcessingRun($processingRunId) === array()) {
+            return 'pass_5';
+        }
+
+        return 'finishing';
+    }
+
+    private function evidenceStepLabel(?string $step): ?string
+    {
+        return match ($step) {
+            'queued' => 'Waiting for evidence worker',
+            'persisting' => 'Persisting timestamped transcript',
+            'pass_4' => 'Pass 4 — quality + readable layer',
+            'pass_5' => 'Pass 5 — blocks + flight outline',
+            'finishing' => 'Finalizing evidence run',
+            default => null,
+        };
+    }
+
+    private function transcriptionWorkerRecentlyActive(int $recordingId): bool
+    {
+        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_recorder_' . $recordingId . '.log';
         if (!is_file($logFile)) {
             return false;
         }

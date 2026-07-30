@@ -130,48 +130,25 @@ final class TranscriptReviewService
     private function pipelineStatus(array $recording): array
     {
         $recordingId = (int)($recording['id'] ?? 0);
-        $status = strtolower(trim((string)($recording['transcription_status'] ?? '')));
-        $publishableRun = $this->processingRuns->findLatestPublishableForRecording($recordingId);
-        $currentRunId = (int)($recording['current_processing_run_id'] ?? 0);
-        if ($currentRunId <= 0 && is_array($publishableRun)) {
-            $currentRunId = (int)($publishableRun['id'] ?? 0);
-        }
-
-        $evidenceReady = EvidenceSchema::persistenceReady($this->pdo);
-        $pass4Ready = EvidenceSchema::pass4Ready($this->pdo);
-        $pass5Ready = EvidenceSchema::pass5Ready($this->pdo);
-        $publishReady = EvidenceSchema::publishReady($this->pdo);
         $evidenceQueue = CockpitRecorderEvidenceQueueService::fromPdo($this->pdo);
-        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
-        $evidenceInProgress = $evidenceQueue->isEvidenceInProgress($recordingId)
-            || ($status === 'ready' && is_array($runningRun));
-        $needsEvidence = $status === 'ready' && $publishableRun === null && $evidenceQueue->needsEvidenceProcessing($recording);
-
-        $stage = 'legacy';
-        if ($status === 'queued' || $status === 'transcribing' || $status === 'pending') {
-            $stage = 'transcribing';
-        } elseif ($needsEvidence && ($evidenceInProgress || $evidenceReady)) {
-            $stage = 'processing_evidence';
-        } elseif ($currentRunId > 0 && is_array($publishableRun)) {
-            $stage = (int)($recording['published_transcript_version_id'] ?? 0) > 0 ? 'published' : 'publishable';
-        } elseif ($currentRunId > 0) {
-            $stage = 'evidence';
-        } elseif ($status === 'ready') {
-            $stage = 'transcribed';
-        }
+        $public = $evidenceQueue->publicStatusForRecording($recording);
 
         return array(
-            'stage' => $stage,
-            'evidence_ready' => $evidenceReady,
-            'pass4_ready' => $pass4Ready,
-            'pass5_ready' => $pass5Ready,
-            'publish_ready' => $publishReady,
-            'publishable' => $publishableRun !== null,
-            'evidence_in_progress' => $evidenceInProgress,
-            'needs_evidence_processing' => $needsEvidence,
-            'running_processing_run_id' => is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : null,
-            'latest_publishable_processing_run_id' => is_array($publishableRun) ? (int)($publishableRun['id'] ?? 0) : null,
-            'active_processing_run_id' => $currentRunId > 0 ? $currentRunId : null,
+            'stage' => (string)($public['pipeline_stage'] ?? 'legacy'),
+            'evidence_ready' => EvidenceSchema::persistenceReady($this->pdo),
+            'pass4_ready' => EvidenceSchema::pass4Ready($this->pdo),
+            'pass5_ready' => EvidenceSchema::pass5Ready($this->pdo),
+            'publish_ready' => EvidenceSchema::publishReady($this->pdo),
+            'publishable' => !empty($public['publishable']),
+            'evidence_in_progress' => !empty($public['evidence_in_progress']),
+            'needs_evidence_processing' => !empty($public['needs_evidence_processing']),
+            'evidence_step' => $public['evidence_step'] ?? null,
+            'evidence_step_label' => $public['evidence_step_label'] ?? null,
+            'running_processing_run_id' => $public['running_processing_run_id'] ?? null,
+            'latest_publishable_processing_run_id' => $public['latest_publishable_processing_run_id'] ?? null,
+            'active_processing_run_id' => (int)($recording['current_processing_run_id'] ?? 0) > 0
+                ? (int)$recording['current_processing_run_id']
+                : ($public['latest_publishable_processing_run_id'] ?? $public['running_processing_run_id'] ?? null),
             'published_transcript_version_id' => (int)($recording['published_transcript_version_id'] ?? 0),
         );
     }

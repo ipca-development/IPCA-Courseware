@@ -163,6 +163,10 @@
       let html = escapeHtml(parts.join(' · '));
       const stage = payload.pipeline?.stage || 'legacy';
       html += ' <span class="trv-badge trv-badge-stage">' + escapeHtml(STAGE_LABELS[stage] || stage) + '</span>';
+      const evidenceStepLabel = String(payload.pipeline?.evidence_step_label || '').trim();
+      if (evidenceStepLabel !== '') {
+        html += '<div class="intake-muted" style="margin-top:4px">' + escapeHtml(evidenceStepLabel) + '</div>';
+      }
       if (payload.published?.published_version_uuid) {
         html += '<div class="intake-muted" style="margin-top:4px">Published '
           + escapeHtml(String(payload.published.published_version_uuid).slice(0, 8)) + '…'
@@ -239,10 +243,15 @@
     renderEvidenceProcessing(payload) {
       const pipeline = payload.pipeline || {};
       const runId = pipeline.running_processing_run_id || pipeline.active_processing_run_id || '';
-      const parts = ['Evidence processing in progress…'];
+      const stepLabel = String(pipeline.evidence_step_label || '').trim();
+      const parts = [stepLabel !== '' ? stepLabel : 'Evidence processing in progress…'];
       if (runId) parts.push('Run #' + String(runId));
-      parts.push('Pass 4 + Pass 5');
-      this.renderLegacy(parts.join(' · ') + '. Timestamped transcript, readable layer, and debrief follow transcription.');
+      const detail = pipeline.evidence_step === 'pass_4'
+        ? 'Building readable transcript, suppressing junk segments, and queuing debrief.'
+        : pipeline.evidence_step === 'pass_5'
+          ? 'Building timestamped blocks and flight outline chapters.'
+          : 'Timestamped transcript, readable layer, and debrief follow transcription.';
+      this.renderLegacy(parts.join(' · ') + '. ' + detail);
     },
 
     renderLegacy(text) {
