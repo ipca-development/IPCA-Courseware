@@ -178,6 +178,30 @@ final class EvidenceSchema
         return $env === '1' || $env === 'true';
     }
 
+    /**
+     * When true (default), transcription uses one Whisper verbose_json pass with timestamps.
+     * Set CW_TRANSCRIPTION_LEGACY_DUAL_PASS=1 to restore gpt-4o transcribe + separate Whisper evidence pass.
+     */
+    public static function whisperFirstTranscription(): bool
+    {
+        $env = getenv('CW_TRANSCRIPTION_LEGACY_DUAL_PASS');
+        return !($env === '1' || $env === 'true');
+    }
+
+    public static function defaultAsrModel(): string
+    {
+        $env = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: ''));
+        if ($env !== '') {
+            return $env;
+        }
+        return self::whisperFirstTranscription() ? 'whisper-1' : 'gpt-4o-transcribe';
+    }
+
+    public static function defaultAsrResponseFormat(): string
+    {
+        return self::whisperFirstTranscription() ? 'verbose_json' : 'json';
+    }
+
     public static function runPass5AfterPersist(): bool
     {
         if (getenv('CW_EVIDENCE_SKIP_PASS5') === '1' || getenv('CW_EVIDENCE_SKIP_PASS5') === 'true') {

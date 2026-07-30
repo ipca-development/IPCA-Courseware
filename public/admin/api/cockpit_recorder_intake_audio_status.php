@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderEvidenceQueueService.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderDebriefQueueService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -51,6 +54,9 @@ try {
     );
     $stmt->execute($ids);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $recorder = new CockpitRecorderService($pdo);
+    $evidenceQueue = CockpitRecorderEvidenceQueueService::fromPdo($pdo);
     $recordings = array();
     foreach (is_array($rows) ? $rows : array() as $row) {
         if (!is_array($row)) {
@@ -58,8 +64,18 @@ try {
         }
         $status = strtolower(trim((string)($row['transcription_status'] ?? '')));
         $progress = max(0, min(100, (int)($row['transcription_progress'] ?? 0)));
+        $recordingId = (int)($row['id'] ?? 0);
+        if ($status === 'ready' && $recordingId > 0) {
+            $recording = $recorder->recordingByAnyId((string)$recordingId);
+            if (is_array($recording)) {
+                if ($evidenceQueue->needsEvidenceProcessing($recording)) {
+                    $evidenceQueue->ensureQueued($recordingId);
+                }
+                CockpitRecorderDebriefQueueService::fromPdo($pdo)->onTranscriptionReady($recordingId);
+            }
+        }
         $recordings[] = array(
-            'id' => (int)($row['id'] ?? 0),
+            'id' => $recordingId,
             'transcription_status' => $status,
             'transcription_progress' => $progress,
             'can_view_transcript' => $status === 'ready',

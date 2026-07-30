@@ -4,6 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/CockpitRecorderService.php';
 
+@set_time_limit(0);
+@ini_set('memory_limit', '1024M');
+
 $recordingId = 0;
 foreach ($argv ?? array() as $arg) {
     if (str_starts_with($arg, '--recording-id=')) {
@@ -17,12 +20,17 @@ if ($recordingId <= 0) {
 }
 
 $service = new CockpitRecorderService($pdo);
+$concurrency = max(1, (int)(getenv('CW_TRANSCRIPTION_CHUNK_CONCURRENCY') ?: 8));
 
 try {
     $result = array('ok' => false, 'done' => false);
     for ($attempt = 0; $attempt < 500; $attempt++) {
-        $result = $service->processTranscriptionStep($recordingId);
-        if (array_key_exists('processed_chunk', $result)) {
+        $result = $service->processTranscriptionParallelBatch($recordingId, $concurrency);
+        if (!empty($result['processed_chunks']) && is_array($result['processed_chunks'])) {
+            echo 'Processed cockpit recorder transcription chunks '
+                . implode(', ', array_map(static fn(int $i): string => (string)($i + 1), $result['processed_chunks']))
+                . PHP_EOL;
+        } elseif (array_key_exists('processed_chunk', $result)) {
             echo 'Processed cockpit recorder transcription chunk ' . ((int)$result['processed_chunk'] + 1) . PHP_EOL;
         }
         if ((bool)($result['done'] ?? false)) {

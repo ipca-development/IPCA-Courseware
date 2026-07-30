@@ -83,14 +83,26 @@ final class ProductionTranscriptionEvidenceService
                 'execution_uuid' => $executionUuid,
             );
         }
-
-        $productionModel = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: 'gpt-4o-transcribe'));
-        if ($productionModel === '') {
-            $productionModel = 'gpt-4o-transcribe';
+        if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'running') {
+            $createdAt = strtotime((string)($existingRun['created_at'] ?? ''));
+            $ageSeconds = $createdAt !== false ? max(0, time() - $createdAt) : PHP_INT_MAX;
+            if ($ageSeconds < 14400) {
+                return array(
+                    'ok' => true,
+                    'skipped' => true,
+                    'reason' => 'in_progress',
+                    'processing_run_id' => (int)($existingRun['id'] ?? 0),
+                    'execution_uuid' => $executionUuid,
+                );
+            }
+            $this->processingRuns->abandonRun((int)($existingRun['id'] ?? 0));
         }
+
+        $productionModel = EvidenceSchema::defaultAsrModel();
         $language = CockpitRecorderService::normalizeLanguage((string)($recording['language'] ?? 'en'));
         $sourceDurationMs = (int)round(max(0.0, (float)($recording['duration_seconds'] ?? 0)) * 1000.0);
         $skipWhisper = EvidenceSchema::productionSkipWhisper();
+        $whisperFirst = EvidenceSchema::whisperFirstTranscription();
 
         $processingRun = $this->processingRuns->createWithUuid(
             $recordingId,
@@ -141,52 +153,82 @@ final class ProductionTranscriptionEvidenceService
                 );
                 $audioChunkId = (int)($audioChunk['id'] ?? 0);
 
-                $productionResult = $this->persistProviderRun(
-                    $executionUuid,
-                    $processingRunId,
-                    $audioChunkId,
-                    $chunkIndex,
-                    'production_json',
-                    $productionModel,
-                    'json',
-                    array(
-                        'provider' => 'openai',
-                        'model' => $productionModel,
-                        'response_format' => 'json',
-                        'language_forced' => $language !== '',
-                        'language' => $language !== '' ? $language : null,
-                    ),
-                    array('text' => $chunkText, 'task' => 'transcribe'),
-                    200,
-                    $chunkText,
-                    $sourceAudioSha256,
-                    $chunkAudioSha256,
-                    $chunkStartTimeMs,
-                    $chunkDurationMs,
-                    $sourceDurationMs,
-                    $language,
-                    false,
-                    0,
-                    0
-                );
-                $runsOut[] = $productionResult['summary'];
-                $totalObservations += $productionResult['observations'];
-                $totalSegments += $productionResult['segments'];
-                $totalWords += $productionResult['words'];
+                if (!$whisperFirst) {
+                    $productionResult = $this->persistProviderRun(
+                        $executionUuid,
+                        $processingRunId,
+                        $audioChunkId,
+                        $chunkIndex,
+                        'production_json',
+                        $productionModel,
+                        'json',
+                        array(
+                            'provider' => 'openai',
+                            'model' => $productionModel,
+                            'response_format' => 'json',
+                            'language_forced' => $language !== '',
+                            'language' => $language !== '' ? $language : null,
+                        ),
+                        array('text' => $chunkText, 'task' => 'transcribe'),
+                        200,
+                        $chunkText,
+                        $sourceAudioSha256,
+                        $chunkAudioSha256,
+                        $chunkStartTimeMs,
+                        $chunkDurationMs,
+                        $sourceDurationMs,
+                        $language,
+                        false,
+                        0,
+                        0
+                    );
+                    $runsOut[] = $productionResult['summary'];
+                    $totalObservations += $productionResult['observations'];
+                    $totalSegments += $productionResult['segments'];
+                    $totalWords += $productionResult['words'];
+                }
 
                 if (!$skipWhisper) {
-                    $whisperResult = $this->recorder->transcribeOpenAiAudioStructured(
-                        $chunkPath,
-                        $mime,
-                        basename($chunkPath),
-                        $language,
-                        'whisper-1',
-                        'verbose_json',
-                        true,
-                        true
-                    );
-                    $whisperJson = is_array($whisperResult['raw_json'] ?? null) ? $whisperResult['raw_json'] : array();
-                    $whisperText = trim((string)($whisperResult['text'] ?? ''));
+                    $whisperJson = array();
+                    $whisperText = $chunkText;
+                    $whisperHttpCode = 200;
+                    $whisperModel = 'whisper-1';
+                    $openaiRequestId = null;
+                    $latencyMs = null;
+                    $requestStartedAt = null;
+                    $requestCompletedAt = null;
+
+                    $cachedWhisper = $whisperFirst ? $this->recorder->loadWhisperChunkCache($recordingId, $chunkIndex) : null;
+                    if (is_array($cachedWhisper) && is_array($cachedWhisper['raw_json'] ?? null)) {
+                        $whisperJson = $cachedWhisper['raw_json'];
+                        $whisperText = trim((string)($cachedWhisper['text'] ?? $chunkText));
+                        $whisperHttpCode = (int)($cachedWhisper['http_code'] ?? 200);
+                        $whisperModel = trim((string)($cachedWhisper['model'] ?? 'whisper-1'));
+                        $openaiRequestId = isset($cachedWhisper['openai_request_id']) ? (string)$cachedWhisper['openai_request_id'] : null;
+                        $latencyMs = isset($cachedWhisper['latency_ms']) ? (int)$cachedWhisper['latency_ms'] : null;
+                        $requestStartedAt = isset($cachedWhisper['request_started_at']) ? (string)$cachedWhisper['request_started_at'] : null;
+                        $requestCompletedAt = isset($cachedWhisper['request_completed_at']) ? (string)$cachedWhisper['request_completed_at'] : null;
+                    } else {
+                        $whisperResult = $this->recorder->transcribeOpenAiAudioStructured(
+                            $chunkPath,
+                            $mime,
+                            basename($chunkPath),
+                            $language,
+                            'whisper-1',
+                            'verbose_json',
+                            true,
+                            true
+                        );
+                        $whisperJson = is_array($whisperResult['raw_json'] ?? null) ? $whisperResult['raw_json'] : array();
+                        $whisperText = trim((string)($whisperResult['text'] ?? ''));
+                        $whisperHttpCode = (int)($whisperResult['http_code'] ?? 0);
+                        $whisperModel = trim((string)($whisperResult['model'] ?? 'whisper-1'));
+                        $openaiRequestId = isset($whisperResult['openai_request_id']) ? (string)$whisperResult['openai_request_id'] : null;
+                        $latencyMs = isset($whisperResult['latency_ms']) ? (int)$whisperResult['latency_ms'] : null;
+                        $requestStartedAt = isset($whisperResult['request_started_at']) ? (string)$whisperResult['request_started_at'] : null;
+                        $requestCompletedAt = isset($whisperResult['request_completed_at']) ? (string)$whisperResult['request_completed_at'] : null;
+                    }
+
                     $whisperSegments = is_array($whisperJson['segments'] ?? null) ? $whisperJson['segments'] : array();
                     $wordCount = 0;
                     foreach ($whisperSegments as $segment) {
@@ -201,18 +243,19 @@ final class ProductionTranscriptionEvidenceService
                         $audioChunkId,
                         $chunkIndex,
                         'whisper1_verbose_json',
-                        'whisper-1',
+                        $whisperModel !== '' ? $whisperModel : 'whisper-1',
                         'verbose_json',
                         array(
                             'provider' => 'openai',
-                            'model' => 'whisper-1',
+                            'model' => $whisperModel !== '' ? $whisperModel : 'whisper-1',
                             'response_format' => 'verbose_json',
                             'language_forced' => $language !== '',
                             'language' => $language !== '' ? $language : null,
                             'timestamp_granularities_requested' => array('word', 'segment'),
+                            'whisper_first_cached' => $cachedWhisper !== null,
                         ),
                         $whisperJson,
-                        (int)($whisperResult['http_code'] ?? 0),
+                        $whisperHttpCode,
                         $whisperText,
                         $sourceAudioSha256,
                         $chunkAudioSha256,
@@ -223,10 +266,10 @@ final class ProductionTranscriptionEvidenceService
                         $this->capabilities->supportsSegmentTimestamps('openai', 'whisper-1', 'verbose_json'),
                         count($whisperSegments),
                         $wordCount,
-                        isset($whisperResult['openai_request_id']) ? (string)$whisperResult['openai_request_id'] : null,
-                        isset($whisperResult['latency_ms']) ? (int)$whisperResult['latency_ms'] : null,
-                        isset($whisperResult['request_started_at']) ? (string)$whisperResult['request_started_at'] : null,
-                        isset($whisperResult['request_completed_at']) ? (string)$whisperResult['request_completed_at'] : null
+                        $openaiRequestId,
+                        $latencyMs,
+                        $requestStartedAt,
+                        $requestCompletedAt
                     );
                     $runsOut[] = $whisperPersist['summary'];
                     $totalObservations += $whisperPersist['observations'];
@@ -249,6 +292,11 @@ final class ProductionTranscriptionEvidenceService
             }
         }
 
+        $this->updateRecordingProcessingRun($recordingId, $processingRunId, $pass4Result);
+        if (is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])) {
+            $this->maybeAutoQueueDebrief($recordingId);
+        }
+
         $pass5Result = null;
         if (
             is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])
@@ -262,7 +310,6 @@ final class ProductionTranscriptionEvidenceService
         }
 
         $this->processingRuns->markCompleted($processingRunId);
-        $this->updateRecordingProcessingRun($recordingId, $processingRunId, $pass4Result);
 
         return array(
             'ok' => true,
@@ -493,6 +540,16 @@ final class ProductionTranscriptionEvidenceService
             $this->pdo->prepare(
                 'UPDATE ipca_cockpit_recordings SET current_processing_run_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
             )->execute(array($processingRunId, $recordingId));
+        }
+    }
+
+    private function maybeAutoQueueDebrief(int $recordingId): void
+    {
+        try {
+            require_once __DIR__ . '/../CockpitRecorderDebriefQueueService.php';
+            CockpitRecorderDebriefQueueService::fromPdo($this->pdo)->onReadableTranscriptReady($recordingId);
+        } catch (Throwable $e) {
+            error_log('[CockpitRecorderDebriefQueue] recording ' . $recordingId . ': ' . $e->getMessage());
         }
     }
 

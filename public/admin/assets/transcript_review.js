@@ -13,6 +13,7 @@
     legacy: 'Legacy cache only',
     transcribed: 'Transcribed',
     transcribing: 'Transcribing',
+    processing_evidence: 'Processing evidence',
     evidence: 'Evidence persisted',
     publishable: 'Ready to publish',
     published: 'Published',
@@ -82,11 +83,14 @@
 
       const status = String(payload.transcription_status || '').toLowerCase();
       const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
-      if (inProgress && allowPoll && this.state.pollTimer === null) {
+      const pipeline = payload.pipeline || {};
+      const evidencePending = !!pipeline.needs_evidence_processing || !!pipeline.evidence_in_progress
+        || pipeline.stage === 'processing_evidence';
+      if ((inProgress || evidencePending) && allowPoll && this.state.pollTimer === null) {
         this.state.pollTimer = window.setInterval(() => {
           this.load(recordingId, { allowPoll: true }).catch(() => this.stopPoll());
-        }, 3000);
-      } else if (!inProgress) {
+        }, 5000);
+      } else if (!inProgress && !evidencePending) {
         this.stopPoll();
       }
 
@@ -110,8 +114,17 @@
 
       const status = String(payload.transcription_status || '').toLowerCase();
       const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
+      const pipeline = payload.pipeline || {};
+      const evidencePending = pipeline.stage === 'processing_evidence'
+        || !!pipeline.evidence_in_progress
+        || !!pipeline.needs_evidence_processing;
+
       if (inProgress) {
         this.renderProgress(payload);
+        return;
+      }
+      if (evidencePending && !pipeline.publishable) {
+        this.renderEvidenceProcessing(payload);
         return;
       }
       if (status === 'failed') {
@@ -174,7 +187,11 @@
         } else if (!publishable) {
           publishHint.hidden = false;
           publishHint.classList.remove('trv-publish-hint-ready');
-          publishHint.innerHTML = '<strong>Publish Evidence is unavailable.</strong> Run full evidence processing (Whisper + Pass 4 + Pass 5) first.';
+          if (pipeline.stage === 'processing_evidence' || pipeline.evidence_in_progress) {
+            publishHint.innerHTML = '<strong>Finalizing transcript…</strong> Pass 4 readable layer and debrief run after timestamped transcription. Debrief starts automatically when ready.';
+          } else {
+            publishHint.innerHTML = '<strong>Publish Evidence is unavailable.</strong> Pass 4 quality processing must finish before the readable transcript and debrief can proceed.';
+          }
         } else {
           publishHint.hidden = false;
           publishHint.classList.add('trv-publish-hint-ready');
@@ -200,6 +217,15 @@
 
     renderProgress(payload) {
       this.renderLegacy('Transcription in progress… ' + String(payload.transcription_progress || 0) + '%');
+    },
+
+    renderEvidenceProcessing(payload) {
+      const pipeline = payload.pipeline || {};
+      const runId = pipeline.running_processing_run_id || pipeline.active_processing_run_id || '';
+      const parts = ['Evidence processing in progress…'];
+      if (runId) parts.push('Run #' + String(runId));
+      parts.push('Pass 4 + Pass 5');
+      this.renderLegacy(parts.join(' · ') + '. Timestamped transcript, readable layer, and debrief follow transcription.');
     },
 
     renderLegacy(text) {

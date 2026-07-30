@@ -5,6 +5,7 @@ require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/FlightSessionService.php';
 require_once __DIR__ . '/FlightRecordDerivationService.php';
 require_once __DIR__ . '/MissionCatalogService.php';
+require_once __DIR__ . '/AviationEvidence/ProcessingRunRepository.php';
 
 final class ManualReconstructionBundleService
 {
@@ -327,19 +328,20 @@ final class ManualReconstructionBundleService
         if ((int)($bundle['transcript_snapshot_id'] ?? 0) > 0) {
             return array('ready' => true, 'reason' => '', 'snapshot_id' => (int)$bundle['transcript_snapshot_id']);
         }
-        $recording = $this->row('ipca_cockpit_recordings', (int)$bundle['cockpit_recording_id']);
+        $recordingId = (int)$bundle['cockpit_recording_id'];
+        $recording = $this->row('ipca_cockpit_recordings', $recordingId);
         if (strtolower((string)($recording['transcription_status'] ?? '')) !== 'ready') {
-            return array('ready' => false, 'reason' => 'Raw transcript is not Ready.', 'snapshot_id' => null);
+            return array('ready' => false, 'reason' => 'Transcription is not Ready yet.', 'snapshot_id' => null);
+        }
+        $processingRuns = new ProcessingRunRepository($this->pdo);
+        if ($processingRuns->findLatestPublishableForRecording($recordingId) === null) {
+            return array('ready' => false, 'reason' => 'Pass 4 readable transcript is still processing.', 'snapshot_id' => null);
         }
         $text = trim((string)($recording['transcript_text'] ?? ''));
         if ($text === '') {
-            return array('ready' => false, 'reason' => 'Raw transcript is empty.', 'snapshot_id' => null);
+            return array('ready' => false, 'reason' => 'Readable transcript is empty.', 'snapshot_id' => null);
         }
-        $chunks = $this->transcriptChunks((int)$recording['id']);
-        if ($chunks !== array() && count(array_filter($chunks, fn(array $row): bool => strtolower((string)$row['status']) !== 'ready')) > 0) {
-            return array('ready' => false, 'reason' => 'One or more transcript chunks are not Ready.', 'snapshot_id' => null);
-        }
-        return array('ready' => false, 'reason' => 'Transcript is Ready but must be version-locked.', 'snapshot_id' => null);
+        return array('ready' => false, 'reason' => 'Readable transcript is ready but must be version-locked.', 'snapshot_id' => null);
     }
 
     public function lockTranscript(int $bundleId, ?int $actorUserId): int
@@ -353,7 +355,11 @@ final class ManualReconstructionBundleService
         }
         $recording = $this->row('ipca_cockpit_recordings', (int)$bundle['cockpit_recording_id']);
         if (strtolower((string)($recording['transcription_status'] ?? '')) !== 'ready') {
-            throw new RuntimeException('Raw transcript must be Ready before it can be locked.');
+            throw new RuntimeException('Transcription must be Ready before locking.');
+        }
+        $processingRuns = new ProcessingRunRepository($this->pdo);
+        if ($processingRuns->findLatestPublishableForRecording((int)$recording['id']) === null) {
+            throw new RuntimeException('Pass 4 readable transcript must be ready before locking.');
         }
         $text = trim((string)($recording['transcript_text'] ?? ''));
         if ($text === '') {

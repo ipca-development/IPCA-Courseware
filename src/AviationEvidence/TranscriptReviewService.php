@@ -15,6 +15,7 @@ require_once __DIR__ . '/Pass4bRepetitionDetectorService.php';
 require_once __DIR__ . '/DisplayBlockBuilderService.php';
 require_once __DIR__ . '/ChapterBuilderService.php';
 require_once __DIR__ . '/TerminologyCorrectionRepository.php';
+require_once __DIR__ . '/../CockpitRecorderEvidenceQueueService.php';
 require_once __DIR__ . '/../CockpitRecorderService.php';
 
 final class TranscriptReviewService
@@ -129,10 +130,17 @@ final class TranscriptReviewService
         $pass4Ready = EvidenceSchema::pass4Ready($this->pdo);
         $pass5Ready = EvidenceSchema::pass5Ready($this->pdo);
         $publishReady = EvidenceSchema::publishReady($this->pdo);
+        $evidenceQueue = CockpitRecorderEvidenceQueueService::fromPdo($this->pdo);
+        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
+        $evidenceInProgress = $evidenceQueue->isEvidenceInProgress($recordingId)
+            || ($status === 'ready' && is_array($runningRun));
+        $needsEvidence = $status === 'ready' && $publishableRun === null && $evidenceQueue->needsEvidenceProcessing($recording);
 
         $stage = 'legacy';
         if ($status === 'queued' || $status === 'transcribing' || $status === 'pending') {
             $stage = 'transcribing';
+        } elseif ($needsEvidence && ($evidenceInProgress || $evidenceReady)) {
+            $stage = 'processing_evidence';
         } elseif ($currentRunId > 0 && is_array($publishableRun)) {
             $stage = (int)($recording['published_transcript_version_id'] ?? 0) > 0 ? 'published' : 'publishable';
         } elseif ($currentRunId > 0) {
@@ -148,6 +156,9 @@ final class TranscriptReviewService
             'pass5_ready' => $pass5Ready,
             'publish_ready' => $publishReady,
             'publishable' => $publishableRun !== null,
+            'evidence_in_progress' => $evidenceInProgress,
+            'needs_evidence_processing' => $needsEvidence,
+            'running_processing_run_id' => is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : null,
             'latest_publishable_processing_run_id' => is_array($publishableRun) ? (int)($publishableRun['id'] ?? 0) : null,
             'active_processing_run_id' => $currentRunId > 0 ? $currentRunId : null,
             'published_transcript_version_id' => (int)($recording['published_transcript_version_id'] ?? 0),

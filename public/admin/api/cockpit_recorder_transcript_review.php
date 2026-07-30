@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderEvidenceQueueService.php';
+require_once __DIR__ . '/../../../src/CockpitRecorderDebriefQueueService.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/TranscriptReviewService.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -34,7 +36,23 @@ try {
         cockpit_transcript_review_json(404, array('ok' => false, 'error' => 'Recording not found.'));
     }
 
+    $autoQueue = !filter_var($_GET['no_auto_queue'] ?? '0', FILTER_VALIDATE_BOOLEAN);
+    $evidenceQueue = null;
+    if ($autoQueue) {
+        $queue = CockpitRecorderEvidenceQueueService::fromPdo($pdo);
+        if ($queue->needsEvidenceProcessing($recording)) {
+            $evidenceQueue = $queue->ensureQueued((int)($recording['id'] ?? 0));
+            $recording = $service->recordingByAnyId($id) ?? $recording;
+        }
+        if (strtolower((string)($recording['transcription_status'] ?? '')) === 'ready') {
+            CockpitRecorderDebriefQueueService::fromPdo($pdo)->onTranscriptionReady((int)($recording['id'] ?? 0));
+        }
+    }
+
     $payload = TranscriptReviewService::fromPdo($pdo)->buildReviewPayload($recording, $preferredLayer);
+    if ($evidenceQueue !== null) {
+        $payload['evidence_queue'] = $evidenceQueue;
+    }
     cockpit_transcript_review_json(200, $payload);
 } catch (Throwable $e) {
     cockpit_transcript_review_json(500, array('ok' => false, 'error' => $e->getMessage()));

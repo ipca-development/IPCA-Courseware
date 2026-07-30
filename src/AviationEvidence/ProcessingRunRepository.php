@@ -159,6 +159,58 @@ final class ProcessingRunRepository
         return is_array($row) ? $row : null;
     }
 
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function findRunningForRecording(int $recordingId): ?array
+    {
+        $rows = $this->listRunningForRecording($recordingId);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listRunningForRecording(int $recordingId): array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+            . ' WHERE recording_id = ? AND status = ? ORDER BY id DESC'
+        );
+        $stmt->execute(array($recordingId, 'running'));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    public function abandonRun(int $runId): void
+    {
+        if ($runId <= 0 || !EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('DELETE FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE id = ? AND status = ?');
+        $stmt->execute(array($runId, 'running'));
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function findLatestForRecording(int $recordingId): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS
+            . ' WHERE recording_id = ? ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute(array($recordingId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
     private function uuid(): string
     {
         $data = random_bytes(16);

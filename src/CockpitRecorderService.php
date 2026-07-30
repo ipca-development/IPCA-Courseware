@@ -27,6 +27,83 @@ final class CockpitRecorderService
         return self::projectRoot() . '/storage/cockpit_recorder/audio';
     }
 
+    public static function whisperChunkCacheRoot(): string
+    {
+        return self::projectRoot() . '/storage/cockpit_recorder/whisper_chunks';
+    }
+
+    public static function whisperFirstTranscription(): bool
+    {
+        require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+        return EvidenceSchema::whisperFirstTranscription();
+    }
+
+    public function defaultAsrModel(): string
+    {
+        require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+        return EvidenceSchema::defaultAsrModel();
+    }
+
+    public function transcriptionResponseFormat(): string
+    {
+        require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+        return EvidenceSchema::defaultAsrResponseFormat();
+    }
+
+    public function whisperChunkCachePath(int $recordingId, int $chunkIndex): string
+    {
+        return self::whisperChunkCacheRoot() . '/' . $recordingId . '/' . $chunkIndex . '.json';
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    public function storeWhisperChunkCache(int $recordingId, int $chunkIndex, array $payload): void
+    {
+        if ($recordingId <= 0) {
+            return;
+        }
+        $dir = self::whisperChunkCacheRoot() . '/' . $recordingId;
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        $path = $this->whisperChunkCachePath($recordingId, $chunkIndex);
+        @file_put_contents($path, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function loadWhisperChunkCache(int $recordingId, int $chunkIndex): ?array
+    {
+        if ($recordingId <= 0) {
+            return null;
+        }
+        $path = $this->whisperChunkCachePath($recordingId, $chunkIndex);
+        if (!is_file($path)) {
+            return null;
+        }
+        $json = json_decode((string)file_get_contents($path), true);
+        return is_array($json) ? $json : null;
+    }
+
+    public function clearWhisperChunkCache(int $recordingId): void
+    {
+        if ($recordingId <= 0) {
+            return;
+        }
+        $dir = self::whisperChunkCacheRoot() . '/' . $recordingId;
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (glob($dir . '/*.json') ?: array() as $file) {
+            if (is_file($file)) {
+                @unlink($file);
+            }
+        }
+        @rmdir($dir);
+    }
+
     public static function ahrsRoot(): string
     {
         return self::projectRoot() . '/storage/cockpit_recorder/ahrs';
@@ -711,7 +788,7 @@ final class CockpitRecorderService
         if ($status === 'ready') {
             $updatedRecording = $this->recordingByAnyId((string)$recordingId);
             if (is_array($updatedRecording)) {
-                $this->maybePersistProductionEvidence($recordingId, $updatedRecording);
+                $this->runPostTranscriptionPipeline($recordingId, $updatedRecording);
             }
         }
 
@@ -808,7 +885,21 @@ final class CockpitRecorderService
             $realPath = $this->transcriptionAudioPath($recording);
             $chunkPath = $this->extractAudioChunk($realPath, $start, max(1.0, $end - $start), (string)($recording['recording_uid'] ?? 'recording'), $index);
             $mime = mime_content_type($chunkPath) ?: 'audio/mp4';
-            $text = $this->transcribeAudioFile($chunkPath, $mime, basename($chunkPath), self::normalizeLanguage((string)($recording['language'] ?? 'en')));
+            $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
+            $parallel = $this->transcribeAudioFilesParallel(array(array(
+                'recording_id' => $recordingId,
+                'chunk_index' => $index,
+                'start_seconds' => $start,
+                'end_seconds' => $end,
+                'chunk_path' => $chunkPath,
+                'mime' => $mime,
+                'filename' => basename($chunkPath),
+            )), $language);
+            $result = $parallel[0] ?? null;
+            if (!is_array($result) || empty($result['ok'])) {
+                throw new RuntimeException((string)($result['error'] ?? 'Chunk transcription failed.'));
+            }
+            $text = trim((string)($result['text'] ?? ''));
             $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
         } catch (Throwable $e) {
             $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'failed', 0, null, $e->getMessage());
@@ -837,6 +928,162 @@ final class CockpitRecorderService
             'ok' => true,
             'done' => false,
             'processed_chunk' => $index,
+            'recording' => $updated ? $this->publicRecordingPayload($updated) : null,
+        );
+    }
+
+    public function transcriptionChunkConcurrency(): int
+    {
+        $env = getenv('CW_TRANSCRIPTION_CHUNK_CONCURRENCY');
+        if ($env !== false && $env !== '') {
+            return max(1, min(16, (int)$env));
+        }
+        return self::whisperFirstTranscription() ? 12 : 8;
+    }
+
+    /**
+     * Transcribe up to N queued chunks in parallel (background worker path).
+     *
+     * @return array<string,mixed>
+     */
+    public function processTranscriptionParallelBatch(int $recordingId, ?int $concurrency = null): array
+    {
+        $this->requireTables();
+        if ($recordingId <= 0) {
+            return array('ok' => false, 'done' => true, 'error' => 'Invalid recording id.');
+        }
+
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . self::TABLE . ' WHERE id = ? LIMIT 1');
+        $stmt->execute(array($recordingId));
+        $recording = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($recording)) {
+            return array('ok' => false, 'done' => true, 'error' => 'Recording not found.');
+        }
+        if ((string)($recording['transcription_status'] ?? '') === 'ready') {
+            return array('ok' => true, 'done' => true, 'recording' => $this->publicRecordingPayload($recording));
+        }
+
+        $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+        if ($duration <= self::TRANSCRIPTION_CHUNK_SECONDS) {
+            return $this->processTranscription($recordingId);
+        }
+        if (!self::transcriptionChunkTablePresent($this->pdo)) {
+            return array('ok' => false, 'done' => true, 'error' => 'Apply scripts/sql/2026_06_22_cockpit_recorder_transcription_chunks.sql first.');
+        }
+
+        $chunkCount = max(1, (int)ceil($duration / self::TRANSCRIPTION_CHUNK_SECONDS));
+        $existing = $this->transcriptionChunksForRecording($recordingId);
+        if (!$existing) {
+            for ($index = 0; $index < $chunkCount; $index++) {
+                $start = $index * self::TRANSCRIPTION_CHUNK_SECONDS;
+                $end = min($duration, $start + self::TRANSCRIPTION_CHUNK_SECONDS);
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'queued', 0, null, null);
+            }
+        }
+
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_status = 'transcribing',
+                transcription_progress = GREATEST(transcription_progress, 10),
+                transcription_started_at = COALESCE(transcription_started_at, CURRENT_TIMESTAMP),
+                error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($recordingId));
+
+        $chunks = $this->transcriptionChunksForRecording($recordingId);
+        $pending = array();
+        foreach ($chunks as $chunk) {
+            $status = (string)($chunk['status'] ?? '');
+            if ($status === 'queued' || $status === 'transcribing') {
+                $pending[] = $chunk;
+            }
+        }
+
+        if ($pending === array()) {
+            return $this->finishSteppedTranscription($recordingId);
+        }
+
+        $batchSize = $concurrency ?? $this->transcriptionChunkConcurrency();
+        $batch = array_slice($pending, 0, $batchSize);
+        $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
+        $realPath = $this->transcriptionAudioPath($recording);
+        $jobs = array();
+
+        foreach ($batch as $chunk) {
+            $index = (int)($chunk['chunk_index'] ?? 0);
+            $start = (float)($chunk['start_seconds'] ?? 0);
+            $end = (float)($chunk['end_seconds'] ?? 0);
+            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'transcribing', 0, null, null);
+            try {
+                $chunkPath = $this->extractAudioChunk(
+                    $realPath,
+                    $start,
+                    max(1.0, $end - $start),
+                    (string)($recording['recording_uid'] ?? 'recording'),
+                    $index
+                );
+                $mime = mime_content_type($chunkPath) ?: 'audio/mp4';
+                $jobs[] = array(
+                    'recording_id' => $recordingId,
+                    'chunk_index' => $index,
+                    'start_seconds' => $start,
+                    'end_seconds' => $end,
+                    'chunk_path' => $chunkPath,
+                    'mime' => $mime,
+                    'filename' => basename($chunkPath),
+                );
+            } catch (Throwable $e) {
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'failed', 0, null, $e->getMessage());
+            }
+        }
+
+        if ($jobs !== array()) {
+            foreach ($this->transcribeAudioFilesParallel($jobs, $language) as $result) {
+                $index = (int)($result['chunk_index'] ?? 0);
+                $start = (float)($result['start_seconds'] ?? 0);
+                $end = (float)($result['end_seconds'] ?? 0);
+                if (!empty($result['ok'])) {
+                    $text = trim((string)($result['text'] ?? ''));
+                    $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
+                } else {
+                    $this->storeTranscriptionChunk(
+                        $recordingId,
+                        $index,
+                        $start,
+                        $end,
+                        'failed',
+                        0,
+                        null,
+                        (string)($result['error'] ?? 'Chunk transcription failed.')
+                    );
+                }
+                $chunkPath = (string)($result['chunk_path'] ?? '');
+                if ($chunkPath !== '' && is_file($chunkPath)) {
+                    @unlink($chunkPath);
+                }
+            }
+        }
+
+        $readyCount = $this->countTranscriptionChunksByStatus($recordingId, 'ready');
+        $failedCount = $this->countTranscriptionChunksByStatus($recordingId, 'failed');
+        $progress = min(95, 10 + (int)round((($readyCount + $failedCount) / $chunkCount) * 85));
+        $this->pdo->prepare("
+            UPDATE " . self::TABLE . "
+            SET transcription_progress = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ")->execute(array($progress, $recordingId));
+
+        if (($readyCount + $failedCount) >= $chunkCount) {
+            return $this->finishSteppedTranscription($recordingId);
+        }
+
+        $updated = $this->recordingByAnyId((string)$recordingId);
+        return array(
+            'ok' => true,
+            'done' => false,
+            'processed_chunks' => array_map(static fn(array $job): int => (int)($job['chunk_index'] ?? 0), $jobs),
             'recording' => $updated ? $this->publicRecordingPayload($updated) : null,
         );
     }
@@ -878,6 +1125,7 @@ final class CockpitRecorderService
         if (self::transcriptionChunkTablePresent($this->pdo)) {
             $this->resetTranscriptionChunks($recordingId);
         }
+        $this->clearWhisperChunkCache($recordingId);
     }
 
     /**
@@ -2036,7 +2284,13 @@ final class CockpitRecorderService
         $realPath = $this->transcriptionAudioPath($recording);
         $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
         $mime = mime_content_type($realPath) ?: ((string)($recording['mime_type'] ?? '') ?: 'audio/mp4');
-        return $this->transcribeAudioFile($realPath, $mime, basename($realPath), $language);
+        return $this->transcribeAudioFile(
+            $realPath,
+            $mime,
+            basename($realPath),
+            $language,
+            (int)($recording['id'] ?? 0)
+        );
     }
 
     /**
@@ -2063,6 +2317,7 @@ final class CockpitRecorderService
         $language = self::normalizeLanguage((string)($recording['language'] ?? 'en'));
         $chunkCount = max(1, (int)ceil($duration / self::TRANSCRIPTION_CHUNK_SECONDS));
         $this->resetTranscriptionChunks($recordingId);
+        $this->clearWhisperChunkCache($recordingId);
 
         $texts = array();
         $failedChunks = array();
@@ -2081,7 +2336,20 @@ final class CockpitRecorderService
             try {
                 $chunkPath = $this->extractAudioChunk($realPath, $start, $end - $start, (string)($recording['recording_uid'] ?? 'recording'), $index);
                 $mime = mime_content_type($chunkPath) ?: 'audio/mp4';
-                $text = $this->transcribeAudioFile($chunkPath, $mime, basename($chunkPath), $language);
+                $parallel = $this->transcribeAudioFilesParallel(array(array(
+                    'recording_id' => $recordingId,
+                    'chunk_index' => $index,
+                    'start_seconds' => $start,
+                    'end_seconds' => $end,
+                    'chunk_path' => $chunkPath,
+                    'mime' => $mime,
+                    'filename' => basename($chunkPath),
+                )), $language);
+                $chunkResult = $parallel[0] ?? null;
+                if (!is_array($chunkResult) || empty($chunkResult['ok'])) {
+                    throw new RuntimeException((string)($chunkResult['error'] ?? 'Chunk transcription failed.'));
+                }
+                $text = trim((string)($chunkResult['text'] ?? ''));
                 $texts[] = $text;
                 $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
             } catch (Throwable $e) {
@@ -2252,25 +2520,199 @@ final class CockpitRecorderService
         );
     }
 
-    private function transcribeAudioFile(string $realPath, string $mime, string $filename, string $language): string
+    private function transcribeAudioFile(string $realPath, string $mime, string $filename, string $language, int $recordingId = 0): string
     {
-        $model = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: ''));
-        if ($model === '') {
-            $model = 'gpt-4o-transcribe';
-        }
+        $result = $this->transcribeAudioFilesParallel(array(array(
+            'recording_id' => $recordingId,
+            'chunk_index' => 0,
+            'start_seconds' => 0.0,
+            'end_seconds' => 0.0,
+            'chunk_path' => $realPath,
+            'mime' => $mime,
+            'filename' => $filename,
+        )), $language);
 
-        $result = $this->transcribeOpenAiAudioStructured($realPath, $mime, $filename, $language, $model, 'json', false, true);
-        if ($result['http_code'] < 200 || $result['http_code'] >= 300) {
-            $msg = (string)($result['raw_json']['error']['message'] ?? ('HTTP ' . $result['http_code']));
-            throw new RuntimeException('OpenAI transcription error: ' . $msg);
+        $first = $result[0] ?? null;
+        if (!is_array($first) || empty($first['ok'])) {
+            throw new RuntimeException((string)($first['error'] ?? 'OpenAI transcription failed.'));
         }
-
-        $text = trim($result['text']);
+        if ($recordingId > 0) {
+            $this->persistWhisperCacheFromParallelResult($recordingId, $first);
+        }
+        $text = trim((string)($first['text'] ?? ''));
         if ($text === '') {
             throw new RuntimeException('OpenAI transcription returned no text.');
         }
-
         return $text;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $jobs
+     * @return list<array<string,mixed>>
+     */
+    private function transcribeAudioFilesParallel(array $jobs, string $language): array
+    {
+        if ($jobs === array()) {
+            return array();
+        }
+
+        $whisperFirst = self::whisperFirstTranscription();
+        $model = $this->defaultAsrModel();
+        $responseFormat = $this->transcriptionResponseFormat();
+        $prompt = self::transcriptionPrompt();
+        $multi = curl_multi_init();
+        $handles = array();
+        $startedAt = microtime(true);
+        $startedIso = gmdate('Y-m-d H:i:s', (int)$startedAt) . '.' . sprintf('%03d', (int)(($startedAt - floor($startedAt)) * 1000));
+
+        foreach ($jobs as $jobIndex => $job) {
+            $chunkPath = (string)($job['chunk_path'] ?? '');
+            if ($chunkPath === '' || !is_file($chunkPath)) {
+                $handles[$jobIndex] = null;
+                continue;
+            }
+            $postFields = array(
+                'file' => new CURLFile($chunkPath, (string)($job['mime'] ?? 'audio/mp4'), (string)($job['filename'] ?? basename($chunkPath))),
+                'model' => $model,
+                'response_format' => $responseFormat,
+            );
+            if ($prompt !== '') {
+                $postFields['prompt'] = $prompt;
+            }
+            if ($language !== '') {
+                $postFields['language'] = $language;
+            }
+            if ($whisperFirst && $responseFormat === 'verbose_json') {
+                $postFields['timestamp_granularities[]'] = 'word';
+                $postFields['timestamp_granularities[]'] = 'segment';
+            }
+
+            $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
+            curl_setopt_array($ch, array(
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => array('Authorization: Bearer ' . cw_openai_key()),
+                CURLOPT_POSTFIELDS => $postFields,
+                CURLOPT_TIMEOUT => 900,
+                CURLOPT_CONNECTTIMEOUT => 30,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            ));
+            curl_multi_add_handle($multi, $ch);
+            $handles[$jobIndex] = $ch;
+        }
+
+        $running = null;
+        do {
+            $status = curl_multi_exec($multi, $running);
+            if ($running > 0) {
+                curl_multi_select($multi, 1.0);
+            }
+        } while ($running > 0 && $status === CURLM_OK);
+
+        $completedAt = microtime(true);
+        $latencyMs = (int)round(($completedAt - $startedAt) * 1000.0);
+        $completedIso = gmdate('Y-m-d H:i:s', (int)$completedAt) . '.' . sprintf('%03d', (int)(($completedAt - floor($completedAt)) * 1000));
+
+        $out = array();
+        foreach ($jobs as $jobIndex => $job) {
+            $base = array(
+                'recording_id' => (int)($job['recording_id'] ?? 0),
+                'chunk_index' => (int)($job['chunk_index'] ?? 0),
+                'start_seconds' => (float)($job['start_seconds'] ?? 0),
+                'end_seconds' => (float)($job['end_seconds'] ?? 0),
+                'chunk_path' => (string)($job['chunk_path'] ?? ''),
+            );
+            $ch = $handles[$jobIndex] ?? null;
+            if (!is_object($ch) && !is_resource($ch)) {
+                $out[] = $base + array('ok' => false, 'error' => 'Chunk file missing.');
+                continue;
+            }
+            $body = (string)curl_multi_getcontent($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($multi, $ch);
+            curl_close($ch);
+
+            $json = json_decode($body, true);
+            if ($code < 200 || $code >= 300 || !is_array($json)) {
+                $msg = is_array($json) ? (string)($json['error']['message'] ?? ('HTTP ' . $code)) : ('HTTP ' . $code);
+                $out[] = $base + array('ok' => false, 'error' => $msg, 'http_code' => $code);
+                continue;
+            }
+            $text = trim((string)($json['text'] ?? ''));
+            if ($text === '') {
+                $out[] = $base + array('ok' => false, 'error' => 'OpenAI transcription returned no text.', 'http_code' => $code);
+                continue;
+            }
+            $row = $base + array(
+                'ok' => true,
+                'text' => $text,
+                'raw_json' => $json,
+                'http_code' => $code,
+                'model' => $model,
+                'response_format' => $responseFormat,
+                'request_started_at' => $startedIso,
+                'request_completed_at' => $completedIso,
+                'latency_ms' => $latencyMs,
+            );
+            $recordingId = (int)($job['recording_id'] ?? 0);
+            if ($recordingId > 0) {
+                $this->persistWhisperCacheFromParallelResult($recordingId, $row);
+            }
+            $out[] = $row;
+        }
+
+        curl_multi_close($multi);
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     */
+    private function persistWhisperCacheFromParallelResult(int $recordingId, array $result): void
+    {
+        if ($recordingId <= 0 || !self::whisperFirstTranscription()) {
+            return;
+        }
+        $rawJson = $result['raw_json'] ?? null;
+        if (!is_array($rawJson)) {
+            return;
+        }
+        $chunkIndex = (int)($result['chunk_index'] ?? 0);
+        $chunkPath = (string)($result['chunk_path'] ?? '');
+        $chunkAudioSha256 = ($chunkPath !== '' && is_file($chunkPath)) ? (hash_file('sha256', $chunkPath) ?: '') : '';
+        $this->storeWhisperChunkCache($recordingId, $chunkIndex, array(
+            'text' => trim((string)($result['text'] ?? '')),
+            'raw_json' => $rawJson,
+            'http_code' => (int)($result['http_code'] ?? 0),
+            'model' => (string)($result['model'] ?? $this->defaultAsrModel()),
+            'response_format' => (string)($result['response_format'] ?? 'verbose_json'),
+            'openai_request_id' => isset($result['openai_request_id']) ? (string)$result['openai_request_id'] : null,
+            'latency_ms' => isset($result['latency_ms']) ? (int)$result['latency_ms'] : null,
+            'request_started_at' => isset($result['request_started_at']) ? (string)$result['request_started_at'] : null,
+            'request_completed_at' => isset($result['request_completed_at']) ? (string)$result['request_completed_at'] : null,
+            'chunk_audio_sha256' => $chunkAudioSha256 !== '' ? $chunkAudioSha256 : null,
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function runPostTranscriptionPipeline(int $recordingId, array $recording): void
+    {
+        try {
+            require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+            if (!EvidenceSchema::persistenceReady($this->pdo) || EvidenceSchema::skipProductionPersist()) {
+                return;
+            }
+            require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+            if (EvidenceSchema::whisperFirstTranscription()) {
+                ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
+                return;
+            }
+            $this->maybePersistProductionEvidence($recordingId, $recording);
+        } catch (Throwable $e) {
+            error_log('[ProductionTranscriptionEvidence] recording ' . $recordingId . ': ' . $e->getMessage());
+        }
     }
 
     /**
@@ -2279,12 +2721,19 @@ final class CockpitRecorderService
     private function maybePersistProductionEvidence(int $recordingId, array $recording): void
     {
         try {
-            require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
-            require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
-            if (!EvidenceSchema::persistenceReady($this->pdo) || EvidenceSchema::skipProductionPersist()) {
+            require_once __DIR__ . '/CockpitRecorderEvidenceQueueService.php';
+            $queue = CockpitRecorderEvidenceQueueService::fromPdo($this->pdo);
+            if (!$queue->needsEvidenceProcessing($recording)) {
                 return;
             }
-            ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
+            $result = $queue->ensureQueued($recordingId);
+            if (empty($result['queued']) && ($result['reason'] ?? '') === 'worker_spawn_failed') {
+                require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+                require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+                if (EvidenceSchema::persistenceReady($this->pdo) && !EvidenceSchema::skipProductionPersist()) {
+                    ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
+                }
+            }
         } catch (Throwable $e) {
             error_log('[ProductionTranscriptionEvidence] recording ' . $recordingId . ': ' . $e->getMessage());
         }
@@ -2358,7 +2807,7 @@ final class CockpitRecorderService
         if ($status === 'ready') {
             $updatedRecording = $this->recordingByAnyId((string)$recordingId);
             if (is_array($updatedRecording)) {
-                $this->maybePersistProductionEvidence($recordingId, $updatedRecording);
+                $this->runPostTranscriptionPipeline($recordingId, $updatedRecording);
             }
         }
 
@@ -2466,7 +2915,7 @@ final class CockpitRecorderService
     /**
      * @param list<string> $candidates
      */
-    private static function findBinary(array $candidates): string
+    public static function findBinary(array $candidates): string
     {
         foreach ($candidates as $candidate) {
             $candidate = trim($candidate);
