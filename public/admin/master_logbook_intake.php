@@ -657,6 +657,57 @@ cw_header('Master Logbook');
 .intake-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;padding:20px;z-index:1200}
 .intake-modal-backdrop[hidden]{display:none}
 .intake-modal{width:min(920px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;border:1px solid #dbe3ee;box-shadow:0 24px 60px rgba(15,23,42,.22)}
+.intake-modal-transcript-review{width:min(1280px,100%)}
+.intake-modal-transcript-review .intake-modal-body{display:grid;gap:12px;padding:16px}
+.trv-toolbar{display:grid;gap:8px}
+.trv-toolbar-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.trv-layer-label{display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.04em}
+.trv-layer-select{border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;padding:6px 8px;font-size:12px;font-weight:700}
+.trv-pipeline-badges{display:flex;gap:6px;flex-wrap:wrap}
+.trv-badge{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;background:#e2e8f0;color:#64748b}
+.trv-badge-ok{background:#dcfce7;color:#166534}
+.trv-badge-stage{background:#e0e7ff;color:#3730a3}
+.trv-workspace{display:grid;grid-template-columns:220px minmax(0,1fr) 260px;gap:12px;min-height:320px}
+.trv-workspace[hidden]{display:none}
+.trv-outline,.trv-transcript,.trv-sidebar{border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:10px;min-height:280px;max-height:52vh;overflow:auto}
+.trv-panel-title{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:8px}
+.trv-muted{color:#64748b;font-size:11px;line-height:1.45;margin:0}
+.trv-chapter-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.trv-chapter-btn{width:100%;border:1px solid #dbeafe;border-radius:10px;background:#fff;padding:8px;text-align:left;cursor:pointer;display:grid;gap:3px}
+.trv-chapter-btn:hover{border-color:#93c5fd;background:#eff6ff}
+.trv-chapter-time{font-size:10px;font-weight:800;color:#64748b;font-variant-numeric:tabular-nums}
+.trv-chapter-title{font-size:12px;font-weight:800;color:#0f172a;line-height:1.35}
+.trv-chapter-cat{font-size:10px;color:#64748b}
+.trv-block-list{display:grid;gap:8px}
+.trv-block{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:start;border:1px solid transparent;border-radius:10px;padding:8px;background:#fff}
+.trv-block.is-active{border-color:#93c5fd;background:#eff6ff}
+.trv-block-time{border:0;background:transparent;color:#64748b;font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;cursor:pointer;padding:0}
+.trv-block-time:hover{color:#1d4ed8}
+.trv-block-text{font-size:12px;line-height:1.55;color:#0f172a;white-space:pre-wrap}
+.trv-block-correct{border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#475569;font-size:10px;font-weight:800;padding:4px 6px;cursor:pointer}
+.trv-block-correct:hover{border-color:#93c5fd;color:#1d4ed8}
+.trv-side-panel+ .trv-side-panel{margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0}
+.trv-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0 0 8px;font-size:11px}
+.trv-kv dt{color:#64748b;font-weight:700}
+.trv-kv dd{margin:0;color:#0f172a;font-weight:800}
+.trv-findings{margin:0;padding-left:16px;font-size:11px;color:#475569}
+.trv-correction-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.trv-correction{border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:8px;font-size:11px}
+.trv-correction-raw{color:#991b1b}
+.trv-correction-arrow{color:#64748b}
+.trv-correction-fixed{color:#166534;font-weight:700}
+.trv-correction-meta{margin-top:6px;color:#64748b;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.trv-correction-action{border:1px solid #86efac;border-radius:7px;background:#ecfdf5;color:#166534;font-size:10px;font-weight:800;padding:2px 6px;cursor:pointer}
+.trv-correction-reject{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+.trv-correction-form{display:grid;gap:8px;margin-top:10px}
+.trv-correction-form label{display:grid;gap:4px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase}
+.trv-correction-form input{border:1px solid #cbd5e1;border-radius:8px;padding:7px 8px;font-size:12px}
+.trv-correction-form-actions{display:flex;gap:8px}
+.trv-btn-primary,.trv-btn-secondary{border-radius:8px;padding:6px 10px;font-size:11px;font-weight:800;cursor:pointer}
+.trv-btn-primary{border:0;background:#1d4ed8;color:#fff}
+.trv-btn-secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}
+.trv-publish-hint-ready{border-left-color:#86efac;background:#ecfdf5;color:#166534}
+@media (max-width:980px){.trv-workspace{grid-template-columns:1fr}.trv-outline,.trv-sidebar{max-height:24vh}}
 .intake-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:14px 16px;border-bottom:1px solid #e2e8f0}
 .intake-modal-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .intake-modal-reprocess{border:1px solid #fbbf24;border-radius:9px;background:#fffbeb;color:#92400e;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
@@ -1730,7 +1781,7 @@ cw_header('Master Logbook');
 </div>
 
 <div class="intake-modal-backdrop" id="intake-audio-transcript-modal" hidden>
-  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="intake-audio-transcript-title">
+  <div class="intake-modal intake-modal-transcript-review" role="dialog" aria-modal="true" aria-labelledby="intake-audio-transcript-title">
     <div class="intake-modal-head">
       <div>
         <h3 class="intake-modal-title" id="intake-audio-transcript-title">Cockpit Audio Transcript</h3>
@@ -1747,10 +1798,22 @@ cw_header('Master Logbook');
       <p class="intake-modal-note" id="intake-audio-transcript-note">Use <strong>Publish Evidence</strong> to snapshot the Pass 4 readable transcript into an immutable published version (recommended when typed evidence exists). Use <strong>Clean Up</strong> for legacy duplicate removal on the stored cache. Use <strong>Re-Process From Audio</strong> only when you need a fresh transcription from the audio file.</p>
       <p class="intake-modal-note intake-modal-publish-hint" id="intake-audio-transcript-publish-hint" hidden></p>
       <audio class="intake-modal-audio" id="intake-audio-transcript-player" controls preload="none"></audio>
+      <div class="trv-toolbar" id="intake-transcript-review-toolbar"></div>
+      <div class="trv-workspace" id="intake-transcript-review-workspace" hidden>
+        <aside class="trv-outline" id="intake-transcript-review-outline"></aside>
+        <main class="trv-transcript" id="intake-transcript-review-transcript"></main>
+        <aside class="trv-sidebar" id="intake-transcript-review-sidebar"></aside>
+      </div>
       <div class="intake-modal-transcript" id="intake-audio-transcript-body">Loading transcript…</div>
     </div>
   </div>
 </div>
+
+<?php
+$transcriptReviewJsPath = __DIR__ . '/assets/transcript_review.js';
+$transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($transcriptReviewJsPath) : (string)time();
+?>
+<script src="/admin/assets/transcript_review.js?v=<?= cvr_intake_h($transcriptReviewJsVer) ?>"></script>
 
 <script>
 (function () {
@@ -1918,154 +1981,38 @@ cw_header('Master Logbook');
   const transcriptCleanupButton = document.querySelector('[data-audio-transcript-cleanup]');
   const transcriptPublishButton = document.querySelector('[data-audio-transcript-publish]');
   const transcriptPublishHint = document.getElementById('intake-audio-transcript-publish-hint');
+  const transcriptReview = window.TranscriptReviewWorkspace?.init({
+    title: transcriptTitle,
+    meta: transcriptMeta,
+    note: transcriptNote,
+    player: transcriptPlayer,
+    toolbar: document.getElementById('intake-transcript-review-toolbar'),
+    workspace: document.getElementById('intake-transcript-review-workspace'),
+    outline: document.getElementById('intake-transcript-review-outline'),
+    transcript: document.getElementById('intake-transcript-review-transcript'),
+    sidebar: document.getElementById('intake-transcript-review-sidebar'),
+    legacyBody: transcriptBody,
+    publishButton: transcriptPublishButton,
+    publishHint: transcriptPublishHint,
+    reprocessButton: transcriptReprocessButton,
+    cleanupButton: transcriptCleanupButton,
+  });
   let activeTranscriptRecordingId = null;
-  let activePublishableRunId = null;
-  let transcriptPollTimer = null;
-
-  const formatTranscriptSourceLabel = (source) => {
-    if (source === 'published_evidence') return 'Published evidence';
-    return 'Legacy cache';
-  };
-
-  const updateTranscriptPublishButton = (payload) => {
-    if (!transcriptPublishButton) return;
-    const publishReady = !!payload.publish_ready;
-    const publishable = !!payload.publishable;
-    transcriptPublishButton.hidden = !publishReady;
-    transcriptPublishButton.disabled = !publishable;
-    activePublishableRunId = publishable ? (payload.latest_publishable_processing_run_id || null) : null;
-    if (!publishReady) {
-      transcriptPublishButton.title = 'Evidence publish tables are not available on this environment.';
-      if (transcriptPublishHint) {
-        transcriptPublishHint.hidden = true;
-        transcriptPublishHint.textContent = '';
-      }
-    } else if (!publishable) {
-      transcriptPublishButton.title = 'This recording has no typed evidence with a readable Pass 4 layer yet.';
-      if (transcriptPublishHint) {
-        transcriptPublishHint.hidden = false;
-        transcriptPublishHint.classList.remove('intake-modal-publish-hint-ready');
-        transcriptPublishHint.innerHTML = '<strong>Publish Evidence is unavailable for this recording.</strong> '
-          + 'It only works after typed provider evidence and Pass 4 have run (Phase 0 probe/replay on App Platform). '
-          + 'This recording currently shows <em>Legacy cache</em> only — use Clean Up or Re-Process for the old pipeline, '
-          + 'or run evidence processing first for recording #' + String(payload.recording_id || '') + '.';
-      }
-    } else if (payload.transcript_source === 'published_evidence') {
-      transcriptPublishButton.title = 'Create a new immutable published snapshot from the latest evidence run.';
-      transcriptPublishButton.textContent = 'Publish New Evidence Version';
-      if (transcriptPublishHint) {
-        transcriptPublishHint.hidden = false;
-        transcriptPublishHint.classList.add('intake-modal-publish-hint-ready');
-        transcriptPublishHint.textContent = 'Published evidence is active. You can publish again to create a new immutable version from processing run #' + String(activePublishableRunId || payload.latest_publishable_processing_run_id || '') + '.';
-      }
-    } else {
-      transcriptPublishButton.title = 'Publish the readable evidence transcript and regenerate the legacy cache from it.';
-      transcriptPublishButton.textContent = 'Publish Evidence';
-      if (transcriptPublishHint) {
-        transcriptPublishHint.hidden = false;
-        transcriptPublishHint.classList.add('intake-modal-publish-hint-ready');
-        transcriptPublishHint.textContent = 'Ready to publish from processing run #' + String(activePublishableRunId || payload.latest_publishable_processing_run_id || '') + '. This will snapshot the Pass 4 readable layer and update the legacy cache without cleanTranscriptText().';
-      }
-    }
-  };
-
-  const stopTranscriptPoll = () => {
-    if (transcriptPollTimer !== null) {
-      window.clearInterval(transcriptPollTimer);
-      transcriptPollTimer = null;
-    }
-  };
 
   const loadTranscriptModal = async (recordingId, options = {}) => {
-    const allowPoll = options.allowPoll !== false;
-    if (!recordingId || !transcriptModal || !transcriptBody || !transcriptPlayer) {
+    if (!recordingId || !transcriptModal || !transcriptReview) {
       return;
     }
     activeTranscriptRecordingId = recordingId;
     transcriptModal.hidden = false;
-    if (transcriptBody.textContent === 'Loading transcript…' || !allowPoll) {
-      transcriptBody.textContent = 'Loading transcript…';
-    }
-    if (transcriptMeta && transcriptBody.textContent === 'Loading transcript…') transcriptMeta.textContent = '';
-    if (transcriptTitle && transcriptBody.textContent === 'Loading transcript…') transcriptTitle.textContent = 'Cockpit Audio Transcript';
-
-    const response = await fetch('/admin/api/cockpit_recorder_intake_transcript.php?id=' + encodeURIComponent(recordingId), { credentials: 'same-origin' });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || 'Could not load transcript.');
-    }
-    if (transcriptTitle) {
-      transcriptTitle.textContent = payload.recording_uid ? ('Transcript · ' + payload.recording_uid) : 'Cockpit Audio Transcript';
-    }
-    if (transcriptMeta) {
-      const metaParts = [];
-      if (payload.aircraft_registration) metaParts.push(payload.aircraft_registration);
-      if (payload.transcription_status) metaParts.push(String(payload.transcription_status).toUpperCase());
-      if (payload.transcription_progress != null) metaParts.push(String(payload.transcription_progress) + '%');
-      if (payload.original_filename) metaParts.push(payload.original_filename);
-      const sourceLabel = formatTranscriptSourceLabel(payload.transcript_source || 'legacy_cache');
-      transcriptMeta.innerHTML = metaParts.map((part) => document.createTextNode(part).textContent).join(' · ')
-        + ' <span class="intake-transcript-source '
-        + (payload.transcript_source === 'published_evidence' ? '' : 'intake-transcript-source-legacy')
-        + '">' + sourceLabel + '</span>';
-      if (payload.published_version_uuid) {
-        transcriptMeta.innerHTML += '<div class="intake-muted" style="margin-top:4px">Published '
-          + String(payload.published_version_uuid).slice(0, 8) + '…'
-          + (payload.published_at ? (' · ' + payload.published_at) : '')
-          + '</div>';
-      }
-    }
-    updateTranscriptPublishButton(payload);
-    if (transcriptNote) {
-      transcriptNote.hidden = false;
-    }
-    if (payload.audio_url && !transcriptPlayer.getAttribute('src')) {
-      transcriptPlayer.src = payload.audio_url;
-    }
-    const status = String(payload.transcription_status || '').toLowerCase();
-    const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
-    if (transcriptReprocessButton) {
-      transcriptReprocessButton.disabled = inProgress;
-    }
-    if (transcriptCleanupButton) {
-      transcriptCleanupButton.disabled = inProgress;
-    }
-    if (transcriptPublishButton) {
-      transcriptPublishButton.disabled = inProgress || !payload.publishable;
-    }
-    if (inProgress) {
-      transcriptBody.textContent = 'Transcription in progress… ' + String(payload.transcription_progress || 0) + '%';
-      if (allowPoll && transcriptPollTimer === null) {
-        transcriptPollTimer = window.setInterval(() => {
-          loadTranscriptModal(recordingId, { allowPoll: true }).catch(() => stopTranscriptPoll());
-        }, 3000);
-      }
-      return;
-    }
-    stopTranscriptPoll();
-    if (status === 'failed') {
-      transcriptBody.textContent = 'Transcription failed. Use Re-Process Transcript to try again.';
-      if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
-      if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
-      if (transcriptPublishButton) transcriptPublishButton.disabled = !payload.publishable;
-      return;
-    }
-    transcriptBody.textContent = payload.transcript_text || 'Transcript is not available yet.';
-    if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
-    if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
-    if (transcriptPublishButton) transcriptPublishButton.disabled = !payload.publishable;
+    await transcriptReview.load(recordingId, options);
   };
 
   const closeTranscriptModal = () => {
     if (!transcriptModal) return;
-    stopTranscriptPoll();
+    transcriptReview?.close();
     activeTranscriptRecordingId = null;
     transcriptModal.hidden = true;
-    if (transcriptPlayer) {
-      transcriptPlayer.pause();
-      transcriptPlayer.removeAttribute('src');
-      transcriptPlayer.load();
-    }
   };
   document.querySelectorAll('[data-audio-transcript-close]').forEach((button) => {
     button.addEventListener('click', closeTranscriptModal);
@@ -2079,19 +2026,16 @@ cw_header('Master Logbook');
     button.addEventListener('click', async () => {
       const recordingId = button.getAttribute('data-recording-id');
       if (!recordingId) return;
-      stopTranscriptPoll();
-      if (transcriptNote) transcriptNote.hidden = true;
+      transcriptReview?.close();
+      if (transcriptNote) transcriptNote.hidden = false;
       if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
       if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
-      if (transcriptPlayer) {
-        transcriptPlayer.removeAttribute('src');
-        transcriptPlayer.load();
-      }
       if (transcriptBody) transcriptBody.textContent = 'Loading transcript…';
       try {
         await loadTranscriptModal(recordingId, { allowPoll: true });
       } catch (error) {
         if (transcriptBody) {
+          transcriptBody.hidden = false;
           transcriptBody.textContent = error instanceof Error ? error.message : 'Could not load transcript.';
         }
       }
@@ -2103,6 +2047,7 @@ cw_header('Master Logbook');
       if (!activeTranscriptRecordingId) {
         return;
       }
+      const activePublishableRunId = transcriptReview?.getPublishableRunId?.() || null;
       const message = activePublishableRunId
         ? ('Publish an immutable evidence transcript snapshot from processing run #' + activePublishableRunId + '? This updates the legacy transcript cache from the readable evidence layer (no cleanTranscriptText pass).')
         : 'Publish an immutable evidence transcript snapshot from the latest typed evidence run?';
@@ -2110,7 +2055,10 @@ cw_header('Master Logbook');
         return;
       }
       transcriptPublishButton.disabled = true;
-      if (transcriptBody) transcriptBody.textContent = 'Publishing evidence transcript…';
+      if (transcriptBody) {
+        transcriptBody.hidden = false;
+        transcriptBody.textContent = 'Publishing evidence transcript…';
+      }
       try {
         const formData = new FormData();
         formData.append('recording_id', activeTranscriptRecordingId);
@@ -2130,11 +2078,8 @@ cw_header('Master Logbook');
         window.alert('Published evidence transcript version ' + (payload.version_uuid || payload.published_transcript_version_id || '') + '.');
       } catch (error) {
         if (transcriptBody) {
+          transcriptBody.hidden = false;
           transcriptBody.textContent = error instanceof Error ? error.message : 'Could not publish evidence transcript.';
-        }
-      } finally {
-        if (transcriptPublishButton) {
-          transcriptPublishButton.disabled = !activePublishableRunId;
         }
       }
     });
@@ -2187,7 +2132,7 @@ cw_header('Master Logbook');
       if (transcriptBody) transcriptBody.textContent = 'Queuing transcript re-processing…';
       if (transcriptMeta) transcriptMeta.textContent = 'QUEUED · 0%';
       try {
-        stopTranscriptPoll();
+        transcriptReview?.stopPoll?.();
         const formData = new FormData();
         formData.append('id', activeTranscriptRecordingId);
         formData.append('mode', 'retry');

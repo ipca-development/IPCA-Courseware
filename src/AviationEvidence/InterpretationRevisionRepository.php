@@ -83,6 +83,25 @@ final class InterpretationRevisionRepository
     /**
      * @return array<string,mixed>|null
      */
+    public function findLatestForRunByLayer(int $processingRunId, string $layer): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_INTERPRETATION_REVISIONS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT i.* FROM ' . EvidenceSchema::TABLE_INTERPRETATION_REVISIONS . ' i'
+            . ' INNER JOIN ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' s ON s.id = i.speech_segment_id'
+            . ' WHERE s.processing_run_id = ? AND i.layer = ?'
+            . ' ORDER BY i.revision_number DESC, i.id DESC LIMIT 1'
+        );
+        $stmt->execute(array($processingRunId, $layer));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
     public function findLatestReadableForProcessingRun(int $processingRunId): ?array
     {
         if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_INTERPRETATION_REVISIONS)) {

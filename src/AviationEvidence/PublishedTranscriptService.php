@@ -8,6 +8,8 @@ require_once __DIR__ . '/SpeechSegmentRepository.php';
 require_once __DIR__ . '/SuppressionRepository.php';
 require_once __DIR__ . '/ProviderRunRepository.php';
 require_once __DIR__ . '/PublishedTranscriptVersionRepository.php';
+require_once __DIR__ . '/DisplayBlockRepository.php';
+require_once __DIR__ . '/ChapterRepository.php';
 
 final class PublishedTranscriptService
 {
@@ -19,6 +21,8 @@ final class PublishedTranscriptService
         private readonly SuppressionRepository $suppressions,
         private readonly ProviderRunRepository $providerRuns,
         private readonly PublishedTranscriptVersionRepository $publishedVersions,
+        private readonly DisplayBlockRepository $displayBlocks,
+        private readonly ChapterRepository $chapters,
     ) {
     }
 
@@ -60,6 +64,12 @@ final class PublishedTranscriptService
         $suppressedSegmentIds = $this->suppressedSegmentIdsFromRows($suppressionRows);
         $timeline = $this->buildTimeline($speechSegmentRows, $suppressedSegmentIds);
         $canonical = $this->providerRuns->findCanonicalForProcessingRun($processingRunId);
+        $displayBlocks = $this->formatBlocksForSnapshot(
+            $this->displayBlocks->listForProcessingRun($processingRunId),
+            $speechSegmentRows,
+            $suppressedSegmentIds
+        );
+        $chapters = $this->formatChaptersForSnapshot($this->chapters->listForProcessingRun($processingRunId));
 
         $reasoning = json_decode((string)($readable['reasoning_json'] ?? ''), true);
         if (!is_array($reasoning)) {
@@ -82,6 +92,8 @@ final class PublishedTranscriptService
             'canonical_provider_run_id' => is_array($canonical) ? (int)($canonical['id'] ?? 0) : null,
             'readable_reasoning' => $reasoning,
             'timeline' => $timeline,
+            'display_blocks' => $displayBlocks,
+            'chapters' => $chapters,
         );
 
         $published = $this->publishedVersions->create(
@@ -307,6 +319,76 @@ final class PublishedTranscriptService
         return $timeline;
     }
 
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param list<array<string,mixed>> $speechSegmentRows
+     * @param list<int> $suppressedSegmentIds
+     * @return list<array<string,mixed>>
+     */
+    private function formatBlocksForSnapshot(array $rows, array $speechSegmentRows, array $suppressedSegmentIds): array
+    {
+        $segmentsById = array();
+        foreach ($speechSegmentRows as $segment) {
+            $segmentsById[(int)($segment['id'] ?? 0)] = $segment;
+        }
+
+        $out = array();
+        foreach ($rows as $row) {
+            $segmentIds = json_decode((string)($row['speech_segment_ids_json'] ?? '[]'), true);
+            if (!is_array($segmentIds)) {
+                $segmentIds = array();
+            }
+            $textParts = array();
+            foreach ($segmentIds as $segmentId) {
+                $segmentId = (int)$segmentId;
+                if ($segmentId <= 0 || in_array($segmentId, $suppressedSegmentIds, true)) {
+                    continue;
+                }
+                $segment = $segmentsById[$segmentId] ?? null;
+                if (is_array($segment)) {
+                    $text = trim((string)($segment['provider_segment_text'] ?? ''));
+                    if ($text !== '') {
+                        $textParts[] = $text;
+                    }
+                }
+            }
+            $text = trim(implode(' ', $textParts));
+            if ($text === '') {
+                continue;
+            }
+            $out[] = array(
+                'id' => (int)($row['id'] ?? 0),
+                'start_time_ms' => (int)($row['start_time_ms'] ?? 0),
+                'end_time_ms' => (int)($row['end_time_ms'] ?? 0),
+                'text' => $text,
+                'speech_segment_ids' => $segmentIds,
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function formatChaptersForSnapshot(array $rows): array
+    {
+        $out = array();
+        foreach ($rows as $row) {
+            $segmentIds = json_decode((string)($row['supporting_segment_ids_json'] ?? '[]'), true);
+            $out[] = array(
+                'id' => (int)($row['id'] ?? 0),
+                'title' => (string)($row['title'] ?? ''),
+                'category' => (string)($row['category'] ?? ''),
+                'start_time_ms' => (int)($row['start_time_ms'] ?? 0),
+                'end_time_ms' => (int)($row['end_time_ms'] ?? 0),
+                'confidence' => isset($row['calculated_confidence']) ? (float)$row['calculated_confidence'] : null,
+                'supporting_segment_ids' => is_array($segmentIds) ? $segmentIds : array(),
+            );
+        }
+        return $out;
+    }
+
     public static function fromPdo(PDO $pdo): self
     {
         return new self(
@@ -317,6 +399,8 @@ final class PublishedTranscriptService
             new SuppressionRepository($pdo),
             new ProviderRunRepository($pdo),
             new PublishedTranscriptVersionRepository($pdo),
+            new DisplayBlockRepository($pdo),
+            new ChapterRepository($pdo),
         );
     }
 }

@@ -19,10 +19,14 @@ final class EvidenceSchema
     public const TABLE_INTERPRETATION_REVISIONS = 'ipca_evidence_interpretation_revisions';
     public const TABLE_INTERPRETATION_CONFIDENCE = 'ipca_evidence_interpretation_confidence_factors';
     public const TABLE_SUPPRESSIONS = 'ipca_evidence_suppressions';
+    public const TABLE_DISPLAY_BLOCKS = 'ipca_evidence_display_blocks';
+    public const TABLE_CHAPTERS = 'ipca_evidence_chapters';
+    public const TABLE_KNOWLEDGE_CORRECTIONS = 'ipca_knowledge_correction_evidence';
 
     public const PASS4A_VERSION = '2026.07.30.1';
     public const PASS4B_VERSION = '2026.07.30.1';
-    public const PUBLISH_SNAPSHOT_VERSION = '2026.07.30.1';
+    public const PASS5_VERSION = '2026.07.30.1';
+    public const PUBLISH_SNAPSHOT_VERSION = '2026.07.30.2';
 
     public const LAYER_PASS4A = 'pass_4a_speech_quality';
     public const LAYER_PASS4B = 'pass_4b_repetition';
@@ -139,6 +143,21 @@ final class EvidenceSchema
         return self::pass4Ready($pdo) && self::tablePresent($pdo, self::TABLE_PUBLISHED_VERSIONS);
     }
 
+    public static function pass5Ready(PDO $pdo): bool
+    {
+        foreach (array(self::TABLE_DISPLAY_BLOCKS, self::TABLE_CHAPTERS) as $table) {
+            if (!self::tablePresent($pdo, $table)) {
+                return false;
+            }
+        }
+        return self::pass4Ready($pdo);
+    }
+
+    public static function terminologyReady(PDO $pdo): bool
+    {
+        return self::tablePresent($pdo, self::TABLE_KNOWLEDGE_CORRECTIONS);
+    }
+
     public static function runPass4AfterPersist(): bool
     {
         if (getenv('CW_EVIDENCE_SKIP_PASS4') === '1' || getenv('CW_EVIDENCE_SKIP_PASS4') === 'true') {
@@ -157,6 +176,14 @@ final class EvidenceSchema
     {
         $env = getenv('CW_EVIDENCE_PRODUCTION_SKIP_WHISPER');
         return $env === '1' || $env === 'true';
+    }
+
+    public static function runPass5AfterPersist(): bool
+    {
+        if (getenv('CW_EVIDENCE_SKIP_PASS5') === '1' || getenv('CW_EVIDENCE_SKIP_PASS5') === 'true') {
+            return false;
+        }
+        return true;
     }
 
     /**

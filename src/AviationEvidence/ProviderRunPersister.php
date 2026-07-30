@@ -9,6 +9,7 @@ require_once __DIR__ . '/ProviderRunRepository.php';
 require_once __DIR__ . '/ProviderObservationRepository.php';
 require_once __DIR__ . '/ProviderModelCapabilitiesRepository.php';
 require_once __DIR__ . '/EvidencePass4Runner.php';
+require_once __DIR__ . '/EvidencePass5Runner.php';
 
 /**
  * Persists immutable Phase 0 probe evidence into typed tables.
@@ -191,6 +192,18 @@ final class ProviderRunPersister
             }
         }
 
+        $pass5Result = null;
+        if (
+            is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])
+            && EvidenceSchema::runPass5AfterPersist() && EvidenceSchema::pass5Ready($this->pdo)
+        ) {
+            try {
+                $pass5Result = EvidencePass5Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
+            } catch (Throwable $e) {
+                $pass5Result = array('ok' => false, 'error' => $e->getMessage());
+            }
+        }
+
         $this->processingRuns->markCompleted($processingRunId);
 
         $schemaVersion = EvidenceSchema::currentSchemaVersion($this->pdo);
@@ -210,6 +223,7 @@ final class ProviderRunPersister
             ),
             'filesystem_evidence_paths' => $evidenceFilesByLabel,
             'pass_4' => $pass4Result,
+            'pass_5' => $pass5Result,
         );
     }
 
