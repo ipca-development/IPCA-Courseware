@@ -11,6 +11,10 @@ $intake = file_get_contents($root . '/src/CvrWorkflowEvidenceIntakeService.php')
 $dispatchIntake = file_get_contents($root . '/src/CvrDispatchIntakeService.php') ?: '';
 $derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 $classification = file_get_contents($root . '/src/GarminFlightDataSourceClassificationService.php') ?: '';
+$garminRecovery = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/GarminRecoveryServices.swift') ?: '';
+$apiClient = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift') ?: '';
+$garminEvidence = file_get_contents($root . '/src/GarminCsvEvidenceService.php') ?: '';
+$garminChunkEndpoint = file_get_contents($root . '/public/api/cvr/csv_upload_chunk.php') ?: '';
 
 $checks = array(
     'archive model retains all evidence categories' =>
@@ -59,6 +63,24 @@ $checks = array(
         && str_contains($derivation, "'authority' => 'dispatch_start_crew_end'")
         && str_contains($derivation, 'verify the dispatch entry')
         && str_contains($derivation, 'Garmin airframe_hours'),
+    'SD recovery synchronizes all data-rich files without GPS-only logs' =>
+        str_contains($garminRecovery, 'if candidate.classification.isDataRich')
+        && str_contains($garminRecovery, 'candidate) in candidates.enumerated()')
+        && str_contains($garminRecovery, 'Non-matching files synchronize as standalone records')
+        && str_contains($garminRecovery, 'knownGarminCsvHashes')
+        && str_contains($apiClient, 'appendField("standalone_upload", "1")')
+        && str_contains($garminChunkEndpoint, "'standalone_upload' =>")
+        && str_contains($garminEvidence, '$standaloneUpload'),
+    'SD recovery exposes live scan and synchronization progress' =>
+        str_contains($garminRecovery, 'scanFilesProcessed')
+        && str_contains($garminRecovery, 'syncFilesProcessed')
+        && str_contains($garminRecovery, 'currentFileProgress')
+        && str_contains($views, 'activeRecoveryProgress')
+        && str_contains($views, 'SYNCHRONIZING CARD FILES')
+        && str_contains(
+            (string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/CVROperationalDesign.swift'),
+            'ProgressView(value: progress)'
+        ),
     'crew endings override derived durations with discrepancy reporting' =>
         str_contains($derivation, 'crew_hobbs_duration_hours')
         && str_contains($derivation, 'crew_hobbs_end')

@@ -52,6 +52,11 @@ struct IPCACVRUnitApp: App {
                     await missionCatalog.refreshFromServer(settings: settings)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                     sdRecovery.refreshBookmarkState(settings: settings)
+                    _ = await sdRecovery.scanAndImportIfNeeded(
+                        settings: settings,
+                        vault: garminVault,
+                        workflow: workflowStore
+                    )
                     await garminSync.syncPending(
                         settings: settings,
                         vault: garminVault,

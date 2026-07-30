@@ -273,6 +273,7 @@ struct CVROperationalWarningCard: View {
     var message: String
     var iconName: String
     var color: Color
+    var progress: Double? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -289,6 +290,11 @@ struct CVROperationalWarningCard: View {
                     .foregroundStyle(CVROperationalPalette.textSecondary)
                     .lineLimit(2)
                     .minimumScaleFactor(0.86)
+                if let progress {
+                    ProgressView(value: progress)
+                        .tint(color)
+                        .animation(.linear(duration: 0.15), value: progress)
+                }
             }
             Spacer(minLength: 0)
         }

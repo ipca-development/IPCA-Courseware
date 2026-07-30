@@ -40,7 +40,11 @@ final class GarminCsvVaultStore: ObservableObject {
     }
 
     func pendingRecords() -> [GarminCsvVaultRecord] {
-        records.filter { $0.syncState == .pending || $0.syncState == .failed }
+        records.filter {
+            $0.syncState == .pending
+                || $0.syncState == .uploading
+                || $0.syncState == .failed
+        }
     }
 
     func syncedRecordsEligibleForPurge(olderThan cutoff: Date) -> [GarminCsvVaultRecord] {
@@ -219,8 +223,18 @@ final class GarminSDCardRecoveryService: ObservableObject {
     @Published private(set) var cardAvailable = false
     @Published private(set) var lastSummary: GarminSDCardScanSummary?
     @Published private(set) var lastError = ""
+    @Published private(set) var scanPhase = ""
+    @Published private(set) var scanFilesProcessed = 0
+    @Published private(set) var scanFilesTotal = 0
+    @Published private(set) var scanDataRichFound = 0
+    @Published private(set) var scanGpsOnlySkipped = 0
 
     private let maxScanDepth = 8
+
+    var scanProgress: Double? {
+        guard scanFilesTotal > 0 else { return nil }
+        return min(1, max(0, Double(scanFilesProcessed) / Double(scanFilesTotal)))
+    }
 
     func refreshBookmarkState(settings: SettingsStore) {
         cardConfigured = settings.garminSDCardBookmarkData != nil
@@ -318,14 +332,23 @@ final class GarminSDCardRecoveryService: ObservableObject {
         cardAvailable = true
 
         isScanning = true
-        defer { isScanning = false }
+        scanPhase = "Finding CSV files on the SD card"
+        scanFilesProcessed = 0
+        scanFilesTotal = 0
+        scanDataRichFound = 0
+        scanGpsOnlySkipped = 0
+        defer {
+            isScanning = false
+            scanPhase = ""
+        }
 
         do {
-            let inventory = try scanInventory(root: root)
+            let inventory = try await scanInventory(root: root)
             let candidates = inventory.dataRich
             var alreadyKnown = 0
             var imported = 0
             var matched = false
+            var vaultFailures = 0
 
             let flightRecord = workflow.state.activeFlightRecord
             let expectedTail = settings.selectedAircraft?.registration
@@ -339,48 +362,74 @@ final class GarminSDCardRecoveryService: ObservableObject {
                 recordingWindow: recordingWindow
             )
 
-            for candidate in candidates {
-                let sha = try sha256(for: candidate.fileURL)
-                let hadVaultRecord = vault.record(forSHA256: sha) != nil
-                if hadVaultRecord {
-                    alreadyKnown += 1
-                }
+            scanPhase = "Copying data-rich files to the local vault"
+            scanFilesProcessed = 0
+            scanFilesTotal = candidates.count
+            for (index, candidate) in candidates.enumerated() {
+                do {
+                    let sha = try sha256(for: candidate.fileURL)
+                    let existingVaultRecord = vault.record(forSHA256: sha)
+                    let hadVaultRecord = existingVaultRecord != nil
+                    if hadVaultRecord {
+                        alreadyKnown += 1
+                    }
 
-                guard let best, best.fileURL == candidate.fileURL, let flightRecord else { continue }
+                    var matchedFlightRecordID: String?
+                    var uploadComponentID: String?
+                    if let best, best.fileURL == candidate.fileURL, let flightRecord {
+                        if existingVaultRecord?.flightRecordID == flightRecord.id,
+                           let existingComponentID = existingVaultRecord?.uploadComponentID,
+                           workflow.state.uploadComponents.contains(where: { $0.id == existingComponentID }) {
+                            uploadComponentID = existingComponentID
+                        } else {
+                            uploadComponentID = workflow.importGarminCSVFromRecovery(
+                                sourceURL: candidate.fileURL,
+                                sourceLabel: "sd_card_auto_import"
+                            )
+                        }
+                        if uploadComponentID != nil {
+                            matchedFlightRecordID = flightRecord.id
+                            matched = true
+                        }
+                    }
 
-                let componentID = workflow.importGarminCSVFromRecovery(
-                    sourceURL: candidate.fileURL,
-                    sourceLabel: "sd_card_auto_import"
-                )
-                if let componentID {
+                    // Copy every data-rich CSV into the local vault while the card is
+                    // available. Non-matching files synchronize as standalone records;
+                    // the best current-flight match also joins the workflow upload.
                     _ = try vault.ingest(
                         sourceURL: candidate.fileURL,
                         relativePath: candidate.relativePath,
                         metadata: candidate.metadata,
                         classification: candidate.classification,
-                        flightRecordID: flightRecord.id,
-                        uploadComponentID: componentID
+                        flightRecordID: matchedFlightRecordID,
+                        uploadComponentID: uploadComponentID
                     )
-                    if !hadVaultRecord || workflow.state.uploadComponents.contains(where: { $0.id == componentID && $0.state == .queued }) {
+                    if !hadVaultRecord {
                         imported += 1
                     }
-                    matched = true
+                } catch {
+                    vaultFailures += 1
                 }
+                scanFilesProcessed = index + 1
+                await Task.yield()
             }
 
+            let failureDetail = vaultFailures > 0
+                ? " \(vaultFailures) data-rich file(s) could not be copied and will be retried on the next scan."
+                : ""
             let message: String
             if let best, matched {
-                message = "Imported data-rich log \(best.filename) for the active Flight Record."
+                message = "Vaulted \(imported) new data-rich file(s); \(alreadyKnown) already stored; \(inventory.gpsOnly) GPS-only skipped.\(failureDetail) Matched \(best.filename) to the active Flight Record. Server sync starts automatically."
             } else if inventory.csvFiles == 0 {
                 message = "No CSV files found under the configured folder (\(root.lastPathComponent)). Select the SD card root or its data_log folder in Admin."
             } else if candidates.isEmpty {
                 message = "Found \(inventory.csvFiles) CSV file(s): \(inventory.gpsOnly) GPS-only, \(inventory.unreadable) unreadable. No data-rich engine/avionics logs."
-            } else if best == nil {
-                message = "Found data-rich logs but none matched this aircraft or flight window."
             } else if flightRecord == nil {
-                message = "Found \(candidates.count) data-rich log(s). Create or recover a Flight Record before import."
+                message = "Vaulted \(imported) new data-rich file(s); \(alreadyKnown) already stored; \(inventory.gpsOnly) GPS-only skipped.\(failureDetail) They will synchronize with the server as standalone files."
+            } else if best == nil {
+                message = "Vaulted \(imported) new data-rich file(s); \(alreadyKnown) already stored; \(inventory.gpsOnly) GPS-only skipped.\(failureDetail) None matched this aircraft or flight window, but server sync will still include them."
             } else {
-                message = "Scan complete. \(alreadyKnown) file(s) were already stored locally."
+                message = "Vaulted \(imported) new data-rich file(s); \(alreadyKnown) already stored; \(inventory.gpsOnly) GPS-only skipped.\(failureDetail) Server sync starts automatically."
             }
 
             let summary = GarminSDCardScanSummary(
@@ -389,7 +438,7 @@ final class GarminSDCardRecoveryService: ObservableObject {
                 csvFilesScanned: inventory.csvFiles,
                 dataRichFound: candidates.count,
                 gpsOnlySkipped: inventory.gpsOnly,
-                unreadableFiles: inventory.unreadable,
+                unreadableFiles: inventory.unreadable + vaultFailures,
                 alreadyKnown: alreadyKnown,
                 imported: imported,
                 matchedFlightRecord: matched,
@@ -470,7 +519,7 @@ final class GarminSDCardRecoveryService: ObservableObject {
         return scored.max(by: { $0.1 < $1.1 })?.0 ?? candidates.first
     }
 
-    private func scanInventory(root: URL) throws -> ScanInventory {
+    private func scanInventory(root: URL) async throws -> ScanInventory {
         var inventory = ScanInventory()
         let fileManager = FileManager.default
         let enumerator = fileManager.enumerator(
@@ -478,6 +527,7 @@ final class GarminSDCardRecoveryService: ObservableObject {
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         )
+        var csvURLs: [URL] = []
         while let item = enumerator?.nextObject() as? URL {
             let depth = item.pathComponents.count - root.pathComponents.count
             if depth > maxScanDepth {
@@ -485,10 +535,23 @@ final class GarminSDCardRecoveryService: ObservableObject {
                 continue
             }
             guard item.pathExtension.lowercased() == "csv" else { continue }
-            inventory.csvFiles += 1
+            csvURLs.append(item)
+            scanFilesTotal = csvURLs.count
+            if csvURLs.count.isMultiple(of: 20) {
+                await Task.yield()
+            }
+        }
+
+        inventory.csvFiles = csvURLs.count
+        scanPhase = "Classifying CSV files"
+        scanFilesProcessed = 0
+        scanFilesTotal = csvURLs.count
+        for (index, item) in csvURLs.enumerated() {
             do {
                 guard let candidate = try classifyCandidate(item, root: root) else {
                     inventory.unreadable += 1
+                    scanFilesProcessed = index + 1
+                    await Task.yield()
                     continue
                 }
                 if candidate.classification.isDataRich {
@@ -499,6 +562,10 @@ final class GarminSDCardRecoveryService: ObservableObject {
             } catch {
                 inventory.unreadable += 1
             }
+            scanFilesProcessed = index + 1
+            scanDataRichFound = inventory.dataRich.count
+            scanGpsOnlySkipped = inventory.gpsOnly
+            await Task.yield()
         }
         inventory.dataRich.sort {
             ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
@@ -541,6 +608,17 @@ final class GarminSDCardRecoveryService: ObservableObject {
 final class GarminCsvSyncManager: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError = ""
+    @Published private(set) var syncPhase = ""
+    @Published private(set) var syncFilesProcessed = 0
+    @Published private(set) var syncFilesTotal = 0
+    @Published private(set) var currentFileName = ""
+    @Published private(set) var currentFileProgress = 0.0
+
+    var syncProgress: Double? {
+        guard syncFilesTotal > 0 else { return nil }
+        let completed = Double(syncFilesProcessed) + currentFileProgress
+        return min(1, max(0, completed / Double(syncFilesTotal)))
+    }
 
     func syncPending(
         settings: SettingsStore,
@@ -549,13 +627,23 @@ final class GarminCsvSyncManager: ObservableObject {
         network: NetworkMonitor,
         uploadManager: UploadManager
     ) async {
+        guard !isSyncing else { return }
         guard !settings.isSimulationModeEnabled else { return }
         guard network.canUpload(allowCellular: settings.allowCellularUpload) else { return }
         guard settings.deviceCredential != nil else { return }
         guard let baseURL = settings.normalizedServerURL else { return }
 
         isSyncing = true
-        defer { isSyncing = false }
+        syncPhase = "Preparing synchronization"
+        syncFilesProcessed = 0
+        syncFilesTotal = 0
+        currentFileName = ""
+        currentFileProgress = 0
+        defer {
+            isSyncing = false
+            currentFileName = ""
+            currentFileProgress = 0
+        }
 
         vault.purgeExpired(
             retentionDays: settings.garminVaultRetentionDays,
@@ -565,6 +653,7 @@ final class GarminCsvSyncManager: ObservableObject {
         let pending = vault.pendingRecords()
         guard !pending.isEmpty else {
             lastError = ""
+            syncPhase = "All data-rich files are synchronized"
             return
         }
 
@@ -572,15 +661,19 @@ final class GarminCsvSyncManager: ObservableObject {
             let client = APIClient(serverURL: baseURL)
             let credential = settings.deviceCredential ?? ""
             let hashes = pending.map(\.sha256)
+            syncPhase = "Comparing \(pending.count) file(s) with the server"
+            syncFilesTotal = pending.count
             let known = try await client.knownGarminCsvHashes(
                 sha256List: hashes,
                 aircraftRegistration: settings.selectedAircraft?.registration ?? "",
                 credential: credential
             )
             let knownSet = Set(known.known.map { $0.sha256.lowercased() })
+            var serverKnownCount = 0
 
             for record in pending {
                 if knownSet.contains(record.sha256.lowercased()) {
+                    serverKnownCount += 1
                     let match = known.known.first { $0.sha256.caseInsensitiveCompare(record.sha256) == .orderedSame }
                     vault.markDuplicate(id: record.id, csvFileUuid: match?.csvFileUuid)
                     if let componentID = record.uploadComponentID {
@@ -607,19 +700,38 @@ final class GarminCsvSyncManager: ObservableObject {
                 }
             }
 
-            for record in vault.pendingRecords() where record.uploadComponentID == nil {
-                try await uploadStandaloneRecord(
-                    record: record,
-                    client: client,
-                    credential: credential,
-                    vault: vault,
-                    sessionUUID: workflow.state.activeFlightRecord?.recordingSessionID
-                )
+            let standaloneRecords = vault.pendingRecords().filter { $0.uploadComponentID == nil }
+            syncFilesProcessed = serverKnownCount
+            syncFilesTotal = serverKnownCount + standaloneRecords.count
+            var standaloneErrors: [String] = []
+            for (index, record) in standaloneRecords.enumerated() {
+                currentFileName = record.originalFilename
+                currentFileProgress = 0
+                syncPhase = "Uploading file \(index + 1) of \(standaloneRecords.count)"
+                do {
+                    try await uploadStandaloneRecord(
+                        record: record,
+                        client: client,
+                        credential: credential,
+                        vault: vault,
+                        sessionUUID: nil
+                    )
+                } catch {
+                    let message = error.localizedDescription
+                    vault.markFailed(id: record.id, message: message)
+                    standaloneErrors.append("\(record.originalFilename): \(message)")
+                }
+                currentFileProgress = 0
+                syncFilesProcessed = serverKnownCount + index + 1
             }
 
-            lastError = ""
+            lastError = standaloneErrors.joined(separator: "\n")
+            syncPhase = standaloneErrors.isEmpty
+                ? "Synchronization complete"
+                : "Synchronization completed with \(standaloneErrors.count) error(s)"
         } catch {
             lastError = error.localizedDescription
+            syncPhase = "Synchronization failed"
         }
     }
 
@@ -654,8 +766,10 @@ final class GarminCsvSyncManager: ObservableObject {
                 originalFilename: record.originalFilename,
                 chunkData: chunkData
             )
+            currentFileProgress = Double(chunkIndex + 1) / Double(totalChunks)
         }
 
+        syncPhase = "Finalizing \(record.originalFilename)"
         let finalize = try await client.finalizeCvrCsvUpload(credential: credential, uploadUUID: uploadUUID)
         guard finalize.ok else {
             vault.markFailed(id: record.id, message: finalize.error ?? "Server rejected Garmin CSV finalize.")

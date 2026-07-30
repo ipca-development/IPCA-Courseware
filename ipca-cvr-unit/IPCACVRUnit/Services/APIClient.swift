@@ -427,6 +427,8 @@ struct APIClient {
         appendField("upload_uuid", uploadUUID)
         if let sessionUUID, !sessionUUID.isEmpty {
             appendField("session_uuid", sessionUUID)
+        } else {
+            appendField("standalone_upload", "1")
         }
         appendField("chunk_index", String(chunkIndex))
         appendField("total_chunks", String(totalChunks))

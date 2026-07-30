@@ -39,6 +39,7 @@ try {
         'upload_uuid' => $_POST['upload_uuid'] ?? $_POST['upload_id'] ?? cvr_csv_header('X-IPCA-CVR-CSV-Upload-ID'),
         'request_uuid' => $_POST['request_uuid'] ?? cvr_csv_header('X-IPCA-Request-ID'),
         'session_uuid' => $_POST['session_uuid'] ?? cvr_csv_header('X-IPCA-Flight-Session-ID'),
+        'standalone_upload' => $_POST['standalone_upload'] ?? '',
         'chunk_index' => $_POST['chunk_index'] ?? cvr_csv_header('X-IPCA-Chunk-Index'),
         'total_chunks' => $_POST['total_chunks'] ?? cvr_csv_header('X-IPCA-Total-Chunks'),
         'total_size' => $_POST['total_size'] ?? cvr_csv_header('X-IPCA-Total-Size'),

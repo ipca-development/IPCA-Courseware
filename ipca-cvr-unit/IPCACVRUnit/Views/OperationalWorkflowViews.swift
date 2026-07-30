@@ -1202,12 +1202,12 @@ struct GarminWorkflowView: View {
                     CVROperationalHeaderView(aircraftRegistration: settings.selectedAircraft?.registration ?? workflow.state.activeDispatch?.tailNumber ?? "NO AIRCRAFT", unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                     CVROperationalStatusCard(title: "GARMIN RECOVERY", subtitle: "IMPORT AND UPLOAD QUEUE", iconName: "doc.badge.arrow.up", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "GARMIN", metrics: metrics)
                     HStack(spacing: metrics.spacing) {
-                        CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby, metrics: metrics)
+                        CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: uploadTileColor, metrics: metrics)
                         CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
                         CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
                         CVROperationalTile(title: "SD CARD", iconName: "sdcard.fill", value: sdCardTileValue, color: sdCardTileColor, metrics: metrics)
                     }
-                    if let summary = sdRecovery.lastSummary {
+                    if !sdRecovery.isScanning, !garminSync.isSyncing, let summary = sdRecovery.lastSummary {
                         CVROperationalWarningCard(
                             title: "SD CARD SCAN",
                             message: summary.message,
@@ -1215,7 +1215,13 @@ struct GarminWorkflowView: View {
                             color: summary.matchedFlightRecord ? CVROperationalPalette.success : CVROperationalPalette.secondaryBlue
                         )
                     }
-                    CVROperationalWarningCard(title: garminWarningTitle, message: garminWarningMessage, iconName: garminWarningIcon, color: garminWarningColor)
+                    CVROperationalWarningCard(
+                        title: garminWarningTitle,
+                        message: garminWarningMessage,
+                        iconName: garminWarningIcon,
+                        color: garminWarningColor,
+                        progress: activeRecoveryProgress
+                    )
                     workflowUploadRepairActions
                     CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
                         if settings.isSimulationModeEnabled {
@@ -1302,8 +1308,11 @@ struct GarminWorkflowView: View {
     }
 
     private var sdCardTileValue: String {
-        if sdRecovery.isScanning || garminSync.isSyncing {
-            return "Busy"
+        if sdRecovery.isScanning {
+            return progressPercent(sdRecovery.scanProgress) ?? "Scanning"
+        }
+        if garminSync.isSyncing {
+            return progressPercent(garminSync.syncProgress) ?? "Syncing"
         }
         if !sdRecovery.cardConfigured {
             return "Setup"
@@ -1348,7 +1357,15 @@ struct GarminWorkflowView: View {
         if let recording = recoveryRecording, recording.uploadStatus == .uploading {
             return "\(Int((recording.uploadProgress * 100).rounded()))%"
         }
-        guard !garminComponents.isEmpty else { return "Recovery" }
+        if garminSync.isSyncing {
+            return progressPercent(garminSync.syncProgress) ?? "Syncing"
+        }
+        if garminComponents.isEmpty {
+            if vaultFailedCount > 0 { return "Failed" }
+            if vaultPendingCount > 0 { return "Queued" }
+            if vaultSyncedCount > 0 { return "Synced" }
+            return "Recovery"
+        }
         if let uploading = workflowComponents.first(where: { $0.state == .uploading }) {
             return "\(Int(((uploading.progress ?? 0) * 100).rounded()))%"
         }
@@ -1359,6 +1376,50 @@ struct GarminWorkflowView: View {
             return "Uploaded"
         }
         return "Queued"
+    }
+
+    private var activeRecoveryProgress: Double? {
+        if sdRecovery.isScanning {
+            return sdRecovery.scanProgress
+        }
+        if garminSync.isSyncing {
+            return garminSync.syncProgress
+        }
+        return nil
+    }
+
+    private func progressPercent(_ progress: Double?) -> String? {
+        guard let progress else { return nil }
+        return "\(Int((progress * 100).rounded()))%"
+    }
+
+    private var uploadTileColor: Color {
+        if vaultFailedCount > 0 {
+            return CVROperationalPalette.critical
+        }
+        if garminSync.isSyncing || vaultPendingCount > 0 {
+            return CVROperationalPalette.secondaryBlue
+        }
+        if vaultSyncedCount > 0 || !garminComponents.isEmpty {
+            return CVROperationalPalette.success
+        }
+        return CVROperationalPalette.standby
+    }
+
+    private var vaultPendingCount: Int {
+        garminVault.records.filter {
+            $0.syncState == .pending || $0.syncState == .uploading
+        }.count
+    }
+
+    private var vaultFailedCount: Int {
+        garminVault.records.filter { $0.syncState == .failed }.count
+    }
+
+    private var vaultSyncedCount: Int {
+        garminVault.records.filter {
+            $0.syncState == .synced || $0.syncState == .duplicate
+        }.count
     }
 
     private var transcriptTileValue: String {
@@ -1454,9 +1515,21 @@ struct GarminWorkflowView: View {
         if !sdRecovery.cardConfigured {
             return "SD CARD SETUP REQUIRED"
         }
+        if sdRecovery.isScanning {
+            return "SCANNING SD CARD"
+        }
+        if garminSync.isSyncing {
+            return "SYNCHRONIZING CARD FILES"
+        }
         if garminComponents.isEmpty {
-            if sdRecovery.isScanning {
-                return "SCANNING SD CARD"
+            if vaultFailedCount > 0 {
+                return "CARD SYNC NEEDS RETRY"
+            }
+            if garminSync.isSyncing || vaultPendingCount > 0 {
+                return "CARD FILES QUEUED FOR SYNC"
+            }
+            if vaultSyncedCount > 0 {
+                return "CARD FILES SYNCHRONIZED"
             }
             return sdRecovery.cardAvailable ? "WAITING FOR MATCHING LOG" : "INSERT SD CARD READER"
         }
@@ -1480,9 +1553,33 @@ struct GarminWorkflowView: View {
         if !sdRecovery.cardConfigured {
             return "Configure the Garmin SD card folder once in Admin, then insert the USB-C reader. The app imports data-rich logs automatically."
         }
+        if sdRecovery.isScanning {
+            let total = sdRecovery.scanFilesTotal
+            let processed = min(sdRecovery.scanFilesProcessed, total)
+            let counts = total > 0
+                ? " \(processed)/\(total) · \(sdRecovery.scanDataRichFound) data-rich · \(sdRecovery.scanGpsOnlySkipped) GPS-only."
+                : ""
+            return "\(sdRecovery.scanPhase).\(counts)"
+        }
+        if garminSync.isSyncing {
+            let total = garminSync.syncFilesTotal
+            let processed = min(garminSync.syncFilesProcessed, total)
+            let file = garminSync.currentFileName.isEmpty ? "" : " \(garminSync.currentFileName)"
+            let counts = total > 0 ? " \(processed)/\(total) complete." : ""
+            return "\(garminSync.syncPhase).\(file)\(counts)"
+        }
         if garminComponents.isEmpty {
-            if sdRecovery.isScanning {
-                return "Scanning the SD card for data-rich Garmin CSV files..."
+            if vaultFailedCount > 0 {
+                let detail = garminSync.lastError.trimmingCharacters(in: .whitespacesAndNewlines)
+                return detail.isEmpty
+                    ? "\(vaultFailedCount) data-rich card file(s) failed to synchronize and will retry automatically."
+                    : "\(vaultFailedCount) data-rich card file(s) failed to synchronize: \(detail)"
+            }
+            if garminSync.isSyncing || vaultPendingCount > 0 {
+                return "\(vaultPendingCount) data-rich card file(s) are queued. GPS-only files are excluded. \(vaultSyncedCount) already synchronized or confirmed on the server."
+            }
+            if vaultSyncedCount > 0 {
+                return "\(vaultSyncedCount) data-rich card file(s) are synchronized or already existed on the server. GPS-only files were excluded."
             }
             if let summary = sdRecovery.lastSummary, !summary.cardAvailable {
                 return "Insert the USB-C SD card reader. GPS-only logs are skipped automatically."
@@ -1503,12 +1600,31 @@ struct GarminWorkflowView: View {
     }
 
     private var garminWarningIcon: String {
-        failedWorkflowComponent == nil ? (garminComponents.isEmpty ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill") : "exclamationmark.triangle.fill"
+        if sdRecovery.isScanning || garminSync.isSyncing {
+            return "arrow.triangle.2.circlepath"
+        }
+        if failedWorkflowComponent != nil || vaultFailedCount > 0 {
+            return "exclamationmark.triangle.fill"
+        }
+        if vaultPendingCount > 0 || garminSync.isSyncing {
+            return "arrow.triangle.2.circlepath"
+        }
+        return garminComponents.isEmpty && vaultSyncedCount == 0 ? "externaldrive.fill" : "checkmark.seal.fill"
     }
 
     private var garminWarningColor: Color {
-        if failedWorkflowComponent != nil { return CVROperationalPalette.critical }
-        return garminComponents.isEmpty ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.success
+        if sdRecovery.isScanning || garminSync.isSyncing {
+            return CVROperationalPalette.secondaryBlue
+        }
+        if failedWorkflowComponent != nil || vaultFailedCount > 0 {
+            return CVROperationalPalette.critical
+        }
+        if vaultPendingCount > 0 || garminSync.isSyncing {
+            return CVROperationalPalette.secondaryBlue
+        }
+        return garminComponents.isEmpty && vaultSyncedCount == 0
+            ? CVROperationalPalette.secondaryBlue
+            : CVROperationalPalette.success
     }
 
     private var avionicsPowerLabel: String {

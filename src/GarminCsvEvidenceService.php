@@ -35,7 +35,14 @@ final class GarminCsvEvidenceService
             throw new RuntimeException('CSV chunk file is missing.');
         }
 
-        $session = (new FlightSessionService($this->pdo))->sessionForDevice($device, (string)($meta['session_uuid'] ?? ''));
+        $standaloneUpload = in_array(
+            strtolower(trim((string)($meta['standalone_upload'] ?? ''))),
+            array('1', 'true', 'yes'),
+            true
+        );
+        $session = $standaloneUpload
+            ? array()
+            : (new FlightSessionService($this->pdo))->sessionForDevice($device, (string)($meta['session_uuid'] ?? ''));
         $request = $this->ensureUploadRequest($device, $session, $uploadUuid, (string)($meta['request_uuid'] ?? $uploadUuid), $totalChunks, $totalSize, (string)($meta['original_filename'] ?? ''));
         $dir = $this->uploadSessionDir($uploadUuid);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
