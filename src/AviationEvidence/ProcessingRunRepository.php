@@ -91,6 +91,31 @@ final class ProcessingRunRepository
         $stmt->execute(array($status, $runId));
     }
 
+    /**
+     * Latest completed run for a recording that has a readable_primary interpretation.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findLatestPublishableForRecording(int $recordingId): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT pr.* FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' pr'
+            . ' WHERE pr.recording_id = ? AND pr.status = ?'
+            . ' AND EXISTS ('
+            . '   SELECT 1 FROM ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' s'
+            . '   INNER JOIN ' . EvidenceSchema::TABLE_INTERPRETATION_REVISIONS . ' i ON i.speech_segment_id = s.id'
+            . '   WHERE s.processing_run_id = pr.id AND i.layer = ?'
+            . ' )'
+            . ' ORDER BY pr.completed_at DESC, pr.id DESC LIMIT 1'
+        );
+        $stmt->execute(array($recordingId, 'completed', EvidenceSchema::LAYER_READABLE));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
     private function uuid(): string
     {
         $data = random_bytes(16);

@@ -450,6 +450,33 @@ final class CockpitRecorderService
         if (!$recording) {
             return array('ok' => false, 'error' => 'Recording not found.');
         }
+
+        try {
+            require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+            require_once __DIR__ . '/AviationEvidence/PublishedTranscriptService.php';
+            if (EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PUBLISHED_VERSIONS)) {
+                $published = PublishedTranscriptService::fromPdo($this->pdo)->resolvePublishedForRecording($recording);
+                if (is_array($published) && trim((string)($published['transcript'] ?? '')) !== '') {
+                    return array(
+                        'ok' => true,
+                        'recording_id' => (string)$recording['recording_uid'],
+                        'transcription_status' => (string)$recording['transcription_status'],
+                        'language' => (string)$recording['language'],
+                        'transcript' => (string)$published['transcript'],
+                        'transcript_source' => (string)($published['transcript_source'] ?? 'published_evidence'),
+                        'published_transcript_version_id' => (int)($published['published_transcript_version_id'] ?? 0),
+                        'published_version_uuid' => (string)($published['published_version_uuid'] ?? ''),
+                        'published_at' => (string)($published['published_at'] ?? ''),
+                        'processing_run_id' => (int)($published['processing_run_id'] ?? 0),
+                        'transcript_cleaned' => false,
+                        'error' => (string)($recording['error_message'] ?? ''),
+                    );
+                }
+            }
+        } catch (Throwable) {
+            // Fall through to legacy cache when publish layer is unavailable.
+        }
+
         $rawTranscript = (string)($recording['transcript_text'] ?? '');
         $cleanTranscript = self::cleanTranscriptText($rawTranscript);
 
@@ -459,6 +486,7 @@ final class CockpitRecorderService
             'transcription_status' => (string)$recording['transcription_status'],
             'language' => (string)$recording['language'],
             'transcript' => $cleanTranscript,
+            'transcript_source' => 'legacy_cache',
             'transcript_cleaned' => $cleanTranscript !== $rawTranscript,
             'error' => (string)($recording['error_message'] ?? ''),
         );

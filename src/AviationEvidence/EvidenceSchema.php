@@ -22,6 +22,7 @@ final class EvidenceSchema
 
     public const PASS4A_VERSION = '2026.07.30.1';
     public const PASS4B_VERSION = '2026.07.30.1';
+    public const PUBLISH_SNAPSHOT_VERSION = '2026.07.30.1';
 
     public const LAYER_PASS4A = 'pass_4a_speech_quality';
     public const LAYER_PASS4B = 'pass_4b_repetition';
@@ -131,6 +132,11 @@ final class EvidenceSchema
             }
         }
         return self::persistenceReady($pdo);
+    }
+
+    public static function publishReady(PDO $pdo): bool
+    {
+        return self::pass4Ready($pdo) && self::tablePresent($pdo, self::TABLE_PUBLISHED_VERSIONS);
     }
 
     public static function runPass4AfterPersist(): bool

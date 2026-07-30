@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/AviationEvidence/Phase0InvestigationServic
 require_once __DIR__ . '/../../../src/AviationEvidence/Phase0ProbeAuth.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/Phase0EvidenceReplayService.php';
 require_once __DIR__ . '/../../../src/AviationEvidence/EvidencePass4Runner.php';
+require_once __DIR__ . '/../../../src/AviationEvidence/PublishedTranscriptService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -72,6 +73,25 @@ try {
             'sha256' => hash('sha256', (string)file_get_contents($path)),
             'json' => $json,
         ));
+    }
+
+    if ($action === 'publish_transcript') {
+        if ($recordingId <= 0) {
+            $recordingId = 552;
+        }
+        if (!$isAdmin && !Phase0ProbeAuth::isAuthorized($recordingId, $probeChunk)) {
+            phase0_api_json(403, array('ok' => false, 'error' => 'Admin or probe token required.'));
+        }
+        $runId = (int)($_GET['processing_run_id'] ?? 0);
+        try {
+            $publisher = PublishedTranscriptService::fromPdo($pdo);
+            $result = $runId > 0
+                ? $publisher->publishProcessingRun($recordingId, $runId, is_array($currentUser) ? (int)($currentUser['id'] ?? 0) : null)
+                : $publisher->publishLatestForRecording($recordingId, is_array($currentUser) ? (int)($currentUser['id'] ?? 0) : null);
+            phase0_api_json(!empty($result['ok']) ? 200 : 500, $result);
+        } catch (Throwable $e) {
+            phase0_api_json(500, array('ok' => false, 'error' => $e->getMessage()));
+        }
     }
 
     if ($action === 'run_pass4') {

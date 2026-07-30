@@ -83,6 +83,42 @@ final class InterpretationRevisionRepository
     /**
      * @return array<string,mixed>|null
      */
+    public function findLatestReadableForProcessingRun(int $processingRunId): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_INTERPRETATION_REVISIONS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT i.* FROM ' . EvidenceSchema::TABLE_INTERPRETATION_REVISIONS . ' i'
+            . ' INNER JOIN ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' s ON s.id = i.speech_segment_id'
+            . ' WHERE s.processing_run_id = ? AND i.layer = ?'
+            . ' ORDER BY i.revision_number DESC, i.id DESC LIMIT 1'
+        );
+        $stmt->execute(array($processingRunId, EvidenceSchema::LAYER_READABLE));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function listRevisionIdsForProcessingRun(int $processingRunId): array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_INTERPRETATION_REVISIONS)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT i.id FROM ' . EvidenceSchema::TABLE_INTERPRETATION_REVISIONS . ' i'
+            . ' INNER JOIN ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS . ' s ON s.id = i.speech_segment_id'
+            . ' WHERE s.processing_run_id = ? ORDER BY i.id ASC'
+        );
+        $stmt->execute(array($processingRunId));
+        return array_map(static fn(array $row): int => (int)$row['id'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array());
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
     public function findById(int $id): ?array
     {
         if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_INTERPRETATION_REVISIONS)) {
