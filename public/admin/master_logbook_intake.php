@@ -690,7 +690,15 @@ cw_header('Master Logbook');
 .trv-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0 0 8px;font-size:11px}
 .trv-kv dt{color:#64748b;font-weight:700}
 .trv-kv dd{margin:0;color:#0f172a;font-weight:800}
-.trv-findings{margin:0;padding-left:16px;font-size:11px;color:#475569}
+.trv-findings{margin:0;padding-left:0;list-style:none;font-size:11px;color:#475569;display:grid;gap:6px}
+.trv-findings-group{margin-top:10px}
+.trv-findings-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:6px}
+.trv-finding-btn{width:100%;border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:6px 8px;text-align:left;cursor:pointer;display:grid;gap:2px}
+.trv-finding-btn:hover{border-color:#93c5fd;background:#eff6ff}
+.trv-finding-time{font-size:10px;font-weight:800;color:#64748b;font-variant-numeric:tabular-nums}
+.trv-finding-label{font-size:11px;font-weight:700;color:#0f172a;line-height:1.35}
+.trv-finding-confidence{font-size:10px;color:#64748b}
+.trv-finding-preview{font-size:10px;color:#475569;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trv-correction-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .trv-correction{border:1px solid #e2e8f0;border-radius:10px;background:#fff;padding:8px;font-size:11px}
 .trv-correction-raw{color:#991b1b}

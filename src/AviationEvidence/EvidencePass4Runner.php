@@ -9,6 +9,7 @@ require_once __DIR__ . '/SuppressionRepository.php';
 require_once __DIR__ . '/ProcessingRunRepository.php';
 require_once __DIR__ . '/Pass4aSpeechQualityService.php';
 require_once __DIR__ . '/Pass4bRepetitionDetectorService.php';
+require_once __DIR__ . '/GibberishSegmentDetectorService.php';
 
 final class EvidencePass4Runner
 {
@@ -117,11 +118,14 @@ final class EvidencePass4Runner
             );
             $interpretationIds[] = (int)($rev['id'] ?? 0);
 
-            if (($finding['confidence'] ?? 0) >= 0.65) {
+            $signals = is_array($finding['signals'] ?? null) ? $finding['signals'] : array();
+            $isGibberish = array_intersect($signals, GibberishSegmentDetectorService::SIGNALS) !== array();
+            $threshold = $isGibberish ? 0.55 : 0.65;
+            if (($finding['confidence'] ?? 0) >= $threshold) {
                 $sup = $this->suppressions->create(
                     $processingRunId,
-                    'low_speech_quality',
-                    'Pass 4A: ' . implode(', ', $finding['signals'] ?? array()),
+                    $isGibberish ? 'gibberish_hallucination' : 'low_speech_quality',
+                    'Pass 4A: ' . implode(', ', $signals),
                     $speechSegmentId,
                     (int)($rev['id'] ?? null),
                     (string)($finding['text_preview'] ?? null)

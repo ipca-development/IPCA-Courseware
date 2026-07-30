@@ -477,6 +477,7 @@ final class Pass4bRepetitionDetectorService
      */
     private static function buildReadableText(array $speechSegments, array $suppressIds): string
     {
+        $gibberish = new GibberishSegmentDetectorService();
         $parts = array();
         foreach ($speechSegments as $segment) {
             $id = (int)($segment['id'] ?? 0);
@@ -484,9 +485,10 @@ final class Pass4bRepetitionDetectorService
                 continue;
             }
             $text = trim((string)($segment['provider_segment_text'] ?? ''));
-            if ($text !== '') {
-                $parts[] = $text;
+            if ($text === '' || $gibberish->isGibberish($text)) {
+                continue;
             }
+            $parts[] = $text;
         }
         return trim(implode(' ', $parts));
     }

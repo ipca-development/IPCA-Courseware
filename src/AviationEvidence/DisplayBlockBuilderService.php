@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/GibberishSegmentDetectorService.php';
+
 /**
  * Groups speech segments into UI display blocks (timestamped transcript paragraphs).
  */
@@ -9,6 +11,11 @@ final class DisplayBlockBuilderService
     private const GAP_MS = 2500;
     private const MAX_BLOCK_MS = 90000;
     private const MAX_BLOCK_CHARS = 1200;
+
+    public function __construct(
+        private readonly GibberishSegmentDetectorService $gibberish = new GibberishSegmentDetectorService(),
+    ) {
+    }
 
     /**
      * @param list<array<string,mixed>> $speechSegments ordered by start_time_ms
@@ -23,13 +30,17 @@ final class DisplayBlockBuilderService
         foreach ($speechSegments as $segment) {
             $segmentId = (int)($segment['id'] ?? 0);
             $text = trim((string)($segment['provider_segment_text'] ?? ''));
-            if ($segmentId <= 0 || $text === '') {
+            if ($segmentId <= 0 || $text === '' || $this->gibberish->isGibberish($text)) {
+                continue;
+            }
+
+            if (in_array($segmentId, $suppressedSegmentIds, true)) {
                 continue;
             }
 
             $startMs = (int)($segment['start_time_ms'] ?? 0);
             $endMs = (int)($segment['end_time_ms'] ?? $startMs);
-            $suppressed = in_array($segmentId, $suppressedSegmentIds, true);
+            $suppressed = false;
 
             if ($current === null) {
                 $current = $this->startBlock($segmentId, $startMs, $endMs, $text, $suppressed);

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/EvidenceSchema.php';
+require_once __DIR__ . '/GibberishSegmentDetectorService.php';
 
 /**
  * Pass 4A — acoustic / speech-quality interpretation from whisper segment observations.
@@ -9,6 +10,10 @@ require_once __DIR__ . '/EvidenceSchema.php';
  */
 final class Pass4aSpeechQualityService
 {
+    public function __construct(
+        private readonly GibberishSegmentDetectorService $gibberish = new GibberishSegmentDetectorService(),
+    ) {
+    }
     private const NO_SPEECH_WARN = 0.5;
     private const NO_SPEECH_STRONG = 0.7;
     private const LOGPROB_WARN = -0.8;
@@ -27,6 +32,7 @@ final class Pass4aSpeechQualityService
         $lowLogprob = 0;
         $highCompression = 0;
         $silenceWithText = 0;
+        $gibberishSegments = 0;
 
         foreach ($speechSegments as $idx => $segment) {
             $segmentId = (int)($segment['id'] ?? 0);
@@ -71,6 +77,15 @@ final class Pass4aSpeechQualityService
                 $silenceWithText++;
             }
 
+            $gibberish = $this->gibberish->analyze($text);
+            if ($gibberish !== null) {
+                foreach ($gibberish['signals'] as $signal) {
+                    $signals[] = $signal;
+                }
+                $score = max($score, (float)($gibberish['confidence'] ?? 0));
+                $gibberishSegments++;
+            }
+
             if ($signals === array()) {
                 continue;
             }
@@ -101,6 +116,7 @@ final class Pass4aSpeechQualityService
                 'low_logprob_segments' => $lowLogprob,
                 'high_compression_segments' => $highCompression,
                 'text_during_elevated_no_speech' => $silenceWithText,
+                'gibberish_segment_count' => $gibberishSegments,
                 'flagged_ratio' => round(count($findings) / $total, 4),
             ),
         );

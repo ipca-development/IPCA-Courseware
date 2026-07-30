@@ -16,6 +16,8 @@ require_once __DIR__ . '/DisplayBlockBuilderService.php';
 require_once __DIR__ . '/ChapterBuilderService.php';
 require_once __DIR__ . '/TerminologyCorrectionRepository.php';
 require_once __DIR__ . '/EvidencePass5Runner.php';
+require_once __DIR__ . '/GibberishSegmentDetectorService.php';
+require_once __DIR__ . '/GibberishSegmentDetectorService.php';
 require_once __DIR__ . '/../CockpitRecorderEvidenceQueueService.php';
 require_once __DIR__ . '/../CockpitRecorderService.php';
 
@@ -35,6 +37,7 @@ final class TranscriptReviewService
         private readonly Pass4aSpeechQualityService $pass4a,
         private readonly DisplayBlockBuilderService $blockBuilder,
         private readonly ChapterBuilderService $chapterBuilder,
+        private readonly GibberishSegmentDetectorService $gibberish = new GibberishSegmentDetectorService(),
     ) {
     }
 
@@ -57,6 +60,7 @@ final class TranscriptReviewService
         }
 
         if ($processingRunId > 0) {
+            $this->ensureGibberishSuppressions($recordingId, $processingRunId);
             $this->ensureDisplayMaterialized($recordingId, $processingRunId);
         }
 
@@ -269,18 +273,18 @@ final class TranscriptReviewService
         ?array $snapshot,
         array $suppressedSegmentIds
     ): array {
-        if (is_array($snapshot) && is_array($snapshot['display_blocks'] ?? null) && $snapshot['display_blocks'] !== array()) {
-            $fromSnapshot = $this->normalizeBlocksForView($snapshot['display_blocks']);
-            if ($fromSnapshot !== array()) {
-                return $fromSnapshot;
-            }
-        }
-
         $rows = $this->displayBlocks->listForProcessingRun($processingRunId);
         if ($rows !== array()) {
             $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds);
             if ($formatted !== array()) {
                 return $formatted;
+            }
+        }
+
+        if (is_array($snapshot) && is_array($snapshot['display_blocks'] ?? null) && $snapshot['display_blocks'] !== array()) {
+            $fromSnapshot = $this->normalizeBlocksForView($snapshot['display_blocks']);
+            if ($fromSnapshot !== array()) {
+                return $fromSnapshot;
             }
         }
 
@@ -383,16 +387,20 @@ final class TranscriptReviewService
                 $segment = $segmentsById[$segmentId] ?? null;
                 if (is_array($segment)) {
                     $text = trim((string)($segment['provider_segment_text'] ?? ''));
-                    if ($text !== '') {
+                    if ($text !== '' && !$this->gibberish->isGibberish($text)) {
                         $textParts[] = $text;
                     }
                 }
+            }
+            $joined = trim(implode(' ', $textParts));
+            if ($joined === '' || $this->gibberish->isGibberish($joined)) {
+                continue;
             }
             $out[] = array(
                 'id' => (int)($row['id'] ?? 0),
                 'start_time_ms' => (int)($row['start_time_ms'] ?? 0),
                 'end_time_ms' => (int)($row['end_time_ms'] ?? 0),
-                'text' => trim(implode(' ', $textParts)),
+                'text' => $joined,
                 'speech_segment_ids' => $segmentIds,
                 'suppressed' => $suppressed,
             );
@@ -424,6 +432,54 @@ final class TranscriptReviewService
             );
         }
         return $this->blockBuilder->build($segments, $suppressedSegmentIds);
+    }
+
+    private function ensureGibberishSuppressions(int $recordingId, int $processingRunId): void
+    {
+        if ($recordingId <= 0 || $processingRunId <= 0 || !EvidenceSchema::pass4Ready($this->pdo)) {
+            return;
+        }
+
+        $suppressedIds = array_flip($this->suppressedSegmentIds($processingRunId));
+        $speechSegments = $this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId));
+        if ($speechSegments === array()) {
+            return;
+        }
+
+        $created = false;
+        foreach ($speechSegments as $segment) {
+            $segmentId = (int)($segment['id'] ?? 0);
+            if ($segmentId <= 0 || isset($suppressedIds[$segmentId])) {
+                continue;
+            }
+            $text = trim((string)($segment['provider_segment_text'] ?? ''));
+            $gibberish = $this->gibberish->analyze($text);
+            if ($gibberish === null || !$this->gibberish->shouldSuppressConfidence(
+                (float)($gibberish['confidence'] ?? 0),
+                $gibberish['signals']
+            )) {
+                continue;
+            }
+            $this->suppressions->create(
+                $processingRunId,
+                'gibberish_hallucination',
+                'Pass 4A backfill: ' . implode(', ', $gibberish['signals']),
+                $segmentId,
+                null,
+                (string)($gibberish['text_preview'] ?? $text)
+            );
+            $suppressedIds[$segmentId] = true;
+            $created = true;
+        }
+
+        if ($created && EvidenceSchema::pass5Ready($this->pdo)) {
+            try {
+                EvidencePass5Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId, true);
+            } catch (Throwable $e) {
+                error_log('[TranscriptReview] Gibberish backfill Pass 5 recording ' . $recordingId . ': ' . $e->getMessage());
+            }
+            return;
+        }
     }
 
     private function ensureDisplayMaterialized(int $recordingId, int $processingRunId): void
@@ -479,7 +535,7 @@ final class TranscriptReviewService
                 continue;
             }
             $text = trim((string)($block['text'] ?? ''));
-            if ($text === '') {
+            if ($text === '' || $this->gibberish->isGibberish($text)) {
                 continue;
             }
             $id = (int)($block['id'] ?? 0);
@@ -525,6 +581,13 @@ final class TranscriptReviewService
         }
 
         $suppressionRows = $this->suppressions->listForProcessingRun($processingRunId);
+        $segmentStartMsById = array();
+        foreach ($speechSegments as $segment) {
+            $segmentId = (int)($segment['id'] ?? 0);
+            if ($segmentId > 0) {
+                $segmentStartMsById[$segmentId] = (int)($segment['start_time_ms'] ?? 0);
+            }
+        }
 
         return array(
             'speech_segment_count' => count($speechSegments),
@@ -533,8 +596,123 @@ final class TranscriptReviewService
             'pass_4a' => $pass4a['chunk_summary'] ?? array(),
             'pass_4a_flagged_count' => count($pass4a['findings'] ?? array()),
             'pass_4b_finding_count' => count($pass4bFindings),
-            'pass_4a_findings_preview' => array_slice($pass4a['findings'] ?? array(), 0, 8),
+            'pass_4a_findings_preview' => $this->formatPass4aFindingsPreview(
+                array_slice($pass4a['findings'] ?? array(), 0, 8)
+            ),
+            'pass_4b_findings_preview' => $this->formatPass4bFindingsPreview(
+                array_slice($pass4bFindings, 0, 8),
+                $segmentStartMsById
+            ),
         );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $findings
+     * @return list<array<string,mixed>>
+     */
+    private function formatPass4aFindingsPreview(array $findings): array
+    {
+        $out = array();
+        foreach ($findings as $finding) {
+            $signals = is_array($finding['signals'] ?? null) ? $finding['signals'] : array();
+            $label = $signals !== array()
+                ? implode(', ', array_map(array($this, 'humanizeSignal'), $signals))
+                : 'Speech quality flag';
+            $out[] = array(
+                'kind' => 'pass_4a',
+                'label' => $label,
+                'text_preview' => (string)($finding['text_preview'] ?? ''),
+                'start_time_ms' => (int)($finding['start_time_ms'] ?? 0),
+                'confidence' => isset($finding['confidence']) ? (float)$finding['confidence'] : null,
+                'speech_segment_id' => (int)($finding['speech_segment_id'] ?? 0),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $findings
+     * @param array<int,int> $segmentStartMsById
+     * @return list<array<string,mixed>>
+     */
+    private function formatPass4bFindingsPreview(array $findings, array $segmentStartMsById): array
+    {
+        $out = array();
+        foreach ($findings as $finding) {
+            $segmentIds = is_array($finding['speech_segment_ids'] ?? null) ? $finding['speech_segment_ids'] : array();
+            $firstSegmentId = 0;
+            foreach ($segmentIds as $segmentId) {
+                $segmentId = (int)$segmentId;
+                if ($segmentId > 0) {
+                    $firstSegmentId = $segmentId;
+                    break;
+                }
+            }
+            $out[] = array(
+                'kind' => 'pass_4b',
+                'label' => $this->formatPass4bFindingLabel($finding),
+                'detection_type' => (string)($finding['detection_type'] ?? ''),
+                'text_preview' => $this->pass4bFindingPreviewText($finding),
+                'start_time_ms' => $firstSegmentId > 0 ? (int)($segmentStartMsById[$firstSegmentId] ?? 0) : 0,
+                'confidence' => isset($finding['confidence']) ? (float)$finding['confidence'] : null,
+                'speech_segment_id' => $firstSegmentId > 0 ? $firstSegmentId : null,
+                'occurrence_count' => isset($finding['occurrence_count']) ? (int)$finding['occurrence_count'] : null,
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $finding
+     */
+    private function formatPass4bFindingLabel(array $finding): string
+    {
+        $type = (string)($finding['detection_type'] ?? 'finding');
+        $count = (int)($finding['occurrence_count'] ?? $finding['cycle_count'] ?? $finding['repeat_count'] ?? 0);
+        $countSuffix = $count > 0 ? (' x' . $count) : '';
+
+        return match ($type) {
+            'exact_repeated_phrase' => 'Repeated phrase' . $countSuffix . ': ' . substr((string)($finding['phrase'] ?? ''), 0, 80),
+            'repeated_ngram' => 'Repeated n-gram' . $countSuffix . ': ' . substr((string)($finding['ngram'] ?? ''), 0, 80),
+            'aa_loop' => 'A-A loop' . $countSuffix . ': ' . substr((string)($finding['phrase'] ?? ''), 0, 80),
+            'ab_loop' => 'A-B loop' . $countSuffix . ': '
+                . substr((string)($finding['phrase_a'] ?? ''), 0, 40)
+                . ' / '
+                . substr((string)($finding['phrase_b'] ?? ''), 0, 40),
+            'phrase_cycle_loop' => 'Phrase cycle loop' . $countSuffix,
+            'low_lexical_diversity' => 'Low lexical diversity',
+            'abnormal_compression' => 'Abnormal text compression',
+            'repeated_token_dominance' => 'Dominant repeated token: ' . (string)($finding['token'] ?? ''),
+            'repetition_concentrated_near_chunk_end' => 'Repetition concentrated near chunk end',
+            'secondary_hypothesis_repetition' => 'Secondary transcript repetition',
+            default => str_replace('_', ' ', $type),
+        };
+    }
+
+    /**
+     * @param array<string,mixed> $finding
+     */
+    private function pass4bFindingPreviewText(array $finding): string
+    {
+        $type = (string)($finding['detection_type'] ?? '');
+        if ($type === 'exact_repeated_phrase' || $type === 'aa_loop') {
+            return substr((string)($finding['phrase'] ?? ''), 0, 120);
+        }
+        if ($type === 'repeated_ngram') {
+            return substr((string)($finding['ngram'] ?? ''), 0, 120);
+        }
+        if ($type === 'secondary_hypothesis_repetition') {
+            return substr((string)($finding['details']['secondary_text_preview'] ?? ''), 0, 120);
+        }
+        if ($type === 'repeated_token_dominance') {
+            return (string)($finding['token'] ?? '');
+        }
+        return '';
+    }
+
+    private function humanizeSignal(string $signal): string
+    {
+        return str_replace('_', ' ', $signal);
     }
 
     public static function fromPdo(PDO $pdo): self

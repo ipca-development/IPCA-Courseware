@@ -341,6 +341,7 @@
       if (sidebar) {
         sidebar.innerHTML = this.renderQualityPanel(payload.quality)
           + this.renderTerminologyPanel(payload);
+        this.bindQualityFindingActions(sidebar);
         this.bindTerminologyActions(sidebar, payload);
       }
     },
@@ -363,10 +364,29 @@
       }
 
       const pass4a = quality.pass_4a || {};
-      const preview = (quality.pass_4a_findings_preview || []).slice(0, 5).map((item) => {
-        const label = item.reason || item.type || item.category || 'finding';
-        return '<li>' + escapeHtml(label) + '</li>';
-      }).join('');
+      const pass4aPreview = Array.isArray(quality.pass_4a_findings_preview) ? quality.pass_4a_findings_preview : [];
+      const pass4bPreview = Array.isArray(quality.pass_4b_findings_preview) ? quality.pass_4b_findings_preview : [];
+
+      const renderFindingList = (title, items, emptyText) => {
+        if (items.length === 0) {
+          return '<div class="trv-findings-group"><div class="trv-findings-title">' + escapeHtml(title) + '</div><p class="trv-muted">' + escapeHtml(emptyText) + '</p></div>';
+        }
+        return '<div class="trv-findings-group"><div class="trv-findings-title">' + escapeHtml(title) + '</div><ul class="trv-findings">'
+          + items.map((item) => {
+            const label = item.label || item.detection_type || item.reason || 'Finding';
+            const preview = String(item.text_preview || '').trim();
+            const startMs = Number(item.start_time_ms || 0);
+            const confidence = item.confidence != null ? Number(item.confidence) : null;
+            const timeLabel = startMs > 0 ? formatMs(startMs) : '';
+            return '<li><button type="button" class="trv-finding-btn" data-trv-finding-start="' + startMs + '" title="Jump to timestamp">'
+              + (timeLabel ? '<span class="trv-finding-time">' + escapeHtml(timeLabel) + '</span>' : '')
+              + '<span class="trv-finding-label">' + escapeHtml(label) + '</span>'
+              + (confidence != null ? '<span class="trv-finding-confidence">' + escapeHtml(Math.round(confidence * 100) + '%') + '</span>' : '')
+              + (preview ? '<span class="trv-finding-preview">' + escapeHtml(preview) + '</span>' : '')
+              + '</button></li>';
+          }).join('')
+          + '</ul></div>';
+      };
 
       return ''
         + '<section class="trv-side-panel">'
@@ -376,10 +396,25 @@
         + '<dt>Suppressed</dt><dd>' + Number(quality.suppressed_segment_count || 0) + '</dd>'
         + '<dt>Pass 4A flags</dt><dd>' + Number(quality.pass_4a_flagged_count || 0) + '</dd>'
         + '<dt>Pass 4B findings</dt><dd>' + Number(quality.pass_4b_finding_count || 0) + '</dd>'
+        + (pass4a.gibberish_segment_count != null ? '<dt>Gibberish flagged</dt><dd>' + Number(pass4a.gibberish_segment_count) + '</dd>' : '')
         + '</dl>'
-        + (pass4a.avg_confidence != null ? '<p class="trv-muted">Avg confidence: ' + escapeHtml(String(pass4a.avg_confidence)) + '</p>' : '')
-        + (preview ? '<ul class="trv-findings">' + preview + '</ul>' : '')
+        + (pass4a.flagged_ratio != null ? '<p class="trv-muted">Flagged ratio: ' + escapeHtml(String(Math.round(Number(pass4a.flagged_ratio) * 100)) + '%') + '</p>' : '')
+        + renderFindingList('Pass 4A — speech quality', pass4aPreview, 'No segment-level quality flags in preview.')
+        + renderFindingList('Pass 4B — repetition / loops', pass4bPreview, 'No repetition findings in preview.')
         + '</section>';
+    },
+
+    bindQualityFindingActions(sidebar) {
+      if (!sidebar) return;
+      sidebar.querySelectorAll('[data-trv-finding-start]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const startMs = Number(button.getAttribute('data-trv-finding-start') || 0);
+          if (startMs > 0) {
+            this.seekToMs(startMs);
+            this.highlightBlockNear(startMs);
+          }
+        });
+      });
     },
 
     renderTerminologyPanel(payload) {
