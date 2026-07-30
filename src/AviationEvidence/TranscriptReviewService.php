@@ -144,6 +144,12 @@ final class TranscriptReviewService
             'needs_evidence_processing' => !empty($public['needs_evidence_processing']),
             'evidence_step' => $public['evidence_step'] ?? null,
             'evidence_step_label' => $public['evidence_step_label'] ?? null,
+            'evidence_progress' => $public['evidence_progress'] ?? null,
+            'evidence_elapsed_seconds' => $public['evidence_elapsed_seconds'] ?? null,
+            'evidence_estimated_remaining_seconds' => $public['evidence_estimated_remaining_seconds'] ?? null,
+            'evidence_worker_failed' => !empty($public['evidence_worker_failed']),
+            'evidence_worker_failure_reason' => $public['evidence_worker_failure_reason'] ?? null,
+            'can_retry_evidence' => !empty($public['can_retry_evidence']),
             'running_processing_run_id' => $public['running_processing_run_id'] ?? null,
             'latest_publishable_processing_run_id' => $public['latest_publishable_processing_run_id'] ?? null,
             'active_processing_run_id' => (int)($recording['current_processing_run_id'] ?? 0) > 0

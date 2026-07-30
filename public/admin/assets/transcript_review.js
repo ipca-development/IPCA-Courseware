@@ -242,16 +242,68 @@
 
     renderEvidenceProcessing(payload) {
       const pipeline = payload.pipeline || {};
+      const { legacyBody } = this.elements;
       const runId = pipeline.running_processing_run_id || pipeline.active_processing_run_id || '';
       const stepLabel = String(pipeline.evidence_step_label || '').trim();
-      const parts = [stepLabel !== '' ? stepLabel : 'Evidence processing in progress…'];
-      if (runId) parts.push('Run #' + String(runId));
-      const detail = pipeline.evidence_step === 'pass_4'
-        ? 'Building readable transcript, suppressing junk segments, and queuing debrief.'
-        : pipeline.evidence_step === 'pass_5'
-          ? 'Building timestamped blocks and flight outline chapters.'
-          : 'Timestamped transcript, readable layer, and debrief follow transcription.';
-      this.renderLegacy(parts.join(' · ') + '. ' + detail);
+      const progress = Number(pipeline.evidence_progress ?? payload.evidence_progress ?? 0);
+      const remainingSeconds = Number(pipeline.evidence_estimated_remaining_seconds ?? payload.evidence_estimated_remaining_seconds ?? 0);
+      const workerFailed = !!pipeline.evidence_worker_failed;
+      const failureReason = String(pipeline.evidence_worker_failure_reason || '').trim();
+
+      if (workerFailed && failureReason !== '' && legacyBody) {
+        const { workspace, toolbar } = this.elements;
+        if (workspace) workspace.hidden = true;
+        if (toolbar) toolbar.innerHTML = '';
+        legacyBody.hidden = false;
+        legacyBody.innerHTML = ''
+          + '<div class="trv-evidence-warning">'
+          + '<strong>Evidence worker failed to start</strong>'
+          + '<p>' + escapeHtml(failureReason) + '</p>'
+          + (pipeline.can_retry_evidence
+            ? '<button type="button" class="trv-btn-primary" data-trv-evidence-retry>Restart Evidence</button>'
+            : '')
+          + '</div>';
+        const retryBtn = legacyBody.querySelector('[data-trv-evidence-retry]');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => this.retryEvidenceProcessing());
+        }
+        return;
+      }
+
+      const parts = [];
+      if (stepLabel !== '') {
+        parts.push(stepLabel);
+      } else {
+        parts.push('Evidence processing in progress…');
+      }
+      if (progress > 0) {
+        parts.push(String(progress) + '%');
+      }
+      if (remainingSeconds > 0) {
+        parts.push('~' + formatMs(remainingSeconds * 1000).replace(/^0:/, '') + ' left');
+      }
+      if (runId) {
+        parts.push('Run #' + String(runId));
+      }
+      this.renderLegacy(parts.join(' · ') + '.');
+    },
+
+    async retryEvidenceProcessing() {
+      if (!this.state.recordingId) {
+        return;
+      }
+      const formData = new FormData();
+      formData.append('recording_id', String(this.state.recordingId));
+      const response = await fetch('/admin/api/cockpit_recorder_intake_run_evidence.php', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || payload.inline_error || 'Could not restart evidence processing.');
+      }
+      await this.load(this.state.recordingId, { allowPoll: true, silentRefresh: false });
     },
 
     renderLegacy(text) {

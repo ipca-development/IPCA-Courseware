@@ -29,21 +29,9 @@ try {
         cockpit_run_evidence_json(400, array('ok' => false, 'error' => 'Recording id is required.'));
     }
 
-    $recorder = new CockpitRecorderService($pdo);
-    $recording = $recorder->recordingByAnyId((string)$recordingId);
-    if (!is_array($recording)) {
-        cockpit_run_evidence_json(404, array('ok' => false, 'error' => 'Recording not found.'));
-    }
-
     $queue = CockpitRecorderEvidenceQueueService::fromPdo($pdo);
-    $result = $queue->ensureQueued($recordingId);
-    cockpit_run_evidence_json(200, array(
-        'ok' => true,
-        'recording_id' => $recordingId,
-        'queue' => $result,
-        'evidence_in_progress' => $queue->isEvidenceInProgress($recordingId),
-        'needs_evidence' => $queue->needsEvidenceProcessing($recording),
-    ));
+    $result = $queue->retryProcessing($recordingId);
+    cockpit_run_evidence_json(!empty($result['ok']) ? 200 : 500, $result);
 } catch (Throwable $e) {
     cockpit_run_evidence_json(500, array('ok' => false, 'error' => $e->getMessage()));
 }

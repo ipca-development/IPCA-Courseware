@@ -623,7 +623,7 @@ cw_header('Master Logbook');
 .intake-table-audio col.intake-col-duration{width:4%}
 .intake-table-audio col.intake-col-input{width:11%}
 .intake-table-audio col.intake-col-upload{width:5.5%}
-.intake-table-audio col.intake-col-transcript{width:10%}
+.intake-table-audio col.intake-col-transcript{width:14%}
 .intake-table-audio col.intake-col-view{width:7.5%}
 .intake-table-audio col.intake-col-error{width:7.5%}
 .intake-table-audio th{font-size:8px;padding:7px 8px}
@@ -637,8 +637,16 @@ cw_header('Master Logbook');
 .intake-audio-mission{font-size:10px;font-weight:800;font-variant-numeric:tabular-nums;color:#0f172a}
 .intake-audio-input-mix{display:grid;gap:3px}
 .intake-audio-input-detail{font-size:9px;color:#64748b;font-weight:700;white-space:nowrap}
-.intake-audio-transcript-head{display:flex;align-items:center;gap:6px}
-.intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums}
+.intake-audio-transcript-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 6px;align-items:center;max-width:100%}
+.intake-audio-transcript-head [data-audio-transcription-status]{grid-column:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.intake-audio-evidence-step{grid-column:1 / -1;display:block;font-size:10px;line-height:1.35;color:#64748b;white-space:normal;overflow:hidden;text-overflow:ellipsis}
+.intake-audio-evidence-warning{grid-column:1 / -1;display:grid;gap:6px;margin-top:4px;padding:6px 8px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:10px;line-height:1.4}
+.intake-audio-evidence-warning[hidden]{display:none!important}
+.intake-audio-evidence-warning-text{display:block}
+.intake-audio-evidence-retry-btn{border:1px solid #fca5a5;border-radius:999px;background:#fff;color:#b91c1c;padding:3px 8px;font-size:9px;font-weight:900;cursor:pointer;justify-self:start}
+.intake-audio-evidence-retry-btn:hover{border-color:#ef4444;background:#fff1f2}
+.intake-audio-evidence-retry-btn:disabled{opacity:.55;cursor:not-allowed}
+.intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums;grid-column:2;grid-row:1;white-space:nowrap}
 .intake-audio-received{font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap}
 .intake-audio-start-stop{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;line-height:1.35;white-space:nowrap}
 .intake-audio-start-line{font-weight:700}
@@ -713,6 +721,8 @@ cw_header('Master Logbook');
 .trv-correction-form-actions{display:flex;gap:8px}
 .trv-btn-primary,.trv-btn-secondary{border-radius:8px;padding:6px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .trv-btn-primary{border:0;background:#1d4ed8;color:#fff}
+.trv-evidence-warning{border:1px solid #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;padding:12px;display:grid;gap:8px}
+.trv-evidence-warning p{margin:0;font-size:12px;line-height:1.45;color:#7f1d1d}
 .trv-btn-secondary{border:1px solid #cbd5e1;background:#fff;color:#334155}
 .trv-publish-hint-ready{border-left-color:#86efac;background:#ecfdf5;color:#166534}
 @media (max-width:980px){.trv-workspace{grid-template-columns:1fr}.trv-outline,.trv-sidebar{max-height:24vh}}
@@ -1093,6 +1103,10 @@ cw_header('Master Logbook');
                   <span class="intake-audio-transcript-progress" data-audio-transcription-progress><?= $transcriptionProgress ?>%</span>
                 </div>
                 <div class="intake-progress-bar" style="margin-top:4px"><div class="intake-progress-fill" data-audio-transcription-fill style="width:<?= $transcriptionProgress ?>%"></div></div>
+                <div class="intake-audio-evidence-warning" data-audio-evidence-warning hidden>
+                  <span class="intake-audio-evidence-warning-text" data-audio-evidence-warning-text></span>
+                  <button type="button" class="intake-audio-evidence-retry-btn" data-audio-evidence-retry>Restart Evidence</button>
+                </div>
               </td>
               <td>
                 <button
@@ -2183,6 +2197,18 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
       return 'intake-status-pending';
     };
+    const formatDurationShort = (seconds) => {
+      const total = Math.max(0, Math.floor(Number(seconds || 0)));
+      if (total < 60) {
+        return total + 's';
+      }
+      const minutes = Math.floor(total / 60);
+      const remainder = total % 60;
+      if (remainder === 0) {
+        return minutes + 'm';
+      }
+      return minutes + 'm ' + remainder + 's';
+    };
     const formatAudioStatusLabel = (status) => {
       const normalized = String(status || '').trim().toLowerCase();
       if (normalized === '') {
@@ -2232,7 +2258,11 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           const fillEl = cell.querySelector('[data-audio-transcription-fill]');
           const statusEl = cell.querySelector('[data-audio-transcription-status]');
           const evidenceStepEl = cell.querySelector('[data-audio-evidence-step]');
+          const evidenceWarningEl = cell.querySelector('[data-audio-evidence-warning]');
+          const evidenceWarningTextEl = cell.querySelector('[data-audio-evidence-warning-text]');
+          const evidenceRetryBtn = cell.querySelector('[data-audio-evidence-retry]');
           if (progressEl) {
+            progressEl.hidden = false;
             progressEl.textContent = progress + '%';
           }
           if (fillEl) {
@@ -2245,13 +2275,31 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           }
           if (evidenceStepEl) {
             const stepLabel = String(recording.evidence_step_label || '').trim();
-            if (displayStatus === 'processing_evidence' && stepLabel !== '') {
+            const remainingSeconds = Number(recording.evidence_estimated_remaining_seconds || 0);
+            const workerFailed = !!recording.evidence_worker_failed;
+            if (displayStatus === 'processing_evidence' && stepLabel !== '' && !workerFailed) {
               evidenceStepEl.hidden = false;
-              evidenceStepEl.textContent = stepLabel;
+              evidenceStepEl.textContent = stepLabel
+                + (remainingSeconds > 0 ? (' · ~' + formatDurationShort(remainingSeconds) + ' left') : '');
             } else {
               evidenceStepEl.hidden = true;
               evidenceStepEl.textContent = '';
             }
+          }
+          if (evidenceWarningEl && evidenceWarningTextEl) {
+            const workerFailed = !!recording.evidence_worker_failed;
+            const failureReason = String(recording.evidence_worker_failure_reason || '').trim();
+            if (workerFailed && failureReason !== '') {
+              evidenceWarningEl.hidden = false;
+              evidenceWarningTextEl.textContent = failureReason;
+            } else {
+              evidenceWarningEl.hidden = true;
+              evidenceWarningTextEl.textContent = '';
+            }
+          }
+          if (evidenceRetryBtn) {
+            evidenceRetryBtn.hidden = !recording.can_retry_evidence;
+            evidenceRetryBtn.disabled = !!evidenceRetryBtn.dataset.retrying;
           }
           const row = cell.closest('tr');
           if (!row) {
@@ -2278,6 +2326,43 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     };
     pollAudioStatus();
     window.setInterval(pollAudioStatus, 3000);
+
+    page.addEventListener('click', async (event) => {
+      const retryButton = event.target instanceof Element
+        ? event.target.closest('[data-audio-evidence-retry]')
+        : null;
+      if (!retryButton || retryButton.disabled) {
+        return;
+      }
+      const cell = retryButton.closest('[data-audio-recording-id]');
+      const recordingId = cell ? cell.getAttribute('data-audio-recording-id') : null;
+      if (!recordingId || recordingId === '0') {
+        return;
+      }
+      retryButton.disabled = true;
+      retryButton.dataset.retrying = '1';
+      retryButton.textContent = 'Restarting…';
+      try {
+        const formData = new FormData();
+        formData.append('recording_id', recordingId);
+        const response = await fetch('/admin/api/cockpit_recorder_intake_run_evidence.php', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || payload.inline_error || 'Could not restart evidence processing.');
+        }
+        await pollAudioStatus();
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Could not restart evidence processing.');
+      } finally {
+        delete retryButton.dataset.retrying;
+        retryButton.disabled = false;
+        retryButton.textContent = 'Restart Evidence';
+      }
+    });
   }
 })();
 </script>
