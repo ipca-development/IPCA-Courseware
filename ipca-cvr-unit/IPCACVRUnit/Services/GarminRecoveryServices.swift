@@ -276,6 +276,7 @@ final class GarminSDCardRecoveryService: ObservableObject {
             return summary
         }
         guard let access = settings.beginGarminSDCardAccess() else {
+            let detail = settings.garminSDCardLastAccessError.trimmingCharacters(in: .whitespacesAndNewlines)
             let summary = GarminSDCardScanSummary(
                 scannedAt: Date(),
                 cardAvailable: false,
@@ -286,7 +287,9 @@ final class GarminSDCardRecoveryService: ObservableObject {
                 alreadyKnown: 0,
                 imported: 0,
                 matchedFlightRecord: false,
-                message: "Could not access the configured SD card folder. Re-select the Garmin folder in Admin with the card inserted."
+                message: detail.isEmpty
+                    ? "Could not access the configured SD card folder. Re-select the Garmin folder in Admin with the card inserted."
+                    : detail
             )
             lastSummary = summary
             return summary

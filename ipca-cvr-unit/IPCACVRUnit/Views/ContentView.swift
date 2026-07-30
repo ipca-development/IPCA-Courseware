@@ -335,14 +335,33 @@ private struct AdminSettingsView: View {
                     LabeledContent("Folder") {
                         Text(settings.garminSDCardFolderLabel.isEmpty ? "Not configured" : settings.garminSDCardFolderLabel)
                     }
+                    LabeledContent("Access") {
+                        Text(sdRecovery.cardAvailable ? "Available" : (settings.garminSDCardBookmarkData == nil ? "Not configured" : "Unavailable"))
+                            .foregroundStyle(sdRecovery.cardAvailable ? IPCATheme.success : IPCATheme.warning)
+                    }
                     Button("Select Garmin SD Card Folder") {
                         showGarminFolderPicker = true
                     }
                     if settings.garminSDCardBookmarkData != nil {
+                        Button("Test SD Card Access") {
+                            sdRecovery.refreshBookmarkState(settings: settings)
+                        }
                         Button("Clear SD Card Folder", role: .destructive) {
                             settings.clearGarminSDCardFolder()
                             sdRecovery.refreshBookmarkState(settings: settings)
                         }
+                    }
+                    if !settings.garminSDCardSetupMessage.isEmpty {
+                        Text(settings.garminSDCardSetupMessage)
+                            .font(.caption)
+                            .foregroundStyle(settings.garminSDCardSetupMessage.contains("verified")
+                                ? IPCATheme.success
+                                : IPCATheme.warning)
+                    }
+                    if !settings.garminSDCardLastAccessError.isEmpty {
+                        Text(settings.garminSDCardLastAccessError)
+                            .font(.caption)
+                            .foregroundStyle(IPCATheme.danger)
                     }
                     Stepper(
                         "Retain synced CSVs: \(settings.garminVaultRetentionDays) days",
@@ -356,7 +375,7 @@ private struct AdminSettingsView: View {
                         step: 50
                     )
                     LabeledContent("Local vault files", value: "\(garminVault.records.count)")
-                    Text("One-time setup: with the SD card inserted, choose the card root or its data_log folder in Files. If scans fail later, re-select the folder after reinserting the card.")
+                    Text("One-time setup: with the SD card inserted, choose the card root or its data_log folder in Files. After saving, tap Test SD Card Access. If it shows Unavailable, re-select the folder with the card inserted.")
                         .font(.caption)
                         .foregroundStyle(IPCATheme.secondaryText)
                 }

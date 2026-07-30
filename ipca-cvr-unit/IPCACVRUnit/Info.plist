@@ -39,7 +39,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
+	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>IPCA CVR Unit uses Bluetooth to monitor aircraft trigger devices and test the IPCA avionics-power BLE beacon.</string>
 	<key>NSMicrophoneUsageDescription</key>
