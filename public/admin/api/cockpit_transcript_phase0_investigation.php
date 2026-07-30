@@ -47,6 +47,32 @@ try {
         phase0_api_json(!empty($report['ok']) ? 200 : 500, array('ok' => !empty($report['ok']), 'verification' => $report));
     }
 
+    if ($action === 'read_evidence') {
+        if ($recordingId <= 0) {
+            $recordingId = 552;
+        }
+        if (!$isAdmin && !Phase0ProbeAuth::isAuthorized($recordingId, $probeChunk)) {
+            phase0_api_json(403, array('ok' => false, 'error' => 'Admin or probe token required.'));
+        }
+        $basename = trim((string)($_GET['file'] ?? ''));
+        if ($basename === '' || preg_match('/[^a-zA-Z0-9._-]/', $basename)) {
+            phase0_api_json(400, array('ok' => false, 'error' => 'Invalid evidence file name.'));
+        }
+        $evidenceDir = trim((string)($_GET['evidence_dir'] ?? 'storage/cockpit_recorder/phase0_evidence'));
+        $absDir = CockpitRecorderService::projectRoot() . '/' . ltrim($evidenceDir, '/');
+        $path = $absDir . '/' . $basename;
+        if (!is_file($path)) {
+            phase0_api_json(404, array('ok' => false, 'error' => 'Evidence file not found.', 'path' => $basename));
+        }
+        $json = json_decode((string)file_get_contents($path), true);
+        phase0_api_json(200, array(
+            'ok' => true,
+            'file' => $basename,
+            'sha256' => hash('sha256', (string)file_get_contents($path)),
+            'json' => $json,
+        ));
+    }
+
     if ($action === 'replay_evidence') {
         if ($recordingId <= 0) {
             $recordingId = 552;
