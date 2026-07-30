@@ -661,6 +661,10 @@ cw_header('Master Logbook');
 .intake-modal-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .intake-modal-reprocess{border:1px solid #fbbf24;border-radius:9px;background:#fffbeb;color:#92400e;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .intake-modal-reprocess:disabled{opacity:.55;cursor:not-allowed}
+.intake-modal-publish{border:1px solid #86efac;border-radius:9px;background:#ecfdf5;color:#166534;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
+.intake-modal-publish:disabled{opacity:.55;cursor:not-allowed;color:#64748b;border-color:#cbd5e1;background:#f8fafc}
+.intake-transcript-source{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;background:#e0e7ff;color:#3730a3;margin-left:6px}
+.intake-transcript-source-legacy{background:#f1f5f9;color:#475569}
 .intake-modal-note{margin:0 0 8px;color:#64748b;font-size:11px;line-height:1.45}
 .intake-modal-title{margin:0;font-size:16px;color:#0f172a}
 .intake-modal-body{display:grid;gap:14px;padding:16px}
@@ -1732,13 +1736,14 @@ cw_header('Master Logbook');
         <div class="intake-muted" id="intake-audio-transcript-meta"></div>
       </div>
       <div class="intake-modal-actions">
+        <button class="intake-modal-publish" type="button" data-audio-transcript-publish hidden>Publish Evidence</button>
         <button class="intake-modal-reprocess" type="button" data-audio-transcript-cleanup>Clean Up Transcript</button>
         <button class="intake-modal-reprocess" type="button" data-audio-transcript-reprocess>Re-Process From Audio</button>
         <button class="intake-modal-close" type="button" data-audio-transcript-close>Close</button>
       </div>
     </div>
     <div class="intake-modal-body">
-      <p class="intake-modal-note" id="intake-audio-transcript-note">Use <strong>Clean Up</strong> to remove duplicate loops and repeated [unclear] markers from the stored transcript. Use <strong>Re-Process From Audio</strong> only when you need a fresh transcription from the audio file.</p>
+      <p class="intake-modal-note" id="intake-audio-transcript-note">Use <strong>Publish Evidence</strong> to snapshot the Pass 4 readable transcript into an immutable published version (recommended when typed evidence exists). Use <strong>Clean Up</strong> for legacy duplicate removal on the stored cache. Use <strong>Re-Process From Audio</strong> only when you need a fresh transcription from the audio file.</p>
       <audio class="intake-modal-audio" id="intake-audio-transcript-player" controls preload="none"></audio>
       <div class="intake-modal-transcript" id="intake-audio-transcript-body">Loading transcript…</div>
     </div>
@@ -1909,8 +1914,35 @@ cw_header('Master Logbook');
   const transcriptNote = document.getElementById('intake-audio-transcript-note');
   const transcriptReprocessButton = document.querySelector('[data-audio-transcript-reprocess]');
   const transcriptCleanupButton = document.querySelector('[data-audio-transcript-cleanup]');
+  const transcriptPublishButton = document.querySelector('[data-audio-transcript-publish]');
   let activeTranscriptRecordingId = null;
+  let activePublishableRunId = null;
   let transcriptPollTimer = null;
+
+  const formatTranscriptSourceLabel = (source) => {
+    if (source === 'published_evidence') return 'Published evidence';
+    return 'Legacy cache';
+  };
+
+  const updateTranscriptPublishButton = (payload) => {
+    if (!transcriptPublishButton) return;
+    const publishReady = !!payload.publish_ready;
+    const publishable = !!payload.publishable;
+    transcriptPublishButton.hidden = !publishReady;
+    transcriptPublishButton.disabled = !publishable;
+    activePublishableRunId = publishable ? (payload.latest_publishable_processing_run_id || null) : null;
+    if (!publishReady) {
+      transcriptPublishButton.title = 'Evidence publish tables are not available on this environment.';
+    } else if (!publishable) {
+      transcriptPublishButton.title = 'No typed evidence with readable_primary is available yet. Run Phase 0 probe/replay and Pass 4 first.';
+    } else if (payload.transcript_source === 'published_evidence') {
+      transcriptPublishButton.title = 'Create a new immutable published snapshot from the latest evidence run.';
+      transcriptPublishButton.textContent = 'Publish New Evidence Version';
+    } else {
+      transcriptPublishButton.title = 'Publish the readable evidence transcript and regenerate the legacy cache from it.';
+      transcriptPublishButton.textContent = 'Publish Evidence';
+    }
+  };
 
   const stopTranscriptPoll = () => {
     if (transcriptPollTimer !== null) {
@@ -1946,8 +1978,19 @@ cw_header('Master Logbook');
       if (payload.transcription_status) metaParts.push(String(payload.transcription_status).toUpperCase());
       if (payload.transcription_progress != null) metaParts.push(String(payload.transcription_progress) + '%');
       if (payload.original_filename) metaParts.push(payload.original_filename);
-      transcriptMeta.textContent = metaParts.join(' · ');
+      const sourceLabel = formatTranscriptSourceLabel(payload.transcript_source || 'legacy_cache');
+      transcriptMeta.innerHTML = metaParts.map((part) => document.createTextNode(part).textContent).join(' · ')
+        + ' <span class="intake-transcript-source '
+        + (payload.transcript_source === 'published_evidence' ? '' : 'intake-transcript-source-legacy')
+        + '">' + sourceLabel + '</span>';
+      if (payload.published_version_uuid) {
+        transcriptMeta.innerHTML += '<div class="intake-muted" style="margin-top:4px">Published '
+          + String(payload.published_version_uuid).slice(0, 8) + '…'
+          + (payload.published_at ? (' · ' + payload.published_at) : '')
+          + '</div>';
+      }
     }
+    updateTranscriptPublishButton(payload);
     if (transcriptNote) {
       transcriptNote.hidden = false;
     }
@@ -1961,6 +2004,9 @@ cw_header('Master Logbook');
     }
     if (transcriptCleanupButton) {
       transcriptCleanupButton.disabled = inProgress;
+    }
+    if (transcriptPublishButton) {
+      transcriptPublishButton.disabled = inProgress || !payload.publishable;
     }
     if (inProgress) {
       transcriptBody.textContent = 'Transcription in progress… ' + String(payload.transcription_progress || 0) + '%';
@@ -1976,11 +2022,13 @@ cw_header('Master Logbook');
       transcriptBody.textContent = 'Transcription failed. Use Re-Process Transcript to try again.';
       if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
       if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
+      if (transcriptPublishButton) transcriptPublishButton.disabled = !payload.publishable;
       return;
     }
     transcriptBody.textContent = payload.transcript_text || 'Transcript is not available yet.';
     if (transcriptReprocessButton) transcriptReprocessButton.disabled = false;
     if (transcriptCleanupButton) transcriptCleanupButton.disabled = false;
+    if (transcriptPublishButton) transcriptPublishButton.disabled = !payload.publishable;
   };
 
   const closeTranscriptModal = () => {
@@ -2024,6 +2072,48 @@ cw_header('Master Logbook');
       }
     });
   });
+
+  if (transcriptPublishButton) {
+    transcriptPublishButton.addEventListener('click', async () => {
+      if (!activeTranscriptRecordingId) {
+        return;
+      }
+      const message = activePublishableRunId
+        ? ('Publish an immutable evidence transcript snapshot from processing run #' + activePublishableRunId + '? This updates the legacy transcript cache from the readable evidence layer (no cleanTranscriptText pass).')
+        : 'Publish an immutable evidence transcript snapshot from the latest typed evidence run?';
+      if (!window.confirm(message)) {
+        return;
+      }
+      transcriptPublishButton.disabled = true;
+      if (transcriptBody) transcriptBody.textContent = 'Publishing evidence transcript…';
+      try {
+        const formData = new FormData();
+        formData.append('recording_id', activeTranscriptRecordingId);
+        if (activePublishableRunId) {
+          formData.append('processing_run_id', String(activePublishableRunId));
+        }
+        const response = await fetch('/admin/api/cockpit_evidence_publish_transcript.php', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Could not publish evidence transcript.');
+        }
+        await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: false });
+        window.alert('Published evidence transcript version ' + (payload.version_uuid || payload.published_transcript_version_id || '') + '.');
+      } catch (error) {
+        if (transcriptBody) {
+          transcriptBody.textContent = error instanceof Error ? error.message : 'Could not publish evidence transcript.';
+        }
+      } finally {
+        if (transcriptPublishButton) {
+          transcriptPublishButton.disabled = !activePublishableRunId;
+        }
+      }
+    });
+  }
 
   if (transcriptCleanupButton) {
     transcriptCleanupButton.addEventListener('click', async () => {

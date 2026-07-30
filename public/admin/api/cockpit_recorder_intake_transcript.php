@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/CockpitRecorderService.php';
+require_once __DIR__ . '/../../../src/AviationEvidence/EvidenceSchema.php';
+require_once __DIR__ . '/../../../src/AviationEvidence/ProcessingRunRepository.php';
+require_once __DIR__ . '/../../../src/AviationEvidence/PublishedTranscriptService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -35,6 +38,21 @@ try {
     $rawTranscript = trim((string)($recording['transcript_text'] ?? ''));
     $transcriptPayload = $service->transcript((string)$recordingId);
     $cleanTranscript = trim((string)($transcriptPayload['transcript'] ?? $rawTranscript));
+
+    $publishReady = EvidenceSchema::publishReady($pdo);
+    $publishable = false;
+    $latestPublishableRunId = null;
+    $publishedVersions = array();
+    if ($publishReady) {
+        $processingRuns = new ProcessingRunRepository($pdo);
+        $publishableRun = $processingRuns->findLatestPublishableForRecording($recordingId);
+        if ($publishableRun !== null) {
+            $publishable = true;
+            $latestPublishableRunId = (int)($publishableRun['id'] ?? 0);
+        }
+        $publishedVersions = PublishedTranscriptService::fromPdo($pdo)->listPublishedVersions($recordingId, 5);
+    }
+
     cockpit_intake_transcript_json(200, array(
         'ok' => true,
         'recording_id' => $recordingId,
@@ -47,6 +65,12 @@ try {
         'transcript_source' => (string)($transcriptPayload['transcript_source'] ?? 'legacy_cache'),
         'published_transcript_version_id' => (int)($transcriptPayload['published_transcript_version_id'] ?? ($recording['published_transcript_version_id'] ?? 0)),
         'published_version_uuid' => (string)($transcriptPayload['published_version_uuid'] ?? ''),
+        'published_at' => (string)($transcriptPayload['published_at'] ?? ''),
+        'processing_run_id' => (int)($transcriptPayload['processing_run_id'] ?? 0),
+        'publish_ready' => $publishReady,
+        'publishable' => $publishable,
+        'latest_publishable_processing_run_id' => $latestPublishableRunId,
+        'published_versions' => $publishedVersions,
         'transcript_raw' => $rawTranscript,
         'transcript_cleaned' => !empty($transcriptPayload['transcript_cleaned']),
         'original_filename' => (string)($recording['original_filename'] ?? ''),

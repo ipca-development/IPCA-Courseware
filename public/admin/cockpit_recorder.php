@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../src/CockpitAdsbEnrichmentService.php';
 require_once __DIR__ . '/../../src/GarminCsvImportProfile.php';
 require_once __DIR__ . '/../../src/GarminCsvFlightSummaryService.php';
 require_once __DIR__ . '/../../src/GarminCsvReplayPayloadService.php';
+require_once __DIR__ . '/../../src/AviationEvidence/EvidenceSchema.php';
 
 cw_require_admin();
 
@@ -695,6 +696,8 @@ cw_header('Cockpit Recordings');
             $gpsUrl = '/admin/cockpit_recorder_gps.php?id=' . $id;
             $eventsUrl = '/admin/cockpit_recorder_events.php?id=' . $id;
             $transcript = trim((string)($row['transcript_text'] ?? ''));
+            $publishedTranscriptVersionId = (int)($row['published_transcript_version_id'] ?? 0);
+            $evidencePublishReady = EvidenceSchema::publishReady($pdo);
             $rowError = trim((string)($row['error_message'] ?? ''));
             $isTestRecording = !empty($row['is_test_recording']);
             $flightSessionUid = trim((string)($row['flight_session_uid'] ?? ''));
@@ -962,8 +965,16 @@ cw_header('Cockpit Recordings');
                         <div class="cockpit-error"><?= h($rowError) ?></div>
                       <?php elseif ($transcript !== ''): ?>
                         <div class="cockpit-transcript"><?= h($transcript) ?></div>
+                        <?php if ($publishedTranscriptVersionId > 0): ?>
+                          <div class="cockpit-muted">Serving published evidence snapshot #<?= $publishedTranscriptVersionId ?>.</div>
+                        <?php endif; ?>
                       <?php else: ?>
                         <div class="cockpit-muted">Transcript not ready.</div>
+                      <?php endif; ?>
+                      <?php if ($id > 0 && $evidencePublishReady): ?>
+                        <div class="cockpit-actions-row" style="margin-top:10px">
+                          <button class="cockpit-button" type="button" data-evidence-publish="<?= $id ?>">Publish Evidence Transcript</button>
+                        </div>
                       <?php endif; ?>
                       <?php if ($id > 0 && $transcription !== 'ready'): ?>
                         <div class="cockpit-actions-row">
@@ -1587,6 +1598,37 @@ cw_header('Cockpit Recordings');
   document.querySelectorAll('[data-recon-cancel]').forEach(function (button) {
     button.addEventListener('click', function () {
       cancelReconstruction(button.getAttribute('data-recon-cancel'), button);
+    });
+  });
+  document.querySelectorAll('[data-evidence-publish]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      const recordingId = button.getAttribute('data-evidence-publish');
+      if (!recordingId) return;
+      if (!window.confirm('Publish an immutable evidence transcript snapshot for recording #' + recordingId + '?')) {
+        return;
+      }
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Publishing…';
+      try {
+        const formData = new FormData();
+        formData.append('recording_id', recordingId);
+        const response = await fetch('/admin/api/cockpit_evidence_publish_transcript.php', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error((payload && payload.error) || 'Publish failed.');
+        }
+        window.alert('Published evidence transcript version ' + (payload.version_uuid || payload.published_transcript_version_id || '') + '. Reload the page to see the updated cache.');
+      } catch (error) {
+        window.alert(error.message || 'Publish failed.');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
     });
   });
   <?php if ($pollRecordingId > 0): ?>
