@@ -664,7 +664,8 @@ cw_header('Master Logbook');
 .intake-modal-publish{border:1px solid #86efac;border-radius:9px;background:#ecfdf5;color:#166534;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .intake-modal-publish:disabled{opacity:.55;cursor:not-allowed;color:#64748b;border-color:#cbd5e1;background:#f8fafc}
 .intake-transcript-source{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;background:#e0e7ff;color:#3730a3;margin-left:6px}
-.intake-transcript-source-legacy{background:#f1f5f9;color:#475569}
+.intake-modal-publish-hint{border-left:3px solid #cbd5e1;background:#f8fafc;color:#475569;padding:8px 10px;margin-top:0}
+.intake-modal-publish-hint-ready{border-left-color:#86efac;background:#ecfdf5;color:#166534}
 .intake-modal-note{margin:0 0 8px;color:#64748b;font-size:11px;line-height:1.45}
 .intake-modal-title{margin:0;font-size:16px;color:#0f172a}
 .intake-modal-body{display:grid;gap:14px;padding:16px}
@@ -1744,6 +1745,7 @@ cw_header('Master Logbook');
     </div>
     <div class="intake-modal-body">
       <p class="intake-modal-note" id="intake-audio-transcript-note">Use <strong>Publish Evidence</strong> to snapshot the Pass 4 readable transcript into an immutable published version (recommended when typed evidence exists). Use <strong>Clean Up</strong> for legacy duplicate removal on the stored cache. Use <strong>Re-Process From Audio</strong> only when you need a fresh transcription from the audio file.</p>
+      <p class="intake-modal-note intake-modal-publish-hint" id="intake-audio-transcript-publish-hint" hidden></p>
       <audio class="intake-modal-audio" id="intake-audio-transcript-player" controls preload="none"></audio>
       <div class="intake-modal-transcript" id="intake-audio-transcript-body">Loading transcript…</div>
     </div>
@@ -1915,6 +1917,7 @@ cw_header('Master Logbook');
   const transcriptReprocessButton = document.querySelector('[data-audio-transcript-reprocess]');
   const transcriptCleanupButton = document.querySelector('[data-audio-transcript-cleanup]');
   const transcriptPublishButton = document.querySelector('[data-audio-transcript-publish]');
+  const transcriptPublishHint = document.getElementById('intake-audio-transcript-publish-hint');
   let activeTranscriptRecordingId = null;
   let activePublishableRunId = null;
   let transcriptPollTimer = null;
@@ -1933,14 +1936,36 @@ cw_header('Master Logbook');
     activePublishableRunId = publishable ? (payload.latest_publishable_processing_run_id || null) : null;
     if (!publishReady) {
       transcriptPublishButton.title = 'Evidence publish tables are not available on this environment.';
+      if (transcriptPublishHint) {
+        transcriptPublishHint.hidden = true;
+        transcriptPublishHint.textContent = '';
+      }
     } else if (!publishable) {
-      transcriptPublishButton.title = 'No typed evidence with readable_primary is available yet. Run Phase 0 probe/replay and Pass 4 first.';
+      transcriptPublishButton.title = 'This recording has no typed evidence with a readable Pass 4 layer yet.';
+      if (transcriptPublishHint) {
+        transcriptPublishHint.hidden = false;
+        transcriptPublishHint.classList.remove('intake-modal-publish-hint-ready');
+        transcriptPublishHint.innerHTML = '<strong>Publish Evidence is unavailable for this recording.</strong> '
+          + 'It only works after typed provider evidence and Pass 4 have run (Phase 0 probe/replay on App Platform). '
+          + 'This recording currently shows <em>Legacy cache</em> only — use Clean Up or Re-Process for the old pipeline, '
+          + 'or run evidence processing first for recording #' + String(payload.recording_id || '') + '.';
+      }
     } else if (payload.transcript_source === 'published_evidence') {
       transcriptPublishButton.title = 'Create a new immutable published snapshot from the latest evidence run.';
       transcriptPublishButton.textContent = 'Publish New Evidence Version';
+      if (transcriptPublishHint) {
+        transcriptPublishHint.hidden = false;
+        transcriptPublishHint.classList.add('intake-modal-publish-hint-ready');
+        transcriptPublishHint.textContent = 'Published evidence is active. You can publish again to create a new immutable version from processing run #' + String(activePublishableRunId || payload.latest_publishable_processing_run_id || '') + '.';
+      }
     } else {
       transcriptPublishButton.title = 'Publish the readable evidence transcript and regenerate the legacy cache from it.';
       transcriptPublishButton.textContent = 'Publish Evidence';
+      if (transcriptPublishHint) {
+        transcriptPublishHint.hidden = false;
+        transcriptPublishHint.classList.add('intake-modal-publish-hint-ready');
+        transcriptPublishHint.textContent = 'Ready to publish from processing run #' + String(activePublishableRunId || payload.latest_publishable_processing_run_id || '') + '. This will snapshot the Pass 4 readable layer and update the legacy cache without cleanTranscriptText().';
+      }
     }
   };
 

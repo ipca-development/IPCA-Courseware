@@ -147,6 +147,18 @@ final class EvidenceSchema
         return true;
     }
 
+    public static function skipProductionPersist(): bool
+    {
+        $env = getenv('CW_EVIDENCE_SKIP_PRODUCTION_PERSIST');
+        return $env === '1' || $env === 'true';
+    }
+
+    public static function productionSkipWhisper(): bool
+    {
+        $env = getenv('CW_EVIDENCE_PRODUCTION_SKIP_WHISPER');
+        return $env === '1' || $env === 'true';
+    }
+
     /**
      * @return array<string,mixed>|null
      */

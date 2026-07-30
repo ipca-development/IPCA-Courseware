@@ -11,7 +11,7 @@ final class CockpitRecorderService
 {
     private const TABLE = 'ipca_cockpit_recordings';
     private const CHUNK_TABLE = 'ipca_cockpit_recording_transcription_chunks';
-    private const TRANSCRIPTION_CHUNK_SECONDS = 300.0;
+    public const TRANSCRIPTION_CHUNK_SECONDS = 300.0;
 
     public function __construct(private PDO $pdo)
     {
@@ -707,6 +707,13 @@ final class CockpitRecorderService
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ")->execute(array($status, $progress, $transcript !== '' ? $transcript : null, $error !== '' ? $error : null, $recordingId));
+
+        if ($status === 'ready') {
+            $updatedRecording = $this->recordingByAnyId((string)$recordingId);
+            if (is_array($updatedRecording)) {
+                $this->maybePersistProductionEvidence($recordingId, $updatedRecording);
+            }
+        }
 
         $updated = $this->recordingByAnyId((string)$recordingId);
 
@@ -2096,7 +2103,7 @@ final class CockpitRecorderService
             ")->execute(array($progress, $recordingId));
         }
 
-        $combined = self::cleanTranscriptText(self::mergeTranscriptParts(array_values(array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== ''))));
+        $combined = self::mergeTranscriptParts(array_values(array_filter(array_map('trim', $texts), fn(string $text): bool => $text !== '')));
         if ($failedChunks) {
             $failedLabel = implode(', ', array_map(fn(int $i): string => (string)($i + 1), $failedChunks));
             $message = 'Partial transcript: chunk(s) ' . $failedLabel . ' failed. '
@@ -2124,6 +2131,127 @@ final class CockpitRecorderService
         return $realPath;
     }
 
+    /**
+     * @param array<string,mixed> $recording
+     */
+    public function resolveTranscriptionAudioPath(array $recording): string
+    {
+        return $this->transcriptionAudioPath($recording);
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    public function extractTranscriptionChunkForEvidence(
+        array $recording,
+        int $index,
+        float $startSeconds,
+        float $durationSeconds
+    ): string {
+        $realPath = $this->transcriptionAudioPath($recording);
+        return $this->extractAudioChunk(
+            $realPath,
+            $startSeconds,
+            $durationSeconds,
+            (string)($recording['recording_uid'] ?? 'recording'),
+            $index
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listLegacyTranscriptionChunks(int $recordingId): array
+    {
+        if (!self::transcriptionChunkTablePresent($this->pdo)) {
+            return array();
+        }
+        return $this->transcriptionChunksForRecording($recordingId);
+    }
+
+    /**
+     * @return array{text:string,raw_json:array<string,mixed>,http_code:int,openai_request_id:?string,latency_ms:int,request_started_at:string,request_completed_at:string,model:string,response_format:string}
+     */
+    public function transcribeOpenAiAudioStructured(
+        string $realPath,
+        string $mime,
+        string $filename,
+        string $language,
+        string $model,
+        string $responseFormat,
+        bool $wordTimestamps,
+        bool $usePrompt
+    ): array {
+        $prompt = $usePrompt ? self::transcriptionPrompt() : '';
+        $postFields = array(
+            'file' => new CURLFile($realPath, $mime, $filename),
+            'model' => $model,
+            'response_format' => $responseFormat,
+        );
+        if ($usePrompt && $prompt !== '') {
+            $postFields['prompt'] = $prompt;
+        }
+        if ($language !== '') {
+            $postFields['language'] = $language;
+        }
+        if ($wordTimestamps && $responseFormat === 'verbose_json') {
+            $postFields['timestamp_granularities[]'] = 'word';
+            $postFields['timestamp_granularities[]'] = 'segment';
+        }
+
+        $requestStartedAt = microtime(true);
+        $requestStartedIso = gmdate('Y-m-d H:i:s', (int)$requestStartedAt) . '.' . sprintf('%03d', (int)(($requestStartedAt - floor($requestStartedAt)) * 1000));
+
+        $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_HTTPHEADER => array('Authorization: Bearer ' . cw_openai_key()),
+            CURLOPT_POSTFIELDS => $postFields,
+            CURLOPT_TIMEOUT => 900,
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        ));
+        $rawResponse = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        curl_close($ch);
+
+        $requestCompletedAt = microtime(true);
+        $latencyMs = (int)round(($requestCompletedAt - $requestStartedAt) * 1000.0);
+        $requestCompletedIso = gmdate('Y-m-d H:i:s', (int)$requestCompletedAt) . '.' . sprintf('%03d', (int)(($requestCompletedAt - floor($requestCompletedAt)) * 1000));
+
+        $headersRaw = is_string($rawResponse) ? substr($rawResponse, 0, $headerSize) : '';
+        $body = is_string($rawResponse) ? substr($rawResponse, $headerSize) : '';
+        $json = is_string($body) ? json_decode($body, true) : null;
+        if (!is_array($json)) {
+            $json = array(
+                'error' => array('message' => is_string($body) ? substr($body, 0, 800) : 'non-json response'),
+            );
+        }
+
+        $openaiRequestId = null;
+        foreach (explode("\r\n", $headersRaw) as $line) {
+            if (str_starts_with(strtolower($line), 'x-request-id:')) {
+                $openaiRequestId = trim(substr($line, strlen('x-request-id:')));
+                break;
+            }
+        }
+
+        return array(
+            'text' => trim((string)($json['text'] ?? '')),
+            'raw_json' => $json,
+            'http_code' => $code,
+            'openai_request_id' => $openaiRequestId,
+            'latency_ms' => $latencyMs,
+            'request_started_at' => $requestStartedIso,
+            'request_completed_at' => $requestCompletedIso,
+            'model' => $model,
+            'response_format' => $responseFormat,
+        );
+    }
+
     private function transcribeAudioFile(string $realPath, string $mime, string $filename, string $language): string
     {
         $model = trim((string)(getenv('CW_OPENAI_ASR_MODEL') ?: ''));
@@ -2131,54 +2259,35 @@ final class CockpitRecorderService
             $model = 'gpt-4o-transcribe';
         }
 
-        $prompt = self::transcriptionPrompt();
-
-        $postFields = array(
-            'file' => new CURLFile($realPath, $mime, $filename),
-            'model' => $model,
-            'prompt' => $prompt,
-            'response_format' => 'json',
-        );
-        if ($language !== '') {
-            $postFields['language'] = $language;
-        }
-
-        $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
-            'Authorization: Bearer ' . cw_openai_key(),
-        ));
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 900);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-
-        $resp = curl_exec($ch);
-        $err = curl_error($ch);
-        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($resp === false) {
-            throw new RuntimeException('OpenAI transcription request failed: ' . $err);
-        }
-
-        $json = json_decode((string)$resp, true);
-        if (!is_array($json)) {
-            throw new RuntimeException('OpenAI transcription returned non-JSON. HTTP ' . $code . ' Body: ' . substr((string)$resp, 0, 800));
-        }
-
-        if ($code < 200 || $code >= 300) {
-            $msg = (string)($json['error']['message'] ?? ('HTTP ' . $code));
+        $result = $this->transcribeOpenAiAudioStructured($realPath, $mime, $filename, $language, $model, 'json', false, true);
+        if ($result['http_code'] < 200 || $result['http_code'] >= 300) {
+            $msg = (string)($result['raw_json']['error']['message'] ?? ('HTTP ' . $result['http_code']));
             throw new RuntimeException('OpenAI transcription error: ' . $msg);
         }
 
-        $text = self::cleanTranscriptText(trim((string)($json['text'] ?? '')));
+        $text = trim($result['text']);
         if ($text === '') {
             throw new RuntimeException('OpenAI transcription returned no text.');
         }
 
         return $text;
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     */
+    private function maybePersistProductionEvidence(int $recordingId, array $recording): void
+    {
+        try {
+            require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
+            require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+            if (!EvidenceSchema::persistenceReady($this->pdo) || EvidenceSchema::skipProductionPersist()) {
+                return;
+            }
+            ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
+        } catch (Throwable $e) {
+            error_log('[ProductionTranscriptionEvidence] recording ' . $recordingId . ': ' . $e->getMessage());
+        }
     }
 
     private function resetTranscriptionChunks(int $recordingId): void
@@ -2224,7 +2333,7 @@ final class CockpitRecorderService
             }
         }
 
-        $combined = self::cleanTranscriptText(self::mergeTranscriptParts($texts));
+        $combined = self::mergeTranscriptParts($texts);
         $status = $failed ? 'failed' : 'ready';
         $error = null;
         if ($failed) {
@@ -2245,6 +2354,13 @@ final class CockpitRecorderService
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ")->execute(array($status, $status === 'ready' ? 100 : 0, $combined !== '' ? $combined : null, $error, $recordingId));
+
+        if ($status === 'ready') {
+            $updatedRecording = $this->recordingByAnyId((string)$recordingId);
+            if (is_array($updatedRecording)) {
+                $this->maybePersistProductionEvidence($recordingId, $updatedRecording);
+            }
+        }
 
         $updated = $this->recordingByAnyId((string)$recordingId);
         return array(
@@ -2396,7 +2512,7 @@ final class CockpitRecorderService
     /**
      * @param list<string> $parts
      */
-    private static function mergeTranscriptParts(array $parts): string
+    public static function mergeTranscriptParts(array $parts): string
     {
         $out = '';
         foreach ($parts as $part) {
@@ -2562,7 +2678,7 @@ final class CockpitRecorderService
         return trim(substr($uid, 0, 96), '.-_');
     }
 
-    private static function normalizeLanguage(string $language): string
+    public static function normalizeLanguage(string $language): string
     {
         $language = strtolower(trim($language));
         $language = preg_replace('/[^a-z0-9_-]+/', '', $language) ?? '';

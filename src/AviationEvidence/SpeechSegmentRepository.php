@@ -53,6 +53,64 @@ final class SpeechSegmentRepository
     }
 
     /**
+     * Materialize speech segments from one or more whisper provider runs, offsetting chunk-relative times.
+     *
+     * @param list<array<string,mixed>> $whisperRuns
+     * @return list<array<string,mixed>>
+     */
+    public function materializeFromWhisperRuns(
+        int $recordingId,
+        int $processingRunId,
+        array $whisperRuns,
+        ?string $detectedLanguage = null
+    ): array {
+        EvidenceSchema::requireTables($this->pdo, array(EvidenceSchema::TABLE_SPEECH_SEGMENTS));
+
+        $existing = $this->listForProcessingRun($processingRunId);
+        if ($existing !== array()) {
+            return $existing;
+        }
+
+        if ($whisperRuns === array()) {
+            return array();
+        }
+
+        require_once __DIR__ . '/ProviderRunRepository.php';
+        $providerRuns = new ProviderRunRepository($this->pdo);
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ' . EvidenceSchema::TABLE_SPEECH_SEGMENTS
+            . ' (recording_id, processing_run_id, primary_provider_segment_id, primary_provider_run_id,'
+            . ' start_time_ms, end_time_ms, detected_language)'
+            . ' VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        foreach ($whisperRuns as $run) {
+            $providerRunId = (int)($run['id'] ?? 0);
+            if ($providerRunId <= 0) {
+                continue;
+            }
+            $offsetMs = (int)($run['chunk_start_time_ms'] ?? 0);
+            foreach ($providerRuns->listSegments($providerRunId) as $segment) {
+                $providerSegmentId = (int)($segment['id'] ?? 0);
+                $startMs = (int)($segment['start_time_ms'] ?? 0) + $offsetMs;
+                $endMs = (int)($segment['end_time_ms'] ?? 0) + $offsetMs;
+                $insert->execute(array(
+                    $recordingId,
+                    $processingRunId,
+                    $providerSegmentId > 0 ? $providerSegmentId : null,
+                    $providerRunId,
+                    $startMs,
+                    $endMs,
+                    $detectedLanguage,
+                ));
+            }
+        }
+
+        return $this->listForProcessingRun($processingRunId);
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     public function listForProcessingRun(int $processingRunId): array

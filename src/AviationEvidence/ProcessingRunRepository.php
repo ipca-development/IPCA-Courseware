@@ -92,6 +92,49 @@ final class ProcessingRunRepository
     }
 
     /**
+     * @return array<string,mixed>|null
+     */
+    public function findByRunUuid(string $runUuid): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE run_uuid = ? LIMIT 1');
+        $stmt->execute(array($runUuid));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Latest completed initial-transcription run for a recording with matching source audio hash.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findLatestInitialForRecording(int $recordingId, string $sourceAudioSha256): ?array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROCESSING_RUNS)) {
+            return null;
+        }
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_RUNS)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT pr.* FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' pr'
+            . ' INNER JOIN ' . EvidenceSchema::TABLE_PROVIDER_RUNS . ' p ON p.processing_run_id = pr.id'
+            . ' WHERE pr.recording_id = ? AND pr.status = ? AND p.run_purpose = ? AND p.source_audio_sha256 = ?'
+            . ' GROUP BY pr.id ORDER BY pr.completed_at DESC, pr.id DESC LIMIT 1'
+        );
+        $stmt->execute(array(
+            $recordingId,
+            'completed',
+            EvidenceSchema::RUN_PURPOSE_INITIAL,
+            strtolower($sourceAudioSha256),
+        ));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
      * Latest completed run for a recording that has a readable_primary interpretation.
      *
      * @return array<string,mixed>|null

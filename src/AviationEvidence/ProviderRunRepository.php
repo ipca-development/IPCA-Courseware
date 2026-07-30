@@ -279,6 +279,74 @@ final class ProviderRunRepository
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    public function listCanonicalWhisperRunsForProcessingRun(int $processingRunId): array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_RUNS)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_RUNS
+            . ' WHERE processing_run_id = ? AND is_canonical_timeline = 1 AND success_status = ?'
+            . ' ORDER BY chunk_start_time_ms ASC, id ASC'
+        );
+        $stmt->execute(array($processingRunId, 'success'));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($rows) && $rows !== array()) {
+            return $rows;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_RUNS
+            . ' WHERE processing_run_id = ? AND probe_label = ? AND success_status = ?'
+            . ' ORDER BY chunk_start_time_ms ASC, id ASC'
+        );
+        $stmt->execute(array($processingRunId, 'whisper1_verbose_json', 'success'));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listProductionJsonRunsForProcessingRun(int $processingRunId): array
+    {
+        if (!EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_RUNS)) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ' . EvidenceSchema::TABLE_PROVIDER_RUNS
+            . ' WHERE processing_run_id = ? AND probe_label = ? AND success_status = ?'
+            . ' ORDER BY chunk_start_time_ms ASC, id ASC'
+        );
+        $stmt->execute(array($processingRunId, 'production_json', 'success'));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    public function mergedProductionTextForProcessingRun(int $processingRunId): ?string
+    {
+        $runs = $this->listProductionJsonRunsForProcessingRun($processingRunId);
+        if ($runs === array()) {
+            return null;
+        }
+        $parts = array();
+        foreach ($runs as $run) {
+            $text = trim((string)($run['returned_text'] ?? ''));
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+        if ($parts === array()) {
+            return null;
+        }
+        if (count($parts) === 1) {
+            return $parts[0];
+        }
+        require_once dirname(__DIR__) . '/CockpitRecorderService.php';
+        return CockpitRecorderService::mergeTranscriptParts($parts);
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     public function findByProcessingRunAndLabel(int $processingRunId, string $probeLabel): ?array

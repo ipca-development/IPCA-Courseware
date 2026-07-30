@@ -47,35 +47,45 @@ final class EvidencePass4Runner
             );
         }
 
-        $canonical = $this->providerRuns->findCanonicalForProcessingRun($processingRunId);
-        if ($canonical === null) {
+        $recordingId = (int)$processingRun['recording_id'];
+        $whisperRuns = $this->providerRuns->listCanonicalWhisperRunsForProcessingRun($processingRunId);
+        if ($whisperRuns === array()) {
             throw new RuntimeException('No canonical whisper provider run for processing run ' . $processingRunId);
         }
 
-        $secondary = $this->providerRuns->findByProcessingRunAndLabel($processingRunId, 'production_json');
-        $providerSegments = $this->providerRuns->listSegments((int)$canonical['id']);
-        if ($providerSegments === array()) {
-            throw new RuntimeException('Canonical provider run has no segments.');
+        $secondaryText = $this->providerRuns->mergedProductionTextForProcessingRun($processingRunId);
+        $language = null;
+        foreach ($this->providerRuns->listProductionJsonRunsForProcessingRun($processingRunId) as $productionRun) {
+            if (isset($productionRun['language_code']) && is_string($productionRun['language_code']) && $productionRun['language_code'] !== '') {
+                $language = $productionRun['language_code'];
+                break;
+            }
         }
 
-        $recordingId = (int)$processingRun['recording_id'];
-        $language = is_array($secondary) ? ($secondary['language_code'] ?? null) : null;
+        if (count($whisperRuns) === 1) {
+            $providerSegments = $this->providerRuns->listSegments((int)$whisperRuns[0]['id']);
+            if ($providerSegments === array()) {
+                throw new RuntimeException('Canonical provider run has no segments.');
+            }
+        }
 
-        $speechSegmentRows = $this->speechSegments->materializeFromProviderRun(
+        $speechSegmentRows = $this->speechSegments->materializeFromWhisperRuns(
             $recordingId,
             $processingRunId,
-            (int)$canonical['id'],
-            $providerSegments,
+            $whisperRuns,
             is_string($language) ? $language : null
         );
+        if ($speechSegmentRows === array()) {
+            throw new RuntimeException('Whisper provider runs have no materialized speech segments.');
+        }
+        $canonicalRunId = (int)($whisperRuns[0]['id'] ?? 0);
 
         $pass4a = $this->pass4a->analyze($speechSegmentRows);
         $primaryText = trim(implode(' ', array_map(
             static fn(array $s): string => trim((string)($s['provider_segment_text'] ?? '')),
             $speechSegmentRows
         )));
-        $secondaryText = is_array($secondary) ? trim((string)($secondary['returned_text'] ?? '')) : null;
-        $pass4b = $this->pass4b->analyze($primaryText, $secondaryText !== '' ? $secondaryText : null, $speechSegmentRows);
+        $pass4b = $this->pass4b->analyze($primaryText, $secondaryText !== null && $secondaryText !== '' ? $secondaryText : null, $speechSegmentRows);
 
         $interpretationIds = array();
         $suppressionIds = array();
@@ -198,8 +208,9 @@ final class EvidencePass4Runner
             'skipped' => false,
             'processing_run_id' => $processingRunId,
             'recording_id' => $recordingId,
-            'canonical_provider_run_id' => (int)$canonical['id'],
-            'secondary_provider_run_id' => is_array($secondary) ? (int)($secondary['id'] ?? 0) : null,
+            'canonical_provider_run_id' => $canonicalRunId,
+            'whisper_provider_run_count' => count($whisperRuns),
+            'secondary_text_length' => $secondaryText !== null ? strlen($secondaryText) : 0,
             'speech_segment_count' => count($speechSegmentRows),
             'pass_4a' => $pass4a,
             'pass_4b' => array(

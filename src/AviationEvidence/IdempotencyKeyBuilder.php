@@ -13,6 +13,27 @@ final class IdempotencyKeyBuilder
     }
 
     /**
+     * Stable execution id for one production transcription completion (recording + completion time + source hash).
+     */
+    public static function productionExecutionUuid(int $recordingId, string $transcriptionCompletedAt, string $sourceAudioSha256): string
+    {
+        $hash = hash('sha256', 'production_execution|' . $recordingId . '|' . $transcriptionCompletedAt . '|' . strtolower($sourceAudioSha256));
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12)
+        );
+    }
+
+    public static function forProductionTranscriptionChunk(string $executionUuid, int $chunkIndex, string $probeLabel): string
+    {
+        return hash('sha256', 'production_persist|' . strtolower($executionUuid) . '|' . $chunkIndex . '|' . $probeLabel);
+    }
+
+    /**
      * @param array<string,mixed> $requestConfig
      */
     public static function normalizeRequestConfig(array $requestConfig): array
