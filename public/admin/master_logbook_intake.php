@@ -2055,10 +2055,6 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
         return;
       }
       transcriptPublishButton.disabled = true;
-      if (transcriptBody) {
-        transcriptBody.hidden = false;
-        transcriptBody.textContent = 'Publishing evidence transcript…';
-      }
       try {
         const formData = new FormData();
         formData.append('recording_id', activeTranscriptRecordingId);
@@ -2074,8 +2070,9 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error || 'Could not publish evidence transcript.');
         }
-        await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: false });
-        window.alert('Published evidence transcript version ' + (payload.version_uuid || payload.published_transcript_version_id || '') + '.');
+        await loadTranscriptModal(activeTranscriptRecordingId, { allowPoll: false, silentRefresh: true });
+        const blockInfo = payload.display_block_count ? (' · ' + String(payload.display_block_count) + ' timestamped blocks') : '';
+        window.alert('Published evidence transcript version ' + (payload.version_uuid || payload.published_transcript_version_id || '') + blockInfo + '.');
       } catch (error) {
         if (transcriptBody) {
           transcriptBody.hidden = false;

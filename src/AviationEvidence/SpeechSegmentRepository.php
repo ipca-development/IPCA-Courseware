@@ -130,6 +130,59 @@ final class SpeechSegmentRepository
     }
 
     /**
+     * Fill missing provider_segment_text from provider segments table when JOIN did not populate it.
+     *
+     * @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    public function enrichProviderText(array $segments): array
+    {
+        if ($segments === array()) {
+            return array();
+        }
+
+        $missingProviderSegmentIds = array();
+        foreach ($segments as $segment) {
+            if (trim((string)($segment['provider_segment_text'] ?? '')) !== '') {
+                continue;
+            }
+            $providerSegmentId = (int)($segment['primary_provider_segment_id'] ?? 0);
+            if ($providerSegmentId > 0) {
+                $missingProviderSegmentIds[$providerSegmentId] = $providerSegmentId;
+            }
+        }
+
+        $providerTextById = array();
+        if ($missingProviderSegmentIds !== array() && EvidenceSchema::tablePresent($this->pdo, EvidenceSchema::TABLE_PROVIDER_SEGMENTS)) {
+            $placeholders = implode(',', array_fill(0, count($missingProviderSegmentIds), '?'));
+            $stmt = $this->pdo->prepare(
+                'SELECT id, text FROM ' . EvidenceSchema::TABLE_PROVIDER_SEGMENTS . ' WHERE id IN (' . $placeholders . ')'
+            );
+            $stmt->execute(array_values($missingProviderSegmentIds));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+                $text = trim((string)($row['text'] ?? ''));
+                if ($text !== '') {
+                    $providerTextById[(int)($row['id'] ?? 0)] = $text;
+                }
+            }
+        }
+
+        $out = array();
+        foreach ($segments as $segment) {
+            $text = trim((string)($segment['provider_segment_text'] ?? ''));
+            if ($text === '') {
+                $providerSegmentId = (int)($segment['primary_provider_segment_id'] ?? 0);
+                if ($providerSegmentId > 0 && isset($providerTextById[$providerSegmentId])) {
+                    $segment['provider_segment_text'] = $providerTextById[$providerSegmentId];
+                }
+            }
+            $out[] = $segment;
+        }
+
+        return $out;
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     public function findById(int $id): ?array

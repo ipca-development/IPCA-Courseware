@@ -46,6 +46,7 @@
       pollTimer: null,
       publishableRunId: null,
       timeUpdateBound: false,
+      hasLoadedOnce: false,
     },
 
     init(elements) {
@@ -62,10 +63,13 @@
 
     async load(recordingId, options = {}) {
       const allowPoll = options.allowPoll !== false;
+      const silentRefresh = options.silentRefresh === true || (this.state.hasLoadedOnce && allowPoll);
       if (!recordingId) return;
 
       this.state.recordingId = recordingId;
-      this.showLoading();
+      if (!silentRefresh) {
+        this.showLoading();
+      }
 
       const layer = this.state.activeLayer ? '&layer=' + encodeURIComponent(this.state.activeLayer) : '';
       const response = await fetch('/admin/api/cockpit_recorder_transcript_review.php?id=' + encodeURIComponent(recordingId) + layer, {
@@ -77,6 +81,7 @@
       }
 
       this.state.payload = payload;
+      this.state.hasLoadedOnce = true;
       this.state.activeLayer = payload.active_layer || 'legacy';
       this.state.publishableRunId = payload.pipeline?.latest_publishable_processing_run_id || null;
       this.render(payload);
@@ -88,7 +93,7 @@
         || pipeline.stage === 'processing_evidence';
       if ((inProgress || evidencePending) && allowPoll && this.state.pollTimer === null) {
         this.state.pollTimer = window.setInterval(() => {
-          this.load(recordingId, { allowPoll: true }).catch(() => this.stopPoll());
+          this.load(recordingId, { allowPoll: true, silentRefresh: true }).catch(() => this.stopPoll());
         }, 5000);
       } else if (!inProgress && !evidencePending) {
         this.stopPoll();
@@ -132,8 +137,9 @@
         return;
       }
 
-      if (payload.view_mode === 'structured' && Array.isArray(payload.blocks) && payload.blocks.length > 0
-        && ['whisper', 'readable', 'published'].includes(String(payload.active_layer || ''))) {
+      if (Array.isArray(payload.blocks) && payload.blocks.length > 0
+        && (payload.view_mode === 'structured'
+          || ['whisper', 'readable', 'published', 'production'].includes(String(payload.active_layer || '')))) {
         this.renderStructured(payload);
       } else {
         const layerText = payload.layers?.[payload.active_layer] || payload.legacy_text || '';
@@ -192,6 +198,17 @@
           } else {
             publishHint.innerHTML = '<strong>Publish Evidence is unavailable.</strong> Pass 4 quality processing must finish before the readable transcript and debrief can proceed.';
           }
+        } else if (payload.published?.published_version_uuid) {
+          publishHint.hidden = false;
+          publishHint.classList.add('trv-publish-hint-ready');
+          const blockCount = Number(payload.block_count || payload.blocks?.length || 0);
+          const chapterCount = Number(payload.chapter_count || payload.chapters?.length || 0);
+          publishHint.textContent = 'Published evidence version '
+            + String(payload.published.published_version_uuid).slice(0, 8)
+            + '…'
+            + (blockCount > 0 ? (' · ' + String(blockCount) + ' timestamped blocks') : '')
+            + (chapterCount > 0 ? (' · ' + String(chapterCount) + ' chapters') : '')
+            + '. Publish again to create a new immutable snapshot.';
         } else {
           publishHint.hidden = false;
           publishHint.classList.add('trv-publish-hint-ready');
@@ -513,6 +530,7 @@
       this.stopPoll();
       this.state.recordingId = null;
       this.state.payload = null;
+      this.state.hasLoadedOnce = false;
       this.state.timeUpdateBound = false;
       const { player, workspace, legacyBody, toolbar } = this.elements;
       if (player) {

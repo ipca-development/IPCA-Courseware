@@ -15,6 +15,7 @@ require_once __DIR__ . '/Pass4bRepetitionDetectorService.php';
 require_once __DIR__ . '/DisplayBlockBuilderService.php';
 require_once __DIR__ . '/ChapterBuilderService.php';
 require_once __DIR__ . '/TerminologyCorrectionRepository.php';
+require_once __DIR__ . '/EvidencePass5Runner.php';
 require_once __DIR__ . '/../CockpitRecorderEvidenceQueueService.php';
 require_once __DIR__ . '/../CockpitRecorderService.php';
 
@@ -53,6 +54,10 @@ final class TranscriptReviewService
 
         if ($processingRunId <= 0 && is_array($snapshot)) {
             $processingRunId = (int)($snapshot['processing_run_id'] ?? 0);
+        }
+
+        if ($processingRunId > 0) {
+            $this->ensureDisplayMaterialized($recordingId, $processingRunId);
         }
 
         $blocks = array();
@@ -109,6 +114,8 @@ final class TranscriptReviewService
             ), $corrections),
             'view_mode' => $blocks !== array() ? 'structured' : 'legacy',
             'legacy_text' => trim((string)($recording['transcript_text'] ?? '')),
+            'block_count' => count($blocks),
+            'chapter_count' => count($chapters),
         );
     }
 
@@ -263,25 +270,39 @@ final class TranscriptReviewService
         array $suppressedSegmentIds
     ): array {
         if (is_array($snapshot) && is_array($snapshot['display_blocks'] ?? null) && $snapshot['display_blocks'] !== array()) {
-            return $snapshot['display_blocks'];
+            $fromSnapshot = $this->normalizeBlocksForView($snapshot['display_blocks']);
+            if ($fromSnapshot !== array()) {
+                return $fromSnapshot;
+            }
         }
 
         $rows = $this->displayBlocks->listForProcessingRun($processingRunId);
         if ($rows !== array()) {
-            return $this->formatBlockRows($rows, $suppressedSegmentIds);
+            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds);
+            if ($formatted !== array()) {
+                return $formatted;
+            }
         }
 
-        if (!EvidenceSchema::pass5Ready($this->pdo)) {
+        $speechSegments = $this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId));
+        if ($speechSegments === array()) {
             return $this->blocksFromTimeline($snapshot, $suppressedSegmentIds);
         }
 
-        $speechSegments = $this->speechSegments->listForProcessingRun($processingRunId);
-        if ($speechSegments === array()) {
-            return array();
+        $built = $this->blockBuilder->build($speechSegments, $suppressedSegmentIds);
+        if ($built === array()) {
+            return $this->blocksFromTimeline($snapshot, $suppressedSegmentIds);
         }
 
-        $built = $this->blockBuilder->build($speechSegments, $suppressedSegmentIds);
-        return $this->displayBlocks->replaceForProcessingRun($recordingId, $processingRunId, $built);
+        if (EvidenceSchema::pass5Ready($this->pdo)) {
+            $rows = $this->displayBlocks->replaceForProcessingRun($recordingId, $processingRunId, $built);
+            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds);
+            if ($formatted !== array()) {
+                return $formatted;
+            }
+        }
+
+        return $this->normalizeBlocksForView($built);
     }
 
     /**
@@ -336,7 +357,7 @@ final class TranscriptReviewService
         if ($rows !== array()) {
             $processingRunId = (int)($rows[0]['processing_run_id'] ?? 0);
             if ($processingRunId > 0) {
-                foreach ($this->speechSegments->listForProcessingRun($processingRunId) as $segment) {
+                foreach ($this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId)) as $segment) {
                     $segmentsById[(int)($segment['id'] ?? 0)] = $segment;
                 }
             }
@@ -403,6 +424,83 @@ final class TranscriptReviewService
             );
         }
         return $this->blockBuilder->build($segments, $suppressedSegmentIds);
+    }
+
+    private function ensureDisplayMaterialized(int $recordingId, int $processingRunId): void
+    {
+        if ($recordingId <= 0 || $processingRunId <= 0) {
+            return;
+        }
+
+        $suppressedSegmentIds = $this->suppressedSegmentIds($processingRunId);
+        $existingRows = $this->displayBlocks->listForProcessingRun($processingRunId);
+        if ($existingRows !== array()) {
+            $formatted = $this->formatBlockRows($existingRows, $suppressedSegmentIds);
+            if ($formatted !== array()) {
+                return;
+            }
+        }
+
+        if (!EvidenceSchema::pass5Ready($this->pdo)) {
+            return;
+        }
+
+        $speechSegments = $this->speechSegments->listForProcessingRun($processingRunId);
+        if ($speechSegments === array()) {
+            return;
+        }
+
+        try {
+            EvidencePass5Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId, $existingRows !== array());
+        } catch (Throwable $e) {
+            error_log('[TranscriptReview] Pass 5 backfill recording ' . $recordingId . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    private function enrichSpeechSegments(array $segments): array
+    {
+        return $this->speechSegments->enrichProviderText($segments);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $blocks
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeBlocksForView(array $blocks): array
+    {
+        $out = array();
+        $nextId = 1;
+        foreach ($blocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $text = trim((string)($block['text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            $id = (int)($block['id'] ?? 0);
+            if ($id <= 0) {
+                $id = $nextId;
+            }
+            $nextId = max($nextId + 1, $id + 1);
+            $segmentIds = $block['speech_segment_ids'] ?? array();
+            if (!is_array($segmentIds)) {
+                $segmentIds = array();
+            }
+            $out[] = array(
+                'id' => $id,
+                'start_time_ms' => (int)($block['start_time_ms'] ?? 0),
+                'end_time_ms' => (int)($block['end_time_ms'] ?? 0),
+                'text' => $text,
+                'speech_segment_ids' => array_values(array_map('intval', $segmentIds)),
+                'suppressed' => !empty($block['suppressed']),
+            );
+        }
+        return $out;
     }
 
     /**
