@@ -2217,6 +2217,9 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       if (normalized === 'processing_evidence') {
         return 'PROCESSING EVIDENCE';
       }
+      if (normalized === 'evidence_failed') {
+        return 'EVIDENCE FAILED';
+      }
       return normalized.replace(/_/g, ' ').toUpperCase();
     };
     const abbreviateAudioError = (text, maxLength = 52) => {
@@ -2268,6 +2271,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           if (fillEl) {
             fillEl.style.width = progress + '%';
             fillEl.classList.toggle('is-evidence-active', displayStatus === 'processing_evidence');
+            fillEl.classList.toggle('is-evidence-failed', displayStatus === 'evidence_failed');
           }
           if (statusEl) {
             statusEl.textContent = formatAudioStatusLabel(displayStatus);

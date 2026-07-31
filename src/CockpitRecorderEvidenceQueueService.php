@@ -47,54 +47,128 @@ final class CockpitRecorderEvidenceQueueService
     }
 
     /**
+     * One automatic kickoff after transcription — not a retry loop for failed runs.
+     *
+     * @return array<string,mixed>
+     */
+    public function kickoffOnce(int $recordingId): array
+    {
+        if ($recordingId <= 0) {
+            return array('ok' => false, 'started' => false, 'reason' => 'invalid_recording_id');
+        }
+
+        $recording = $this->recorder->recordingByAnyId((string)$recordingId);
+        if (!is_array($recording)) {
+            return array('ok' => false, 'started' => false, 'reason' => 'recording_not_found');
+        }
+        if (!$this->needsEvidenceProcessing($recording)) {
+            return array('ok' => true, 'started' => false, 'reason' => 'not_needed');
+        }
+        if ($this->isEvidenceInProgress($recordingId)) {
+            return array('ok' => true, 'started' => false, 'reason' => 'already_running');
+        }
+
+        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
+        if (is_array($runningRun) && !$this->diagnostics->isRunLive($runningRun)) {
+            return array('ok' => true, 'started' => false, 'reason' => 'needs_manual_restart');
+        }
+
+        $failure = $this->diagnostics->diagnose($recordingId, $recording, $runningRun);
+        if (is_array($failure) && $this->diagnostics->requiresManualRestart($failure)) {
+            return array('ok' => true, 'started' => false, 'reason' => 'needs_manual_restart', 'failure' => $failure);
+        }
+
+        if ($this->hasRecentKickoffAttempt($recordingId)) {
+            return array('ok' => true, 'started' => false, 'reason' => 'kickoff_already_attempted');
+        }
+
+        $this->recordKickoffAttempt($recordingId);
+
+        if (!function_exists('exec')) {
+            return array(
+                'ok' => true,
+                'started' => false,
+                'reason' => 'exec_disabled_needs_restart',
+            );
+        }
+
+        $spawned = $this->spawnWorker($recordingId);
+        return array(
+            'ok' => true,
+            'started' => $spawned,
+            'reason' => $spawned ? 'worker_spawned' : 'worker_spawn_failed',
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $recording
+     * @return array<string,mixed>
+     */
+    private function kickoffInline(int $recordingId, array $recording): array
+    {
+        require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
+        try {
+            @set_time_limit(0);
+            $result = ProductionTranscriptionEvidenceService::fromPdo($this->pdo)
+                ->persistAfterTranscription($recordingId, $recording);
+            if (($result['reason'] ?? '') === 'in_progress') {
+                return array('ok' => true, 'started' => true, 'reason' => 'already_running', 'inline_result' => $result);
+            }
+            if (!empty($result['ok']) || !empty($result['skipped'])) {
+                return array('ok' => true, 'started' => true, 'reason' => 'inline_completed', 'inline_result' => $result);
+            }
+            return array(
+                'ok' => false,
+                'started' => false,
+                'reason' => (string)($result['reason'] ?? 'inline_failed'),
+                'inline_result' => $result,
+            );
+        } catch (Throwable $e) {
+            return array('ok' => false, 'started' => false, 'reason' => 'inline_exception', 'error' => $e->getMessage());
+        }
+    }
+
+    private function kickoffStampPath(int $recordingId): string
+    {
+        $dir = CockpitRecorderService::projectRoot() . '/storage/locks';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        return $dir . '/evidence_kickoff_' . $recordingId . '.stamp';
+    }
+
+    private function hasRecentKickoffAttempt(int $recordingId): bool
+    {
+        $path = $this->kickoffStampPath($recordingId);
+        if (!is_file($path)) {
+            return false;
+        }
+        $mtime = filemtime($path);
+        if ($mtime === false) {
+            return true;
+        }
+        return (time() - $mtime) < 120;
+    }
+
+    private function recordKickoffAttempt(int $recordingId): void
+    {
+        @file_put_contents($this->kickoffStampPath($recordingId), gmdate('c'));
+    }
+
+    /**
      * Start evidence processing once after transcription. Does not retry stalled runs.
      *
      * @return array<string,mixed>
      */
     public function ensureQueued(int $recordingId): array
     {
-        if ($recordingId <= 0) {
-            return array('ok' => false, 'queued' => false, 'reason' => 'invalid_recording_id');
-        }
-
-        $recording = $this->recorder->recordingByAnyId((string)$recordingId);
-        if (!is_array($recording)) {
-            return array('ok' => false, 'queued' => false, 'reason' => 'recording_not_found');
-        }
-        if (!$this->needsEvidenceProcessing($recording)) {
-            $publishable = $this->processingRuns->findLatestPublishableForRecording($recordingId);
-            return array(
-                'ok' => true,
-                'queued' => false,
-                'reason' => $publishable !== null ? 'already_publishable' : 'not_needed',
-                'processing_run_id' => is_array($publishable) ? (int)($publishable['id'] ?? 0) : null,
-            );
-        }
-
-        if ($this->isEvidenceInProgress($recordingId)) {
-            return array('ok' => true, 'queued' => false, 'reason' => 'already_running');
-        }
-
-        $runningRun = $this->processingRuns->findRunningForRecording($recordingId);
-        $failure = $this->diagnostics->diagnose($recordingId, $recording, $runningRun);
-        if (is_array($failure)) {
-            return array(
-                'ok' => true,
-                'queued' => false,
-                'reason' => 'needs_manual_restart',
-                'failure' => $failure,
-            );
-        }
-
-        if ($this->processingRuns->findLatestFailedForRecording($recordingId) !== null) {
-            return array('ok' => true, 'queued' => false, 'reason' => 'needs_manual_restart');
-        }
-
-        $spawned = $this->spawnWorker($recordingId);
+        $result = $this->kickoffOnce($recordingId);
         return array(
-            'ok' => true,
-            'queued' => $spawned,
-            'reason' => $spawned ? 'worker_spawned' : 'worker_spawn_failed',
+            'ok' => !empty($result['ok']),
+            'queued' => !empty($result['started']),
+            'reason' => (string)($result['reason'] ?? 'unknown'),
+            'failure' => $result['failure'] ?? null,
+            'inline_result' => $result['inline_result'] ?? null,
         );
     }
 

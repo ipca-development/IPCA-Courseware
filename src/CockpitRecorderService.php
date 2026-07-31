@@ -2699,18 +2699,28 @@ final class CockpitRecorderService
      */
     private function runPostTranscriptionPipeline(int $recordingId, array $recording): void
     {
+        $logFile = CockpitRecorderService::projectRoot() . '/storage/logs/cockpit_evidence_' . $recordingId . '.log';
         try {
             require_once __DIR__ . '/AviationEvidence/EvidenceSchema.php';
-            if (!EvidenceSchema::persistenceReady($this->pdo) || EvidenceSchema::skipProductionPersist()) {
+            if (!EvidenceSchema::persistenceReady($this->pdo)) {
+                @file_put_contents($logFile, '[' . gmdate('c') . '] Post-transcription evidence skipped: schema not ready.' . PHP_EOL, FILE_APPEND);
+                return;
+            }
+            if (EvidenceSchema::skipProductionPersist()) {
+                @file_put_contents($logFile, '[' . gmdate('c') . '] Post-transcription evidence skipped: CW_EVIDENCE_SKIP_PRODUCTION_PERSIST.' . PHP_EOL, FILE_APPEND);
                 return;
             }
             require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
-            if (EvidenceSchema::whisperFirstTranscription()) {
-                ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
-                return;
-            }
-            $this->maybePersistProductionEvidence($recordingId, $recording);
+            @file_put_contents($logFile, '[' . gmdate('c') . '] Post-transcription evidence starting inline.' . PHP_EOL, FILE_APPEND);
+            $result = ProductionTranscriptionEvidenceService::fromPdo($this->pdo)->persistAfterTranscription($recordingId, $recording);
+            @file_put_contents(
+                $logFile,
+                '[' . gmdate('c') . '] Post-transcription evidence result: '
+                . json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL,
+                FILE_APPEND
+            );
         } catch (Throwable $e) {
+            @file_put_contents($logFile, '[' . gmdate('c') . '] Post-transcription evidence ERROR: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
             error_log('[ProductionTranscriptionEvidence] recording ' . $recordingId . ': ' . $e->getMessage());
         }
     }

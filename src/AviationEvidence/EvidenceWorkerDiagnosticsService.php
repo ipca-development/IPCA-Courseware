@@ -36,16 +36,6 @@ final class EvidenceWorkerDiagnosticsService
             return null;
         }
 
-        if (!function_exists('exec')) {
-            return $this->failure(
-                'exec_disabled',
-                'Background worker cannot start because PHP exec() is disabled on this server.',
-                'The server cannot spawn nohup background workers. Use Restart Evidence to run inline instead.',
-                null,
-                null
-            );
-        }
-
         $failedRun = $this->processingRuns->findLatestFailedForRecording($recordingId);
         if (is_array($failedRun)) {
             $reason = trim((string)($failedRun['failure_reason'] ?? ''));
@@ -122,13 +112,17 @@ final class EvidenceWorkerDiagnosticsService
 
         if (is_array($recording)) {
             $elapsed = $this->secondsSinceTranscriptionReady($recording);
-            if ($elapsed !== null && $elapsed >= self::QUEUED_START_TIMEOUT_SECONDS && !$this->hasEvidenceLog($recordingId)) {
+            if ($elapsed !== null && $elapsed >= self::QUEUED_START_TIMEOUT_SECONDS && !$this->hasProcessingStarted($recordingId)) {
+                $detail = 'No evidence processing activity was recorded. Transcription completed ' . $elapsed . 's ago.';
+                if (!function_exists('exec')) {
+                    $detail .= ' PHP exec() is disabled — use Restart Evidence to run inline.';
+                }
                 return $this->failure(
                     'never_started',
                     'Evidence processing never started after transcription finished.',
-                    'No evidence worker log exists yet. Transcription completed ' . $elapsed . 's ago.',
+                    $detail,
                     'queued',
-                    null
+                    $this->readLogExcerpt($recordingId)
                 );
             }
         }
@@ -136,9 +130,57 @@ final class EvidenceWorkerDiagnosticsService
         return null;
     }
 
+    public function hasProcessingStarted(int $recordingId): bool
+    {
+        if ($recordingId <= 0) {
+            return false;
+        }
+
+        if ($this->processingRuns->findLatestForRecording($recordingId) !== null) {
+            return true;
+        }
+
+        foreach ($this->tailLogLines($recordingId, 40) as $line) {
+            if (
+                str_contains($line, 'Evidence worker started for recording')
+                || str_contains($line, 'Evidence persist started')
+                || str_contains($line, 'Persisting chunk ')
+                || str_contains($line, 'Pass 4 started')
+                || str_contains($line, 'Pass 5 started')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
-     * Seal a dead running row as failed once we have a diagnosis. Does not restart.
+     * Failures that require an operator restart — never auto-kickoff.
      *
+     * @return list<string>
+     */
+    public static function manualRestartFailureCodes(): array
+    {
+        return array(
+            'run_failed',
+            'never_started',
+            'spawn_failed',
+            'worker_exception',
+            'heartbeat_timeout',
+            'worker_never_heartbeated',
+        );
+    }
+
+    /**
+     * @param array{code:string,reason:string,detail:string,phase:?string,log_excerpt:?string,can_restart:bool} $diagnosis
+     */
+    public function requiresManualRestart(array $diagnosis): bool
+    {
+        return in_array((string)($diagnosis['code'] ?? ''), self::manualRestartFailureCodes(), true);
+    }
+
+    /**
      * @param array{code:string,reason:string,detail:string,phase:?string,log_excerpt:?string,can_restart:bool} $diagnosis
      */
     public function sealDiagnosedFailure(int $runId, array $diagnosis): bool
