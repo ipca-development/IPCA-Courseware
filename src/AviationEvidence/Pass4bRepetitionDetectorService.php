@@ -120,6 +120,7 @@ final class Pass4bRepetitionDetectorService
         $counts = array_count_values(array_map(static fn(string $p): string => strtolower($p), $phrases));
         $findings = array();
         foreach ($counts as $phrase => $count) {
+            $phrase = (string)$phrase;
             if ($count < 3 || strlen($phrase) < 4) {
                 continue;
             }
@@ -347,6 +348,7 @@ final class Pass4bRepetitionDetectorService
         $tailCounts = array_count_values(array_map('strtolower', $tail));
         $repeatedInTail = 0;
         foreach ($tailCounts as $phrase => $count) {
+            $phrase = (string)$phrase;
             if ($count >= 2 && strlen($phrase) >= 4) {
                 $repeatedInTail += $count;
             }
