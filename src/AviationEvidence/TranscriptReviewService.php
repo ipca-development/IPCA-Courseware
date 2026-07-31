@@ -17,7 +17,6 @@ require_once __DIR__ . '/ChapterBuilderService.php';
 require_once __DIR__ . '/TerminologyCorrectionRepository.php';
 require_once __DIR__ . '/EvidencePass5Runner.php';
 require_once __DIR__ . '/GibberishSegmentDetectorService.php';
-require_once __DIR__ . '/GibberishSegmentDetectorService.php';
 require_once __DIR__ . '/../CockpitRecorderEvidenceQueueService.php';
 require_once __DIR__ . '/../CockpitRecorderService.php';
 
@@ -51,17 +50,14 @@ final class TranscriptReviewService
         $hasAudio = trim((string)($recording['storage_path'] ?? '')) !== '';
 
         $pipeline = $this->pipelineStatus($recording);
-        $processingRunId = (int)($pipeline['active_processing_run_id'] ?? 0);
+        // Only read finalized, publishable evidence here. A transcript GET must never
+        // materialize or analyze a partially written processing run.
+        $processingRunId = (int)($pipeline['latest_publishable_processing_run_id'] ?? 0);
         $publishedVersion = $this->resolvePublishedVersion($recording);
         $snapshot = is_array($publishedVersion) ? $this->decodeSnapshot($publishedVersion) : null;
 
         if ($processingRunId <= 0 && is_array($snapshot)) {
             $processingRunId = (int)($snapshot['processing_run_id'] ?? 0);
-        }
-
-        if ($processingRunId > 0) {
-            $this->ensureGibberishSuppressions($recordingId, $processingRunId);
-            $this->ensureDisplayMaterialized($recordingId, $processingRunId);
         }
 
         $blocks = array();
@@ -149,12 +145,16 @@ final class TranscriptReviewService
             'evidence_estimated_remaining_seconds' => $public['evidence_estimated_remaining_seconds'] ?? null,
             'evidence_worker_failed' => !empty($public['evidence_worker_failed']),
             'evidence_worker_failure_reason' => $public['evidence_worker_failure_reason'] ?? null,
+            'evidence_worker_failure_code' => $public['evidence_worker_failure_code'] ?? null,
+            'evidence_worker_failure_detail' => $public['evidence_worker_failure_detail'] ?? null,
+            'evidence_worker_log_excerpt' => $public['evidence_worker_log_excerpt'] ?? null,
             'can_retry_evidence' => !empty($public['can_retry_evidence']),
             'running_processing_run_id' => $public['running_processing_run_id'] ?? null,
             'latest_publishable_processing_run_id' => $public['latest_publishable_processing_run_id'] ?? null,
-            'active_processing_run_id' => (int)($recording['current_processing_run_id'] ?? 0) > 0
-                ? (int)$recording['current_processing_run_id']
-                : ($public['latest_publishable_processing_run_id'] ?? $public['running_processing_run_id'] ?? null),
+            'active_processing_run_id' => $public['latest_publishable_processing_run_id']
+                ?? ((int)($recording['current_processing_run_id'] ?? 0) > 0
+                    ? (int)$recording['current_processing_run_id']
+                    : ($public['running_processing_run_id'] ?? null)),
             'published_transcript_version_id' => (int)($recording['published_transcript_version_id'] ?? 0),
         );
     }

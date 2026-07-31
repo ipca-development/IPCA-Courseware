@@ -82,8 +82,6 @@ final class CockpitRecorderEvidenceQueueService
             return array('ok' => true, 'started' => false, 'reason' => 'kickoff_already_attempted');
         }
 
-        $this->recordKickoffAttempt($recordingId);
-
         if (!function_exists('exec')) {
             return array(
                 'ok' => true,
@@ -93,6 +91,9 @@ final class CockpitRecorderEvidenceQueueService
         }
 
         $spawned = $this->spawnWorker($recordingId);
+        if ($spawned) {
+            $this->recordKickoffAttempt($recordingId);
+        }
         return array(
             'ok' => true,
             'started' => $spawned,
@@ -172,7 +173,7 @@ final class CockpitRecorderEvidenceQueueService
         );
     }
 
-    public function spawnWorker(int $recordingId): bool
+    public function spawnWorker(int $recordingId, bool $explicitRetry = false): bool
     {
         if ($recordingId <= 0) {
             return false;
@@ -213,11 +214,13 @@ final class CockpitRecorderEvidenceQueueService
                 . escapeshellarg($php) . ' '
                 . escapeshellarg($script) . ' '
                 . '--recording-id=' . $recordingId
+                . ($explicitRetry ? ' --explicit-retry=1' : '')
                 . ' >> ' . escapeshellarg($logFile) . ' 2>&1';
         } else {
             $cmd = 'nohup ' . escapeshellarg($php) . ' '
                 . escapeshellarg($script) . ' '
                 . '--recording-id=' . $recordingId
+                . ($explicitRetry ? ' --explicit-retry=1' : '')
                 . ' >> ' . escapeshellarg($logFile) . ' 2>&1 < /dev/null & echo $!';
         }
 
@@ -235,7 +238,11 @@ final class CockpitRecorderEvidenceQueueService
      *
      * @return array<string,mixed>
      */
-    public function retryProcessing(int $recordingId, bool $allowInlineFallback = true): array
+    public function retryProcessing(
+        int $recordingId,
+        bool $allowInlineFallback = true,
+        bool $preferBackgroundWorker = true
+    ): array
     {
         if ($recordingId <= 0) {
             return array('ok' => false, 'error' => 'Invalid recording id.');
@@ -289,7 +296,7 @@ final class CockpitRecorderEvidenceQueueService
             );
         }
 
-        if (function_exists('exec') && $this->spawnWorker($recordingId)) {
+        if ($preferBackgroundWorker && function_exists('exec') && $this->spawnWorker($recordingId, true)) {
             $recording = $this->recorder->recordingByAnyId((string)$recordingId) ?? $recording;
             return array(
                 'ok' => true,
@@ -348,34 +355,61 @@ final class CockpitRecorderEvidenceQueueService
      */
     public function retryProcessingBatch(array $recordingIds): array
     {
-        $results = array();
-        $started = 0;
-        $failed = 0;
-        foreach ($recordingIds as $recordingId) {
-            $recordingId = (int)$recordingId;
-            if ($recordingId <= 0) {
-                continue;
-            }
-            $result = $this->retryProcessing($recordingId, false);
-            $results[] = array(
-                'recording_id' => $recordingId,
-                'ok' => !empty($result['ok']),
-                'reason' => (string)($result['reason'] ?? ''),
-                'error' => isset($result['error']) ? (string)$result['error'] : null,
-            );
-            if (!empty($result['ok'])) {
-                $started++;
-            } else {
-                $failed++;
-            }
+        $recordingIds = array_values(array_unique(array_filter(
+            array_map('intval', $recordingIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ($recordingIds === array()) {
+            return array('ok' => false, 'started' => 0, 'failed' => 0, 'error' => 'No recording ids supplied.');
         }
 
+        $spawned = $this->spawnBatchWorker($recordingIds);
         return array(
-            'ok' => $failed === 0,
-            'started' => $started,
-            'failed' => $failed,
-            'results' => $results,
+            'ok' => $spawned,
+            'started' => $spawned ? count($recordingIds) : 0,
+            'failed' => $spawned ? 0 : count($recordingIds),
+            'queued_recording_ids' => $recordingIds,
+            'reason' => $spawned ? 'sequential_batch_worker_spawned' : 'batch_worker_spawn_failed',
+            'error' => $spawned ? null : 'Could not start the sequential evidence batch worker.',
         );
+    }
+
+    /**
+     * @param list<int> $recordingIds
+     */
+    private function spawnBatchWorker(array $recordingIds): bool
+    {
+        if (!function_exists('exec')) {
+            return false;
+        }
+
+        $php = CockpitRecorderService::findBinary(array(
+            trim((string)PHP_BINDIR) !== '' ? rtrim((string)PHP_BINDIR, '/') . '/php' : '',
+            '/usr/bin/php',
+            '/usr/local/bin/php',
+            '/opt/homebrew/bin/php',
+            'php',
+        ));
+        $script = realpath(__DIR__ . '/../scripts/run_cockpit_recorder_evidence_batch.php');
+        if ($php === '' || $script === false) {
+            return false;
+        }
+
+        $logDir = CockpitRecorderService::projectRoot() . '/storage/logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0775, true);
+        }
+        if (!is_dir($logDir) || !is_writable($logDir)) {
+            return false;
+        }
+
+        $logFile = $logDir . '/cockpit_evidence_batch.log';
+        $command = 'nohup ' . escapeshellarg($php) . ' '
+            . escapeshellarg($script) . ' '
+            . escapeshellarg('--recording-ids=' . implode(',', $recordingIds))
+            . ' >> ' . escapeshellarg($logFile) . ' 2>&1 < /dev/null & echo $!';
+        exec($command, $output, $exitCode);
+        return $exitCode === 0;
     }
 
     /**

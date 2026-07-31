@@ -10,9 +10,12 @@ require_once __DIR__ . '/../src/AviationEvidence/ProcessingRunRepository.php';
 @ini_set('memory_limit', '1024M');
 
 $recordingId = 0;
+$explicitRetry = false;
 foreach ($argv ?? array() as $arg) {
     if (str_starts_with($arg, '--recording-id=')) {
         $recordingId = (int)substr($arg, strlen('--recording-id='));
+    } elseif ($arg === '--explicit-retry=1') {
+        $explicitRetry = true;
     }
 }
 
@@ -61,7 +64,8 @@ try {
         throw new RuntimeException('Recording not found: ' . $recordingId);
     }
 
-    $result = ProductionTranscriptionEvidenceService::fromPdo($pdo)->persistAfterTranscription($recordingId, $recording);
+    $result = ProductionTranscriptionEvidenceService::fromPdo($pdo)
+        ->persistAfterTranscription($recordingId, $recording, $explicitRetry);
     cockpit_evidence_log($logFile, 'Result: ' . json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
     if (!empty($result['ok']) || (!empty($result['skipped']) && ($result['reason'] ?? '') === 'already_persisted')) {

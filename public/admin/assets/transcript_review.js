@@ -14,6 +14,7 @@
     transcribed: 'Transcribed',
     transcribing: 'Transcribing',
     processing_evidence: 'Processing evidence',
+    evidence_failed: 'Evidence failed',
     evidence: 'Evidence persisted',
     publishable: 'Ready to publish',
     published: 'Published',
@@ -47,6 +48,7 @@
       publishableRunId: null,
       timeUpdateBound: false,
       hasLoadedOnce: false,
+      restartPendingUntil: 0,
     },
 
     init(elements) {
@@ -72,10 +74,29 @@
       }
 
       const layer = this.state.activeLayer ? '&layer=' + encodeURIComponent(this.state.activeLayer) : '';
-      const response = await fetch('/admin/api/cockpit_recorder_transcript_review.php?id=' + encodeURIComponent(recordingId) + layer, {
-        credentials: 'same-origin',
-      });
-      const payload = await response.json();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15000);
+      let response;
+      let payload;
+      try {
+        response = await fetch('/admin/api/cockpit_recorder_transcript_review.php?id=' + encodeURIComponent(recordingId) + layer, {
+          credentials: 'same-origin',
+          signal: controller.signal,
+        });
+        const responseText = await response.text();
+        try {
+          payload = JSON.parse(responseText);
+        } catch (_) {
+          throw new Error('Transcript service returned an invalid response.');
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          throw new Error('Transcript service timed out. Evidence processing continues in the background.');
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || 'Could not load transcript review.');
       }
@@ -89,8 +110,12 @@
       const status = String(payload.transcription_status || '').toLowerCase();
       const inProgress = status === 'queued' || status === 'transcribing' || status === 'pending';
       const pipeline = payload.pipeline || {};
-      const evidencePending = !!pipeline.needs_evidence_processing || !!pipeline.evidence_in_progress
-        || pipeline.stage === 'processing_evidence';
+      const awaitingRestart = Date.now() < Number(this.state.restartPendingUntil || 0);
+      const evidencePending = (!pipeline.evidence_worker_failed || awaitingRestart) && (
+        !!pipeline.needs_evidence_processing
+        || !!pipeline.evidence_in_progress
+        || pipeline.stage === 'processing_evidence'
+      );
       if ((inProgress || evidencePending) && allowPoll && this.state.pollTimer === null) {
         this.state.pollTimer = window.setInterval(() => {
           this.load(recordingId, { allowPoll: true, silentRefresh: true }).catch(() => this.stopPoll());
@@ -128,10 +153,6 @@
         this.renderProgress(payload);
         return;
       }
-      if (evidencePending && !pipeline.publishable) {
-        this.renderEvidenceProcessing(payload);
-        return;
-      }
       if (status === 'failed') {
         this.renderLegacy('Transcription failed. Use Re-Process From Audio to try again.');
         return;
@@ -141,6 +162,13 @@
         && (payload.view_mode === 'structured'
           || ['whisper', 'readable', 'published', 'production'].includes(String(payload.active_layer || '')))) {
         this.renderStructured(payload);
+      } else if (String(payload.legacy_text || '').trim() !== '') {
+        this.renderLegacy(payload.legacy_text);
+        if (evidencePending && !pipeline.publishable) {
+          this.decorateLegacyEvidenceStatus(pipeline);
+        }
+      } else if (evidencePending && !pipeline.publishable) {
+        this.renderEvidenceProcessing(payload);
       } else {
         const layerText = payload.layers?.[payload.active_layer] || payload.legacy_text || '';
         this.renderLegacy(layerText || 'Transcript is not available yet.');
@@ -306,6 +334,8 @@
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || payload.inline_error || 'Could not restart evidence processing.');
       }
+      this.state.restartPendingUntil = Date.now() + 30000;
+      await new Promise((resolve) => window.setTimeout(resolve, 750));
       await this.load(this.state.recordingId, { allowPoll: true, silentRefresh: false });
     },
 
@@ -316,6 +346,40 @@
         legacyBody.hidden = false;
         legacyBody.textContent = text;
       }
+    },
+
+    decorateLegacyEvidenceStatus(pipeline) {
+      const { legacyBody } = this.elements;
+      if (!legacyBody) return;
+
+      const notice = document.createElement('div');
+      notice.className = 'trv-evidence-warning';
+      const failed = !!pipeline.evidence_worker_failed;
+      const reason = String(pipeline.evidence_worker_failure_reason || '').trim();
+      const step = String(pipeline.evidence_step_label || '').trim();
+
+      const strong = document.createElement('strong');
+      strong.textContent = failed ? 'Structured evidence failed' : 'Structured evidence is still processing';
+      notice.appendChild(strong);
+
+      const message = document.createElement('p');
+      message.textContent = reason || step || 'The raw transcript is available below while structured evidence is built.';
+      notice.appendChild(message);
+
+      if (pipeline.can_retry_evidence) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'trv-btn-primary';
+        button.textContent = 'Restart Evidence';
+        button.addEventListener('click', () => {
+          this.retryEvidenceProcessing().catch((error) => {
+            message.textContent = error instanceof Error ? error.message : 'Could not restart evidence processing.';
+          });
+        });
+        notice.appendChild(button);
+      }
+
+      legacyBody.prepend(notice);
     },
 
     renderStructured(payload) {
@@ -631,6 +695,7 @@
       this.state.payload = null;
       this.state.hasLoadedOnce = false;
       this.state.timeUpdateBound = false;
+      this.state.restartPendingUntil = 0;
       const { player, workspace, legacyBody, toolbar } = this.elements;
       if (player) {
         player.pause();

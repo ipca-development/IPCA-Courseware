@@ -40,7 +40,7 @@ final class ProcessingRunRepository
             $stmt = $this->pdo->prepare(
                 'INSERT INTO ' . EvidenceSchema::TABLE_PROCESSING_RUNS
                 . ' (run_uuid, recording_id, parent_run_id, status, canonical_timeline_source, canonical_asr_model, secondary_asr_model, created_by, heartbeat_at, current_phase)'
-                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), ?)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)'
             );
             $stmt->execute(array(
                 $runUuid,

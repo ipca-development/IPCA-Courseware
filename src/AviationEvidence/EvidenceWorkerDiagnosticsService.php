@@ -36,27 +36,51 @@ final class EvidenceWorkerDiagnosticsService
             return null;
         }
 
-        $failedRun = $this->processingRuns->findLatestFailedForRecording($recordingId);
-        if (is_array($failedRun)) {
-            $reason = trim((string)($failedRun['failure_reason'] ?? ''));
-            if ($reason === '') {
-                $reason = 'Evidence processing failed without a recorded reason.';
-            }
-            return $this->failure(
-                'run_failed',
-                $reason,
-                'Processing run #' . (int)($failedRun['id'] ?? 0) . ' is marked failed.',
-                trim((string)($failedRun['current_phase'] ?? '')) ?: null,
-                $this->readLogExcerpt($recordingId)
-            );
-        }
-
-        if ($this->workerLogRecentlyActive($recordingId) || $this->transcriptionWorkerRecentlyActive($recordingId)) {
-            return null;
-        }
-
         if (is_array($runningRun) && $this->isRunLive($runningRun)) {
             return null;
+        }
+
+        if ($runningRun === null) {
+            $failedRun = $this->processingRuns->findLatestFailedForRecording($recordingId);
+            if (is_array($failedRun)) {
+                $reason = trim((string)($failedRun['failure_reason'] ?? ''));
+                if ($reason === '') {
+                    $reason = 'Evidence processing failed without a recorded reason.';
+                }
+                return $this->failure(
+                    'run_failed',
+                    $reason,
+                    'Processing run #' . (int)($failedRun['id'] ?? 0) . ' is marked failed.',
+                    trim((string)($failedRun['current_phase'] ?? '')) ?: null,
+                    $this->readLogExcerpt($recordingId)
+                );
+            }
+
+            $latestRun = $this->processingRuns->findLatestForRecording($recordingId);
+            if (
+                is_array($latestRun)
+                && (string)($latestRun['status'] ?? '') === 'completed'
+                && $this->processingRuns->findLatestPublishableForRecording($recordingId) === null
+            ) {
+                return $this->failure(
+                    'incomplete_completed_run',
+                    'Evidence processing ended before producing a readable transcript.',
+                    'Processing run #' . (int)($latestRun['id'] ?? 0)
+                        . ' was marked completed without Pass 4 readable evidence.',
+                    trim((string)($latestRun['current_phase'] ?? '')) ?: null,
+                    $this->readLogExcerpt($recordingId)
+                );
+            }
+
+            if (!function_exists('exec')) {
+                return $this->failure(
+                    'exec_disabled',
+                    'Background evidence workers are disabled on this server.',
+                    'PHP exec() is unavailable, so evidence cannot be queued as a background process.',
+                    'queued',
+                    $this->readLogExcerpt($recordingId)
+                );
+            }
         }
 
         $logExcerpt = $this->readLogExcerpt($recordingId);
@@ -80,6 +104,14 @@ final class EvidenceWorkerDiagnosticsService
                 is_array($runningRun) ? trim((string)($runningRun['current_phase'] ?? '')) ?: null : null,
                 $logExcerpt
             );
+        }
+
+        $hasHeartbeatColumn = is_array($runningRun) && array_key_exists('heartbeat_at', $runningRun);
+        if (
+            ($runningRun === null || !$hasHeartbeatColumn)
+            && ($this->workerLogRecentlyActive($recordingId) || $this->transcriptionWorkerRecentlyActive($recordingId))
+        ) {
+            return null;
         }
 
         if (is_array($runningRun)) {
@@ -164,6 +196,8 @@ final class EvidenceWorkerDiagnosticsService
     {
         return array(
             'run_failed',
+            'incomplete_completed_run',
+            'exec_disabled',
             'never_started',
             'spawn_failed',
             'worker_exception',
@@ -214,10 +248,6 @@ final class EvidenceWorkerDiagnosticsService
             return false;
         }
 
-        if ($this->workerLogRecentlyActive((int)($run['recording_id'] ?? 0))) {
-            return true;
-        }
-
         $heartbeatAt = trim((string)($run['heartbeat_at'] ?? ''));
         if ($heartbeatAt !== '') {
             $heartbeatTs = strtotime($heartbeatAt);
@@ -231,7 +261,12 @@ final class EvidenceWorkerDiagnosticsService
             return false;
         }
 
-        return (time() - $createdAt) < self::STARTUP_GRACE_SECONDS;
+        if (array_key_exists('heartbeat_at', $run)) {
+            return (time() - $createdAt) < self::STARTUP_GRACE_SECONDS;
+        }
+
+        return $this->workerLogRecentlyActive((int)($run['recording_id'] ?? 0))
+            || (time() - $createdAt) < self::STARTUP_GRACE_SECONDS;
     }
 
     /**

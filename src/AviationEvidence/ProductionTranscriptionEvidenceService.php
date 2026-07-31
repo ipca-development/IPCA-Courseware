@@ -78,13 +78,25 @@ final class ProductionTranscriptionEvidenceService
         $diagnostics = EvidenceWorkerDiagnosticsService::fromPdo($this->pdo);
         $existingRun = $this->processingRuns->findByRunUuid($executionUuid);
         if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'completed') {
-            return array(
-                'ok' => true,
-                'skipped' => true,
-                'reason' => 'already_persisted',
-                'processing_run_id' => (int)($existingRun['id'] ?? 0),
-                'execution_uuid' => $executionUuid,
-            );
+            $publishableRun = $this->processingRuns->findLatestPublishableForRecording($recordingId);
+            if ($publishableRun !== null) {
+                return array(
+                    'ok' => true,
+                    'skipped' => true,
+                    'reason' => 'already_persisted',
+                    'processing_run_id' => (int)($publishableRun['id'] ?? 0),
+                    'execution_uuid' => $executionUuid,
+                );
+            }
+            if (!$explicitRetry) {
+                return array(
+                    'ok' => false,
+                    'skipped' => true,
+                    'reason' => 'incomplete_run_needs_restart',
+                    'processing_run_id' => (int)($existingRun['id'] ?? 0),
+                    'execution_uuid' => $executionUuid,
+                );
+            }
         }
         if ($existingRun !== null && (string)($existingRun['status'] ?? '') === 'running') {
             if ($diagnostics->isRunLive($existingRun)) {
@@ -119,11 +131,15 @@ final class ProductionTranscriptionEvidenceService
         $retryAttempt = 1;
         if ($explicitRetry) {
             $stmt = $this->pdo->prepare(
-                'SELECT COUNT(*) FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE recording_id = ? AND status = ?'
+                'SELECT COUNT(*) FROM ' . EvidenceSchema::TABLE_PROCESSING_RUNS . ' WHERE recording_id = ?'
             );
-            $stmt->execute(array($recordingId, 'failed'));
+            $stmt->execute(array($recordingId));
             $retryAttempt = max(1, (int)$stmt->fetchColumn() + 1);
-            $executionUuid = IdempotencyKeyBuilder::productionRetryExecutionUuid($executionUuid, $retryAttempt);
+            $baseExecutionUuid = $executionUuid;
+            do {
+                $executionUuid = IdempotencyKeyBuilder::productionRetryExecutionUuid($baseExecutionUuid, $retryAttempt);
+                $retryAttempt++;
+            } while ($this->processingRuns->findByRunUuid($executionUuid) !== null);
         }
 
         $productionModel = EvidenceSchema::defaultAsrModel();
@@ -321,13 +337,19 @@ final class ProductionTranscriptionEvidenceService
             }
 
         $pass4Result = null;
-        if (!$skipWhisper && EvidenceSchema::runPass4AfterPersist() && EvidenceSchema::pass4Ready($this->pdo)) {
+        if (!$skipWhisper && EvidenceSchema::runPass4AfterPersist()) {
+            if (!EvidenceSchema::pass4Ready($this->pdo)) {
+                throw new RuntimeException('Pass 4 schema is not ready.');
+            }
             $execution->heartbeat('pass_4');
             $this->evidenceProgressLog($recordingId, 'Pass 4 started.');
             try {
                 $pass4Result = EvidencePass4Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
             } catch (Throwable $e) {
-                $pass4Result = array('ok' => false, 'error' => $e->getMessage());
+                throw new RuntimeException('Pass 4 failed: ' . $e->getMessage(), 0, $e);
+            }
+            if (empty($pass4Result['ok'])) {
+                throw new RuntimeException('Pass 4 failed without a successful result.');
             }
         }
 
@@ -339,14 +361,20 @@ final class ProductionTranscriptionEvidenceService
         $pass5Result = null;
         if (
             is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])
-            && EvidenceSchema::runPass5AfterPersist() && EvidenceSchema::pass5Ready($this->pdo)
+            && EvidenceSchema::runPass5AfterPersist()
         ) {
+            if (!EvidenceSchema::pass5Ready($this->pdo)) {
+                throw new RuntimeException('Pass 5 schema is not ready.');
+            }
             $execution->heartbeat('pass_5');
             $this->evidenceProgressLog($recordingId, 'Pass 5 started.');
             try {
                 $pass5Result = EvidencePass5Runner::fromPdo($this->pdo)->runForProcessingRun($processingRunId);
             } catch (Throwable $e) {
-                $pass5Result = array('ok' => false, 'error' => $e->getMessage());
+                throw new RuntimeException('Pass 5 failed: ' . $e->getMessage(), 0, $e);
+            }
+            if (empty($pass5Result['ok'])) {
+                throw new RuntimeException('Pass 5 failed without a successful result.');
             }
         }
 
