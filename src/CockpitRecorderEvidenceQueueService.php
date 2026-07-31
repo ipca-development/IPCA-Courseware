@@ -235,7 +235,7 @@ final class CockpitRecorderEvidenceQueueService
      *
      * @return array<string,mixed>
      */
-    public function retryProcessing(int $recordingId): array
+    public function retryProcessing(int $recordingId, bool $allowInlineFallback = true): array
     {
         if ($recordingId <= 0) {
             return array('ok' => false, 'error' => 'Invalid recording id.');
@@ -289,6 +289,28 @@ final class CockpitRecorderEvidenceQueueService
             );
         }
 
+        if (function_exists('exec') && $this->spawnWorker($recordingId)) {
+            $recording = $this->recorder->recordingByAnyId((string)$recordingId) ?? $recording;
+            return array(
+                'ok' => true,
+                'recording_id' => $recordingId,
+                'diagnosis' => $diagnosis,
+                'started' => true,
+                'reason' => 'worker_spawned',
+                'pipeline' => $this->publicStatusForRecording($recording),
+            );
+        }
+
+        if (!$allowInlineFallback) {
+            return array(
+                'ok' => false,
+                'recording_id' => $recordingId,
+                'diagnosis' => $diagnosis,
+                'error' => 'Could not spawn evidence worker. Check storage/logs and PHP exec() permissions.',
+                'pipeline' => $this->publicStatusForRecording($recording),
+            );
+        }
+
         require_once __DIR__ . '/AviationEvidence/ProductionTranscriptionEvidenceService.php';
         $inlineError = null;
         $inlineResult = null;
@@ -315,6 +337,44 @@ final class CockpitRecorderEvidenceQueueService
             'inline_result' => $inlineResult,
             'pipeline' => $pipeline,
             'error' => $inlineError,
+        );
+    }
+
+    /**
+     * Restart evidence for multiple recordings (background workers only — for intake bulk action).
+     *
+     * @param list<int> $recordingIds
+     * @return array<string,mixed>
+     */
+    public function retryProcessingBatch(array $recordingIds): array
+    {
+        $results = array();
+        $started = 0;
+        $failed = 0;
+        foreach ($recordingIds as $recordingId) {
+            $recordingId = (int)$recordingId;
+            if ($recordingId <= 0) {
+                continue;
+            }
+            $result = $this->retryProcessing($recordingId, false);
+            $results[] = array(
+                'recording_id' => $recordingId,
+                'ok' => !empty($result['ok']),
+                'reason' => (string)($result['reason'] ?? ''),
+                'error' => isset($result['error']) ? (string)$result['error'] : null,
+            );
+            if (!empty($result['ok'])) {
+                $started++;
+            } else {
+                $failed++;
+            }
+        }
+
+        return array(
+            'ok' => $failed === 0,
+            'started' => $started,
+            'failed' => $failed,
+            'results' => $results,
         );
     }
 
@@ -401,7 +461,7 @@ final class CockpitRecorderEvidenceQueueService
             'evidence_worker_failure_code' => is_array($workerFailure) ? (string)($workerFailure['code'] ?? '') : null,
             'evidence_worker_failure_detail' => is_array($workerFailure) ? (string)($workerFailure['detail'] ?? '') : null,
             'evidence_worker_log_excerpt' => is_array($workerFailure) ? ($workerFailure['log_excerpt'] ?? null) : null,
-            'can_retry_evidence' => is_array($workerFailure) && !empty($workerFailure['can_restart']) && $needsEvidence,
+            'can_retry_evidence' => $needsEvidence && !$evidenceInProgress,
             'publishable' => $publishableRun !== null,
             'running_processing_run_id' => is_array($runningRun) ? (int)($runningRun['id'] ?? 0) : null,
             'latest_publishable_processing_run_id' => is_array($publishableRun) ? (int)($publishableRun['id'] ?? 0) : null,

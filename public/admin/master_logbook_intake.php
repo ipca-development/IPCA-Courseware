@@ -607,7 +607,7 @@ cw_header('Master Logbook');
 .intake-panel{display:none}
 .intake-panel.is-active{display:block}
 .intake-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
-.intake-audio-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.intake-audio-filter{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:flex-end}
 .intake-audio-toggle{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:850;cursor:pointer}
 .intake-audio-toggle.is-on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
 .intake-audio-table[data-hide-short="true"] tr.intake-audio-row-short{display:none}
@@ -646,6 +646,9 @@ cw_header('Master Logbook');
 .intake-audio-evidence-retry-btn{border:1px solid #fca5a5;border-radius:999px;background:#fff;color:#b91c1c;padding:3px 8px;font-size:9px;font-weight:900;cursor:pointer;justify-self:start}
 .intake-audio-evidence-retry-btn:hover{border-color:#ef4444;background:#fff1f2}
 .intake-audio-evidence-retry-btn:disabled{opacity:.55;cursor:not-allowed}
+.intake-audio-bulk-retry-btn{border:1px solid #f59e0b;border-radius:999px;background:#fffbeb;color:#92400e;padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}
+.intake-audio-bulk-retry-btn:hover{border-color:#d97706;background:#fef3c7}
+.intake-audio-bulk-retry-btn:disabled{opacity:.55;cursor:not-allowed}
 .intake-audio-transcript-progress{font-size:10px;color:#64748b;font-weight:700;font-variant-numeric:tabular-nums;grid-column:2;grid-row:1;white-space:nowrap}
 .intake-audio-received{font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap}
 .intake-audio-start-stop{font-size:10px;font-variant-numeric:tabular-nums;color:#1e3a8a;line-height:1.35;white-space:nowrap}
@@ -973,8 +976,9 @@ cw_header('Master Logbook');
         <h2 class="intake-panel-title">Cockpit Audio</h2>
         <div class="intake-muted">Audio upload and transcription status received from recorder units.</div>
       </div>
-      <?php if ($audio['available'] && $audio['rows'] !== array() && $audioShortRowCount > 0): ?>
+      <?php if ($audio['available'] && $audio['rows'] !== array()): ?>
         <div class="intake-audio-filter">
+          <?php if ($audioShortRowCount > 0): ?>
           <span class="intake-muted" data-audio-summary>
             Showing <?= (int)$audioVisibleRowCount ?> of <?= count($audio['rows']) ?> recordings
             (<?= (int)$audioShortRowCount ?> under 10 min hidden)
@@ -987,6 +991,16 @@ cw_header('Master Logbook');
             title="Short recordings are usually power-ups and are hidden by default"
           >
             Short recordings (&lt; 10 min): OFF
+          </button>
+          <?php endif; ?>
+          <button
+            class="intake-audio-bulk-retry-btn"
+            type="button"
+            data-audio-evidence-retry-all
+            hidden
+            title="Restart evidence for all stuck recordings in this list"
+          >
+            Restart stuck evidence
           </button>
         </div>
       <?php endif; ?>
@@ -2232,6 +2246,9 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
       return { display: normalized.slice(0, maxLength).trimEnd() + '...', full: normalized };
     };
+    const bulkRetryBtn = page.querySelector('[data-audio-evidence-retry-all]');
+    let stuckEvidenceIds = [];
+
     const pollAudioStatus = async () => {
       const ids = Array.from(audioStatusCells)
         .map((cell) => cell.getAttribute('data-audio-recording-id'))
@@ -2246,9 +2263,22 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           return;
         }
         const byId = {};
+        stuckEvidenceIds = [];
         (payload.recordings || []).forEach((recording) => {
           byId[String(recording.id)] = recording;
+          if (recording.can_retry_evidence) {
+            stuckEvidenceIds.push(String(recording.id));
+          }
         });
+        if (bulkRetryBtn) {
+          if (stuckEvidenceIds.length > 0) {
+            bulkRetryBtn.hidden = false;
+            bulkRetryBtn.textContent = 'Restart stuck evidence (' + stuckEvidenceIds.length + ')';
+            bulkRetryBtn.disabled = !!bulkRetryBtn.dataset.retrying;
+          } else {
+            bulkRetryBtn.hidden = true;
+          }
+        }
         audioStatusCells.forEach((cell) => {
           const recordingId = cell.getAttribute('data-audio-recording-id');
           const recording = byId[String(recordingId)];
@@ -2291,14 +2321,18 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
             }
           }
           if (evidenceWarningEl && evidenceWarningTextEl) {
-            const workerFailed = !!recording.evidence_worker_failed;
+            const canRetry = !!recording.can_retry_evidence;
             const failureReason = String(recording.evidence_worker_failure_reason || '').trim();
             const failureDetail = String(recording.evidence_worker_failure_detail || '').trim();
-            if (workerFailed && failureReason !== '') {
+            if (canRetry) {
               evidenceWarningEl.hidden = false;
-              evidenceWarningTextEl.textContent = failureDetail !== ''
-                ? (failureReason + ' ' + failureDetail)
-                : failureReason;
+              if (failureReason !== '') {
+                evidenceWarningTextEl.textContent = failureDetail !== ''
+                  ? (failureReason + ' ' + failureDetail)
+                  : failureReason;
+              } else {
+                evidenceWarningTextEl.textContent = 'Evidence has not finished building yet. Click Restart Evidence to start or resume.';
+              }
             } else {
               evidenceWarningEl.hidden = true;
               evidenceWarningTextEl.textContent = '';
@@ -2333,6 +2367,39 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     };
     pollAudioStatus();
     window.setInterval(pollAudioStatus, 3000);
+
+    if (bulkRetryBtn) {
+      bulkRetryBtn.addEventListener('click', async () => {
+        if (bulkRetryBtn.disabled || stuckEvidenceIds.length === 0) {
+          return;
+        }
+        if (!window.confirm('Restart evidence for ' + stuckEvidenceIds.length + ' recording(s)? Each will run in the background.')) {
+          return;
+        }
+        bulkRetryBtn.disabled = true;
+        bulkRetryBtn.dataset.retrying = '1';
+        bulkRetryBtn.textContent = 'Restarting…';
+        try {
+          const formData = new FormData();
+          formData.append('recording_ids', stuckEvidenceIds.join(','));
+          const response = await fetch('/admin/api/cockpit_recorder_intake_run_evidence_batch.php', {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin',
+          });
+          const payload = await response.json();
+          if (!response.ok || (!payload.ok && Number(payload.started || 0) === 0)) {
+            throw new Error(payload.error || 'Could not restart evidence for stuck recordings.');
+          }
+          await pollAudioStatus();
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : 'Could not restart stuck evidence.');
+        } finally {
+          delete bulkRetryBtn.dataset.retrying;
+          bulkRetryBtn.disabled = false;
+        }
+      });
+    }
 
     page.addEventListener('click', async (event) => {
       const retryButton = event.target instanceof Element
