@@ -56,9 +56,15 @@ final class EvidenceSchema
 
     public static function tablePresent(PDO $pdo, string $table): bool
     {
+        static $cache = array();
+        $cacheKey = spl_object_id($pdo) . ':' . $table;
+        if (array_key_exists($cacheKey, $cache)) {
+            return $cache[$cacheKey];
+        }
         $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
         $stmt->execute(array($table));
-        return (bool)$stmt->fetchColumn();
+        $cache[$cacheKey] = (bool)$stmt->fetchColumn();
+        return $cache[$cacheKey];
     }
 
     /**

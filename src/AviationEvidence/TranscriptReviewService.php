@@ -63,14 +63,23 @@ final class TranscriptReviewService
         $blocks = array();
         $chapters = array();
         $quality = null;
-        $layers = $this->buildLayers($recording, $processingRunId, $snapshot);
+        $speechSegments = $processingRunId > 0
+            ? $this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId))
+            : array();
+        $layers = $this->buildLayers($recording, $processingRunId, $snapshot, $speechSegments);
         $suppressedSegmentIds = array();
 
         if ($processingRunId > 0) {
             $suppressedSegmentIds = $this->suppressedSegmentIds($processingRunId);
-            $blocks = $this->resolveBlocks($recordingId, $processingRunId, $snapshot, $suppressedSegmentIds);
+            $blocks = $this->resolveBlocks(
+                $recordingId,
+                $processingRunId,
+                $snapshot,
+                $suppressedSegmentIds,
+                $speechSegments
+            );
             $chapters = $this->resolveChapters($recordingId, $processingRunId, $snapshot);
-            $quality = $this->buildQualitySummary($processingRunId, $suppressedSegmentIds);
+            $quality = $this->buildQualitySummary($processingRunId, $suppressedSegmentIds, $speechSegments);
         }
 
         $activeLayer = $preferredLayer ?? ($publishedVersion !== null ? 'published' : ($blocks !== array() ? 'readable' : 'legacy'));
@@ -192,7 +201,12 @@ final class TranscriptReviewService
      * @param array<string,mixed>|null $snapshot
      * @return array<string,string>
      */
-    private function buildLayers(array $recording, int $processingRunId, ?array $snapshot): array
+    private function buildLayers(
+        array $recording,
+        int $processingRunId,
+        ?array $snapshot,
+        array $speechSegments = array()
+    ): array
     {
         $layers = array(
             'legacy' => trim((string)($recording['transcript_text'] ?? '')),
@@ -210,12 +224,10 @@ final class TranscriptReviewService
             }
 
             $whisperParts = array();
-            foreach ($this->providerRuns->listCanonicalWhisperRunsForProcessingRun($processingRunId) as $run) {
-                foreach ($this->providerRuns->listSegments((int)$run['id']) as $segment) {
-                    $text = trim((string)($segment['text'] ?? ''));
-                    if ($text !== '') {
-                        $whisperParts[] = $text;
-                    }
+            foreach ($speechSegments as $segment) {
+                $text = trim((string)($segment['provider_segment_text'] ?? ''));
+                if ($text !== '') {
+                    $whisperParts[] = $text;
                 }
             }
             if ($whisperParts !== array()) {
@@ -254,11 +266,12 @@ final class TranscriptReviewService
         int $recordingId,
         int $processingRunId,
         ?array $snapshot,
-        array $suppressedSegmentIds
+        array $suppressedSegmentIds,
+        array $speechSegments = array()
     ): array {
         $rows = $this->displayBlocks->listForProcessingRun($processingRunId);
         if ($rows !== array()) {
-            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds);
+            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds, $speechSegments);
             if ($formatted !== array()) {
                 return $formatted;
             }
@@ -271,7 +284,11 @@ final class TranscriptReviewService
             }
         }
 
-        $speechSegments = $this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId));
+        if ($speechSegments === array()) {
+            $speechSegments = $this->enrichSpeechSegments(
+                $this->speechSegments->listForProcessingRun($processingRunId)
+            );
+        }
         if ($speechSegments === array()) {
             return $this->blocksFromTimeline($snapshot, $suppressedSegmentIds);
         }
@@ -283,7 +300,7 @@ final class TranscriptReviewService
 
         if (EvidenceSchema::pass5Ready($this->pdo)) {
             $rows = $this->displayBlocks->replaceForProcessingRun($recordingId, $processingRunId, $built);
-            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds);
+            $formatted = $this->formatBlockRows($rows, $suppressedSegmentIds, $speechSegments);
             if ($formatted !== array()) {
                 return $formatted;
             }
@@ -338,10 +355,18 @@ final class TranscriptReviewService
      * @param list<int> $suppressedSegmentIds
      * @return list<array<string,mixed>>
      */
-    private function formatBlockRows(array $rows, array $suppressedSegmentIds): array
+    private function formatBlockRows(
+        array $rows,
+        array $suppressedSegmentIds,
+        array $speechSegments = array()
+    ): array
     {
         $segmentsById = array();
-        if ($rows !== array()) {
+        if ($speechSegments !== array()) {
+            foreach ($speechSegments as $segment) {
+                $segmentsById[(int)($segment['id'] ?? 0)] = $segment;
+            }
+        } elseif ($rows !== array()) {
             $processingRunId = (int)($rows[0]['processing_run_id'] ?? 0);
             if ($processingRunId > 0) {
                 foreach ($this->enrichSpeechSegments($this->speechSegments->listForProcessingRun($processingRunId)) as $segment) {
@@ -546,9 +571,15 @@ final class TranscriptReviewService
      * @param list<int> $suppressedSegmentIds
      * @return array<string,mixed>|null
      */
-    private function buildQualitySummary(int $processingRunId, array $suppressedSegmentIds): ?array
+    private function buildQualitySummary(
+        int $processingRunId,
+        array $suppressedSegmentIds,
+        array $speechSegments = array()
+    ): ?array
     {
-        $speechSegments = $this->speechSegments->listForProcessingRun($processingRunId);
+        if ($speechSegments === array()) {
+            $speechSegments = $this->speechSegments->listForProcessingRun($processingRunId);
+        }
         if ($speechSegments === array()) {
             return null;
         }
