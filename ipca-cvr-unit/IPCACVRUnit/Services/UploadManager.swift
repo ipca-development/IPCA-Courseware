@@ -580,6 +580,9 @@ final class UploadManager: ObservableObject {
         guard finalized.ok else {
             throw APIClientError.badResponse(finalized.error ?? "Server rejected Garmin CSV.")
         }
+        guard finalized.workflowLinked == true else {
+            throw APIClientError.badResponse("Server stored the Garmin CSV but did not link it to the selected flight.")
+        }
         progress(1)
     }
 

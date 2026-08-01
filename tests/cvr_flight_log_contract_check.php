@@ -13,12 +13,18 @@ $garminFinalize = file_get_contents($root . '/public/api/cvr/csv_upload_finalize
 $plist = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Info.plist') ?: '';
 $adjustmentApi = file_get_contents($root . '/public/api/cvr/flight_log_adjust.php') ?: '';
 $adjustmentMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_adjustments.sql') ?: '';
+$workflowStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
         str_contains($api, 'requireDevice()')
         && str_contains($service, 'd.aircraft_id = :aircraft_id')
         && str_contains($service, 'd.organization_id = :organization_id'),
+    'flight log adjustment uses the same aircraft identity fallback as listing' =>
+        str_contains($service, '$aircraftOwnershipPredicate = $aircraftId > 0')
+        && str_contains($service, "'aircraft_id = :aircraft_id'")
+        && str_contains($service, "'UPPER(aircraft_registration) = :registration'")
+        && !str_contains($service, 'aircraft_id IS NULL AND UPPER(aircraft_registration)'),
     'flight log includes route times Hobbs and Garmin completeness' =>
         str_contains($service, "'departure_airport'")
         && str_contains($service, "'departure_time'")
@@ -26,6 +32,11 @@ $checks = array(
         && str_contains($service, "'arrival_time'")
         && str_contains($service, "'total_hobbs_time'")
         && str_contains($service, "'has_garmin_csv'"),
+    'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
+        str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
+        && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")
+        && str_contains($service, "\$arrivalTime = \$row['arrival_event_time']")
+        && str_contains($views, 'departure.timestampLocal.addingTimeInterval(totalHobbs * 3600)'),
     'flight log exposes crew and protected operational adjustments' =>
         str_contains($service, "'crew_names'")
         && str_contains($models, 'var crewNames: [String]?')
@@ -56,8 +67,11 @@ $checks = array(
         && str_contains($garminFinalize, "'workflow_flight_record_uuid'")
         && str_contains($garminEvidence, 'assertWorkflowFlightOwnership')
         && str_contains($garminEvidence, 'workflow_flight_record_uuid')
+        && str_contains($garminEvidence, "'workflow_linked' => \$workflowLinked")
+        && str_contains($garminEvidence, 'workflowLinkConfirmed')
         && str_contains($garminEvidence, 'GarminCsvValidationService')
-        && str_contains($garminEvidence, 'enqueueJobs'),
+        && str_contains($garminEvidence, 'enqueueJobs')
+        && str_contains($uploads, 'finalized.workflowLinked == true'),
     'Log tab uses the operational shell and exposes missing CSV records' =>
         str_contains($models, 'case log')
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
@@ -67,6 +81,24 @@ $checks = array(
         str_contains($views, 'AUDIO FLIGHT CLOSURE')
         && str_contains($views, 'Garmin CSV data is optional now')
         && str_contains($views, 'Enter Ending Hobbs and Tacho'),
+    'ending meters finish locally while uploads continue from the archive' =>
+        str_contains($workflowStore, 'func finishEndedFlightLocally() -> Bool')
+        && str_contains($workflowStore, 'guard archiveActiveWorkflow() else { return false }')
+        && str_contains($workflowStore, '$0.selectedTab = .log')
+        && str_contains($views, 'workflow.finishEndedFlightLocally()')
+        && str_contains($views, 'uploadManager.uploadQueuedWorkflowComponents'),
+    'just-ended local flight is immediately selectable for Garmin attachment' =>
+        str_contains($views, 'private var displayEntries: [CVRFlightLogEntry]')
+        && str_contains($views, 'for archive in workflow.archives')
+        && str_contains($views, 'ForEach(displayEntries.filter { !$0.hasGarminCSV })'),
+    'successful Garmin attachment survives assignment-sheet dismissal and refresh cancellation' =>
+        str_contains($models, 'locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)')
+        && str_contains($models, 'entries[index].hasGarminCSV = true')
+        && str_contains($models, 'await refresh(settings: settings)')
+        && str_contains($models, 'self.pendingGarminCSV = nil')
+        && strpos($models, 'await refresh(settings: settings)') < strrpos($models, 'self.pendingGarminCSV = nil')
+        && str_contains($models, 'catch is CancellationError')
+        && str_contains($views, 'hasLocallyAttachedGarminCSV'),
 );
 
 $failed = array();

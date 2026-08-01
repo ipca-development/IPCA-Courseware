@@ -547,6 +547,7 @@ final class CVRFlightLogStore: ObservableObject {
     @Published private(set) var uploadProgress = 0.0
     @Published private(set) var lastError = ""
     @Published var pendingGarminCSV: CVRPendingGarminCSV?
+    @Published private(set) var locallyAttachedGarminFlightRecordIDs: Set<String> = []
 
     func refresh(settings: SettingsStore) async {
         guard let baseURL = settings.normalizedServerURL,
@@ -569,6 +570,10 @@ final class CVRFlightLogStore: ObservableObject {
                 return $0.scheduledDate > $1.scheduledDate
             }
             lastError = ""
+        } catch is CancellationError {
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
         } catch {
             lastError = error.localizedDescription
         }
@@ -625,14 +630,26 @@ final class CVRFlightLogStore: ObservableObject {
             ) { [weak self] progress in
                 self?.uploadProgress = progress
             }
-            try? FileManager.default.removeItem(at: pendingGarminCSV.fileURL)
-            self.pendingGarminCSV = nil
+            locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)
+            if let index = entries.firstIndex(where: { $0.flightRecordID == entry.flightRecordID }) {
+                entries[index].hasGarminCSV = true
+            }
             uploadProgress = 1
             lastError = ""
             await refresh(settings: settings)
+            try? FileManager.default.removeItem(at: pendingGarminCSV.fileURL)
+            self.pendingGarminCSV = nil
+        } catch is CancellationError {
+            lastError = "Garmin CSV upload was interrupted. The file is still ready to retry."
+        } catch let error as URLError where error.code == .cancelled {
+            lastError = "Garmin CSV upload was interrupted. The file is still ready to retry."
         } catch {
             lastError = "Garmin CSV upload failed: \(error.localizedDescription)"
         }
+    }
+
+    func hasLocallyAttachedGarminCSV(flightRecordID: String) -> Bool {
+        locallyAttachedGarminFlightRecordIDs.contains(flightRecordID)
     }
 
     func cancelPendingGarminCSV() {

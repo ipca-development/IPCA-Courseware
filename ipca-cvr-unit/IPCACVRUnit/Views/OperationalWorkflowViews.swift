@@ -454,12 +454,19 @@ private struct ScheduledFlightsView: View {
     private var aircraftSessions: [CVRScheduledSession] {
         guard let aircraft = settings.selectedAircraft else { return [] }
         let startOfToday = Calendar.current.startOfDay(for: Date())
+        var consumedSchedulerRecordIDs = Set(
+            workflow.archives.compactMap { $0.dispatch.schedulerRecordID }
+        )
+        if let activeSchedulerRecordID = workflow.state.activeDispatch?.schedulerRecordID {
+            consumedSchedulerRecordIDs.insert(activeSchedulerRecordID)
+        }
         return sessionsStore.sessions
             .filter {
                 ($0.aircraftID == aircraft.id
                     || CVRWorkflowStore.normalizedTail($0.aircraftRegistration)
                         == CVRWorkflowStore.normalizedTail(aircraft.registration))
                     && ($0.dateTime(nil) ?? .distantPast) >= startOfToday
+                    && !consumedSchedulerRecordIDs.contains($0.schedulerRecordID)
             }
             .sorted { ($0.dateTime($0.scheduledStartTime) ?? .distantFuture) < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture) }
     }
@@ -1451,8 +1458,10 @@ private struct ShutdownVerificationView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if save() {
-                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-                            dismiss()
+                            if workflow.finishEndedFlightLocally() {
+                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                dismiss()
+                            }
                         }
                     }
                     .disabled(!canSave)
@@ -2124,7 +2133,7 @@ private struct FlightLogView: View {
                             subtitle: "DISPATCHED FLIGHTS AND GARMIN STATUS",
                             iconName: "list.bullet.clipboard",
                             color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.success,
-                            value: "\(flightLogs.entries.count)",
+                            value: "\(displayEntries.count)",
                             caption: "LOGS",
                             metrics: metrics
                         )
@@ -2152,7 +2161,7 @@ private struct FlightLogView: View {
                                 color: CVROperationalPalette.warning
                             )
                         }
-                        if flightLogs.entries.isEmpty && !flightLogs.isRefreshing {
+                        if displayEntries.isEmpty && !flightLogs.isRefreshing {
                             CVROperationalWarningCard(
                                 title: "NO DISPATCHED FLIGHTS",
                                 message: "Completed Dispatch records for \(settings.selectedAircraft?.registration ?? "this aircraft") will appear here.",
@@ -2161,7 +2170,7 @@ private struct FlightLogView: View {
                             )
                         } else {
                             VStack(spacing: 10) {
-                                ForEach(flightLogs.entries) { entry in
+                                ForEach(displayEntries) { entry in
                                     flightLogRow(entry)
                                 }
                             }
@@ -2404,7 +2413,7 @@ private struct FlightLogView: View {
                         Text("Select the dispatched flight that belongs to this Garmin CSV.")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(CVROperationalPalette.textSecondary)
-                        ForEach(flightLogs.entries.filter { !$0.hasGarminCSV }) { entry in
+                        ForEach(displayEntries.filter { !$0.hasGarminCSV }) { entry in
                             Button {
                                 Task {
                                     await flightLogs.uploadPendingGarminCSV(
@@ -2470,8 +2479,101 @@ private struct FlightLogView: View {
         }
     }
 
+    private var displayEntries: [CVRFlightLogEntry] {
+        var byID = Dictionary(uniqueKeysWithValues: flightLogs.entries.map { ($0.flightRecordID, $0) })
+        let selectedTail = normalizedTail(settings.selectedAircraft?.registration ?? "")
+        for archive in workflow.archives where selectedTail.isEmpty
+            || normalizedTail(archive.dispatch.tailNumber) == selectedTail {
+            let local = localLogEntry(
+                dispatch: archive.dispatch,
+                flightRecord: archive.flightRecord,
+                events: archive.flightEvents,
+                components: archive.uploadComponents
+            )
+            if var remote = byID[local.flightRecordID] {
+                remote.hasGarminCSV = remote.hasGarminCSV || local.hasGarminCSV
+                if (remote.crewNames ?? []).isEmpty { remote.crewNames = local.crewNames }
+                if remote.departureAirport.isEmpty { remote.departureAirport = local.departureAirport }
+                if remote.arrivalAirport.isEmpty { remote.arrivalAirport = local.arrivalAirport }
+                byID[local.flightRecordID] = remote
+            } else {
+                byID[local.flightRecordID] = local
+            }
+        }
+        if let dispatch = workflow.state.activeDispatch,
+           let flightRecord = workflow.state.activeFlightRecord {
+            let local = localLogEntry(
+                dispatch: dispatch,
+                flightRecord: flightRecord,
+                events: workflow.state.flightEvents,
+                components: workflow.state.uploadComponents
+            )
+            byID[local.flightRecordID] = byID[local.flightRecordID] ?? local
+        }
+        for flightRecordID in Array(byID.keys)
+            where flightLogs.hasLocallyAttachedGarminCSV(flightRecordID: flightRecordID) {
+            byID[flightRecordID]?.hasGarminCSV = true
+        }
+        return byID.values.sorted {
+            if $0.scheduledDate == $1.scheduledDate {
+                return ($0.departureTime ?? "") > ($1.departureTime ?? "")
+            }
+            return $0.scheduledDate > $1.scheduledDate
+        }
+    }
+
+    private func localLogEntry(
+        dispatch: CVRDispatchRecord,
+        flightRecord: CVRIncompleteFlightRecord,
+        events: [CVRFlightEventRecord],
+        components: [CVRUploadComponentRecord]
+    ) -> CVRFlightLogEntry {
+        let flightEvents = events.filter { $0.flightRecordID == flightRecord.id }
+        let departure = flightEvents
+            .filter { $0.eventType == "engine_start_off_block" }
+            .min { $0.timestampLocal < $1.timestampLocal }
+        let arrival = flightEvents
+            .filter { $0.eventType == "engine_shutdown_on_block" }
+            .max { $0.timestampLocal < $1.timestampLocal }
+        let totalHobbs: Double? = if let start = dispatch.startingHobbs,
+                                     let end = flightRecord.endingHobbs {
+            end - start
+        } else {
+            nil
+        }
+        let calculatedArrival: Date? = if let departure,
+                                          let totalHobbs {
+            departure.timestampLocal.addingTimeInterval(totalHobbs * 3600)
+        } else {
+            arrival?.timestampLocal
+        }
+        return CVRFlightLogEntry(
+            flightRecordID: flightRecord.id,
+            dispatchUUID: dispatch.id,
+            aircraftRegistration: dispatch.tailNumber,
+            scheduledDate: Self.logDateFormatter.string(from: dispatch.scheduledDate),
+            crewNames: dispatch.crew.map(\.personName),
+            departureAirport: dispatch.plannedDepartureAirport,
+            departureTime: departure.map { ISO8601DateFormatter().string(from: $0.timestampLocal) },
+            arrivalAirport: dispatch.plannedDestinationAirport,
+            arrivalTime: calculatedArrival.map { ISO8601DateFormatter().string(from: $0) },
+            startingHobbs: dispatch.startingHobbs,
+            startingTacho: dispatch.startingTacho,
+            endingHobbs: flightRecord.endingHobbs,
+            endingTacho: flightRecord.endingTacho,
+            fuelRemaining: flightRecord.fuelRemaining,
+            endingOilPercentage: flightRecord.endingOilPercentage,
+            endingOilQuantity: flightRecord.endingOilQuantity,
+            endingOilUnit: flightRecord.endingOilUnit,
+            totalHobbsTime: totalHobbs,
+            hasGarminCSV: components.contains {
+                $0.flightRecordID == flightRecord.id && $0.componentType == "garmin_csv"
+            }
+        )
+    }
+
     private var completeCount: Int {
-        flightLogs.entries.filter(\.hasGarminCSV).count
+        displayEntries.filter(\.hasGarminCSV).count
     }
 
     private var activeFlightIsClosed: Bool {
@@ -2486,7 +2588,7 @@ private struct FlightLogView: View {
     }
 
     private var missingCount: Int {
-        flightLogs.entries.count - completeCount
+        displayEntries.count - completeCount
     }
 
     private func displayDate(_ value: String) -> String {
@@ -2506,6 +2608,10 @@ private struct FlightLogView: View {
         value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : value
     }
 
+    private func normalizedTail(_ value: String) -> String {
+        value.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
+
     private func hobbs(_ value: Double?) -> String {
         value.map { String(format: "%.1f", $0) } ?? "—"
     }
@@ -2513,6 +2619,15 @@ private struct FlightLogView: View {
     private static let inputDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let logDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()

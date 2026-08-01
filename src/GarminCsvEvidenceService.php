@@ -97,15 +97,22 @@ final class GarminCsvEvidenceService
         $fingerprint = (new GarminCsvFingerprintService())->fingerprint($assembled, (string)($request['original_filename'] ?? ''));
         $duplicate = $this->csvBySha((string)$fingerprint['sha256']);
         if ($duplicate !== null) {
+            $workflowLinked = null;
             if ($workflowFlightRecordUuid !== '') {
-                $this->linkCsvToWorkflow($duplicate, $workflowFlightRecordUuid);
+                $workflowLinked = $this->linkCsvToWorkflow($duplicate, $workflowFlightRecordUuid);
             }
             $this->pdo->prepare("
                 UPDATE ipca_garmin_csv_upload_requests
                 SET status = 'duplicate', assembled_path = ?, updated_at = CURRENT_TIMESTAMP(3)
                 WHERE id = ?
             ")->execute(array($assembled, (int)$request['id']));
-            return array('ok' => true, 'status' => 'duplicate', 'csv_file_uuid' => $duplicate['csv_file_uuid'], 'sha256' => $fingerprint['sha256']);
+            return array(
+                'ok' => true,
+                'status' => 'duplicate',
+                'csv_file_uuid' => $duplicate['csv_file_uuid'],
+                'sha256' => $fingerprint['sha256'],
+                'workflow_linked' => $workflowLinked,
+            );
         }
 
         $storagePath = $this->persistCsv($assembled, (string)$fingerprint['sha256'], (string)($request['original_filename'] ?? 'garmin.csv'));
@@ -122,6 +129,12 @@ final class GarminCsvEvidenceService
         $match = $csvFile !== null ? (new GarminCsvSessionMatchService($this->pdo))->match($csvFile) : array();
         $this->classifySupersession($csvFileId, $fingerprint);
         $this->enqueueJobs($csvFileId);
+        $workflowLinked = $workflowFlightRecordUuid !== ''
+            ? $this->workflowLinkConfirmed($csvFileId, $workflowFlightRecordUuid)
+            : null;
+        if ($workflowFlightRecordUuid !== '' && !$workflowLinked) {
+            throw new RuntimeException('The Garmin CSV was stored but could not be linked to the selected Flight Record.');
+        }
 
         $this->pdo->prepare("
             UPDATE ipca_garmin_csv_upload_requests
@@ -134,6 +147,7 @@ final class GarminCsvEvidenceService
             'status' => 'finalized',
             'csv_file_uuid' => $csvFile['csv_file_uuid'] ?? null,
             'sha256' => $fingerprint['sha256'],
+            'workflow_linked' => $workflowLinked,
             'validation' => $validation,
             'match' => $match,
         );
@@ -343,23 +357,29 @@ final class GarminCsvEvidenceService
      */
     private function assertWorkflowFlightOwnership(array $device, string $workflowFlightRecordUuid): void
     {
+        $aircraftId = (int)($device['aircraft_id'] ?? 0);
+        $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
+        $aircraftPredicate = $aircraftId > 0
+            ? 'aircraft_id = :aircraft_id'
+            : 'UPPER(aircraft_registration) = :registration';
         $stmt = $this->pdo->prepare(
             'SELECT id
              FROM ipca_cvr_dispatches
-             WHERE workflow_flight_record_uuid = ?
-               AND organization_id = ?
-               AND (
-                    (aircraft_id IS NOT NULL AND aircraft_id = ?)
-                    OR (aircraft_id IS NULL AND UPPER(aircraft_registration) = UPPER(?))
-               )
+             WHERE workflow_flight_record_uuid = :flight_uuid
+               AND organization_id = :organization_id
+               AND ' . $aircraftPredicate . '
              LIMIT 1'
         );
-        $stmt->execute(array(
-            $workflowFlightRecordUuid,
-            max(1, (int)($device['organization_id'] ?? 1)),
-            (int)($device['aircraft_id'] ?? 0),
-            trim((string)($device['aircraft_registration'] ?? '')),
-        ));
+        $parameters = array(
+            ':flight_uuid' => $workflowFlightRecordUuid,
+            ':organization_id' => max(1, (int)($device['organization_id'] ?? 1)),
+        );
+        if ($aircraftId > 0) {
+            $parameters[':aircraft_id'] = $aircraftId;
+        } else {
+            $parameters[':registration'] = $registration;
+        }
+        $stmt->execute($parameters);
         if ($stmt->fetchColumn() === false) {
             throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
         }
@@ -368,7 +388,7 @@ final class GarminCsvEvidenceService
     /**
      * @param array<string,mixed> $csv
      */
-    private function linkCsvToWorkflow(array $csv, string $workflowFlightRecordUuid): void
+    private function linkCsvToWorkflow(array $csv, string $workflowFlightRecordUuid): bool
     {
         $existing = strtolower(trim((string)($csv['workflow_flight_record_uuid'] ?? '')));
         if ($existing !== '' && $existing !== $workflowFlightRecordUuid) {
@@ -381,6 +401,22 @@ final class GarminCsvEvidenceService
                  WHERE id = ? AND (workflow_flight_record_uuid IS NULL OR workflow_flight_record_uuid = \'\')'
             )->execute(array($workflowFlightRecordUuid, (int)$csv['id']));
         }
+        if (!$this->workflowLinkConfirmed((int)$csv['id'], $workflowFlightRecordUuid)) {
+            throw new RuntimeException('The Garmin CSV could not be linked to the selected Flight Record.');
+        }
+        return true;
+    }
+
+    private function workflowLinkConfirmed(int $csvFileId, string $workflowFlightRecordUuid): bool
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT 1
+             FROM ipca_garmin_csv_files
+             WHERE id = ? AND workflow_flight_record_uuid = ?
+             LIMIT 1'
+        );
+        $statement->execute(array($csvFileId, $workflowFlightRecordUuid));
+        return $statement->fetchColumn() !== false;
     }
 
     /**

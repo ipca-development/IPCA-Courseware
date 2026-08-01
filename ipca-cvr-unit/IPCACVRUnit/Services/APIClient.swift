@@ -236,6 +236,7 @@ struct CvrCsvFinalizeResponse: Codable {
     var status: String?
     var csvFileUuid: String?
     var sha256: String?
+    var workflowLinked: Bool?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
@@ -243,6 +244,7 @@ struct CvrCsvFinalizeResponse: Codable {
         case status
         case csvFileUuid = "csv_file_uuid"
         case sha256
+        case workflowLinked = "workflow_linked"
         case error
     }
 }

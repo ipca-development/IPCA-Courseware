@@ -422,12 +422,6 @@ final class CvrDispatchIntakeService
         if ($slotMission !== '' && strcasecmp($slotMission, (string)$normalized['mission_code']) !== 0) {
             throw new RuntimeException('Scheduled session mission does not match the Dispatch.');
         }
-        foreach (array('scheduled_start_time', 'scheduled_end_time') as $field) {
-            if ($normalized[$field] === null
-                || strtotime((string)$normalized[$field]) !== strtotime((string)$slot[$field])) {
-                throw new RuntimeException('Scheduled session times do not match the Dispatch.');
-            }
-        }
         foreach (array('planned_departure_airport', 'planned_destination_airport') as $field) {
             $scheduledAirport = strtoupper(trim((string)($slot[$field] ?? '')));
             if ($scheduledAirport !== '' && $scheduledAirport !== (string)$normalized[$field]) {

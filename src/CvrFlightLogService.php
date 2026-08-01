@@ -44,7 +44,7 @@ final class CvrFlightLogService
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'),
                     ''
                 ) AS arrival_airport,
-                DATE_FORMAT(arrival_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS arrival_time,
+                DATE_FORMAT(arrival_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS arrival_event_time,
                 CAST(d.starting_hobbs AS DECIMAL(12,2)) AS starting_hobbs,
                 CAST(d.starting_tacho AS DECIMAL(12,2)) AS starting_tacho,
                 CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
@@ -130,6 +130,18 @@ final class CvrFlightLogService
                     $crewNames[] = $name;
                 }
             }
+            $arrivalTime = $row['arrival_event_time'] !== null ? (string)$row['arrival_event_time'] : null;
+            if ($row['departure_time'] !== null && $row['total_hobbs_time'] !== null) {
+                try {
+                    $departureTime = new DateTimeImmutable((string)$row['departure_time']);
+                    $elapsedSeconds = (int)round((float)$row['total_hobbs_time'] * 3600);
+                    $arrivalTime = $departureTime
+                        ->modify(sprintf('+%d seconds', $elapsedSeconds))
+                        ->format('Y-m-d\TH:i:s');
+                } catch (Throwable) {
+                    // Preserve the recorded shutdown time if the local departure timestamp is invalid.
+                }
+            }
             $logs[] = array(
                 'flight_record_uuid' => (string)$row['workflow_flight_record_uuid'],
                 'dispatch_uuid' => (string)$row['dispatch_uuid'],
@@ -139,7 +151,7 @@ final class CvrFlightLogService
                 'departure_airport' => (string)$row['departure_airport'],
                 'departure_time' => $row['departure_time'] !== null ? (string)$row['departure_time'] : null,
                 'arrival_airport' => (string)$row['arrival_airport'],
-                'arrival_time' => $row['arrival_time'] !== null ? (string)$row['arrival_time'] : null,
+                'arrival_time' => $arrivalTime,
                 'starting_hobbs' => $row['starting_hobbs'] !== null ? (float)$row['starting_hobbs'] : null,
                 'starting_tacho' => $row['starting_tacho'] !== null ? (float)$row['starting_tacho'] : null,
                 'ending_hobbs' => $row['ending_hobbs'] !== null ? (float)$row['ending_hobbs'] : null,
@@ -170,19 +182,29 @@ final class CvrFlightLogService
         $organizationId = max(1, (int)($device['organization_id'] ?? 1));
         $aircraftId = (int)($device['aircraft_id'] ?? 0);
         $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
+        $aircraftOwnershipPredicate = $aircraftId > 0
+            ? 'aircraft_id = :aircraft_id'
+            : 'UPPER(aircraft_registration) = :registration';
         $ownership = $this->pdo->prepare(
             'SELECT id, starting_hobbs, starting_tacho
              FROM ipca_cvr_dispatches
-             WHERE workflow_flight_record_uuid = ?
-               AND dispatch_uuid = ?
-               AND organization_id = ?
-               AND (
-                    (aircraft_id IS NOT NULL AND aircraft_id = ?)
-                    OR (aircraft_id IS NULL AND UPPER(aircraft_registration) = ?)
-               )
+             WHERE workflow_flight_record_uuid = :flight_uuid
+               AND dispatch_uuid = :dispatch_uuid
+               AND organization_id = :organization_id
+               AND ' . $aircraftOwnershipPredicate . '
              LIMIT 1'
         );
-        $ownership->execute(array($flightUuid, $dispatchUuid, $organizationId, $aircraftId, $registration));
+        $ownershipParameters = array(
+            ':flight_uuid' => $flightUuid,
+            ':dispatch_uuid' => $dispatchUuid,
+            ':organization_id' => $organizationId,
+        );
+        if ($aircraftId > 0) {
+            $ownershipParameters[':aircraft_id'] = $aircraftId;
+        } else {
+            $ownershipParameters[':registration'] = $registration;
+        }
+        $ownership->execute($ownershipParameters);
         $dispatch = $ownership->fetch(PDO::FETCH_ASSOC);
         if (!is_array($dispatch)) {
             throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');

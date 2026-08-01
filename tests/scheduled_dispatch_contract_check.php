@@ -58,6 +58,14 @@ $checks['schedule claim is transactional row locked and idempotent'] = static fn
     && str_contains($dispatchSource, 'FOR UPDATE')
     && str_contains($dispatchSource, 'claimed_dispatch_uuid')
     && str_contains($dispatchSource, "status = 'claimed'");
+$checks['schedule times are planning data and cannot block Dispatch upload'] = static fn(): bool =>
+    !str_contains($dispatchSource, 'Scheduled session times do not match the Dispatch.')
+    && str_contains($iosWorkflow, 'failedForLegacyScheduleTimeRule')
+    && str_contains($iosWorkflow, 'componentState == .failed || componentState == .needsUserAction');
+$checks['consumed scheduled sessions disappear from the iOS schedule immediately'] = static fn(): bool =>
+    str_contains($iosViews, 'consumedSchedulerRecordIDs')
+    && str_contains($iosViews, 'workflow.archives.compactMap')
+    && str_contains($iosViews, '!consumedSchedulerRecordIDs.contains($0.schedulerRecordID)');
 $checks['migration is additive and contains relational crew'] = static fn(): bool =>
     str_contains($migration, 'CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots')
     && str_contains($migration, 'CREATE TABLE IF NOT EXISTS ipca_flight_schedule_crew')

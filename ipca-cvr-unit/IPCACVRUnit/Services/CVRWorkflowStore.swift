@@ -1118,6 +1118,29 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    func finishEndedFlightLocally() -> Bool {
+        guard let flightRecord = state.activeFlightRecord,
+              flightRecord.endingHobbs != nil,
+              flightRecord.endingTacho != nil else {
+            lastError = "Ending Hobbs and Tacho are required before finishing the flight."
+            return false
+        }
+        guard archiveActiveWorkflow() else { return false }
+        mutate {
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .log
+        }
+        return true
+    }
+
     func completeSimulationFlight() {
         guard let flightRecord = state.activeFlightRecord else {
             lastError = "No active flight record to complete in simulation."
@@ -1548,12 +1571,29 @@ final class CVRWorkflowStore: ObservableObject {
         var recovered = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
         var changed = false
         for archiveIndex in recovered.indices {
+            let failedForLegacyScheduleTimeRule = recovered[archiveIndex].uploadComponents.contains {
+                $0.componentType == "dispatch_metadata"
+                    && ($0.state == .failed || $0.state == .needsUserAction)
+                    && $0.lastError.localizedCaseInsensitiveContains(
+                        "Scheduled session times do not match the Dispatch"
+                    )
+            }
             for componentIndex in recovered[archiveIndex].uploadComponents.indices
-            where recovered[archiveIndex].uploadComponents[componentIndex].state == .uploading {
-                recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
-                recovered[archiveIndex].uploadComponents[componentIndex].lastError = "Upload was interrupted and has been queued for recovery."
-                recovered[archiveIndex].status = .uploadPending
-                changed = true
+            {
+                let componentState = recovered[archiveIndex].uploadComponents[componentIndex].state
+                if componentState == .uploading {
+                    recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                    recovered[archiveIndex].uploadComponents[componentIndex].lastError = "Upload was interrupted and has been queued for recovery."
+                    recovered[archiveIndex].status = .uploadPending
+                    changed = true
+                } else if failedForLegacyScheduleTimeRule
+                            && (componentState == .failed || componentState == .needsUserAction) {
+                    recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                    recovered[archiveIndex].uploadComponents[componentIndex].lastError = ""
+                    recovered[archiveIndex].uploadComponents[componentIndex].progress = 0
+                    recovered[archiveIndex].status = .uploadPending
+                    changed = true
+                }
             }
         }
         if changed {
