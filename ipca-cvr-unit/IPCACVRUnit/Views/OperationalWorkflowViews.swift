@@ -115,11 +115,11 @@ private struct OperationalBottomTabBar: View {
                 Button {
                     workflow.selectTab(tab)
                 } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         Image(systemName: tab.systemImage)
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                         Text(tab.title)
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 7, weight: .bold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
@@ -136,8 +136,8 @@ private struct OperationalBottomTabBar: View {
                 .accessibilityAddTraits(workflow.state.selectedTab == tab ? .isSelected : [])
             }
         }
-        .padding(.top, 9)
-        .padding(.bottom, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
         .background(Color.black.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Rectangle()
@@ -496,17 +496,20 @@ struct DispatchWorkflowView: View {
             let metrics = CVROperationalMetrics(size: proxy.size)
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
-                VStack(spacing: metrics.spacing) {
-                    statusCard(metrics)
-                    dispatchTiles(metrics)
-                    dispatchOilUploadSection
-                    warningCard
-                    continuityUploadRepairCard
-                    actionButtons
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        statusCard(metrics)
+                        dispatchTiles(metrics)
+                        dispatchOilUploadSection
+                        warningCard
+                        continuityUploadRepairCard
+                        actionButtons
+                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                .padding(.horizontal, metrics.outerHorizontalPadding)
-                .padding(.vertical, metrics.outerVerticalPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .onAppear {
@@ -985,35 +988,38 @@ struct RecorderVerificationView: View {
             let metrics = CVROperationalMetrics(size: proxy.size)
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
-                VStack(spacing: metrics.spacing) {
-                    CVROperationalStatusCard(title: "READY FOR CHECK", subtitle: "RECORDER VERIFICATION REQUIRED", iconName: "waveform.badge.magnifyingglass", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "RECORDER", metrics: metrics)
-                    HStack(spacing: metrics.spacing) {
-                        CVROperationalTile(title: "AUDIO", iconName: "mic.fill", value: audio.isInternalMicWarning ? "iPhone Mic" : audio.sourceSummary.replacingOccurrences(of: "Audio source: ", with: ""), color: audio.isInternalMicWarning ? CVROperationalPalette.warning : CVROperationalPalette.success, metrics: metrics)
-                        CVROperationalTile(title: "BEACON", iconName: "dot.radiowaves.left.and.right", value: beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement).label, color: beaconColor, metrics: metrics)
-                        CVROperationalTile(title: "GPS", iconName: "location.fill", value: gpsLabel, color: gpsColor, metrics: metrics)
-                        CVROperationalTile(title: "STORAGE", iconName: "externaldrive.fill", value: system.storageText, color: system.availableStorageBytes > 512_000_000 ? CVROperationalPalette.success : CVROperationalPalette.warning, metrics: metrics)
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        CVROperationalStatusCard(title: "READY FOR CHECK", subtitle: "RECORDER VERIFICATION REQUIRED", iconName: "waveform.badge.magnifyingglass", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "RECORDER", metrics: metrics)
+                        HStack(spacing: metrics.spacing) {
+                            CVROperationalTile(title: "AUDIO", iconName: "mic.fill", value: audio.isInternalMicWarning ? "iPhone Mic" : audio.sourceSummary.replacingOccurrences(of: "Audio source: ", with: ""), color: audio.isInternalMicWarning ? CVROperationalPalette.warning : CVROperationalPalette.success, metrics: metrics)
+                            CVROperationalTile(title: "BEACON", iconName: "dot.radiowaves.left.and.right", value: beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement).label, color: beaconColor, metrics: metrics)
+                            CVROperationalTile(title: "GPS", iconName: "location.fill", value: gpsLabel, color: gpsColor, metrics: metrics)
+                            CVROperationalTile(title: "STORAGE", iconName: "externaldrive.fill", value: system.storageText, color: system.availableStorageBytes > 512_000_000 ? CVROperationalPalette.success : CVROperationalPalette.warning, metrics: metrics)
+                        }
+                        CVROperationalWarningCard(title: "VISUAL VERIFICATION", message: "Confirm recorder health before enabling in-flight logging.", iconName: "eye.fill", color: CVROperationalPalette.standby)
+                        CVROperationalActionButton(title: "VERIFY RECORDER", subtitle: "Persist health check", color: CVROperationalPalette.success) {
+                            workflow.recordRecorderVerification(
+                                audioRouteStatus: audio.sourceSummary,
+                                beaconStatus: beacon.currentState.rawValue,
+                                gpsStatus: gps.state.rawValue,
+                                storageStatus: system.storageText,
+                                thermalStatus: thermalLabel,
+                                batteryStatus: "\(system.batteryStateText) \(system.batteryLevelPercent)%",
+                                permissionStatus: "app-level-checks-pending",
+                                fileWritingTestResult: "deferred-to-recording-start",
+                                warnings: audio.isInternalMicWarning ? ["IPHONE MICROPHONE ACTIVE"] : [],
+                                acceptedWarnings: [],
+                                appVersion: appVersion,
+                                deviceID: UIDevice.current.identifierForVendor?.uuidString ?? "local-device"
+                            )
+                        }
                     }
-                    CVROperationalWarningCard(title: "VISUAL VERIFICATION", message: "Confirm recorder health before enabling in-flight logging.", iconName: "eye.fill", color: CVROperationalPalette.standby)
-                    CVROperationalActionButton(title: "VERIFY RECORDER", subtitle: "Persist health check", color: CVROperationalPalette.success) {
-                        workflow.recordRecorderVerification(
-                            audioRouteStatus: audio.sourceSummary,
-                            beaconStatus: beacon.currentState.rawValue,
-                            gpsStatus: gps.state.rawValue,
-                            storageStatus: system.storageText,
-                            thermalStatus: thermalLabel,
-                            batteryStatus: "\(system.batteryStateText) \(system.batteryLevelPercent)%",
-                            permissionStatus: "app-level-checks-pending",
-                            fileWritingTestResult: "deferred-to-recording-start",
-                            warnings: audio.isInternalMicWarning ? ["IPHONE MICROPHONE ACTIVE"] : [],
-                            acceptedWarnings: [],
-                            appVersion: appVersion,
-                            deviceID: UIDevice.current.identifierForVendor?.uuidString ?? "local-device"
-                        )
-                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                .padding(.horizontal, metrics.outerHorizontalPadding)
-                .padding(.vertical, metrics.outerVerticalPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
     }
@@ -1078,49 +1084,52 @@ struct InFlightWorkflowView: View {
                         let metrics = CVROperationalMetrics(size: proxy.size)
                         ZStack {
                             CVROperationalPalette.background.ignoresSafeArea()
-                            VStack(spacing: metrics.spacing) {
-                                CVROperationalStatusCard(title: inFlightTitle, subtitle: inFlightSubtitle, iconName: "airplane", color: inFlightColor, value: inFlightValue(now: timeline.date), caption: "IN-FLIGHT", metrics: metrics)
-                                HStack(spacing: metrics.spacing) {
-                                    CVROperationalTile(title: "DISPATCH", iconName: "checkmark.seal.fill", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
-                                    CVROperationalTile(title: "RECORDER", iconName: "waveform", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
-                                    CVROperationalTile(title: "BEACON", iconName: "dot.radiowaves.left.and.right", value: beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement).label, color: avionicsReady ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
-                                    CVROperationalTile(title: "GPS", iconName: "location.fill", value: gps.state == .ready || gps.state == .recording ? "Ready" : "Acquiring", color: gps.state == .ready || gps.state == .recording ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
-                                }
-                                inFlightControlPanel
-                                HStack(spacing: metrics.spacing) {
-                                    CVROperationalHoldTile(
-                                        title: "TAKE OFFS",
-                                        iconName: "airplane.departure",
-                                        value: "\(operationCounts.displayTakeoffs)",
-                                        subtitle: "Hold 2s to +1",
-                                        color: operationCounts.displayTakeoffs > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
-                                        metrics: metrics,
-                                        minimumDuration: 2,
-                                        isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
-                                    ) {
-                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                        workflow.recordManualTakeoffAdjustment(gpsSample: gps.latestSample)
-                                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            ScrollView {
+                                VStack(spacing: metrics.spacing) {
+                                    CVROperationalStatusCard(title: inFlightTitle, subtitle: inFlightSubtitle, iconName: "airplane", color: inFlightColor, value: inFlightValue(now: timeline.date), caption: "IN-FLIGHT", metrics: metrics)
+                                    HStack(spacing: metrics.spacing) {
+                                        CVROperationalTile(title: "DISPATCH", iconName: "checkmark.seal.fill", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
+                                        CVROperationalTile(title: "RECORDER", iconName: "waveform", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
+                                        CVROperationalTile(title: "BEACON", iconName: "dot.radiowaves.left.and.right", value: beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement).label, color: avionicsReady ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
+                                        CVROperationalTile(title: "GPS", iconName: "location.fill", value: gps.state == .ready || gps.state == .recording ? "Ready" : "Acquiring", color: gps.state == .ready || gps.state == .recording ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
                                     }
-                                    CVROperationalHoldTile(
-                                        title: "LANDINGS",
-                                        iconName: "airplane.arrival",
-                                        value: "\(operationCounts.displayLandings)",
-                                        subtitle: "Hold 2s to +1",
-                                        color: operationCounts.displayLandings > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
-                                        metrics: metrics,
-                                        minimumDuration: 2,
-                                        isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
-                                    ) {
-                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                        workflow.recordManualLandingAdjustment(gpsSample: gps.latestSample)
-                                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                    inFlightControlPanel
+                                    HStack(spacing: metrics.spacing) {
+                                        CVROperationalHoldTile(
+                                            title: "TAKE OFFS",
+                                            iconName: "airplane.departure",
+                                            value: "\(operationCounts.displayTakeoffs)",
+                                            subtitle: "Hold 2s to +1",
+                                            color: operationCounts.displayTakeoffs > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
+                                            metrics: metrics,
+                                            minimumDuration: 2,
+                                            isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                        ) {
+                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            workflow.recordManualTakeoffAdjustment(gpsSample: gps.latestSample)
+                                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                        }
+                                        CVROperationalHoldTile(
+                                            title: "LANDINGS",
+                                            iconName: "airplane.arrival",
+                                            value: "\(operationCounts.displayLandings)",
+                                            subtitle: "Hold 2s to +1",
+                                            color: operationCounts.displayLandings > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
+                                            metrics: metrics,
+                                            minimumDuration: 2,
+                                            isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                        ) {
+                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            workflow.recordManualLandingAdjustment(gpsSample: gps.latestSample)
+                                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                        }
                                     }
                                 }
+                                .padding(.horizontal, metrics.outerHorizontalPadding)
+                                .padding(.top, metrics.outerVerticalPadding)
+                                .padding(.bottom, 132)
+                                .frame(width: proxy.size.width, alignment: .top)
                             }
-                            .padding(.horizontal, metrics.outerHorizontalPadding)
-                            .padding(.vertical, metrics.outerVerticalPadding)
-                            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
                         }
                     }
                 }
@@ -1601,50 +1610,53 @@ struct GarminWorkflowView: View {
             let metrics = CVROperationalMetrics(size: proxy.size)
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
-                VStack(spacing: metrics.spacing) {
-                    CVROperationalStatusCard(title: "GARMIN RECOVERY", subtitle: "IMPORT AND UPLOAD QUEUE", iconName: "doc.badge.arrow.up", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "GARMIN", metrics: metrics)
-                    HStack(spacing: metrics.spacing) {
-                        CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: uploadTileColor, metrics: metrics)
-                        CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
-                        CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
-                        CVROperationalTile(title: "SD CARD", iconName: "sdcard.fill", value: sdCardTileValue, color: sdCardTileColor, metrics: metrics)
-                    }
-                    if !sdRecovery.isScanning, !garminSync.isSyncing, let summary = sdRecovery.lastSummary {
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        CVROperationalStatusCard(title: "GARMIN RECOVERY", subtitle: "IMPORT AND UPLOAD QUEUE", iconName: "doc.badge.arrow.up", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "GARMIN", metrics: metrics)
+                        HStack(spacing: metrics.spacing) {
+                            CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: uploadTileColor, metrics: metrics)
+                            CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
+                            CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
+                            CVROperationalTile(title: "SD CARD", iconName: "sdcard.fill", value: sdCardTileValue, color: sdCardTileColor, metrics: metrics)
+                        }
+                        if !sdRecovery.isScanning, !garminSync.isSyncing, let summary = sdRecovery.lastSummary {
+                            CVROperationalWarningCard(
+                                title: "SD CARD SCAN",
+                                message: summary.message,
+                                iconName: summary.matchedFlightRecord ? "checkmark.circle.fill" : "externaldrive.fill",
+                                color: summary.matchedFlightRecord ? CVROperationalPalette.success : CVROperationalPalette.secondaryBlue
+                            )
+                        }
                         CVROperationalWarningCard(
-                            title: "SD CARD SCAN",
-                            message: summary.message,
-                            iconName: summary.matchedFlightRecord ? "checkmark.circle.fill" : "externaldrive.fill",
-                            color: summary.matchedFlightRecord ? CVROperationalPalette.success : CVROperationalPalette.secondaryBlue
+                            title: garminWarningTitle,
+                            message: garminWarningMessage,
+                            iconName: garminWarningIcon,
+                            color: garminWarningColor,
+                            progress: activeRecoveryProgress
                         )
-                    }
-                    CVROperationalWarningCard(
-                        title: garminWarningTitle,
-                        message: garminWarningMessage,
-                        iconName: garminWarningIcon,
-                        color: garminWarningColor,
-                        progress: activeRecoveryProgress
-                    )
-                    workflowUploadRepairActions
-                    CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
-                        if settings.isSimulationModeEnabled {
-                            completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
-                        } else if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
-                            isShowingClosureEditor = true
-                        } else if workflow.canRepairFailedDispatchUpload {
-                            workflow.selectTab(.dispatch)
-                        } else if workflow.dispatchUploadFailure() != nil || !workflow.failedActiveUploadComponents().isEmpty {
-                            workflow.requeueFailedUploads()
-                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-                        } else if allWorkflowComponentsVerified {
-                            workflow.resetForNextFlightIfComplete()
-                        } else {
-                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        workflowUploadRepairActions
+                        CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
+                            if settings.isSimulationModeEnabled {
+                                completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
+                            } else if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+                                isShowingClosureEditor = true
+                            } else if workflow.canRepairFailedDispatchUpload {
+                                workflow.selectTab(.dispatch)
+                            } else if workflow.dispatchUploadFailure() != nil || !workflow.failedActiveUploadComponents().isEmpty {
+                                workflow.requeueFailedUploads()
+                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            } else if allWorkflowComponentsVerified {
+                                workflow.resetForNextFlightIfComplete()
+                            } else {
+                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            }
                         }
                     }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                .padding(.horizontal, metrics.outerHorizontalPadding)
-                .padding(.vertical, metrics.outerVerticalPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .sheet(isPresented: $isShowingClosureEditor) {
@@ -2419,14 +2431,16 @@ struct LockedOperationalView: View {
             let metrics = CVROperationalMetrics(size: proxy.size)
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
-                VStack(spacing: metrics.spacing) {
-                    CVROperationalStatusCard(title: title, subtitle: subtitle, iconName: iconName, color: color, value: nil, caption: "WORKFLOW", metrics: metrics)
-                    CVROperationalWarningCard(title: subtitle, message: "Complete the previous operational step before using this tab.", iconName: "lock.fill", color: color)
-                    Spacer()
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        CVROperationalStatusCard(title: title, subtitle: subtitle, iconName: iconName, color: color, value: nil, caption: "WORKFLOW", metrics: metrics)
+                        CVROperationalWarningCard(title: subtitle, message: "Complete the previous operational step before using this tab.", iconName: "lock.fill", color: color)
+                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                .padding(.horizontal, metrics.outerHorizontalPadding)
-                .padding(.vertical, metrics.outerVerticalPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
     }

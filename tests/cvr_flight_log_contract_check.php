@@ -8,6 +8,8 @@ $app = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/IPCACVRUnitApp.swif
 $models = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Models/CVRWorkflowModels.swift') ?: '';
 $views = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
 $uploads = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
+$garminEvidence = file_get_contents($root . '/src/GarminCsvEvidenceService.php') ?: '';
+$garminFinalize = file_get_contents($root . '/public/api/cvr/csv_upload_finalize.php') ?: '';
 $plist = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Info.plist') ?: '';
 
 $checks = array(
@@ -31,7 +33,16 @@ $checks = array(
         str_contains($models, 'CVRPendingGarminCSV')
         && str_contains($models, 'uploadPendingGarminCSV')
         && str_contains($uploads, 'uploadGarminCSVAttachment')
+        && str_contains($uploads, 'uploadCvrCsvChunk')
+        && str_contains($uploads, 'workflowFlightRecordUUID: flightRecordID')
         && str_contains($views, 'Assign Garmin CSV'),
+    'late CSV attachment is authenticated ownership checked and fully processed' =>
+        str_contains($garminFinalize, 'requireDevice()')
+        && str_contains($garminFinalize, "'workflow_flight_record_uuid'")
+        && str_contains($garminEvidence, 'assertWorkflowFlightOwnership')
+        && str_contains($garminEvidence, 'workflow_flight_record_uuid')
+        && str_contains($garminEvidence, 'GarminCsvValidationService')
+        && str_contains($garminEvidence, 'enqueueJobs'),
     'Log tab uses the operational shell and exposes missing CSV records' =>
         str_contains($models, 'case log')
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
