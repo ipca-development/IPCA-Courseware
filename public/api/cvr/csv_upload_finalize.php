@@ -24,7 +24,11 @@ try {
         cvr_csv_finalize_json(400, array('ok' => false, 'error' => 'Invalid JSON payload.'));
     }
     $device = (new DeviceAuthService($pdo))->requireDevice();
-    $result = (new GarminCsvEvidenceService($pdo))->finalize($device, (string)($payload['upload_uuid'] ?? $payload['upload_id'] ?? ''));
+    $result = (new GarminCsvEvidenceService($pdo))->finalize(
+        $device,
+        (string)($payload['upload_uuid'] ?? $payload['upload_id'] ?? ''),
+        (string)($payload['workflow_flight_record_uuid'] ?? '')
+    );
     cvr_csv_finalize_json(200, $result);
 } catch (Throwable $e) {
     $code = str_contains(strtolower($e->getMessage()), 'token') ? 401 : 400;

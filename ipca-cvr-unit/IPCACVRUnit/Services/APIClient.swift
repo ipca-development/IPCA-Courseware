@@ -469,14 +469,22 @@ struct APIClient {
         return try decode(CvrCsvChunkUploadResponse.self, from: data, response: response)
     }
 
-    func finalizeCvrCsvUpload(credential: String, uploadUUID: String) async throws -> CvrCsvFinalizeResponse {
+    func finalizeCvrCsvUpload(
+        credential: String,
+        uploadUUID: String,
+        workflowFlightRecordUUID: String? = nil
+    ) async throws -> CvrCsvFinalizeResponse {
         let url = serverURL.appending(path: "api/cvr/csv_upload_finalize.php")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 3600
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["upload_uuid": uploadUUID])
+        var payload: [String: Any] = ["upload_uuid": uploadUUID]
+        if let workflowFlightRecordUUID, !workflowFlightRecordUUID.isEmpty {
+            payload["workflow_flight_record_uuid"] = workflowFlightRecordUUID
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(CvrCsvFinalizeResponse.self, from: data, response: response)

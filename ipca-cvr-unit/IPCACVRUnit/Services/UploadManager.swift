@@ -527,15 +527,60 @@ final class UploadManager: ObservableObject {
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             throw APIClientError.badResponse("CVR Unit is not enrolled.")
         }
-        _ = credential
-        _ = try await uploadGarminFile(
-            fileURL: fileURL,
-            originalFilename: originalFilename,
-            flightRecordID: flightRecordID,
-            baseURL: baseURL
-        ) { value, _ in
-            progress(value)
+        let client = APIClient(serverURL: baseURL)
+        let uploadUUID = UUID().uuidString.lowercased()
+        let fileSize = try fileSize(fileURL)
+        let totalChunks = max(1, Int(ceil(Double(fileSize) / Double(chunkSize))))
+        for chunkIndex in 0..<totalChunks {
+            let offset = Int64(chunkIndex * chunkSize)
+            let count = min(chunkSize, Int(fileSize - offset))
+            let chunkData = try readChunk(
+                fileURL: fileURL,
+                offset: offset,
+                count: count,
+                chunkIndex: chunkIndex
+            )
+            progress(max(0.01, Double(chunkIndex) / Double(totalChunks) * 0.95))
+            var lastError: Error?
+            for attempt in 1...maxChunkAttempts {
+                do {
+                    let response = try await client.uploadCvrCsvChunk(
+                        credential: credential,
+                        uploadUUID: uploadUUID,
+                        sessionUUID: nil,
+                        chunkIndex: chunkIndex,
+                        totalChunks: totalChunks,
+                        totalSize: fileSize,
+                        originalFilename: originalFilename,
+                        chunkData: chunkData
+                    )
+                    guard response.ok else {
+                        throw APIClientError.badResponse(response.error ?? "Garmin CSV chunk upload failed.")
+                    }
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    if attempt < maxChunkAttempts {
+                        try await Task.sleep(for: .seconds(min(30, attempt * attempt * 2)))
+                    }
+                }
+            }
+            if let lastError {
+                throw lastError
+            }
+            progress(min(0.95, Double(chunkIndex + 1) / Double(totalChunks) * 0.95))
         }
+        progress(0.98)
+        let finalized = try await client.finalizeCvrCsvUpload(
+            credential: credential,
+            uploadUUID: uploadUUID,
+            workflowFlightRecordUUID: flightRecordID
+        )
+        guard finalized.ok else {
+            throw APIClientError.badResponse(finalized.error ?? "Server rejected Garmin CSV.")
+        }
+        progress(1)
     }
 
     private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws -> String {
