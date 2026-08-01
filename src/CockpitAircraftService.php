@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/tv_adsb_status.php';
 require_once __DIR__ . '/PfdProfileService.php';
+require_once __DIR__ . '/AircraftOperationalConfigService.php';
 
 /**
  * Aircraft/device registry shared by scheduling and Cockpit Recorder.
@@ -245,8 +246,9 @@ final class CockpitAircraftService
      */
     public function publicPayload(array $row): array
     {
+        $aircraftId = (int)($row['id'] ?? 0);
         return array(
-            'id' => (int)($row['id'] ?? 0),
+            'id' => $aircraftId,
             'registration' => (string)($row['registration'] ?? ''),
             'display_name' => (string)($row['display_name'] ?? ''),
             'aircraft_type' => (string)($row['aircraft_type'] ?? ''),
@@ -254,6 +256,7 @@ final class CockpitAircraftService
             'home_airport' => (string)($row['home_airport'] ?? ''),
             'active' => (int)($row['active'] ?? 0) === 1,
             'pfd_profile' => PfdProfileService::fromStored((string)($row['pfd_profile_json'] ?? '')),
+            'operational_config' => (new AircraftOperationalConfigService($this->pdo))->configForAircraft($aircraftId),
         );
     }
 }

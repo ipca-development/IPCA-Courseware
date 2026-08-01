@@ -141,7 +141,12 @@ private struct AdminWorkflowArchiveDetailView: View {
                 LabeledContent("Ending Hobbs", value: archive.flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? "—")
                 LabeledContent("Ending Tacho", value: archive.flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? "—")
                 LabeledContent("Fuel Remaining", value: archive.flightRecord.fuelRemaining ?? "—")
-                LabeledContent("Oil", value: archive.flightRecord.endingOilPercentage.map { "\($0)%" } ?? "—")
+                LabeledContent(
+                    "Oil",
+                    value: archive.flightRecord.effectiveEndingOilQuantity
+                        .map { "\(String(format: "%.1f", $0)) \(archive.flightRecord.effectiveEndingOilUnit)" }
+                        ?? "—"
+                )
             }
             Section("Event Timeline") {
                 ForEach(archive.flightEvents.sorted(by: { $0.timestampUTC < $1.timestampUTC })) { event in

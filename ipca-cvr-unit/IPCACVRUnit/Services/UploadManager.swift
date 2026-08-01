@@ -89,9 +89,6 @@ final class UploadManager: ObservableObject {
 
     func uploadQueuedWorkflowComponents(workflow: CVRWorkflowStore, settings: SettingsStore) {
         guard !settings.isSimulationModeEnabled else { return }
-        guard let baseURL = settings.normalizedServerURL else {
-            return
-        }
         let supportedTypes = Set([
             "dispatch_metadata", "garmin_csv", "flight_events",
             "recorder_verification", "flight_record_closure"
@@ -100,6 +97,17 @@ final class UploadManager: ObservableObject {
             supportedTypes.contains($0.componentType)
         }
         guard !components.isEmpty else { return }
+        guard let baseURL = settings.normalizedServerURL else {
+            for component in components where component.componentType == "dispatch_metadata" {
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .needsUserAction,
+                    progress: component.progress ?? 0,
+                    lastError: "Server URL is not configured. Open Admin, configure the server, then retry Dispatch upload."
+                )
+            }
+            return
+        }
 
         for component in components {
             guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
@@ -109,7 +117,7 @@ final class UploadManager: ObservableObject {
                     id: component.id,
                     state: .needsUserAction,
                     progress: component.progress ?? 0,
-                    lastError: "Ending Hobbs, Ending Tacho, and fuel remaining are required before closure upload."
+                    lastError: "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required before closure upload."
                 )
                 continue
             }
@@ -273,6 +281,7 @@ final class UploadManager: ObservableObject {
             .uppercased()
             ?? dispatch.tailNumber.uppercased()
         let uploadAircraftID = settings.selectedAircraft?.id ?? dispatch.aircraftID
+        let operationalConfig = settings.selectedAircraft?.operationalConfig ?? .safeDefaults
 
         var dispatchPayload: [String: Any] = [
             "id": dispatch.id.lowercased(),
@@ -294,6 +303,8 @@ final class UploadManager: ObservableObject {
                 return member
             },
             "fuel_onboard": dispatch.fuelOnboard,
+            "fuel_unit": operationalConfig.fuelUnit,
+            "fuel_capacity": operationalConfig.fuelCapacity,
             "dispatch_source": dispatch.dispatchSource,
             "creator_identity": dispatch.creatorIdentity,
             "created_at": iso.string(from: dispatch.createdAt),
@@ -316,11 +327,22 @@ final class UploadManager: ObservableObject {
         if let oilPercentage = dispatch.oilPercentage {
             dispatchPayload["oil_percentage"] = oilPercentage
         }
+        if let oilQuantity = dispatch.effectiveStartingOilQuantity {
+            dispatchPayload["oil_quantity"] = oilQuantity
+            dispatchPayload["oil_unit"] = dispatch.effectiveStartingOilUnit
+            if dispatch.effectiveStartingOilUnit == "%" {
+                dispatchPayload["oil_percentage"] = Int(oilQuantity.rounded())
+            }
+        }
         if let value = dispatch.previousFlightRecordID { dispatchPayload["previous_flight_record_id"] = value.lowercased() }
         if let value = dispatch.previousEndingHobbs { dispatchPayload["previous_ending_hobbs"] = value }
         if let value = dispatch.previousEndingTacho { dispatchPayload["previous_ending_tacho"] = value }
         if let value = dispatch.previousFuelRemaining { dispatchPayload["previous_fuel_remaining"] = value }
         if let value = dispatch.previousOilPercentage { dispatchPayload["previous_oil_percentage"] = value }
+        if let value = dispatch.effectivePreviousOilQuantity {
+            dispatchPayload["previous_ending_oil_quantity"] = value
+            dispatchPayload["previous_ending_oil_unit"] = dispatch.previousEndingOilUnit ?? "%"
+        }
         if let value = dispatch.refueledSincePreviousFlight { dispatchPayload["refueled_since_previous_flight"] = value }
         if let value = dispatch.oilServicedSincePreviousFlight { dispatchPayload["oil_serviced_since_previous_flight"] = value }
         if let schedulerRecordID = dispatch.schedulerRecordID {
@@ -379,7 +401,7 @@ final class UploadManager: ObservableObject {
             progress: 0.25,
             lastError: "Sending immutable \(component.componentType.replacingOccurrences(of: "_", with: " ")) evidence..."
         )
-        let payload = try workflowEvidencePayload(component: component, context: context)
+        let payload = try workflowEvidencePayload(component: component, context: context, settings: settings)
         let response = try await APIClient(serverURL: baseURL).syncWorkflowEvidence(
             payload: payload,
             credential: credential
@@ -400,7 +422,8 @@ final class UploadManager: ObservableObject {
             consents: [CVRConsentRecord],
             events: [CVRFlightEventRecord],
             verifications: [CVRRecorderVerificationRecord]
-        )
+        ),
+        settings: SettingsStore
     ) throws -> [String: Any] {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -463,6 +486,14 @@ final class UploadManager: ObservableObject {
             if let value = flight.endingHobbs { item["ending_hobbs"] = value }
             if let value = flight.endingTacho { item["ending_tacho"] = value }
             if let value = flight.fuelRemaining { item["fuel_remaining"] = value }
+            item["fuel_unit"] = settings.selectedAircraft?.operationalConfig.fuelUnit ?? AircraftOperationalConfig.safeDefaults.fuelUnit
+            if let value = flight.effectiveEndingOilQuantity {
+                item["ending_oil_quantity"] = value
+                item["ending_oil_unit"] = flight.effectiveEndingOilUnit
+                if flight.effectiveEndingOilUnit == "%" {
+                    item["ending_oil_percentage"] = Int(value.rounded())
+                }
+            }
             if let value = flight.verifiedTakeoffCount { item["verified_takeoff_count"] = value }
             if let value = flight.verifiedLandingCount { item["verified_landing_count"] = value }
             if let value = flight.autoDetectedTakeoffCount { item["auto_detected_takeoff_count"] = value }

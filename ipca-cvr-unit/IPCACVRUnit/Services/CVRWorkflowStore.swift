@@ -26,6 +26,7 @@ final class CVRWorkflowStore: ObservableObject {
                 let data = try Data(contentsOf: url)
                 state = try decoder.decode(CVRWorkflowState.self, from: data)
                 var changed = recoverInterruptedActiveUploads()
+                changed = Self.repairStaleDispatchConsents(in: &state) || changed
                 changed = ensureDispatchUploadComponent() || changed
                 changed = ensureEvidenceUploadComponents() || changed
                 changed = reconcileClosureUploadComponents() || changed
@@ -83,6 +84,8 @@ final class CVRWorkflowStore: ObservableObject {
             startingTacho: carryover?.endingTacho,
             fuelOnboard: carryover?.fuelRemaining ?? "",
             oilPercentage: carryover?.oilPercentage,
+            startingOilQuantity: carryover?.oilQuantity,
+            startingOilUnit: carryover?.oilUnit ?? selectedAircraft.operationalConfig.oilUnit,
             dispatchSource: carryover == nil ? "iphone_offline_local" : "verified_previous_flight_carryover",
             schedulerRecordID: nil,
             creatorIdentity: "local_cvr_unit",
@@ -98,6 +101,8 @@ final class CVRWorkflowStore: ObservableObject {
             previousEndingTacho: carryover?.endingTacho,
             previousFuelRemaining: carryover?.fuelRemaining,
             previousOilPercentage: carryover?.oilPercentage,
+            previousEndingOilQuantity: carryover?.oilQuantity,
+            previousEndingOilUnit: carryover?.oilUnit,
             refueledSincePreviousFlight: nil,
             oilServicedSincePreviousFlight: nil
         )
@@ -115,6 +120,48 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    func openDispatchFromScheduledSession(
+        _ session: CVRScheduledSession,
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String
+    ) {
+        guard let selectedAircraft, selectedAircraft.id == session.aircraftID else {
+            lastError = "This scheduled flight does not match the aircraft enrolled to this CVR Unit."
+            return
+        }
+        if let active = state.activeDispatch,
+           active.schedulerRecordID == session.schedulerRecordID {
+            selectTab(.dispatch)
+            return
+        }
+        guard state.activeDispatch == nil, state.activeFlightRecord == nil else {
+            lastError = "Finish and archive the current Dispatch before opening another scheduled flight."
+            return
+        }
+
+        createOrOpenLocalDispatch(selectedAircraft: selectedAircraft, cvrUnitID: cvrUnitID, beaconID: beaconID)
+        updateActiveDispatch { dispatch in
+            dispatch.scheduledDate = session.dateTime(nil) ?? Date()
+            dispatch.scheduledStartTime = session.dateTime(session.scheduledStartTime)
+            dispatch.scheduledEndTime = session.dateTime(session.scheduledEndTime)
+            dispatch.schedulerRecordID = session.schedulerRecordID
+            dispatch.missionCode = session.missionCode
+            dispatch.plannedDepartureAirport = session.plannedDepartureAirport
+            dispatch.plannedDestinationAirport = session.plannedDestinationAirport
+            dispatch.dispatchSource = "scheduled_session"
+            dispatch.crew = session.crew.map { member in
+                CVRCrewAssignment(
+                    id: UUID().uuidString,
+                    personID: member.personID,
+                    personName: member.personName,
+                    role: Self.crewRole(from: member.role)
+                )
+            }
+        }
+        selectTab(.dispatch)
+    }
+
     func updateActiveDispatch(_ update: (inout CVRDispatchRecord) -> Void) {
         if isDispatchLocked {
             lastError = "Dispatch is locked after confirmation."
@@ -126,17 +173,19 @@ final class CVRWorkflowStore: ObservableObject {
             let previousMaterialSignature = Self.materialSignature(dispatch)
             let previousStatus = dispatch.status
             update(&dispatch)
-            dispatch.version += 1
             dispatch.modifiedAt = Date()
             let materialChanged = previousMaterialSignature != Self.materialSignature(dispatch)
-            dispatch.status = Self.dispatchStatus(for: dispatch, consents: $0.consents)
             if materialChanged {
+                dispatch.version += 1
                 $0.consents = []
                 dispatch.consentStatus = "invalidated_by_dispatch_change"
                 if $0.activeFlightRecord?.status == .recorderVerificationRequired {
                     $0.activeFlightRecord = nil
                 }
-            } else if previousStatus == .flightRecordLoggingEnabled,
+            }
+            dispatch.status = Self.dispatchStatus(for: dispatch, consents: $0.consents)
+            if !materialChanged,
+               previousStatus == .flightRecordLoggingEnabled,
                       $0.activeFlightRecord?.dispatchID == dispatch.id,
                       dispatch.status == .readyForVerification {
                 dispatch.status = .flightRecordLoggingEnabled
@@ -194,6 +243,8 @@ final class CVRWorkflowStore: ObservableObject {
             endingTacho: nil,
             fuelRemaining: nil,
             endingOilPercentage: nil,
+            endingOilQuantity: nil,
+            endingOilUnit: nil,
             verifiedTakeoffCount: nil,
             verifiedLandingCount: nil,
             autoDetectedTakeoffCount: nil,
@@ -453,6 +504,8 @@ final class CVRWorkflowStore: ObservableObject {
         endingHobbs: Double?,
         endingTacho: Double?,
         fuelRemaining: String,
+        endingOilQuantity: Double?,
+        endingOilUnit: String?,
         verifiedTakeoffCount: Int,
         verifiedLandingCount: Int,
         maintenanceRemark: String,
@@ -468,6 +521,8 @@ final class CVRWorkflowStore: ObservableObject {
             endingHobbs: endingHobbs,
             endingTacho: endingTacho,
             fuelRemaining: fuelRemaining,
+            endingOilQuantity: endingOilQuantity,
+            endingOilUnit: endingOilUnit,
             verifiedTakeoffCount: verifiedTakeoffCount,
             verifiedLandingCount: verifiedLandingCount,
             maintenanceRemark: maintenanceRemark,
@@ -484,7 +539,10 @@ final class CVRWorkflowStore: ObservableObject {
             return false
         }
         let fuel = (flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Double(fuel) != nil, verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
+        guard Double(fuel) != nil,
+              flightRecord.effectiveEndingOilQuantity != nil,
+              verifiedTakeoffCount >= 0,
+              verifiedLandingCount >= 0 else {
             return false
         }
         guard let dispatch = state.activeDispatch else { return endingHobbs >= 0 && endingTacho >= 0 }
@@ -516,6 +574,8 @@ final class CVRWorkflowStore: ObservableObject {
         endingHobbs: Double?,
         endingTacho: Double?,
         fuelRemaining: String,
+        endingOilQuantity: Double?,
+        endingOilUnit: String?,
         verifiedTakeoffCount: Int,
         verifiedLandingCount: Int,
         maintenanceRemark: String,
@@ -535,6 +595,12 @@ final class CVRWorkflowStore: ObservableObject {
         let normalizedFuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Double(normalizedFuel) != nil else {
             lastError = "Fuel remaining must be a valid quantity."
+            return false
+        }
+        guard let endingOilQuantity, endingOilQuantity >= 0,
+              let endingOilUnit,
+              !endingOilUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastError = "Ending oil quantity and unit are required."
             return false
         }
         guard verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
@@ -561,7 +627,9 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
             flightRecord.fuelRemaining = normalizedFuel
-            flightRecord.endingOilPercentage = nil
+            flightRecord.endingOilQuantity = endingOilQuantity
+            flightRecord.endingOilUnit = endingOilUnit
+            flightRecord.endingOilPercentage = endingOilUnit == "%" ? Int(endingOilQuantity.rounded()) : nil
             flightRecord.verifiedTakeoffCount = verifiedTakeoffCount
             flightRecord.verifiedLandingCount = verifiedLandingCount
             flightRecord.autoDetectedTakeoffCount = counts.displayTakeoffs
@@ -734,7 +802,7 @@ final class CVRWorkflowStore: ObservableObject {
 
     func queuedWorkflowComponents() -> [CVRUploadComponentRecord] {
         let eligible: (CVRUploadComponentRecord) -> Bool = {
-            $0.state == .queued || $0.state == .failed || $0.state == .needsUserAction
+            $0.state == .queued
         }
         return state.uploadComponents.filter(eligible) + archives.flatMap(\.uploadComponents).filter(eligible)
     }
@@ -790,6 +858,12 @@ final class CVRWorkflowStore: ObservableObject {
     func dispatchUploadVerified() -> Bool {
         state.uploadComponents.contains {
             $0.componentType == "dispatch_metadata" && $0.state == .serverVerified
+        }
+    }
+
+    func dispatchUploadInProgress() -> Bool {
+        state.uploadComponents.contains {
+            $0.componentType == "dispatch_metadata" && ($0.state == .queued || $0.state == .uploading)
         }
     }
 
@@ -872,6 +946,11 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "No active Dispatch is available to repair."
             return false
         }
+        if let dispatch = state.activeDispatch,
+           Self.normalizedTail(dispatch.tailNumber) == Self.normalizedTail(enrolledTail),
+           dispatch.aircraftID == aircraft.id {
+            return true
+        }
         mutate {
             guard var dispatch = $0.activeDispatch else { return }
             dispatch.tailNumber = enrolledTail
@@ -892,6 +971,10 @@ final class CVRWorkflowStore: ObservableObject {
 
     func requeueFailedUploads(componentTypes: Set<String>? = nil) {
         mutate {
+            let includesDispatch = componentTypes == nil || componentTypes?.contains("dispatch_metadata") == true
+            if includesDispatch {
+                _ = Self.repairStaleDispatchConsents(in: &$0)
+            }
             for index in $0.uploadComponents.indices {
                 let component = $0.uploadComponents[index]
                 guard component.state == .failed || component.state == .needsUserAction else { continue }
@@ -1026,7 +1109,13 @@ final class CVRWorkflowStore: ObservableObject {
         if !Self.hasRequiredConsents(dispatch: dispatch, consents: state.consents) {
             let consentMissing = dispatch.crew
                 .filter { assignment in
-                    !state.consents.contains { $0.dispatchID == dispatch.id && $0.personName == assignment.personName && $0.crewRole == assignment.role && $0.consentResult }
+                    !state.consents.contains {
+                        $0.dispatchID == dispatch.id
+                            && $0.dispatchVersion == dispatch.version
+                            && $0.personName == assignment.personName
+                            && $0.crewRole == assignment.role
+                            && $0.consentResult
+                    }
                 }
                 .map { "\($0.role.label.uppercased()) CONSENT REQUIRED" }
             items.append(contentsOf: consentMissing)
@@ -1125,7 +1214,9 @@ final class CVRWorkflowStore: ObservableObject {
         endingHobbs: Double,
         endingTacho: Double,
         fuelRemaining: String,
-        oilPercentage: Int?
+        oilPercentage: Int?,
+        oilQuantity: Double?,
+        oilUnit: String?
     )? {
         let normalizedRegistration = registration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return archives
@@ -1143,7 +1234,15 @@ final class CVRWorkflowStore: ObservableObject {
                       let fuelRemaining = archive.flightRecord.fuelRemaining else {
                     return nil
                 }
-                return (archive.flightRecordID, endingHobbs, endingTacho, fuelRemaining, archive.flightRecord.endingOilPercentage)
+                return (
+                    archive.flightRecordID,
+                    endingHobbs,
+                    endingTacho,
+                    fuelRemaining,
+                    archive.flightRecord.endingOilPercentage,
+                    archive.flightRecord.effectiveEndingOilQuantity,
+                    archive.flightRecord.effectiveEndingOilUnit
+                )
             }
             .first
     }
@@ -1240,7 +1339,7 @@ final class CVRWorkflowStore: ObservableObject {
             }
             if state.uploadComponents[index].state == .queued || state.uploadComponents[index].state == .uploading {
                 state.uploadComponents[index].state = .needsUserAction
-                state.uploadComponents[index].lastError = "Ending Hobbs, Ending Tacho, and fuel remaining are required before closure upload."
+                state.uploadComponents[index].lastError = "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required before closure upload."
                 changed = true
             }
         }
@@ -1429,11 +1528,76 @@ final class CVRWorkflowStore: ObservableObject {
         return .readyForVerification
     }
 
+    private static func repairStaleDispatchConsents(in workflow: inout CVRWorkflowState) -> Bool {
+        guard var dispatch = workflow.activeDispatch,
+              workflow.uploadComponents.contains(where: {
+                  $0.componentType == "dispatch_metadata"
+                      && ($0.state == .failed || $0.state == .needsUserAction)
+                      && $0.lastError.localizedCaseInsensitiveContains("current-version consent")
+              }) else {
+            return false
+        }
+
+        var repairedConsents = workflow.consents
+        for assignment in dispatch.crew {
+            if repairedConsents.contains(where: {
+                $0.dispatchID == dispatch.id
+                    && $0.dispatchVersion == dispatch.version
+                    && $0.personName == assignment.personName
+                    && $0.crewRole == assignment.role
+                    && $0.consentResult
+            }) {
+                continue
+            }
+            guard let accepted = workflow.consents.last(where: {
+                $0.dispatchID == dispatch.id
+                    && $0.personName == assignment.personName
+                    && $0.crewRole == assignment.role
+                    && $0.consentResult
+            }) else {
+                return false
+            }
+            repairedConsents.append(CVRConsentRecord(
+                id: UUID().uuidString,
+                personID: accepted.personID,
+                personName: accepted.personName,
+                crewRole: accepted.crewRole,
+                consentResult: true,
+                timestamp: accepted.timestamp,
+                deviceID: accepted.deviceID,
+                dispatchID: dispatch.id,
+                dispatchVersion: dispatch.version,
+                consentTextVersion: accepted.consentTextVersion,
+                appVersion: accepted.appVersion
+            ))
+        }
+
+        guard hasRequiredConsents(dispatch: dispatch, consents: repairedConsents) else {
+            return false
+        }
+        workflow.consents = repairedConsents
+        dispatch.consentStatus = "complete"
+        workflow.activeDispatch = dispatch
+        for index in workflow.uploadComponents.indices {
+            guard workflow.uploadComponents[index].componentType == "dispatch_metadata",
+                  workflow.uploadComponents[index].lastError.localizedCaseInsensitiveContains("current-version consent"),
+                  workflow.uploadComponents[index].state == .failed
+                      || workflow.uploadComponents[index].state == .needsUserAction else {
+                continue
+            }
+            workflow.uploadComponents[index].state = .queued
+            workflow.uploadComponents[index].progress = 0
+            workflow.uploadComponents[index].lastError = "Recovered consent version metadata; Dispatch is queued for retry."
+        }
+        return true
+    }
+
     private static func hasRequiredConsents(dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> Bool {
         guard !dispatch.crew.isEmpty else { return false }
         return dispatch.crew.allSatisfy { assignment in
             consents.contains {
                 $0.dispatchID == dispatch.id
+                    && $0.dispatchVersion == dispatch.version
                     && $0.personName == assignment.personName
                     && $0.crewRole == assignment.role
                     && $0.consentResult
@@ -1452,11 +1616,24 @@ final class CVRWorkflowStore: ObservableObject {
             dispatch.startingHobbs.map { String(format: "%.4f", $0) } ?? "",
             dispatch.startingTacho.map { String(format: "%.4f", $0) } ?? "",
             dispatch.fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines),
-            dispatch.oilPercentage.map(String.init) ?? "",
+            dispatch.effectiveStartingOilQuantity.map { String(format: "%.4f", $0) } ?? "",
+            dispatch.effectiveStartingOilUnit,
             dispatch.refueledSincePreviousFlight.map(String.init) ?? "",
             dispatch.oilServicedSincePreviousFlight.map(String.init) ?? "",
             crewSignature
         ]
         return values.joined(separator: "#")
+    }
+
+    private static func crewRole(from value: String) -> CVRCrewRole {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .lowercased()
+        return CVRCrewRole.allCases.first {
+            $0.rawValue.replacingOccurrences(of: "_", with: "").lowercased() == normalized
+                || $0.label.replacingOccurrences(of: " ", with: "").lowercased() == normalized
+        } ?? .unknown
     }
 }

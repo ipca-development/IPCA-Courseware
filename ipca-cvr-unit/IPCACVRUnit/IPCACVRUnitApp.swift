@@ -15,6 +15,7 @@ struct IPCACVRUnitApp: App {
     @StateObject private var coordinator = CVRUnitCoordinator()
     @StateObject private var workflowStore = CVRWorkflowStore()
     @StateObject private var missionCatalog = MissionCatalogStore()
+    @StateObject private var scheduledSessions = ScheduledSessionsStore()
     @StateObject private var garminVault = GarminCsvVaultStore()
     @StateObject private var sdRecovery = GarminSDCardRecoveryService()
     @StateObject private var garminSync = GarminCsvSyncManager()
@@ -34,6 +35,7 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(coordinator)
                 .environmentObject(workflowStore)
                 .environmentObject(missionCatalog)
+                .environmentObject(scheduledSessions)
                 .environmentObject(garminVault)
                 .environmentObject(sdRecovery)
                 .environmentObject(garminSync)
@@ -41,6 +43,7 @@ struct IPCACVRUnitApp: App {
                 .task {
                     await recordingStore.load()
                     await workflowStore.load()
+                    await scheduledSessions.load()
                     await garminVault.load()
                     missionCatalog.loadBundledFallback()
                     await audioRecorder.refreshInputs()
@@ -49,6 +52,7 @@ struct IPCACVRUnitApp: App {
                     gpsManager.prepare()
                     await settings.refreshAircraft()
                     await settings.refreshCrewUsers()
+                    await scheduledSessions.refresh(settings: settings)
                     await missionCatalog.refreshFromServer(settings: settings)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                     sdRecovery.refreshBookmarkState(settings: settings)
@@ -85,6 +89,7 @@ struct IPCACVRUnitApp: App {
                         coordinator.appWillEnterForeground()
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                         Task {
+                            await scheduledSessions.refresh(settings: settings)
                             sdRecovery.refreshBookmarkState(settings: settings)
                             _ = await sdRecovery.scanAndImportIfNeeded(
                                 settings: settings,

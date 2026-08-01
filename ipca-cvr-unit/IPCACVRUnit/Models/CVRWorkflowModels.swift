@@ -1,6 +1,7 @@
 import Foundation
 
 enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
+    case scheduled
     case dispatch
     case recorder
     case inFlight
@@ -10,6 +11,7 @@ enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .scheduled: return "Scheduled"
         case .dispatch: return "Dispatch"
         case .recorder: return "Recorder"
         case .inFlight: return "In-Flight"
@@ -19,6 +21,7 @@ enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .scheduled: return "calendar"
         case .dispatch: return "checklist"
         case .recorder: return "waveform"
         case .inFlight: return "airplane"
@@ -150,6 +153,8 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var startingTacho: Double?
     var fuelOnboard: String
     var oilPercentage: Int?
+    var startingOilQuantity: Double?
+    var startingOilUnit: String?
     var dispatchSource: String
     var schedulerRecordID: String?
     var creatorIdentity: String
@@ -165,6 +170,8 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var previousEndingTacho: Double?
     var previousFuelRemaining: String?
     var previousOilPercentage: Int?
+    var previousEndingOilQuantity: Double?
+    var previousEndingOilUnit: String?
     var refueledSincePreviousFlight: Bool?
     var oilServicedSincePreviousFlight: Bool?
 
@@ -178,7 +185,7 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
         if startingHobbs == nil { items.append("STARTING HOBBS REQUIRED") }
         if startingTacho == nil { items.append("STARTING TACHO REQUIRED") }
         if fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("FUEL QUANTITY REQUIRED") }
-        if oilPercentage == nil { items.append("OIL PERCENTAGE REQUIRED") }
+        if effectiveStartingOilQuantity == nil { items.append("OIL QUANTITY REQUIRED") }
         items.append(contentsOf: continuityDiscrepancies)
         return items
     }
@@ -202,8 +209,8 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
                 items.append("FUEL DISCREPANCY >20%: REFUELING DOES NOT EXPLAIN LOWER QUANTITY")
             }
         }
-        if let expected = previousOilPercentage, let actual = oilPercentage,
-           Self.relativeDifference(Double(actual), Double(expected)) > 0.20 {
+        if let expected = effectivePreviousOilQuantity, let actual = effectiveStartingOilQuantity,
+           Self.relativeDifference(actual, expected) > 0.20 {
             if actual > expected {
                 if oilServicedSincePreviousFlight != true {
                     items.append("OIL DISCREPANCY >20%: CONFIRM OIL WAS SERVICED")
@@ -222,6 +229,20 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
 
     private static func relativeDifference(_ lhs: Double, _ rhs: Double) -> Double {
         abs(lhs - rhs) / max(abs(rhs), 0.1)
+    }
+
+    var effectiveStartingOilQuantity: Double? {
+        startingOilQuantity ?? oilPercentage.map(Double.init)
+    }
+
+    var effectiveStartingOilUnit: String {
+        startingOilUnit?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? startingOilUnit!
+            : "%"
+    }
+
+    var effectivePreviousOilQuantity: Double? {
+        previousEndingOilQuantity ?? previousOilPercentage.map(Double.init)
     }
 }
 
@@ -257,6 +278,8 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var endingTacho: Double?
     var fuelRemaining: String?
     var endingOilPercentage: Int?
+    var endingOilQuantity: Double?
+    var endingOilUnit: String?
     var verifiedTakeoffCount: Int?
     var verifiedLandingCount: Int?
     var autoDetectedTakeoffCount: Int?
@@ -264,6 +287,16 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var maintenanceRemark: String?
     var createdAt: Date
     var updatedAt: Date
+
+    var effectiveEndingOilQuantity: Double? {
+        endingOilQuantity ?? endingOilPercentage.map(Double.init)
+    }
+
+    var effectiveEndingOilUnit: String {
+        endingOilUnit?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? endingOilUnit!
+            : "%"
+    }
 }
 
 enum CVRWorkflowArchiveStatus: String, Codable {

@@ -3,8 +3,26 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/CvrDispatchIntakeService.php';
 
-$service = (new ReflectionClass(CvrDispatchIntakeService::class))->newInstanceWithoutConstructor();
+$pdo = new PDO('sqlite::memory:');
+$pdo->exec('CREATE TABLE ipca_cvr_dispatches (
+    dispatch_uuid TEXT,
+    workflow_flight_record_uuid TEXT,
+    aircraft_registration TEXT
+)');
+$pdo->exec('CREATE TABLE ipca_cvr_flight_closures (
+    id INTEGER PRIMARY KEY,
+    workflow_flight_record_uuid TEXT,
+    ending_hobbs REAL,
+    ending_tacho REAL,
+    fuel_remaining TEXT,
+    oil_percentage INTEGER,
+    oil_quantity REAL,
+    oil_unit TEXT,
+    received_at TEXT
+)');
+$service = new CvrDispatchIntakeService($pdo);
 $normalize = new ReflectionMethod(CvrDispatchIntakeService::class, 'normalizeAndValidate');
+$retryEquivalent = new ReflectionMethod(CvrDispatchIntakeService::class, 'isRetryEquivalent');
 $device = array(
     'id' => 10,
     'organization_id' => 1,
@@ -86,6 +104,50 @@ check('invalid Flight Record UUID is blocking', static function () use ($normali
     $changed = $payload;
     $changed['flight_record_uuid'] = 'not-a-uuid';
     return throws_runtime(static fn() => $normalize->invoke($service, $changed, $device), 'UUID');
+});
+check('generic oil quantity and unit replace legacy percentage', static function () use ($normalize, $service, $payload, $device): bool {
+    $changed = $payload;
+    unset($changed['dispatch']['oil_percentage']);
+    $changed['dispatch']['oil_quantity'] = 6.5;
+    $changed['dispatch']['oil_unit'] = 'qt';
+    $normalized = $normalize->invoke($service, $changed, $device);
+    return ($normalized['oil_quantity'] ?? null) === 6.5
+        && ($normalized['oil_unit'] ?? null) === 'qt'
+        && ($normalized['oil_percentage'] ?? null) === null;
+});
+check('generic oil requires a unit', static function () use ($normalize, $service, $payload, $device): bool {
+    $changed = $payload;
+    unset($changed['dispatch']['oil_percentage']);
+    $changed['dispatch']['oil_quantity'] = 6.5;
+    return throws_runtime(static fn() => $normalize->invoke($service, $changed, $device), 'oil');
+});
+check('scheduler record id must be UUID', static function () use ($normalize, $service, $payload, $device): bool {
+    $changed = $payload;
+    $changed['dispatch']['scheduler_record_id'] = 'schedule-123';
+    return throws_runtime(static fn() => $normalize->invoke($service, $changed, $device), 'scheduler_record_id');
+});
+check('retry timestamp changes remain idempotent', static function () use ($retryEquivalent, $service): bool {
+    $existing = array(
+        'dispatch_uuid' => '11111111-1111-4111-8111-111111111111',
+        'dispatch_version' => 4,
+        'mission_code' => 'SPC-1',
+        'modified_at' => '2026-07-28 20:01:00.000',
+    );
+    $incoming = $existing;
+    $incoming['modified_at'] = '2026-07-31 23:15:00.000';
+    return $retryEquivalent->invoke($service, json_encode($existing), json_encode($incoming));
+});
+check('material retry changes still conflict', static function () use ($retryEquivalent, $service): bool {
+    $existing = array(
+        'dispatch_uuid' => '11111111-1111-4111-8111-111111111111',
+        'dispatch_version' => 4,
+        'mission_code' => 'SPC-1',
+        'modified_at' => '2026-07-28 20:01:00.000',
+    );
+    $incoming = $existing;
+    $incoming['mission_code'] = 'SPC-2';
+    $incoming['modified_at'] = '2026-07-31 23:15:00.000';
+    return !$retryEquivalent->invoke($service, json_encode($existing), json_encode($incoming));
 });
 
 if ($failures !== array()) {

@@ -20,6 +20,7 @@ final class CvrDispatchIntakeService
         $normalized = $this->normalizeAndValidate($payload, $device);
         $canonicalJson = AuditEventService::jsonEncode($this->canonicalize($normalized));
         $payloadSha256 = hash('sha256', $canonicalJson);
+        $verifiedPayloadSha256 = $payloadSha256;
         $deviceId = (int)$device['id'];
         $organizationId = max(1, (int)($device['organization_id'] ?? 1));
 
@@ -38,14 +39,27 @@ final class CvrDispatchIntakeService
                 $dispatchId = $this->insertDispatch($normalized, $deviceId, $organizationId);
                 $dispatch = $this->lockDispatch($normalized['dispatch_uuid']);
             }
+            if (is_array($dispatch)) {
+                $existingSchedulerId = trim((string)($dispatch['scheduler_record_id'] ?? ''));
+                if ($existingSchedulerId !== '' && $existingSchedulerId !== $normalized['scheduler_record_id']) {
+                    throw new RuntimeException('Dispatch UUID is already linked to another schedule slot.');
+                }
+                $this->claimScheduledSlot($normalized, $device);
+            }
 
             $existingVersion = $this->dispatchVersion($dispatchId, $normalized['dispatch_version']);
             $alreadyPresent = is_array($existingVersion);
             if ($alreadyPresent) {
                 if (!hash_equals((string)$existingVersion['payload_sha256'], $payloadSha256)) {
-                    throw new RuntimeException('Dispatch version conflict: this version was already received with different content.');
+                    if (!$this->isRetryEquivalent(
+                        (string)($existingVersion['payload_json'] ?? ''),
+                        $canonicalJson
+                    )) {
+                        throw new RuntimeException('Dispatch version conflict: this version was already received with different content.');
+                    }
                 }
                 $receiptUuid = (string)$existingVersion['receipt_uuid'];
+                $verifiedPayloadSha256 = (string)$existingVersion['payload_sha256'];
             } else {
                 $receiptUuid = AuditEventService::uuid();
                 $this->insertVersion(
@@ -108,7 +122,7 @@ final class CvrDispatchIntakeService
             'receipt' => array(
                 'receipt_id' => $receiptUuid,
                 'component_type' => 'dispatch_metadata',
-                'payload_sha256' => $payloadSha256,
+                'payload_sha256' => $verifiedPayloadSha256,
                 'server_verified_at' => gmdate('c'),
             ),
         );
@@ -133,6 +147,11 @@ final class CvrDispatchIntakeService
         $missionCode = trim((string)($dispatch['mission_code'] ?? ''));
         $aircraftId = isset($dispatch['aircraft_id']) ? (int)$dispatch['aircraft_id'] : null;
         $oilPercentage = isset($dispatch['oil_percentage']) ? (int)$dispatch['oil_percentage'] : null;
+        $oilQuantity = isset($dispatch['oil_quantity']) && $dispatch['oil_quantity'] !== ''
+            ? (float)$dispatch['oil_quantity']
+            : null;
+        $oilUnit = substr(trim((string)($dispatch['oil_unit'] ?? '')), 0, 16);
+        $schedulerRecordId = strtolower(trim((string)($dispatch['scheduler_record_id'] ?? '')));
         $startingHobbs = isset($dispatch['starting_hobbs']) ? (float)$dispatch['starting_hobbs'] : null;
         $startingTacho = isset($dispatch['starting_tacho']) ? (float)$dispatch['starting_tacho'] : null;
         $fuelOnboard = trim((string)($dispatch['fuel_onboard'] ?? ''));
@@ -146,11 +165,20 @@ final class CvrDispatchIntakeService
         if ($scheduledDate === '' || DateTimeImmutable::createFromFormat('!Y-m-d', $scheduledDate) === false) {
             throw new RuntimeException('Valid Dispatch scheduled date is required.');
         }
-        if ($missionCode === '' || $crew === array() || $startingHobbs === null || $startingTacho === null || $fuelOnboard === '' || $oilPercentage === null) {
+        if ($missionCode === '' || $crew === array() || $startingHobbs === null || $startingTacho === null
+            || $fuelOnboard === '' || ($oilPercentage === null && $oilQuantity === null)) {
             throw new RuntimeException('Dispatch is incomplete and cannot be synchronized.');
         }
-        if ($oilPercentage < 0 || $oilPercentage > 100 || $startingHobbs < 0 || $startingTacho < 0) {
+        if (($oilPercentage !== null && ($oilPercentage < 0 || $oilPercentage > 100))
+            || $oilQuantity !== null && ($oilQuantity < 0 || $oilUnit === '')
+            || $startingHobbs < 0 || $startingTacho < 0) {
             throw new RuntimeException('Dispatch meter or oil values are invalid.');
+        }
+        if ($oilQuantity === null && $oilUnit !== '') {
+            throw new RuntimeException('Oil quantity is required when an oil unit is provided.');
+        }
+        if ($schedulerRecordId !== '' && !$this->isUuid($schedulerRecordId)) {
+            throw new RuntimeException('scheduler_record_id must be a valid UUID.');
         }
 
         $deviceTail = self::normalizeTailRegistration((string)($device['aircraft_registration'] ?? ''));
@@ -231,6 +259,8 @@ final class CvrDispatchIntakeService
             $startingTacho,
             $fuelOnboard,
             $oilPercentage,
+            $oilQuantity,
+            $oilUnit,
             $refueled,
             $oilServiced
         );
@@ -252,8 +282,10 @@ final class CvrDispatchIntakeService
             'starting_tacho' => $startingTacho,
             'fuel_onboard' => substr($fuelOnboard, 0, 64),
             'oil_percentage' => $oilPercentage,
+            'oil_quantity' => $oilQuantity,
+            'oil_unit' => $oilQuantity !== null ? $oilUnit : null,
             'dispatch_source' => substr(trim((string)($dispatch['dispatch_source'] ?? 'iphone_offline_local')), 0, 64),
-            'scheduler_record_id' => substr(trim((string)($dispatch['scheduler_record_id'] ?? '')), 0, 128),
+            'scheduler_record_id' => $schedulerRecordId,
             'creator_identity' => substr(trim((string)($dispatch['creator_identity'] ?? '')), 0, 128),
             'created_at' => $this->normalizeTimestamp((string)($dispatch['created_at'] ?? '')),
             'modified_at' => $this->normalizeTimestamp((string)($dispatch['modified_at'] ?? '')),
@@ -274,13 +306,15 @@ final class CvrDispatchIntakeService
         float $startingHobbs,
         float $startingTacho,
         string $fuelOnboard,
-        int $oilPercentage,
+        ?int $oilPercentage,
+        ?float $oilQuantity,
+        string $oilUnit,
         bool $refueled,
         bool $oilServiced
     ): void {
         $statement = $this->pdo->prepare(
             'SELECT d.workflow_flight_record_uuid, c.ending_hobbs, c.ending_tacho,
-                    c.fuel_remaining, c.oil_percentage
+                    c.fuel_remaining, c.oil_percentage, c.oil_quantity, c.oil_unit
              FROM ipca_cvr_dispatches d
              INNER JOIN ipca_cvr_flight_closures c ON c.id = (
                SELECT fc.id FROM ipca_cvr_flight_closures fc
@@ -318,11 +352,20 @@ final class CvrDispatchIntakeService
                 );
             }
         }
-        $previousOil = (int)$previous['oil_percentage'];
-        if ($this->relativeDifference((float)$oilPercentage, (float)$previousOil) > 0.20) {
-            if ($oilPercentage <= $previousOil || !$oilServiced) {
+        $incomingOil = $oilQuantity;
+        $previousOil = $previous['oil_quantity'] !== null ? (float)$previous['oil_quantity'] : null;
+        $unitsMatch = $incomingOil !== null && $previousOil !== null
+            && strcasecmp($oilUnit, trim((string)($previous['oil_unit'] ?? ''))) === 0;
+        if (!$unitsMatch && $oilPercentage !== null && $previous['oil_percentage'] !== null) {
+            $incomingOil = (float)$oilPercentage;
+            $previousOil = (float)$previous['oil_percentage'];
+            $unitsMatch = true;
+        }
+        if ($unitsMatch && $incomingOil !== null && $previousOil !== null
+            && $this->relativeDifference($incomingOil, $previousOil) > 0.20) {
+            if ($incomingOil <= $previousOil || !$oilServiced) {
                 throw new RuntimeException(
-                    $oilPercentage > $previousOil
+                    $incomingOil > $previousOil
                         ? 'Oil differs by more than 20%; confirm that oil was serviced.'
                         : 'Oil is more than 20% below the previous ending quantity; servicing does not explain the discrepancy.'
                 );
@@ -341,6 +384,84 @@ final class CvrDispatchIntakeService
         return abs($value - $baseline) / max(abs($baseline), 0.1);
     }
 
+    /** @param array<string,mixed> $normalized @param array<string,mixed> $device */
+    private function claimScheduledSlot(array $normalized, array $device): void
+    {
+        $schedulerRecordId = (string)$normalized['scheduler_record_id'];
+        if ($schedulerRecordId === '') {
+            return;
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT s.*, a.registration AS aircraft_registration
+             FROM ipca_flight_schedule_slots s
+             INNER JOIN ipca_aircraft_devices a ON a.id = s.aircraft_id
+             WHERE s.scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+        );
+        $statement->execute(array($schedulerRecordId));
+        $slot = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($slot)) {
+            throw new RuntimeException('Scheduled session does not exist.');
+        }
+        if (in_array((string)$slot['status'], array('cancelled', 'completed'), true)) {
+            throw new RuntimeException('Scheduled session is not available for Dispatch.');
+        }
+        $claimedDispatch = strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
+        if ($claimedDispatch !== '' && $claimedDispatch !== $normalized['dispatch_uuid']) {
+            throw new RuntimeException('Scheduled session has already been claimed by another Dispatch.');
+        }
+        $deviceAircraftId = (int)($device['aircraft_id'] ?? 0);
+        if ((int)$slot['aircraft_id'] !== $deviceAircraftId
+            || (int)$slot['aircraft_id'] !== (int)($normalized['aircraft_id'] ?? 0)
+            || self::normalizeTailRegistration((string)$slot['aircraft_registration']) !== $normalized['aircraft_registration']) {
+            throw new RuntimeException('Scheduled session aircraft does not match the authenticated Dispatch aircraft.');
+        }
+        if ((string)$slot['scheduled_date'] !== $normalized['scheduled_date']) {
+            throw new RuntimeException('Scheduled session date does not match the Dispatch.');
+        }
+        $slotMission = trim((string)($slot['mission_code'] ?? ''));
+        if ($slotMission !== '' && strcasecmp($slotMission, (string)$normalized['mission_code']) !== 0) {
+            throw new RuntimeException('Scheduled session mission does not match the Dispatch.');
+        }
+        foreach (array('scheduled_start_time', 'scheduled_end_time') as $field) {
+            if ($normalized[$field] === null
+                || strtotime((string)$normalized[$field]) !== strtotime((string)$slot[$field])) {
+                throw new RuntimeException('Scheduled session times do not match the Dispatch.');
+            }
+        }
+        foreach (array('planned_departure_airport', 'planned_destination_airport') as $field) {
+            $scheduledAirport = strtoupper(trim((string)($slot[$field] ?? '')));
+            if ($scheduledAirport !== '' && $scheduledAirport !== (string)$normalized[$field]) {
+                throw new RuntimeException('Scheduled session airports do not match the Dispatch.');
+            }
+        }
+        $crewStatement = $this->pdo->prepare(
+            'SELECT user_id, person_name_snapshot, crew_role
+             FROM ipca_flight_schedule_crew WHERE schedule_slot_id = ?'
+        );
+        $crewStatement->execute(array((int)$slot['id']));
+        foreach ($crewStatement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $scheduledCrew) {
+            $matched = false;
+            foreach ($normalized['crew'] as $dispatchCrew) {
+                $samePerson = ($scheduledCrew['user_id'] !== null
+                        && (int)$scheduledCrew['user_id'] === (int)($dispatchCrew['person_id'] ?? 0))
+                    || ($scheduledCrew['user_id'] === null
+                        && strcasecmp((string)$scheduledCrew['person_name_snapshot'], (string)$dispatchCrew['person_name']) === 0);
+                if ($samePerson && strcasecmp((string)$scheduledCrew['crew_role'], (string)$dispatchCrew['role']) === 0) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if (!$matched) {
+                throw new RuntimeException('Scheduled session crew does not match the Dispatch.');
+            }
+        }
+        $this->pdo->prepare(
+            "UPDATE ipca_flight_schedule_slots
+             SET status = 'claimed', claimed_dispatch_uuid = ?, claimed_at = COALESCE(claimed_at, CURRENT_TIMESTAMP(3))
+             WHERE id = ?"
+        )->execute(array($normalized['dispatch_uuid'], (int)$slot['id']));
+    }
+
     /**
      * @param array<string,mixed> $normalized
      */
@@ -348,14 +469,14 @@ final class CvrDispatchIntakeService
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_cvr_dispatches
-              (dispatch_uuid, organization_id, device_id, workflow_flight_record_uuid, current_version,
+              (dispatch_uuid, organization_id, device_id, workflow_flight_record_uuid, scheduler_record_id, current_version,
                aircraft_id, aircraft_registration, scheduled_date, mission_code, crew_json,
-               starting_hobbs, starting_tacho, fuel_onboard, oil_percentage, dispatch_source,
+               starting_hobbs, starting_tacho, fuel_onboard, oil_percentage, oil_quantity, oil_unit, dispatch_source,
                consent_status, status, cvr_unit_identifier, beacon_identifier)
             VALUES
-              (:dispatch_uuid, :organization_id, :device_id, :workflow_flight_record_uuid, :current_version,
+              (:dispatch_uuid, :organization_id, :device_id, :workflow_flight_record_uuid, :scheduler_record_id, :current_version,
                :aircraft_id, :aircraft_registration, :scheduled_date, :mission_code, :crew_json,
-               :starting_hobbs, :starting_tacho, :fuel_onboard, :oil_percentage, :dispatch_source,
+               :starting_hobbs, :starting_tacho, :fuel_onboard, :oil_percentage, :oil_quantity, :oil_unit, :dispatch_source,
                :consent_status, :status, :cvr_unit_identifier, :beacon_identifier)
         ");
         $stmt->execute(array(
@@ -363,6 +484,7 @@ final class CvrDispatchIntakeService
             ':organization_id' => $organizationId,
             ':device_id' => $deviceId,
             ':workflow_flight_record_uuid' => $normalized['flight_record_uuid'],
+            ':scheduler_record_id' => $normalized['scheduler_record_id'] ?: null,
             ':current_version' => $normalized['dispatch_version'],
             ':aircraft_id' => $normalized['aircraft_id'],
             ':aircraft_registration' => $normalized['aircraft_registration'],
@@ -373,6 +495,8 @@ final class CvrDispatchIntakeService
             ':starting_tacho' => $normalized['starting_tacho'],
             ':fuel_onboard' => $normalized['fuel_onboard'],
             ':oil_percentage' => $normalized['oil_percentage'],
+            ':oil_quantity' => $normalized['oil_quantity'],
+            ':oil_unit' => $normalized['oil_unit'],
             ':dispatch_source' => $normalized['dispatch_source'],
             ':consent_status' => $normalized['consent_status'],
             ':status' => $normalized['status'],
@@ -390,6 +514,7 @@ final class CvrDispatchIntakeService
         $stmt = $this->pdo->prepare("
             UPDATE ipca_cvr_dispatches
             SET workflow_flight_record_uuid = :workflow_flight_record_uuid,
+                scheduler_record_id = :scheduler_record_id,
                 current_version = :current_version,
                 aircraft_id = :aircraft_id,
                 aircraft_registration = :aircraft_registration,
@@ -400,6 +525,8 @@ final class CvrDispatchIntakeService
                 starting_tacho = :starting_tacho,
                 fuel_onboard = :fuel_onboard,
                 oil_percentage = :oil_percentage,
+                oil_quantity = :oil_quantity,
+                oil_unit = :oil_unit,
                 dispatch_source = :dispatch_source,
                 consent_status = :consent_status,
                 status = :status,
@@ -410,6 +537,7 @@ final class CvrDispatchIntakeService
         ");
         $stmt->execute(array(
             ':workflow_flight_record_uuid' => $normalized['flight_record_uuid'],
+            ':scheduler_record_id' => $normalized['scheduler_record_id'] ?: null,
             ':current_version' => $normalized['dispatch_version'],
             ':aircraft_id' => $normalized['aircraft_id'],
             ':aircraft_registration' => $normalized['aircraft_registration'],
@@ -420,6 +548,8 @@ final class CvrDispatchIntakeService
             ':starting_tacho' => $normalized['starting_tacho'],
             ':fuel_onboard' => $normalized['fuel_onboard'],
             ':oil_percentage' => $normalized['oil_percentage'],
+            ':oil_quantity' => $normalized['oil_quantity'],
+            ':oil_unit' => $normalized['oil_unit'],
             ':dispatch_source' => $normalized['dispatch_source'],
             ':consent_status' => $normalized['consent_status'],
             ':status' => $normalized['status'],
@@ -493,6 +623,26 @@ final class CvrDispatchIntakeService
         $stmt->execute(array($dispatchUuid));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    private function isRetryEquivalent(string $existingJson, string $incomingJson): bool
+    {
+        $existing = json_decode($existingJson, true);
+        $incoming = json_decode($incomingJson, true);
+        if (!is_array($existing) || !is_array($incoming)) {
+            return false;
+        }
+
+        // modified_at is device bookkeeping, not a material Dispatch change. Older
+        // app builds rewrote it before every retry, including after the server had
+        // accepted the request but the response was lost.
+        unset($existing['modified_at'], $incoming['modified_at']);
+        $existingCanonical = AuditEventService::jsonEncode($this->canonicalize($existing));
+        $incomingCanonical = AuditEventService::jsonEncode($this->canonicalize($incoming));
+        return hash_equals(
+            hash('sha256', $existingCanonical),
+            hash('sha256', $incomingCanonical)
+        );
     }
 
     /**

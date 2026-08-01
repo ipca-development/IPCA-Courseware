@@ -91,6 +91,10 @@ final class AircraftOperationalConfigService
             'movement_groundspeed_kt' => $this->floatValue($values['movement_groundspeed_kt'] ?? null, (float)$current['movement_groundspeed_kt']),
             'movement_confirm_ms' => $this->intValue($values['movement_confirm_ms'] ?? null, (int)$current['movement_confirm_ms']),
             'fuel_discrepancy_usg' => $this->floatValue($values['fuel_discrepancy_usg'] ?? null, (float)$current['fuel_discrepancy_usg']),
+            'fuel_capacity' => $this->positiveFloatValue($values['fuel_capacity'] ?? null, (float)$current['fuel_capacity']),
+            'fuel_unit' => $this->unitValue($values['fuel_unit'] ?? null, (string)$current['fuel_unit']),
+            'oil_capacity' => $this->positiveFloatValue($values['oil_capacity'] ?? null, (float)$current['oil_capacity']),
+            'oil_unit' => $this->unitValue($values['oil_unit'] ?? null, (string)$current['oil_unit']),
             'timezone_identifier' => trim((string)($values['timezone_identifier'] ?? $current['timezone_identifier'])) ?: 'UTC',
             'change_reason' => substr(trim((string)($values['change_reason'] ?? 'Operational thresholds update')), 0, 512),
         ));
@@ -119,9 +123,10 @@ final class AircraftOperationalConfigService
                   (config_id, config_version_uuid, version_number, effective_from_utc,
                    hobbs_engine_on_rpm_threshold, hobbs_start_confirm_ms, hobbs_stop_confirm_ms,
                    tacho_rpm_threshold, movement_groundspeed_kt, movement_confirm_ms,
-                   fuel_discrepancy_usg, timezone_identifier, changed_by, change_reason)
+                   fuel_discrepancy_usg, fuel_capacity, fuel_unit, oil_capacity, oil_unit,
+                   timezone_identifier, changed_by, change_reason)
                 VALUES
-                  (?, ?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (?, ?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $insert->execute(array(
                 (int)$config['id'],
@@ -134,6 +139,10 @@ final class AircraftOperationalConfigService
                 (float)$next['movement_groundspeed_kt'],
                 (int)$next['movement_confirm_ms'],
                 (float)$next['fuel_discrepancy_usg'],
+                (float)$next['fuel_capacity'],
+                (string)$next['fuel_unit'],
+                (float)$next['oil_capacity'],
+                (string)$next['oil_unit'],
                 (string)$next['timezone_identifier'],
                 $changedBy,
                 (string)$next['change_reason'],
@@ -165,6 +174,10 @@ final class AircraftOperationalConfigService
             'movement_groundspeed_kt' => 3.0,
             'movement_confirm_ms' => 3000,
             'fuel_discrepancy_usg' => 1.0,
+            'fuel_capacity' => 13.0,
+            'fuel_unit' => 'USG',
+            'oil_capacity' => 100.0,
+            'oil_unit' => '%',
             'timezone_identifier' => 'UTC',
         );
     }
@@ -185,6 +198,10 @@ final class AircraftOperationalConfigService
             'movement_groundspeed_kt' => (float)$row['movement_groundspeed_kt'],
             'movement_confirm_ms' => (int)$row['movement_confirm_ms'],
             'fuel_discrepancy_usg' => (float)$row['fuel_discrepancy_usg'],
+            'fuel_capacity' => (float)($row['fuel_capacity'] ?? 13.0),
+            'fuel_unit' => trim((string)($row['fuel_unit'] ?? 'USG')) ?: 'USG',
+            'oil_capacity' => (float)($row['oil_capacity'] ?? 100.0),
+            'oil_unit' => trim((string)($row['oil_unit'] ?? '%')) ?: '%',
             'timezone_identifier' => (string)($row['timezone_identifier'] ?? 'UTC'),
         ));
     }
@@ -197,6 +214,17 @@ final class AircraftOperationalConfigService
     private function intValue(mixed $value, int $fallback): int
     {
         return is_numeric($value) ? max(0, (int)$value) : $fallback;
+    }
+
+    private function positiveFloatValue(mixed $value, float $fallback): float
+    {
+        return is_numeric($value) && (float)$value > 0 ? (float)$value : $fallback;
+    }
+
+    private function unitValue(mixed $value, string $fallback): string
+    {
+        $unit = substr(trim((string)($value ?? '')), 0, 16);
+        return $unit !== '' ? $unit : $fallback;
     }
 
     private function nullableFloatValue(mixed $value): ?float

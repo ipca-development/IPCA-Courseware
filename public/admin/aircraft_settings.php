@@ -154,6 +154,10 @@ try {
                 'movement_groundspeed_kt' => $_POST['movement_groundspeed_kt'] ?? null,
                 'movement_confirm_ms' => $_POST['movement_confirm_ms'] ?? null,
                 'fuel_discrepancy_usg' => $_POST['fuel_discrepancy_usg'] ?? null,
+                'fuel_capacity' => $_POST['fuel_capacity'] ?? null,
+                'fuel_unit' => $_POST['fuel_unit'] ?? 'USG',
+                'oil_capacity' => $_POST['oil_capacity'] ?? null,
+                'oil_unit' => $_POST['oil_unit'] ?? '%',
                 'timezone_identifier' => $_POST['timezone_identifier'] ?? 'UTC',
                 'change_reason' => $_POST['operational_change_reason'] ?? 'Operational thresholds update',
             ));
@@ -504,6 +508,26 @@ cw_header('Aircraft Settings');
             <label for="timezone_identifier">Operational timezone</label>
             <input id="timezone_identifier" name="timezone_identifier" value="<?= h((string)($operational['timezone_identifier'] ?? 'UTC')) ?>" maxlength="64">
             <span class="settings-help">IANA timezone name used for operational day grouping.</span>
+          </div>
+          <div class="settings-field">
+            <label for="fuel_capacity">Usable fuel capacity</label>
+            <input id="fuel_capacity" name="fuel_capacity" type="number" min="0.001" step="0.001" value="<?= h((string)($operational['fuel_capacity'] ?? 13)) ?>">
+            <span class="settings-help">Maximum quantity shown in Dispatch.</span>
+          </div>
+          <div class="settings-field">
+            <label for="fuel_unit">Fuel unit</label>
+            <input id="fuel_unit" name="fuel_unit" maxlength="16" value="<?= h((string)($operational['fuel_unit'] ?? 'USG')) ?>">
+            <span class="settings-help">For example USG or L.</span>
+          </div>
+          <div class="settings-field">
+            <label for="oil_capacity">Oil capacity</label>
+            <input id="oil_capacity" name="oil_capacity" type="number" min="0.001" step="0.001" value="<?= h((string)($operational['oil_capacity'] ?? 100)) ?>">
+            <span class="settings-help">Maximum quantity shown in Dispatch.</span>
+          </div>
+          <div class="settings-field">
+            <label for="oil_unit">Oil unit</label>
+            <input id="oil_unit" name="oil_unit" maxlength="16" value="<?= h((string)($operational['oil_unit'] ?? '%')) ?>">
+            <span class="settings-help">For example qt, L, or %.</span>
           </div>
           <div class="settings-field">
             <label for="operational_change_reason">Change reason</label>

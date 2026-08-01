@@ -68,6 +68,46 @@ struct AudioRecordingSegment: Codable, Equatable {
     var fileSize: Int64
 }
 
+struct AircraftOperationalConfig: Codable, Equatable {
+    var fuelCapacity: Double
+    var fuelUnit: String
+    var oilCapacity: Double
+    var oilUnit: String
+
+    static let safeDefaults = AircraftOperationalConfig(
+        fuelCapacity: 13,
+        fuelUnit: "USG",
+        oilCapacity: 100,
+        oilUnit: "%"
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case fuelCapacity = "fuel_capacity"
+        case fuelUnit = "fuel_unit"
+        case oilCapacity = "oil_capacity"
+        case oilUnit = "oil_unit"
+    }
+
+    init(fuelCapacity: Double, fuelUnit: String, oilCapacity: Double, oilUnit: String) {
+        let normalizedFuelUnit = fuelUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedOilUnit = oilUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.fuelCapacity = fuelCapacity > 0 ? fuelCapacity : Self.safeDefaults.fuelCapacity
+        self.fuelUnit = normalizedFuelUnit.isEmpty ? Self.safeDefaults.fuelUnit : normalizedFuelUnit
+        self.oilCapacity = oilCapacity > 0 ? oilCapacity : Self.safeDefaults.oilCapacity
+        self.oilUnit = normalizedOilUnit.isEmpty ? Self.safeDefaults.oilUnit : normalizedOilUnit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            fuelCapacity: try container.decodeIfPresent(Double.self, forKey: .fuelCapacity) ?? Self.safeDefaults.fuelCapacity,
+            fuelUnit: try container.decodeIfPresent(String.self, forKey: .fuelUnit) ?? Self.safeDefaults.fuelUnit,
+            oilCapacity: try container.decodeIfPresent(Double.self, forKey: .oilCapacity) ?? Self.safeDefaults.oilCapacity,
+            oilUnit: try container.decodeIfPresent(String.self, forKey: .oilUnit) ?? Self.safeDefaults.oilUnit
+        )
+    }
+}
+
 struct CockpitAircraft: Identifiable, Codable, Equatable {
     var id: Int
     var registration: String
@@ -76,6 +116,7 @@ struct CockpitAircraft: Identifiable, Codable, Equatable {
     var adsbHex: String
     var homeAirport: String
     var active: Bool
+    var operationalConfig: AircraftOperationalConfig
 
     var label: String {
         let name = displayName.isEmpty ? registration : displayName
@@ -90,6 +131,19 @@ struct CockpitAircraft: Identifiable, Codable, Equatable {
         case adsbHex = "adsb_hex"
         case homeAirport = "home_airport"
         case active
+        case operationalConfig = "operational_config"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        registration = try container.decodeIfPresent(String.self, forKey: .registration) ?? ""
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        aircraftType = try container.decodeIfPresent(String.self, forKey: .aircraftType) ?? ""
+        adsbHex = try container.decodeIfPresent(String.self, forKey: .adsbHex) ?? ""
+        homeAirport = try container.decodeIfPresent(String.self, forKey: .homeAirport) ?? ""
+        active = try container.decodeIfPresent(Bool.self, forKey: .active) ?? true
+        operationalConfig = try container.decodeIfPresent(AircraftOperationalConfig.self, forKey: .operationalConfig) ?? .safeDefaults
     }
 }
 

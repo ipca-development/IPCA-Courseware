@@ -36,6 +36,13 @@ struct OperationalTabsView: View {
                 get: { workflow.state.selectedTab },
                 set: { workflow.selectTab($0) }
             )) {
+                ScheduledFlightsView(showAdminUnlock: $showAdminUnlock)
+                    .tabItem {
+                        Image(systemName: CVROperationalTab.scheduled.systemImage)
+                        Text(CVROperationalTab.scheduled.title)
+                    }
+                    .tag(CVROperationalTab.scheduled)
+
                 DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
                     .tabItem {
                         Image(systemName: CVROperationalTab.dispatch.systemImage)
@@ -71,6 +78,139 @@ struct OperationalTabsView: View {
             }
         }
         .background(CVROperationalPalette.background.ignoresSafeArea())
+    }
+}
+
+private struct ScheduledFlightsView: View {
+    @EnvironmentObject private var sessionsStore: ScheduledSessionsStore
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @Binding var showAdminUnlock: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if settings.selectedAircraft == nil {
+                    Section {
+                        Button("Configure Aircraft") { showAdminUnlock = true }
+                    } header: {
+                        Text("Aircraft enrollment required")
+                    }
+                } else {
+                    sessionSection("Today", sessions: todaySessions)
+                    sessionSection("Upcoming", sessions: upcomingSessions)
+                    Section("Offline fallback") {
+                        Button {
+                            workflow.createOrOpenLocalDispatch(
+                                selectedAircraft: settings.selectedAircraft,
+                                cvrUnitID: settings.cvrUnitIdentifier,
+                                beaconID: beacon.expectedBeaconIdentityHex
+                            )
+                        } label: {
+                            Label("Create Local Dispatch", systemImage: "plus.circle.fill")
+                        }
+                        .disabled(workflow.state.activeDispatch != nil || workflow.state.activeFlightRecord != nil)
+                    }
+                }
+                if let error = sessionsStore.lastError.nilIfEmpty {
+                    Section("Last refresh") {
+                        Text(error).foregroundStyle(CVROperationalPalette.warning)
+                    }
+                }
+            }
+            .navigationTitle("Scheduled Flights")
+            .overlay {
+                if sessionsStore.isRefreshing && aircraftSessions.isEmpty {
+                    ProgressView("Loading scheduled flights…")
+                }
+            }
+            .refreshable {
+                await sessionsStore.refresh(settings: settings)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sessionSection(_ title: String, sessions: [CVRScheduledSession]) -> some View {
+        Section(title) {
+            if sessions.isEmpty {
+                Text("No \(title.lowercased()) flights")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(sessions) { session in
+                    Button {
+                        workflow.openDispatchFromScheduledSession(
+                            session,
+                            selectedAircraft: settings.selectedAircraft,
+                            cvrUnitID: settings.cvrUnitIdentifier,
+                            beaconID: beacon.expectedBeaconIdentityHex
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text(session.missionCode.nilIfEmpty ?? "Scheduled Flight")
+                                    .font(.headline)
+                                Spacer()
+                                Text(timeRange(session))
+                                    .font(.subheadline.monospacedDigit())
+                            }
+                            Text(route(session))
+                                .font(.subheadline)
+                            Text(crewSummary(session))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(workflow.state.activeDispatch != nil
+                        && workflow.state.activeDispatch?.schedulerRecordID != session.schedulerRecordID)
+                }
+            }
+        }
+    }
+
+    private var aircraftSessions: [CVRScheduledSession] {
+        guard let aircraft = settings.selectedAircraft else { return [] }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return sessionsStore.sessions
+            .filter {
+                ($0.aircraftID == aircraft.id
+                    || CVRWorkflowStore.normalizedTail($0.aircraftRegistration)
+                        == CVRWorkflowStore.normalizedTail(aircraft.registration))
+                    && ($0.dateTime(nil) ?? .distantPast) >= startOfToday
+            }
+            .sorted { ($0.dateTime($0.scheduledStartTime) ?? .distantFuture) < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture) }
+    }
+
+    private var todaySessions: [CVRScheduledSession] {
+        aircraftSessions.filter { session in
+            guard let date = session.dateTime(nil) else { return false }
+            return Calendar.current.isDateInToday(date)
+        }
+    }
+
+    private var upcomingSessions: [CVRScheduledSession] {
+        aircraftSessions.filter { session in
+            guard let date = session.dateTime(nil) else { return false }
+            return !Calendar.current.isDateInToday(date)
+        }
+    }
+
+    private func timeRange(_ session: CVRScheduledSession) -> String {
+        let start = session.dateTime(session.scheduledStartTime)?.formatted(date: .omitted, time: .shortened) ?? "TBD"
+        let end = session.dateTime(session.scheduledEndTime)?.formatted(date: .omitted, time: .shortened) ?? "TBD"
+        return "\(start)–\(end)"
+    }
+
+    private func route(_ session: CVRScheduledSession) -> String {
+        let departure = session.plannedDepartureAirport.nilIfEmpty ?? "TBD"
+        let destination = session.plannedDestinationAirport.nilIfEmpty ?? "TBD"
+        return "\(departure) → \(destination)"
+    }
+
+    private func crewSummary(_ session: CVRScheduledSession) -> String {
+        let names = session.crew.map(\.personName).filter { !$0.isEmpty }
+        return names.isEmpty ? "Crew not assigned" : names.joined(separator: ", ")
     }
 }
 
@@ -163,6 +303,13 @@ struct DispatchWorkflowView: View {
                 iconName: "icloud.slash.fill",
                 color: CVROperationalPalette.critical
             )
+        } else if workflow.dispatchUploadInProgress() {
+            CVROperationalWarningCard(
+                title: "DISPATCH UPLOAD IN PROGRESS",
+                message: "The Dispatch is stored locally and is being verified by the server.",
+                iconName: "icloud.and.arrow.up.fill",
+                color: CVROperationalPalette.secondaryBlue
+            )
         } else if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
             CVROperationalWarningCard(
                 title: "AIRCRAFT MISMATCH",
@@ -222,10 +369,10 @@ struct DispatchWorkflowView: View {
                         Spacer(minLength: 0)
                         CVRFluidCylinderPicker(
                             title: "OIL",
-                            unit: "%",
+                            unit: operationalConfig.oilUnit,
                             value: $repairOilPercent,
                             hasSelection: $repairHasOilSelection,
-                            maxValue: 100,
+                            maxValue: operationalConfig.oilCapacity,
                             warningThreshold: nil,
                             fillColor: CVROperationalPalette.standby,
                             warningColor: CVROperationalPalette.standby
@@ -327,8 +474,10 @@ struct DispatchWorkflowView: View {
                     }
                 }
             } else {
-                if workflow.isDispatchLocked && workflow.dispatchUploadFailure() == nil {
+                if workflow.isDispatchLocked && workflow.dispatchUploadVerified() {
                     CVROperationalActionButton(title: "Dispatch Confirmed", subtitle: "Flight Record Created", color: CVROperationalPalette.success) {}
+                } else if workflow.isDispatchLocked && workflow.dispatchUploadInProgress() {
+                    CVROperationalActionButton(title: "Uploading Dispatch", subtitle: "Waiting for server verification", color: CVROperationalPalette.secondaryBlue) {}
                 } else if !workflow.isDispatchLocked {
                     CVROperationalActionButton(title: "Edit Dispatch", subtitle: "Crew / meters / oil", color: CVROperationalPalette.secondaryBlue) {
                         isEditingDispatch = true
@@ -429,11 +578,11 @@ struct DispatchWorkflowView: View {
         guard let dispatch = workflow.state.activeDispatch else { return }
         repairRefueledSincePreviousFlight = dispatch.refueledSincePreviousFlight ?? false
         repairOilServicedSincePreviousFlight = dispatch.oilServicedSincePreviousFlight ?? false
-        if let oil = dispatch.oilPercentage {
-            repairOilPercent = min(max(Double(oil), 0), 100)
+        if let oil = dispatch.effectiveStartingOilQuantity {
+            repairOilPercent = min(max(oil, 0), operationalConfig.oilCapacity)
             repairHasOilSelection = true
         } else {
-            repairOilPercent = 50
+            repairOilPercent = operationalConfig.oilCapacity / 2
             repairHasOilSelection = false
         }
     }
@@ -441,7 +590,9 @@ struct DispatchWorkflowView: View {
     private func applyContinuityRepairAndRetryUpload() {
         guard workflow.updateActiveDispatchForUploadRepair({ dispatch in
             if repairHasOilSelection {
-                dispatch.oilPercentage = Int(repairOilPercent.rounded())
+                dispatch.startingOilQuantity = repairOilPercent
+                dispatch.startingOilUnit = operationalConfig.oilUnit
+                dispatch.oilPercentage = operationalConfig.oilUnit == "%" ? Int(repairOilPercent.rounded()) : nil
             }
             if showsRepairRefuelConfirmation {
                 dispatch.refueledSincePreviousFlight = repairRefueledSincePreviousFlight
@@ -491,14 +642,19 @@ struct DispatchWorkflowView: View {
 
     private var fuelTile: String {
         guard let dispatch = workflow.state.activeDispatch else { return "Required" }
-        let fuel = Self.fuelGallons(from: dispatch.fuelOnboard).map { "F: \(Self.gallonText($0)) USG" } ?? "F: ? USG"
-        let oil = dispatch.oilPercentage.map { "O: \($0)%" } ?? "O: ?%"
+        let fuel = Self.quantity(from: dispatch.fuelOnboard, unit: operationalConfig.fuelUnit)
+            .map { "F: \(Self.quantityText($0)) \(operationalConfig.fuelUnit)" }
+            ?? "F: ? \(operationalConfig.fuelUnit)"
+        let oil = dispatch.effectiveStartingOilQuantity
+            .map { "O: \(Self.quantityText($0)) \(dispatch.effectiveStartingOilUnit)" }
+            ?? "O: ? \(operationalConfig.oilUnit)"
         return "\(fuel)\n\(oil)"
     }
 
     private var fuelTileColor: Color {
-        guard let dispatch = workflow.state.activeDispatch, !dispatch.fuelOnboard.isEmpty, dispatch.oilPercentage != nil else { return CVROperationalPalette.warning }
-        if let gallons = Self.fuelGallons(from: dispatch.fuelOnboard), gallons <= 3 {
+        guard let dispatch = workflow.state.activeDispatch, !dispatch.fuelOnboard.isEmpty, dispatch.effectiveStartingOilQuantity != nil else { return CVROperationalPalette.warning }
+        if let quantity = Self.quantity(from: dispatch.fuelOnboard, unit: operationalConfig.fuelUnit),
+           quantity <= operationalConfig.fuelCapacity * (3.0 / 13.0) {
             return CVROperationalPalette.critical
         }
         return CVROperationalPalette.success
@@ -516,14 +672,19 @@ struct DispatchWorkflowView: View {
         return hasConsent ? CVROperationalPalette.success : CVROperationalPalette.standby
     }
 
-    private static func fuelGallons(from value: String) -> Double? {
+    private var operationalConfig: AircraftOperationalConfig {
+        settings.selectedAircraft?.operationalConfig ?? .safeDefaults
+    }
+
+    private static func quantity(from value: String, unit: String) -> Double? {
         let cleaned = value
+            .replacingOccurrences(of: unit, with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Double(cleaned)
     }
 
-    private static func gallonText(_ value: Double) -> String {
+    private static func quantityText(_ value: Double) -> String {
         String(format: "%.1f", value)
     }
 }
@@ -965,7 +1126,9 @@ private struct ShutdownVerificationView: View {
     @State private var endingHobbs = ""
     @State private var endingTacho = ""
     @State private var fuelRemaining = 0.0
+    @State private var oilRemaining = 0.0
     @State private var hasFuelSelection = false
+    @State private var hasOilSelection = false
     @State private var verifiedTakeoffs = 0
     @State private var verifiedLandings = 0
     @State private var maintenanceRemark = ""
@@ -987,18 +1150,29 @@ private struct ShutdownVerificationView: View {
                         }
                     }
 
-                    section("POST-FLIGHT FUEL") {
-                        HStack {
+                    section("POST-FLIGHT FLUIDS") {
+                        HStack(alignment: .top, spacing: 10) {
                             Spacer(minLength: 0)
                             CVRFluidCylinderPicker(
                                 title: "FUEL",
-                                unit: "USG",
+                                unit: operationalConfig.fuelUnit,
                                 value: $fuelRemaining,
                                 hasSelection: $hasFuelSelection,
-                                maxValue: 13,
-                                warningThreshold: 3,
+                                maxValue: operationalConfig.fuelCapacity,
+                                warningThreshold: operationalConfig.fuelCapacity * (3.0 / 13.0),
                                 fillColor: CVROperationalPalette.success,
                                 warningColor: CVROperationalPalette.critical
+                            )
+                            .frame(width: 132)
+                            CVRFluidCylinderPicker(
+                                title: "OIL",
+                                unit: operationalConfig.oilUnit,
+                                value: $oilRemaining,
+                                hasSelection: $hasOilSelection,
+                                maxValue: operationalConfig.oilCapacity,
+                                warningThreshold: nil,
+                                fillColor: CVROperationalPalette.standby,
+                                warningColor: CVROperationalPalette.standby
                             )
                             .frame(width: 132)
                             Spacer(minLength: 0)
@@ -1052,7 +1226,7 @@ private struct ShutdownVerificationView: View {
     }
 
     private var canSave: Bool {
-        Double(endingHobbs) != nil && Double(endingTacho) != nil && hasFuelSelection && verifiedTakeoffs >= 0 && verifiedLandings >= 0
+        Double(endingHobbs) != nil && Double(endingTacho) != nil && hasFuelSelection && hasOilSelection && verifiedTakeoffs >= 0 && verifiedLandings >= 0
     }
 
     private var detectedTakeoffs: Int {
@@ -1135,9 +1309,16 @@ private struct ShutdownVerificationView: View {
         guard let flightRecord = workflow.state.activeFlightRecord else { return }
         endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
         endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingTacho.map { String(format: "%.1f", $0) } ?? ""
-        if let fuel = flightRecord.fuelRemaining.flatMap(Self.fuelGallons(from:)) {
-            fuelRemaining = min(max(fuel, 0), 13)
+        if let fuel = flightRecord.fuelRemaining.flatMap({ Self.quantity(from: $0, unit: operationalConfig.fuelUnit) }) {
+            fuelRemaining = min(max(fuel, 0), operationalConfig.fuelCapacity)
             hasFuelSelection = true
+        }
+        if let oil = flightRecord.effectiveEndingOilQuantity {
+            oilRemaining = min(max(oil, 0), operationalConfig.oilCapacity)
+            hasOilSelection = true
+        } else if let startingOil = workflow.state.activeDispatch?.effectiveStartingOilQuantity {
+            oilRemaining = min(max(startingOil, 0), operationalConfig.oilCapacity)
+            hasOilSelection = true
         }
         verifiedTakeoffs = flightRecord.verifiedTakeoffCount ?? workflow.operationCounts(for: flightRecord.id).displayTakeoffs
         verifiedLandings = flightRecord.verifiedLandingCount ?? workflow.operationCounts(for: flightRecord.id).displayLandings
@@ -1151,6 +1332,8 @@ private struct ShutdownVerificationView: View {
                 endingHobbs: Double(endingHobbs),
                 endingTacho: Double(endingTacho),
                 fuelRemaining: String(format: "%.1f", fuelRemaining),
+                endingOilQuantity: oilRemaining,
+                endingOilUnit: operationalConfig.oilUnit,
                 verifiedTakeoffCount: verifiedTakeoffs,
                 verifiedLandingCount: verifiedLandings,
                 maintenanceRemark: maintenanceRemark,
@@ -1162,6 +1345,8 @@ private struct ShutdownVerificationView: View {
                 endingHobbs: Double(endingHobbs),
                 endingTacho: Double(endingTacho),
                 fuelRemaining: String(format: "%.1f", fuelRemaining),
+                endingOilQuantity: oilRemaining,
+                endingOilUnit: operationalConfig.oilUnit,
                 verifiedTakeoffCount: verifiedTakeoffs,
                 verifiedLandingCount: verifiedLandings,
                 maintenanceRemark: maintenanceRemark,
@@ -1171,8 +1356,13 @@ private struct ShutdownVerificationView: View {
         return saved
     }
 
-    private static func fuelGallons(from value: String) -> Double? {
+    private var operationalConfig: AircraftOperationalConfig {
+        settings.selectedAircraft?.operationalConfig ?? .safeDefaults
+    }
+
+    private static func quantity(from value: String, unit: String) -> Double? {
         let cleaned = value
+            .replacingOccurrences(of: unit, with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Double(cleaned)
@@ -1588,7 +1778,7 @@ struct GarminWorkflowView: View {
         }
         if let failedWorkflowComponent {
             if workflow.canEditFlightClosure {
-                let detail = failedWorkflowComponent.lastError.nilIfEmpty ?? "Ending Hobbs, Ending Tacho, and fuel remaining are required."
+                let detail = failedWorkflowComponent.lastError.nilIfEmpty ?? "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required."
                 return "\(detail) Tap FIX ENDING METERS / FUEL below."
             }
             return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
@@ -1762,21 +1952,21 @@ struct DispatchEditorView: View {
                             Spacer(minLength: 0)
                             CVRFluidCylinderPicker(
                                 title: "FUEL",
-                                unit: "USG",
+                                unit: operationalConfig.fuelUnit,
                                 value: $fuelGallons,
                                 hasSelection: $hasFuelSelection,
-                                maxValue: 13,
-                                warningThreshold: 3,
+                                maxValue: operationalConfig.fuelCapacity,
+                                warningThreshold: operationalConfig.fuelCapacity * (3.0 / 13.0),
                                 fillColor: CVROperationalPalette.success,
                                 warningColor: CVROperationalPalette.critical
                             )
                             .frame(width: 132)
                             CVRFluidCylinderPicker(
                                 title: "OIL",
-                                unit: "%",
+                                unit: operationalConfig.oilUnit,
                                 value: $oilPercent,
                                 hasSelection: $hasOilSelection,
-                                maxValue: 100,
+                                maxValue: operationalConfig.oilCapacity,
                                 warningThreshold: nil,
                                 fillColor: CVROperationalPalette.standby,
                                 warningColor: CVROperationalPalette.standby
@@ -2043,18 +2233,18 @@ struct DispatchEditorView: View {
         selectedMissionCode = dispatch.missionCode
         startingHobbs = dispatch.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
         startingTacho = dispatch.startingTacho.map { String(format: "%.1f", $0) } ?? ""
-        if let fuel = Self.fuelGallons(from: dispatch.fuelOnboard) {
-            fuelGallons = min(max(fuel, 0), 13)
+        if let fuel = Self.quantity(from: dispatch.fuelOnboard, unit: operationalConfig.fuelUnit) {
+            fuelGallons = min(max(fuel, 0), operationalConfig.fuelCapacity)
             hasFuelSelection = true
         } else {
             fuelGallons = 0
             hasFuelSelection = false
         }
-        if let oil = dispatch.oilPercentage {
-            oilPercent = min(max(Double(oil), 0), 100)
+        if let oil = dispatch.effectiveStartingOilQuantity {
+            oilPercent = min(max(oil, 0), operationalConfig.oilCapacity)
             hasOilSelection = true
         } else {
-            oilPercent = 50
+            oilPercent = operationalConfig.oilCapacity / 2
             hasOilSelection = true
         }
         refueledSincePreviousFlight = dispatch.refueledSincePreviousFlight ?? false
@@ -2067,8 +2257,10 @@ struct DispatchEditorView: View {
             dispatch.missionCode = (selectedCode.isEmpty ? missionCode : selectedCode).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             dispatch.startingHobbs = Double(startingHobbs)
             dispatch.startingTacho = Double(startingTacho)
-            dispatch.fuelOnboard = hasFuelSelection ? Self.gallonText(fuelGallons) : ""
-            dispatch.oilPercentage = hasOilSelection ? Int(oilPercent.rounded()) : nil
+            dispatch.fuelOnboard = hasFuelSelection ? Self.quantityText(fuelGallons) : ""
+            dispatch.startingOilQuantity = hasOilSelection ? oilPercent : nil
+            dispatch.startingOilUnit = hasOilSelection ? operationalConfig.oilUnit : nil
+            dispatch.oilPercentage = hasOilSelection && operationalConfig.oilUnit == "%" ? Int(oilPercent.rounded()) : nil
             dispatch.refueledSincePreviousFlight = (requiresRefuelConfirmation || workflow.dispatchContinuityUploadIssue() == .refueling)
                 ? refueledSincePreviousFlight
                 : (dispatch.refueledSincePreviousFlight ?? false)
@@ -2085,17 +2277,17 @@ struct DispatchEditorView: View {
 
     private var requiresRefuelConfirmation: Bool {
         guard let dispatch = workflow.state.activeDispatch,
-              let previous = dispatch.previousFuelRemaining.flatMap(Self.fuelGallons(from:)),
+              let previous = dispatch.previousFuelRemaining.flatMap({ Self.quantity(from: $0, unit: operationalConfig.fuelUnit) }),
               hasFuelSelection,
               fuelGallons > previous else { return false }
         return Self.relativeDifference(fuelGallons, previous) > 0.20
     }
 
     private var requiresOilServiceConfirmation: Bool {
-        guard let previous = workflow.state.activeDispatch?.previousOilPercentage,
+        guard let previous = workflow.state.activeDispatch?.effectivePreviousOilQuantity,
               hasOilSelection,
-              oilPercent > Double(previous) else { return false }
-        return Self.relativeDifference(oilPercent, Double(previous)) > 0.20
+              oilPercent > previous else { return false }
+        return Self.relativeDifference(oilPercent, previous) > 0.20
     }
 
     private var continuityMessages: [String] {
@@ -2111,17 +2303,17 @@ struct DispatchEditorView: View {
            abs(actual - expected) > 0.1 {
             messages.append(String(format: "Tacho discrepancy: previous ending value was %.1f.", expected))
         }
-        if let previous = dispatch.previousFuelRemaining.flatMap(Self.fuelGallons(from:)),
+        if let previous = dispatch.previousFuelRemaining.flatMap({ Self.quantity(from: $0, unit: operationalConfig.fuelUnit) }),
            hasFuelSelection,
            Self.relativeDifference(fuelGallons, previous) > 0.20 {
             messages.append(fuelGallons > previous
                 ? "Fuel differs by more than 20%. Confirm refueling."
                 : "Fuel is more than 20% below the previous ending value; refueling cannot explain this.")
         }
-        if let previous = dispatch.previousOilPercentage,
+        if let previous = dispatch.effectivePreviousOilQuantity,
            hasOilSelection,
-           Self.relativeDifference(oilPercent, Double(previous)) > 0.20 {
-            messages.append(oilPercent > Double(previous)
+           Self.relativeDifference(oilPercent, previous) > 0.20 {
+            messages.append(oilPercent > previous
                 ? "Oil differs by more than 20%. Confirm oil servicing."
                 : "Oil is more than 20% below the previous ending value; servicing cannot explain this.")
         }
@@ -2229,14 +2421,19 @@ struct DispatchEditorView: View {
         return .other
     }
 
-    private static func fuelGallons(from value: String) -> Double? {
+    private var operationalConfig: AircraftOperationalConfig {
+        settings.selectedAircraft?.operationalConfig ?? .safeDefaults
+    }
+
+    private static func quantity(from value: String, unit: String) -> Double? {
         let cleaned = value
+            .replacingOccurrences(of: unit, with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Double(cleaned)
     }
 
-    private static func gallonText(_ value: Double) -> String {
+    private static func quantityText(_ value: Double) -> String {
         String(format: "%.1f", value)
     }
 }
@@ -2297,7 +2494,7 @@ private struct CVRFluidCylinderPicker: View {
                             .onChanged { gesture in
                                 let y = min(max(gesture.location.y, 0), cylinderHeight)
                                 let selected = (1 - y / cylinderHeight) * maxValue
-                                let stepped = unit == "USG" ? (selected * 10).rounded() / 10 : selected.rounded()
+                                let stepped = unit == "%" ? selected.rounded() : (selected * 10).rounded() / 10
                                 value = min(max(stepped, 0), maxValue)
                                 hasSelection = true
                             }

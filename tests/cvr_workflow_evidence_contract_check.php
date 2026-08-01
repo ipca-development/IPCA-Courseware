@@ -42,6 +42,7 @@ $checks['invalid evidence UUID is rejected'] = static function () use ($normaliz
 };
 
 $migration = file_get_contents(__DIR__ . '/../scripts/sql/2026_07_29_cvr_workflow_evidence_intake.sql') ?: '';
+$scheduledMigration = file_get_contents(__DIR__ . '/../scripts/sql/2026_07_31_scheduled_dispatch_start_end.sql') ?: '';
 $serviceSource = file_get_contents(__DIR__ . '/../src/CvrWorkflowEvidenceIntakeService.php') ?: '';
 $checks['migration has component and event idempotency keys'] = static fn(): bool =>
     str_contains($migration, 'UNIQUE KEY uk_ipca_cvr_workflow_evidence_component')
@@ -49,6 +50,13 @@ $checks['migration has component and event idempotency keys'] = static fn(): boo
 $checks['same component with different hash conflicts'] = static fn(): bool =>
     str_contains($serviceSource, 'Workflow evidence component UUID conflict.')
     && str_contains($serviceSource, 'hash_equals');
+$checks['closure stores generic oil while retaining percentage'] = static fn(): bool =>
+    str_contains($scheduledMigration, 'ipca_cvr_flight_closures ADD COLUMN oil_quantity')
+    && str_contains($scheduledMigration, 'ipca_cvr_flight_closures ADD COLUMN oil_unit')
+    && str_contains($serviceSource, "ending_oil_quantity")
+    && str_contains($serviceSource, "ending_oil_percentage");
+$checks['closure enforces generic oil unit continuity'] = static fn(): bool =>
+    str_contains($serviceSource, 'Ending oil unit must match the Dispatch oil unit.');
 
 $failed = array();
 foreach ($checks as $name => $scenario) {

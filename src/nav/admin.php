@@ -16,8 +16,7 @@ return [
         'key' => 'schedule',
         'label' => 'Schedule',
         'icon' => 'schedule',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/admin/schedule.php',
     ],
 
     [

@@ -53,9 +53,9 @@ $checks = array(
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/FlightLandingCycleDetector.swift'), 'stop_and_go')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'CVROperationalHoldTile')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'verifiedTakeoffCount'),
-    'postflight closure captures fuel and verified operation counts only' =>
-        str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'POST-FLIGHT FUEL')
-        && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'POST-FLIGHT FUEL / OIL')
+    'postflight closure captures aircraft-aware fuel oil and operation counts' =>
+        str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'POST-FLIGHT FLUIDS')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'ending_oil_quantity')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'verified_takeoff_count'),
     'Garmin metadata verifies dispatch counter starts' =>
         str_contains($classification, "metadata['airframe_hours']")

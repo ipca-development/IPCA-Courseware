@@ -165,15 +165,19 @@ final class CvrWorkflowEvidenceIntakeService
             return;
         }
         $oil = isset($e['ending_oil_percentage']) ? max(0, min(100, (int)$e['ending_oil_percentage'])) : null;
+        $oilQuantity = isset($e['ending_oil_quantity']) && $e['ending_oil_quantity'] !== ''
+            ? (float)$e['ending_oil_quantity']
+            : null;
+        $oilUnit = $oilQuantity !== null ? $this->nullableString($e['ending_oil_unit'] ?? null) : null;
         $this->pdo->prepare(
             'INSERT INTO ipca_cvr_flight_closures
              (closure_uuid, batch_id, workflow_flight_record_uuid, ending_hobbs, ending_tacho,
-              fuel_remaining, oil_percentage, maintenance_remark, payload_sha256, payload_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              fuel_remaining, oil_percentage, oil_quantity, oil_unit, maintenance_remark, payload_sha256, payload_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute(array(
             $e['closure_uuid'], $batchId, $normalized['flight_record_uuid'],
             $e['ending_hobbs'] ?? null, $e['ending_tacho'] ?? null,
-            $this->nullableString($e['fuel_remaining'] ?? null), $oil,
+            $this->nullableString($e['fuel_remaining'] ?? null), $oil, $oilQuantity, $oilUnit,
             $this->nullableString($e['maintenance_remark'] ?? null), $hash, $json,
         ));
     }
@@ -212,6 +216,16 @@ final class CvrWorkflowEvidenceIntakeService
                 || (int)$evidence['ending_oil_percentage'] > 100)) {
             throw new RuntimeException('ending_oil_percentage must be between 0 and 100 when provided.');
         }
+        $hasOilQuantity = array_key_exists('ending_oil_quantity', $evidence)
+            && trim((string)$evidence['ending_oil_quantity']) !== '';
+        $oilUnit = trim((string)($evidence['ending_oil_unit'] ?? ''));
+        if ($hasOilQuantity && (!is_numeric($evidence['ending_oil_quantity'])
+            || (float)$evidence['ending_oil_quantity'] < 0 || $oilUnit === '')) {
+            throw new RuntimeException('ending_oil_quantity must be non-negative and include ending_oil_unit.');
+        }
+        if (!$hasOilQuantity && $oilUnit !== '') {
+            throw new RuntimeException('ending_oil_quantity is required when ending_oil_unit is provided.');
+        }
         foreach (array('verified_takeoff_count', 'verified_landing_count') as $countField) {
             if (array_key_exists($countField, $evidence)
                 && (!is_numeric($evidence[$countField]) || (int)$evidence[$countField] < 0)) {
@@ -219,7 +233,7 @@ final class CvrWorkflowEvidenceIntakeService
             }
         }
         $dispatch = $this->pdo->prepare(
-            'SELECT starting_hobbs, starting_tacho
+            'SELECT starting_hobbs, starting_tacho, oil_quantity, oil_unit
              FROM ipca_cvr_dispatches
              WHERE dispatch_uuid = ? AND workflow_flight_record_uuid = ? LIMIT 1'
         );
@@ -233,6 +247,10 @@ final class CvrWorkflowEvidenceIntakeService
         }
         if ((float)$evidence['ending_tacho'] < (float)$starting['starting_tacho']) {
             throw new RuntimeException('Ending Tacho cannot be lower than Starting Tacho.');
+        }
+        if ($hasOilQuantity && $starting['oil_quantity'] !== null
+            && strcasecmp($oilUnit, trim((string)($starting['oil_unit'] ?? ''))) !== 0) {
+            throw new RuntimeException('Ending oil unit must match the Dispatch oil unit.');
         }
     }
 
