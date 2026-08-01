@@ -6,6 +6,7 @@ enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
     case recorder
     case inFlight
     case garmin
+    case log
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
         case .recorder: return "Recorder"
         case .inFlight: return "In-Flight"
         case .garmin: return "Garmin"
+        case .log: return "Log"
         }
     }
 
@@ -26,6 +28,7 @@ enum CVROperationalTab: String, Codable, CaseIterable, Identifiable {
         case .recorder: return "waveform"
         case .inFlight: return "airplane"
         case .garmin: return "doc.badge.arrow.up"
+        case .log: return "list.bullet.clipboard"
         }
     }
 }
@@ -469,4 +472,171 @@ struct CVRDiscrepancyRecord: Identifiable, Codable, Equatable {
     var evidence: [String: String]
     var status: String
     var createdAt: Date
+}
+
+struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
+    var flightRecordID: String
+    var dispatchUUID: String
+    var aircraftRegistration: String
+    var scheduledDate: String
+    var departureAirport: String
+    var departureTime: String?
+    var arrivalAirport: String
+    var arrivalTime: String?
+    var startingHobbs: Double?
+    var endingHobbs: Double?
+    var totalHobbsTime: Double?
+    var hasGarminCSV: Bool
+
+    var id: String { flightRecordID }
+
+    enum CodingKeys: String, CodingKey {
+        case flightRecordID = "flight_record_uuid"
+        case dispatchUUID = "dispatch_uuid"
+        case aircraftRegistration = "aircraft_registration"
+        case scheduledDate = "scheduled_date"
+        case departureAirport = "departure_airport"
+        case departureTime = "departure_time"
+        case arrivalAirport = "arrival_airport"
+        case arrivalTime = "arrival_time"
+        case startingHobbs = "starting_hobbs"
+        case endingHobbs = "ending_hobbs"
+        case totalHobbsTime = "total_hobbs_time"
+        case hasGarminCSV = "has_garmin_csv"
+    }
+}
+
+struct CVRFlightLogsResponse: Codable {
+    var ok: Bool
+    var flightLogs: [CVRFlightLogEntry]
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case flightLogs = "flight_logs"
+        case error
+    }
+}
+
+struct CVRPendingGarminCSV: Identifiable, Equatable {
+    var id: String
+    var fileURL: URL
+    var originalFilename: String
+}
+
+@MainActor
+final class CVRFlightLogStore: ObservableObject {
+    @Published private(set) var entries: [CVRFlightLogEntry] = []
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var isUploading = false
+    @Published private(set) var uploadProgress = 0.0
+    @Published private(set) var lastError = ""
+    @Published var pendingGarminCSV: CVRPendingGarminCSV?
+
+    func refresh(settings: SettingsStore) async {
+        guard let baseURL = settings.normalizedServerURL,
+              let credential = settings.deviceCredential,
+              !credential.isEmpty else {
+            lastError = "Enroll this CVR Unit before loading the aircraft flight log."
+            return
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let response = try await APIClient(serverURL: baseURL).flightLogs(credential: credential)
+            guard response.ok else {
+                throw APIClientError.badResponse(response.error ?? "Flight log request failed.")
+            }
+            entries = response.flightLogs.sorted {
+                if $0.scheduledDate == $1.scheduledDate {
+                    return ($0.departureTime ?? "") > ($1.departureTime ?? "")
+                }
+                return $0.scheduledDate > $1.scheduledDate
+            }
+            lastError = ""
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func stageGarminCSV(from sourceURL: URL) -> Bool {
+        let accessed = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            guard sourceURL.pathExtension.caseInsensitiveCompare("csv") == .orderedSame else {
+                throw APIClientError.badResponse("Select a Garmin CSV file.")
+            }
+            let data = try Data(contentsOf: sourceURL)
+            guard !data.isEmpty else {
+                throw APIClientError.badResponse("The selected CSV file is empty.")
+            }
+            let directory = try pendingDirectory()
+            let fileID = UUID().uuidString
+            let destination = directory.appendingPathComponent("\(fileID).csv")
+            try data.write(to: destination, options: [.atomic])
+            pendingGarminCSV = CVRPendingGarminCSV(
+                id: fileID,
+                fileURL: destination,
+                originalFilename: sourceURL.lastPathComponent
+            )
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not receive Garmin CSV: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func uploadPendingGarminCSV(
+        to entry: CVRFlightLogEntry,
+        settings: SettingsStore,
+        uploadManager: UploadManager
+    ) async {
+        guard let pendingGarminCSV else { return }
+        isUploading = true
+        uploadProgress = 0
+        defer { isUploading = false }
+        do {
+            try await uploadManager.uploadGarminCSVAttachment(
+                fileURL: pendingGarminCSV.fileURL,
+                originalFilename: pendingGarminCSV.originalFilename,
+                flightRecordID: entry.flightRecordID,
+                settings: settings
+            ) { [weak self] progress in
+                self?.uploadProgress = progress
+            }
+            try? FileManager.default.removeItem(at: pendingGarminCSV.fileURL)
+            self.pendingGarminCSV = nil
+            uploadProgress = 1
+            lastError = ""
+            await refresh(settings: settings)
+        } catch {
+            lastError = "Garmin CSV upload failed: \(error.localizedDescription)"
+        }
+    }
+
+    func cancelPendingGarminCSV() {
+        if let fileURL = pendingGarminCSV?.fileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        pendingGarminCSV = nil
+        uploadProgress = 0
+    }
+
+    private func pendingDirectory() throws -> URL {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = support.appendingPathComponent("PendingGarminImports", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
 }

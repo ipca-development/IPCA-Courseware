@@ -353,6 +353,17 @@ struct APIClient {
         return try decode(ScheduledSessionsResponse.self, from: data, response: response)
     }
 
+    func flightLogs(credential: String) async throws -> CVRFlightLogsResponse {
+        let url = serverURL.appending(path: "api/cvr/flight_logs.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 60
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CVRFlightLogsResponse.self, from: data, response: response)
+    }
+
     func enrollDevice(code: String, deviceUUID: String, displayName: String) async throws -> DeviceEnrollmentResponse {
         let url = serverURL.appending(path: "api/cvr/enroll.php")
         var request = URLRequest(url: url)

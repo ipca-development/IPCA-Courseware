@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 private func completeSimulationDemo(
@@ -29,9 +30,9 @@ private extension View {
         overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [
-                    CVROperationalPalette.background.opacity(0),
-                    CVROperationalPalette.background.opacity(0.82),
-                    CVROperationalPalette.background
+                    Color.black.opacity(0),
+                    Color.black.opacity(0.82),
+                    Color.black
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -72,62 +73,76 @@ struct OperationalTabsView: View {
                 }
                 .zIndex(2)
 
-                ZStack(alignment: .bottom) {
-                    TabView(selection: Binding(
-                        get: { workflow.state.selectedTab },
-                        set: { workflow.selectTab($0) }
-                    )) {
-                        ScheduledFlightsView(showAdminUnlock: $showAdminUnlock)
-                            .operationalBottomFade()
-                            .tabItem {
-                                Image(systemName: CVROperationalTab.scheduled.systemImage)
-                                Text(CVROperationalTab.scheduled.title)
-                            }
-                            .tag(CVROperationalTab.scheduled)
-
-                        DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
-                            .operationalBottomFade()
-                            .tabItem {
-                                Image(systemName: CVROperationalTab.dispatch.systemImage)
-                                Text(CVROperationalTab.dispatch.title)
-                            }
-                            .tag(CVROperationalTab.dispatch)
-
-                        RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
-                            .operationalBottomFade()
-                            .tabItem {
-                                Image(systemName: CVROperationalTab.recorder.systemImage)
-                                Text(CVROperationalTab.recorder.title)
-                            }
-                            .tag(CVROperationalTab.recorder)
-
-                        InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
-                            .operationalBottomFade()
-                            .tabItem {
-                                Image(systemName: CVROperationalTab.inFlight.systemImage)
-                                Text(CVROperationalTab.inFlight.title)
-                            }
-                            .tag(CVROperationalTab.inFlight)
-
-                        GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
-                            .operationalBottomFade()
-                            .tabItem {
-                                Image(systemName: CVROperationalTab.garmin.systemImage)
-                                Text(CVROperationalTab.garmin.title)
-                            }
-                            .tag(CVROperationalTab.garmin)
-                    }
-                    .tint(CVROperationalPalette.primaryBlue)
-                    .toolbarBackground(CVROperationalPalette.background, for: .tabBar)
-                    .toolbarBackground(.visible, for: .tabBar)
-                    .toolbarColorScheme(.dark, for: .tabBar)
-                }
+                selectedTabContent
+                    .operationalBottomFade()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if settings.isSimulationModeEnabled {
                     SimulationModeChrome()
                 }
+
+                OperationalBottomTabBar()
             }
             .background(CVROperationalPalette.background.ignoresSafeArea())
+        }
+    }
+
+    @ViewBuilder
+    private var selectedTabContent: some View {
+        switch workflow.state.selectedTab {
+        case .scheduled:
+            ScheduledFlightsView(showAdminUnlock: $showAdminUnlock)
+        case .dispatch:
+            DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
+        case .recorder:
+            RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+        case .inFlight:
+            InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
+        case .garmin:
+            GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
+        case .log:
+            FlightLogView()
+        }
+    }
+}
+
+private struct OperationalBottomTabBar: View {
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(CVROperationalTab.allCases) { tab in
+                Button {
+                    workflow.selectTab(tab)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 20, weight: .semibold))
+                        Text(tab.title)
+                            .font(.system(size: 10, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(
+                        workflow.state.selectedTab == tab
+                            ? CVROperationalPalette.primaryBlue
+                            : Color.white.opacity(0.62)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(workflow.state.selectedTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(.top, 9)
+        .padding(.bottom, 8)
+        .background(Color.black.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
         }
     }
 }
@@ -137,7 +152,9 @@ private struct ScheduledFlightsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @EnvironmentObject private var audio: AudioRecorderManager
     @Binding var showAdminUnlock: Bool
+    @State private var pendingReplacementSession: CVRScheduledSession?
 
     var body: some View {
         GeometryReader { proxy in
@@ -154,13 +171,34 @@ private struct ScheduledFlightsView: View {
                         actionButtons
                     }
                     .padding(.horizontal, metrics.outerHorizontalPadding)
-                    .padding(.vertical, metrics.outerVerticalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
                     .frame(width: proxy.size.width, alignment: .top)
                 }
                 .refreshable {
                     await sessionsStore.refresh(settings: settings)
                 }
             }
+        }
+        .confirmationDialog(
+            "Archive the current workflow?",
+            isPresented: Binding(
+                get: { pendingReplacementSession != nil },
+                set: { if !$0 { pendingReplacementSession = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let session = pendingReplacementSession {
+                Button("Archive Current and Open Scheduled Dispatch", role: .destructive) {
+                    pendingReplacementSession = nil
+                    openScheduledSession(session)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingReplacementSession = nil
+            }
+        } message: {
+            Text("The existing workflow will remain in Flight History with its pending upload state. The scheduled Dispatch will then open.")
         }
     }
 
@@ -271,15 +309,17 @@ private struct ScheduledFlightsView: View {
         _ session: CVRScheduledSession,
         metrics: CVROperationalMetrics
     ) -> some View {
-        let blocked = workflow.state.activeDispatch != nil
-            && workflow.state.activeDispatch?.schedulerRecordID != session.schedulerRecordID
+        let blocked = !workflow.canOpenScheduledSession(
+            session,
+            selectedAircraft: settings.selectedAircraft,
+            isAudioRecording: audio.isRecording
+        )
         return Button {
-            workflow.openDispatchFromScheduledSession(
-                session,
-                selectedAircraft: settings.selectedAircraft,
-                cvrUnitID: settings.cvrUnitIdentifier,
-                beaconID: beacon.expectedBeaconIdentityHex
-            )
+            if workflow.requiresArchivingBeforeScheduledSession(session) {
+                pendingReplacementSession = session
+            } else {
+                openScheduledSession(session)
+            }
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: "calendar.badge.checkmark")
@@ -313,6 +353,16 @@ private struct ScheduledFlightsView: View {
         .buttonStyle(.plain)
         .disabled(blocked)
         .opacity(blocked ? 0.55 : 1)
+    }
+
+    private func openScheduledSession(_ session: CVRScheduledSession) {
+        workflow.openDispatchFromScheduledSession(
+            session,
+            selectedAircraft: settings.selectedAircraft,
+            cvrUnitID: settings.cvrUnitIdentifier,
+            beaconID: beacon.expectedBeaconIdentityHex,
+            isAudioRecording: audio.isRecording
+        )
     }
 
     private var actionButtons: some View {
@@ -912,7 +962,11 @@ struct RecorderWorkflowView: View {
         } else if !workflow.isRecorderVerified {
             RecorderVerificationView(showAdminUnlock: $showAdminUnlock)
         } else {
-            StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+            StatusDashboardView(
+                adminUnlocked: $adminUnlocked,
+                showAdminUnlock: $showAdminUnlock,
+                showsHeader: false
+            )
         }
     }
 }
@@ -1140,13 +1194,13 @@ struct InFlightWorkflowView: View {
     private var inFlightControlPanel: some View {
         if hasEngineShutdownEvent {
             VStack(spacing: 8) {
-                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "SHUTDOWN VALUES SAVED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending meters, fuel, and operation counts are atomically stored locally and queued for an individual server receipt. NEXT FLIGHT remains blocked until verification." : "Official Engine Shutdown time is stored locally and queued for server verification.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
+                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "FLIGHT ENDED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending Hobbs and Tacho are stored with the audio-recorded flight. Garmin CSV can be attached later from Log." : "Enter Ending Hobbs and Tacho to close this flight.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
                 if !hasShutdownVerificationEvent {
-                    CVROperationalActionButton(title: "Complete Shutdown Verification", subtitle: "Ending meters / fuel / operations", color: CVROperationalPalette.secondaryBlue) {
+                    CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.secondaryBlue) {
                         isShowingShutdownVerification = true
                     }
                 } else if workflow.canEditFlightClosure {
-                    CVROperationalActionButton(title: "Edit Ending Meters / Fuel", subtitle: "Fix closure values before upload", color: CVROperationalPalette.warning) {
+                    CVROperationalActionButton(title: "EDIT ENDING METERS", subtitle: "Fix Hobbs or Tacho before upload", color: CVROperationalPalette.warning) {
                         isShowingShutdownVerification = true
                     }
                 }
@@ -1170,10 +1224,10 @@ struct InFlightWorkflowView: View {
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
-                CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
+                CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.critical) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordEngineShutdownOnBlock(gpsSample: gps.latestSample)
-                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    isShowingShutdownVerification = true
                 }
             }
         } else if avionicsReady {
@@ -1350,55 +1404,10 @@ private struct ShutdownVerificationView: View {
                         }
                     }
 
-                    section("POST-FLIGHT FLUIDS") {
-                        HStack(alignment: .top, spacing: 10) {
-                            Spacer(minLength: 0)
-                            CVRFluidCylinderPicker(
-                                title: "FUEL",
-                                unit: operationalConfig.fuelUnit,
-                                value: $fuelRemaining,
-                                hasSelection: $hasFuelSelection,
-                                maxValue: operationalConfig.fuelCapacity,
-                                warningThreshold: operationalConfig.fuelCapacity * (3.0 / 13.0),
-                                fillColor: CVROperationalPalette.success,
-                                warningColor: CVROperationalPalette.critical
-                            )
-                            .frame(width: 132)
-                            CVRFluidCylinderPicker(
-                                title: "OIL",
-                                unit: operationalConfig.oilUnit,
-                                value: $oilRemaining,
-                                hasSelection: $hasOilSelection,
-                                maxValue: operationalConfig.oilCapacity,
-                                warningThreshold: nil,
-                                fillColor: CVROperationalPalette.standby,
-                                warningColor: CVROperationalPalette.standby
-                            )
-                            .frame(width: 132)
-                            Spacer(minLength: 0)
-                        }
-                    }
-
-                    section("TAKEOFFS / LANDINGS") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("GPS auto-detected \(detectedTakeoffs) takeoff(s) and \(detectedLandings) landing(s). Adjust if needed before upload.")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(CVROperationalPalette.textSecondary)
-                            HStack(spacing: 12) {
-                                operationStepper(title: "TAKE OFFS", value: $verifiedTakeoffs)
-                                operationStepper(title: "LANDINGS", value: $verifiedLandings)
-                            }
-                        }
-                    }
-
-                    section("MAINTENANCE REMARK") {
-                        TextField("Optional remark", text: $maintenanceRemark, axis: .vertical)
-                            .lineLimit(3, reservesSpace: true)
+                    section("AUDIO FLIGHT CLOSURE") {
+                        Text("Enter the final aircraft meters to end this dispatched audio-recorded flight. Garmin CSV data is optional now and can be attached later from the Log page.")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(CVROperationalPalette.textPrimary)
-                            .padding(10)
-                            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
                     }
                 }
                 .padding(16)
@@ -1426,7 +1435,7 @@ private struct ShutdownVerificationView: View {
     }
 
     private var canSave: Bool {
-        Double(endingHobbs) != nil && Double(endingTacho) != nil && hasFuelSelection && hasOilSelection && verifiedTakeoffs >= 0 && verifiedLandings >= 0
+        Double(endingHobbs) != nil && Double(endingTacho) != nil
     }
 
     private var detectedTakeoffs: Int {
@@ -1510,6 +1519,10 @@ private struct ShutdownVerificationView: View {
         endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
         endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingTacho.map { String(format: "%.1f", $0) } ?? ""
         if let fuel = flightRecord.fuelRemaining.flatMap({ Self.quantity(from: $0, unit: operationalConfig.fuelUnit) }) {
+            fuelRemaining = min(max(fuel, 0), operationalConfig.fuelCapacity)
+            hasFuelSelection = true
+        } else if let startingFuel = workflow.state.activeDispatch?.fuelOnboard,
+                  let fuel = Self.quantity(from: startingFuel, unit: operationalConfig.fuelUnit) {
             fuelRemaining = min(max(fuel, 0), operationalConfig.fuelCapacity)
             hasFuelSelection = true
         }
@@ -2050,6 +2063,347 @@ struct GarminWorkflowView: View {
             try? await Task.sleep(for: .seconds(5))
         }
     }
+}
+
+private struct FlightLogView: View {
+    @EnvironmentObject private var flightLogs: CVRFlightLogStore
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var uploadManager: UploadManager
+    @State private var isShowingFileImporter = false
+    @State private var directImportTarget: CVRFlightLogEntry?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let metrics = CVROperationalMetrics(size: proxy.size)
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        CVROperationalStatusCard(
+                            title: "AIRCRAFT FLIGHT LOG",
+                            subtitle: "DISPATCHED FLIGHTS AND GARMIN STATUS",
+                            iconName: "list.bullet.clipboard",
+                            color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.success,
+                            value: "\(flightLogs.entries.count)",
+                            caption: "LOGS",
+                            metrics: metrics
+                        )
+                        HStack(spacing: metrics.spacing) {
+                            CVROperationalTile(
+                                title: "COMPLETE",
+                                iconName: "checkmark.seal.fill",
+                                value: "\(completeCount)",
+                                color: CVROperationalPalette.success,
+                                metrics: metrics
+                            )
+                            CVROperationalTile(
+                                title: "CSV MISSING",
+                                iconName: "exclamationmark.triangle.fill",
+                                value: "\(missingCount)",
+                                color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.standby,
+                                metrics: metrics
+                            )
+                        }
+                        if !flightLogs.lastError.isEmpty {
+                            CVROperationalWarningCard(
+                                title: "FLIGHT LOG",
+                                message: flightLogs.lastError,
+                                iconName: "exclamationmark.triangle.fill",
+                                color: CVROperationalPalette.warning
+                            )
+                        }
+                        if flightLogs.entries.isEmpty && !flightLogs.isRefreshing {
+                            CVROperationalWarningCard(
+                                title: "NO DISPATCHED FLIGHTS",
+                                message: "Completed Dispatch records for \(settings.selectedAircraft?.registration ?? "this aircraft") will appear here.",
+                                iconName: "clock.arrow.circlepath",
+                                color: CVROperationalPalette.secondaryBlue
+                            )
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(flightLogs.entries) { entry in
+                                    flightLogRow(entry)
+                                }
+                            }
+                        }
+                        if activeFlightIsClosed {
+                            CVROperationalActionButton(
+                                title: activeWorkflowVerified ? "NEXT FLIGHT" : "UPLOAD FLIGHT RECORD",
+                                subtitle: activeWorkflowVerified
+                                    ? "Archive this flight; Garmin CSV may still be added later"
+                                    : "Send Dispatch, audio events, and ending meters",
+                                color: activeWorkflowVerified
+                                    ? CVROperationalPalette.success
+                                    : CVROperationalPalette.secondaryBlue
+                            ) {
+                                if activeWorkflowVerified {
+                                    workflow.resetForNextFlightIfComplete()
+                                    Task { await flightLogs.refresh(settings: settings) }
+                                } else {
+                                    workflow.requeueFailedUploads()
+                                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                }
+                            }
+                        }
+                        CVROperationalActionButton(
+                            title: "IMPORT GARMIN CSV",
+                            subtitle: "Choose a CSV, then assign it to a dispatched flight",
+                            color: CVROperationalPalette.secondaryBlue
+                        ) {
+                            directImportTarget = nil
+                            isShowingFileImporter = true
+                        }
+                        CVROperationalActionButton(
+                            title: flightLogs.isRefreshing ? "REFRESHING LOG" : "REFRESH FLIGHT LOG",
+                            subtitle: settings.selectedAircraft?.registration ?? "Enrolled aircraft",
+                            color: CVROperationalPalette.standby
+                        ) {
+                            Task { await flightLogs.refresh(settings: settings) }
+                        }
+                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
+                }
+                .refreshable {
+                    await flightLogs.refresh(settings: settings)
+                }
+                if flightLogs.isUploading {
+                    uploadOverlay
+                }
+            }
+        }
+        .task {
+            await flightLogs.refresh(settings: settings)
+        }
+        .fileImporter(
+            isPresented: $isShowingFileImporter,
+            allowedContentTypes: [.commaSeparatedText],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first, flightLogs.stageGarminCSV(from: url) else { return }
+                if let target = directImportTarget {
+                    directImportTarget = nil
+                    Task {
+                        await flightLogs.uploadPendingGarminCSV(
+                            to: target,
+                            settings: settings,
+                            uploadManager: uploadManager
+                        )
+                    }
+                }
+            case .failure(let error):
+                directImportTarget = nil
+                _ = error
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { flightLogs.pendingGarminCSV != nil && directImportTarget == nil && !flightLogs.isUploading },
+                set: { if !$0 && !flightLogs.isUploading { flightLogs.cancelPendingGarminCSV() } }
+            )
+        ) {
+            garminAssignmentSheet
+        }
+    }
+
+    private func flightLogRow(_ entry: CVRFlightLogEntry) -> some View {
+        Button {
+            guard !entry.hasGarminCSV else { return }
+            directImportTarget = entry
+            isShowingFileImporter = true
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(displayDate(entry.scheduledDate))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Label(
+                        entry.hasGarminCSV ? "COMPLETE" : "CSV MISSING",
+                        systemImage: entry.hasGarminCSV ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning)
+                }
+                HStack(spacing: 8) {
+                    logValue("DEPARTURE", value: airport(entry.departureAirport), detail: displayTime(entry.departureTime))
+                    Image(systemName: "arrow.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    logValue("ARRIVAL", value: airport(entry.arrivalAirport), detail: displayTime(entry.arrivalTime))
+                    logValue("HOBBS", value: hobbs(entry.totalHobbsTime), detail: "TOTAL")
+                }
+                if !entry.hasGarminCSV {
+                    Text("Tap this log to attach its Garmin CSV later.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.warning)
+                }
+            }
+            .padding(14)
+            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        entry.hasGarminCSV ? CVROperationalPalette.cardBorder : CVROperationalPalette.warning.opacity(0.55),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func logValue(_ title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+            Text(detail)
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var garminAssignmentSheet: some View {
+        NavigationStack {
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let file = flightLogs.pendingGarminCSV {
+                            Text(file.originalFilename)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                        }
+                        Text("Select the dispatched flight that belongs to this Garmin CSV.")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
+                        ForEach(flightLogs.entries.filter { !$0.hasGarminCSV }) { entry in
+                            Button {
+                                Task {
+                                    await flightLogs.uploadPendingGarminCSV(
+                                        to: entry,
+                                        settings: settings,
+                                        uploadManager: uploadManager
+                                    )
+                                }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(displayDate(entry.scheduledDate))
+                                            .font(.headline.weight(.bold))
+                                        Text("\(airport(entry.departureAirport)) \(displayTime(entry.departureTime)) → \(airport(entry.arrivalAirport)) \(displayTime(entry.arrivalTime))")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(CVROperationalPalette.textSecondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "paperclip")
+                                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                                }
+                                .foregroundStyle(.white)
+                                .padding(14)
+                                .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Assign Garmin CSV")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { flightLogs.cancelPendingGarminCSV() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var uploadOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.72).ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView(value: flightLogs.uploadProgress)
+                    .tint(CVROperationalPalette.secondaryBlue)
+                    .frame(width: 220)
+                Text("ATTACHING GARMIN CSV")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Text("\(Int((flightLogs.uploadProgress * 100).rounded()))%")
+                    .font(.title2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            }
+            .padding(24)
+            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+    }
+
+    private var completeCount: Int {
+        flightLogs.entries.filter(\.hasGarminCSV).count
+    }
+
+    private var activeFlightIsClosed: Bool {
+        guard let flightRecord = workflow.state.activeFlightRecord else { return false }
+        return workflow.flightClosureIsComplete(flightRecord)
+    }
+
+    private var activeWorkflowVerified: Bool {
+        guard let flightRecordID = workflow.state.activeFlightRecord?.id else { return false }
+        let components = workflow.state.uploadComponents.filter { $0.flightRecordID == flightRecordID }
+        return !components.isEmpty && components.allSatisfy { $0.state == .serverVerified }
+    }
+
+    private var missingCount: Int {
+        flightLogs.entries.count - completeCount
+    }
+
+    private func displayDate(_ value: String) -> String {
+        guard let date = Self.inputDateFormatter.date(from: value) else { return value }
+        return Self.outputDateFormatter.string(from: date)
+    }
+
+    private func displayTime(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        let timePart = value.split(separator: "T").last.map(String.init)
+            ?? value.split(separator: " ").last.map(String.init)
+            ?? value
+        return String(timePart.prefix(5))
+    }
+
+    private func airport(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : value
+    }
+
+    private func hobbs(_ value: Double?) -> String {
+        value.map { String(format: "%.1f", $0) } ?? "—"
+    }
+
+    private static let inputDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let outputDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, MMM d, yyyy"
+        return formatter
+    }()
 }
 
 struct LockedOperationalView: View {

@@ -11,6 +11,7 @@ struct StatusDashboardView: View {
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @Binding var adminUnlocked: Bool
     @Binding var showAdminUnlock: Bool
+    var showsHeader = true
     @State private var logoTapCount = 0
     @State private var lastLogoTapAt: Date?
 
@@ -19,45 +20,50 @@ struct StatusDashboardView: View {
             let metrics = CVRLayoutMetrics(size: proxy.size)
             ZStack {
                 CVRPalette.background.ignoresSafeArea()
-                VStack(spacing: metrics.spacing) {
-                    CVRHeaderView(
-                        aircraftRegistration: aircraftRegistration,
-                        unitIdentifier: settings.cvrUnitIdentifier,
-                        metrics: metrics,
-                        onLogoTap: handleLogoTap
-                    )
-                    RecorderPrimaryStatusCard(
-                        status: recorderStatus,
-                        secondaryText: recorderSecondaryText,
-                        elapsed: audio.elapsed,
-                        metrics: metrics
-                    )
-                    AudioInputHealthCard(
-                        sourceName: publicAudioSourceName,
-                        signalState: audioSignalState,
-                        needleValue: liveAudioNeedleValue,
-                        averageDB: audio.averagePowerDB,
-                        peakDB: audio.peakPowerDB,
-                        volumePercent: Int((audio.level * 100).rounded()),
-                        gainText: gainDisplayText,
-                        sourceWarning: audio.isInternalMicWarning,
-                        metrics: metrics
-                    )
-                    ThermalLoadCompactView(state: ProcessInfo.processInfo.thermalState, metrics: metrics)
-                    SubsystemStatusRow(
-                        cells: [
-                            beaconCell,
-                            gpsCell,
-                            batteryCell,
-                            storageCell
-                        ],
-                        metrics: metrics
-                    )
-                    RecorderHealthBanner(health: publicHealth, metrics: metrics)
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        if showsHeader {
+                            CVRHeaderView(
+                                aircraftRegistration: aircraftRegistration,
+                                unitIdentifier: settings.cvrUnitIdentifier,
+                                metrics: metrics,
+                                onLogoTap: handleLogoTap
+                            )
+                        }
+                        RecorderPrimaryStatusCard(
+                            status: recorderStatus,
+                            secondaryText: recorderSecondaryText,
+                            elapsed: audio.elapsed,
+                            metrics: metrics
+                        )
+                        AudioInputHealthCard(
+                            sourceName: publicAudioSourceName,
+                            signalState: audioSignalState,
+                            needleValue: liveAudioNeedleValue,
+                            averageDB: audio.averagePowerDB,
+                            peakDB: audio.peakPowerDB,
+                            volumePercent: Int((audio.level * 100).rounded()),
+                            gainText: gainDisplayText,
+                            sourceWarning: audio.isInternalMicWarning,
+                            metrics: metrics
+                        )
+                        ThermalLoadCompactView(state: ProcessInfo.processInfo.thermalState, metrics: metrics)
+                        SubsystemStatusRow(
+                            cells: [
+                                beaconCell,
+                                gpsCell,
+                                batteryCell,
+                                storageCell
+                            ],
+                            metrics: metrics
+                        )
+                        RecorderHealthBanner(health: publicHealth, metrics: metrics)
+                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                .padding(.horizontal, metrics.outerHorizontalPadding)
-                .padding(.vertical, metrics.outerVerticalPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .background(CVRPalette.background)

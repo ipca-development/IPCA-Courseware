@@ -129,9 +129,10 @@ final class CVRWorkflowStore: ObservableObject {
         _ session: CVRScheduledSession,
         selectedAircraft: CockpitAircraft?,
         cvrUnitID: String,
-        beaconID: String
+        beaconID: String,
+        isAudioRecording: Bool
     ) {
-        guard let selectedAircraft, selectedAircraft.id == session.aircraftID else {
+        guard let selectedAircraft, scheduledSessionMatchesAircraft(session, selectedAircraft: selectedAircraft) else {
             lastError = "This scheduled flight does not match the aircraft enrolled to this CVR Unit."
             return
         }
@@ -140,12 +141,32 @@ final class CVRWorkflowStore: ObservableObject {
             selectTab(.dispatch)
             return
         }
-        guard state.activeDispatch == nil, state.activeFlightRecord == nil else {
-            lastError = "Finish and archive the current Dispatch before opening another scheduled flight."
+        if let activeDispatch = state.activeDispatch,
+           Self.normalizedTail(activeDispatch.tailNumber) != Self.normalizedTail(selectedAircraft.registration) {
+            lastError = "The existing Dispatch belongs to another aircraft and cannot be replaced."
             return
         }
+        if state.activeFlightRecord != nil {
+            guard !isAudioRecording else {
+                lastError = "Stop the active recording before opening another scheduled flight."
+                return
+            }
+            guard archiveActiveWorkflow() else { return }
+            mutate {
+                $0.activeDispatch = nil
+                $0.activeFlightRecord = nil
+                $0.consents = []
+                $0.recorderVerifications = []
+                $0.flightEvents = []
+                $0.flightLegs = []
+                $0.uploadComponents = []
+                $0.discrepancies = []
+            }
+        }
 
-        createOrOpenLocalDispatch(selectedAircraft: selectedAircraft, cvrUnitID: cvrUnitID, beaconID: beaconID)
+        if state.activeDispatch == nil {
+            createOrOpenLocalDispatch(selectedAircraft: selectedAircraft, cvrUnitID: cvrUnitID, beaconID: beaconID)
+        }
         updateActiveDispatch { dispatch in
             dispatch.scheduledDate = session.dateTime(nil) ?? Date()
             dispatch.scheduledStartTime = session.dateTime(session.scheduledStartTime)
@@ -165,6 +186,40 @@ final class CVRWorkflowStore: ObservableObject {
             }
         }
         selectTab(.dispatch)
+    }
+
+    func canOpenScheduledSession(
+        _ session: CVRScheduledSession,
+        selectedAircraft: CockpitAircraft?,
+        isAudioRecording: Bool
+    ) -> Bool {
+        guard let selectedAircraft,
+              scheduledSessionMatchesAircraft(session, selectedAircraft: selectedAircraft) else {
+            return false
+        }
+        if state.activeDispatch?.schedulerRecordID == session.schedulerRecordID {
+            return true
+        }
+        if isAudioRecording {
+            return false
+        }
+        guard let activeDispatch = state.activeDispatch else {
+            return true
+        }
+        return Self.normalizedTail(activeDispatch.tailNumber) == Self.normalizedTail(selectedAircraft.registration)
+    }
+
+    func requiresArchivingBeforeScheduledSession(_ session: CVRScheduledSession) -> Bool {
+        state.activeFlightRecord != nil
+            && state.activeDispatch?.schedulerRecordID != session.schedulerRecordID
+    }
+
+    private func scheduledSessionMatchesAircraft(
+        _ session: CVRScheduledSession,
+        selectedAircraft: CockpitAircraft
+    ) -> Bool {
+        session.aircraftID == selectedAircraft.id
+            || Self.normalizedTail(session.aircraftRegistration) == Self.normalizedTail(selectedAircraft.registration)
     }
 
     func updateActiveDispatch(_ update: (inout CVRDispatchRecord) -> Void) {
@@ -640,7 +695,7 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.autoDetectedTakeoffCount = counts.displayTakeoffs
             flightRecord.autoDetectedLandingCount = counts.displayLandings
             flightRecord.maintenanceRemark = maintenanceRemark.trimmingCharacters(in: .whitespacesAndNewlines)
-            flightRecord.status = .awaitingGarmin
+            flightRecord.status = .awaitingUpload
             flightRecord.updatedAt = event.timestampUTC
             $0.activeFlightRecord = flightRecord
             let supersededEventIDs = Set($0.flightEvents.filter {
@@ -670,7 +725,7 @@ final class CVRWorkflowStore: ObservableObject {
                     evidenceID: flightRecord.id
                 ))
             }
-            $0.selectedTab = repairExistingClosureUpload ? $0.selectedTab : .garmin
+            $0.selectedTab = repairExistingClosureUpload ? $0.selectedTab : .log
         }
         return persisted
     }
@@ -1200,7 +1255,9 @@ final class CVRWorkflowStore: ObservableObject {
             recordingSessionIDs: [flightRecord.recordingSessionID].compactMap { $0 },
             archivedAt: Date(),
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-            status: components.allSatisfy { $0.state == .serverVerified } ? .serverVerified : .uploadPending
+            status: !components.isEmpty && components.allSatisfy { $0.state == .serverVerified }
+                ? .serverVerified
+                : .uploadPending
         )
         do {
             var updated = archives

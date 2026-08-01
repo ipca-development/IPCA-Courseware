@@ -17,12 +17,13 @@ struct IPCACVRUnitApp: App {
     @StateObject private var workflowStore = CVRWorkflowStore()
     @StateObject private var missionCatalog = MissionCatalogStore()
     @StateObject private var scheduledSessions = ScheduledSessionsStore()
+    @StateObject private var flightLogs = CVRFlightLogStore()
     @StateObject private var garminVault = GarminCsvVaultStore()
     @StateObject private var sdRecovery = GarminSDCardRecoveryService()
     @StateObject private var garminSync = GarminCsvSyncManager()
 
     init() {
-        let background = UIColor(red: 0.005, green: 0.02, blue: 0.045, alpha: 1)
+        let background = UIColor.black
         let selected = UIColor(red: 0.12, green: 0.47, blue: 0.92, alpha: 1)
         let unselected = UIColor.white.withAlphaComponent(0.55)
         let appearance = UITabBarAppearance()
@@ -65,6 +66,7 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(workflowStore)
                 .environmentObject(missionCatalog)
                 .environmentObject(scheduledSessions)
+                .environmentObject(flightLogs)
                 .environmentObject(garminVault)
                 .environmentObject(sdRecovery)
                 .environmentObject(garminSync)
@@ -82,6 +84,7 @@ struct IPCACVRUnitApp: App {
                     await settings.refreshAircraft()
                     await settings.refreshCrewUsers()
                     await scheduledSessions.refresh(settings: settings)
+                    await flightLogs.refresh(settings: settings)
                     await missionCatalog.refreshFromServer(settings: settings)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                     sdRecovery.refreshBookmarkState(settings: settings)
@@ -119,6 +122,7 @@ struct IPCACVRUnitApp: App {
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                         Task {
                             await scheduledSessions.refresh(settings: settings)
+                            await flightLogs.refresh(settings: settings)
                             sdRecovery.refreshBookmarkState(settings: settings)
                             _ = await sdRecovery.scanAndImportIfNeeded(
                                 settings: settings,
@@ -138,7 +142,9 @@ struct IPCACVRUnitApp: App {
                     }
                 }
                 .onOpenURL { url in
-                    workflowStore.importGarminCSV(from: url)
+                    if flightLogs.stageGarminCSV(from: url) {
+                        workflowStore.selectTab(.log)
+                    }
                 }
         }
     }

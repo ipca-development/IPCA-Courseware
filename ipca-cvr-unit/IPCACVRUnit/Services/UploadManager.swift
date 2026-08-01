@@ -514,8 +514,55 @@ final class UploadManager: ObservableObject {
         ]
     }
 
+    func uploadGarminCSVAttachment(
+        fileURL: URL,
+        originalFilename: String,
+        flightRecordID: String,
+        settings: SettingsStore,
+        progress: @escaping (Double) -> Void
+    ) async throws {
+        guard let baseURL = settings.normalizedServerURL else {
+            throw APIClientError.invalidServerURL
+        }
+        guard let credential = settings.deviceCredential, !credential.isEmpty else {
+            throw APIClientError.badResponse("CVR Unit is not enrolled.")
+        }
+        _ = credential
+        _ = try await uploadGarminFile(
+            fileURL: fileURL,
+            originalFilename: originalFilename,
+            flightRecordID: flightRecordID,
+            baseURL: baseURL
+        ) { value, _ in
+            progress(value)
+        }
+    }
+
     private func uploadWorkflowGarminComponent(component: CVRUploadComponentRecord, flightRecordID: String, baseURL: URL, workflow: CVRWorkflowStore) async throws -> String {
         let fileURL = try workflowComponentFileURL(component)
+        return try await uploadGarminFile(
+            fileURL: fileURL,
+            originalFilename: fileURL.lastPathComponent,
+            flightRecordID: flightRecordID,
+            baseURL: baseURL
+        ) { value, message in
+            let uploadState: CVRUploadComponentState = value >= 0.98 ? .uploaded : .uploading
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: uploadState,
+                progress: value,
+                lastError: message
+            )
+        }
+    }
+
+    private func uploadGarminFile(
+        fileURL: URL,
+        originalFilename: String,
+        flightRecordID: String,
+        baseURL: URL,
+        progress: @escaping (Double, String) -> Void
+    ) async throws -> String {
         let fileSize = try fileSize(fileURL)
         let totalChunks = max(1, Int(ceil(Double(fileSize) / Double(chunkSize))))
 
@@ -531,18 +578,14 @@ final class UploadManager: ObservableObject {
                 totalChunks: totalChunks,
                 totalSize: fileSize,
                 chunkSize: count,
-                originalFilename: fileURL.lastPathComponent,
+                originalFilename: originalFilename,
                 mimeType: "text/csv"
             )
 
-            await MainActor.run {
-                workflow.updateUploadComponent(
-                    id: component.id,
-                    state: .uploading,
-                    progress: max(0.01, Double(chunkIndex) / Double(totalChunks) * 0.95),
-                    lastError: "Uploading CSV chunk \(chunkIndex + 1)/\(totalChunks)..."
-                )
-            }
+            progress(
+                max(0.01, Double(chunkIndex) / Double(totalChunks) * 0.95),
+                "Uploading CSV chunk \(chunkIndex + 1)/\(totalChunks)..."
+            )
 
             var lastError: Error?
             for attempt in 1...maxChunkAttempts {
@@ -565,19 +608,13 @@ final class UploadManager: ObservableObject {
                 throw lastError
             }
 
-            await MainActor.run {
-                workflow.updateUploadComponent(
-                    id: component.id,
-                    state: .uploading,
-                    progress: min(0.95, Double(chunkIndex + 1) / Double(totalChunks) * 0.95),
-                    lastError: "Uploaded CSV chunk \(chunkIndex + 1)/\(totalChunks)"
-                )
-            }
+            progress(
+                min(0.95, Double(chunkIndex + 1) / Double(totalChunks) * 0.95),
+                "Uploaded CSV chunk \(chunkIndex + 1)/\(totalChunks)"
+            )
         }
 
-        await MainActor.run {
-            workflow.updateUploadComponent(id: component.id, state: .uploaded, progress: 0.98, lastError: "Finalizing Garmin CSV on server...")
-        }
+        progress(0.98, "Finalizing Garmin CSV on server...")
 
         var finalize = URLRequest(url: baseURL.appending(path: "api/recordings/g3x_finalize.php"))
         finalize.httpMethod = "POST"
