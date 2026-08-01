@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/AuditEventService.php';
+
 final class CvrFlightLogService
 {
     public function __construct(private PDO $pdo)
@@ -28,22 +30,32 @@ final class CvrFlightLogService
                 d.workflow_flight_record_uuid,
                 d.dispatch_uuid,
                 d.aircraft_registration,
+                d.crew_json AS dispatch_crew_json,
+                adjustment.crew_json AS adjustment_crew_json,
                 DATE_FORMAT(d.scheduled_date, '%Y-%m-%d') AS scheduled_date,
                 COALESCE(
+                    NULLIF(adjustment.departure_airport, ''),
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_departure_airport')), 'null'),
                     ''
                 ) AS departure_airport,
                 DATE_FORMAT(departure_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS departure_time,
                 COALESCE(
+                    NULLIF(adjustment.arrival_airport, ''),
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'),
                     ''
                 ) AS arrival_airport,
                 DATE_FORMAT(arrival_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS arrival_time,
                 CAST(d.starting_hobbs AS DECIMAL(12,2)) AS starting_hobbs,
-                CAST(closure.ending_hobbs AS DECIMAL(12,2)) AS ending_hobbs,
+                CAST(d.starting_tacho AS DECIMAL(12,2)) AS starting_tacho,
+                CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
+                CAST(COALESCE(adjustment.ending_tacho, closure.ending_tacho) AS DECIMAL(12,2)) AS ending_tacho,
+                COALESCE(adjustment.fuel_remaining, closure.fuel_remaining) AS fuel_remaining,
+                closure.oil_percentage,
+                closure.oil_quantity,
+                closure.oil_unit,
                 CASE
-                    WHEN closure.ending_hobbs IS NULL OR d.starting_hobbs IS NULL THEN NULL
-                    ELSE ROUND(closure.ending_hobbs - d.starting_hobbs, 2)
+                    WHEN COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) IS NULL OR d.starting_hobbs IS NULL THEN NULL
+                    ELSE ROUND(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) - d.starting_hobbs, 2)
                 END AS total_hobbs_time,
                 EXISTS(
                     SELECT 1
@@ -61,6 +73,14 @@ final class CvrFlightLogService
                   FROM ipca_cvr_flight_closures c2
                   WHERE c2.workflow_flight_record_uuid = d.workflow_flight_record_uuid
                   ORDER BY c2.received_at DESC, c2.id DESC
+                  LIMIT 1
+              )
+            LEFT JOIN ipca_cvr_flight_log_adjustments adjustment
+              ON adjustment.id = (
+                  SELECT a2.id
+                  FROM ipca_cvr_flight_log_adjustments a2
+                  WHERE a2.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                  ORDER BY a2.created_at DESC, a2.id DESC
                   LIMIT 1
               )
             LEFT JOIN ipca_cvr_flight_events departure_event
@@ -97,21 +117,163 @@ final class CvrFlightLogService
 
         $logs = array();
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $crewJson = $row['adjustment_crew_json'] !== null
+                ? (string)$row['adjustment_crew_json']
+                : (string)($row['dispatch_crew_json'] ?? '[]');
+            $crew = json_decode($crewJson, true);
+            $crewNames = array();
+            foreach (is_array($crew) ? $crew : array() as $member) {
+                $name = is_array($member)
+                    ? trim((string)($member['person_name'] ?? ''))
+                    : trim((string)$member);
+                if ($name !== '') {
+                    $crewNames[] = $name;
+                }
+            }
             $logs[] = array(
                 'flight_record_uuid' => (string)$row['workflow_flight_record_uuid'],
                 'dispatch_uuid' => (string)$row['dispatch_uuid'],
                 'aircraft_registration' => (string)$row['aircraft_registration'],
                 'scheduled_date' => (string)$row['scheduled_date'],
+                'crew_names' => array_values(array_unique($crewNames)),
                 'departure_airport' => (string)$row['departure_airport'],
                 'departure_time' => $row['departure_time'] !== null ? (string)$row['departure_time'] : null,
                 'arrival_airport' => (string)$row['arrival_airport'],
                 'arrival_time' => $row['arrival_time'] !== null ? (string)$row['arrival_time'] : null,
                 'starting_hobbs' => $row['starting_hobbs'] !== null ? (float)$row['starting_hobbs'] : null,
+                'starting_tacho' => $row['starting_tacho'] !== null ? (float)$row['starting_tacho'] : null,
                 'ending_hobbs' => $row['ending_hobbs'] !== null ? (float)$row['ending_hobbs'] : null,
+                'ending_tacho' => $row['ending_tacho'] !== null ? (float)$row['ending_tacho'] : null,
+                'fuel_remaining' => $row['fuel_remaining'] !== null ? (string)$row['fuel_remaining'] : null,
+                'ending_oil_percentage' => $row['oil_percentage'] !== null ? (int)$row['oil_percentage'] : null,
+                'ending_oil_quantity' => $row['oil_quantity'] !== null ? (float)$row['oil_quantity'] : null,
+                'ending_oil_unit' => $row['oil_unit'] !== null ? (string)$row['oil_unit'] : null,
                 'total_hobbs_time' => $row['total_hobbs_time'] !== null ? (float)$row['total_hobbs_time'] : null,
                 'has_garmin_csv' => (bool)$row['has_garmin_csv'],
             );
         }
         return $logs;
+    }
+
+    /**
+     * @param array<string,mixed> $device
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    public function adjustForDeviceAircraft(array $device, array $payload): array
+    {
+        $flightUuid = strtolower(trim((string)($payload['flight_record_uuid'] ?? '')));
+        $dispatchUuid = strtolower(trim((string)($payload['dispatch_uuid'] ?? '')));
+        if (!$this->isUuid($flightUuid) || !$this->isUuid($dispatchUuid)) {
+            throw new RuntimeException('Valid Flight Record and Dispatch UUIDs are required.');
+        }
+        $organizationId = max(1, (int)($device['organization_id'] ?? 1));
+        $aircraftId = (int)($device['aircraft_id'] ?? 0);
+        $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
+        $ownership = $this->pdo->prepare(
+            'SELECT id, starting_hobbs, starting_tacho
+             FROM ipca_cvr_dispatches
+             WHERE workflow_flight_record_uuid = ?
+               AND dispatch_uuid = ?
+               AND organization_id = ?
+               AND (
+                    (aircraft_id IS NOT NULL AND aircraft_id = ?)
+                    OR (aircraft_id IS NULL AND UPPER(aircraft_registration) = ?)
+               )
+             LIMIT 1'
+        );
+        $ownership->execute(array($flightUuid, $dispatchUuid, $organizationId, $aircraftId, $registration));
+        $dispatch = $ownership->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($dispatch)) {
+            throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
+        }
+
+        $departure = $this->airport($payload['departure_airport'] ?? null, 'departure_airport');
+        $arrival = $this->airport($payload['arrival_airport'] ?? null, 'arrival_airport');
+        $crew = array();
+        foreach (is_array($payload['crew_names'] ?? null) ? $payload['crew_names'] : array() as $name) {
+            $name = trim((string)$name);
+            if ($name !== '') {
+                $crew[] = substr($name, 0, 255);
+            }
+        }
+        $crew = array_values(array_unique($crew));
+        if ($crew === array()) {
+            throw new RuntimeException('At least one crew member is required.');
+        }
+        $endingHobbs = isset($payload['ending_hobbs']) && is_numeric($payload['ending_hobbs'])
+            ? (float)$payload['ending_hobbs']
+            : null;
+        $endingTacho = isset($payload['ending_tacho']) && is_numeric($payload['ending_tacho'])
+            ? (float)$payload['ending_tacho']
+            : null;
+        $fuel = trim((string)($payload['fuel_remaining'] ?? ''));
+        if ($endingHobbs === null || $endingHobbs < (float)$dispatch['starting_hobbs']) {
+            throw new RuntimeException('Ending Hobbs cannot be lower than Starting Hobbs.');
+        }
+        if ($endingTacho === null || $endingTacho < (float)$dispatch['starting_tacho']) {
+            throw new RuntimeException('Ending Tacho cannot be lower than Starting Tacho.');
+        }
+        if ($fuel === '' || !is_numeric($fuel) || (float)$fuel < 0) {
+            throw new RuntimeException('Fuel remaining must be a valid non-negative quantity.');
+        }
+
+        $adjustmentUuid = AuditEventService::uuid();
+        $this->pdo->prepare(
+            'INSERT INTO ipca_cvr_flight_log_adjustments
+             (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
+              departure_airport, arrival_airport, crew_json, ending_hobbs, ending_tacho, fuel_remaining)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute(array(
+            $adjustmentUuid,
+            $organizationId,
+            (int)$device['id'],
+            $flightUuid,
+            $dispatchUuid,
+            $departure,
+            $arrival,
+            AuditEventService::jsonEncode($crew),
+            $endingHobbs,
+            $endingTacho,
+            $fuel,
+        ));
+        (new AuditEventService($this->pdo))->record(
+            'cvr_flight_log_adjusted',
+            'ipca_cvr_flight_log_adjustments',
+            $adjustmentUuid,
+            null,
+            array(
+                'flight_record_uuid' => $flightUuid,
+                'dispatch_uuid' => $dispatchUuid,
+                'departure_airport' => $departure,
+                'arrival_airport' => $arrival,
+                'crew_names' => $crew,
+                'ending_hobbs' => $endingHobbs,
+                'ending_tacho' => $endingTacho,
+                'fuel_remaining' => $fuel,
+            ),
+            'PIN-protected iOS adjustment of a locked Flight Log.',
+            'device',
+            null,
+            (int)$device['id'],
+            null,
+            $organizationId,
+            'cvr_app'
+        );
+        return array('ok' => true, 'adjustment_uuid' => $adjustmentUuid);
+    }
+
+    private function airport(mixed $value, string $field): string
+    {
+        $airport = strtoupper(trim((string)$value));
+        if ($airport === '' || preg_match('/^[A-Z0-9]{3,8}$/', $airport) !== 1) {
+            throw new RuntimeException($field . ' must contain a valid airport identifier.');
+        }
+        return $airport;
+    }
+
+    private function isUuid(string $value): bool
+    {
+        return preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/', $value) === 1;
     }
 }

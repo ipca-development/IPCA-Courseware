@@ -134,6 +134,26 @@ struct CockpitAircraft: Identifiable, Codable, Equatable {
         case operationalConfig = "operational_config"
     }
 
+    init(
+        id: Int,
+        registration: String,
+        displayName: String = "",
+        aircraftType: String = "",
+        adsbHex: String = "",
+        homeAirport: String = "",
+        active: Bool = true,
+        operationalConfig: AircraftOperationalConfig = .safeDefaults
+    ) {
+        self.id = id
+        self.registration = registration
+        self.displayName = displayName
+        self.aircraftType = aircraftType
+        self.adsbHex = adsbHex
+        self.homeAirport = homeAirport
+        self.active = active
+        self.operationalConfig = operationalConfig
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)

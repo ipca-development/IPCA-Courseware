@@ -311,7 +311,7 @@ private struct ScheduledFlightsView: View {
     ) -> some View {
         let blocked = !workflow.canOpenScheduledSession(
             session,
-            selectedAircraft: settings.selectedAircraft,
+            selectedAircraft: aircraftForSession(session),
             isAudioRecording: audio.isRecording
         )
         return Button {
@@ -358,11 +358,31 @@ private struct ScheduledFlightsView: View {
     private func openScheduledSession(_ session: CVRScheduledSession) {
         workflow.openDispatchFromScheduledSession(
             session,
-            selectedAircraft: settings.selectedAircraft,
+            selectedAircraft: aircraftForSession(session),
             cvrUnitID: settings.cvrUnitIdentifier,
             beaconID: beacon.expectedBeaconIdentityHex,
             isAudioRecording: audio.isRecording
         )
+    }
+
+    private func aircraftForSession(_ session: CVRScheduledSession) -> CockpitAircraft {
+        if let aircraft = settings.aircraft.first(where: {
+            $0.id == session.aircraftID
+                || normalizedTail($0.registration) == normalizedTail(session.aircraftRegistration)
+        }) {
+            return aircraft
+        }
+        return CockpitAircraft(
+            id: session.aircraftID,
+            registration: session.aircraftRegistration,
+            displayName: session.aircraftRegistration,
+            homeAirport: session.plannedDepartureAirport,
+            operationalConfig: settings.selectedAircraft?.operationalConfig ?? .safeDefaults
+        )
+    }
+
+    private func normalizedTail(_ value: String) -> String {
+        value.uppercased().filter { $0.isLetter || $0.isNumber }
     }
 
     private var actionButtons: some View {
@@ -1638,7 +1658,7 @@ struct GarminWorkflowView: View {
                         CVROperationalActionButton(title: uploadButtonTitle, subtitle: uploadButtonSubtitle, color: garminComponents.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.secondaryBlue) {
                             if settings.isSimulationModeEnabled {
                                 completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)
-                            } else if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+                            } else if workflow.canEditFlightClosure {
                                 isShowingClosureEditor = true
                             } else if workflow.canRepairFailedDispatchUpload {
                                 workflow.selectTab(.dispatch)
@@ -1668,6 +1688,9 @@ struct GarminWorkflowView: View {
                 .presentationDetents([.large])
         }
         .task {
+            if workflow.repairCompletedClosureUploadIfNeeded() {
+                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+            }
             await runRecoveryPipelineOnce()
             await pollRecoveryProcessingStatus()
         }
@@ -1693,8 +1716,8 @@ struct GarminWorkflowView: View {
         VStack(spacing: 8) {
             if workflow.canEditFlightClosure {
                 CVROperationalActionButton(
-                    title: "FIX ENDING METERS / FUEL",
-                    subtitle: "Enter Hobbs, Tacho, fuel, and operation counts",
+                    title: "FIX ENDING METERS",
+                    subtitle: "Enter Ending Hobbs and Tacho",
                     color: CVROperationalPalette.warning
                 ) {
                     isShowingClosureEditor = true
@@ -1884,8 +1907,8 @@ struct GarminWorkflowView: View {
             return "Uploading \(Int(((uploading.progress ?? 0) * 100).rounded()))%"
         }
         if failedWorkflowComponent != nil {
-            if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
-                return "Enter ending Hobbs, Tacho, and fuel"
+            if workflow.canEditFlightClosure {
+                return "Enter Ending Hobbs and Tacho"
             }
             if workflow.canRepairFailedDispatchUpload {
                 return "Open Dispatch tab to fix and retry"
@@ -1903,7 +1926,7 @@ struct GarminWorkflowView: View {
             return "NEXT FLIGHT"
         }
         if failedWorkflowComponent != nil {
-            if workflow.canEditFlightClosure || workflow.closureUploadFailure() != nil {
+            if workflow.canEditFlightClosure {
                 return "FIX ENDING METERS"
             }
             if workflow.canRepairFailedDispatchUpload {
@@ -1950,7 +1973,7 @@ struct GarminWorkflowView: View {
         if let failedWorkflowComponent {
             return switch failedWorkflowComponent.componentType {
             case "dispatch_metadata": "DISPATCH UPLOAD FAILED"
-            case "flight_record_closure": "ENDING METERS / FUEL UPLOAD FAILED"
+            case "flight_record_closure": "FLIGHT CLOSURE UPLOAD FAILED"
             case "flight_events": "FLIGHT EVENT UPLOAD FAILED"
             case "recorder_verification": "RECORDER VERIFICATION UPLOAD FAILED"
             default: "GARMIN UPLOAD FAILED"
@@ -2002,8 +2025,8 @@ struct GarminWorkflowView: View {
         }
         if let failedWorkflowComponent {
             if workflow.canEditFlightClosure {
-                let detail = failedWorkflowComponent.lastError.nilIfEmpty ?? "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required."
-                return "\(detail) Tap FIX ENDING METERS / FUEL below."
+                let detail = failedWorkflowComponent.lastError.nilIfEmpty ?? "Ending Hobbs and Ending Tacho are required."
+                return "\(detail) Tap FIX ENDING METERS below."
             }
             return failedWorkflowComponent.lastError.nilIfEmpty ?? "Retry missing / failed components."
         }
@@ -2084,6 +2107,10 @@ private struct FlightLogView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @State private var isShowingFileImporter = false
     @State private var directImportTarget: CVRFlightLogEntry?
+    @State private var pinTarget: CVRFlightLogEntry?
+    @State private var adjustmentTarget: CVRFlightLogEntry?
+    @State private var adjustmentPIN = ""
+    @State private var pinError = ""
 
     var body: some View {
         GeometryReader { proxy in
@@ -2182,7 +2209,7 @@ private struct FlightLogView: View {
                 .refreshable {
                     await flightLogs.refresh(settings: settings)
                 }
-                if flightLogs.isUploading {
+                if flightLogs.isUploading || flightLogs.isAdjusting {
                     uploadOverlay
                 }
             }
@@ -2221,52 +2248,74 @@ private struct FlightLogView: View {
         ) {
             garminAssignmentSheet
         }
+        .sheet(item: $pinTarget) { entry in
+            flightLogPINSheet(entry)
+        }
+        .sheet(item: $adjustmentTarget) { entry in
+            FlightLogAdjustmentView(entry: entry)
+                .environmentObject(flightLogs)
+                .environmentObject(settings)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     private func flightLogRow(_ entry: CVRFlightLogEntry) -> some View {
-        Button {
-            guard !entry.hasGarminCSV else { return }
-            directImportTarget = entry
-            isShowingFileImporter = true
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(displayDate(entry.scheduledDate))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Label(
-                        entry.hasGarminCSV ? "COMPLETE" : "CSV MISSING",
-                        systemImage: entry.hasGarminCSV ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
-                    )
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning)
-                }
-                HStack(spacing: 8) {
-                    logValue("DEPARTURE", value: airport(entry.departureAirport), detail: displayTime(entry.departureTime))
-                    Image(systemName: "arrow.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
-                    logValue("ARRIVAL", value: airport(entry.arrivalAirport), detail: displayTime(entry.arrivalTime))
-                    logValue("HOBBS", value: hobbs(entry.totalHobbsTime), detail: "TOTAL")
-                }
-                if !entry.hasGarminCSV {
-                    Text("Tap this log to attach its Garmin CSV later.")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(CVROperationalPalette.warning)
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(displayDate(entry.scheduledDate))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Label(
+                    entry.hasGarminCSV ? "COMPLETE" : "CSV MISSING",
+                    systemImage: entry.hasGarminCSV ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                )
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning)
             }
-            .padding(14)
-            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(
-                        entry.hasGarminCSV ? CVROperationalPalette.cardBorder : CVROperationalPalette.warning.opacity(0.55),
-                        lineWidth: 1
-                    )
-            )
+            Text((entry.crewNames ?? []).isEmpty ? "Crew not recorded" : (entry.crewNames ?? []).joined(separator: " · "))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            HStack(spacing: 8) {
+                logValue("DEPARTURE", value: airport(entry.departureAirport), detail: displayTime(entry.departureTime))
+                Image(systemName: "arrow.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                logValue("ARRIVAL", value: airport(entry.arrivalAirport), detail: displayTime(entry.arrivalTime))
+                logValue("HOBBS", value: hobbs(entry.totalHobbsTime), detail: "TOTAL")
+            }
+            HStack(spacing: 8) {
+                if !entry.hasGarminCSV {
+                    Button {
+                        directImportTarget = entry
+                        isShowingFileImporter = true
+                    } label: {
+                        Label("ADD CSV", systemImage: "paperclip")
+                    }
+                    .foregroundStyle(CVROperationalPalette.warning)
+                }
+                Spacer()
+                Button {
+                    adjustmentPIN = ""
+                    pinError = ""
+                    pinTarget = entry
+                } label: {
+                    Label("ADJUST", systemImage: "lock.fill")
+                }
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            }
+            .font(.caption.weight(.bold))
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    entry.hasGarminCSV ? CVROperationalPalette.cardBorder : CVROperationalPalette.warning.opacity(0.55),
+                    lineWidth: 1
+                )
+        )
     }
 
     private func logValue(_ title: String, value: String, detail: String) -> some View {
@@ -2283,6 +2332,62 @@ private struct FlightLogView: View {
                 .foregroundStyle(CVROperationalPalette.secondaryBlue)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func flightLogPINSheet(_ entry: CVRFlightLogEntry) -> some View {
+        NavigationStack {
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                VStack(spacing: 18) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 42, weight: .bold))
+                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    Text("ADMIN AUTHORIZATION")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text("Enter the CVR Unit Admin PIN to adjust Hobbs, Tacho, or fuel.")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                    SecureField("Admin PIN", text: $adjustmentPIN)
+                        .keyboardType(.numberPad)
+                        .textContentType(.password)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(12)
+                        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+                    if !pinError.isEmpty {
+                        Text(pinError)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(CVROperationalPalette.critical)
+                    }
+                    CVROperationalActionButton(
+                        title: "UNLOCK ADJUSTMENT",
+                        subtitle: displayDate(entry.scheduledDate),
+                        color: CVROperationalPalette.secondaryBlue
+                    ) {
+                        guard adjustmentPIN == settings.adminPIN else {
+                            pinError = "Incorrect Admin PIN"
+                            return
+                        }
+                        pinTarget = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            adjustmentTarget = entry
+                        }
+                    }
+                }
+                .padding(24)
+            }
+            .navigationTitle("Protected Adjustment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { pinTarget = nil }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 
     private var garminAssignmentSheet: some View {
@@ -2347,15 +2452,17 @@ private struct FlightLogView: View {
         ZStack {
             Color.black.opacity(0.72).ignoresSafeArea()
             VStack(spacing: 14) {
-                ProgressView(value: flightLogs.uploadProgress)
+                ProgressView(value: flightLogs.isAdjusting ? nil : flightLogs.uploadProgress)
                     .tint(CVROperationalPalette.secondaryBlue)
                     .frame(width: 220)
-                Text("ATTACHING GARMIN CSV")
+                Text(flightLogs.isAdjusting ? "SAVING LOG ADJUSTMENT" : "ATTACHING GARMIN CSV")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
-                Text("\(Int((flightLogs.uploadProgress * 100).rounded()))%")
-                    .font(.title2.weight(.bold).monospacedDigit())
-                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                if !flightLogs.isAdjusting {
+                    Text("\(Int((flightLogs.uploadProgress * 100).rounded()))%")
+                        .font(.title2.weight(.bold).monospacedDigit())
+                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                }
             }
             .padding(24)
             .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
@@ -2416,6 +2523,145 @@ private struct FlightLogView: View {
         formatter.dateFormat = "EEE, MMM d, yyyy"
         return formatter
     }()
+}
+
+private struct FlightLogAdjustmentView: View {
+    @EnvironmentObject private var flightLogs: CVRFlightLogStore
+    @EnvironmentObject private var settings: SettingsStore
+    @Environment(\.dismiss) private var dismiss
+    let entry: CVRFlightLogEntry
+    @State private var departureAirport: String
+    @State private var arrivalAirport: String
+    @State private var crewNames: String
+    @State private var endingHobbs: String
+    @State private var endingTacho: String
+    @State private var fuelRemaining: String
+
+    init(entry: CVRFlightLogEntry) {
+        self.entry = entry
+        _departureAirport = State(initialValue: entry.departureAirport)
+        _arrivalAirport = State(initialValue: entry.arrivalAirport)
+        _crewNames = State(initialValue: (entry.crewNames ?? []).joined(separator: ", "))
+        _endingHobbs = State(initialValue: entry.endingHobbs.map { String(format: "%.1f", $0) } ?? "")
+        _endingTacho = State(initialValue: entry.endingTacho.map { String(format: "%.1f", $0) } ?? "")
+        _fuelRemaining = State(initialValue: entry.fuelRemaining ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        CVROperationalWarningCard(
+                            title: "ADMINISTRATIVE ADJUSTMENT",
+                            message: "This creates a new append-only Flight Closure record. The original evidence remains preserved.",
+                            iconName: "lock.shield.fill",
+                            color: CVROperationalPalette.warning
+                        )
+                        adjustmentField(
+                            "DEPARTURE AIRPORT",
+                            value: $departureAirport,
+                            baseline: nil,
+                            keyboard: .default
+                        )
+                        adjustmentField(
+                            "ARRIVAL AIRPORT",
+                            value: $arrivalAirport,
+                            baseline: nil,
+                            keyboard: .default
+                        )
+                        adjustmentField(
+                            "CREW NAMES",
+                            value: $crewNames,
+                            baseline: nil,
+                            keyboard: .default
+                        )
+                        adjustmentField(
+                            "ENDING HOBBS",
+                            value: $endingHobbs,
+                            baseline: entry.startingHobbs
+                        )
+                        adjustmentField(
+                            "ENDING TACHO",
+                            value: $endingTacho,
+                            baseline: entry.startingTacho
+                        )
+                        adjustmentField(
+                            "FUEL REMAINING",
+                            value: $fuelRemaining,
+                            baseline: nil
+                        )
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Adjust Flight Log")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            if await flightLogs.adjustFlightLog(
+                                entry,
+                                departureAirport: departureAirport,
+                                arrivalAirport: arrivalAirport,
+                                crewNames: crewNames.split(separator: ",").map(String.init),
+                                endingHobbs: Double(endingHobbs),
+                                endingTacho: Double(endingTacho),
+                                fuelRemaining: fuelRemaining,
+                                settings: settings
+                            ) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(
+                        departureAirport.isEmpty
+                            || arrivalAirport.isEmpty
+                            || crewNames.isEmpty
+                            || endingHobbs.isEmpty
+                            || endingTacho.isEmpty
+                            || fuelRemaining.isEmpty
+                    )
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func adjustmentField(
+        _ title: String,
+        value: Binding<String>,
+        baseline: Double?,
+        keyboard: UIKeyboardType = .decimalPad
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .tracking(1)
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            TextField(title, text: value)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(keyboard == .default ? .characters : .never)
+                .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+            if let baseline {
+                Text("Starting value: \(String(format: "%.1f", baseline))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
+            }
+        }
+        .padding(14)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
 }
 
 struct LockedOperationalView: View {

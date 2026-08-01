@@ -15,6 +15,8 @@ $aircraftSource = file_get_contents(__DIR__ . '/../src/CockpitAircraftService.ph
 $apiSource = file_get_contents(__DIR__ . '/../public/api/cvr/scheduled_sessions.php') ?: '';
 $iosModels = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Models/CVRCatalogModels.swift') ?: '';
 $iosUpload = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
+$iosWorkflow = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
+$iosViews = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
 
 $schedule = (new ReflectionClass(FlightScheduleService::class))->newInstanceWithoutConstructor();
 $payloadMethod = new ReflectionMethod(FlightScheduleService::class, 'payload');
@@ -75,6 +77,16 @@ $checks['aircraft payload exposes operational config'] = static fn(): bool =>
 $checks['iOS schedule decoder accepts authenticated API envelope'] = static fn(): bool =>
     str_contains($apiSource, "'scheduled_sessions'")
     && str_contains($iosModels, 'scheduledSessions = "scheduled_sessions"');
+$checks['authenticated scheduled missions are selectable unless audio is recording'] = static fn(): bool =>
+    str_contains($iosWorkflow, 'return !isAudioRecording')
+    && str_contains($iosWorkflow, 'state.activeDispatch != nil')
+    && str_contains($iosViews, 'aircraftForSession(session)')
+    && str_contains($iosViews, 'Archive Current and Open Scheduled Dispatch');
+$checks['completed prior workflow archives without a confusing confirmation'] = static fn(): bool =>
+    str_contains($iosWorkflow, 'func requiresArchivingBeforeScheduledSession')
+    && str_contains($iosWorkflow, 'let endingMetersEntered')
+    && str_contains($iosWorkflow, 'shutdown_verification_completed')
+    && str_contains($iosWorkflow, 'if endingMetersEntered || shutdownSaved');
 $checks['iOS and backend use the same generic oil payload keys'] = static fn(): bool =>
     str_contains($dispatchSource, "\$dispatch['oil_quantity']")
     && str_contains($dispatchSource, "\$dispatch['oil_unit']")

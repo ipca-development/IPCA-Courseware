@@ -479,12 +479,19 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     var dispatchUUID: String
     var aircraftRegistration: String
     var scheduledDate: String
+    var crewNames: [String]?
     var departureAirport: String
     var departureTime: String?
     var arrivalAirport: String
     var arrivalTime: String?
     var startingHobbs: Double?
+    var startingTacho: Double?
     var endingHobbs: Double?
+    var endingTacho: Double?
+    var fuelRemaining: String?
+    var endingOilPercentage: Int?
+    var endingOilQuantity: Double?
+    var endingOilUnit: String?
     var totalHobbsTime: Double?
     var hasGarminCSV: Bool
 
@@ -495,12 +502,19 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
         case dispatchUUID = "dispatch_uuid"
         case aircraftRegistration = "aircraft_registration"
         case scheduledDate = "scheduled_date"
+        case crewNames = "crew_names"
         case departureAirport = "departure_airport"
         case departureTime = "departure_time"
         case arrivalAirport = "arrival_airport"
         case arrivalTime = "arrival_time"
         case startingHobbs = "starting_hobbs"
+        case startingTacho = "starting_tacho"
         case endingHobbs = "ending_hobbs"
+        case endingTacho = "ending_tacho"
+        case fuelRemaining = "fuel_remaining"
+        case endingOilPercentage = "ending_oil_percentage"
+        case endingOilQuantity = "ending_oil_quantity"
+        case endingOilUnit = "ending_oil_unit"
         case totalHobbsTime = "total_hobbs_time"
         case hasGarminCSV = "has_garmin_csv"
     }
@@ -529,6 +543,7 @@ final class CVRFlightLogStore: ObservableObject {
     @Published private(set) var entries: [CVRFlightLogEntry] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var isUploading = false
+    @Published private(set) var isAdjusting = false
     @Published private(set) var uploadProgress = 0.0
     @Published private(set) var lastError = ""
     @Published var pendingGarminCSV: CVRPendingGarminCSV?
@@ -626,6 +641,74 @@ final class CVRFlightLogStore: ObservableObject {
         }
         pendingGarminCSV = nil
         uploadProgress = 0
+    }
+
+    @discardableResult
+    func adjustFlightLog(
+        _ entry: CVRFlightLogEntry,
+        departureAirport: String,
+        arrivalAirport: String,
+        crewNames: [String],
+        endingHobbs: Double?,
+        endingTacho: Double?,
+        fuelRemaining: String,
+        settings: SettingsStore
+    ) async -> Bool {
+        guard let endingHobbs,
+              let endingTacho,
+              endingHobbs >= (entry.startingHobbs ?? 0),
+              endingTacho >= (entry.startingTacho ?? 0) else {
+            lastError = "Ending Hobbs and Tacho must be valid and cannot be lower than their starting values."
+            return false
+        }
+        let fuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let fuelValue = Double(fuel), fuelValue >= 0 else {
+            lastError = "Fuel remaining must be a valid non-negative quantity."
+            return false
+        }
+        guard let baseURL = settings.normalizedServerURL,
+              let credential = settings.deviceCredential,
+              !credential.isEmpty else {
+            lastError = "Enroll this CVR Unit before adjusting a flight log."
+            return false
+        }
+
+        isAdjusting = true
+        defer { isAdjusting = false }
+        let departure = departureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let arrival = arrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let crew = crewNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !departure.isEmpty, !arrival.isEmpty, !crew.isEmpty else {
+            lastError = "Departure, arrival, and at least one crew member are required."
+            return false
+        }
+        let payload: [String: Any] = [
+            "flight_record_uuid": entry.flightRecordID.lowercased(),
+            "dispatch_uuid": entry.dispatchUUID.lowercased(),
+            "departure_airport": departure,
+            "arrival_airport": arrival,
+            "crew_names": crew,
+            "ending_hobbs": endingHobbs,
+            "ending_tacho": endingTacho,
+            "fuel_remaining": fuelValue
+        ]
+        do {
+            let response = try await APIClient(serverURL: baseURL).adjustFlightLog(
+                payload: payload,
+                credential: credential
+            )
+            guard response.ok, response.adjustmentUUID?.isEmpty == false else {
+                throw APIClientError.badResponse(response.error ?? "The adjusted flight log was not verified.")
+            }
+            lastError = ""
+            await refresh(settings: settings)
+            return true
+        } catch {
+            lastError = "Flight log adjustment failed: \(error.localizedDescription)"
+            return false
+        }
     }
 
     private func pendingDirectory() throws -> URL {

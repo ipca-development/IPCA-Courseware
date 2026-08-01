@@ -141,20 +141,27 @@ final class CVRWorkflowStore: ObservableObject {
             selectTab(.dispatch)
             return
         }
-        if let activeDispatch = state.activeDispatch,
-           Self.normalizedTail(activeDispatch.tailNumber) != Self.normalizedTail(selectedAircraft.registration) {
-            lastError = "The existing Dispatch belongs to another aircraft and cannot be replaced."
-            return
-        }
         if state.activeFlightRecord != nil {
             guard !isAudioRecording else {
                 lastError = "Stop the active recording before opening another scheduled flight."
                 return
             }
-            guard archiveActiveWorkflow() else { return }
+            if state.activeDispatch != nil {
+                guard archiveActiveWorkflow() else { return }
+            }
             mutate {
                 $0.activeDispatch = nil
                 $0.activeFlightRecord = nil
+                $0.consents = []
+                $0.recorderVerifications = []
+                $0.flightEvents = []
+                $0.flightLegs = []
+                $0.uploadComponents = []
+                $0.discrepancies = []
+            }
+        } else if state.activeDispatch != nil {
+            mutate {
+                $0.activeDispatch = nil
                 $0.consents = []
                 $0.recorderVerifications = []
                 $0.flightEvents = []
@@ -193,25 +200,30 @@ final class CVRWorkflowStore: ObservableObject {
         selectedAircraft: CockpitAircraft?,
         isAudioRecording: Bool
     ) -> Bool {
-        guard let selectedAircraft,
-              scheduledSessionMatchesAircraft(session, selectedAircraft: selectedAircraft) else {
-            return false
-        }
+        _ = session
+        _ = selectedAircraft
         if state.activeDispatch?.schedulerRecordID == session.schedulerRecordID {
             return true
         }
-        if isAudioRecording {
-            return false
-        }
-        guard let activeDispatch = state.activeDispatch else {
-            return true
-        }
-        return Self.normalizedTail(activeDispatch.tailNumber) == Self.normalizedTail(selectedAircraft.registration)
+        return !isAudioRecording
     }
 
     func requiresArchivingBeforeScheduledSession(_ session: CVRScheduledSession) -> Bool {
-        state.activeFlightRecord != nil
-            && state.activeDispatch?.schedulerRecordID != session.schedulerRecordID
+        guard state.activeDispatch != nil,
+              state.activeDispatch?.schedulerRecordID != session.schedulerRecordID else {
+            return false
+        }
+        if let flightRecord = state.activeFlightRecord {
+            let endingMetersEntered = flightRecord.endingHobbs != nil && flightRecord.endingTacho != nil
+            let shutdownSaved = state.flightEvents.contains {
+                $0.flightRecordID == flightRecord.id
+                    && $0.eventType == "shutdown_verification_completed"
+            }
+            if endingMetersEntered || shutdownSaved {
+                return false
+            }
+        }
+        return true
     }
 
     private func scheduledSessionMatchesAircraft(
@@ -619,13 +631,41 @@ final class CVRWorkflowStore: ObservableObject {
 
     var canEditFlightClosure: Bool {
         guard state.activeFlightRecord != nil, state.activeDispatch != nil else { return false }
-        if closureUploadFailure() != nil { return true }
         guard let flightRecord = state.activeFlightRecord else { return false }
+        if closureUploadFailure() != nil {
+            return !flightClosureIsComplete(flightRecord)
+        }
         if flightClosureIsComplete(flightRecord) { return false }
         return state.uploadComponents.contains {
             $0.componentType == "flight_record_closure" && $0.flightRecordID == flightRecord.id
         } || state.flightEvents.contains {
             $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+        }
+    }
+
+    @discardableResult
+    func repairCompletedClosureUploadIfNeeded() -> Bool {
+        guard let flightRecord = state.activeFlightRecord,
+              flightClosureIsComplete(flightRecord),
+              closureUploadFailure() != nil else {
+            return false
+        }
+        return mutate {
+            $0.uploadComponents.removeAll {
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "flight_record_closure"
+                    && ($0.state == .failed || $0.state == .needsUserAction)
+            }
+            if !$0.uploadComponents.contains(where: {
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "flight_record_closure"
+            }) {
+                $0.uploadComponents.append(evidenceComponent(
+                    flightRecordID: flightRecord.id,
+                    type: "flight_record_closure",
+                    evidenceID: flightRecord.id
+                ))
+            }
         }
     }
 
@@ -709,22 +749,18 @@ final class CVRWorkflowStore: ObservableObject {
             $0.flightEvents.append(event)
             $0.uploadComponents.append(eventUploadComponent(event))
 
-            var hasClosureComponent = false
-            for index in $0.uploadComponents.indices {
-                guard $0.uploadComponents[index].flightRecordID == flightRecord.id,
-                      $0.uploadComponents[index].componentType == "flight_record_closure" else { continue }
-                hasClosureComponent = true
-                $0.uploadComponents[index].state = .queued
-                $0.uploadComponents[index].lastError = ""
-                $0.uploadComponents[index].progress = 0
+            // A repaired closure is new immutable evidence. Reusing the failed
+            // component UUID can conflict with a request the server accepted
+            // before the client lost its response.
+            $0.uploadComponents.removeAll {
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "flight_record_closure"
             }
-            if !hasClosureComponent {
-                $0.uploadComponents.append(evidenceComponent(
-                    flightRecordID: flightRecord.id,
-                    type: "flight_record_closure",
-                    evidenceID: flightRecord.id
-                ))
-            }
+            $0.uploadComponents.append(evidenceComponent(
+                flightRecordID: flightRecord.id,
+                type: "flight_record_closure",
+                evidenceID: flightRecord.id
+            ))
             $0.selectedTab = repairExistingClosureUpload ? $0.selectedTab : .log
         }
         return persisted

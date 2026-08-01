@@ -43,6 +43,11 @@ $checks = array(
         && str_contains($store, 'return persisted')
         && str_contains($views, 'if save()')
         && str_contains($views, 'uploadManager.uploadQueuedWorkflowComponents'),
+    'closure repair replaces immutable upload identity instead of looping' =>
+        str_contains($store, 'repairCompletedClosureUploadIfNeeded')
+        && str_contains($store, 'A repaired closure is new immutable evidence')
+        && str_contains($views, 'workflow.repairCompletedClosureUploadIfNeeded()')
+        && !str_contains($views, 'FIX ENDING METERS / FUEL'),
     'server rejects incomplete or regressing closure values' =>
         str_contains($intake, 'assertCompleteClosure')
         && str_contains($intake, 'Ending Hobbs cannot be lower than Starting Hobbs.')
@@ -105,7 +110,9 @@ $checks = array(
         str_contains($store, 'saveFlightClosureValues')
         && str_contains($store, 'canEditFlightClosure')
         && str_contains($store, 'reconcileClosureUploadComponents')
-        && str_contains($views, 'FIX ENDING METERS / FUEL')
+        && str_contains($store, 'repairCompletedClosureUploadIfNeeded')
+        && str_contains($views, 'FIX ENDING METERS')
+        && str_contains($views, 'RETRY FAILED ITEMS')
         && str_contains($views, 'Fix Ending Meters'),
     'operational calculation versions accept long service version labels' =>
         str_contains($derivation, "substr((string)(\$value['calculation_version'] ?? 'phase3-v1'), 0, 64)")

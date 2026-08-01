@@ -11,6 +11,8 @@ $uploads = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/Upload
 $garminEvidence = file_get_contents($root . '/src/GarminCsvEvidenceService.php') ?: '';
 $garminFinalize = file_get_contents($root . '/public/api/cvr/csv_upload_finalize.php') ?: '';
 $plist = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Info.plist') ?: '';
+$adjustmentApi = file_get_contents($root . '/public/api/cvr/flight_log_adjust.php') ?: '';
+$adjustmentMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_adjustments.sql') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
@@ -24,6 +26,19 @@ $checks = array(
         && str_contains($service, "'arrival_time'")
         && str_contains($service, "'total_hobbs_time'")
         && str_contains($service, "'has_garmin_csv'"),
+    'flight log exposes crew and protected operational adjustments' =>
+        str_contains($service, "'crew_names'")
+        && str_contains($models, 'var crewNames: [String]?')
+        && str_contains($models, 'func adjustFlightLog(')
+        && str_contains($service, 'adjustForDeviceAircraft')
+        && str_contains($adjustmentApi, 'requireDevice()')
+        && str_contains($adjustmentMigration, 'ipca_cvr_flight_log_adjustments')
+        && str_contains($views, 'ADMIN AUTHORIZATION')
+        && str_contains($views, 'adjustmentPIN == settings.adminPIN')
+        && str_contains($views, 'ADMINISTRATIVE ADJUSTMENT')
+        && str_contains($views, 'DEPARTURE AIRPORT')
+        && str_contains($views, 'ARRIVAL AIRPORT')
+        && str_contains($views, 'CREW NAMES'),
     'iOS accepts AirDrop CSV and routes it to Log assignment' =>
         str_contains($plist, 'public.comma-separated-values-text')
         && str_contains($app, '.onOpenURL')
