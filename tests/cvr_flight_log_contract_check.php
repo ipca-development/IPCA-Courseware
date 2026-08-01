@@ -15,6 +15,8 @@ $adjustmentApi = file_get_contents($root . '/public/api/cvr/flight_log_adjust.ph
 $retryApi = file_get_contents($root . '/public/api/cvr/flight_log_retry.php') ?: '';
 $adjustmentMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_adjustments.sql') ?: '';
 $workflowStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
+$coordinator = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRUnitCoordinator.swift') ?: '';
+$recordingStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/RecordingStore.swift') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
@@ -41,6 +43,24 @@ $checks = array(
         && str_contains($views, 'return "dispatch:')
         && str_contains($views, 'mergeLogEntries')
         && str_contains($views, 'existing.hasGarminCSV || candidate.hasGarminCSV'),
+    'offline audio is linked to the workflow flight and repaired for existing archives' =>
+        str_contains($coordinator, 'recording.flightSessionID = workflow?.state.activeFlightRecord?.id')
+        && str_contains($coordinator, 'linkRecordingSession(recordingID: recordingSessionID')
+        && str_contains($workflowStore, 'func recordingSessionFlightRecordLinks()')
+        && str_contains($recordingStore, 'func repairFlightSessionLinks(')
+        && str_contains($recordingStore, 'recordings[index].uploadStatus = .pending')
+        && str_contains($views, '$0.flightSessionID = entry.flightRecordID'),
+    'connectivity recovery requeues archived workflow and cockpit audio uploads' =>
+        str_contains($workflowStore, 'func requeueConnectivityFailedUploads()')
+        && str_contains($recordingStore, 'func requeueConnectivityFailedUploads()')
+        && str_contains($coordinator, 'network.canUpload(allowCellular:')
+        && str_contains($uploads, 'configureNetworkMonitor')
+        && str_contains($app, 'recordingStore.requeueConnectivityFailedUploads()'),
+    'retry progress replaces stale offline errors in the merged Log row' =>
+        str_contains($views, 'merged.serverUploadStatus?.lowercased() == "failed"')
+        && str_contains($views, 'merged.transcriptStatus?.lowercased() == "failed"')
+        && strpos($views, 'if values.contains("pending")') < strpos($views, 'if values.contains("failed")')
+        && str_contains($views, 'await flightLogs.refresh(settings: settings)'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")

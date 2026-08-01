@@ -7,6 +7,7 @@ final class UploadManager: ObservableObject {
     private let chunkSize = 512 * 1024
     private let maxChunkAttempts = 8
     private var retryTasks: [String: Task<Void, Never>] = [:]
+    private weak var networkMonitor: NetworkMonitor?
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -17,6 +18,10 @@ final class UploadManager: ObservableObject {
         return URLSession(configuration: configuration)
     }()
 
+    func configureNetworkMonitor(_ network: NetworkMonitor) {
+        networkMonitor = network
+    }
+
     func uploadPending(store: RecordingStore, settings: SettingsStore, network: NetworkMonitor) {
         guard !settings.isSimulationModeEnabled else { return }
         guard network.canUpload(allowCellular: settings.allowCellularUpload) else { return }
@@ -26,6 +31,16 @@ final class UploadManager: ObservableObject {
     }
 
     func upload(recordingID: String, store: RecordingStore, settings: SettingsStore) {
+        if let networkMonitor,
+           !networkMonitor.canUpload(allowCellular: settings.allowCellularUpload) {
+            store.update(recordingID) {
+                if $0.uploadStatus != .uploaded {
+                    $0.uploadStatus = .pending
+                    $0.lastError = ""
+                }
+            }
+            return
+        }
         guard settings.isServerURLConfigured else {
             store.update(recordingID) {
                 $0.uploadStatus = .failed
@@ -89,6 +104,10 @@ final class UploadManager: ObservableObject {
 
     func uploadQueuedWorkflowComponents(workflow: CVRWorkflowStore, settings: SettingsStore) {
         guard !settings.isSimulationModeEnabled else { return }
+        if let networkMonitor,
+           !networkMonitor.canUpload(allowCellular: settings.allowCellularUpload) {
+            return
+        }
         let supportedTypes = Set([
             "dispatch_metadata", "garmin_csv", "flight_events",
             "recorder_verification", "flight_record_closure"

@@ -78,12 +78,20 @@ final class CVRUnitCoordinator: ObservableObject {
         self.settings = settings
         self.uploadManager = uploadManager
         self.workflow = workflow
+        uploadManager.configureNetworkMonitor(network)
 
         network.$statusText
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.attemptPendingUploads()
-                if let self, let workflow = self.workflow, let settings = self.settings {
+                guard let self, let network = self.network, let settings = self.settings else { return }
+                if network.canUpload(allowCellular: settings.allowCellularUpload),
+                   let workflow = self.workflow {
+                    workflow.requeueConnectivityFailedUploads()
+                    if let store = self.store {
+                        store.repairFlightSessionLinks(workflow.recordingSessionFlightRecordLinks())
+                        store.requeueConnectivityFailedUploads()
+                    }
+                    self.attemptPendingUploads()
                     self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
             }
@@ -438,8 +446,9 @@ final class CVRUnitCoordinator: ObservableObject {
             clearRecoveredContinuationState()
         }
         recording.gpsSamplesPath = gps?.stopCaptureAndSave(recordingID: recording.id)
-        recording.flightSessionID = sessionID ?? recording.id
-        workflow?.linkRecordingSession(recordingID: recording.flightSessionID, startedAt: recording.startedAt)
+        let recordingSessionID = sessionID ?? recording.id
+        recording.flightSessionID = workflow?.state.activeFlightRecord?.id ?? recordingSessionID
+        workflow?.linkRecordingSession(recordingID: recordingSessionID, startedAt: recording.startedAt)
         if !mergedRecoveredPrelude {
             recording.segmentIndex = activeSegmentIndex
             recording.previousSegmentID = activePreviousSegmentID
@@ -447,7 +456,7 @@ final class CVRUnitCoordinator: ObservableObject {
         }
         recording.beaconDiagnosticsPath = beacon?.saveDiagnostics(
             recordingID: recording.id,
-            recordingSessionID: recording.flightSessionID,
+            recordingSessionID: recordingSessionID,
             recordingEndReason: reason
         )
         recordEvent(severity: "info", type: "recording_stopped", message: reason)
@@ -780,7 +789,7 @@ final class CVRUnitCoordinator: ObservableObject {
             transcript: "",
             lastError: "Recovered after app restart and queued as a separate interrupted recording.",
             recordingEventsPath: eventsPath,
-            flightSessionID: prelude.sessionID,
+            flightSessionID: workflow?.state.activeFlightRecord?.id ?? prelude.sessionID,
             segmentIndex: prelude.segmentIndex,
             sourceGapSummary: "App was closed or restarted during recording. Recovered pre-close audio was saved as a separate interrupted recording.\(gapText)"
         )

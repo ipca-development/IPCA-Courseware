@@ -74,11 +74,11 @@ final class CVRWorkflowStore: ObservableObject {
             return
         }
         if state.activeDispatch != nil || state.activeFlightRecord != nil {
-            lastError = "The current Dispatch must be fully server verified and archived before another Dispatch can be created."
+            lastError = "Finish and save the current flight before creating another Dispatch. Uploads may continue after the flight is saved."
             return
         }
 
-        let carryover = latestVerifiedCarryover(for: registration)
+        let carryover = latestClosedCarryover(for: registration)
         let dispatch = CVRDispatchRecord(
             id: UUID().uuidString,
             serverDispatchID: nil,
@@ -98,7 +98,7 @@ final class CVRWorkflowStore: ObservableObject {
             oilPercentage: carryover?.oilPercentage,
             startingOilQuantity: carryover?.oilQuantity,
             startingOilUnit: carryover?.oilUnit ?? selectedAircraft.operationalConfig.oilUnit,
-            dispatchSource: carryover == nil ? "iphone_offline_local" : "verified_previous_flight_carryover",
+            dispatchSource: carryover == nil ? "iphone_offline_local" : "previous_locally_closed_flight_carryover",
             schedulerRecordID: nil,
             creatorIdentity: "local_cvr_unit",
             createdAt: Date(),
@@ -910,6 +910,77 @@ final class CVRWorkflowStore: ObservableObject {
         return state.uploadComponents.filter(eligible) + archives.flatMap(\.uploadComponents).filter(eligible)
     }
 
+    func recordingSessionFlightRecordLinks() -> [String: String] {
+        var links: [String: String] = [:]
+        if let flightRecord = state.activeFlightRecord,
+           let recordingSessionID = flightRecord.recordingSessionID,
+           !recordingSessionID.isEmpty {
+            links[recordingSessionID] = flightRecord.id
+        }
+        for archive in archives {
+            let sessionIDs = archive.recordingSessionIDs
+                + [archive.flightRecord.recordingSessionID].compactMap { $0 }
+            for sessionID in sessionIDs where !sessionID.isEmpty {
+                links[sessionID] = archive.flightRecordID
+            }
+        }
+        return links
+    }
+
+    func recordingIdentifiers(forFlightRecordID flightRecordID: String) -> Set<String> {
+        var identifiers = Set([flightRecordID])
+        if state.activeFlightRecord?.id == flightRecordID,
+           let recordingSessionID = state.activeFlightRecord?.recordingSessionID {
+            identifiers.insert(recordingSessionID)
+        }
+        if let archive = archives.first(where: { $0.flightRecordID == flightRecordID }) {
+            identifiers.formUnion(archive.recordingSessionIDs)
+            if let recordingSessionID = archive.flightRecord.recordingSessionID {
+                identifiers.insert(recordingSessionID)
+            }
+        }
+        return identifiers
+    }
+
+    func requeueConnectivityFailedUploads() {
+        mutate {
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].state == .failed,
+                      Self.isConnectivityFailure($0.uploadComponents[index].lastError) else {
+                    continue
+                }
+                $0.uploadComponents[index].state = .queued
+                $0.uploadComponents[index].progress = 0
+                $0.uploadComponents[index].lastError = ""
+            }
+        }
+
+        var updated = archives
+        var changed = false
+        for archiveIndex in updated.indices {
+            for componentIndex in updated[archiveIndex].uploadComponents.indices {
+                let component = updated[archiveIndex].uploadComponents[componentIndex]
+                guard component.state == .failed,
+                      Self.isConnectivityFailure(component.lastError) else {
+                    continue
+                }
+                updated[archiveIndex].uploadComponents[componentIndex].state = .queued
+                updated[archiveIndex].uploadComponents[componentIndex].progress = 0
+                updated[archiveIndex].uploadComponents[componentIndex].lastError = ""
+                updated[archiveIndex].status = .uploadPending
+                changed = true
+            }
+        }
+        guard changed else { return }
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+        } catch {
+            lastError = "Could not restore offline flight uploads: \(error.localizedDescription)"
+        }
+    }
+
     func workflowUploadContext(componentID: String) -> (
         dispatch: CVRDispatchRecord,
         flightRecord: CVRIncompleteFlightRecord,
@@ -1025,6 +1096,17 @@ final class CVRWorkflowStore: ObservableObject {
 
     static func normalizedTail(_ value: String) -> String {
         value.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private static func isConnectivityFailure(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("offline")
+            || normalized.contains("internet connection")
+            || normalized.contains("network connection")
+            || normalized.contains("not connected to the internet")
+            || normalized.contains("could not connect")
+            || normalized.contains("connection was lost")
+            || normalized.contains("timed out")
     }
 
     func dispatchTailMismatch(enrolledRegistration: String?) -> Bool {
@@ -1377,7 +1459,7 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
-    private func latestVerifiedCarryover(for registration: String) -> (
+    private func latestClosedCarryover(for registration: String) -> (
         flightRecordID: String,
         endingHobbs: Double,
         endingTacho: Double,
@@ -1389,8 +1471,7 @@ final class CVRWorkflowStore: ObservableObject {
         let normalizedRegistration = registration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return archives
             .filter {
-                $0.status == .serverVerified
-                    && $0.dispatch.tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedRegistration
+                $0.dispatch.tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == normalizedRegistration
                     && $0.flightRecord.endingHobbs != nil
                     && $0.flightRecord.endingTacho != nil
                     && !($0.flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

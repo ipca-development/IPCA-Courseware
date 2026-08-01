@@ -32,12 +32,13 @@ $checks = array(
     'next flight requires every server verification receipt' =>
         str_contains($store, 'components.allSatisfy({ $0.state == .serverVerified')
         && str_contains($store, 'NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component'),
-    'verified aircraft carryover prefills next dispatch meters and fuel' =>
-        str_contains($store, 'latestVerifiedCarryover(for: registration)')
+    'locally closed aircraft carryover prefills next dispatch while upload continues' =>
+        str_contains($store, 'latestClosedCarryover(for: registration)')
         && str_contains($store, 'startingHobbs: carryover?.endingHobbs')
         && str_contains($store, 'startingTacho: carryover?.endingTacho')
         && str_contains($store, 'fuelOnboard: carryover?.fuelRemaining')
-        && str_contains($views, 'VERIFIED PREVIOUS FLIGHT VALUES'),
+        && str_contains($views, 'PREVIOUS FLIGHT VALUES SAVED ON THIS IPHONE')
+        && str_contains($views, 'server upload may still be pending'),
     'shutdown save persists locally before immediate closure upload' =>
         str_contains($store, 'let persisted = mutate')
         && str_contains($store, 'return persisted')

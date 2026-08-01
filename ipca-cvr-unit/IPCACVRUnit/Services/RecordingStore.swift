@@ -46,6 +46,55 @@ final class RecordingStore: ObservableObject {
         save()
     }
 
+    @discardableResult
+    func repairFlightSessionLinks(_ flightRecordIDByRecordingSessionID: [String: String]) -> Int {
+        var repaired = 0
+        for index in recordings.indices {
+            let recording = recordings[index]
+            guard let flightRecordID = flightRecordIDByRecordingSessionID[recording.flightSessionID]
+                    ?? flightRecordIDByRecordingSessionID[recording.id],
+                  recording.flightSessionID != flightRecordID else {
+                continue
+            }
+            recordings[index].flightSessionID = flightRecordID
+            recordings[index].uploadStatus = .pending
+            recordings[index].uploadProgress = 0
+            recordings[index].nextUploadRetryAt = nil
+            recordings[index].uploadRetryCount = nil
+            recordings[index].lastError = ""
+            repaired += 1
+        }
+        if repaired > 0 {
+            save()
+        }
+        return repaired
+    }
+
+    @discardableResult
+    func requeueConnectivityFailedUploads() -> Int {
+        var requeued = 0
+        for index in recordings.indices where recordings[index].uploadStatus == .failed {
+            let message = recordings[index].lastError.lowercased()
+            let connectivityFailure = message.contains("offline")
+                || message.contains("internet connection")
+                || message.contains("network connection")
+                || message.contains("not connected to the internet")
+                || message.contains("could not connect")
+                || message.contains("connection was lost")
+                || message.contains("timed out")
+            guard connectivityFailure else { continue }
+            recordings[index].uploadStatus = .pending
+            recordings[index].nextUploadRetryAt = nil
+            recordings[index].uploadRetryCount = nil
+            recordings[index].lastError = ""
+            requeued += 1
+        }
+        if requeued > 0 {
+            save()
+        }
+        return requeued
+    }
+
     func recording(id: String) -> Recording? {
         recordings.first(where: { $0.id == id })
     }

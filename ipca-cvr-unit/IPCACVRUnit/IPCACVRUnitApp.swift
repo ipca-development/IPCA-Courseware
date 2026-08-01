@@ -74,11 +74,15 @@ struct IPCACVRUnitApp: App {
                 .task {
                     await recordingStore.load()
                     await workflowStore.load()
+                    recordingStore.repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())
+                    recordingStore.requeueConnectivityFailedUploads()
+                    workflowStore.requeueConnectivityFailedUploads()
                     await scheduledSessions.load()
                     await garminVault.load()
                     missionCatalog.loadBundledFallback()
                     await audioRecorder.refreshInputs()
                     network.start()
+                    uploadManager.configureNetworkMonitor(network)
                     systemMonitor.start()
                     gpsManager.prepare()
                     await settings.refreshAircraft()
@@ -119,6 +123,12 @@ struct IPCACVRUnitApp: App {
                         coordinator.appEnteredBackground()
                     case .active:
                         coordinator.appWillEnterForeground()
+                        if network.canUpload(allowCellular: settings.allowCellularUpload) {
+                            recordingStore.repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())
+                            recordingStore.requeueConnectivityFailedUploads()
+                            workflowStore.requeueConnectivityFailedUploads()
+                            uploadManager.uploadPending(store: recordingStore, settings: settings, network: network)
+                        }
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
                         Task {
                             await scheduledSessions.refresh(settings: settings)

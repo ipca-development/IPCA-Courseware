@@ -2475,17 +2475,38 @@ private struct FlightLogView: View {
     private func retryLogUpload(_ entry: CVRFlightLogEntry) {
         workflow.requeueFailedUploads(forFlightRecordID: entry.flightRecordID)
         uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-        for recording in recordingStore.recordings where
-            recording.flightSessionID == entry.flightRecordID
-                || recording.id == entry.flightRecordID {
+        for recording in linkedRecordings(forFlightRecordID: entry.flightRecordID) {
+            let needsFlightRelink = recording.flightSessionID != entry.flightRecordID
             recordingStore.update(recording.id) {
+                $0.flightSessionID = entry.flightRecordID
                 $0.nextUploadRetryAt = nil
                 $0.uploadRetryCount = nil
+                if $0.uploadStatus == .failed {
+                    $0.lastError = ""
+                }
             }
-            uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
+            if needsFlightRelink || recording.uploadStatus != .uploaded {
+                uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
+            }
         }
         Task {
-            await flightLogs.retryServerProcessing(entry, settings: settings)
+            try? await Task.sleep(for: .seconds(4))
+            if entry.transcriptStatus?.lowercased() == "failed" {
+                await flightLogs.retryServerProcessing(entry, settings: settings)
+            } else {
+                await flightLogs.refresh(settings: settings)
+            }
+            try? await Task.sleep(for: .seconds(8))
+            await flightLogs.refresh(settings: settings)
+        }
+    }
+
+    private func linkedRecordings(forFlightRecordID flightRecordID: String) -> [Recording] {
+        let identifiers = workflow.recordingIdentifiers(forFlightRecordID: flightRecordID)
+        return recordingStore.recordings.filter {
+            $0.flightSessionID == flightRecordID
+                || identifiers.contains($0.id)
+                || identifiers.contains($0.flightSessionID)
         }
     }
 
@@ -2724,7 +2745,9 @@ private struct FlightLogView: View {
             existing.serverUploadProgress ?? 0,
             candidate.serverUploadProgress ?? 0
         )
-        merged.serverUploadError = existing.serverUploadError ?? candidate.serverUploadError
+        merged.serverUploadError = merged.serverUploadStatus?.lowercased() == "failed"
+            ? (candidate.serverUploadError ?? existing.serverUploadError)
+            : nil
         merged.audioUploadStatus = preferredStatus(
             existing.audioUploadStatus,
             candidate.audioUploadStatus,
@@ -2739,7 +2762,9 @@ private struct FlightLogView: View {
             existing.transcriptProgress ?? 0,
             candidate.transcriptProgress ?? 0
         )
-        merged.transcriptError = existing.transcriptError ?? candidate.transcriptError
+        merged.transcriptError = merged.transcriptStatus?.lowercased() == "failed"
+            ? (candidate.transcriptError ?? existing.transcriptError)
+            : nil
         merged.takeoffCount = max(existing.takeoffCount ?? 0, candidate.takeoffCount ?? 0)
         merged.landingCount = max(existing.landingCount ?? 0, candidate.landingCount ?? 0)
         merged.serverComponentCount = max(
@@ -2752,10 +2777,12 @@ private struct FlightLogView: View {
     private func preferredStatus(_ first: String?, _ second: String?, success: String) -> String? {
         let values = [first, second].compactMap { $0?.lowercased() }
         if values.contains(success) { return success }
-        if values.contains("failed") { return "failed" }
         if values.contains("uploading") { return "uploading" }
         if values.contains("transcribing") { return "transcribing" }
+        if values.contains("queued") { return "queued" }
+        if values.contains("pending") { return "pending" }
         if values.contains("partial") { return "partial" }
+        if values.contains("failed") { return "failed" }
         return values.first
     }
 
@@ -2800,10 +2827,7 @@ private struct FlightLogView: View {
             : (!relevantComponents.isEmpty && verifiedComponentCount == relevantComponents.count
                 ? "complete"
                 : (relevantComponents.contains { $0.state == .uploading } ? "uploading" : "pending"))
-        let linkedRecordings = recordingStore.recordings.filter {
-            $0.flightSessionID == flightRecord.id
-                || $0.id == flightRecord.recordingSessionID
-        }
+        let linkedRecordings = linkedRecordings(forFlightRecordID: flightRecord.id)
         let audioUploadStatus = linkedRecordings.contains { $0.uploadStatus == .failed }
             ? "failed"
             : (!linkedRecordings.isEmpty && linkedRecordings.allSatisfy { $0.uploadStatus == .uploaded }
@@ -3198,6 +3222,13 @@ struct DispatchEditorView: View {
                                 message: "Starting Hobbs, Starting Tacho, fuel, and oil were prefilled from the latest locally archived flight for this aircraft after all server receipts were verified. Confirm the physical indications before dispatch.",
                                 iconName: "checkmark.icloud.fill",
                                 color: CVROperationalPalette.success
+                            )
+                        } else if workflow.state.activeDispatch?.dispatchSource == "previous_locally_closed_flight_carryover" {
+                            CVROperationalWarningCard(
+                                title: "PREVIOUS FLIGHT VALUES SAVED ON THIS IPHONE",
+                                message: "Starting Hobbs, Starting Tacho, fuel, and oil were carried forward from the previous completed flight. Its server upload may still be pending. Confirm the physical indications before dispatch.",
+                                iconName: "iphone.and.arrow.forward",
+                                color: CVROperationalPalette.secondaryBlue
                             )
                         }
                         missionPicker
