@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots (
   scheduled_end_time DATETIME(3) NOT NULL,
   aircraft_id BIGINT UNSIGNED NOT NULL,
   mission_id BIGINT UNSIGNED NULL,
+  cohort_id INT NULL,
   mission_code VARCHAR(64) NOT NULL DEFAULT '',
   planned_departure_airport VARCHAR(8) NOT NULL DEFAULT '',
   planned_destination_airport VARCHAR(8) NOT NULL DEFAULT '',
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots (
   UNIQUE KEY uk_ipca_flight_schedule_slots_record (scheduler_record_id),
   UNIQUE KEY uk_ipca_flight_schedule_slots_claim (claimed_dispatch_uuid),
   KEY idx_ipca_flight_schedule_slots_date_aircraft (scheduled_date, aircraft_id, scheduled_start_time),
+  KEY idx_ipca_flight_schedule_slots_aircraft_time (aircraft_id, scheduled_start_time, scheduled_end_time, status),
+  KEY idx_ipca_flight_schedule_slots_cohort (cohort_id, scheduled_start_time),
   KEY idx_ipca_flight_schedule_slots_status (status, scheduled_start_time),
   CONSTRAINT fk_ipca_flight_schedule_slots_aircraft FOREIGN KEY (aircraft_id)
     REFERENCES ipca_aircraft_devices(id) ON DELETE RESTRICT ON UPDATE CASCADE,

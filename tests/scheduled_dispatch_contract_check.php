@@ -6,7 +6,11 @@ require_once __DIR__ . '/../src/AircraftOperationalConfigService.php';
 
 $checks = array();
 $migration = file_get_contents(__DIR__ . '/../scripts/sql/2026_07_31_scheduled_dispatch_start_end.sql') ?: '';
+$resourceMigration = file_get_contents(__DIR__ . '/../scripts/sql/2026_07_31_schedule_resource_scheduler.sql') ?: '';
 $dispatchSource = file_get_contents(__DIR__ . '/../src/CvrDispatchIntakeService.php') ?: '';
+$scheduleSource = file_get_contents(__DIR__ . '/../src/FlightScheduleService.php') ?: '';
+$scheduleAdmin = file_get_contents(__DIR__ . '/../public/admin/schedule.php') ?: '';
+$scheduleJs = file_get_contents(__DIR__ . '/../public/admin/assets/flight_schedule.js') ?: '';
 $aircraftSource = file_get_contents(__DIR__ . '/../src/CockpitAircraftService.php') ?: '';
 $apiSource = file_get_contents(__DIR__ . '/../public/api/cvr/scheduled_sessions.php') ?: '';
 $iosModels = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Models/CVRCatalogModels.swift') ?: '';
@@ -22,6 +26,8 @@ $slotPayload = $payloadMethod->invoke($schedule, array(
     'aircraft_id' => 7,
     'aircraft_registration' => 'N446CS',
     'mission_id' => 2,
+    'cohort_id' => 5,
+    'cohort_name' => 'FAA ACP 25A',
     'resolved_mission_code' => 'SPC-1',
     'mission_name' => 'SPC 1',
     'planned_departure_airport' => 'KPAE',
@@ -38,6 +44,7 @@ $checks['scheduled sessions payload matches iOS contract'] = static fn(): bool =
     && ($slotPayload['aircraft']['id'] ?? 0) === 7
     && ($slotPayload['aircraft']['registration'] ?? '') === 'N446CS'
     && ($slotPayload['mission']['code'] ?? '') === 'SPC-1'
+    && ($slotPayload['cohort']['id'] ?? 0) === 5
     && count($slotPayload['crew'] ?? array()) === 1
     && ($slotPayload['status'] ?? '') === 'scheduled';
 $checks['API requires enrolled device authentication'] = static fn(): bool =>
@@ -73,6 +80,23 @@ $checks['iOS and backend use the same generic oil payload keys'] = static fn(): 
     && str_contains($dispatchSource, "\$dispatch['oil_unit']")
     && str_contains($iosUpload, 'dispatchPayload["oil_quantity"]')
     && str_contains($iosUpload, 'dispatchPayload["oil_unit"]');
+$checks['resource scheduler exposes devices staff cohorts and drag resize'] = static fn(): bool =>
+    str_contains($scheduleAdmin, "'label' => 'Devices'")
+    && str_contains($scheduleAdmin, "'label' => 'Staff'")
+    && str_contains($scheduleAdmin, "'label' => 'Cohorts'")
+    && str_contains($scheduleJs, 'startMove(')
+    && str_contains($scheduleJs, 'startResize(')
+    && str_contains($scheduleJs, 'flightScheduleChangeModal');
+$checks['resource rescheduling retains dispatch lock'] = static fn(): bool =>
+    str_contains($scheduleSource, 'function rescheduleSlot(')
+    && str_contains($scheduleSource, 'FOR UPDATE')
+    && str_contains($scheduleSource, 'A reservation cannot move after Dispatch is activated.')
+    && str_contains($scheduleSource, 'This reservation changed in another session.')
+    && str_contains($scheduleSource, 'assertNoResourceConflicts');
+$checks['resource scheduler migration adds cohort assignment'] = static fn(): bool =>
+    str_contains($resourceMigration, "COLUMN_NAME = 'cohort_id'")
+    && str_contains($resourceMigration, 'idx_ipca_flight_schedule_slots_cohort')
+    && str_contains($resourceMigration, 'idx_ipca_flight_schedule_slots_aircraft_time');
 
 $failed = array();
 foreach ($checks as $name => $scenario) {
