@@ -495,6 +495,16 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     var endingOilUnit: String?
     var totalHobbsTime: Double?
     var hasGarminCSV: Bool
+    var serverUploadStatus: String?
+    var serverUploadProgress: Int?
+    var serverUploadError: String?
+    var audioUploadStatus: String?
+    var transcriptStatus: String?
+    var transcriptProgress: Int?
+    var transcriptError: String?
+    var takeoffCount: Int?
+    var landingCount: Int?
+    var serverComponentCount: Int?
 
     var id: String { flightRecordID }
 
@@ -519,6 +529,16 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
         case endingOilUnit = "ending_oil_unit"
         case totalHobbsTime = "total_hobbs_time"
         case hasGarminCSV = "has_garmin_csv"
+        case serverUploadStatus = "server_upload_status"
+        case serverUploadProgress = "server_upload_progress"
+        case serverUploadError = "server_upload_error"
+        case audioUploadStatus = "audio_upload_status"
+        case transcriptStatus = "transcript_status"
+        case transcriptProgress = "transcript_progress"
+        case transcriptError = "transcript_error"
+        case takeoffCount = "takeoff_count"
+        case landingCount = "landing_count"
+        case serverComponentCount = "server_component_count"
     }
 }
 
@@ -652,6 +672,28 @@ final class CVRFlightLogStore: ObservableObject {
 
     func hasLocallyAttachedGarminCSV(flightRecordID: String) -> Bool {
         locallyAttachedGarminFlightRecordIDs.contains(flightRecordID)
+    }
+
+    func retryServerProcessing(_ entry: CVRFlightLogEntry, settings: SettingsStore) async {
+        guard let baseURL = settings.normalizedServerURL,
+              let credential = settings.deviceCredential,
+              !credential.isEmpty else {
+            lastError = "Enroll this CVR Unit before retrying flight processing."
+            return
+        }
+        do {
+            let response = try await APIClient(serverURL: baseURL).retryFlightLog(
+                flightRecordID: entry.flightRecordID,
+                credential: credential
+            )
+            guard response.ok else {
+                throw APIClientError.badResponse(response.error ?? "Flight retry was not accepted.")
+            }
+            lastError = ""
+            await refresh(settings: settings)
+        } catch {
+            lastError = "Flight re-upload failed: \(error.localizedDescription)"
+        }
     }
 
     func cancelPendingGarminCSV() {

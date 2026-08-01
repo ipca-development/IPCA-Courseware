@@ -2118,6 +2118,7 @@ private struct FlightLogView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var recordingStore: RecordingStore
     @State private var isShowingFileImporter = false
     @State private var directImportTarget: CVRFlightLogEntry?
     @State private var pinTarget: CVRFlightLogEntry?
@@ -2274,18 +2275,19 @@ private struct FlightLogView: View {
     }
 
     private func flightLogRow(_ entry: CVRFlightLogEntry) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let overall = overallLogStatus(entry)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(displayDate(entry.scheduledDate))
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
                 Label(
-                    entry.hasGarminCSV ? "COMPLETE" : "CSV MISSING",
-                    systemImage: entry.hasGarminCSV ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                    overall.title,
+                    systemImage: overall.icon
                 )
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning)
+                .foregroundStyle(overall.color)
             }
             Text((entry.crewNames ?? []).isEmpty ? "Crew not recorded" : (entry.crewNames ?? []).joined(separator: " · "))
                 .font(.caption.weight(.semibold))
@@ -2299,6 +2301,41 @@ private struct FlightLogView: View {
                 logValue("HOBBS", value: hobbs(entry.totalHobbsTime), detail: "TOTAL")
             }
             HStack(spacing: 8) {
+                logStatusValue(
+                    "SERVER",
+                    value: uploadStatusText(entry),
+                    color: uploadStatusColor(entry)
+                )
+                logStatusValue(
+                    "TRANSCRIPT",
+                    value: transcriptStatusText(entry),
+                    color: transcriptStatusColor(entry)
+                )
+                logStatusValue(
+                    "GARMIN CSV",
+                    value: entry.hasGarminCSV ? "UPLOADED" : "MISSING",
+                    color: entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning
+                )
+            }
+            HStack(spacing: 8) {
+                logStatusValue(
+                    "TAKEOFFS",
+                    value: "\(entry.takeoffCount ?? 0)",
+                    color: CVROperationalPalette.secondaryBlue
+                )
+                logStatusValue(
+                    "LANDINGS",
+                    value: "\(entry.landingCount ?? 0)",
+                    color: CVROperationalPalette.secondaryBlue
+                )
+            }
+            if let failure = logFailureMessage(entry) {
+                Text(failure)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CVROperationalPalette.critical)
+                    .lineLimit(3)
+            }
+            HStack(spacing: 8) {
                 if !entry.hasGarminCSV {
                     Button {
                         directImportTarget = entry
@@ -2307,6 +2344,14 @@ private struct FlightLogView: View {
                         Label("ADD CSV", systemImage: "paperclip")
                     }
                     .foregroundStyle(CVROperationalPalette.warning)
+                }
+                if logNeedsRetry(entry) {
+                    Button {
+                        retryLogUpload(entry)
+                    } label: {
+                        Label("RE-UPLOAD", systemImage: "arrow.clockwise.icloud.fill")
+                    }
+                    .foregroundStyle(CVROperationalPalette.critical)
                 }
                 Spacer()
                 Button {
@@ -2346,6 +2391,102 @@ private struct FlightLogView: View {
                 .foregroundStyle(CVROperationalPalette.secondaryBlue)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func logStatusValue(_ title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            Text(value)
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func uploadStatusText(_ entry: CVRFlightLogEntry) -> String {
+        switch entry.serverUploadStatus?.lowercased() {
+        case "complete": return "UPLOADED"
+        case "failed": return "FAILED"
+        case "uploading", "partial", "pending":
+            return "\(entry.serverUploadProgress ?? 0)%"
+        default: return "\(entry.serverUploadProgress ?? 0)%"
+        }
+    }
+
+    private func uploadStatusColor(_ entry: CVRFlightLogEntry) -> Color {
+        switch entry.serverUploadStatus?.lowercased() {
+        case "complete": return CVROperationalPalette.success
+        case "failed": return CVROperationalPalette.critical
+        default: return CVROperationalPalette.secondaryBlue
+        }
+    }
+
+    private func transcriptStatusText(_ entry: CVRFlightLogEntry) -> String {
+        switch entry.transcriptStatus?.lowercased() {
+        case "ready": return "READY"
+        case "failed": return "FAILED"
+        case "transcribing", "queued": return "\(entry.transcriptProgress ?? 0)%"
+        default: return "PENDING"
+        }
+    }
+
+    private func transcriptStatusColor(_ entry: CVRFlightLogEntry) -> Color {
+        switch entry.transcriptStatus?.lowercased() {
+        case "ready": return CVROperationalPalette.success
+        case "failed": return CVROperationalPalette.critical
+        case "transcribing", "queued": return CVROperationalPalette.secondaryBlue
+        default: return CVROperationalPalette.standby
+        }
+    }
+
+    private func overallLogStatus(_ entry: CVRFlightLogEntry) -> (title: String, icon: String, color: Color) {
+        if entry.serverUploadStatus?.lowercased() == "failed"
+            || entry.transcriptStatus?.lowercased() == "failed" {
+            return ("UPLOAD FAILED", "exclamationmark.octagon.fill", CVROperationalPalette.critical)
+        }
+        if entry.serverUploadStatus?.lowercased() == "complete",
+           entry.transcriptStatus?.lowercased() == "ready",
+           entry.hasGarminCSV {
+            return ("COMPLETE", "checkmark.seal.fill", CVROperationalPalette.success)
+        }
+        if entry.serverUploadStatus?.lowercased() == "complete" {
+            return ("SERVER UPLOADED", "checkmark.icloud.fill", CVROperationalPalette.secondaryBlue)
+        }
+        return ("INCOMPLETE", "exclamationmark.triangle.fill", CVROperationalPalette.warning)
+    }
+
+    private func logNeedsRetry(_ entry: CVRFlightLogEntry) -> Bool {
+        entry.serverUploadStatus?.lowercased() == "failed"
+            || entry.audioUploadStatus?.lowercased() == "failed"
+            || entry.transcriptStatus?.lowercased() == "failed"
+    }
+
+    private func logFailureMessage(_ entry: CVRFlightLogEntry) -> String? {
+        let message = (entry.transcriptError ?? entry.serverUploadError ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
+    }
+
+    private func retryLogUpload(_ entry: CVRFlightLogEntry) {
+        workflow.requeueFailedUploads(forFlightRecordID: entry.flightRecordID)
+        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+        for recording in recordingStore.recordings where
+            recording.flightSessionID == entry.flightRecordID
+                || recording.id == entry.flightRecordID {
+            recordingStore.update(recording.id) {
+                $0.nextUploadRetryAt = nil
+                $0.uploadRetryCount = nil
+            }
+            uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
+        }
+        Task {
+            await flightLogs.retryServerProcessing(entry, settings: settings)
+        }
     }
 
     private func flightLogPINSheet(_ entry: CVRFlightLogEntry) -> some View {
@@ -2574,7 +2715,48 @@ private struct FlightLogView: View {
                 ? candidate.arrivalAirport
                 : existing.arrivalAirport
         }
+        merged.serverUploadStatus = preferredStatus(
+            existing.serverUploadStatus,
+            candidate.serverUploadStatus,
+            success: "complete"
+        )
+        merged.serverUploadProgress = max(
+            existing.serverUploadProgress ?? 0,
+            candidate.serverUploadProgress ?? 0
+        )
+        merged.serverUploadError = existing.serverUploadError ?? candidate.serverUploadError
+        merged.audioUploadStatus = preferredStatus(
+            existing.audioUploadStatus,
+            candidate.audioUploadStatus,
+            success: "uploaded"
+        )
+        merged.transcriptStatus = preferredStatus(
+            existing.transcriptStatus,
+            candidate.transcriptStatus,
+            success: "ready"
+        )
+        merged.transcriptProgress = max(
+            existing.transcriptProgress ?? 0,
+            candidate.transcriptProgress ?? 0
+        )
+        merged.transcriptError = existing.transcriptError ?? candidate.transcriptError
+        merged.takeoffCount = max(existing.takeoffCount ?? 0, candidate.takeoffCount ?? 0)
+        merged.landingCount = max(existing.landingCount ?? 0, candidate.landingCount ?? 0)
+        merged.serverComponentCount = max(
+            existing.serverComponentCount ?? 0,
+            candidate.serverComponentCount ?? 0
+        )
         return merged
+    }
+
+    private func preferredStatus(_ first: String?, _ second: String?, success: String) -> String? {
+        let values = [first, second].compactMap { $0?.lowercased() }
+        if values.contains(success) { return success }
+        if values.contains("failed") { return "failed" }
+        if values.contains("uploading") { return "uploading" }
+        if values.contains("transcribing") { return "transcribing" }
+        if values.contains("partial") { return "partial" }
+        return values.first
     }
 
     private func localLogEntry(
@@ -2602,6 +2784,47 @@ private struct FlightLogView: View {
         } else {
             arrival?.timestampLocal
         }
+        let relevantComponents = components.filter { $0.flightRecordID == flightRecord.id }
+        let failedComponent = relevantComponents.first {
+            $0.state == .failed || $0.state == .needsUserAction
+        }
+        let verifiedComponentCount = relevantComponents.filter { $0.state == .serverVerified }.count
+        let componentProgress = relevantComponents.isEmpty
+            ? 0
+            : Int((relevantComponents.reduce(0.0) { partial, component in
+                if component.state == .serverVerified { return partial + 1 }
+                return partial + min(max(component.progress ?? 0, 0), 1)
+            } / Double(relevantComponents.count) * 100).rounded())
+        let workflowUploadStatus = failedComponent != nil
+            ? "failed"
+            : (!relevantComponents.isEmpty && verifiedComponentCount == relevantComponents.count
+                ? "complete"
+                : (relevantComponents.contains { $0.state == .uploading } ? "uploading" : "pending"))
+        let linkedRecordings = recordingStore.recordings.filter {
+            $0.flightSessionID == flightRecord.id
+                || $0.id == flightRecord.recordingSessionID
+        }
+        let audioUploadStatus = linkedRecordings.contains { $0.uploadStatus == .failed }
+            ? "failed"
+            : (!linkedRecordings.isEmpty && linkedRecordings.allSatisfy { $0.uploadStatus == .uploaded }
+                ? "uploaded"
+                : (linkedRecordings.contains { $0.uploadStatus == .uploading } ? "uploading" : "pending"))
+        let transcriptStatus = linkedRecordings.contains { $0.transcriptStatus == .failed }
+            ? "failed"
+            : (!linkedRecordings.isEmpty && linkedRecordings.allSatisfy { $0.transcriptStatus == .ready }
+                ? "ready"
+                : (linkedRecordings.contains { $0.transcriptStatus == .transcribing } ? "transcribing" : "pending"))
+        let transcriptProgress = linkedRecordings.isEmpty
+            ? 0
+            : linkedRecordings.map(\.transcriptProgress).min() ?? 0
+        let takeoffCount = flightRecord.verifiedTakeoffCount
+            ?? flightEvents.filter {
+                $0.eventType == "gps_takeoff_provisional" || $0.eventType == "manual_takeoff_adjustment"
+            }.count
+        let landingCount = flightRecord.verifiedLandingCount
+            ?? flightEvents.filter {
+                $0.eventType == "gps_landing_provisional" || $0.eventType == "manual_landing_adjustment"
+            }.count
         return CVRFlightLogEntry(
             flightRecordID: flightRecord.id,
             dispatchUUID: dispatch.id,
@@ -2623,8 +2846,20 @@ private struct FlightLogView: View {
             endingOilUnit: flightRecord.endingOilUnit,
             totalHobbsTime: totalHobbs,
             hasGarminCSV: components.contains {
-                $0.flightRecordID == flightRecord.id && $0.componentType == "garmin_csv"
-            }
+                $0.flightRecordID == flightRecord.id
+                    && $0.componentType == "garmin_csv"
+                    && $0.state == .serverVerified
+            },
+            serverUploadStatus: workflowUploadStatus,
+            serverUploadProgress: componentProgress,
+            serverUploadError: failedComponent?.lastError,
+            audioUploadStatus: audioUploadStatus,
+            transcriptStatus: transcriptStatus,
+            transcriptProgress: transcriptProgress,
+            transcriptError: linkedRecordings.first(where: { $0.transcriptStatus == .failed })?.lastError,
+            takeoffCount: takeoffCount,
+            landingCount: landingCount,
+            serverComponentCount: verifiedComponentCount
         )
     }
 

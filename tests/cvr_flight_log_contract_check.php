@@ -12,6 +12,7 @@ $garminEvidence = file_get_contents($root . '/src/GarminCsvEvidenceService.php')
 $garminFinalize = file_get_contents($root . '/public/api/cvr/csv_upload_finalize.php') ?: '';
 $plist = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Info.plist') ?: '';
 $adjustmentApi = file_get_contents($root . '/public/api/cvr/flight_log_adjust.php') ?: '';
+$retryApi = file_get_contents($root . '/public/api/cvr/flight_log_retry.php') ?: '';
 $adjustmentMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_adjustments.sql') ?: '';
 $workflowStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
 
@@ -58,6 +59,29 @@ $checks = array(
         && str_contains($views, 'DEPARTURE AIRPORT')
         && str_contains($views, 'ARRIVAL AIRPORT')
         && str_contains($views, 'CREW NAMES'),
+    'flight log exposes server upload transcript progress and operation counts' =>
+        str_contains($service, "'server_upload_status'")
+        && str_contains($service, "'server_upload_progress'")
+        && str_contains($service, "'transcript_status'")
+        && str_contains($service, "'transcript_progress'")
+        && str_contains($service, "'takeoff_count'")
+        && str_contains($service, "'landing_count'")
+        && str_contains($models, 'var serverUploadProgress: Int?')
+        && str_contains($models, 'var transcriptProgress: Int?')
+        && str_contains($models, 'var takeoffCount: Int?')
+        && str_contains($models, 'var landingCount: Int?')
+        && str_contains($views, '"SERVER"')
+        && str_contains($views, '"TRANSCRIPT"')
+        && str_contains($views, '"TAKEOFFS"')
+        && str_contains($views, '"LANDINGS"'),
+    'failed log upload and transcript processing can be retried securely' =>
+        str_contains($retryApi, 'requireDevice()')
+        && str_contains($service, 'retryServerProcessingForDeviceAircraft')
+        && str_contains($service, 'requeueTranscription')
+        && str_contains($models, 'func retryServerProcessing(')
+        && str_contains($workflowStore, 'func requeueFailedUploads(forFlightRecordID')
+        && str_contains($views, 'Label("RE-UPLOAD"')
+        && str_contains($views, 'retryLogUpload(entry)'),
     'iOS accepts AirDrop CSV and routes it to Log assignment' =>
         str_contains($plist, 'public.comma-separated-values-text')
         && str_contains($app, '.onOpenURL')

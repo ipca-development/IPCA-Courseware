@@ -1089,6 +1089,46 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    func requeueFailedUploads(forFlightRecordID flightRecordID: String) {
+        mutate {
+            guard $0.activeFlightRecord?.id == flightRecordID else { return }
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].state == .failed
+                    || $0.uploadComponents[index].state == .needsUserAction else {
+                    continue
+                }
+                $0.uploadComponents[index].state = .queued
+                $0.uploadComponents[index].lastError = ""
+                $0.uploadComponents[index].progress = 0
+            }
+        }
+
+        guard let archiveIndex = archives.firstIndex(where: { $0.flightRecordID == flightRecordID }) else {
+            return
+        }
+        var updated = archives
+        var changed = false
+        for componentIndex in updated[archiveIndex].uploadComponents.indices {
+            guard updated[archiveIndex].uploadComponents[componentIndex].state == .failed
+                || updated[archiveIndex].uploadComponents[componentIndex].state == .needsUserAction else {
+                continue
+            }
+            updated[archiveIndex].uploadComponents[componentIndex].state = .queued
+            updated[archiveIndex].uploadComponents[componentIndex].lastError = ""
+            updated[archiveIndex].uploadComponents[componentIndex].progress = 0
+            changed = true
+        }
+        guard changed else { return }
+        updated[archiveIndex].status = .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+        } catch {
+            lastError = "Could not requeue archived flight uploads: \(error.localizedDescription)"
+        }
+    }
+
     func archiveExportURL(id: String) throws -> URL {
         guard let archive = archives.first(where: { $0.id == id }) else {
             throw CocoaError(.fileNoSuchFile)

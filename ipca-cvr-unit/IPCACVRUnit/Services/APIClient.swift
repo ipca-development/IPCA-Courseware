@@ -188,6 +188,18 @@ struct FlightLogAdjustmentResponse: Codable {
     }
 }
 
+struct FlightLogRetryResponse: Codable {
+    var ok: Bool
+    var transcriptionsQueued: Int?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case transcriptionsQueued = "transcriptions_queued"
+        case error
+    }
+}
+
 struct CvrCsvKnownHashEntry: Codable {
     var sha256: String
     var csvFileUuid: String?
@@ -389,6 +401,21 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(FlightLogAdjustmentResponse.self, from: data, response: response)
+    }
+
+    func retryFlightLog(flightRecordID: String, credential: String) async throws -> FlightLogRetryResponse {
+        let url = serverURL.appending(path: "api/cvr/flight_log_retry.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "flight_record_uuid": flightRecordID.lowercased()
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(FlightLogRetryResponse.self, from: data, response: response)
     }
 
     func enrollDevice(code: String, deviceUUID: String, displayName: String) async throws -> DeviceEnrollmentResponse {
