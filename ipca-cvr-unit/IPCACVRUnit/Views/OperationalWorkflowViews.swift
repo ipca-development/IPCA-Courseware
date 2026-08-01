@@ -2485,7 +2485,15 @@ private struct FlightLogView: View {
     }
 
     private var displayEntries: [CVRFlightLogEntry] {
-        var byID = Dictionary(uniqueKeysWithValues: flightLogs.entries.map { ($0.flightRecordID, $0) })
+        var byIdentity: [String: CVRFlightLogEntry] = [:]
+        for remote in flightLogs.entries {
+            let identity = logIdentity(remote)
+            if let existing = byIdentity[identity] {
+                byIdentity[identity] = mergeLogEntries(existing, remote)
+            } else {
+                byIdentity[identity] = remote
+            }
+        }
         let selectedTail = normalizedTail(settings.selectedAircraft?.registration ?? "")
         for archive in workflow.archives where selectedTail.isEmpty
             || normalizedTail(archive.dispatch.tailNumber) == selectedTail {
@@ -2495,14 +2503,11 @@ private struct FlightLogView: View {
                 events: archive.flightEvents,
                 components: archive.uploadComponents
             )
-            if var remote = byID[local.flightRecordID] {
-                remote.hasGarminCSV = remote.hasGarminCSV || local.hasGarminCSV
-                if (remote.crewNames ?? []).isEmpty { remote.crewNames = local.crewNames }
-                if remote.departureAirport.isEmpty { remote.departureAirport = local.departureAirport }
-                if remote.arrivalAirport.isEmpty { remote.arrivalAirport = local.arrivalAirport }
-                byID[local.flightRecordID] = remote
+            let identity = logIdentity(local)
+            if let existing = byIdentity[identity] {
+                byIdentity[identity] = mergeLogEntries(existing, local)
             } else {
-                byID[local.flightRecordID] = local
+                byIdentity[identity] = local
             }
         }
         if let dispatch = workflow.state.activeDispatch,
@@ -2513,18 +2518,63 @@ private struct FlightLogView: View {
                 events: workflow.state.flightEvents,
                 components: workflow.state.uploadComponents
             )
-            byID[local.flightRecordID] = byID[local.flightRecordID] ?? local
+            let identity = logIdentity(local)
+            if let existing = byIdentity[identity] {
+                byIdentity[identity] = mergeLogEntries(existing, local)
+            } else {
+                byIdentity[identity] = local
+            }
         }
-        for flightRecordID in Array(byID.keys)
-            where flightLogs.hasLocallyAttachedGarminCSV(flightRecordID: flightRecordID) {
-            byID[flightRecordID]?.hasGarminCSV = true
+        for identity in Array(byIdentity.keys) {
+            guard let entry = byIdentity[identity],
+                  flightLogs.hasLocallyAttachedGarminCSV(flightRecordID: entry.flightRecordID) else {
+                continue
+            }
+            byIdentity[identity]?.hasGarminCSV = true
         }
-        return byID.values.sorted {
+        return byIdentity.values.sorted {
             if $0.scheduledDate == $1.scheduledDate {
                 return ($0.departureTime ?? "") > ($1.departureTime ?? "")
             }
             return $0.scheduledDate > $1.scheduledDate
         }
+    }
+
+    private func logIdentity(_ entry: CVRFlightLogEntry) -> String {
+        if let schedulerRecordID = entry.schedulerRecordID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !schedulerRecordID.isEmpty {
+            return "schedule:\(schedulerRecordID.lowercased())"
+        }
+        let dispatchUUID = entry.dispatchUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !dispatchUUID.isEmpty {
+            return "dispatch:\(dispatchUUID.lowercased())"
+        }
+        return "flight:\(entry.flightRecordID.lowercased())"
+    }
+
+    private func mergeLogEntries(
+        _ existing: CVRFlightLogEntry,
+        _ candidate: CVRFlightLogEntry
+    ) -> CVRFlightLogEntry {
+        var merged = candidate.hasGarminCSV && !existing.hasGarminCSV ? candidate : existing
+        merged.hasGarminCSV = existing.hasGarminCSV || candidate.hasGarminCSV
+        if merged.schedulerRecordID?.isEmpty != false {
+            merged.schedulerRecordID = existing.schedulerRecordID ?? candidate.schedulerRecordID
+        }
+        if (merged.crewNames ?? []).isEmpty {
+            merged.crewNames = (existing.crewNames ?? []).isEmpty ? candidate.crewNames : existing.crewNames
+        }
+        if merged.departureAirport.isEmpty {
+            merged.departureAirport = existing.departureAirport.isEmpty
+                ? candidate.departureAirport
+                : existing.departureAirport
+        }
+        if merged.arrivalAirport.isEmpty {
+            merged.arrivalAirport = existing.arrivalAirport.isEmpty
+                ? candidate.arrivalAirport
+                : existing.arrivalAirport
+        }
+        return merged
     }
 
     private func localLogEntry(
@@ -2555,6 +2605,7 @@ private struct FlightLogView: View {
         return CVRFlightLogEntry(
             flightRecordID: flightRecord.id,
             dispatchUUID: dispatch.id,
+            schedulerRecordID: dispatch.schedulerRecordID,
             aircraftRegistration: dispatch.tailNumber,
             scheduledDate: Self.logDateFormatter.string(from: dispatch.scheduledDate),
             crewNames: dispatch.crew.map(\.personName),

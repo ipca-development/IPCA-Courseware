@@ -32,6 +32,14 @@ $checks = array(
         && str_contains($service, "'arrival_time'")
         && str_contains($service, "'total_hobbs_time'")
         && str_contains($service, "'has_garmin_csv'"),
+    'duplicate local and server rows collapse by reservation then Dispatch identity' =>
+        str_contains($service, "'scheduler_record_id'")
+        && str_contains($models, 'var schedulerRecordID: String?')
+        && str_contains($views, 'private func logIdentity(')
+        && str_contains($views, 'return "schedule:')
+        && str_contains($views, 'return "dispatch:')
+        && str_contains($views, 'mergeLogEntries')
+        && str_contains($views, 'existing.hasGarminCSV || candidate.hasGarminCSV'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")

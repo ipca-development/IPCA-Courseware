@@ -29,6 +29,7 @@ final class CvrFlightLogService
             SELECT
                 d.workflow_flight_record_uuid,
                 d.dispatch_uuid,
+                d.scheduler_record_id,
                 d.aircraft_registration,
                 d.crew_json AS dispatch_crew_json,
                 adjustment.crew_json AS adjustment_crew_json,
@@ -145,6 +146,9 @@ final class CvrFlightLogService
             $logs[] = array(
                 'flight_record_uuid' => (string)$row['workflow_flight_record_uuid'],
                 'dispatch_uuid' => (string)$row['dispatch_uuid'],
+                'scheduler_record_id' => $row['scheduler_record_id'] !== null
+                    ? (string)$row['scheduler_record_id']
+                    : null,
                 'aircraft_registration' => (string)$row['aircraft_registration'],
                 'scheduled_date' => (string)$row['scheduled_date'],
                 'crew_names' => array_values(array_unique($crewNames)),

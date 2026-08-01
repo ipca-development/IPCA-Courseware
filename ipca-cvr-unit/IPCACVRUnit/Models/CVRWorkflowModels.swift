@@ -477,6 +477,7 @@ struct CVRDiscrepancyRecord: Identifiable, Codable, Equatable {
 struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     var flightRecordID: String
     var dispatchUUID: String
+    var schedulerRecordID: String?
     var aircraftRegistration: String
     var scheduledDate: String
     var crewNames: [String]?
@@ -500,6 +501,7 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case flightRecordID = "flight_record_uuid"
         case dispatchUUID = "dispatch_uuid"
+        case schedulerRecordID = "scheduler_record_id"
         case aircraftRegistration = "aircraft_registration"
         case scheduledDate = "scheduled_date"
         case crewNames = "crew_names"
