@@ -110,6 +110,9 @@ $checks['resource scheduler exposes devices staff cohorts and drag resize'] = st
 $checks['editable reservations support click edit and drag without false concurrency conflicts'] = static fn(): bool =>
     !str_contains($scheduleJs, "if (pointerEvent.target.closest('.fltsch-resize-handle')) return;\n    pointerEvent.preventDefault();")
     && str_contains($scheduleJs, 'if (!moved && Math.abs(event.clientX - originX) < 5) return;')
+    && str_contains($scheduleJs, "class=\"fltsch-event-edit\"")
+    && str_contains($scheduleJs, '} else if (moved) {')
+    && str_contains($scheduleAdmin, 'flight_schedule.js?v=20260801.3')
     && str_contains($scheduleSource, "substr((string)(\$slot['updated_at'] ?? ''), 0, 19)")
     && str_contains($scheduleSource, 'isoPrecise');
 $checks['dispatched and completed reservations remain locked with evidence indicators'] = static fn(): bool =>

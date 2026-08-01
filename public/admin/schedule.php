@@ -242,7 +242,7 @@ compliance_page_open(array(
   #flightReservationModal{width:min(860px,calc(100vw - 32px));}
   @media(max-width:760px){.cmpcal-form-grid,.fltsch-crew-row{grid-template-columns:1fr}.fltsch-filters,.fltsch-filters .cmpcal-field{width:100%}.fltsch-filters .compliance-btn{width:100%}.fltsch-card{padding:14px}}
 </style>
-<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260731">
+<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260801.3">
 
 <section class="fltsch-card fltsch-scheduler-card">
   <div class="fltsch-day-toolbar">
@@ -389,6 +389,6 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 })();
 <?php endif; ?>
 </script>
-<script src="/admin/assets/flight_schedule.js?v=20260731"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260801.3"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

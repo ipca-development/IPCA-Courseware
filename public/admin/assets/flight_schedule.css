@@ -351,6 +351,29 @@
   opacity: .8;
 }
 
+.fltsch-event-edit {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 3;
+  min-height: 16px;
+  padding: 1px 5px;
+  border: 1px solid rgba(23, 52, 93, .2);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .88);
+  color: inherit;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.fltsch-event-edit:hover {
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .15);
+}
+
 .fltsch-event-title,
 .fltsch-event-meta {
   overflow: hidden;
@@ -359,6 +382,7 @@
 }
 
 .fltsch-event-title {
+  padding-right: 24px;
   font-size: 11px;
   font-weight: 880;
 }

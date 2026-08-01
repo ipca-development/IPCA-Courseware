@@ -149,6 +149,9 @@
     var nextStart = originalStart;
     var moved = false;
     var rect = timeline.getBoundingClientRect();
+    if (typeof eventElement.setPointerCapture === 'function') {
+      try { eventElement.setPointerCapture(pointerEvent.pointerId); } catch (error) {}
+    }
 
     function move(event) {
       var delta = snapMinutes((event.clientX - originX) / rect.width * totalMinutes);
@@ -170,6 +173,10 @@
     function up() {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      if (typeof eventElement.releasePointerCapture === 'function') {
+        try { eventElement.releasePointerCapture(pointerEvent.pointerId); } catch (error) {}
+      }
       timeline.classList.remove('is-drop-target');
       eventElement.classList.remove('is-resizing');
       if (moved && nextStart !== originalStart) {
@@ -178,7 +185,7 @@
           withMinutes(start, nextStart),
           withMinutes(start, nextStart + duration)
         );
-      } else {
+      } else if (moved) {
         renderReservations();
       }
       window.setTimeout(function () { suppressClick = false; }, 250);
@@ -186,6 +193,7 @@
 
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
   }
 
   function startResize(pointerEvent, reservation, timeline, eventElement, start, end, edge) {
@@ -199,6 +207,9 @@
     var originalEnd = minutes(end);
     var nextStart = originalStart;
     var nextEnd = originalEnd;
+    if (typeof eventElement.setPointerCapture === 'function') {
+      try { eventElement.setPointerCapture(pointerEvent.pointerId); } catch (error) {}
+    }
 
     function move(event) {
       if (!moved && Math.abs(event.clientX - originX) < 5) return;
@@ -219,6 +230,10 @@
     function up() {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      if (typeof eventElement.releasePointerCapture === 'function') {
+        try { eventElement.releasePointerCapture(pointerEvent.pointerId); } catch (error) {}
+      }
       eventElement.classList.remove('is-resizing');
       if (moved && (nextStart !== originalStart || nextEnd !== originalEnd)) {
         suppressClick = true;
@@ -227,7 +242,7 @@
           withMinutes(start, nextStart),
           withMinutes(start, nextEnd)
         );
-      } else {
+      } else if (moved) {
         renderReservations();
       }
       window.setTimeout(function () { suppressClick = false; }, 250);
@@ -235,6 +250,7 @@
 
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
   }
 
   function createEvent(reservation, timeline) {
@@ -265,6 +281,7 @@
       + '</span>';
     element.innerHTML =
       (reservation.editable ? '<span class="fltsch-resize-handle start"></span>' : '')
+      + (reservation.editable ? '<button type="button" class="fltsch-event-edit" aria-label="Edit reservation">Edit</button>' : '')
       + '<span class="fltsch-event-title">' + escapeHtml(eventTitle(reservation)) + '</span>'
       + '<span class="fltsch-event-meta">' + escapeHtml(eventDetail(reservation, start, end)) + '</span>'
       + evidenceHtml
@@ -277,6 +294,17 @@
     element.addEventListener('pointerdown', function (event) {
       startMove(event, reservation, timeline, element, start, end);
     });
+    var editButton = element.querySelector('.fltsch-event-edit');
+    if (editButton) {
+      editButton.addEventListener('pointerdown', function (event) {
+        event.stopPropagation();
+      });
+      editButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        openEdit(reservation);
+      });
+    }
     element.querySelectorAll('.fltsch-resize-handle').forEach(function (handle) {
       handle.addEventListener('pointerdown', function (event) {
         startResize(
