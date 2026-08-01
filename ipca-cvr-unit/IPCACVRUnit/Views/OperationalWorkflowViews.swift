@@ -24,6 +24,25 @@ private func operationalToggle(_ title: String, isOn: Binding<Bool>) -> some Vie
     .tint(CVROperationalPalette.success)
 }
 
+private extension View {
+    func operationalBottomFade() -> some View {
+        overlay(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    CVROperationalPalette.background.opacity(0),
+                    CVROperationalPalette.background.opacity(0.82),
+                    CVROperationalPalette.background
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 108)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
 struct OperationalTabsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
@@ -31,56 +50,85 @@ struct OperationalTabsView: View {
     @Binding var showAdminUnlock: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            TabView(selection: Binding(
-                get: { workflow.state.selectedTab },
-                set: { workflow.selectTab($0) }
-            )) {
-                ScheduledFlightsView(showAdminUnlock: $showAdminUnlock)
-                    .tabItem {
-                        Image(systemName: CVROperationalTab.scheduled.systemImage)
-                        Text(CVROperationalTab.scheduled.title)
-                    }
-                    .tag(CVROperationalTab.scheduled)
+        GeometryReader { proxy in
+            let metrics = CVROperationalMetrics(size: proxy.size)
+            VStack(spacing: 0) {
+                CVROperationalHeaderView(
+                    aircraftRegistration: settings.selectedAircraft?.registration
+                        ?? workflow.state.activeDispatch?.tailNumber
+                        ?? "NO AIRCRAFT",
+                    unitIdentifier: settings.cvrUnitIdentifier,
+                    metrics: metrics,
+                    onLogoTap: { showAdminUnlock = true }
+                )
+                .padding(.horizontal, metrics.outerHorizontalPadding)
+                .padding(.vertical, metrics.outerVerticalPadding)
+                .frame(maxWidth: .infinity)
+                .background(CVROperationalPalette.background)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(CVROperationalPalette.cardBorder.opacity(0.45))
+                        .frame(height: 1)
+                }
+                .zIndex(2)
 
-                DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
-                    .tabItem {
-                        Image(systemName: CVROperationalTab.dispatch.systemImage)
-                        Text(CVROperationalTab.dispatch.title)
-                    }
-                    .tag(CVROperationalTab.dispatch)
+                ZStack(alignment: .bottom) {
+                    TabView(selection: Binding(
+                        get: { workflow.state.selectedTab },
+                        set: { workflow.selectTab($0) }
+                    )) {
+                        ScheduledFlightsView(showAdminUnlock: $showAdminUnlock)
+                            .operationalBottomFade()
+                            .tabItem {
+                                Image(systemName: CVROperationalTab.scheduled.systemImage)
+                                Text(CVROperationalTab.scheduled.title)
+                            }
+                            .tag(CVROperationalTab.scheduled)
 
-                RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
-                    .tabItem {
-                        Image(systemName: CVROperationalTab.recorder.systemImage)
-                        Text(CVROperationalTab.recorder.title)
-                    }
-                    .tag(CVROperationalTab.recorder)
+                        DispatchWorkflowView(showAdminUnlock: $showAdminUnlock)
+                            .operationalBottomFade()
+                            .tabItem {
+                                Image(systemName: CVROperationalTab.dispatch.systemImage)
+                                Text(CVROperationalTab.dispatch.title)
+                            }
+                            .tag(CVROperationalTab.dispatch)
 
-                InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
-                    .tabItem {
-                        Image(systemName: CVROperationalTab.inFlight.systemImage)
-                        Text(CVROperationalTab.inFlight.title)
-                    }
-                    .tag(CVROperationalTab.inFlight)
+                        RecorderWorkflowView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                            .operationalBottomFade()
+                            .tabItem {
+                                Image(systemName: CVROperationalTab.recorder.systemImage)
+                                Text(CVROperationalTab.recorder.title)
+                            }
+                            .tag(CVROperationalTab.recorder)
 
-                GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
-                    .tabItem {
-                        Image(systemName: CVROperationalTab.garmin.systemImage)
-                        Text(CVROperationalTab.garmin.title)
+                        InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
+                            .operationalBottomFade()
+                            .tabItem {
+                                Image(systemName: CVROperationalTab.inFlight.systemImage)
+                                Text(CVROperationalTab.inFlight.title)
+                            }
+                            .tag(CVROperationalTab.inFlight)
+
+                        GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
+                            .operationalBottomFade()
+                            .tabItem {
+                                Image(systemName: CVROperationalTab.garmin.systemImage)
+                                Text(CVROperationalTab.garmin.title)
+                            }
+                            .tag(CVROperationalTab.garmin)
                     }
-                    .tag(CVROperationalTab.garmin)
+                    .tint(CVROperationalPalette.primaryBlue)
+                    .toolbarBackground(CVROperationalPalette.background, for: .tabBar)
+                    .toolbarBackground(.visible, for: .tabBar)
+                    .toolbarColorScheme(.dark, for: .tabBar)
+                }
+
+                if settings.isSimulationModeEnabled {
+                    SimulationModeChrome()
+                }
             }
-            .tint(CVROperationalPalette.primaryBlue)
-            .toolbarBackground(CVROperationalPalette.background, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
-            .toolbarColorScheme(.dark, for: .tabBar)
-
-            if settings.isSimulationModeEnabled {
-                SimulationModeChrome()
-            }
+            .background(CVROperationalPalette.background.ignoresSafeArea())
         }
-        .background(CVROperationalPalette.background.ignoresSafeArea())
     }
 }
 
@@ -98,7 +146,6 @@ private struct ScheduledFlightsView: View {
                 CVROperationalPalette.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: metrics.spacing) {
-                        header(metrics)
                         statusCard(metrics)
                         scheduleTiles(metrics)
                         scheduleWarning
@@ -115,15 +162,6 @@ private struct ScheduledFlightsView: View {
                 }
             }
         }
-    }
-
-    private func header(_ metrics: CVROperationalMetrics) -> some View {
-        CVROperationalHeaderView(
-            aircraftRegistration: settings.selectedAircraft?.registration ?? "NO AIRCRAFT",
-            unitIdentifier: settings.cvrUnitIdentifier,
-            metrics: metrics,
-            onLogoTap: { showAdminUnlock = true }
-        )
     }
 
     private func statusCard(_ metrics: CVROperationalMetrics) -> some View {
@@ -409,7 +447,6 @@ struct DispatchWorkflowView: View {
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
                 VStack(spacing: metrics.spacing) {
-                    header(metrics)
                     statusCard(metrics)
                     dispatchTiles(metrics)
                     dispatchOilUploadSection
@@ -436,15 +473,6 @@ struct DispatchWorkflowView: View {
                 .environmentObject(uploadManager)
                 .presentationDetents([.large])
         }
-    }
-
-    private func header(_ metrics: CVROperationalMetrics) -> some View {
-        CVROperationalHeaderView(
-            aircraftRegistration: aircraftRegistration,
-            unitIdentifier: settings.cvrUnitIdentifier,
-            metrics: metrics,
-            onLogoTap: { showAdminUnlock = true }
-        )
     }
 
     private func statusCard(_ metrics: CVROperationalMetrics) -> some View {
@@ -904,7 +932,6 @@ struct RecorderVerificationView: View {
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
                 VStack(spacing: metrics.spacing) {
-                    CVROperationalHeaderView(aircraftRegistration: aircraftRegistration, unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                     CVROperationalStatusCard(title: "READY FOR CHECK", subtitle: "RECORDER VERIFICATION REQUIRED", iconName: "waveform.badge.magnifyingglass", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "RECORDER", metrics: metrics)
                     HStack(spacing: metrics.spacing) {
                         CVROperationalTile(title: "AUDIO", iconName: "mic.fill", value: audio.isInternalMicWarning ? "iPhone Mic" : audio.sourceSummary.replacingOccurrences(of: "Audio source: ", with: ""), color: audio.isInternalMicWarning ? CVROperationalPalette.warning : CVROperationalPalette.success, metrics: metrics)
@@ -998,7 +1025,6 @@ struct InFlightWorkflowView: View {
                         ZStack {
                             CVROperationalPalette.background.ignoresSafeArea()
                             VStack(spacing: metrics.spacing) {
-                                CVROperationalHeaderView(aircraftRegistration: settings.selectedAircraft?.registration ?? workflow.state.activeDispatch?.tailNumber ?? "NO AIRCRAFT", unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                                 CVROperationalStatusCard(title: inFlightTitle, subtitle: inFlightSubtitle, iconName: "airplane", color: inFlightColor, value: inFlightValue(now: timeline.date), caption: "IN-FLIGHT", metrics: metrics)
                                 HStack(spacing: metrics.spacing) {
                                     CVROperationalTile(title: "DISPATCH", iconName: "checkmark.seal.fill", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
@@ -1563,7 +1589,6 @@ struct GarminWorkflowView: View {
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
                 VStack(spacing: metrics.spacing) {
-                    CVROperationalHeaderView(aircraftRegistration: settings.selectedAircraft?.registration ?? workflow.state.activeDispatch?.tailNumber ?? "NO AIRCRAFT", unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                     CVROperationalStatusCard(title: "GARMIN RECOVERY", subtitle: "IMPORT AND UPLOAD QUEUE", iconName: "doc.badge.arrow.up", color: CVROperationalPalette.secondaryBlue, value: nil, caption: "GARMIN", metrics: metrics)
                     HStack(spacing: metrics.spacing) {
                         CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: uploadTileColor, metrics: metrics)
@@ -2041,7 +2066,6 @@ struct LockedOperationalView: View {
             ZStack {
                 CVROperationalPalette.background.ignoresSafeArea()
                 VStack(spacing: metrics.spacing) {
-                    CVROperationalHeaderView(aircraftRegistration: settings.selectedAircraft?.registration ?? "NO AIRCRAFT", unitIdentifier: settings.cvrUnitIdentifier, metrics: metrics, onLogoTap: { showAdminUnlock = true })
                     CVROperationalStatusCard(title: title, subtitle: subtitle, iconName: iconName, color: color, value: nil, caption: "WORKFLOW", metrics: metrics)
                     CVROperationalWarningCard(title: subtitle, message: "Complete the previous operational step before using this tab.", iconName: "lock.fill", color: color)
                     Spacer()
