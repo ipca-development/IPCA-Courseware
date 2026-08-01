@@ -1297,6 +1297,17 @@ cw_header('Master Logbook');
                 <div class="intake-muted"><?= cvr_intake_h($bundle['latest_job_message'] ?? '') ?></div>
               </td>
               <td>
+                <?php
+                  $bundleReplayReady = strtolower(trim((string)($bundle['reconstruction_status'] ?? ''))) === 'ready'
+                    && trim((string)($bundle['recording_uid'] ?? '')) !== '';
+                ?>
+                <?php if ($bundleReplayReady): ?>
+                  <a
+                    class="intake-button"
+                    href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode((string)$bundle['recording_uid']) ?>"
+                    style="display:inline-block;text-decoration:none"
+                  >Open Replay</a>
+                <?php endif; ?>
                 <?php if ($canStart && (string)($bundle['latest_job_status'] ?? '') !== 'processing'): ?>
                   <form method="post" action="/admin/api/manual_bundle_reconstruct.php">
                     <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
@@ -1329,6 +1340,7 @@ cw_header('Master Logbook');
                     <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                     <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
                     <button class="intake-button" type="submit" title="<?= cvr_intake_h($hasFlightRecordVersion ? 'Creates a new Flight Record version from the frozen Garmin CSV. Regenerate Debrief afterward to refresh logbook fields.' : 'Derives the canonical Flight Record from the frozen Garmin CSV.') ?>"><?= $hasFlightRecordVersion ? 'Re-derive Flight Record' : 'Rebuild Flight Record' ?></button>
+                    <div class="intake-muted" style="margin-top:4px">Updates canonical logbook fields from the frozen CSV; it does not rebuild Replay.</div>
                   </form>
                 <?php endif; ?>
                 <?php $debriefJobRunning = in_array((string)($bundle['debrief_job_status'] ?? ''), array('pending','claimed','running','retry_wait'), true); ?>

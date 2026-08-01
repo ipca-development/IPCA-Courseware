@@ -135,6 +135,11 @@ $checks = array(
         && str_contains($bundleService, "\$derived['flight_record_version_id']")
         && str_contains($bundleService, 'rebuildFlightRecord')
         && (str_contains($debriefPage, 'Rebuild Flight Record') || str_contains($debriefPage, 'Re-derive Flight Record')),
+    'ready frozen reconstruction keeps a direct Replay action' =>
+        str_contains($debriefPage, '$bundleReplayReady')
+        && str_contains($debriefPage, '/admin/cockpit_recorder_replay.php?id=')
+        && str_contains($debriefPage, 'Open Replay')
+        && str_contains($debriefPage, 'it does not rebuild Replay'),
     'approval and release remain immutable and instructor-authoritative' =>
         str_contains($debriefSource, 'accepted suggestions are now authoritative')
         && str_contains($debriefSource, 'Only an instructor-approved debrief can be released.')
