@@ -21,6 +21,7 @@ final class CVRWorkflowStore: ObservableObject {
 
     func load() async {
         do {
+            try loadArchives()
             let url = try storeURL()
             if FileManager.default.fileExists(atPath: url.path) {
                 let data = try Data(contentsOf: url)
@@ -35,11 +36,17 @@ final class CVRWorkflowStore: ObservableObject {
                 changed = ensureDispatchUploadComponent() || changed
                 changed = ensureEvidenceUploadComponents() || changed
                 changed = reconcileClosureUploadComponents() || changed
+                if let flightRecord = state.activeFlightRecord,
+                   flightRecord.endingHobbs != nil,
+                   flightRecord.endingTacho != nil {
+                    if finishEndedFlightLocally() {
+                        changed = false
+                    }
+                }
                 if changed {
                     save()
                 }
             }
-            try loadArchives()
             lastError = ""
         } catch {
             lastError = "Workflow recovery failed: \(error.localizedDescription)"
@@ -843,7 +850,7 @@ final class CVRWorkflowStore: ObservableObject {
                 $0.uploadComponents.append(component)
                 $0.flightEvents.append(event)
                 $0.uploadComponents.append(eventUploadComponent(event))
-                $0.selectedTab = .garmin
+                $0.selectedTab = .log
             }
             return component.id
         } catch {

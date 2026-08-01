@@ -99,7 +99,7 @@ struct OperationalTabsView: View {
         case .inFlight:
             InFlightWorkflowView(showAdminUnlock: $showAdminUnlock)
         case .garmin:
-            GarminWorkflowView(showAdminUnlock: $showAdminUnlock)
+            FlightLogView()
         case .log:
             FlightLogView()
         }
@@ -111,7 +111,7 @@ private struct OperationalBottomTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(CVROperationalTab.allCases) { tab in
+            ForEach(CVROperationalTab.allCases.filter { $0 != .garmin }) { tab in
                 Button {
                     workflow.selectTab(tab)
                 } label: {
@@ -981,7 +981,9 @@ struct RecorderWorkflowView: View {
     @Binding var showAdminUnlock: Bool
 
     var body: some View {
-        if !workflow.isDispatchVerified {
+        if workflow.state.activeDispatch == nil {
+            NoActiveFlightView(caption: "RECORDER")
+        } else if !workflow.isDispatchVerified {
             LockedOperationalView(
                 title: "LOCKED",
                 subtitle: "DISPATCH VERIFICATION REQUIRED",
@@ -1103,7 +1105,9 @@ struct InFlightWorkflowView: View {
 
     var body: some View {
         Group {
-            if !workflow.isRecorderVerified {
+            if workflow.state.activeDispatch == nil {
+                NoActiveFlightView(caption: "IN-FLIGHT")
+            } else if !workflow.isRecorderVerified {
                 LockedOperationalView(title: "LOCKED", subtitle: "RECORDER VERIFICATION REQUIRED", iconName: "lock.fill", color: CVROperationalPalette.standby, showAdminUnlock: $showAdminUnlock)
             } else {
                 TimelineView(.periodic(from: Date(), by: 1)) { timeline in
@@ -2252,10 +2256,11 @@ private struct FlightLogView: View {
         .sheet(
             isPresented: Binding(
                 get: { flightLogs.pendingGarminCSV != nil && directImportTarget == nil && !flightLogs.isUploading },
-                set: { if !$0 && !flightLogs.isUploading { flightLogs.cancelPendingGarminCSV() } }
+                set: { _ in }
             )
         ) {
             garminAssignmentSheet
+                .interactiveDismissDisabled()
         }
         .sheet(item: $pinTarget) { entry in
             flightLogPINSheet(entry)
@@ -2776,6 +2781,45 @@ private struct FlightLogAdjustmentView: View {
         .padding(14)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+}
+
+struct NoActiveFlightView: View {
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    var caption: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            let metrics = CVROperationalMetrics(size: proxy.size)
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        CVROperationalStatusCard(
+                            title: "NO ACTIVE FLIGHT",
+                            subtitle: "READY FOR THE NEXT DISPATCH",
+                            iconName: "checkmark.seal.fill",
+                            color: CVROperationalPalette.standby,
+                            value: nil,
+                            caption: caption,
+                            metrics: metrics
+                        )
+                        CVROperationalWarningCard(
+                            title: workflow.archives.isEmpty ? "READY FOR DISPATCH" : "PREVIOUS FLIGHT ENDED",
+                            message: workflow.archives.isEmpty
+                                ? "Select Scheduled or Dispatch to begin a flight."
+                                : "Completed flights and Garmin CSV status are available in Log. Select Scheduled or Dispatch to begin another flight.",
+                            iconName: "list.bullet.clipboard.fill",
+                            color: CVROperationalPalette.success
+                        )
+                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.top, metrics.outerVerticalPadding)
+                    .padding(.bottom, 132)
+                    .frame(width: proxy.size.width, alignment: .top)
+                }
+            }
+        }
     }
 }
 

@@ -54,7 +54,10 @@ $checks = array(
         str_contains($plist, 'public.comma-separated-values-text')
         && str_contains($app, '.onOpenURL')
         && str_contains($app, 'stageGarminCSV')
-        && str_contains($app, 'selectTab(.log)'),
+        && str_contains($app, 'selectTab(.log)')
+        && str_contains($views, 'navigationTitle("Assign Garmin CSV")')
+        && str_contains($views, '.interactiveDismissDisabled()')
+        && str_contains($views, 'set: { _ in }'),
     'late CSV upload can target a selected dispatched flight' =>
         str_contains($models, 'CVRPendingGarminCSV')
         && str_contains($models, 'uploadPendingGarminCSV')
@@ -77,6 +80,16 @@ $checks = array(
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
         && str_contains($views, 'CSV MISSING')
         && str_contains($views, 'OperationalBottomTabBar'),
+    'Log replaces the standalone Garmin operational tab' =>
+        str_contains($views, 'CVROperationalTab.allCases.filter { $0 != .garmin }')
+        && str_contains($views, "case .garmin:\n            FlightLogView()")
+        && str_contains($workflowStore, '$0.selectedTab = .log'),
+    'ended persisted workflow is archived and operational tabs become idle' =>
+        str_contains($workflowStore, 'try loadArchives()')
+        && str_contains($workflowStore, 'if finishEndedFlightLocally()')
+        && str_contains($views, 'NoActiveFlightView(caption: "RECORDER")')
+        && str_contains($views, 'NoActiveFlightView(caption: "IN-FLIGHT")')
+        && str_contains($views, 'PREVIOUS FLIGHT ENDED'),
     'flight closure makes Garmin optional and asks only for ending meters' =>
         str_contains($views, 'AUDIO FLIGHT CLOSURE')
         && str_contains($views, 'Garmin CSV data is optional now')
