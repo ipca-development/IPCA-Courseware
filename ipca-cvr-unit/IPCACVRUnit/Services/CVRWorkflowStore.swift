@@ -25,7 +25,12 @@ final class CVRWorkflowStore: ObservableObject {
             if FileManager.default.fileExists(atPath: url.path) {
                 let data = try Data(contentsOf: url)
                 state = try decoder.decode(CVRWorkflowState.self, from: data)
-                var changed = recoverInterruptedActiveUploads()
+                var changed = false
+                if state.selectedTab != .scheduled {
+                    state.selectedTab = .scheduled
+                    changed = true
+                }
+                changed = recoverInterruptedActiveUploads() || changed
                 changed = Self.repairStaleDispatchConsents(in: &state) || changed
                 changed = ensureDispatchUploadComponent() || changed
                 changed = ensureEvidenceUploadComponents() || changed
@@ -1018,7 +1023,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.flightLegs = []
             $0.uploadComponents = []
             $0.discrepancies = []
-            $0.selectedTab = .dispatch
+            $0.selectedTab = .scheduled
         }
     }
 
@@ -1075,7 +1080,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.flightLegs = []
             $0.uploadComponents = []
             $0.discrepancies = []
-            $0.selectedTab = .dispatch
+            $0.selectedTab = .scheduled
         }
         clearAvionicsSimulation()
     }

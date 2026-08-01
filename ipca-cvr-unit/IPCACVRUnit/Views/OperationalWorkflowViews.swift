@@ -72,6 +72,9 @@ struct OperationalTabsView: View {
                     .tag(CVROperationalTab.garmin)
             }
             .tint(CVROperationalPalette.primaryBlue)
+            .toolbarBackground(CVROperationalPalette.background, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .toolbarColorScheme(.dark, for: .tabBar)
 
             if settings.isSimulationModeEnabled {
                 SimulationModeChrome()
@@ -89,84 +92,255 @@ private struct ScheduledFlightsView: View {
     @Binding var showAdminUnlock: Bool
 
     var body: some View {
-        NavigationStack {
-            List {
-                if settings.selectedAircraft == nil {
-                    Section {
-                        Button("Configure Aircraft") { showAdminUnlock = true }
-                    } header: {
-                        Text("Aircraft enrollment required")
+        GeometryReader { proxy in
+            let metrics = CVROperationalMetrics(size: proxy.size)
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: metrics.spacing) {
+                        header(metrics)
+                        statusCard(metrics)
+                        scheduleTiles(metrics)
+                        scheduleWarning
+                        sessionSection("TODAY", sessions: todaySessions, metrics: metrics)
+                        sessionSection("UPCOMING", sessions: upcomingSessions, metrics: metrics)
+                        actionButtons
                     }
-                } else {
-                    sessionSection("Today", sessions: todaySessions)
-                    sessionSection("Upcoming", sessions: upcomingSessions)
-                    Section("Offline fallback") {
-                        Button {
-                            workflow.createOrOpenLocalDispatch(
-                                selectedAircraft: settings.selectedAircraft,
-                                cvrUnitID: settings.cvrUnitIdentifier,
-                                beaconID: beacon.expectedBeaconIdentityHex
-                            )
-                        } label: {
-                            Label("Create Local Dispatch", systemImage: "plus.circle.fill")
-                        }
-                        .disabled(workflow.state.activeDispatch != nil || workflow.state.activeFlightRecord != nil)
-                    }
+                    .padding(.horizontal, metrics.outerHorizontalPadding)
+                    .padding(.vertical, metrics.outerVerticalPadding)
+                    .frame(width: proxy.size.width, alignment: .top)
                 }
-                if let error = sessionsStore.lastError.nilIfEmpty {
-                    Section("Last refresh") {
-                        Text(error).foregroundStyle(CVROperationalPalette.warning)
-                    }
+                .refreshable {
+                    await sessionsStore.refresh(settings: settings)
                 }
-            }
-            .navigationTitle("Scheduled Flights")
-            .overlay {
-                if sessionsStore.isRefreshing && aircraftSessions.isEmpty {
-                    ProgressView("Loading scheduled flights…")
-                }
-            }
-            .refreshable {
-                await sessionsStore.refresh(settings: settings)
             }
         }
     }
 
+    private func header(_ metrics: CVROperationalMetrics) -> some View {
+        CVROperationalHeaderView(
+            aircraftRegistration: settings.selectedAircraft?.registration ?? "NO AIRCRAFT",
+            unitIdentifier: settings.cvrUnitIdentifier,
+            metrics: metrics,
+            onLogoTap: { showAdminUnlock = true }
+        )
+    }
+
+    private func statusCard(_ metrics: CVROperationalMetrics) -> some View {
+        CVROperationalStatusCard(
+            title: scheduleStatusTitle,
+            subtitle: scheduleStatusSubtitle,
+            iconName: sessionsStore.isRefreshing ? "arrow.triangle.2.circlepath" : "calendar.badge.clock",
+            color: scheduleStatusColor,
+            value: aircraftSessions.isEmpty ? nil : "\(aircraftSessions.count)",
+            caption: "SCHEDULED FLIGHTS",
+            metrics: metrics
+        )
+    }
+
+    private func scheduleTiles(_ metrics: CVROperationalMetrics) -> some View {
+        HStack(spacing: metrics.spacing) {
+            CVROperationalTile(
+                title: "ACFT",
+                iconName: "airplane",
+                value: settings.selectedAircraft?.registration ?? "None",
+                color: settings.selectedAircraft == nil ? CVROperationalPalette.warning : CVROperationalPalette.success,
+                metrics: metrics
+            )
+            CVROperationalTile(
+                title: "TODAY",
+                iconName: "calendar",
+                value: "\(todaySessions.count)",
+                color: todaySessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.secondaryBlue,
+                metrics: metrics
+            )
+            CVROperationalTile(
+                title: "UPCOMING",
+                iconName: "calendar.badge.plus",
+                value: "\(upcomingSessions.count)",
+                color: upcomingSessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.secondaryBlue,
+                metrics: metrics
+            )
+            CVROperationalTile(
+                title: "SYNC",
+                iconName: sessionsStore.isRefreshing ? "arrow.triangle.2.circlepath" : "icloud.fill",
+                value: sessionsStore.isRefreshing ? "Loading" : "Ready",
+                color: sessionsStore.lastError.isEmpty ? CVROperationalPalette.success : CVROperationalPalette.warning,
+                metrics: metrics
+            )
+        }
+    }
+
     @ViewBuilder
-    private func sessionSection(_ title: String, sessions: [CVRScheduledSession]) -> some View {
-        Section(title) {
+    private var scheduleWarning: some View {
+        if settings.selectedAircraft == nil {
+            CVROperationalWarningCard(
+                title: "AIRCRAFT CONFIGURATION REQUIRED",
+                message: "Assign this CVR Unit to its aircraft before loading scheduled flights.",
+                iconName: "lock.trianglebadge.exclamationmark",
+                color: CVROperationalPalette.critical
+            )
+        } else if let error = sessionsStore.lastError.nilIfEmpty {
+            CVROperationalWarningCard(
+                title: "SCHEDULE SYNC WARNING",
+                message: error,
+                iconName: "icloud.slash.fill",
+                color: CVROperationalPalette.warning
+            )
+        } else if aircraftSessions.isEmpty && !sessionsStore.isRefreshing {
+            CVROperationalWarningCard(
+                title: "NO SCHEDULED FLIGHTS",
+                message: "No flights are scheduled for this aircraft. You can still create a local Dispatch.",
+                iconName: "calendar.badge.exclamationmark",
+                color: CVROperationalPalette.standby
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func sessionSection(
+        _ title: String,
+        sessions: [CVRScheduledSession],
+        metrics: CVROperationalMetrics
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .tracking(1.1)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if sessions.isEmpty {
-                Text("No \(title.lowercased()) flights")
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar")
+                        .foregroundStyle(CVROperationalPalette.standby)
+                    Text("No \(title.lowercased()) flights")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    Spacer()
+                }
+                .padding(14)
+                .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
             } else {
                 ForEach(sessions) { session in
-                    Button {
-                        workflow.openDispatchFromScheduledSession(
-                            session,
-                            selectedAircraft: settings.selectedAircraft,
-                            cvrUnitID: settings.cvrUnitIdentifier,
-                            beaconID: beacon.expectedBeaconIdentityHex
-                        )
-                    } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text(session.missionCode.nilIfEmpty ?? "Scheduled Flight")
-                                    .font(.headline)
-                                Spacer()
-                                Text(timeRange(session))
-                                    .font(.subheadline.monospacedDigit())
-                            }
-                            Text(route(session))
-                                .font(.subheadline)
-                            Text(crewSummary(session))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(workflow.state.activeDispatch != nil
-                        && workflow.state.activeDispatch?.schedulerRecordID != session.schedulerRecordID)
+                    scheduledSessionCard(session, metrics: metrics)
                 }
             }
         }
+    }
+
+    private func scheduledSessionCard(
+        _ session: CVRScheduledSession,
+        metrics: CVROperationalMetrics
+    ) -> some View {
+        let blocked = workflow.state.activeDispatch != nil
+            && workflow.state.activeDispatch?.schedulerRecordID != session.schedulerRecordID
+        return Button {
+            workflow.openDispatchFromScheduledSession(
+                session,
+                selectedAircraft: settings.selectedAircraft,
+                cvrUnitID: settings.cvrUnitIdentifier,
+                beaconID: beacon.expectedBeaconIdentityHex
+            )
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "calendar.badge.checkmark")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(session.missionCode.nilIfEmpty ?? "SCHEDULED FLIGHT")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Text(timeRange(session))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    }
+                    Text(route(session))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    Text(crewSummary(session))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                }
+                Image(systemName: blocked ? "lock.fill" : "chevron.right")
+                    .foregroundStyle(blocked ? CVROperationalPalette.warning : CVROperationalPalette.textSecondary)
+            }
+            .padding(14)
+            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(blocked)
+        .opacity(blocked ? 0.55 : 1)
+    }
+
+    private var actionButtons: some View {
+        VStack(spacing: 8) {
+            CVROperationalActionButton(
+                title: sessionsStore.isRefreshing ? "REFRESHING SCHEDULE" : "REFRESH SCHEDULE",
+                subtitle: "Load flights assigned to \(settings.selectedAircraft?.registration ?? "this aircraft")",
+                color: CVROperationalPalette.secondaryBlue
+            ) {
+                Task { await sessionsStore.refresh(settings: settings) }
+            }
+            if settings.selectedAircraft == nil {
+                CVROperationalActionButton(
+                    title: "CONFIGURE AIRCRAFT",
+                    subtitle: "Assign this CVR Unit",
+                    color: CVROperationalPalette.critical
+                ) {
+                    showAdminUnlock = true
+                }
+            } else {
+                CVROperationalActionButton(
+                    title: "CREATE LOCAL DISPATCH",
+                    subtitle: "Use when no flight was scheduled",
+                    color: CVROperationalPalette.standby
+                ) {
+                    workflow.createOrOpenLocalDispatch(
+                        selectedAircraft: settings.selectedAircraft,
+                        cvrUnitID: settings.cvrUnitIdentifier,
+                        beaconID: beacon.expectedBeaconIdentityHex
+                    )
+                }
+            }
+        }
+    }
+
+    private var scheduleStatusTitle: String {
+        if settings.selectedAircraft == nil {
+            return "AIRCRAFT REQUIRED"
+        }
+        if sessionsStore.isRefreshing {
+            return "LOADING SCHEDULE"
+        }
+        return aircraftSessions.isEmpty ? "NO FLIGHTS SCHEDULED" : "FLIGHTS AVAILABLE"
+    }
+
+    private var scheduleStatusSubtitle: String {
+        if settings.selectedAircraft == nil {
+            return "CONFIGURE THE CVR UNIT AIRCRAFT"
+        }
+        if sessionsStore.isRefreshing {
+            return "SYNCING WITH IPCA.TRAINING"
+        }
+        if aircraftSessions.isEmpty {
+            return "LOCAL DISPATCH REMAINS AVAILABLE"
+        }
+        return "SELECT A SESSION TO PREPARE DISPATCH"
+    }
+
+    private var scheduleStatusColor: Color {
+        if settings.selectedAircraft == nil {
+            return CVROperationalPalette.critical
+        }
+        if sessionsStore.isRefreshing {
+            return CVROperationalPalette.secondaryBlue
+        }
+        return aircraftSessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.success
     }
 
     private var aircraftSessions: [CVRScheduledSession] {

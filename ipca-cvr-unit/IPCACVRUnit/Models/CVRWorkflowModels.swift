@@ -122,7 +122,7 @@ struct CVRWorkflowState: Codable, Equatable {
 
     static var empty: CVRWorkflowState {
         CVRWorkflowState(
-            selectedTab: .dispatch,
+            selectedTab: .scheduled,
             activeDispatch: nil,
             activeFlightRecord: nil,
             consents: [],

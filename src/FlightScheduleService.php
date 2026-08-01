@@ -5,6 +5,14 @@ require_once __DIR__ . '/AuditEventService.php';
 
 final class FlightScheduleService
 {
+    private const RESERVATION_TYPES = array(
+        'flight_training' => 'Flight Training',
+        'briefing' => 'Briefing',
+        'simulator_training' => 'Simulator Training',
+        'ground_training' => 'Ground Training',
+        'other' => 'Other',
+    );
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -55,6 +63,12 @@ final class FlightScheduleService
         ));
     }
 
+    /** @return array<string,string> */
+    public function reservationTypes(): array
+    {
+        return self::RESERVATION_TYPES;
+    }
+
     /**
      * @param array<string,mixed> $values
      * @param list<array<string,mixed>> $crew
@@ -69,6 +83,10 @@ final class FlightScheduleService
             throw new RuntimeException('Schedule record id must be a valid UUID.');
         }
         $aircraftId = (int)($values['aircraft_id'] ?? 0);
+        $reservationType = strtolower(trim((string)($values['reservation_type'] ?? 'flight_training')));
+        if (!isset(self::RESERVATION_TYPES[$reservationType])) {
+            throw new RuntimeException('Select a valid reservation type.');
+        }
         $scheduledDate = $this->date((string)($values['scheduled_date'] ?? ''));
         $start = $this->timestamp((string)($values['scheduled_start_time'] ?? ''), 'scheduled start');
         $end = $this->timestamp((string)($values['scheduled_end_time'] ?? ''), 'scheduled end');
@@ -104,12 +122,12 @@ final class FlightScheduleService
                 $slotId = (int)$row['id'];
                 $this->pdo->prepare(
                     'UPDATE ipca_flight_schedule_slots
-                     SET scheduled_date=?, scheduled_start_time=?, scheduled_end_time=?, aircraft_id=?,
+                     SET reservation_type=?, scheduled_date=?, scheduled_start_time=?, scheduled_end_time=?, aircraft_id=?,
                          mission_id=?, mission_code=?, planned_departure_airport=?,
                          planned_destination_airport=?, status=?, notes=?, updated_by=?
                      WHERE id=?'
                 )->execute(array(
-                    $scheduledDate, $start, $end, $aircraftId, $missionId, $missionCode,
+                    $reservationType, $scheduledDate, $start, $end, $aircraftId, $missionId, $missionCode,
                     $departure, $destination, $status, substr(trim((string)($values['notes'] ?? '')), 0, 1000),
                     $actorUserId, $slotId,
                 ));
@@ -117,12 +135,12 @@ final class FlightScheduleService
             } else {
                 $this->pdo->prepare(
                     'INSERT INTO ipca_flight_schedule_slots
-                     (scheduler_record_id, scheduled_date, scheduled_start_time, scheduled_end_time,
+                     (scheduler_record_id, reservation_type, scheduled_date, scheduled_start_time, scheduled_end_time,
                       aircraft_id, mission_id, mission_code, planned_departure_airport,
                       planned_destination_airport, status, notes, created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )->execute(array(
-                    $recordId, $scheduledDate, $start, $end, $aircraftId, $missionId, $missionCode,
+                    $recordId, $reservationType, $scheduledDate, $start, $end, $aircraftId, $missionId, $missionCode,
                     $departure, $destination, $status, substr(trim((string)($values['notes'] ?? '')), 0, 1000),
                     $actorUserId, $actorUserId,
                 ));
@@ -212,6 +230,8 @@ final class FlightScheduleService
     {
         return array(
             'scheduler_record_id' => (string)$row['scheduler_record_id'],
+            'reservation_type' => (string)($row['reservation_type'] ?? 'flight_training'),
+            'reservation_type_label' => self::RESERVATION_TYPES[(string)($row['reservation_type'] ?? '')] ?? 'Other',
             'scheduled_date' => (string)$row['scheduled_date'],
             'scheduled_start_time' => $this->iso((string)$row['scheduled_start_time']),
             'scheduled_end_time' => $this->iso((string)$row['scheduled_end_time']),

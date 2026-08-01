@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct IPCACVRUnitApp: App {
@@ -19,6 +20,34 @@ struct IPCACVRUnitApp: App {
     @StateObject private var garminVault = GarminCsvVaultStore()
     @StateObject private var sdRecovery = GarminSDCardRecoveryService()
     @StateObject private var garminSync = GarminCsvSyncManager()
+
+    init() {
+        let background = UIColor(red: 0.005, green: 0.02, blue: 0.045, alpha: 1)
+        let selected = UIColor(red: 0.12, green: 0.47, blue: 0.92, alpha: 1)
+        let unselected = UIColor.white.withAlphaComponent(0.55)
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = background
+        appearance.shadowColor = UIColor.white.withAlphaComponent(0.08)
+
+        for itemAppearance in [
+            appearance.stackedLayoutAppearance,
+            appearance.inlineLayoutAppearance,
+            appearance.compactInlineLayoutAppearance
+        ] {
+            itemAppearance.normal.iconColor = unselected
+            itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
+            itemAppearance.selected.iconColor = selected
+            itemAppearance.selected.titleTextAttributes = [.foregroundColor: selected]
+        }
+
+        let tabBar = UITabBar.appearance()
+        tabBar.standardAppearance = appearance
+        tabBar.scrollEdgeAppearance = appearance
+        tabBar.isTranslucent = false
+        tabBar.tintColor = selected
+        tabBar.unselectedItemTintColor = unselected
+    }
 
     var body: some Scene {
         WindowGroup {

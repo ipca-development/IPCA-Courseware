@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   scheduler_record_id CHAR(36) NOT NULL,
   organization_id BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  reservation_type VARCHAR(32) NOT NULL DEFAULT 'flight_training',
   scheduled_date DATE NOT NULL,
   scheduled_start_time DATETIME(3) NOT NULL,
   scheduled_end_time DATETIME(3) NOT NULL,
@@ -49,6 +50,11 @@ CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots (
   CONSTRAINT chk_ipca_flight_schedule_slots_times CHECK (scheduled_end_time > scheduled_start_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Dated aircraft schedule slots available for CVR dispatch claim.';
+
+SET @table_name := 'ipca_flight_schedule_slots';
+SET @col_exists := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @table_name AND COLUMN_NAME = 'reservation_type');
+SET @sql := IF(@col_exists = 0, 'ALTER TABLE ipca_flight_schedule_slots ADD COLUMN reservation_type VARCHAR(32) NOT NULL DEFAULT ''flight_training'' AFTER organization_id', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS ipca_flight_schedule_crew (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
