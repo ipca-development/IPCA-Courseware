@@ -180,6 +180,13 @@ final class CvrWorkflowEvidenceIntakeService
             $this->nullableString($e['fuel_remaining'] ?? null), $oil, $oilQuantity, $oilUnit,
             $this->nullableString($e['maintenance_remark'] ?? null), $hash, $json,
         ));
+        $this->pdo->prepare(
+            "UPDATE ipca_flight_schedule_slots schedule_slot
+             INNER JOIN ipca_cvr_dispatches dispatch_record
+               ON dispatch_record.scheduler_record_id = schedule_slot.scheduler_record_id
+             SET schedule_slot.status = 'completed'
+             WHERE dispatch_record.workflow_flight_record_uuid = ?"
+        )->execute(array($normalized['flight_record_uuid']));
     }
 
     private function assertDispatchOwnership(string $dispatchUuid, string $flightUuid, int $deviceId): void

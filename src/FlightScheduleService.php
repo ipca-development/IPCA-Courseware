@@ -26,11 +26,46 @@ final class FlightScheduleService
             SELECT s.*, a.registration AS aircraft_registration,
                    COALESCE(NULLIF(s.mission_code, ''), m.code, '') AS resolved_mission_code,
                    COALESCE(NULLIF(m.name, ''), NULLIF(s.mission_code, ''), '') AS mission_name,
-                   COALESCE(NULLIF(c.name, ''), '') AS cohort_name
+                   COALESCE(NULLIF(c.name, ''), '') AS cohort_name,
+                   d.id AS dispatch_id,
+                   d.dispatch_uuid AS linked_dispatch_uuid,
+                   d.workflow_flight_record_uuid,
+                   d.current_version AS dispatch_version,
+                   d.last_received_at AS dispatch_received_at,
+                   EXISTS(
+                     SELECT 1 FROM ipca_cvr_flight_closures fc
+                     WHERE fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                   ) AS has_closure,
+                   (
+                     EXISTS(
+                       SELECT 1 FROM ipca_cvr_flight_closures fc
+                       WHERE fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                     )
+                     OR EXISTS(
+                       SELECT 1 FROM ipca_cvr_flight_events fe
+                       WHERE fe.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                     )
+                   ) AS has_flight_data,
+                   EXISTS(
+                     SELECT 1 FROM ipca_cockpit_recordings cr
+                     WHERE cr.flight_session_uid = d.workflow_flight_record_uuid
+                       AND cr.upload_status = 'uploaded'
+                   ) AS has_audio,
+                   EXISTS(
+                     SELECT 1
+                     FROM ipca_structured_debriefs sd
+                     INNER JOIN ipca_manual_intake_bundles mib ON mib.id = sd.bundle_id
+                     WHERE mib.dispatch_id = d.id
+                       AND sd.status IN ('approved', 'released')
+                       AND sd.approved_at IS NOT NULL
+                   ) AS has_completed_briefing
             FROM ipca_flight_schedule_slots s
             INNER JOIN ipca_aircraft_devices a ON a.id = s.aircraft_id
             LEFT JOIN ipca_missions m ON m.id = s.mission_id
             LEFT JOIN cohorts c ON c.id = s.cohort_id
+            LEFT JOIN ipca_cvr_dispatches d
+              ON d.scheduler_record_id = s.scheduler_record_id
+              OR (s.claimed_dispatch_uuid IS NOT NULL AND d.dispatch_uuid = s.claimed_dispatch_uuid)
             WHERE s.scheduled_date BETWEEN ? AND ?
         ";
         $params = array($fromDate, $toDate);
@@ -218,7 +253,7 @@ final class FlightScheduleService
             }
             if ($expectedUpdatedAt !== null && trim($expectedUpdatedAt) !== '') {
                 $expected = str_replace('T', ' ', trim($expectedUpdatedAt));
-                if (substr((string)($slot['updated_at'] ?? ''), 0, 23) !== substr($expected, 0, 23)) {
+                if (substr((string)($slot['updated_at'] ?? ''), 0, 19) !== substr($expected, 0, 19)) {
                     throw new RuntimeException('This reservation changed in another session. Reload the schedule and try again.');
                 }
             }
@@ -308,6 +343,12 @@ final class FlightScheduleService
     /** @param list<array<string,mixed>> $crew @return array<string,mixed> */
     private function payload(array $row, array $crew): array
     {
+        $hasDispatch = (int)($row['dispatch_id'] ?? 0) > 0
+            || trim((string)($row['claimed_dispatch_uuid'] ?? '')) !== '';
+        $hasFlightData = (bool)($row['has_flight_data'] ?? false);
+        $hasClosure = (bool)($row['has_closure'] ?? false);
+        $status = $hasClosure ? 'completed' : (string)$row['status'];
+        $editable = $status === 'scheduled' && !$hasDispatch;
         return array(
             'scheduler_record_id' => (string)$row['scheduler_record_id'],
             'reservation_type' => (string)($row['reservation_type'] ?? 'flight_training'),
@@ -331,9 +372,24 @@ final class FlightScheduleService
             'planned_departure_airport' => (string)$row['planned_departure_airport'],
             'planned_destination_airport' => (string)$row['planned_destination_airport'],
             'crew' => $crew,
-            'status' => (string)$row['status'],
+            'status' => $status,
+            'editable' => $editable,
+            'lock_reason' => $editable ? null : ($hasClosure ? 'completed' : 'dispatch_claimed'),
+            'claimed_dispatch_uuid' => trim((string)($row['claimed_dispatch_uuid'] ?? '')) ?: null,
+            'claimed_at' => isset($row['claimed_at'])
+                ? $this->isoPrecise((string)$row['claimed_at'])
+                : null,
+            'evidence' => array(
+                'dispatch' => array(
+                    'present' => $hasDispatch,
+                    'version' => isset($row['dispatch_version']) ? (int)$row['dispatch_version'] : null,
+                ),
+                'flight' => array('present' => $hasFlightData),
+                'audio' => array('present' => (bool)($row['has_audio'] ?? false)),
+                'briefing' => array('present' => (bool)($row['has_completed_briefing'] ?? false)),
+            ),
             'notes' => (string)$row['notes'],
-            'updated_at' => $this->iso((string)($row['updated_at'] ?? '')),
+            'updated_at' => $this->isoPrecise((string)($row['updated_at'] ?? '')),
         );
     }
 
@@ -425,6 +481,11 @@ final class FlightScheduleService
         // Return a timezone-free local timestamp so the enrolled device interprets
         // 10:00 as 10:00 local instead of shifting it through the web server zone.
         return str_replace(' ', 'T', substr(trim($value), 0, 19));
+    }
+
+    private function isoPrecise(string $value): string
+    {
+        return str_replace(' ', 'T', substr(trim($value), 0, 23));
     }
 
     private function airport(mixed $value): string

@@ -100,6 +100,13 @@
     return formatTime(start) + '–' + formatTime(end) + (crew ? ' · ' + crew : '');
   }
 
+  function evidenceChip(shortLabel, fullLabel, evidence) {
+    var present = !!(evidence && evidence.present);
+    return '<span class="fltsch-evidence-chip' + (present ? ' is-present' : '') + '" title="'
+      + escapeHtml(fullLabel + (present ? ' available' : ' not available')) + '">'
+      + escapeHtml(shortLabel) + '</span>';
+  }
+
   function bounds(start, end) {
     var startMinute = minutes(start);
     var endMinute = minutes(end);
@@ -134,7 +141,6 @@
   function startMove(pointerEvent, reservation, timeline, eventElement, start, end) {
     if (!reservation.editable || pointerEvent.button !== 0) return;
     if (pointerEvent.target.closest('.fltsch-resize-handle')) return;
-    pointerEvent.preventDefault();
 
     var originX = pointerEvent.clientX;
     var originalStart = minutes(start);
@@ -147,6 +153,7 @@
     function move(event) {
       var delta = snapMinutes((event.clientX - originX) / rect.width * totalMinutes);
       if (!moved && Math.abs(event.clientX - originX) < 5) return;
+      event.preventDefault();
       moved = true;
       suppressClick = true;
       nextStart = clamp(originalStart + delta, dayStart, dayEnd - duration);
@@ -165,13 +172,14 @@
       document.removeEventListener('pointerup', up);
       timeline.classList.remove('is-drop-target');
       eventElement.classList.remove('is-resizing');
-      renderReservations();
       if (moved && nextStart !== originalStart) {
         openChangeConfirmation(
           reservation,
           withMinutes(start, nextStart),
           withMinutes(start, nextStart + duration)
         );
+      } else {
+        renderReservations();
       }
       window.setTimeout(function () { suppressClick = false; }, 250);
     }
@@ -182,9 +190,10 @@
 
   function startResize(pointerEvent, reservation, timeline, eventElement, start, end, edge) {
     if (!reservation.editable || pointerEvent.button !== 0) return;
-    pointerEvent.preventDefault();
     pointerEvent.stopPropagation();
 
+    var originX = pointerEvent.clientX;
+    var moved = false;
     var rect = timeline.getBoundingClientRect();
     var originalStart = minutes(start);
     var originalEnd = minutes(end);
@@ -192,6 +201,9 @@
     var nextEnd = originalEnd;
 
     function move(event) {
+      if (!moved && Math.abs(event.clientX - originX) < 5) return;
+      event.preventDefault();
+      moved = true;
       var pointerMinute = snapMinutes(dayStart + ((event.clientX - rect.left) / rect.width * totalMinutes));
       if (edge === 'start') nextStart = clamp(pointerMinute, dayStart, nextEnd - snap);
       else nextEnd = clamp(pointerMinute, nextStart + snap, dayEnd);
@@ -208,14 +220,15 @@
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       eventElement.classList.remove('is-resizing');
-      renderReservations();
-      if (nextStart !== originalStart || nextEnd !== originalEnd) {
+      if (moved && (nextStart !== originalStart || nextEnd !== originalEnd)) {
         suppressClick = true;
         openChangeConfirmation(
           reservation,
           withMinutes(start, nextStart),
           withMinutes(start, nextEnd)
         );
+      } else {
+        renderReservations();
       }
       window.setTimeout(function () { suppressClick = false; }, 250);
     }
@@ -231,17 +244,30 @@
 
     var position = bounds(start, end);
     var element = document.createElement('div');
-    element.className = 'fltsch-event' + (reservation.editable ? '' : ' is-locked');
+    element.className = 'fltsch-event'
+      + (reservation.editable ? '' : ' is-locked')
+      + (reservation.status === 'completed' ? ' is-completed' : '')
+      + (reservation.status === 'claimed' ? ' is-dispatched' : '');
     element.dataset.type = reservation.reservation_type || 'flight_training';
     element.style.left = position.left + '%';
     element.style.width = position.width + '%';
     element.title = reservation.editable
       ? 'Click to edit. Drag to move; drag either edge to resize.'
-      : 'Locked after Dispatch activation.';
+      : (reservation.status === 'completed'
+        ? 'Completed flight. Schedule and evidence are locked.'
+        : 'Locked after Dispatch activation.');
+    var evidence = reservation.evidence || {};
+    var evidenceHtml = reservation.editable ? '' : '<span class="fltsch-evidence">'
+      + evidenceChip('D', 'Dispatch Data', evidence.dispatch)
+      + evidenceChip('F', 'Flight Data', evidence.flight)
+      + evidenceChip('A', 'Audio', evidence.audio)
+      + evidenceChip('B', 'Briefing', evidence.briefing)
+      + '</span>';
     element.innerHTML =
       (reservation.editable ? '<span class="fltsch-resize-handle start"></span>' : '')
       + '<span class="fltsch-event-title">' + escapeHtml(eventTitle(reservation)) + '</span>'
       + '<span class="fltsch-event-meta">' + escapeHtml(eventDetail(reservation, start, end)) + '</span>'
+      + evidenceHtml
       + (reservation.editable ? '<span class="fltsch-resize-handle end"></span>' : '');
 
     element.addEventListener('click', function (event) {
@@ -327,6 +353,12 @@
 
   renderAxis();
   renderReservations();
+  var changeModal = document.getElementById('flightScheduleChangeModal');
+  if (changeModal) {
+    changeModal.querySelectorAll('[data-compliance-modal-close]').forEach(function (button) {
+      button.addEventListener('click', renderReservations);
+    });
+  }
 
   var scroll = document.querySelector('.fltsch-scheduler-scroll');
   if (scroll) {

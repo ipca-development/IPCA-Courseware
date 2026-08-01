@@ -106,6 +106,13 @@ try {
         ? current(array_filter($slots, static fn(array $slot): bool => (string)$slot['scheduler_record_id'] === $editId))
         : null;
     $editing = is_array($editing) ? $editing : null;
+    if (is_array($editing) && empty($editing['editable'])) {
+        $error = (string)($editing['status'] ?? '') === 'completed'
+            ? 'Completed flights are locked and cannot be edited.'
+            : 'This reservation is locked because Dispatch has been activated.';
+        $editing = null;
+        $editId = '';
+    }
 } catch (Throwable $e) {
     $slots = $slots ?? array();
     $aircraft = $aircraft ?? array();
@@ -153,7 +160,6 @@ foreach ($slots as $slot) {
         $resourceKeys[] = 'cohort:' . $cohortId;
     }
     $slot['resource_keys'] = array_values(array_unique($resourceKeys));
-    $slot['editable'] = (string)($slot['status'] ?? '') === 'scheduled';
     $schedulerReservations[] = $slot;
 }
 $schedulerResources = array(
@@ -188,8 +194,9 @@ $schedulerResources = array(
 
 $today = date('Y-m-d');
 $scheduledCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'scheduled'));
+$completedCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'completed'));
 $todayCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['scheduled_date'] ?? '') === $today));
-$lockedCount = count($slots) - $scheduledCount;
+$lockedCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'claimed'));
 $flash = $error !== ''
     ? array('type' => 'error', 'message' => $error)
     : ($notice !== '' ? array('type' => 'success', 'message' => $notice) : null);
@@ -207,6 +214,7 @@ compliance_page_open(array(
         array('label' => 'Today', 'value' => $todayCount, 'sub' => 'scheduled for today'),
         array('label' => 'Available', 'value' => $scheduledCount, 'sub' => 'editable / dispatch ready', 'tone' => 'ok'),
         array('label' => 'Dispatch Locked', 'value' => $lockedCount, 'sub' => 'claimed by CVR Unit'),
+        array('label' => 'Completed', 'value' => $completedCount, 'sub' => 'locked with flight evidence', 'tone' => 'ok'),
     ),
     'flash' => $flash,
 ));
@@ -247,7 +255,13 @@ compliance_page_open(array(
       <input type="date" name="date" value="<?= h($selectedDate) ?>" aria-label="Schedule date" onchange="this.form.submit()">
     </form>
     <div class="fltsch-day-title"><?= h(date('l, F j, Y', strtotime($selectedDate))) ?></div>
-    <div class="fltsch-toolbar-note">Drag to move · drag edges to resize · 15-minute increments</div>
+    <div class="fltsch-toolbar-note">Click to edit · drag to move · drag edges to resize · 15-minute increments</div>
+  </div>
+  <div class="fltsch-legend" aria-label="Schedule status legend">
+    <span><i class="is-scheduled"></i> Scheduled · editable</span>
+    <span><i class="is-dispatched"></i> Dispatched · locked</span>
+    <span><i class="is-completed"></i> Completed · locked</span>
+    <span class="fltsch-legend-evidence"><b>D</b> Dispatch Data <b>F</b> Flight Data <b>A</b> Audio <b>B</b> Briefing completed</span>
   </div>
 
   <div class="fltsch-scheduler-scroll" id="flightResourceScheduler">

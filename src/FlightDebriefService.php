@@ -146,8 +146,10 @@ final class FlightDebriefService
         }
         $missionVersion = $this->missionVersion((string)$bundle['mission_code']);
         $exercise = json_decode((string)($missionVersion['exercise_json'] ?? ''), true);
+        $usesGenericMissionRubric = false;
         if (!is_array($exercise['scenario_plan'] ?? null) || !is_array($exercise['evaluation_rubric'] ?? null)) {
-            throw new RuntimeException('Mission requires a canonical scenario_plan and evaluation_rubric.');
+            $exercise = $this->genericExercise((string)($bundle['mission_code'] ?? ''));
+            $usesGenericMissionRubric = true;
         }
         $evidence = $this->structuredEvidence($bundle, $snapshot);
         $encodedEvidence = AuditEventService::jsonEncode($evidence);
@@ -186,7 +188,9 @@ final class FlightDebriefService
                  VALUES (?, ?, ?, ?, ?, \'ai_draft\', \'openai\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute(array(
-                AuditEventService::uuid(), $bundleId, (int)$missionVersion['id'], (int)$snapshot['id'], $supersedes,
+                AuditEventService::uuid(), $bundleId,
+                isset($missionVersion['id']) && (int)$missionVersion['id'] > 0 ? (int)$missionVersion['id'] : null,
+                (int)$snapshot['id'], $supersedes,
                 cw_openai_model(), self::PROMPT_VERSION, self::LOGIC_VERSION,
                 hash('sha256', $prompt),
                 hash('sha256', AuditEventService::jsonEncode($request)),
@@ -222,6 +226,7 @@ final class FlightDebriefService
             }
             $this->structuredAudit($debriefId, 'ai_draft_generated', $actorUserId, null, array(
                 'bundle_id' => $bundleId,
+                'uses_generic_mission_rubric' => $usesGenericMissionRubric,
                 'suggested_overall' => $overall['result'],
                 'model' => cw_openai_model(),
             ), 'Evidence-backed AI suggestions generated; instructor review required.');
@@ -766,6 +771,70 @@ final class FlightDebriefService
         );
     }
 
+    /** @return array<string,mixed> */
+    private function genericExercise(string $missionCode): array
+    {
+        $missionLabel = trim($missionCode) !== '' ? trim($missionCode) : 'unspecified mission';
+        $taskScale = array(
+            'DE' => 'Describe at rote level.',
+            'EX' => 'Explain underlying concepts, principles and procedures.',
+            'PR' => 'Plan and execute with coaching, instruction or assistance.',
+            'PE' => 'Perform without instructor assistance; identify and correct deviations expeditiously.',
+            'NO' => 'Not observed or not required.',
+        );
+        $srmScale = array(
+            'EX' => 'Verbally identify relevant risks.',
+            'PR' => 'Identify and understand risks; prompting may be needed.',
+            'MD' => 'Gather key data, evaluate options and decide appropriately without instructor intervention.',
+            'NO' => 'Not observed or not required.',
+        );
+        return array(
+            'metadata' => array(
+                'mission_code' => $missionLabel,
+                'canonical' => false,
+                'rubric_source' => 'generic_evidence_led_fallback',
+            ),
+            'scenario_plan' => array(
+                'objective' => 'Produce an evidence-led post-flight review without assuming mission-specific maneuvers or standards.',
+                'type' => 'GENERIC',
+                'phases' => array(
+                    array('id' => 'preflight_departure', 'title' => 'Preparation and departure'),
+                    array('id' => 'flight_execution', 'title' => 'Flight execution and operational decisions'),
+                    array('id' => 'arrival_postflight', 'title' => 'Arrival, landing and post-flight review'),
+                ),
+            ),
+            'evaluation_rubric' => array(
+                'task_scale' => $taskScale,
+                'srm_scale' => $srmScale,
+                'tasks' => array(
+                    array('id' => 'generic.procedural_discipline', 'title' => 'Procedural Discipline', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($taskScale)),
+                    array('id' => 'generic.aircraft_control', 'title' => 'Aircraft Control and Flight Execution', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($taskScale)),
+                    array('id' => 'generic.communication_coordination', 'title' => 'Communication and Crew Coordination', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($taskScale)),
+                    array('id' => 'generic.takeoff_arrival_landing', 'title' => 'Takeoff, Arrival and Landing', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($taskScale)),
+                ),
+                'srm_items' => array(
+                    array('id' => 'srm.safety_management', 'title' => 'Safety Management', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($srmScale)),
+                    array('id' => 'generic.srm.risk_management', 'title' => 'Risk Management', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($srmScale)),
+                    array('id' => 'generic.srm.decision_making', 'title' => 'Aeronautical Decision Making', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($srmScale)),
+                    array('id' => 'generic.srm.situational_awareness', 'title' => 'Situational Awareness', 'required' => true, 'required_standard' => 'PR', 'grade_scale' => array_keys($srmScale)),
+                ),
+                'overall_rules' => array(
+                    'BLUE' => 'At least 25% above required, none below.',
+                    'GREEN' => 'All assessed items meet or exceed required, fewer than 25% above.',
+                    'YELLOW' => 'Up to 25% of assessed items are below required.',
+                    'RED' => 'More than 25% are below required or safety management is insufficient.',
+                    'INCOMPLETE' => 'Any required item is explicitly not completed.',
+                ),
+                'evidence_rules' => array(
+                    'This is a generic fallback rubric, not canonical mission data.',
+                    'Do not infer mission-specific maneuvers, tolerances, or completion requirements.',
+                    'Absence from transcript is insufficient evidence, never automatic NO.',
+                    'Instructor grading and approval remain authoritative.',
+                ),
+            ),
+        );
+    }
+
     /** @param array<string,mixed> $exercise @param array<string,mixed> $evidence */
     private function structuredPrompt(array $exercise, array $evidence): string
     {
@@ -1044,7 +1113,7 @@ final class FlightDebriefService
     }
 
     /** @return array<string,mixed> */
-    private function missionVersion(string $missionCode): array
+    private function missionVersion(string $missionCode): ?array
     {
         $statement = $this->pdo->prepare(
             'SELECT v.* FROM ipca_missions m
@@ -1053,10 +1122,7 @@ final class FlightDebriefService
         );
         $statement->execute(array(trim($missionCode)));
         $row = $statement->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            throw new RuntimeException('Canonical mission version was not found.');
-        }
-        return $row;
+        return is_array($row) ? $row : null;
     }
 
     /** @return array<string,mixed> */

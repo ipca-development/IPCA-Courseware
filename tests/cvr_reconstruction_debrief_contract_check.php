@@ -16,10 +16,13 @@ $debriefEndpoint = file_get_contents($root . '/public/admin/api/manual_bundle_de
 $debriefWorker = file_get_contents($root . '/scripts/run_structured_flight_debrief.php') ?: '';
 $debriefPage = file_get_contents($root . '/public/admin/master_logbook_intake.php') ?: '';
 $derivationService = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
+$genericDebriefMigration = file_get_contents($root . '/scripts/sql/2026_08_01_generic_mission_debrief.sql') ?: '';
 
 $service = (new ReflectionClass(FlightDebriefService::class))->newInstanceWithoutConstructor();
 $calculate = new ReflectionMethod(FlightDebriefService::class, 'calculateSuggestedOverall');
 $sanitize = new ReflectionMethod(FlightDebriefService::class, 'sanitizeEvidenceRefs');
+$genericExerciseMethod = new ReflectionMethod(FlightDebriefService::class, 'genericExercise');
+$genericExercise = $genericExerciseMethod->invoke($service, '7-1-5');
 
 $evaluation = static fn(string $id, string $grade, string $required = 'PR', string $type = 'task', string $completion = 'completed'): array => array(
     'rubric_item_id' => $id,
@@ -75,6 +78,14 @@ $checks = array(
         && str_contains($mission215Seed, 'takeoff.short_field')
         && str_contains($mission215Seed, 'Engine failure in takeoff/climb')
         && str_contains($mission215Seed, 'Salton Sea Training Area'),
+    'missing canonical mission data uses a generic evidence-led rubric' =>
+        ($genericExercise['metadata']['canonical'] ?? true) === false
+        && ($genericExercise['metadata']['mission_code'] ?? '') === '7-1-5'
+        && count($genericExercise['evaluation_rubric']['tasks'] ?? array()) >= 4
+        && count($genericExercise['evaluation_rubric']['srm_items'] ?? array()) >= 4
+        && str_contains($debriefSource, 'uses_generic_mission_rubric')
+        && !str_contains($debriefSource, "throw new RuntimeException('Mission requires a canonical scenario_plan and evaluation_rubric.')")
+        && str_contains($genericDebriefMigration, 'mission_version_id BIGINT UNSIGNED NULL'),
     'structured debrief stores append-only evidence and instructor fields' =>
         str_contains($debriefMigration, 'supersedes_debrief_id')
         && str_contains($debriefMigration, 'evidence_refs_json')

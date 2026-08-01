@@ -76,6 +76,50 @@
   white-space: nowrap;
 }
 
+.fltsch-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
+  padding: 7px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 760;
+  flex-wrap: wrap;
+}
+
+.fltsch-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fltsch-legend i {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #8fb2e8;
+  border-radius: 3px;
+  background: #eaf2ff;
+}
+
+.fltsch-legend i.is-dispatched { border-color: #fb923c; background: #fff7ed; }
+.fltsch-legend i.is-completed { border-color: #34d399; background: #ecfdf5; }
+
+.fltsch-legend-evidence b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 14px;
+  margin-left: 3px;
+  border-radius: 4px;
+  background: #0f766e;
+  color: #fff;
+  font-size: 8px;
+}
+
 .fltsch-scheduler-scroll {
   max-height: calc(100vh - 315px);
   min-height: 520px;
@@ -154,7 +198,7 @@
 }
 
 .fltsch-resource-row {
-  min-height: 58px;
+  min-height: 68px;
   border-bottom: 1px solid #e8edf4;
 }
 
@@ -193,7 +237,7 @@
 .fltsch-resource-timeline {
   position: relative;
   width: var(--timeline-width);
-  min-height: 58px;
+  min-height: 68px;
   cursor: crosshair;
   background:
     repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 68 - 1px), #f0f3f7 calc(100% / 68 - 1px), #f0f3f7 calc(100% / 68)),
@@ -229,7 +273,7 @@
   flex-direction: column;
   justify-content: center;
   min-width: 28px;
-  height: 42px;
+  height: 52px;
   overflow: hidden;
   padding: 4px 9px;
   border: 1px solid var(--event-border);
@@ -252,6 +296,45 @@
   --event-border: #94a3b8;
   --event-text: #475569;
   cursor: not-allowed;
+}
+
+.fltsch-event.is-dispatched {
+  --event-bg: #fff7ed;
+  --event-border: #fb923c;
+  --event-text: #9a3412;
+}
+
+.fltsch-event.is-completed {
+  --event-bg: #ecfdf5;
+  --event-border: #34d399;
+  --event-text: #065f46;
+}
+
+.fltsch-evidence {
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.fltsch-evidence-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 14px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  opacity: .35;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.fltsch-evidence-chip.is-present {
+  opacity: 1;
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #fff;
 }
 
 .fltsch-event.is-moving {

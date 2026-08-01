@@ -107,6 +107,21 @@ $checks['resource scheduler exposes devices staff cohorts and drag resize'] = st
     && str_contains($scheduleJs, 'startMove(')
     && str_contains($scheduleJs, 'startResize(')
     && str_contains($scheduleJs, 'flightScheduleChangeModal');
+$checks['editable reservations support click edit and drag without false concurrency conflicts'] = static fn(): bool =>
+    !str_contains($scheduleJs, "if (pointerEvent.target.closest('.fltsch-resize-handle')) return;\n    pointerEvent.preventDefault();")
+    && str_contains($scheduleJs, 'if (!moved && Math.abs(event.clientX - originX) < 5) return;')
+    && str_contains($scheduleSource, "substr((string)(\$slot['updated_at'] ?? ''), 0, 19)")
+    && str_contains($scheduleSource, 'isoPrecise');
+$checks['dispatched and completed reservations remain locked with evidence indicators'] = static fn(): bool =>
+    str_contains($scheduleSource, "'lock_reason'")
+    && str_contains($scheduleSource, "'evidence'")
+    && str_contains($scheduleSource, 'has_flight_data')
+    && str_contains($scheduleSource, 'has_completed_briefing')
+    && str_contains($scheduleJs, 'is-completed')
+    && str_contains($scheduleJs, "evidenceChip('D'")
+    && str_contains($scheduleJs, "evidenceChip('F'")
+    && str_contains($scheduleJs, "evidenceChip('A'")
+    && str_contains($scheduleJs, "evidenceChip('B'");
 $checks['resource rescheduling retains dispatch lock'] = static fn(): bool =>
     str_contains($scheduleSource, 'function rescheduleSlot(')
     && str_contains($scheduleSource, 'FOR UPDATE')
