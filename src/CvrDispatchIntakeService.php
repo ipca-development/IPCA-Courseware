@@ -18,6 +18,9 @@ final class CvrDispatchIntakeService
     {
         $this->requireSchema();
         $normalized = $this->normalizeAndValidate($payload, $device);
+        if ($normalized['scheduler_record_id'] === '') {
+            $normalized['scheduler_record_id'] = $this->resolveUnambiguousScheduledRecordId($normalized);
+        }
         $canonicalJson = AuditEventService::jsonEncode($this->canonicalize($normalized));
         $payloadSha256 = hash('sha256', $canonicalJson);
         $verifiedPayloadSha256 = $payloadSha256;
@@ -402,10 +405,14 @@ final class CvrDispatchIntakeService
         if (!is_array($slot)) {
             throw new RuntimeException('Scheduled session does not exist.');
         }
+        $claimedDispatch = strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
+        if ((string)$slot['status'] === 'completed'
+            && $claimedDispatch === $normalized['dispatch_uuid']) {
+            return;
+        }
         if (in_array((string)$slot['status'], array('cancelled', 'completed'), true)) {
             throw new RuntimeException('Scheduled session is not available for Dispatch.');
         }
-        $claimedDispatch = strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
         if ($claimedDispatch !== '' && $claimedDispatch !== $normalized['dispatch_uuid']) {
             throw new RuntimeException('Scheduled session has already been claimed by another Dispatch.');
         }
@@ -451,9 +458,48 @@ final class CvrDispatchIntakeService
         }
         $this->pdo->prepare(
             "UPDATE ipca_flight_schedule_slots
-             SET status = 'claimed', claimed_dispatch_uuid = ?, claimed_at = COALESCE(claimed_at, CURRENT_TIMESTAMP(3))
+             SET status = CASE
+                   WHEN EXISTS(
+                     SELECT 1 FROM ipca_cvr_flight_closures closure_record
+                     WHERE closure_record.workflow_flight_record_uuid = ?
+                   ) THEN 'completed'
+                   ELSE 'claimed'
+                 END,
+                 claimed_dispatch_uuid = ?,
+                 claimed_at = COALESCE(claimed_at, CURRENT_TIMESTAMP(3))
              WHERE id = ?"
-        )->execute(array($normalized['dispatch_uuid'], (int)$slot['id']));
+        )->execute(array(
+            $normalized['flight_record_uuid'],
+            $normalized['dispatch_uuid'],
+            (int)$slot['id'],
+        ));
+    }
+
+    /** @param array<string,mixed> $normalized */
+    private function resolveUnambiguousScheduledRecordId(array $normalized): string
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT s.scheduler_record_id
+             FROM ipca_flight_schedule_slots s
+             WHERE s.aircraft_id = ?
+               AND s.scheduled_date = ?
+               AND s.status = 'scheduled'
+               AND (s.claimed_dispatch_uuid IS NULL OR s.claimed_dispatch_uuid = '')
+               AND (s.mission_code = '' OR UPPER(s.mission_code) = UPPER(?))
+               AND (s.planned_departure_airport = '' OR UPPER(s.planned_departure_airport) = UPPER(?))
+               AND (s.planned_destination_airport = '' OR UPPER(s.planned_destination_airport) = UPPER(?))
+             ORDER BY s.scheduled_start_time, s.id
+             LIMIT 2"
+        );
+        $statement->execute(array(
+            (int)$normalized['aircraft_id'],
+            (string)$normalized['scheduled_date'],
+            (string)$normalized['mission_code'],
+            (string)$normalized['planned_departure_airport'],
+            (string)$normalized['planned_destination_airport'],
+        ));
+        $matches = $statement->fetchAll(PDO::FETCH_COLUMN) ?: array();
+        return count($matches) === 1 ? (string)$matches[0] : '';
     }
 
     /**
@@ -629,8 +675,15 @@ final class CvrDispatchIntakeService
 
         // modified_at is device bookkeeping, not a material Dispatch change. Older
         // app builds rewrote it before every retry, including after the server had
-        // accepted the request but the response was lost.
-        unset($existing['modified_at'], $incoming['modified_at']);
+        // accepted the request but the response was lost. scheduler_record_id may
+        // be added by safe server reconciliation when an offline archive lost the
+        // original scheduled-session link.
+        unset(
+            $existing['modified_at'],
+            $incoming['modified_at'],
+            $existing['scheduler_record_id'],
+            $incoming['scheduler_record_id']
+        );
         $existingCanonical = AuditEventService::jsonEncode($this->canonicalize($existing));
         $incomingCanonical = AuditEventService::jsonEncode($this->canonicalize($incoming));
         return hash_equals(

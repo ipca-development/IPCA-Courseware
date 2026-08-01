@@ -710,15 +710,21 @@ final class CVRFlightLogStore: ObservableObject {
         departureAirport: String,
         arrivalAirport: String,
         crewNames: [String],
+        startingHobbs: Double?,
+        startingTacho: Double?,
         endingHobbs: Double?,
         endingTacho: Double?,
         fuelRemaining: String,
         settings: SettingsStore
     ) async -> Bool {
-        guard let endingHobbs,
+        guard let startingHobbs,
+              let startingTacho,
+              startingHobbs >= 0,
+              startingTacho >= 0,
+              let endingHobbs,
               let endingTacho,
-              endingHobbs >= (entry.startingHobbs ?? 0),
-              endingTacho >= (entry.startingTacho ?? 0) else {
+              endingHobbs >= startingHobbs,
+              endingTacho >= startingTacho else {
             lastError = "Ending Hobbs and Tacho must be valid and cannot be lower than their starting values."
             return false
         }
@@ -751,6 +757,8 @@ final class CVRFlightLogStore: ObservableObject {
             "departure_airport": departure,
             "arrival_airport": arrival,
             "crew_names": crew,
+            "starting_hobbs": startingHobbs,
+            "starting_tacho": startingTacho,
             "ending_hobbs": endingHobbs,
             "ending_tacho": endingTacho,
             "fuel_remaining": fuelValue

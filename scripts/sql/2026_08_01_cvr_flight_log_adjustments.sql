@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS ipca_cvr_flight_log_adjustments (
   departure_airport           VARCHAR(8) NOT NULL DEFAULT '',
   arrival_airport             VARCHAR(8) NOT NULL DEFAULT '',
   crew_json                   JSON NOT NULL,
+  starting_hobbs              DECIMAL(12,4) NULL,
+  starting_tacho              DECIMAL(12,4) NULL,
   ending_hobbs                DECIMAL(12,4) NOT NULL,
   ending_tacho                DECIMAL(12,4) NOT NULL,
   fuel_remaining              VARCHAR(64) NOT NULL,

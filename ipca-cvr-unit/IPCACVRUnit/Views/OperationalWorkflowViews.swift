@@ -2158,6 +2158,11 @@ private struct FlightLogView: View {
                                 metrics: metrics
                             )
                         }
+                        Text("TIMES SHOWN IN CALIFORNIA LOCAL TIME (PT)")
+                            .font(.caption2.weight(.bold))
+                            .tracking(0.7)
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if !flightLogs.lastError.isEmpty {
                             CVROperationalWarningCard(
                                 title: "FLIGHT LOG",
@@ -2913,10 +2918,16 @@ private struct FlightLogView: View {
 
     private func displayTime(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "—" }
-        let timePart = value.split(separator: "T").last.map(String.init)
-            ?? value.split(separator: " ").last.map(String.init)
-            ?? value
-        return String(timePart.prefix(5))
+        let hasExplicitTimeZone = value.hasSuffix("Z")
+            || value.range(of: #"[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil
+        if hasExplicitTimeZone,
+           let date = Self.isoTimestampFormatter.date(from: value) {
+            return Self.californiaTimeFormatter.string(from: date)
+        }
+        if let localDate = Self.californiaLocalTimestampFormatter.date(from: value) {
+            return Self.californiaTimeFormatter.string(from: localDate)
+        }
+        return value
     }
 
     private func airport(_ value: String) -> String {
@@ -2934,7 +2945,35 @@ private struct FlightLogView: View {
     private static let inputDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = operationalTimeZone
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let operationalTimeZone =
+        TimeZone(identifier: "America/Los_Angeles") ?? .current
+
+    private static let isoTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let californiaLocalTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = operationalTimeZone
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
+
+    private static let californiaTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = operationalTimeZone
+        formatter.dateFormat = "HH:mm"
         return formatter
     }()
 
@@ -2942,7 +2981,7 @@ private struct FlightLogView: View {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        formatter.timeZone = operationalTimeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
@@ -2950,6 +2989,7 @@ private struct FlightLogView: View {
     private static let outputDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = operationalTimeZone
         formatter.dateFormat = "EEE, MMM d, yyyy"
         return formatter
     }()
@@ -2963,6 +3003,8 @@ private struct FlightLogAdjustmentView: View {
     @State private var departureAirport: String
     @State private var arrivalAirport: String
     @State private var crewNames: String
+    @State private var startingHobbs: String
+    @State private var startingTacho: String
     @State private var endingHobbs: String
     @State private var endingTacho: String
     @State private var fuelRemaining: String
@@ -2972,6 +3014,8 @@ private struct FlightLogAdjustmentView: View {
         _departureAirport = State(initialValue: entry.departureAirport)
         _arrivalAirport = State(initialValue: entry.arrivalAirport)
         _crewNames = State(initialValue: (entry.crewNames ?? []).joined(separator: ", "))
+        _startingHobbs = State(initialValue: entry.startingHobbs.map { String(format: "%.1f", $0) } ?? "")
+        _startingTacho = State(initialValue: entry.startingTacho.map { String(format: "%.1f", $0) } ?? "")
         _endingHobbs = State(initialValue: entry.endingHobbs.map { String(format: "%.1f", $0) } ?? "")
         _endingTacho = State(initialValue: entry.endingTacho.map { String(format: "%.1f", $0) } ?? "")
         _fuelRemaining = State(initialValue: entry.fuelRemaining ?? "")
@@ -2985,7 +3029,7 @@ private struct FlightLogAdjustmentView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         CVROperationalWarningCard(
                             title: "ADMINISTRATIVE ADJUSTMENT",
-                            message: "This creates a new append-only Flight Closure record. The original evidence remains preserved.",
+                            message: "Correct the Dispatch start baseline or Flight Closure values. This creates an append-only correction; the original evidence remains preserved.",
                             iconName: "lock.shield.fill",
                             color: CVROperationalPalette.warning
                         )
@@ -3008,14 +3052,24 @@ private struct FlightLogAdjustmentView: View {
                             keyboard: .default
                         )
                         adjustmentField(
+                            "STARTING HOBBS",
+                            value: $startingHobbs,
+                            baseline: nil
+                        )
+                        adjustmentField(
+                            "STARTING TACHO",
+                            value: $startingTacho,
+                            baseline: nil
+                        )
+                        adjustmentField(
                             "ENDING HOBBS",
                             value: $endingHobbs,
-                            baseline: entry.startingHobbs
+                            baseline: nil
                         )
                         adjustmentField(
                             "ENDING TACHO",
                             value: $endingTacho,
-                            baseline: entry.startingTacho
+                            baseline: nil
                         )
                         adjustmentField(
                             "FUEL REMAINING",
@@ -3040,6 +3094,8 @@ private struct FlightLogAdjustmentView: View {
                                 departureAirport: departureAirport,
                                 arrivalAirport: arrivalAirport,
                                 crewNames: crewNames.split(separator: ",").map(String.init),
+                                startingHobbs: Double(startingHobbs),
+                                startingTacho: Double(startingTacho),
                                 endingHobbs: Double(endingHobbs),
                                 endingTacho: Double(endingTacho),
                                 fuelRemaining: fuelRemaining,
@@ -3053,6 +3109,8 @@ private struct FlightLogAdjustmentView: View {
                         departureAirport.isEmpty
                             || arrivalAirport.isEmpty
                             || crewNames.isEmpty
+                            || startingHobbs.isEmpty
+                            || startingTacho.isEmpty
                             || endingHobbs.isEmpty
                             || endingTacho.isEmpty
                             || fuelRemaining.isEmpty

@@ -22,6 +22,7 @@ final class FlightScheduleService
     {
         $fromDate = $this->date($fromDate ?: gmdate('Y-m-d'));
         $toDate = $this->date($toDate ?: gmdate('Y-m-d', time() + 14 * 86400));
+        $this->reconcileUnlinkedCompletedDispatches($fromDate, $toDate);
         $sql = "
             SELECT s.*, a.registration AS aircraft_registration,
                    COALESCE(NULLIF(s.mission_code, ''), m.code, '') AS resolved_mission_code,
@@ -307,6 +308,87 @@ final class FlightScheduleService
             $this->pdo->prepare(
                 "UPDATE ipca_flight_schedule_slots SET status = 'cancelled', updated_by = ? WHERE id = ?"
             )->execute(array($actorUserId, (int)$slot['id']));
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function reconcileUnlinkedCompletedDispatches(string $fromDate, string $toDate): void
+    {
+        if ($this->pdo->inTransaction()) {
+            return;
+        }
+        $dispatches = $this->pdo->prepare(
+            "SELECT d.id, d.dispatch_uuid, d.aircraft_id, d.scheduled_date, d.mission_code,
+                    COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_departure_airport')), 'null'), '') AS departure_airport,
+                    COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'), '') AS destination_airport
+             FROM ipca_cvr_dispatches d
+             LEFT JOIN ipca_cvr_dispatch_versions v
+               ON v.dispatch_id = d.id AND v.dispatch_version = d.current_version
+             WHERE d.scheduled_date BETWEEN ? AND ?
+               AND (d.scheduler_record_id IS NULL OR d.scheduler_record_id = '')
+               AND EXISTS(
+                 SELECT 1 FROM ipca_cvr_flight_closures closure_record
+                 WHERE closure_record.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+               )
+             ORDER BY d.first_received_at"
+        );
+        $dispatches->execute(array($fromDate, $toDate));
+        $rows = $dispatches->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($rows === array()) {
+            return;
+        }
+
+        $match = $this->pdo->prepare(
+            "SELECT id, scheduler_record_id
+             FROM ipca_flight_schedule_slots
+             WHERE aircraft_id = ?
+               AND scheduled_date = ?
+               AND status = 'scheduled'
+               AND (claimed_dispatch_uuid IS NULL OR claimed_dispatch_uuid = '')
+               AND (mission_code = '' OR UPPER(mission_code) = UPPER(?))
+               AND (planned_departure_airport = '' OR UPPER(planned_departure_airport) = UPPER(?))
+               AND (planned_destination_airport = '' OR UPPER(planned_destination_airport) = UPPER(?))
+             ORDER BY scheduled_start_time, id
+             LIMIT 2"
+        );
+        $updateSlot = $this->pdo->prepare(
+            "UPDATE ipca_flight_schedule_slots
+             SET status = 'completed', claimed_dispatch_uuid = ?,
+                 claimed_at = COALESCE(claimed_at, CURRENT_TIMESTAMP(3))
+             WHERE id = ? AND status = 'scheduled'
+               AND (claimed_dispatch_uuid IS NULL OR claimed_dispatch_uuid = '')"
+        );
+        $updateDispatch = $this->pdo->prepare(
+            "UPDATE ipca_cvr_dispatches SET scheduler_record_id = ?
+             WHERE id = ? AND (scheduler_record_id IS NULL OR scheduler_record_id = '')"
+        );
+
+        $this->pdo->beginTransaction();
+        try {
+            foreach ($rows as $dispatch) {
+                $match->execute(array(
+                    (int)$dispatch['aircraft_id'],
+                    (string)$dispatch['scheduled_date'],
+                    (string)$dispatch['mission_code'],
+                    strtoupper(trim((string)$dispatch['departure_airport'])),
+                    strtoupper(trim((string)$dispatch['destination_airport'])),
+                ));
+                $slots = $match->fetchAll(PDO::FETCH_ASSOC) ?: array();
+                if (count($slots) !== 1) {
+                    continue;
+                }
+                $slot = $slots[0];
+                $updateSlot->execute(array((string)$dispatch['dispatch_uuid'], (int)$slot['id']));
+                if ($updateSlot->rowCount() !== 1) {
+                    continue;
+                }
+                $updateDispatch->execute(array((string)$slot['scheduler_record_id'], (int)$dispatch['id']));
+            }
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {

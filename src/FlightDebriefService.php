@@ -269,8 +269,10 @@ final class FlightDebriefService
             'SELECT b.bundle_uuid, b.version_number, b.aircraft_registration, b.mission_code,
                     COALESCE(b.operational_flight_record_version_id, gr.current_version_id) AS operational_flight_record_version_id,
                     d.scheduled_date, d.crew_json, d.aircraft_id,
-                    d.starting_hobbs, d.starting_tacho,
-                    c.ending_hobbs, c.ending_tacho,
+                    COALESCE(fla.starting_hobbs, d.starting_hobbs) AS starting_hobbs,
+                    COALESCE(fla.starting_tacho, d.starting_tacho) AS starting_tacho,
+                    COALESCE(fla.ending_hobbs, c.ending_hobbs) AS ending_hobbs,
+                    COALESCE(fla.ending_tacho, c.ending_tacho) AS ending_tacho,
                     COALESCE(NULLIF(a.aircraft_type, \'\'), NULLIF(a.display_name, \'\'), \'\') AS aircraft_type,
                     v.exact_hobbs_duration_ms, v.exact_tacho_duration_ms,
                     v.hobbs_start_hours, v.hobbs_end_hours, v.tacho_start_hours, v.tacho_end_hours,
@@ -310,6 +312,11 @@ final class FlightDebriefService
                SELECT fc.id FROM ipca_cvr_flight_closures fc
                WHERE fc.workflow_flight_record_uuid = b.workflow_flight_record_uuid
                ORDER BY fc.id DESC LIMIT 1
+             )
+             LEFT JOIN ipca_cvr_flight_log_adjustments fla ON fla.id = (
+               SELECT adj.id FROM ipca_cvr_flight_log_adjustments adj
+               WHERE adj.workflow_flight_record_uuid = b.workflow_flight_record_uuid
+               ORDER BY adj.created_at DESC, adj.id DESC LIMIT 1
              )
              LEFT JOIN ipca_operational_flight_record_versions v
                ON v.id = COALESCE(b.operational_flight_record_version_id, gr.current_version_id)

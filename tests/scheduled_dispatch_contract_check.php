@@ -57,7 +57,15 @@ $checks['schedule claim is transactional row locked and idempotent'] = static fn
     str_contains($dispatchSource, 'claimScheduledSlot')
     && str_contains($dispatchSource, 'FOR UPDATE')
     && str_contains($dispatchSource, 'claimed_dispatch_uuid')
-    && str_contains($dispatchSource, "status = 'claimed'");
+    && str_contains($dispatchSource, "THEN 'completed'")
+    && str_contains($dispatchSource, "ELSE 'claimed'");
+$checks['offline Dispatch safely reconciles one matching return reservation'] = static fn(): bool =>
+    str_contains($dispatchSource, 'resolveUnambiguousScheduledRecordId')
+    && str_contains($dispatchSource, 'count($matches) === 1')
+    && str_contains($dispatchSource, 'ipca_cvr_flight_closures closure_record')
+    && str_contains($scheduleSource, 'reconcileUnlinkedCompletedDispatches')
+    && str_contains($scheduleSource, 'count($slots) !== 1')
+    && str_contains($scheduleSource, "SET status = 'completed', claimed_dispatch_uuid = ?");
 $checks['schedule times are planning data and cannot block Dispatch upload'] = static fn(): bool =>
     !str_contains($dispatchSource, 'Scheduled session times do not match the Dispatch.')
     && str_contains($iosWorkflow, 'failedForLegacyScheduleTimeRule')

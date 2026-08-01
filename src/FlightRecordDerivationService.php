@@ -586,8 +586,13 @@ final class FlightRecordDerivationService
             return array('available' => false, 'discrepancies' => array());
         }
         $statement = $this->pdo->prepare(
-            'SELECT d.starting_hobbs, d.starting_tacho, d.fuel_onboard,
-                    c.ending_hobbs, c.ending_tacho, c.fuel_remaining, c.oil_percentage
+            'SELECT COALESCE(a.starting_hobbs, d.starting_hobbs) AS starting_hobbs,
+                    COALESCE(a.starting_tacho, d.starting_tacho) AS starting_tacho,
+                    d.fuel_onboard,
+                    COALESCE(a.ending_hobbs, c.ending_hobbs) AS ending_hobbs,
+                    COALESCE(a.ending_tacho, c.ending_tacho) AS ending_tacho,
+                    COALESCE(a.fuel_remaining, c.fuel_remaining) AS fuel_remaining,
+                    c.oil_percentage
              FROM ipca_flight_sessions s
              INNER JOIN ipca_cvr_dispatches d
                ON d.workflow_flight_record_uuid = s.session_uuid
@@ -595,6 +600,11 @@ final class FlightRecordDerivationService
                SELECT fc.id FROM ipca_cvr_flight_closures fc
                WHERE fc.workflow_flight_record_uuid = s.session_uuid
                ORDER BY fc.received_at DESC, fc.id DESC LIMIT 1
+             )
+             LEFT JOIN ipca_cvr_flight_log_adjustments a ON a.id = (
+               SELECT adj.id FROM ipca_cvr_flight_log_adjustments adj
+               WHERE adj.workflow_flight_record_uuid = s.session_uuid
+               ORDER BY adj.created_at DESC, adj.id DESC LIMIT 1
              )
              WHERE s.id = ? LIMIT 1'
         );

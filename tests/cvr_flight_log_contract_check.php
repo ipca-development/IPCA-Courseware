@@ -17,6 +17,9 @@ $adjustmentMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_fl
 $workflowStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
 $coordinator = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRUnitCoordinator.swift') ?: '';
 $recordingStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/RecordingStore.swift') ?: '';
+$derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
+$debrief = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
+$startingMeterMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_starting_meter_adjustments.sql') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
@@ -64,8 +67,15 @@ $checks = array(
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")
-        && str_contains($service, "\$arrivalTime = \$row['arrival_event_time']")
+        && str_contains($service, "\$arrivalUtc = \$this->utcDate(\$row['arrival_event_time_utc']")
         && str_contains($views, 'departure.timestampLocal.addingTimeInterval(totalHobbs * 3600)'),
+    'flight log times are explicit California local time with daylight saving support' =>
+        str_contains($service, 'departure_event.timestamp_utc')
+        && str_contains($service, "new DateTimeZone('America/Los_Angeles')")
+        && str_contains($service, "->format('Y-m-d\\TH:i:sP')")
+        && str_contains($views, 'TimeZone(identifier: "America/Los_Angeles")')
+        && str_contains($views, 'californiaTimeFormatter.string(from: date)')
+        && !str_contains($views, 'return String(timePart.prefix(5))'),
     'flight log exposes crew and protected operational adjustments' =>
         str_contains($service, "'crew_names'")
         && str_contains($models, 'var crewNames: [String]?')
@@ -79,6 +89,16 @@ $checks = array(
         && str_contains($views, 'DEPARTURE AIRPORT')
         && str_contains($views, 'ARRIVAL AIRPORT')
         && str_contains($views, 'CREW NAMES'),
+    'incorrect Dispatch starting meters can be corrected append-only and re-derived' =>
+        str_contains($startingMeterMigration, "COLUMN_NAME = 'starting_hobbs'")
+        && str_contains($startingMeterMigration, "COLUMN_NAME = 'starting_tacho'")
+        && str_contains($service, 'COALESCE(adjustment.starting_hobbs, d.starting_hobbs)')
+        && str_contains($service, "'starting_hobbs' => \$startingHobbs")
+        && str_contains($models, '"starting_hobbs": startingHobbs')
+        && str_contains($views, '"STARTING HOBBS"')
+        && str_contains($views, '"STARTING TACHO"')
+        && str_contains($derivation, 'COALESCE(a.starting_hobbs, d.starting_hobbs)')
+        && str_contains($debrief, 'COALESCE(fla.starting_hobbs, d.starting_hobbs)'),
     'flight log exposes server upload transcript progress and operation counts' =>
         str_contains($service, "'server_upload_status'")
         && str_contains($service, "'server_upload_progress'")

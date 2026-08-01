@@ -39,15 +39,15 @@ final class CvrFlightLogService
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_departure_airport')), 'null'),
                     ''
                 ) AS departure_airport,
-                DATE_FORMAT(departure_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS departure_time,
+                DATE_FORMAT(departure_event.timestamp_utc, '%Y-%m-%d %H:%i:%s') AS departure_time_utc,
                 COALESCE(
                     NULLIF(adjustment.arrival_airport, ''),
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'),
                     ''
                 ) AS arrival_airport,
-                DATE_FORMAT(arrival_event.timestamp_local, '%Y-%m-%dT%H:%i:%s') AS arrival_event_time,
-                CAST(d.starting_hobbs AS DECIMAL(12,2)) AS starting_hobbs,
-                CAST(d.starting_tacho AS DECIMAL(12,2)) AS starting_tacho,
+                DATE_FORMAT(arrival_event.timestamp_utc, '%Y-%m-%d %H:%i:%s') AS arrival_event_time_utc,
+                CAST(COALESCE(adjustment.starting_hobbs, d.starting_hobbs) AS DECIMAL(12,2)) AS starting_hobbs,
+                CAST(COALESCE(adjustment.starting_tacho, d.starting_tacho) AS DECIMAL(12,2)) AS starting_tacho,
                 CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
                 CAST(COALESCE(adjustment.ending_tacho, closure.ending_tacho) AS DECIMAL(12,2)) AS ending_tacho,
                 COALESCE(adjustment.fuel_remaining, closure.fuel_remaining) AS fuel_remaining,
@@ -89,8 +89,13 @@ final class CvrFlightLogService
                     )
                 ) AS landing_count,
                 CASE
-                    WHEN COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) IS NULL OR d.starting_hobbs IS NULL THEN NULL
-                    ELSE ROUND(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) - d.starting_hobbs, 2)
+                    WHEN COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) IS NULL
+                      OR COALESCE(adjustment.starting_hobbs, d.starting_hobbs) IS NULL THEN NULL
+                    ELSE ROUND(
+                      COALESCE(adjustment.ending_hobbs, closure.ending_hobbs)
+                      - COALESCE(adjustment.starting_hobbs, d.starting_hobbs),
+                      2
+                    )
                 END AS total_hobbs_time,
                 EXISTS(
                     SELECT 1
@@ -160,7 +165,7 @@ final class CvrFlightLogService
               )
             WHERE d.organization_id = :organization_id
               AND {$aircraftPredicate}
-            ORDER BY d.scheduled_date DESC, COALESCE(departure_event.timestamp_local, d.first_received_at) DESC
+            ORDER BY d.scheduled_date DESC, COALESCE(departure_event.timestamp_utc, d.first_received_at) DESC
             LIMIT 500
         ";
         $statement = $this->pdo->prepare($sql);
@@ -187,18 +192,18 @@ final class CvrFlightLogService
                     $crewNames[] = $name;
                 }
             }
-            $arrivalTime = $row['arrival_event_time'] !== null ? (string)$row['arrival_event_time'] : null;
-            if ($row['departure_time'] !== null && $row['total_hobbs_time'] !== null) {
+            $departureUtc = $this->utcDate($row['departure_time_utc'] ?? null);
+            $arrivalUtc = $this->utcDate($row['arrival_event_time_utc'] ?? null);
+            if ($departureUtc !== null && $row['total_hobbs_time'] !== null) {
                 try {
-                    $departureTime = new DateTimeImmutable((string)$row['departure_time']);
                     $elapsedSeconds = (int)round((float)$row['total_hobbs_time'] * 3600);
-                    $arrivalTime = $departureTime
-                        ->modify(sprintf('+%d seconds', $elapsedSeconds))
-                        ->format('Y-m-d\TH:i:s');
+                    $arrivalUtc = $departureUtc->modify(sprintf('+%d seconds', $elapsedSeconds));
                 } catch (Throwable) {
-                    // Preserve the recorded shutdown time if the local departure timestamp is invalid.
+                    // Preserve the recorded shutdown instant if Hobbs derivation fails.
                 }
             }
+            $departureTime = $this->californiaIso($departureUtc);
+            $arrivalTime = $this->californiaIso($arrivalUtc);
             $audioUploadStatus = strtolower(trim((string)($row['audio_upload_status'] ?? 'missing')));
             $hasClosure = (bool)($row['has_closure'] ?? false);
             $hasRecorderVerification = (bool)($row['has_recorder_verification'] ?? false);
@@ -221,7 +226,7 @@ final class CvrFlightLogService
                 'scheduled_date' => (string)$row['scheduled_date'],
                 'crew_names' => array_values(array_unique($crewNames)),
                 'departure_airport' => (string)$row['departure_airport'],
-                'departure_time' => $row['departure_time'] !== null ? (string)$row['departure_time'] : null,
+                'departure_time' => $departureTime,
                 'arrival_airport' => (string)$row['arrival_airport'],
                 'arrival_time' => $arrivalTime,
                 'starting_hobbs' => $row['starting_hobbs'] !== null ? (float)$row['starting_hobbs'] : null,
@@ -317,11 +322,23 @@ final class CvrFlightLogService
         $endingTacho = isset($payload['ending_tacho']) && is_numeric($payload['ending_tacho'])
             ? (float)$payload['ending_tacho']
             : null;
+        $startingHobbs = isset($payload['starting_hobbs']) && is_numeric($payload['starting_hobbs'])
+            ? (float)$payload['starting_hobbs']
+            : null;
+        $startingTacho = isset($payload['starting_tacho']) && is_numeric($payload['starting_tacho'])
+            ? (float)$payload['starting_tacho']
+            : null;
         $fuel = trim((string)($payload['fuel_remaining'] ?? ''));
-        if ($endingHobbs === null || $endingHobbs < (float)$dispatch['starting_hobbs']) {
+        if ($startingHobbs === null || $startingHobbs < 0) {
+            throw new RuntimeException('Starting Hobbs must be a valid non-negative value.');
+        }
+        if ($startingTacho === null || $startingTacho < 0) {
+            throw new RuntimeException('Starting Tacho must be a valid non-negative value.');
+        }
+        if ($endingHobbs === null || $endingHobbs < $startingHobbs) {
             throw new RuntimeException('Ending Hobbs cannot be lower than Starting Hobbs.');
         }
-        if ($endingTacho === null || $endingTacho < (float)$dispatch['starting_tacho']) {
+        if ($endingTacho === null || $endingTacho < $startingTacho) {
             throw new RuntimeException('Ending Tacho cannot be lower than Starting Tacho.');
         }
         if ($fuel === '' || !is_numeric($fuel) || (float)$fuel < 0) {
@@ -332,8 +349,9 @@ final class CvrFlightLogService
         $this->pdo->prepare(
             'INSERT INTO ipca_cvr_flight_log_adjustments
              (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
-              departure_airport, arrival_airport, crew_json, ending_hobbs, ending_tacho, fuel_remaining)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
+              ending_hobbs, ending_tacho, fuel_remaining)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute(array(
             $adjustmentUuid,
             $organizationId,
@@ -343,6 +361,8 @@ final class CvrFlightLogService
             $departure,
             $arrival,
             AuditEventService::jsonEncode($crew),
+            $startingHobbs,
+            $startingTacho,
             $endingHobbs,
             $endingTacho,
             $fuel,
@@ -358,6 +378,8 @@ final class CvrFlightLogService
                 'departure_airport' => $departure,
                 'arrival_airport' => $arrival,
                 'crew_names' => $crew,
+                'starting_hobbs' => $startingHobbs,
+                'starting_tacho' => $startingTacho,
                 'ending_hobbs' => $endingHobbs,
                 'ending_tacho' => $endingTacho,
                 'fuel_remaining' => $fuel,
@@ -441,6 +463,30 @@ final class CvrFlightLogService
             throw new RuntimeException($field . ' must contain a valid airport identifier.');
         }
         return $airport;
+    }
+
+    private function utcDate(mixed $value): ?DateTimeImmutable
+    {
+        $timestamp = trim((string)$value);
+        if ($timestamp === '') {
+            return null;
+        }
+        $date = DateTimeImmutable::createFromFormat(
+            '!Y-m-d H:i:s',
+            $timestamp,
+            new DateTimeZone('UTC')
+        );
+        return $date instanceof DateTimeImmutable ? $date : null;
+    }
+
+    private function californiaIso(?DateTimeImmutable $date): ?string
+    {
+        if ($date === null) {
+            return null;
+        }
+        return $date
+            ->setTimezone(new DateTimeZone('America/Los_Angeles'))
+            ->format('Y-m-d\TH:i:sP');
     }
 
     private function isUuid(string $value): bool
