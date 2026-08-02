@@ -149,6 +149,7 @@ struct DispatchSyncResponse: Codable {
 
     var ok: Bool
     var alreadyPresent: Bool?
+    var continuityWarnings: [String]?
     var dispatch: ServerDispatch?
     var receipt: Receipt?
     var error: String?
@@ -156,6 +157,7 @@ struct DispatchSyncResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case ok
         case alreadyPresent = "already_present"
+        case continuityWarnings = "continuity_warnings"
         case dispatch
         case receipt
         case error
@@ -369,7 +371,28 @@ struct APIClient {
     }
 
     func scheduledSessions(credential: String) async throws -> ScheduledSessionsResponse {
-        let url = serverURL.appending(path: "api/cvr/scheduled_sessions.php")
+        let timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = calendar.startOfDay(for: Date())
+        let from = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        let to = calendar.date(byAdding: .day, value: 15, to: today) ?? today
+        var components = URLComponents(
+            url: serverURL.appending(path: "api/cvr/scheduled_sessions.php"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "from", value: formatter.string(from: from)),
+            URLQueryItem(name: "to", value: formatter.string(from: to))
+        ]
+        guard let url = components?.url else {
+            throw APIClientError.invalidServerURL
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 60

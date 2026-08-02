@@ -453,7 +453,7 @@ private struct ScheduledFlightsView: View {
 
     private var aircraftSessions: [CVRScheduledSession] {
         guard let aircraft = settings.selectedAircraft else { return [] }
-        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let startOfToday = operationalCalendar.startOfDay(for: Date())
         var consumedSchedulerRecordIDs = Set(
             workflow.archives.compactMap { $0.dispatch.schedulerRecordID }
         )
@@ -474,15 +474,21 @@ private struct ScheduledFlightsView: View {
     private var todaySessions: [CVRScheduledSession] {
         aircraftSessions.filter { session in
             guard let date = session.dateTime(nil) else { return false }
-            return Calendar.current.isDateInToday(date)
+            return operationalCalendar.isDate(date, inSameDayAs: Date())
         }
     }
 
     private var upcomingSessions: [CVRScheduledSession] {
         aircraftSessions.filter { session in
             guard let date = session.dateTime(nil) else { return false }
-            return !Calendar.current.isDateInToday(date)
+            return !operationalCalendar.isDate(date, inSameDayAs: Date())
         }
+    }
+
+    private var operationalCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        return calendar
     }
 
     private func timeRange(_ session: CVRScheduledSession) -> String {
@@ -626,61 +632,14 @@ struct DispatchWorkflowView: View {
 
     @ViewBuilder
     private var continuityUploadRepairCard: some View {
-        if workflow.dispatchContinuityUploadIssue() != nil || workflow.canRepairFailedDispatchUpload {
-            VStack(alignment: .leading, spacing: 10) {
-                if workflow.dispatchContinuityUploadIssue() != nil {
-                    Text("CONTINUITY CONFIRMATION REQUIRED")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(CVROperationalPalette.warning)
-                    Text("The server rejected Dispatch because fuel or oil changed more than 20% from the previous flight. Adjust oil if needed, confirm servicing below, then retry upload.")
-                        .font(.caption)
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
-                } else if workflow.canRepairFailedDispatchUpload {
-                    Text("DISPATCH UPLOAD REPAIR")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(CVROperationalPalette.warning)
-                    Text("Adjust dispatch oil if the reading was wrong, then retry upload.")
-                        .font(.caption)
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
-                }
-
-                if !workflow.dispatchUploadVerified() {
-                    HStack {
-                        Spacer(minLength: 0)
-                        CVRFluidCylinderPicker(
-                            title: "OIL",
-                            unit: operationalConfig.oilUnit,
-                            value: $repairOilPercent,
-                            hasSelection: $repairHasOilSelection,
-                            maxValue: operationalConfig.oilCapacity,
-                            warningThreshold: nil,
-                            fillColor: CVROperationalPalette.standby,
-                            warningColor: CVROperationalPalette.standby
-                        )
-                        .frame(width: 132)
-                        Spacer(minLength: 0)
-                    }
-                }
-
-                if showsRepairRefuelConfirmation {
-                    operationalToggle("Aircraft was refueled before this flight", isOn: $repairRefueledSincePreviousFlight)
-                }
-                if showsRepairOilServiceConfirmation {
-                    operationalToggle("Oil was serviced before this flight", isOn: $repairOilServicedSincePreviousFlight)
-                }
-                CVROperationalActionButton(
-                    title: "CONFIRM & RETRY DISPATCH UPLOAD",
-                    subtitle: "Apply changes and resend",
-                    color: CVROperationalPalette.success
-                ) {
-                    applyContinuityRepairAndRetryUpload()
-                }
-            }
-            .padding(14)
-            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.warning.opacity(0.55), lineWidth: 1))
+        if let warnings = workflow.state.activeDispatch?.continuityDiscrepancies,
+           !warnings.isEmpty {
+            CVROperationalWarningCard(
+                title: "DISPATCH CONTINUITY WARNING",
+                message: warnings.joined(separator: "\n"),
+                iconName: "exclamationmark.triangle.fill",
+                color: CVROperationalPalette.warning
+            )
         }
     }
 
@@ -705,7 +664,7 @@ struct DispatchWorkflowView: View {
                         _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                     }
-                } else if workflow.dispatchContinuityUploadIssue() == nil {
+                } else {
                     CVROperationalActionButton(title: "RETRY DISPATCH UPLOAD", subtitle: "Resend failed Dispatch metadata", color: CVROperationalPalette.warning) {
                         workflow.requeueFailedUploads(componentTypes: ["dispatch_metadata"])
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
@@ -1264,10 +1223,10 @@ struct InFlightWorkflowView: View {
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
-                CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.critical) {
+                CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordEngineShutdownOnBlock(gpsSample: gps.latestSample)
-                    isShowingShutdownVerification = true
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
             }
         } else if avionicsReady {

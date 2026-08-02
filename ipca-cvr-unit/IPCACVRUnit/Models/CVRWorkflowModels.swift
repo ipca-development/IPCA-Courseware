@@ -189,7 +189,6 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
         if startingTacho == nil { items.append("STARTING TACHO REQUIRED") }
         if fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("FUEL QUANTITY REQUIRED") }
         if effectiveStartingOilQuantity == nil { items.append("OIL QUANTITY REQUIRED") }
-        items.append(contentsOf: continuityDiscrepancies)
         return items
     }
 

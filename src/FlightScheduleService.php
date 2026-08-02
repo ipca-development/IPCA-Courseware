@@ -20,8 +20,9 @@ final class FlightScheduleService
     /** @return list<array<string,mixed>> */
     public function listSlots(?string $fromDate = null, ?string $toDate = null, ?int $aircraftId = null): array
     {
-        $fromDate = $this->date($fromDate ?: gmdate('Y-m-d'));
-        $toDate = $this->date($toDate ?: gmdate('Y-m-d', time() + 14 * 86400));
+        $operationalToday = new DateTimeImmutable('today', new DateTimeZone('America/Los_Angeles'));
+        $fromDate = $this->date($fromDate ?: $operationalToday->modify('-1 day')->format('Y-m-d'));
+        $toDate = $this->date($toDate ?: $operationalToday->modify('+15 days')->format('Y-m-d'));
         $this->reconcileUnlinkedCompletedDispatches($fromDate, $toDate);
         $sql = "
             SELECT s.*, a.registration AS aircraft_registration,

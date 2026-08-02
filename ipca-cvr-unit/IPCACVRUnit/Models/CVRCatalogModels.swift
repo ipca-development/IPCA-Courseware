@@ -171,7 +171,7 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
             let formatter = DateFormatter()
             formatter.calendar = Calendar(identifier: .gregorian)
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = .current
+            formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
             formatter.dateFormat = format
             if let date = formatter.date(from: value) {
                 return date

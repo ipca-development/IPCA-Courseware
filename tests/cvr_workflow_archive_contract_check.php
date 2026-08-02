@@ -93,20 +93,21 @@ $checks = array(
         && str_contains($derivation, 'crew_hobbs_end')
         && str_contains($derivation, 'crew counter remains authoritative')
         && str_contains($derivation, 'UPDATE ipca_operational_flight_record_versions'),
-    'fuel and oil continuity require service declarations beyond twenty percent' =>
+    'meter fuel and oil continuity are advisory beyond tolerance' =>
         str_contains($models, 'refueledSincePreviousFlight')
         && str_contains($models, 'oilServicedSincePreviousFlight')
-        && str_contains($views, 'Aircraft was refueled before this flight')
-        && str_contains($views, 'Oil was serviced before this flight')
-        && str_contains($dispatchIntake, 'assertPreviousFlightContinuity')
-        && str_contains($dispatchIntake, '> 0.20'),
-    'failed dispatch upload can be repaired with continuity confirmation' =>
+        && str_contains($dispatchIntake, 'previousFlightContinuityWarnings')
+        && str_contains($dispatchIntake, "'continuity_warnings'")
+        && str_contains($dispatchIntake, '> 0.20')
+        && !str_contains($models, 'items.append(contentsOf: continuityDiscrepancies)'),
+    'continuity warning never replaces generic Dispatch retry' =>
         str_contains($store, 'updateActiveDispatchForUploadRepair')
         && str_contains($store, 'dispatchContinuityUploadIssue')
         && str_contains($store, 'dispatchUploadVerified')
-        && str_contains($views, 'CONFIRM & RETRY DISPATCH UPLOAD')
+        && str_contains($views, 'DISPATCH CONTINUITY WARNING')
+        && str_contains($views, 'RETRY DISPATCH UPLOAD')
         && str_contains($views, 'Oil has been uploaded')
-        && str_contains($views, 'CONTINUITY CONFIRMATION REQUIRED'),
+        && !str_contains($views, 'Adjust dispatch oil if the reading was wrong'),
     'failed closure upload can be repaired from Garmin and In-Flight tabs' =>
         str_contains($store, 'saveFlightClosureValues')
         && str_contains($store, 'canEditFlightClosure')

@@ -17,6 +17,7 @@ $iosModels = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Models/C
 $iosUpload = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
 $iosWorkflow = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
 $iosViews = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
+$iosApiClient = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift') ?: '';
 
 $schedule = (new ReflectionClass(FlightScheduleService::class))->newInstanceWithoutConstructor();
 $payloadMethod = new ReflectionMethod(FlightScheduleService::class, 'payload');
@@ -53,6 +54,12 @@ $checks['API requires enrolled device authentication'] = static fn(): bool =>
     str_contains($apiSource, 'DeviceAuthService')
     && str_contains($apiSource, 'requireDevice()')
     && str_contains($apiSource, "'scheduled_sessions'");
+$checks['scheduled sessions use California date window across UTC midnight'] = static fn(): bool =>
+    str_contains($iosApiClient, 'TimeZone(identifier: "America/Los_Angeles")')
+    && str_contains($iosApiClient, 'URLQueryItem(name: "from"')
+    && str_contains($iosApiClient, 'URLQueryItem(name: "to"')
+    && str_contains($scheduleSource, "new DateTimeZone('America/Los_Angeles')")
+    && !str_contains($scheduleSource, "fromDate ?: gmdate('Y-m-d')");
 $checks['schedule claim is transactional row locked and idempotent'] = static fn(): bool =>
     str_contains($dispatchSource, 'claimScheduledSlot')
     && str_contains($dispatchSource, 'FOR UPDATE')
@@ -98,6 +105,11 @@ $checks['authenticated scheduled missions are selectable unless audio is recordi
     && str_contains($iosWorkflow, 'state.activeDispatch != nil')
     && str_contains($iosViews, 'aircraftForSession(session)')
     && str_contains($iosViews, 'Archive Current and Open Scheduled Dispatch');
+$checks['engine shutdown requires the original three second hold'] = static fn(): bool =>
+    str_contains($iosViews, 'CVRHoldActionButton(title: "ENGINE SHUTDOWN"')
+    && str_contains($iosViews, 'subtitle: "Hold 3 seconds for ON Block"')
+    && str_contains($iosWorkflow, 'creationMethod: "three_second_hold"')
+    && !str_contains($iosViews, 'CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.critical');
 $checks['completed prior workflow archives without a confusing confirmation'] = static fn(): bool =>
     str_contains($iosWorkflow, 'func requiresArchivingBeforeScheduledSession')
     && str_contains($iosWorkflow, 'let endingMetersEntered')

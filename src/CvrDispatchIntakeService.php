@@ -18,6 +18,10 @@ final class CvrDispatchIntakeService
     {
         $this->requireSchema();
         $normalized = $this->normalizeAndValidate($payload, $device);
+        $continuityWarnings = is_array($normalized['continuity_warnings'] ?? null)
+            ? array_values($normalized['continuity_warnings'])
+            : array();
+        unset($normalized['continuity_warnings']);
         if ($normalized['scheduler_record_id'] === '') {
             $normalized['scheduler_record_id'] = $this->resolveUnambiguousScheduledRecordId($normalized);
         }
@@ -94,6 +98,7 @@ final class CvrDispatchIntakeService
                         'flight_record_uuid' => $normalized['flight_record_uuid'],
                         'receipt_uuid' => $receiptUuid,
                         'payload_sha256' => $payloadSha256,
+                        'continuity_warnings' => $continuityWarnings,
                     ),
                     'Authenticated CVR Dispatch received.',
                     'device',
@@ -115,6 +120,7 @@ final class CvrDispatchIntakeService
         return array(
             'ok' => true,
             'already_present' => $alreadyPresent,
+            'continuity_warnings' => $continuityWarnings,
             'dispatch' => array(
                 'id' => $dispatchId,
                 'dispatch_uuid' => $normalized['dispatch_uuid'],
@@ -255,7 +261,7 @@ final class CvrDispatchIntakeService
 
         $refueled = filter_var($dispatch['refueled_since_previous_flight'] ?? false, FILTER_VALIDATE_BOOL);
         $oilServiced = filter_var($dispatch['oil_serviced_since_previous_flight'] ?? false, FILTER_VALIDATE_BOOL);
-        $this->assertPreviousFlightContinuity(
+        $continuityWarnings = $this->previousFlightContinuityWarnings(
             $dispatchUuid,
             $tailNumber,
             $startingHobbs,
@@ -299,11 +305,13 @@ final class CvrDispatchIntakeService
             'previous_flight_record_id' => substr(strtolower(trim((string)($dispatch['previous_flight_record_id'] ?? ''))), 0, 36),
             'refueled_since_previous_flight' => $refueled,
             'oil_serviced_since_previous_flight' => $oilServiced,
+            'continuity_warnings' => $continuityWarnings,
             'consents' => $normalizedConsents,
         );
     }
 
-    private function assertPreviousFlightContinuity(
+    /** @return list<string> */
+    private function previousFlightContinuityWarnings(
         string $dispatchUuid,
         string $tailNumber,
         float $startingHobbs,
@@ -314,7 +322,8 @@ final class CvrDispatchIntakeService
         string $oilUnit,
         bool $refueled,
         bool $oilServiced
-    ): void {
+    ): array {
+        $warnings = array();
         $statement = $this->pdo->prepare(
             'SELECT d.workflow_flight_record_uuid, c.ending_hobbs, c.ending_tacho,
                     c.fuel_remaining, c.oil_percentage, c.oil_quantity, c.oil_unit
@@ -330,29 +339,28 @@ final class CvrDispatchIntakeService
         $statement->execute(array($tailNumber, $dispatchUuid));
         $previous = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($previous)) {
-            return;
+            return $warnings;
         }
         if (abs($startingHobbs - (float)$previous['ending_hobbs']) > 0.1) {
-            throw new RuntimeException(sprintf(
+            $warnings[] = sprintf(
                 'Hobbs discrepancy: previous crew-provided ending value was %.1f; verify the new starting value.',
                 (float)$previous['ending_hobbs']
-            ));
+            );
         }
         if (abs($startingTacho - (float)$previous['ending_tacho']) > 0.1) {
-            throw new RuntimeException(sprintf(
+            $warnings[] = sprintf(
                 'Tacho discrepancy: previous crew-provided ending value was %.1f; verify the new starting value.',
                 (float)$previous['ending_tacho']
-            ));
+            );
         }
         $fuel = $this->numericQuantity($fuelOnboard);
         $previousFuel = $this->numericQuantity((string)$previous['fuel_remaining']);
         if ($fuel !== null && $previousFuel !== null && $this->relativeDifference($fuel, $previousFuel) > 0.20) {
             if ($fuel <= $previousFuel || !$refueled) {
-                throw new RuntimeException(
+                $warnings[] =
                     $fuel > $previousFuel
                         ? 'Fuel differs by more than 20%; confirm that the aircraft was refueled.'
-                        : 'Fuel is more than 20% below the previous ending quantity; refueling does not explain the discrepancy.'
-                );
+                        : 'Fuel is more than 20% below the previous ending quantity; refueling does not explain the discrepancy.';
             }
         }
         $incomingOil = $oilQuantity;
@@ -367,13 +375,13 @@ final class CvrDispatchIntakeService
         if ($unitsMatch && $incomingOil !== null && $previousOil !== null
             && $this->relativeDifference($incomingOil, $previousOil) > 0.20) {
             if ($incomingOil <= $previousOil || !$oilServiced) {
-                throw new RuntimeException(
+                $warnings[] =
                     $incomingOil > $previousOil
                         ? 'Oil differs by more than 20%; confirm that oil was serviced.'
-                        : 'Oil is more than 20% below the previous ending quantity; servicing does not explain the discrepancy.'
-                );
+                        : 'Oil is more than 20% below the previous ending quantity; servicing does not explain the discrepancy.';
             }
         }
+        return $warnings;
     }
 
     private function numericQuantity(string $value): ?float
