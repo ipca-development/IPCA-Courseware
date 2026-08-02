@@ -2764,9 +2764,9 @@ private struct FlightLogView: View {
         if values.contains("uploading") { return "uploading" }
         if values.contains("transcribing") { return "transcribing" }
         if values.contains("queued") { return "queued" }
+        if values.contains("failed") { return "failed" }
         if values.contains("pending") { return "pending" }
         if values.contains("partial") { return "partial" }
-        if values.contains("failed") { return "failed" }
         return values.first
     }
 

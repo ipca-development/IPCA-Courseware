@@ -63,13 +63,19 @@ $checks = array(
     'retry progress replaces stale offline errors in the merged Log row' =>
         str_contains($views, 'merged.serverUploadStatus?.lowercased() == "failed"')
         && str_contains($views, 'merged.transcriptStatus?.lowercased() == "failed"')
-        && strpos($views, 'if values.contains("pending")') < strpos($views, 'if values.contains("failed")')
+        && strpos($views, 'if values.contains("queued")') < strpos($views, 'if values.contains("failed")')
+        && strpos($views, 'if values.contains("failed")') < strpos($views, 'if values.contains("pending")')
         && str_contains($views, 'await flightLogs.refresh(settings: settings)'),
     'legacy continuity 422 is cleared and automatically requeued' =>
         str_contains($workflowStore, 'requeueLegacyAdvisoryDispatchFailure')
         && str_contains($workflowStore, 'isLegacyAdvisoryDispatchFailure')
         && str_contains($workflowStore, 'error.contains("hobbs discrepancy")')
         && str_contains($workflowStore, 'error.contains("tacho discrepancy")'),
+    'completed archived closure is recovered from stale needs-user-action state' =>
+        str_contains($workflowStore, 'archivedClosureIsComplete')
+        && str_contains($workflowStore, 'component.componentType == "flight_record_closure"')
+        && str_contains($workflowStore, 'componentState == .needsUserAction')
+        && str_contains($workflowStore, 'recovered[archiveIndex].uploadComponents[componentIndex].state = .queued'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")

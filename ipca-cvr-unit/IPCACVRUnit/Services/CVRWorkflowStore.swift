@@ -1700,6 +1700,10 @@ final class CVRWorkflowStore: ObservableObject {
         var recovered = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
         var changed = false
         for archiveIndex in recovered.indices {
+            let closureIsComplete = Self.archivedClosureIsComplete(
+                recovered[archiveIndex].flightRecord,
+                dispatch: recovered[archiveIndex].dispatch
+            )
             for componentIndex in recovered[archiveIndex].uploadComponents.indices
             {
                 let component = recovered[archiveIndex].uploadComponents[componentIndex]
@@ -1715,6 +1719,14 @@ final class CVRWorkflowStore: ObservableObject {
                     recovered[archiveIndex].uploadComponents[componentIndex].progress = 0
                     recovered[archiveIndex].status = .uploadPending
                     changed = true
+                } else if component.componentType == "flight_record_closure",
+                          componentState == .needsUserAction,
+                          closureIsComplete {
+                    recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                    recovered[archiveIndex].uploadComponents[componentIndex].lastError = ""
+                    recovered[archiveIndex].uploadComponents[componentIndex].progress = 0
+                    recovered[archiveIndex].status = .uploadPending
+                    changed = true
                 }
             }
         }
@@ -1722,6 +1734,24 @@ final class CVRWorkflowStore: ObservableObject {
             try saveArchives(recovered)
         }
         archives = recovered
+    }
+
+    private static func archivedClosureIsComplete(
+        _ flightRecord: CVRIncompleteFlightRecord,
+        dispatch: CVRDispatchRecord
+    ) -> Bool {
+        guard let endingHobbs = flightRecord.endingHobbs,
+              let endingTacho = flightRecord.endingTacho,
+              endingHobbs >= (dispatch.startingHobbs ?? 0),
+              endingTacho >= (dispatch.startingTacho ?? 0),
+              let fuel = flightRecord.fuelRemaining,
+              Double(fuel.trimmingCharacters(in: .whitespacesAndNewlines)) != nil,
+              flightRecord.effectiveEndingOilQuantity != nil,
+              (flightRecord.verifiedTakeoffCount ?? 0) >= 0,
+              (flightRecord.verifiedLandingCount ?? 0) >= 0 else {
+            return false
+        }
+        return true
     }
 
     private static func requeueLegacyAdvisoryDispatchFailure(in workflow: inout CVRWorkflowState) -> Bool {
