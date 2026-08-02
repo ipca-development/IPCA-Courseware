@@ -728,7 +728,10 @@ final class CVRFlightLogStore: ObservableObject {
             return false
         }
         let fuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let fuelValue = Double(fuel), fuelValue >= 0 else {
+        let numericFuel = fuel.components(
+            separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
+        ).joined()
+        guard let fuelValue = Double(numericFuel), fuelValue >= 0 else {
             lastError = "Fuel remaining must be a valid non-negative quantity."
             return false
         }
@@ -746,13 +749,14 @@ final class CVRFlightLogStore: ObservableObject {
         let crew = crewNames
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard !departure.isEmpty, !arrival.isEmpty, !crew.isEmpty else {
-            lastError = "Departure, arrival, and at least one crew member are required."
+        guard !crew.isEmpty else {
+            lastError = "At least one crew member is required."
             return false
         }
         let payload: [String: Any] = [
             "flight_record_uuid": entry.flightRecordID.lowercased(),
             "dispatch_uuid": entry.dispatchUUID.lowercased(),
+            "aircraft_registration": entry.aircraftRegistration.uppercased(),
             "departure_airport": departure,
             "arrival_airport": arrival,
             "crew_names": crew,
@@ -772,6 +776,21 @@ final class CVRFlightLogStore: ObservableObject {
             }
             lastError = ""
             await refresh(settings: settings)
+            var adjustedEntry = entry
+            adjustedEntry.departureAirport = departure
+            adjustedEntry.arrivalAirport = arrival
+            adjustedEntry.crewNames = crew
+            adjustedEntry.startingHobbs = startingHobbs
+            adjustedEntry.startingTacho = startingTacho
+            adjustedEntry.endingHobbs = endingHobbs
+            adjustedEntry.endingTacho = endingTacho
+            adjustedEntry.fuelRemaining = String(fuelValue)
+            adjustedEntry.totalHobbsTime = endingHobbs - startingHobbs
+            if let index = entries.firstIndex(where: { $0.flightRecordID == entry.flightRecordID }) {
+                entries[index] = adjustedEntry
+            } else {
+                entries.append(adjustedEntry)
+            }
             return true
         } catch {
             lastError = "Flight log adjustment failed: \(error.localizedDescription)"

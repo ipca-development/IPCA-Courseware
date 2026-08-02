@@ -33,6 +33,7 @@ final class CVRWorkflowStore: ObservableObject {
                 }
                 changed = recoverInterruptedActiveUploads() || changed
                 changed = Self.repairStaleDispatchConsents(in: &state) || changed
+                changed = Self.requeueLegacyAdvisoryDispatchFailure(in: &state) || changed
                 changed = ensureDispatchUploadComponent() || changed
                 changed = ensureEvidenceUploadComponents() || changed
                 changed = reconcileClosureUploadComponents() || changed
@@ -1699,23 +1700,16 @@ final class CVRWorkflowStore: ObservableObject {
         var recovered = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
         var changed = false
         for archiveIndex in recovered.indices {
-            let failedForLegacyScheduleTimeRule = recovered[archiveIndex].uploadComponents.contains {
-                $0.componentType == "dispatch_metadata"
-                    && ($0.state == .failed || $0.state == .needsUserAction)
-                    && $0.lastError.localizedCaseInsensitiveContains(
-                        "Scheduled session times do not match the Dispatch"
-                    )
-            }
             for componentIndex in recovered[archiveIndex].uploadComponents.indices
             {
-                let componentState = recovered[archiveIndex].uploadComponents[componentIndex].state
+                let component = recovered[archiveIndex].uploadComponents[componentIndex]
+                let componentState = component.state
                 if componentState == .uploading {
                     recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
                     recovered[archiveIndex].uploadComponents[componentIndex].lastError = "Upload was interrupted and has been queued for recovery."
                     recovered[archiveIndex].status = .uploadPending
                     changed = true
-                } else if failedForLegacyScheduleTimeRule
-                            && (componentState == .failed || componentState == .needsUserAction) {
+                } else if Self.isLegacyAdvisoryDispatchFailure(component) {
                     recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
                     recovered[archiveIndex].uploadComponents[componentIndex].lastError = ""
                     recovered[archiveIndex].uploadComponents[componentIndex].progress = 0
@@ -1728,6 +1722,31 @@ final class CVRWorkflowStore: ObservableObject {
             try saveArchives(recovered)
         }
         archives = recovered
+    }
+
+    private static func requeueLegacyAdvisoryDispatchFailure(in workflow: inout CVRWorkflowState) -> Bool {
+        var changed = false
+        for index in workflow.uploadComponents.indices
+        where isLegacyAdvisoryDispatchFailure(workflow.uploadComponents[index]) {
+            workflow.uploadComponents[index].state = .queued
+            workflow.uploadComponents[index].lastError = ""
+            workflow.uploadComponents[index].progress = 0
+            changed = true
+        }
+        return changed
+    }
+
+    private static func isLegacyAdvisoryDispatchFailure(_ component: CVRUploadComponentRecord) -> Bool {
+        guard component.componentType == "dispatch_metadata",
+              component.state == .failed || component.state == .needsUserAction else {
+            return false
+        }
+        let error = component.lastError.lowercased()
+        return error.contains("scheduled session times do not match the dispatch")
+            || error.contains("hobbs discrepancy")
+            || error.contains("tacho discrepancy")
+            || (error.contains("fuel") && error.contains("20%"))
+            || (error.contains("oil") && error.contains("20%"))
     }
 
     private func saveArchives(_ records: [CVRWorkflowArchiveRecord]) throws {

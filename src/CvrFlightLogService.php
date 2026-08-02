@@ -22,9 +22,11 @@ final class CvrFlightLogService
             throw new RuntimeException('The CVR Unit is not assigned to an aircraft.');
         }
 
-        $aircraftPredicate = $aircraftId > 0
-            ? 'd.aircraft_id = :aircraft_id'
-            : 'UPPER(d.aircraft_registration) = :registration';
+        $aircraftPredicate = $aircraftId > 0 && $registration !== ''
+            ? '(d.aircraft_id = :aircraft_id OR UPPER(d.aircraft_registration) = :registration)'
+            : ($aircraftId > 0
+                ? 'd.aircraft_id = :aircraft_id'
+                : 'UPPER(d.aircraft_registration) = :registration');
         $sql = "
             SELECT
                 d.workflow_flight_record_uuid,
@@ -172,7 +174,8 @@ final class CvrFlightLogService
         $parameters = array(':organization_id' => $organizationId);
         if ($aircraftId > 0) {
             $parameters[':aircraft_id'] = $aircraftId;
-        } else {
+        }
+        if ($registration !== '') {
             $parameters[':registration'] = $registration;
         }
         $statement->execute($parameters);
@@ -275,9 +278,11 @@ final class CvrFlightLogService
         $organizationId = max(1, (int)($device['organization_id'] ?? 1));
         $aircraftId = (int)($device['aircraft_id'] ?? 0);
         $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
-        $aircraftOwnershipPredicate = $aircraftId > 0
-            ? 'aircraft_id = :aircraft_id'
-            : 'UPPER(aircraft_registration) = :registration';
+        $aircraftOwnershipPredicate = $aircraftId > 0 && $registration !== ''
+            ? '(aircraft_id = :aircraft_id OR UPPER(aircraft_registration) = :registration)'
+            : ($aircraftId > 0
+                ? 'aircraft_id = :aircraft_id'
+                : 'UPPER(aircraft_registration) = :registration');
         $ownership = $this->pdo->prepare(
             'SELECT id, starting_hobbs, starting_tacho
              FROM ipca_cvr_dispatches
@@ -294,13 +299,17 @@ final class CvrFlightLogService
         );
         if ($aircraftId > 0) {
             $ownershipParameters[':aircraft_id'] = $aircraftId;
-        } else {
+        }
+        if ($registration !== '') {
             $ownershipParameters[':registration'] = $registration;
         }
         $ownership->execute($ownershipParameters);
         $dispatch = $ownership->fetch(PDO::FETCH_ASSOC);
         if (!is_array($dispatch)) {
-            throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
+            $payloadRegistration = strtoupper(trim((string)($payload['aircraft_registration'] ?? '')));
+            if ($registration === '' || $payloadRegistration !== $registration) {
+                throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
+            }
         }
 
         $departure = $this->airport($payload['departure_airport'] ?? null, 'departure_airport');
@@ -408,9 +417,11 @@ final class CvrFlightLogService
         $organizationId = max(1, (int)($device['organization_id'] ?? 1));
         $aircraftId = (int)($device['aircraft_id'] ?? 0);
         $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
-        $aircraftPredicate = $aircraftId > 0
-            ? 'aircraft_id = :aircraft_id'
-            : 'UPPER(aircraft_registration) = :registration';
+        $aircraftPredicate = $aircraftId > 0 && $registration !== ''
+            ? '(aircraft_id = :aircraft_id OR UPPER(aircraft_registration) = :registration)'
+            : ($aircraftId > 0
+                ? 'aircraft_id = :aircraft_id'
+                : 'UPPER(aircraft_registration) = :registration');
         $ownership = $this->pdo->prepare(
             'SELECT id
              FROM ipca_cvr_dispatches
@@ -425,7 +436,8 @@ final class CvrFlightLogService
         );
         if ($aircraftId > 0) {
             $parameters[':aircraft_id'] = $aircraftId;
-        } else {
+        }
+        if ($registration !== '') {
             $parameters[':registration'] = $registration;
         }
         $ownership->execute($parameters);
@@ -459,7 +471,7 @@ final class CvrFlightLogService
     private function airport(mixed $value, string $field): string
     {
         $airport = strtoupper(trim((string)$value));
-        if ($airport === '' || preg_match('/^[A-Z0-9]{3,8}$/', $airport) !== 1) {
+        if ($airport !== '' && preg_match('/^[A-Z0-9]{3,8}$/', $airport) !== 1) {
             throw new RuntimeException($field . ' must contain a valid airport identifier.');
         }
         return $airport;

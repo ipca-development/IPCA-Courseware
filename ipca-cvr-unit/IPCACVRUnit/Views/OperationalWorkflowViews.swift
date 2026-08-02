@@ -2079,6 +2079,8 @@ private struct FlightLogView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var recordingStore: RecordingStore
     @State private var isShowingFileImporter = false
+    @State private var isShowingGarminAssignment = false
+    @State private var isDirectGarminUpload = false
     @State private var directImportTarget: CVRFlightLogEntry?
     @State private var pinTarget: CVRFlightLogEntry?
     @State private var adjustmentTarget: CVRFlightLogEntry?
@@ -2168,6 +2170,7 @@ private struct FlightLogView: View {
                             subtitle: "Choose a CSV, then assign it to a dispatched flight",
                             color: CVROperationalPalette.secondaryBlue
                         ) {
+                            isDirectGarminUpload = false
                             directImportTarget = nil
                             isShowingFileImporter = true
                         }
@@ -2194,6 +2197,16 @@ private struct FlightLogView: View {
         }
         .task {
             await flightLogs.refresh(settings: settings)
+            if flightLogs.pendingGarminCSV != nil && directImportTarget == nil {
+                isShowingGarminAssignment = true
+            }
+        }
+        .onChange(of: flightLogs.pendingGarminCSV?.id) { _, pendingID in
+            if pendingID == nil {
+                isShowingGarminAssignment = false
+            } else if directImportTarget == nil && !isShowingFileImporter && !isDirectGarminUpload {
+                isShowingGarminAssignment = true
+            }
         }
         .fileImporter(
             isPresented: $isShowingFileImporter,
@@ -2202,7 +2215,10 @@ private struct FlightLogView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                guard let url = urls.first, flightLogs.stageGarminCSV(from: url) else { return }
+                guard let url = urls.first, flightLogs.stageGarminCSV(from: url) else {
+                    isDirectGarminUpload = false
+                    return
+                }
                 if let target = directImportTarget {
                     directImportTarget = nil
                     Task {
@@ -2211,19 +2227,18 @@ private struct FlightLogView: View {
                             settings: settings,
                             uploadManager: uploadManager
                         )
+                        isDirectGarminUpload = false
                     }
+                } else {
+                    isShowingGarminAssignment = true
                 }
             case .failure(let error):
+                isDirectGarminUpload = false
                 directImportTarget = nil
                 _ = error
             }
         }
-        .sheet(
-            isPresented: Binding(
-                get: { flightLogs.pendingGarminCSV != nil && directImportTarget == nil && !flightLogs.isUploading },
-                set: { _ in }
-            )
-        ) {
+        .sheet(isPresented: $isShowingGarminAssignment) {
             garminAssignmentSheet
                 .interactiveDismissDisabled()
         }
@@ -2302,6 +2317,7 @@ private struct FlightLogView: View {
             HStack(spacing: 8) {
                 if !entry.hasGarminCSV {
                     Button {
+                        isDirectGarminUpload = true
                         directImportTarget = entry
                         isShowingFileImporter = true
                     } label: {
@@ -2546,6 +2562,7 @@ private struct FlightLogView: View {
                             .foregroundStyle(CVROperationalPalette.textSecondary)
                         ForEach(displayEntries.filter { !$0.hasGarminCSV }) { entry in
                             Button {
+                                isShowingGarminAssignment = false
                                 Task {
                                     await flightLogs.uploadPendingGarminCSV(
                                         to: entry,
@@ -2581,7 +2598,10 @@ private struct FlightLogView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { flightLogs.cancelPendingGarminCSV() }
+                    Button("Cancel") {
+                        isShowingGarminAssignment = false
+                        flightLogs.cancelPendingGarminCSV()
+                    }
                 }
             }
         }
@@ -2967,6 +2987,7 @@ private struct FlightLogAdjustmentView: View {
     @State private var endingHobbs: String
     @State private var endingTacho: String
     @State private var fuelRemaining: String
+    @State private var saveError = ""
 
     init(entry: CVRFlightLogEntry) {
         self.entry = entry
@@ -2992,14 +3013,22 @@ private struct FlightLogAdjustmentView: View {
                             iconName: "lock.shield.fill",
                             color: CVROperationalPalette.warning
                         )
+                        if !saveError.isEmpty {
+                            CVROperationalWarningCard(
+                                title: "CANNOT SAVE ADJUSTMENT",
+                                message: saveError,
+                                iconName: "exclamationmark.triangle.fill",
+                                color: CVROperationalPalette.critical
+                            )
+                        }
                         adjustmentField(
-                            "DEPARTURE AIRPORT",
+                            "DEPARTURE AIRPORT (OPTIONAL IF UNKNOWN)",
                             value: $departureAirport,
                             baseline: nil,
                             keyboard: .default
                         )
                         adjustmentField(
-                            "ARRIVAL AIRPORT",
+                            "ARRIVAL AIRPORT (OPTIONAL IF UNKNOWN)",
                             value: $arrivalAirport,
                             baseline: nil,
                             keyboard: .default
@@ -3047,6 +3076,11 @@ private struct FlightLogAdjustmentView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        if let validationMessage {
+                            saveError = validationMessage
+                            return
+                        }
+                        saveError = ""
                         Task {
                             if await flightLogs.adjustFlightLog(
                                 entry,
@@ -3061,23 +3095,53 @@ private struct FlightLogAdjustmentView: View {
                                 settings: settings
                             ) {
                                 dismiss()
+                            } else {
+                                saveError = flightLogs.lastError.nilIfEmpty
+                                    ?? "The server did not accept this adjustment."
                             }
                         }
                     }
-                    .disabled(
-                        departureAirport.isEmpty
-                            || arrivalAirport.isEmpty
-                            || crewNames.isEmpty
-                            || startingHobbs.isEmpty
-                            || startingTacho.isEmpty
-                            || endingHobbs.isEmpty
-                            || endingTacho.isEmpty
-                            || fuelRemaining.isEmpty
-                    )
                 }
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var validationMessage: String? {
+        let departure = departureAirport.trimmingCharacters(in: .whitespacesAndNewlines)
+        let arrival = arrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard departure.isEmpty
+                || departure.range(of: "^[A-Za-z0-9]{3,8}$", options: .regularExpression) != nil else {
+            return "Enter a valid 3–8 character departure airport identifier."
+        }
+        guard arrival.isEmpty
+                || arrival.range(of: "^[A-Za-z0-9]{3,8}$", options: .regularExpression) != nil else {
+            return "Enter a valid 3–8 character arrival airport identifier."
+        }
+        guard crewNames.split(separator: ",").contains(where: {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            return "Enter at least one crew member. Separate multiple names with commas."
+        }
+        guard let startHobbs = Double(startingHobbs),
+              let startTacho = Double(startingTacho),
+              startHobbs >= 0,
+              startTacho >= 0 else {
+            return "Starting Hobbs and Tacho must be valid non-negative values."
+        }
+        guard let endHobbs = Double(endingHobbs),
+              let endTacho = Double(endingTacho),
+              endHobbs >= startHobbs,
+              endTacho >= startTacho else {
+            return "Ending Hobbs and Tacho must be valid and cannot be lower than their starting values."
+        }
+        let numericFuel = fuelRemaining.components(
+            separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
+        ).joined()
+        guard let fuel = Double(numericFuel), fuel >= 0 else {
+            return "Fuel remaining must be a valid non-negative quantity."
+        }
+        return nil
     }
 
     private func adjustmentField(

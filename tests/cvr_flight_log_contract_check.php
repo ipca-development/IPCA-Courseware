@@ -28,8 +28,9 @@ $checks = array(
         && str_contains($service, 'd.organization_id = :organization_id'),
     'flight log adjustment uses the same aircraft identity fallback as listing' =>
         str_contains($service, '$aircraftOwnershipPredicate = $aircraftId > 0')
-        && str_contains($service, "'aircraft_id = :aircraft_id'")
-        && str_contains($service, "'UPPER(aircraft_registration) = :registration'")
+        && str_contains($service, 'aircraft_id = :aircraft_id OR UPPER(aircraft_registration) = :registration')
+        && str_contains($service, '$payloadRegistration !== $registration')
+        && str_contains($models, '"aircraft_registration": entry.aircraftRegistration.uppercased()')
         && !str_contains($service, 'aircraft_id IS NULL AND UPPER(aircraft_registration)'),
     'flight log includes route times Hobbs and Garmin completeness' =>
         str_contains($service, "'departure_airport'")
@@ -64,6 +65,11 @@ $checks = array(
         && str_contains($views, 'merged.transcriptStatus?.lowercased() == "failed"')
         && strpos($views, 'if values.contains("pending")') < strpos($views, 'if values.contains("failed")')
         && str_contains($views, 'await flightLogs.refresh(settings: settings)'),
+    'legacy continuity 422 is cleared and automatically requeued' =>
+        str_contains($workflowStore, 'requeueLegacyAdvisoryDispatchFailure')
+        && str_contains($workflowStore, 'isLegacyAdvisoryDispatchFailure')
+        && str_contains($workflowStore, 'error.contains("hobbs discrepancy")')
+        && str_contains($workflowStore, 'error.contains("tacho discrepancy")'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")
@@ -129,7 +135,7 @@ $checks = array(
         && str_contains($app, 'selectTab(.log)')
         && str_contains($views, 'navigationTitle("Assign Garmin CSV")')
         && str_contains($views, '.interactiveDismissDisabled()')
-        && str_contains($views, 'set: { _ in }'),
+        && str_contains($views, '.sheet(isPresented: $isShowingGarminAssignment)'),
     'late CSV upload can target a selected dispatched flight' =>
         str_contains($models, 'CVRPendingGarminCSV')
         && str_contains($models, 'uploadPendingGarminCSV')
@@ -184,6 +190,11 @@ $checks = array(
         && strpos($models, 'await refresh(settings: settings)') < strrpos($models, 'self.pendingGarminCSV = nil')
         && str_contains($models, 'catch is CancellationError')
         && str_contains($views, 'hasLocallyAttachedGarminCSV'),
+    'manual Log CSV upload cannot reopen its assignment sheet in a loop' =>
+        str_contains($views, '@State private var isShowingGarminAssignment = false')
+        && str_contains($views, 'isShowingGarminAssignment = false')
+        && str_contains($views, 'isShowingGarminAssignment = true')
+        && !str_contains($views, 'flightLogs.pendingGarminCSV != nil && directImportTarget == nil && !flightLogs.isUploading'),
 );
 
 $failed = array();
