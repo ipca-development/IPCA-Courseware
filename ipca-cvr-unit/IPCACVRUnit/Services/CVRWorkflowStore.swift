@@ -58,7 +58,9 @@ final class CVRWorkflowStore: ObservableObject {
                 changed = reconcileClosureUploadComponents() || changed
                 if let flightRecord = state.activeFlightRecord,
                    flightRecord.endingHobbs != nil,
-                   flightRecord.endingTacho != nil {
+                   flightRecord.endingTacho != nil,
+                   flightRecord.status != .awaitingAvionicsOff,
+                   state.operationalSession?.awaitingAvionicsOffConfirmation != true {
                     if finishEndedFlightLocally() {
                         changed = false
                     }
@@ -79,7 +81,12 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
-    func createOrOpenLocalDispatch(selectedAircraft: CockpitAircraft?, cvrUnitID: String, beaconID: String) {
+    func createOrOpenLocalDispatch(
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String,
+        canonicalWriteEnabled: Bool = false
+    ) {
         guard let selectedAircraft else {
             lastError = "Aircraft configuration is required before creating a Dispatch."
             return
@@ -94,13 +101,36 @@ final class CVRWorkflowStore: ObservableObject {
             return
         }
         if state.activeDispatch != nil || state.activeFlightRecord != nil {
-            lastError = "Finish and save the current flight before creating another Dispatch. Uploads may continue after the flight is saved."
+            lastError = "Finish Check-In for the current leg before creating another Dispatch."
             return
         }
 
-        let carryover = latestClosedCarryover(for: registration)
+        let continuity = state.operationalSession
+        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
+        let dispatchID = UUID().uuidString
+        var operationalIdentity: CVRLocalOperationalIdentity?
+        if canonicalWriteEnabled {
+            do {
+                operationalIdentity = try CVROperationalIdentityLocal.createOfflineBundle(
+                    organizationID: 1,
+                    dispatchUUID: dispatchID,
+                    organizationTimezoneIANA: TimeZone.current.identifier,
+                    originAirport: selectedAircraft.homeAirport,
+                    destinationAirport: "",
+                    reservationUUID: continuity?.reservationUUID
+                )
+            } catch {
+                CVROperationalIdentityLocal.logSanitized("offline_dispatch_identity_create_failed", fields: [
+                    "error_class": String(describing: type(of: error)),
+                    "tail": registration,
+                ])
+                lastError = "Unable to create the Dispatch. Please try again."
+                return
+            }
+        }
+
         let dispatch = CVRDispatchRecord(
-            id: UUID().uuidString,
+            id: dispatchID,
             serverDispatchID: nil,
             organizationID: 1,
             scheduledDate: Date(),
@@ -118,7 +148,9 @@ final class CVRWorkflowStore: ObservableObject {
             oilPercentage: carryover?.oilPercentage,
             startingOilQuantity: carryover?.oilQuantity,
             startingOilUnit: carryover?.oilUnit ?? selectedAircraft.operationalConfig.oilUnit,
-            dispatchSource: carryover == nil ? "iphone_offline_local" : "previous_locally_closed_flight_carryover",
+            dispatchSource: continuity?.engineSessionContinuityActive == true
+                ? "transient_stop_carryover"
+                : (carryover == nil ? "iphone_offline_local" : "previous_locally_closed_flight_carryover"),
             schedulerRecordID: nil,
             creatorIdentity: "local_cvr_unit",
             createdAt: Date(),
@@ -136,10 +168,11 @@ final class CVRWorkflowStore: ObservableObject {
             previousEndingOilQuantity: carryover?.oilQuantity,
             previousEndingOilUnit: carryover?.oilUnit,
             refueledSincePreviousFlight: nil,
-            oilServicedSincePreviousFlight: nil
+            oilServicedSincePreviousFlight: nil,
+            operationalIdentity: operationalIdentity
         )
 
-        mutate {
+        let persisted = mutate {
             $0.activeDispatch = dispatch
             $0.activeFlightRecord = nil
             $0.consents = []
@@ -150,6 +183,171 @@ final class CVRWorkflowStore: ObservableObject {
             $0.discrepancies = []
             $0.selectedTab = .dispatch
         }
+        if !persisted {
+            if canonicalWriteEnabled {
+                lastError = "Unable to create the Dispatch. Please try again."
+                CVROperationalIdentityLocal.logSanitized("offline_dispatch_persist_failed", fields: [
+                    "dispatch_uuid": dispatchID.lowercased(),
+                    "error_class": "persist_failed",
+                ])
+            }
+        }
+    }
+
+    /// Create a local multi-leg reservation (e.g. KTRM → KPSP → KBUR → KTRM) and open Dispatch for leg 1.
+    func createLocalMultiLegReservation(
+        airports: [String],
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String,
+        missionCode: String = "",
+        canonicalWriteEnabled: Bool = false
+    ) {
+        guard let selectedAircraft else {
+            lastError = "Aircraft configuration is required before creating a Dispatch."
+            return
+        }
+        let normalizedAirports = airports
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+        guard normalizedAirports.count >= 2 else {
+            lastError = "Enter at least two airports to create a multi-leg reservation."
+            return
+        }
+        if state.activeDispatch != nil || state.activeFlightRecord != nil {
+            lastError = "Finish Check-In for the current leg before creating another Dispatch."
+            return
+        }
+
+        let registration = selectedAircraft.registration
+        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
+        let legCount = normalizedAirports.count - 1
+        let dispatchIDs = (0..<legCount).map { _ in UUID().uuidString }
+        var identities: [CVRLocalOperationalIdentity] = []
+        var reservationUUID = UUID().uuidString.lowercased()
+        if canonicalWriteEnabled {
+            do {
+                let minted = try CVROperationalIdentityLocal.createOfflineMultiLegBundles(
+                    organizationID: 1,
+                    organizationTimezoneIANA: TimeZone.current.identifier,
+                    airports: normalizedAirports,
+                    dispatchUUIDs: dispatchIDs
+                )
+                reservationUUID = minted.reservationUUID
+                identities = minted.identities
+            } catch {
+                CVROperationalIdentityLocal.logSanitized("offline_multileg_identity_create_failed", fields: [
+                    "error_class": String(describing: type(of: error)),
+                    "tail": registration,
+                ])
+                lastError = "Unable to create the multi-leg Dispatch. Please try again."
+                return
+            }
+        } else {
+            identities = (0..<legCount).map { index in
+                CVRLocalOperationalIdentity(
+                    reservationUUID: reservationUUID,
+                    legUUID: UUID().uuidString.lowercased(),
+                    organizationID: 1,
+                    reservationType: "flight_training",
+                    activityDomain: "flight",
+                    organizationTimezoneIANA: TimeZone.current.identifier,
+                    originAirport: normalizedAirports[index],
+                    destinationAirport: normalizedAirports[index + 1],
+                    plannedStartAtUTC: nil,
+                    plannedEndAtUTC: nil,
+                    aliases: [],
+                    linkageMethod: CVROperationalIdentityLocal.linkageOfflineCreate
+                )
+            }
+        }
+
+        let plannedLegs: [CVRPlannedLegRecord] = identities.enumerated().map { index, identity in
+            CVRPlannedLegRecord(
+                id: identity.legUUID,
+                reservationUUID: reservationUUID,
+                legUUID: identity.legUUID,
+                sequenceNumber: index + 1,
+                departureAirport: normalizedAirports[index],
+                destinationAirport: normalizedAirports[index + 1],
+                missionCode: missionCode,
+                tailNumber: registration,
+                schedulerRecordID: nil,
+                plannedStartAt: Date(),
+                plannedEndAt: nil,
+                status: index == 0 ? "active" : "planned"
+            )
+        }
+
+        let firstIdentity = canonicalWriteEnabled ? identities.first : nil
+        let dispatch = CVRDispatchRecord(
+            id: dispatchIDs[0],
+            serverDispatchID: nil,
+            organizationID: 1,
+            scheduledDate: Date(),
+            scheduledStartTime: nil,
+            scheduledEndTime: nil,
+            tailNumber: registration,
+            aircraftID: selectedAircraft.id,
+            missionCode: missionCode,
+            plannedDepartureAirport: normalizedAirports[0],
+            plannedDestinationAirport: normalizedAirports[1],
+            crew: [],
+            startingHobbs: carryover?.endingHobbs,
+            startingTacho: carryover?.endingTacho,
+            fuelOnboard: carryover?.fuelRemaining ?? "",
+            oilPercentage: carryover?.oilPercentage,
+            startingOilQuantity: carryover?.oilQuantity,
+            startingOilUnit: carryover?.oilUnit ?? selectedAircraft.operationalConfig.oilUnit,
+            dispatchSource: "local_multileg_reservation",
+            schedulerRecordID: nil,
+            creatorIdentity: "local_cvr_unit",
+            createdAt: Date(),
+            modifiedAt: Date(),
+            version: 1,
+            consentStatus: "not_required_yet",
+            status: .dispatchIncomplete,
+            configuredCVRUnitID: cvrUnitID,
+            configuredBeaconID: beaconID,
+            previousFlightRecordID: carryover?.flightRecordID,
+            previousEndingHobbs: carryover?.endingHobbs,
+            previousEndingTacho: carryover?.endingTacho,
+            previousFuelRemaining: carryover?.fuelRemaining,
+            previousOilPercentage: carryover?.oilPercentage,
+            previousEndingOilQuantity: carryover?.oilQuantity,
+            previousEndingOilUnit: carryover?.oilUnit,
+            refueledSincePreviousFlight: nil,
+            oilServicedSincePreviousFlight: nil,
+            operationalIdentity: firstIdentity
+        )
+
+        let persisted = mutate {
+            $0.operationalSession = CVROperationalSessionContext(
+                reservationUUID: reservationUUID,
+                engineSessionContinuityActive: false,
+                plannedLegs: plannedLegs,
+                currentLegIndex: 1,
+                pendingCheckInMode: nil,
+                carryoverHobbs: nil,
+                carryoverTacho: nil,
+                carryoverFuel: nil,
+                awaitingAvionicsOffConfirmation: false,
+                continuityEngineStartSynthesized: false,
+                pendingSoftStartRecording: false
+            )
+            $0.activeDispatch = dispatch
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .dispatch
+        }
+        if !persisted {
+            lastError = "Unable to create the multi-leg Dispatch. Please try again."
+        }
     }
 
     func openDispatchFromScheduledSession(
@@ -157,69 +355,235 @@ final class CVRWorkflowStore: ObservableObject {
         selectedAircraft: CockpitAircraft?,
         cvrUnitID: String,
         beaconID: String,
-        isAudioRecording: Bool
+        isAudioRecording: Bool,
+        canonicalWriteEnabled: Bool = false
     ) {
-        guard let selectedAircraft, scheduledSessionMatchesAircraft(session, selectedAircraft: selectedAircraft) else {
+        openDispatchFromLeg(
+            session: session,
+            plannedLeg: nil,
+            selectedAircraft: selectedAircraft,
+            cvrUnitID: cvrUnitID,
+            beaconID: beaconID,
+            isAudioRecording: isAudioRecording,
+            canonicalWriteEnabled: canonicalWriteEnabled
+        )
+    }
+
+    func openDispatchFromPlannedLeg(
+        _ plannedLeg: CVRPlannedLegRecord,
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String,
+        isAudioRecording: Bool,
+        canonicalWriteEnabled: Bool = false
+    ) {
+        openDispatchFromLeg(
+            session: nil,
+            plannedLeg: plannedLeg,
+            selectedAircraft: selectedAircraft,
+            cvrUnitID: cvrUnitID,
+            beaconID: beaconID,
+            isAudioRecording: isAudioRecording,
+            canonicalWriteEnabled: canonicalWriteEnabled
+        )
+    }
+
+    private func openDispatchFromLeg(
+        session: CVRScheduledSession?,
+        plannedLeg: CVRPlannedLegRecord?,
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String,
+        isAudioRecording: Bool,
+        canonicalWriteEnabled: Bool
+    ) {
+        let departure = session?.plannedDepartureAirport ?? plannedLeg?.departureAirport ?? ""
+        let destination = session?.plannedDestinationAirport ?? plannedLeg?.destinationAirport ?? ""
+        let missionCode = session?.missionCode ?? plannedLeg?.missionCode ?? ""
+        let schedulerRecordID = session?.schedulerRecordID ?? plannedLeg?.schedulerRecordID
+        let reservationUUID = session?.reservationUUID ?? plannedLeg?.reservationUUID
+        let legUUID = session?.legUUID ?? plannedLeg?.legUUID
+        let registration = selectedAircraft?.registration
+            ?? session?.aircraftRegistration
+            ?? plannedLeg?.tailNumber
+            ?? ""
+
+        guard let selectedAircraft,
+              session == nil || scheduledSessionMatchesAircraft(session!, selectedAircraft: selectedAircraft) else {
             lastError = "This scheduled flight does not match the aircraft enrolled to this CVR Unit."
             return
         }
-        if let active = state.activeDispatch,
-           active.schedulerRecordID == session.schedulerRecordID {
-            selectTab(.dispatch)
+
+        if let active = state.activeDispatch {
+            let sameScheduler = schedulerRecordID != nil && active.schedulerRecordID == schedulerRecordID
+            let sameLeg = legUUID != nil && active.operationalIdentity?.legUUID == legUUID
+            if sameScheduler || sameLeg {
+                selectTab(.dispatch)
+                return
+            }
+        }
+
+        if state.engineSessionContinuityActive,
+           let continuityReservation = state.operationalSession?.reservationUUID,
+           let reservationUUID,
+           continuityReservation.lowercased() != reservationUUID.lowercased() {
+            lastError = "Complete or abandon the current continuous engine session before opening a different reservation."
             return
         }
+
         if state.activeFlightRecord != nil {
-            guard !isAudioRecording else {
+            guard !isAudioRecording || state.engineSessionContinuityActive else {
                 lastError = "Stop the active recording before opening another scheduled flight."
+                return
+            }
+            if state.activeDispatch != nil, state.activeFlightRecord?.endingHobbs == nil {
+                lastError = "Complete Check-In for the current leg before opening the next leg."
                 return
             }
             if state.activeDispatch != nil {
                 guard archiveActiveWorkflow() else { return }
             }
-            mutate {
-                $0.activeDispatch = nil
-                $0.activeFlightRecord = nil
-                $0.consents = []
-                $0.recorderVerifications = []
-                $0.flightEvents = []
-                $0.flightLegs = []
-                $0.uploadComponents = []
-                $0.discrepancies = []
-            }
+            clearActiveLegStatePreservingSession(selectScheduled: false)
         } else if state.activeDispatch != nil {
-            mutate {
-                $0.activeDispatch = nil
-                $0.consents = []
-                $0.recorderVerifications = []
-                $0.flightEvents = []
-                $0.flightLegs = []
-                $0.uploadComponents = []
-                $0.discrepancies = []
-            }
+            clearActiveLegStatePreservingSession(selectScheduled: false)
         }
 
-        if state.activeDispatch == nil {
-            createOrOpenLocalDispatch(selectedAircraft: selectedAircraft, cvrUnitID: cvrUnitID, beaconID: beaconID)
+        let continuity = state.operationalSession
+        let useContinuity = continuity?.engineSessionContinuityActive == true
+        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
+        let dispatchID = UUID().uuidString
+        var operationalIdentity: CVRLocalOperationalIdentity?
+        if canonicalWriteEnabled {
+            do {
+                operationalIdentity = try CVROperationalIdentityLocal.createOfflineBundle(
+                    organizationID: 1,
+                    dispatchUUID: dispatchID,
+                    organizationTimezoneIANA: TimeZone.current.identifier,
+                    originAirport: departure,
+                    destinationAirport: destination,
+                    schedulerRecordID: schedulerRecordID,
+                    reservationUUID: reservationUUID,
+                    legUUID: legUUID
+                )
+            } catch {
+                CVROperationalIdentityLocal.logSanitized("offline_leg_identity_create_failed", fields: [
+                    "error_class": String(describing: type(of: error)),
+                ])
+                lastError = "Unable to open Dispatch for this leg. Please try again."
+                return
+            }
+        } else if let reservationUUID, let legUUID,
+                  let normalizedReservation = CVROperationalIdentityLocal.normalizeUUID(reservationUUID),
+                  let normalizedLeg = CVROperationalIdentityLocal.normalizeUUID(legUUID) {
+            // Preserve already-minted local/planned leg identity without enabling server canonical writes.
+            operationalIdentity = CVRLocalOperationalIdentity(
+                reservationUUID: normalizedReservation,
+                legUUID: normalizedLeg,
+                organizationID: 1,
+                reservationType: "flight_training",
+                activityDomain: "flight",
+                organizationTimezoneIANA: TimeZone.current.identifier,
+                originAirport: CVROperationalIdentityLocal.normalizeAirport(departure),
+                destinationAirport: CVROperationalIdentityLocal.normalizeAirport(destination),
+                plannedStartAtUTC: nil,
+                plannedEndAtUTC: nil,
+                aliases: [],
+                linkageMethod: CVROperationalIdentityLocal.linkageOfflineCreate
+            )
         }
-        updateActiveDispatch { dispatch in
-            dispatch.scheduledDate = session.dateTime(nil) ?? Date()
-            dispatch.scheduledStartTime = session.dateTime(session.scheduledStartTime)
-            dispatch.scheduledEndTime = session.dateTime(session.scheduledEndTime)
-            dispatch.schedulerRecordID = session.schedulerRecordID
-            dispatch.missionCode = session.missionCode
-            dispatch.plannedDepartureAirport = session.plannedDepartureAirport
-            dispatch.plannedDestinationAirport = session.plannedDestinationAirport
-            dispatch.dispatchSource = "scheduled_session"
-            dispatch.crew = session.crew.map { member in
+
+        let dispatch = CVRDispatchRecord(
+            id: dispatchID,
+            serverDispatchID: nil,
+            organizationID: 1,
+            scheduledDate: session?.dateTime(nil) ?? Date(),
+            scheduledStartTime: session?.dateTime(session?.scheduledStartTime),
+            scheduledEndTime: session?.dateTime(session?.scheduledEndTime),
+            tailNumber: selectedAircraft.registration,
+            aircraftID: selectedAircraft.id,
+            missionCode: missionCode,
+            plannedDepartureAirport: departure,
+            plannedDestinationAirport: destination,
+            crew: (session?.crew ?? []).map { member in
                 CVRCrewAssignment(
                     id: UUID().uuidString,
                     personID: member.personID,
                     personName: member.personName,
                     role: Self.crewRole(from: member.role)
                 )
+            },
+            startingHobbs: carryover?.endingHobbs,
+            startingTacho: carryover?.endingTacho,
+            fuelOnboard: carryover?.fuelRemaining ?? "",
+            oilPercentage: carryover?.oilPercentage,
+            startingOilQuantity: carryover?.oilQuantity,
+            startingOilUnit: carryover?.oilUnit ?? selectedAircraft.operationalConfig.oilUnit,
+            dispatchSource: useContinuity
+                ? "transient_stop_carryover"
+                : (session != nil ? "scheduled_session" : "local_planned_leg"),
+            schedulerRecordID: schedulerRecordID,
+            creatorIdentity: "local_cvr_unit",
+            createdAt: Date(),
+            modifiedAt: Date(),
+            version: 1,
+            consentStatus: "not_required_yet",
+            status: .dispatchIncomplete,
+            configuredCVRUnitID: cvrUnitID,
+            configuredBeaconID: beaconID,
+            previousFlightRecordID: carryover?.flightRecordID,
+            previousEndingHobbs: carryover?.endingHobbs,
+            previousEndingTacho: carryover?.endingTacho,
+            previousFuelRemaining: carryover?.fuelRemaining,
+            previousOilPercentage: carryover?.oilPercentage,
+            previousEndingOilQuantity: carryover?.oilQuantity,
+            previousEndingOilUnit: carryover?.oilUnit,
+            refueledSincePreviousFlight: nil,
+            oilServicedSincePreviousFlight: nil,
+            operationalIdentity: operationalIdentity
+        )
+
+        _ = mutate {
+            var sessionContext = $0.operationalSession ?? .empty
+            if let reservationUUID {
+                sessionContext.reservationUUID = reservationUUID.lowercased()
             }
+            if let plannedLeg {
+                if let index = sessionContext.plannedLegs.firstIndex(where: { $0.legUUID == plannedLeg.legUUID }) {
+                    sessionContext.plannedLegs[index].status = "active"
+                    sessionContext.currentLegIndex = sessionContext.plannedLegs[index].sequenceNumber
+                }
+            } else if let legUUID, sessionContext.plannedLegs.contains(where: { $0.legUUID == legUUID }) {
+                for index in sessionContext.plannedLegs.indices {
+                    if sessionContext.plannedLegs[index].legUUID == legUUID {
+                        sessionContext.plannedLegs[index].status = "active"
+                        sessionContext.currentLegIndex = sessionContext.plannedLegs[index].sequenceNumber
+                    } else if sessionContext.plannedLegs[index].status == "active" {
+                        sessionContext.plannedLegs[index].status = "planned"
+                    }
+                }
+            } else if let session {
+                // Seed planned legs from this reservation group if not already local.
+                if sessionContext.plannedLegs.isEmpty, let reservationUUID {
+                    sessionContext.reservationUUID = reservationUUID.lowercased()
+                }
+                sessionContext.currentLegIndex = 1
+                _ = session
+            }
+            sessionContext.pendingCheckInMode = nil
+            sessionContext.awaitingAvionicsOffConfirmation = false
+            sessionContext.continuityEngineStartSynthesized = false
+            sessionContext.pendingSoftStartRecording = useContinuity
+            $0.operationalSession = sessionContext
+            $0.activeDispatch = dispatch
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = $0.flightLegs
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .dispatch
         }
-        selectTab(.dispatch)
     }
 
     func canOpenScheduledSession(
@@ -227,9 +591,15 @@ final class CVRWorkflowStore: ObservableObject {
         selectedAircraft: CockpitAircraft?,
         isAudioRecording: Bool
     ) -> Bool {
-        _ = session
         _ = selectedAircraft
         if state.activeDispatch?.schedulerRecordID == session.schedulerRecordID {
+            return true
+        }
+        if let legUUID = session.legUUID,
+           state.activeDispatch?.operationalIdentity?.legUUID == legUUID {
+            return true
+        }
+        if state.engineSessionContinuityActive {
             return true
         }
         return !isAudioRecording
@@ -240,17 +610,14 @@ final class CVRWorkflowStore: ObservableObject {
               state.activeDispatch?.schedulerRecordID != session.schedulerRecordID else {
             return false
         }
-        if let flightRecord = state.activeFlightRecord {
-            let endingMetersEntered = flightRecord.endingHobbs != nil && flightRecord.endingTacho != nil
-            let shutdownSaved = state.flightEvents.contains {
-                $0.flightRecordID == flightRecord.id
-                    && $0.eventType == "shutdown_verification_completed"
-            }
-            if endingMetersEntered || shutdownSaved {
-                return false
-            }
+        if let legUUID = session.legUUID,
+           state.activeDispatch?.operationalIdentity?.legUUID == legUUID {
+            return false
         }
-        return true
+        if let flightRecord = state.activeFlightRecord {
+            return flightRecord.endingHobbs == nil || flightRecord.endingTacho == nil
+        }
+        return false
     }
 
     private func scheduledSessionMatchesAircraft(
@@ -349,9 +716,30 @@ final class CVRWorkflowStore: ObservableObject {
             autoDetectedTakeoffCount: nil,
             autoDetectedLandingCount: nil,
             maintenanceRemark: nil,
+            checkInComments: nil,
+            verifiedDestinationAirport: nil,
+            checkInMode: nil,
+            calculatedArrivalAt: nil,
+            arrivalCalculationSource: nil,
             createdAt: Date(),
             updatedAt: Date()
         )
+        if var identity = dispatch.operationalIdentity {
+            do {
+                identity = try CVROperationalIdentityLocal.appendingWorkflowFlightRecordAlias(
+                    to: identity,
+                    flightRecordUUID: flightRecord.id
+                )
+                dispatch.operationalIdentity = identity
+            } catch {
+                CVROperationalIdentityLocal.logSanitized("offline_flight_record_alias_failed", fields: [
+                    "error_class": String(describing: type(of: error)),
+                    "dispatch_uuid": dispatch.id.lowercased(),
+                ])
+                lastError = "Unable to confirm the Dispatch. Please try again."
+                return
+            }
+        }
         let dispatchComponent = CVRUploadComponentRecord(
             id: "dispatch-\(dispatch.id)-v\(dispatch.version)",
             serverID: nil,
@@ -432,7 +820,69 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.status = .standingByForAvionics
             flightRecord.updatedAt = Date()
             $0.activeFlightRecord = flightRecord
+            if var session = $0.operationalSession, session.engineSessionContinuityActive {
+                session.pendingSoftStartRecording = true
+                $0.operationalSession = session
+            }
             $0.selectedTab = .inFlight
+        }
+    }
+
+    func consumePendingSoftStartRecording() {
+        guard state.operationalSession?.pendingSoftStartRecording == true else { return }
+        mutate {
+            guard var session = $0.operationalSession else { return }
+            session.pendingSoftStartRecording = false
+            $0.operationalSession = session
+        }
+    }
+
+    func recordTransientStopOnBlock(gpsSample: GPSSample?) {
+        guard var flightRecord = state.activeFlightRecord else { return }
+        let hasEngineRunning = state.flightEvents.contains {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+        } || state.engineSessionContinuityActive
+        guard hasEngineRunning else { return }
+        guard !state.flightEvents.contains(where: {
+            $0.flightRecordID == flightRecord.id
+                && ($0.eventType == "transient_stop_on_block" || $0.eventType == "engine_shutdown_on_block")
+        }) else {
+            return
+        }
+
+        let event = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: "transient_stop_on_block",
+            source: "manual_transient_stop_hold",
+            creationMethod: "three_second_hold",
+            gpsSample: gpsSample
+        )
+
+        mutate {
+            flightRecord.checkInMode = .transientStop
+            flightRecord.status = .shutdownVerificationRequired
+            flightRecord.updatedAt = event.timestampUTC
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = .transientStop
+            session.engineSessionContinuityActive = true
+            $0.operationalSession = session
+        }
+    }
+
+    func beginTransientStopCheckIn() {
+        mutate {
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = .transientStop
+            $0.operationalSession = session
+            if var flight = $0.activeFlightRecord {
+                flight.checkInMode = .transientStop
+                flight.status = .shutdownVerificationRequired
+                flight.updatedAt = Date()
+                $0.activeFlightRecord = flight
+            }
         }
     }
 
@@ -468,7 +918,99 @@ final class CVRWorkflowStore: ObservableObject {
             $0.activeFlightRecord = flightRecord
             $0.flightEvents.append(event)
             $0.uploadComponents.append(eventUploadComponent(event))
+            if var session = $0.operationalSession {
+                session.engineSessionContinuityActive = true
+                $0.operationalSession = session
+            } else {
+                var session = CVROperationalSessionContext.empty
+                session.engineSessionContinuityActive = true
+                session.reservationUUID = $0.activeDispatch?.operationalIdentity?.reservationUUID
+                $0.operationalSession = session
+            }
         }
+    }
+
+    /// After Transient Stop, next leg inherits a running engine — synthesize OFF Block without UI Engine Start.
+    func synthesizeEngineContinuityIfNeeded(gpsSample: GPSSample?) {
+        guard state.engineSessionContinuityActive,
+              var flightRecord = state.activeFlightRecord,
+              isRecorderVerified else { return }
+        guard !state.flightEvents.contains(where: {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+        }) else { return }
+
+        let now = Date()
+        let event = CVRFlightEventRecord(
+            id: UUID().uuidString,
+            flightRecordID: flightRecord.id,
+            recordingSessionID: flightRecord.recordingSessionID,
+            eventType: "engine_start_off_block",
+            timestampUTC: now,
+            timestampLocal: now,
+            deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
+            audioOffset: flightRecord.recordingStartedAt.map { max(0, now.timeIntervalSince($0)) },
+            latitude: gpsSample?.latitude,
+            longitude: gpsSample?.longitude,
+            altitude: gpsSample?.altitude,
+            groundSpeed: gpsSample?.speedKnots,
+            source: "engine_session_continuity",
+            confidence: 1.0,
+            creationMethod: "transient_stop_carryover",
+            userIdentity: "local_cvr_unit",
+            metadata: ["continuity": "true"]
+        )
+        mutate {
+            flightRecord.status = .recording
+            flightRecord.updatedAt = now
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
+            if var session = $0.operationalSession {
+                session.continuityEngineStartSynthesized = true
+                $0.operationalSession = session
+            }
+        }
+    }
+
+    func beginEngineShutdownCheckIn() {
+        mutate {
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = .engineShutdown
+            $0.operationalSession = session
+            if var flight = $0.activeFlightRecord {
+                flight.checkInMode = .engineShutdown
+                flight.updatedAt = Date()
+                $0.activeFlightRecord = flight
+            }
+        }
+    }
+
+    var pendingCheckInMode: CVRCheckInMode? {
+        state.operationalSession?.pendingCheckInMode ?? state.activeFlightRecord?.checkInMode
+    }
+
+    var needsEngineStart: Bool {
+        !state.engineSessionContinuityActive
+    }
+
+    func estimatedCheckInHobbs() -> Double? {
+        guard let start = state.activeDispatch?.startingHobbs else { return nil }
+        let hobbsIncrement = engineRunningHobbsIncrementHours()
+        return ((start + hobbsIncrement) * 10).rounded() / 10
+    }
+
+    func estimatedCheckInTacho() -> Double? {
+        guard let start = state.activeDispatch?.startingTacho else { return nil }
+        let hobbsIncrement = engineRunningHobbsIncrementHours()
+        return ((start + hobbsIncrement * 0.70) * 10).rounded() / 10
+    }
+
+    /// Hobbs increment estimate for the active leg from Off-Block / continuity start to now.
+    func engineRunningHobbsIncrementHours() -> Double {
+        let events = state.flightEvents.filter { $0.flightRecordID == state.activeFlightRecord?.id }
+        let off = events.first { $0.eventType == "engine_start_off_block" }?.timestampUTC
+        guard let off else { return 0 }
+        return max(0, Date().timeIntervalSince(off) / 3600.0)
     }
 
     func recordInFlightAction(eventType: String, creationMethod: String, gpsSample: GPSSample?) {
@@ -510,9 +1052,11 @@ final class CVRWorkflowStore: ObservableObject {
         guard let flightRecord = state.activeFlightRecord,
               state.flightEvents.contains(where: {
                   $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
-              }),
+              }) || state.engineSessionContinuityActive,
               !state.flightEvents.contains(where: {
-                  $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+                  $0.flightRecordID == flightRecord.id
+                      && ($0.eventType == "engine_shutdown_on_block"
+                          || $0.eventType == "transient_stop_on_block")
               }) else {
             return
         }
@@ -574,9 +1118,10 @@ final class CVRWorkflowStore: ObservableObject {
 
     func recordEngineShutdownOnBlock(gpsSample: GPSSample?) {
         guard var flightRecord = state.activeFlightRecord else { return }
-        guard state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block" }) else {
-            return
-        }
+        let hasEngineRunning = state.flightEvents.contains {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+        } || state.engineSessionContinuityActive
+        guard hasEngineRunning else { return }
         guard !state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block" }) else {
             return
         }
@@ -591,10 +1136,15 @@ final class CVRWorkflowStore: ObservableObject {
 
         mutate {
             flightRecord.status = .shutdownVerificationRequired
+            flightRecord.checkInMode = .engineShutdown
             flightRecord.updatedAt = event.timestampUTC
             $0.activeFlightRecord = flightRecord
             $0.flightEvents.append(event)
             $0.uploadComponents.append(eventUploadComponent(event))
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = .engineShutdown
+            session.engineSessionContinuityActive = false
+            $0.operationalSession = session
         }
     }
 
@@ -607,18 +1157,14 @@ final class CVRWorkflowStore: ObservableObject {
         maintenanceRemark: String,
         gpsSample: GPSSample?
     ) -> Bool {
-        guard state.flightEvents.contains(where: {
-            $0.flightRecordID == state.activeFlightRecord?.id && $0.eventType == "engine_shutdown_on_block"
-        }) else {
-            lastError = "Engine shutdown must be recorded before post-flight values can be saved."
-            return false
-        }
-        return saveFlightClosureValues(
+        return saveCheckInValues(
             endingHobbs: endingHobbs,
             endingTacho: endingTacho,
+            fuelRemaining: nil,
+            verifiedDestinationAirport: nil,
             verifiedTakeoffCount: verifiedTakeoffCount,
             verifiedLandingCount: verifiedLandingCount,
-            maintenanceRemark: maintenanceRemark,
+            comments: maintenanceRemark,
             gpsSample: gpsSample,
             repairExistingClosureUpload: false
         )
@@ -632,6 +1178,10 @@ final class CVRWorkflowStore: ObservableObject {
               let endingTacho = flightRecord.endingTacho else {
             return false
         }
+        let fuel = (flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fuel.isEmpty else { return false }
+        let destination = (flightRecord.verifiedDestinationAirport ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !destination.isEmpty else { return false }
         let dispatch = explicitDispatch ?? (
             state.activeFlightRecord?.id == flightRecord.id ? state.activeDispatch : nil
         )
@@ -658,7 +1208,7 @@ final class CVRWorkflowStore: ObservableObject {
         if flightClosureIsComplete(flightRecord) { return false }
         return state.uploadComponents.contains {
             $0.componentType == "flight_record_closure" && $0.flightRecordID == flightRecord.id
-        } || state.flightEvents.contains {
+        } || pendingCheckInMode != nil || state.flightEvents.contains {
             $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
         }
     }
@@ -699,8 +1249,50 @@ final class CVRWorkflowStore: ObservableObject {
         gpsSample: GPSSample?,
         repairExistingClosureUpload: Bool
     ) -> Bool {
+        saveCheckInValues(
+            endingHobbs: endingHobbs,
+            endingTacho: endingTacho,
+            fuelRemaining: nil,
+            verifiedDestinationAirport: nil,
+            verifiedTakeoffCount: verifiedTakeoffCount,
+            verifiedLandingCount: verifiedLandingCount,
+            comments: maintenanceRemark,
+            gpsSample: gpsSample,
+            repairExistingClosureUpload: repairExistingClosureUpload
+        )
+    }
+
+    @discardableResult
+    func saveCheckInValues(
+        endingHobbs: Double?,
+        endingTacho: Double?,
+        fuelRemaining: String?,
+        verifiedDestinationAirport: String?,
+        verifiedTakeoffCount: Int,
+        verifiedLandingCount: Int,
+        comments: String,
+        gpsSample: GPSSample?,
+        repairExistingClosureUpload: Bool
+    ) -> Bool {
         guard var flightRecord = state.activeFlightRecord,
               let dispatch = state.activeDispatch else { return false }
+        let mode = pendingCheckInMode ?? flightRecord.checkInMode ?? .engineShutdown
+        if mode == .engineShutdown {
+            guard state.flightEvents.contains(where: {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+            }) else {
+                lastError = "Engine shutdown must be recorded before Check-In can be saved."
+                return false
+            }
+        }
+        if mode == .transientStop {
+            guard state.flightEvents.contains(where: {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "transient_stop_on_block"
+            }) else {
+                lastError = "Transient Stop must be recorded before Check-In can be saved."
+                return false
+            }
+        }
         guard let endingHobbs, endingHobbs >= (dispatch.startingHobbs ?? 0) else {
             lastError = "Ending Hobbs must be present and cannot be lower than Starting Hobbs."
             return false
@@ -709,37 +1301,112 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Ending Tacho must be present and cannot be lower than Starting Tacho."
             return false
         }
+        let fuel = (fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fuel.isEmpty else {
+            lastError = "Fuel Remaining is required at Check-In."
+            return false
+        }
+        let destination = (verifiedDestinationAirport ?? dispatch.plannedDestinationAirport)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !destination.isEmpty else {
+            lastError = "Destination verification is required at Check-In."
+            return false
+        }
         guard verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
             lastError = "Takeoff and landing counts must be zero or greater."
             return false
         }
 
         let counts = operationCounts(for: flightRecord.id)
+        let offBlock = state.flightEvents.first {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+        }
+        let hobbsIncrement = dispatch.startingHobbs.map { endingHobbs - $0 } ?? 0
+        let calculatedArrival = offBlock.map {
+            $0.timestampLocal.addingTimeInterval(max(0, hobbsIncrement) * 3600)
+        }
+        let arrivalSource = "off_block_plus_hobbs_increment"
+        var eventMetadata: [String: String] = [
+            "verified_takeoff_count": String(verifiedTakeoffCount),
+            "verified_landing_count": String(verifiedLandingCount),
+            "auto_takeoff_count": String(counts.autoTakeoffs + counts.manualTakeoffs),
+            "auto_landing_count": String(counts.autoLandings + counts.manualLandings),
+            "check_in_mode": mode.rawValue,
+            "verified_destination_airport": destination,
+            "arrival_calculation_source": arrivalSource,
+            "hobbs_increment": String(format: "%.2f", hobbsIncrement),
+        ]
+        if let calculatedArrival {
+            eventMetadata["calculated_arrival_at_local"] = ISO8601DateFormatter().string(from: calculatedArrival)
+        }
         let event = makeFlightEvent(
             flightRecord: flightRecord,
             eventType: "shutdown_verification_completed",
-            source: repairExistingClosureUpload ? "closure_upload_repair" : "manual_shutdown_verification",
-            creationMethod: repairExistingClosureUpload ? "upload_repair_form" : "post_flight_form",
+            source: repairExistingClosureUpload ? "closure_upload_repair" : "check_in",
+            creationMethod: repairExistingClosureUpload ? "upload_repair_form" : "check_in_form",
             gpsSample: gpsSample,
-            metadata: [
-                "verified_takeoff_count": String(verifiedTakeoffCount),
-                "verified_landing_count": String(verifiedLandingCount),
-                "auto_takeoff_count": String(counts.autoTakeoffs + counts.manualTakeoffs),
-                "auto_landing_count": String(counts.autoLandings + counts.manualLandings),
-            ]
+            metadata: eventMetadata
+        )
+
+        let legRecord = CVRFlightLegRecord(
+            id: dispatch.operationalIdentity?.legUUID ?? UUID().uuidString.lowercased(),
+            flightRecordID: flightRecord.id,
+            sequenceNumber: (state.operationalSession?.plannedLegs.first(where: {
+                $0.legUUID == dispatch.operationalIdentity?.legUUID
+            })?.sequenceNumber) ?? (state.flightLegs.count + 1),
+            reservationUUID: dispatch.operationalIdentity?.reservationUUID ?? state.operationalSession?.reservationUUID,
+            legUUID: dispatch.operationalIdentity?.legUUID,
+            departureAirport: dispatch.plannedDepartureAirport,
+            arrivalAirport: destination,
+            legOpeningTimestamp: state.flightEvents.first {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+            }?.timestampUTC ?? flightRecord.createdAt,
+            takeoffTimestamp: state.flightEvents.first {
+                $0.flightRecordID == flightRecord.id
+                    && ($0.eventType == "gps_takeoff_provisional" || $0.eventType == "manual_takeoff_adjustment")
+            }?.timestampUTC,
+            landingTimestamp: state.flightEvents.last {
+                $0.flightRecordID == flightRecord.id
+                    && ($0.eventType == "gps_landing_provisional" || $0.eventType == "manual_landing_adjustment")
+            }?.timestampUTC,
+            legClosingTimestamp: event.timestampUTC,
+            startHobbsAllocation: dispatch.startingHobbs,
+            endHobbsAllocation: endingHobbs,
+            hobbsDuration: dispatch.startingHobbs.map { endingHobbs - $0 },
+            actualElapsedDuration: nil,
+            takeoffCount: verifiedTakeoffCount,
+            landingCount: verifiedLandingCount,
+            touchAndGoCount: 0,
+            stopAndGoCount: 0,
+            fullStopLandingCount: verifiedLandingCount,
+            reviewStatus: "checked_in"
         )
 
         let persisted = mutate {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
+            flightRecord.fuelRemaining = fuel
+            flightRecord.verifiedDestinationAirport = destination
             flightRecord.verifiedTakeoffCount = verifiedTakeoffCount
             flightRecord.verifiedLandingCount = verifiedLandingCount
             flightRecord.autoDetectedTakeoffCount = counts.displayTakeoffs
             flightRecord.autoDetectedLandingCount = counts.displayLandings
-            flightRecord.maintenanceRemark = maintenanceRemark.trimmingCharacters(in: .whitespacesAndNewlines)
-            flightRecord.status = .awaitingUpload
+            flightRecord.maintenanceRemark = comments.trimmingCharacters(in: .whitespacesAndNewlines)
+            flightRecord.checkInComments = comments.trimmingCharacters(in: .whitespacesAndNewlines)
+            flightRecord.checkInMode = mode
+            flightRecord.calculatedArrivalAt = calculatedArrival
+            flightRecord.arrivalCalculationSource = arrivalSource
+            if mode == .engineShutdown {
+                flightRecord.status = .awaitingAvionicsOff
+            } else {
+                flightRecord.status = .awaitingUpload
+            }
             flightRecord.updatedAt = event.timestampUTC
             $0.activeFlightRecord = flightRecord
+            $0.flightLegs.removeAll { $0.flightRecordID == flightRecord.id }
+            $0.flightLegs.append(legRecord)
+
             let supersededEventIDs = Set($0.flightEvents.filter {
                 $0.flightRecordID == flightRecord.id && $0.eventType == "shutdown_verification_completed"
             }.map(\.id))
@@ -750,10 +1417,6 @@ final class CVRWorkflowStore: ObservableObject {
             }
             $0.flightEvents.append(event)
             $0.uploadComponents.append(eventUploadComponent(event))
-
-            // A repaired closure is new immutable evidence. Reusing the failed
-            // component UUID can conflict with a request the server accepted
-            // before the client lost its response.
             $0.uploadComponents.removeAll {
                 $0.flightRecordID == flightRecord.id
                     && $0.componentType == "flight_record_closure"
@@ -763,9 +1426,140 @@ final class CVRWorkflowStore: ObservableObject {
                 type: "flight_record_closure",
                 evidenceID: flightRecord.id
             ))
-            $0.selectedTab = repairExistingClosureUpload ? $0.selectedTab : .log
+
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = mode
+            session.carryoverHobbs = endingHobbs
+            session.carryoverTacho = endingTacho
+            session.carryoverFuel = fuel
+            if let legUUID = dispatch.operationalIdentity?.legUUID,
+               let index = session.plannedLegs.firstIndex(where: { $0.legUUID == legUUID }) {
+                session.plannedLegs[index].status = "checked_in"
+            }
+            if mode == .transientStop {
+                session.engineSessionContinuityActive = true
+                session.awaitingAvionicsOffConfirmation = false
+            } else {
+                session.engineSessionContinuityActive = false
+                session.awaitingAvionicsOffConfirmation = true
+            }
+            $0.operationalSession = session
         }
-        return persisted
+        guard persisted else { return false }
+
+        if mode == .transientStop {
+            return completeTransientStopLocally()
+        }
+        return true
+    }
+
+    @discardableResult
+    func completeTransientStopLocally() -> Bool {
+        guard let flightRecord = state.activeFlightRecord,
+              flightRecord.endingHobbs != nil,
+              flightRecord.endingTacho != nil,
+              !(flightRecord.fuelRemaining ?? "").isEmpty else {
+            lastError = "Check-In must be saved before continuing to the next leg."
+            return false
+        }
+        guard archiveActiveWorkflow() else { return false }
+        return mutate {
+            var session = $0.operationalSession ?? .empty
+            session.engineSessionContinuityActive = true
+            session.pendingCheckInMode = nil
+            session.awaitingAvionicsOffConfirmation = false
+            session.continuityEngineStartSynthesized = false
+            $0.operationalSession = session
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .scheduled
+        }
+    }
+
+    @discardableResult
+    func completeEngineShutdownAfterAvionicsOff() -> Bool {
+        guard let flightRecord = state.activeFlightRecord,
+              flightRecord.endingHobbs != nil,
+              flightRecord.endingTacho != nil else {
+            lastError = "Check-In must be saved before completing Engine Shutdown."
+            return false
+        }
+        guard archiveActiveWorkflow() else { return false }
+        return mutate {
+            $0.operationalSession = nil
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            $0.selectedTab = .scheduled
+        }
+    }
+
+    func markAvionicsOffAfterShutdown() {
+        mutate {
+            if var flight = $0.activeFlightRecord, flight.status == .awaitingAvionicsOff {
+                flight.status = .awaitingUpload
+                flight.updatedAt = Date()
+                $0.activeFlightRecord = flight
+            }
+            if var session = $0.operationalSession {
+                session.awaitingAvionicsOffConfirmation = false
+                $0.operationalSession = session
+            }
+        }
+    }
+
+    private func clearActiveLegStatePreservingSession(selectScheduled: Bool) {
+        mutate {
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.uploadComponents = []
+            $0.discrepancies = []
+            if selectScheduled {
+                $0.selectedTab = .scheduled
+            }
+        }
+    }
+
+    private func continuityCarryover(for registration: String) -> (
+        flightRecordID: String,
+        endingHobbs: Double,
+        endingTacho: Double,
+        fuelRemaining: String,
+        oilPercentage: Int?,
+        oilQuantity: Double?,
+        oilUnit: String?
+    )? {
+        guard let session = state.operationalSession,
+              session.engineSessionContinuityActive,
+              let hobbs = session.carryoverHobbs,
+              let tacho = session.carryoverTacho,
+              let fuel = session.carryoverFuel,
+              !fuel.isEmpty else {
+            return nil
+        }
+        _ = registration
+        return (
+            "continuity-carryover",
+            hobbs,
+            tacho,
+            fuel,
+            nil,
+            nil,
+            nil
+        )
     }
 
     func importGarminCSV(from sourceURL: URL) {
@@ -1667,11 +2461,17 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Check-In must be saved locally before opening the next flight."
             return
         }
+        if flightRecord.status == .awaitingAvionicsOff
+            || state.operationalSession?.awaitingAvionicsOffConfirmation == true {
+            lastError = "Wait for avionics OFF before completing Engine Shutdown."
+            return
+        }
         if archiveCompletedWorkflow {
             guard archiveActiveWorkflow() else { return }
         }
 
         mutate {
+            $0.operationalSession = nil
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
             $0.consents = []
@@ -1692,19 +2492,15 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Ending Hobbs and Tacho are required before finishing the flight."
             return false
         }
-        guard archiveActiveWorkflow() else { return false }
-        mutate {
-            $0.activeDispatch = nil
-            $0.activeFlightRecord = nil
-            $0.consents = []
-            $0.recorderVerifications = []
-            $0.flightEvents = []
-            $0.flightLegs = []
-            $0.uploadComponents = []
-            $0.discrepancies = []
-            $0.selectedTab = .log
+        if flightRecord.status == .awaitingAvionicsOff
+            || state.operationalSession?.awaitingAvionicsOffConfirmation == true {
+            return false
         }
-        return true
+        if flightRecord.checkInMode == .transientStop
+            || state.operationalSession?.pendingCheckInMode == .transientStop {
+            return completeTransientStopLocally()
+        }
+        return completeEngineShutdownAfterAvionicsOff()
     }
 
     func completeSimulationFlight() {
@@ -2511,13 +3307,18 @@ final class CVRWorkflowStore: ObservableObject {
     }()
 
     private static func dispatchStatus(for dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> CVRDispatchStatus {
+        _ = consents
         if !dispatch.missingItems.isEmpty {
             return .dispatchIncomplete
         }
-        if !hasRequiredConsents(dispatch: dispatch, consents: consents) {
-            return .consentRequired
-        }
+        // Phase 3 operational flight-test: no crew consent gate.
         return .readyForVerification
+    }
+
+    private static func hasRequiredConsents(dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> Bool {
+        _ = dispatch
+        _ = consents
+        return true
     }
 
     private static func repairStaleDispatchConsents(in workflow: inout CVRWorkflowState) -> Bool {
@@ -2582,19 +3383,6 @@ final class CVRWorkflowStore: ObservableObject {
             workflow.uploadComponents[index].lastError = "Recovered consent version metadata; Dispatch is queued for retry."
         }
         return true
-    }
-
-    private static func hasRequiredConsents(dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> Bool {
-        guard !dispatch.crew.isEmpty else { return false }
-        return dispatch.crew.allSatisfy { assignment in
-            consents.contains {
-                $0.dispatchID == dispatch.id
-                    && $0.dispatchVersion == dispatch.version
-                    && $0.personName == assignment.personName
-                    && $0.crewRole == assignment.role
-                    && $0.consentResult
-            }
-        }
     }
 
     private static func materialSignature(_ dispatch: CVRDispatchRecord) -> String {

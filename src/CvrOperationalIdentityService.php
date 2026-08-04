@@ -17,8 +17,8 @@ final class CvrOperationalIdentityService
     public const ACTIVITY_DOMAINS = array('flight', 'simulator', 'ground', 'administrative');
     public const RESERVATION_TYPES = array(
         'flight_training', 'briefing', 'ar_briefing', 'simulator_training',
-        'theory_lesson', 'theory_mock_exam', 'practical_exam', 'meeting',
-        'assessment', 'maintenance', 'personal', 'unavailable',
+        'ground_training', 'theory_lesson', 'theory_mock_exam', 'practical_exam',
+        'meeting', 'assessment', 'maintenance', 'personal', 'unavailable', 'other',
     );
     public const RESERVATION_STATUSES = array('scheduled', 'active', 'completed', 'cancelled');
     public const LEG_STATUSES = array('scheduled', 'dispatched', 'active', 'checked_in', 'cancelled');
@@ -100,15 +100,16 @@ final class CvrOperationalIdentityService
     /**
      * Deterministic reservation_type → activity_domain for types that do not require
      * explicit classification. practical_exam returns null (must be explicit).
+     * Legs are created only when the returned domain is flight (`other` never creates a leg).
      */
     public static function defaultActivityDomainForReservationType(string $reservationType): ?string
     {
         return match (strtolower(trim($reservationType))) {
             'flight_training' => 'flight',
             'simulator_training' => 'simulator',
-            'briefing', 'ar_briefing', 'theory_lesson', 'theory_mock_exam',
+            'briefing', 'ar_briefing', 'ground_training', 'theory_lesson', 'theory_mock_exam',
             'meeting', 'assessment' => 'ground',
-            'maintenance', 'personal', 'unavailable' => 'administrative',
+            'maintenance', 'personal', 'unavailable', 'other' => 'administrative',
             'practical_exam' => null,
             default => null,
         };
@@ -156,6 +157,194 @@ final class CvrOperationalIdentityService
             }
         }
         return 'scheduled';
+    }
+
+    /**
+     * Phase 2C: create canonical identity for a newly created online schedule reservation.
+     * Caller must already be inside the legacy schedule create transaction when the flag is on.
+     * Retries reuse reservation/leg/alias rows by stable UUID and unique alias scope.
+     *
+     * @param array{
+     *   organization_id:int,
+     *   scheduler_record_id:string,
+     *   schedule_slot_id:int|string,
+     *   reservation_type:string,
+     *   status?:string,
+     *   planned_departure_airport?:string,
+     *   planned_destination_airport?:string,
+     *   scheduled_start_time?:string,
+     *   scheduled_end_time?:string,
+     *   organization_timezone_iana?:string
+     * } $input
+     * @return array{
+     *   reservation_uuid:string,
+     *   leg_uuid:?string,
+     *   activity_domain:string,
+     *   aliases_created:int
+     * }
+     */
+    public function createOnlineScheduleReservationIdentity(array $input): array
+    {
+        if (!$this->isFlagEnabled(self::FLAG_CANONICAL_WRITE)) {
+            throw new RuntimeException('Canonical identity writes are disabled.');
+        }
+
+        $organizationId = $this->requireOrganizationId($input['organization_id'] ?? null);
+        $schedulerRecordId = strtolower(trim((string)($input['scheduler_record_id'] ?? '')));
+        if (!self::isValidUuid($schedulerRecordId)) {
+            throw new InvalidArgumentException('scheduler_record_id must be a valid lowercase UUID.');
+        }
+        $schedulerRecordId = self::normalizeUuid($schedulerRecordId, 'scheduler_record_id');
+        $slotId = trim((string)($input['schedule_slot_id'] ?? ''));
+        if ($slotId === '' || !ctype_digit($slotId) || (int)$slotId < 1) {
+            throw new InvalidArgumentException('schedule_slot_id is required.');
+        }
+        $reservationType = strtolower(trim((string)($input['reservation_type'] ?? '')));
+        if (!in_array($reservationType, self::RESERVATION_TYPES, true)) {
+            throw new InvalidArgumentException('Unsupported reservation_type.');
+        }
+        $activityDomain = self::defaultActivityDomainForReservationType($reservationType);
+        if ($activityDomain === null) {
+            throw new InvalidArgumentException('reservation_type requires an explicit activity_domain.');
+        }
+
+        $status = strtolower(trim((string)($input['status'] ?? 'scheduled')));
+        if ($status === 'completed') {
+            $reservationStatus = 'completed';
+        } elseif ($status === 'cancelled') {
+            $reservationStatus = 'cancelled';
+        } else {
+            $reservationStatus = 'scheduled';
+        }
+
+        $timezone = trim((string)($input['organization_timezone_iana'] ?? ''));
+        if ($timezone === '' || !in_array($timezone, timezone_identifiers_list(), true)) {
+            $timezone = $this->resolveOrganizationTimezone($organizationId);
+        }
+
+        $reservation = $this->createReservation(array(
+            'reservation_uuid' => $schedulerRecordId,
+            'organization_id' => $organizationId,
+            'organization_timezone_iana' => $timezone,
+            'reservation_type' => $reservationType,
+            'activity_domain' => $activityDomain,
+            'status' => $reservationStatus,
+            'source' => 'server_create',
+            'adoption_source_system' => 'schedule',
+            'adoption_provenance' => array(
+                'linkage_method' => 'online_create',
+                'scheduler_record_id' => $schedulerRecordId,
+                'schedule_slot_id' => $slotId,
+            ),
+        ), true);
+        $reservationUuid = (string)$reservation['reservation_uuid'];
+        $this->assertReusableOnlineReservationMatches(
+            $reservation,
+            $organizationId,
+            $reservationUuid,
+            $reservationType,
+            $activityDomain,
+            $schedulerRecordId
+        );
+
+        $legUuid = null;
+        if ($activityDomain === 'flight') {
+            $existingLegs = $this->listLegsForReservation($reservationUuid);
+            $sequenceOne = null;
+            foreach ($existingLegs as $existingLeg) {
+                if ((int)($existingLeg['sequence_number'] ?? 0) === 1
+                    && (int)($existingLeg['organization_id'] ?? 0) === $organizationId) {
+                    $sequenceOne = $existingLeg;
+                    break;
+                }
+            }
+            $startLocal = $this->normalizeScheduleLocalDateTime((string)($input['scheduled_start_time'] ?? ''));
+            $endLocal = $this->normalizeScheduleLocalDateTime((string)($input['scheduled_end_time'] ?? ''));
+            $origin = $this->normalizeAirportCode((string)($input['planned_departure_airport'] ?? ''));
+            $destination = $this->normalizeAirportCode((string)($input['planned_destination_airport'] ?? ''));
+            if ($sequenceOne !== null) {
+                $this->assertReusableOnlineLegMatches(
+                    $sequenceOne,
+                    $organizationId,
+                    $reservationUuid,
+                    $origin,
+                    $destination,
+                    $startLocal,
+                    $endLocal,
+                    $timezone
+                );
+                $legUuid = (string)$sequenceOne['leg_uuid'];
+            } else {
+                $leg = $this->createFlightLeg(array(
+                    'reservation_uuid' => $reservationUuid,
+                    'organization_id' => $organizationId,
+                    'sequence_number' => 1,
+                    'origin_airport' => $origin,
+                    'destination_airport' => $destination,
+                    'planned_start_local' => $startLocal,
+                    'planned_end_local' => $endLocal,
+                    'organization_timezone_iana' => $timezone,
+                    'status' => 'scheduled',
+                    'source' => 'server_create',
+                ), true);
+                $legUuid = (string)$leg['leg_uuid'];
+            }
+        }
+
+        $aliasCount = 0;
+        $this->createAlias(array(
+            'organization_id' => $organizationId,
+            'source_system' => 'schedule',
+            'alias_type' => 'scheduler_record_id',
+            'alias_value' => $schedulerRecordId,
+            'alias_version' => null,
+            'target_type' => 'reservation',
+            'reservation_uuid' => $reservationUuid,
+            'confidence_state' => 'VERIFIED',
+            'linkage_method' => 'online_create',
+        ), true);
+        $aliasCount++;
+
+        $this->createAlias(array(
+            'organization_id' => $organizationId,
+            'source_system' => 'schedule',
+            'alias_type' => 'schedule_slot_id',
+            'alias_value' => $slotId,
+            'alias_version' => null,
+            'target_type' => 'reservation',
+            'reservation_uuid' => $reservationUuid,
+            'confidence_state' => 'VERIFIED',
+            'linkage_method' => 'online_create',
+        ), true);
+        $aliasCount++;
+
+        return array(
+            'reservation_uuid' => $reservationUuid,
+            'leg_uuid' => $legUuid,
+            'activity_domain' => $activityDomain,
+            'aliases_created' => $aliasCount,
+        );
+    }
+
+    /**
+     * Sanitize and log a technical diagnostic for canonical write failures.
+     * Never includes raw database driver messages or protected payload content.
+     *
+     * @param array<string,mixed> $diagnostic
+     */
+    public function logTechnicalDiagnostic(string $code, array $diagnostic): void
+    {
+        $code = substr(trim($code), 0, 96);
+        if ($code === '') {
+            $code = 'canonical_write_diagnostic';
+        }
+        $sanitized = $this->sanitizeDiagnostic($diagnostic);
+        unset($sanitized['message'], $sanitized['sqlstate'], $sanitized['errorInfo'], $sanitized['trace']);
+        if (isset($sanitized['error_message']) && is_string($sanitized['error_message'])) {
+            // Keep class/category only; strip likely driver text.
+            $sanitized['error_message'] = substr($sanitized['error_message'], 0, 180);
+        }
+        error_log('cvr_operational_identity:' . $code . ' ' . AuditEventService::jsonEncode($sanitized));
     }
 
     /**
@@ -732,6 +921,147 @@ final class CvrOperationalIdentityService
             throw new InvalidArgumentException('organization_id must be a positive integer.');
         }
         return $id;
+    }
+
+    private function resolveOrganizationTimezone(int $organizationId): string
+    {
+        unset($organizationId);
+        try {
+            if (function_exists('cw_system_timezone')) {
+                $tz = cw_system_timezone($this->pdo);
+                if (is_string($tz) && in_array($tz, timezone_identifiers_list(), true)) {
+                    return $tz;
+                }
+            }
+        } catch (Throwable) {
+        }
+        return 'America/Los_Angeles';
+    }
+
+    private function normalizeScheduleLocalDateTime(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/', $value) === 1) {
+            return str_replace('T', ' ', $value);
+        }
+        $ts = strtotime($value);
+        if ($ts === false) {
+            return null;
+        }
+        return date('Y-m-d H:i:s', $ts);
+    }
+
+    private function normalizeAirportCode(string $value): string
+    {
+        return strtoupper(substr(trim($value), 0, 8));
+    }
+
+    /**
+     * Fail closed when a same-UUID reservation cannot be treated as an identical online-create retry.
+     *
+     * @param array<string,mixed> $reservation
+     */
+    private function assertReusableOnlineReservationMatches(
+        array $reservation,
+        int $organizationId,
+        string $reservationUuid,
+        string $reservationType,
+        string $activityDomain,
+        string $schedulerRecordId
+    ): void {
+        $source = strtolower(trim((string)($reservation['source'] ?? '')));
+        $compatibleSource = $source === 'server_create';
+        $adoptionSystem = strtolower(trim((string)($reservation['adoption_source_system'] ?? '')));
+        if ($source === 'schedule_adopt' && $adoptionSystem === 'schedule') {
+            // Provenance-compatible schedule adoption may share the immutable scheduler UUID.
+            $compatibleSource = true;
+        }
+
+        $matches = (int)($reservation['organization_id'] ?? 0) === $organizationId
+            && (string)($reservation['reservation_uuid'] ?? '') === $reservationUuid
+            && strtolower(trim((string)($reservation['reservation_type'] ?? ''))) === $reservationType
+            && strtolower(trim((string)($reservation['activity_domain'] ?? ''))) === $activityDomain
+            && $compatibleSource;
+
+        if (!$matches) {
+            $this->logTechnicalDiagnostic('online_schedule_reservation_immutable_conflict', array(
+                'organization_id' => $organizationId,
+                'reservation_uuid' => $reservationUuid,
+                'scheduler_record_id' => $schedulerRecordId,
+                'error_class' => 'immutable_identity_conflict',
+            ));
+            throw new RuntimeException('Canonical reservation identity conflict for online schedule create.');
+        }
+    }
+
+    /**
+     * Fail closed when a sequence-1 leg cannot be treated as an identical online-create retry.
+     *
+     * @param array<string,mixed> $leg
+     */
+    private function assertReusableOnlineLegMatches(
+        array $leg,
+        int $organizationId,
+        string $reservationUuid,
+        string $origin,
+        string $destination,
+        ?string $startLocal,
+        ?string $endLocal,
+        string $timezone
+    ): void {
+        if ((string)($leg['leg_uuid'] ?? '') === '' || !self::isValidUuid((string)$leg['leg_uuid'])) {
+            $this->logTechnicalDiagnostic('online_schedule_leg_immutable_conflict', array(
+                'organization_id' => $organizationId,
+                'reservation_uuid' => $reservationUuid,
+                'error_class' => 'immutable_identity_conflict',
+            ));
+            throw new RuntimeException('Canonical leg identity conflict for online schedule create.');
+        }
+
+        $expectedTimes = $this->normalizePlannedTimes(array(
+            'planned_start_local' => $startLocal,
+            'planned_end_local' => $endLocal,
+        ), $timezone);
+
+        $matches = (int)($leg['organization_id'] ?? 0) === $organizationId
+            && (string)($leg['reservation_uuid'] ?? '') === $reservationUuid
+            && (int)($leg['sequence_number'] ?? 0) === 1
+            && $this->normalizeAirportCode((string)($leg['origin_airport'] ?? '')) === $origin
+            && $this->normalizeAirportCode((string)($leg['destination_airport'] ?? '')) === $destination
+            && $this->normalizeComparableUtc((string)($leg['planned_start_at_utc'] ?? ''))
+                === $this->normalizeComparableUtc((string)($expectedTimes['planned_start_at_utc'] ?? ''))
+            && $this->normalizeComparableUtc((string)($leg['planned_end_at_utc'] ?? ''))
+                === $this->normalizeComparableUtc((string)($expectedTimes['planned_end_at_utc'] ?? ''))
+            && trim((string)($leg['organization_timezone_iana'] ?? '')) === $timezone
+            && in_array(strtolower(trim((string)($leg['source'] ?? ''))), array('server_create', 'backfill_verified'), true);
+
+        if (!$matches) {
+            $this->logTechnicalDiagnostic('online_schedule_leg_immutable_conflict', array(
+                'organization_id' => $organizationId,
+                'reservation_uuid' => $reservationUuid,
+                'leg_uuid' => (string)($leg['leg_uuid'] ?? ''),
+                'error_class' => 'immutable_identity_conflict',
+            ));
+            throw new RuntimeException('Canonical leg identity conflict for online schedule create.');
+        }
+    }
+
+    private function normalizeComparableUtc(string $value): string
+    {
+        $value = trim(str_replace('T', ' ', $value));
+        if ($value === '') {
+            return '';
+        }
+        // Compare to millisecond precision when present; ignore trailing zero variance.
+        if (preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(\.\d{1,6})?$/', $value, $matches) === 1) {
+            $fraction = isset($matches[2]) ? substr(str_pad(substr($matches[2], 1), 3, '0'), 0, 3) : '000';
+            return $matches[1] . '.' . $fraction;
+        }
+        $ts = strtotime($value);
+        return $ts === false ? $value : date('Y-m-d H:i:s.000', $ts);
     }
 
     private function nullableString(mixed $value, int $maxLen): ?string

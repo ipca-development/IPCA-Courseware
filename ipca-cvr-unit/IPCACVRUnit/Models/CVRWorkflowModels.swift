@@ -111,6 +111,59 @@ enum CVRUploadComponentState: String, Codable {
     case superseded
 }
 
+enum CVRCheckInMode: String, Codable, Equatable {
+    case transientStop
+    case engineShutdown
+}
+
+struct CVRPlannedLegRecord: Identifiable, Codable, Equatable {
+    var id: String
+    var reservationUUID: String
+    var legUUID: String
+    var sequenceNumber: Int
+    var departureAirport: String
+    var destinationAirport: String
+    var missionCode: String
+    var tailNumber: String
+    var schedulerRecordID: String?
+    var plannedStartAt: Date?
+    var plannedEndAt: Date?
+    /// planned | active | checked_in
+    var status: String
+}
+
+struct CVROperationalSessionContext: Codable, Equatable {
+    var reservationUUID: String?
+    var engineSessionContinuityActive: Bool
+    var plannedLegs: [CVRPlannedLegRecord]
+    /// 1-based index of the active/current leg within plannedLegs (or 1 when single-leg).
+    var currentLegIndex: Int?
+    var pendingCheckInMode: CVRCheckInMode?
+    var carryoverHobbs: Double?
+    var carryoverTacho: Double?
+    var carryoverFuel: String?
+    var awaitingAvionicsOffConfirmation: Bool
+    var continuityEngineStartSynthesized: Bool
+    /// Request soft-start of a new recording after next-leg Dispatch/recorder ready.
+    var pendingSoftStartRecording: Bool
+
+    static var empty: CVROperationalSessionContext {
+        CVROperationalSessionContext(
+            reservationUUID: nil,
+            engineSessionContinuityActive: false,
+            plannedLegs: [],
+            currentLegIndex: nil,
+            pendingCheckInMode: nil,
+            carryoverHobbs: nil,
+            carryoverTacho: nil,
+            carryoverFuel: nil,
+            awaitingAvionicsOffConfirmation: false,
+            continuityEngineStartSynthesized: false,
+            pendingSoftStartRecording: false
+        )
+    }
+}
+
 struct CVRWorkflowState: Codable, Equatable {
     var selectedTab: CVROperationalTab
     var activeDispatch: CVRDispatchRecord?
@@ -121,6 +174,8 @@ struct CVRWorkflowState: Codable, Equatable {
     var flightLegs: [CVRFlightLegRecord]
     var uploadComponents: [CVRUploadComponentRecord]
     var discrepancies: [CVRDiscrepancyRecord]
+    /// Phase 3 multi-leg / engine continuity. Optional for older flight-workflow.json.
+    var operationalSession: CVROperationalSessionContext?
     var updatedAt: Date
 
     static var empty: CVRWorkflowState {
@@ -134,8 +189,17 @@ struct CVRWorkflowState: Codable, Equatable {
             flightLegs: [],
             uploadComponents: [],
             discrepancies: [],
+            operationalSession: nil,
             updatedAt: Date()
         )
+    }
+
+    var engineSessionContinuityActive: Bool {
+        operationalSession?.engineSessionContinuityActive == true
+    }
+
+    var plannedLegs: [CVRPlannedLegRecord] {
+        operationalSession?.plannedLegs ?? []
     }
 }
 
@@ -177,6 +241,8 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var previousEndingOilUnit: String?
     var refueledSincePreviousFlight: Bool?
     var oilServicedSincePreviousFlight: Bool?
+    /// Phase 2D offline canonical identity. Nil when canonical writes are disabled.
+    var operationalIdentity: CVRLocalOperationalIdentity?
 
     var missingItems: [String] {
         var items: [String] = []
@@ -287,6 +353,11 @@ struct CVRIncompleteFlightRecord: Identifiable, Codable, Equatable {
     var autoDetectedTakeoffCount: Int?
     var autoDetectedLandingCount: Int?
     var maintenanceRemark: String?
+    var checkInComments: String?
+    var verifiedDestinationAirport: String?
+    var checkInMode: CVRCheckInMode?
+    var calculatedArrivalAt: Date?
+    var arrivalCalculationSource: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -427,6 +498,8 @@ struct CVRFlightLegRecord: Identifiable, Codable, Equatable {
     var id: String
     var flightRecordID: String
     var sequenceNumber: Int
+    var reservationUUID: String?
+    var legUUID: String?
     var departureAirport: String?
     var arrivalAirport: String?
     var legOpeningTimestamp: Date?
@@ -485,6 +558,8 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     var flightRecordID: String
     var dispatchUUID: String
     var schedulerRecordID: String?
+    var reservationUUID: String?
+    var legUUID: String?
     var aircraftRegistration: String
     var scheduledDate: String
     var crewNames: [String]?
@@ -519,6 +594,8 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
         case flightRecordID = "flight_record_uuid"
         case dispatchUUID = "dispatch_uuid"
         case schedulerRecordID = "scheduler_record_id"
+        case reservationUUID = "reservation_uuid"
+        case legUUID = "leg_uuid"
         case aircraftRegistration = "aircraft_registration"
         case scheduledDate = "scheduled_date"
         case crewNames = "crew_names"

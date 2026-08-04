@@ -52,6 +52,12 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(garminVaultMaxMegabytes, forKey: Keys.garminVaultMaxMegabytes) }
     }
 
+    /// Local mirror of server policy `operational_identity_canonical_write_enabled`.
+    /// Default off. Offline create must not depend on network to read this flag.
+    @Published var operationalIdentityCanonicalWriteEnabled: Bool {
+        didSet { UserDefaults.standard.set(operationalIdentityCanonicalWriteEnabled, forKey: Keys.operationalIdentityCanonicalWriteEnabled) }
+    }
+
     @Published private(set) var garminSDCardFolderLabel: String = ""
     @Published private(set) var garminSDCardSetupMessage: String = ""
     @Published private(set) var garminSDCardLastAccessError: String = ""
@@ -81,6 +87,8 @@ final class SettingsStore: ObservableObject {
         isSimulationModeEnabled = UserDefaults.standard.object(forKey: Keys.isSimulationModeEnabled) as? Bool ?? false
         garminVaultRetentionDays = UserDefaults.standard.object(forKey: Keys.garminVaultRetentionDays) as? Int ?? 30
         garminVaultMaxMegabytes = UserDefaults.standard.object(forKey: Keys.garminVaultMaxMegabytes) as? Int ?? 500
+        operationalIdentityCanonicalWriteEnabled =
+            UserDefaults.standard.object(forKey: Keys.operationalIdentityCanonicalWriteEnabled) as? Bool ?? false
         garminSDCardFolderLabel = UserDefaults.standard.string(forKey: Keys.garminSDCardFolderLabel) ?? ""
         deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
     }
@@ -435,6 +443,7 @@ final class SettingsStore: ObservableObject {
         static let garminSDCardFolderLabel = "ipca.cvrUnit.garminSDCardFolderLabel"
         static let garminVaultRetentionDays = "ipca.cvrUnit.garminVaultRetentionDays"
         static let garminVaultMaxMegabytes = "ipca.cvrUnit.garminVaultMaxMegabytes"
+        static let operationalIdentityCanonicalWriteEnabled = "ipca.cvrUnit.operationalIdentityCanonicalWriteEnabled"
         static let deviceUUID = "ipca.cvrUnit.deviceUUID"
         static let deviceCredential = "ipca.cvrUnit.deviceCredential"
     }

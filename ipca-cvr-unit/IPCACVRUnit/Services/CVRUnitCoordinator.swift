@@ -279,17 +279,63 @@ final class CVRUnitCoordinator: ObservableObject {
             if simulationActive && activeRecordingSessionID != nil && mode == .recording {
                 return
             }
+            // Soft-split may have stopped recording while power remained ON; only auto-start
+            // when a flight record exists and is ready (or continuity next-leg soft-start is requested).
+            if workflow?.state.activeFlightRecord == nil {
+                return
+            }
             await startRecording()
         case .off:
             if simulationActive {
                 if activeRecordingSessionID != nil || mode == .recording {
                     await stopRecording(reason: "Simulation avionics OFF.")
                 }
+                workflow?.markAvionicsOffAfterShutdown()
+                if workflow?.state.activeFlightRecord?.status == .awaitingUpload
+                    || workflow?.state.activeFlightRecord?.endingHobbs != nil {
+                    _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+                }
                 return
             }
-            guard audio?.isRecording == true else { return }
+            guard audio?.isRecording == true else {
+                workflow?.markAvionicsOffAfterShutdown()
+                if workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
+                    || workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff {
+                    _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+                }
+                return
+            }
             await stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
+            workflow?.markAvionicsOffAfterShutdown()
+            if workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
+                || workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff
+                || (workflow?.state.activeFlightRecord?.endingHobbs != nil
+                    && workflow?.state.activeFlightRecord?.checkInMode == .engineShutdown) {
+                _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+            }
         }
+    }
+
+    /// Finalize the current leg recording while avionics may remain ON (Transient Stop soft-split).
+    func finalizeRecordingForLegBoundary(reason: String) async {
+        guard audio?.isRecording == true || activeRecordingSessionID != nil || mode == .recording else {
+            return
+        }
+        await stopRecording(reason: reason)
+    }
+
+    /// Start a new recording for the next leg while avionics remain ON.
+    func softStartRecordingIfAvionicsOn() async {
+        guard audio?.isRecording != true, mode != .starting else { return }
+        let simulationActive = settings?.isSimulationModeEnabled == true
+        let avionicsOn = beacon?.currentState == .avionicsOn
+            || beacon?.currentState == .temporarilyMissing
+            || beacon?.isSimulationOverrideActive == true
+            || simulationActive
+        guard avionicsOn || settings?.isBeaconTriggerEnabled != true else { return }
+        guard workflow?.state.activeFlightRecord != nil else { return }
+        await startRecording()
+        workflow?.consumePendingSoftStartRecording()
     }
 
     private func handleMatchingBeaconAdvertisement() async {

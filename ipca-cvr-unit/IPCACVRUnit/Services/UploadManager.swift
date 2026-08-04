@@ -898,6 +898,11 @@ final class UploadManager: ObservableObject {
         if let scheduledEndTime = dispatch.scheduledEndTime {
             dispatchPayload["scheduled_end_time"] = iso.string(from: scheduledEndTime)
         }
+        if let identity = dispatch.operationalIdentity {
+            dispatchPayload["operational_identity"] = CVROperationalIdentityLocal.payloadDictionary(from: identity)
+            dispatchPayload["reservation_uuid"] = identity.reservationUUID
+            dispatchPayload["leg_uuid"] = identity.legUUID
+        }
 
         return [
             "flight_record_uuid": flightRecord.id.lowercased(),
@@ -1057,6 +1062,9 @@ final class UploadManager: ObservableObject {
             if let value = flight.autoDetectedTakeoffCount { item["auto_detected_takeoff_count"] = value }
             if let value = flight.autoDetectedLandingCount { item["auto_detected_landing_count"] = value }
             if let value = flight.maintenanceRemark { item["maintenance_remark"] = value }
+            if let value = flight.checkInComments { item["check_in_comments"] = value }
+            if let value = flight.verifiedDestinationAirport { item["verified_destination_airport"] = value }
+            if let value = flight.checkInMode { item["check_in_mode"] = value.rawValue }
             evidence = item
         default:
             throw APIClientError.badResponse("Unsupported workflow evidence component.")

@@ -92,6 +92,10 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
     var plannedDestinationAirport: String
     var crew: [CVRScheduledCrewMember]
     var status: String
+    /// Phase 2B dual-read / Phase 3 multi-leg. Optional for legacy cache compatibility.
+    var reservationUUID: String?
+    var legUUID: String?
+    var identitySource: String?
 
     var id: String { schedulerRecordID }
 
@@ -109,6 +113,9 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         case plannedDestinationAirport = "planned_destination_airport"
         case crew
         case status
+        case reservationUUID = "reservation_uuid"
+        case legUUID = "leg_uuid"
+        case identitySource = "identity_source"
     }
 
     init(from decoder: Decoder) throws {
@@ -132,6 +139,9 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         plannedDestinationAirport = try container.decodeIfPresent(String.self, forKey: .plannedDestinationAirport) ?? ""
         crew = try container.decodeIfPresent([CVRScheduledCrewMember].self, forKey: .crew) ?? []
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        reservationUUID = try container.decodeIfPresent(String.self, forKey: .reservationUUID)
+        legUUID = try container.decodeIfPresent(String.self, forKey: .legUUID)
+        identitySource = try container.decodeIfPresent(String.self, forKey: .identitySource)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -147,6 +157,9 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         try container.encode(plannedDestinationAirport, forKey: .plannedDestinationAirport)
         try container.encode(crew, forKey: .crew)
         try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(reservationUUID, forKey: .reservationUUID)
+        try container.encodeIfPresent(legUUID, forKey: .legUUID)
+        try container.encodeIfPresent(identitySource, forKey: .identitySource)
     }
 
     func dateTime(_ time: String?) -> Date? {
@@ -178,6 +191,187 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
             }
         }
         return nil
+    }
+}
+
+/// Schedule display group: one reservation with ordered selectable legs.
+struct CVRScheduledReservationGroup: Identifiable, Equatable {
+    var id: String
+    var reservationUUID: String?
+    var dayStart: Date
+    var aircraftRegistration: String
+    var legs: [CVRScheduledLegItem]
+
+    var routeSummary: String {
+        let airports = legs.flatMap { [$0.departureAirport, $0.destinationAirport] }
+        var unique: [String] = []
+        for airport in airports {
+            let trimmed = airport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !trimmed.isEmpty else { continue }
+            if unique.last != trimmed {
+                unique.append(trimmed)
+            }
+        }
+        return unique.isEmpty ? "ROUTE TBD" : unique.joined(separator: " → ")
+    }
+}
+
+enum CVRScheduledLegSource: String, Codable, Equatable {
+    case scheduledSession
+    case localPlanned
+}
+
+struct CVRScheduledLegItem: Identifiable, Equatable {
+    var id: String
+    var sequenceNumber: Int
+    var departureAirport: String
+    var destinationAirport: String
+    var missionCode: String
+    var scheduledStartTime: Date?
+    var scheduledEndTime: Date?
+    var reservationUUID: String?
+    var legUUID: String?
+    var schedulerRecordID: String?
+    var source: CVRScheduledLegSource
+    var session: CVRScheduledSession?
+    var status: String
+
+    var routeLabel: String {
+        let dep = departureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let arr = destinationAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return "\(dep.isEmpty ? "TBD" : dep) → \(arr.isEmpty ? "TBD" : arr)"
+    }
+}
+
+enum CVRScheduledReservationGrouping {
+    static func groups(
+        from sessions: [CVRScheduledSession],
+        localLegs: [CVRPlannedLegRecord],
+        calendar: Calendar
+    ) -> [CVRScheduledReservationGroup] {
+        var groups: [CVRScheduledReservationGroup] = []
+        var usedLocalLegIDs = Set<String>()
+
+        var byReservation: [String: [CVRScheduledSession]] = [:]
+        var singles: [CVRScheduledSession] = []
+        for session in sessions {
+            if let reservation = session.reservationUUID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+               !reservation.isEmpty {
+                byReservation[reservation, default: []].append(session)
+            } else {
+                singles.append(session)
+            }
+        }
+
+        for (reservationUUID, reservationSessions) in byReservation {
+            let ordered = reservationSessions.sorted {
+                ($0.dateTime($0.scheduledStartTime) ?? .distantFuture)
+                    < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture)
+            }
+            guard let first = ordered.first else { continue }
+            let day = calendar.startOfDay(for: first.dateTime(nil) ?? Date())
+            let legs: [CVRScheduledLegItem] = ordered.enumerated().map { index, session in
+                CVRScheduledLegItem(
+                    id: session.legUUID ?? session.schedulerRecordID,
+                    sequenceNumber: index + 1,
+                    departureAirport: session.plannedDepartureAirport,
+                    destinationAirport: session.plannedDestinationAirport,
+                    missionCode: session.missionCode,
+                    scheduledStartTime: session.dateTime(session.scheduledStartTime),
+                    scheduledEndTime: session.dateTime(session.scheduledEndTime),
+                    reservationUUID: reservationUUID,
+                    legUUID: session.legUUID,
+                    schedulerRecordID: session.schedulerRecordID,
+                    source: .scheduledSession,
+                    session: session,
+                    status: "scheduled"
+                )
+            }
+            groups.append(
+                CVRScheduledReservationGroup(
+                    id: "reservation-\(reservationUUID)",
+                    reservationUUID: reservationUUID,
+                    dayStart: day,
+                    aircraftRegistration: first.aircraftRegistration,
+                    legs: legs
+                )
+            )
+        }
+
+        for session in singles {
+            let day = calendar.startOfDay(for: session.dateTime(nil) ?? Date())
+            groups.append(
+                CVRScheduledReservationGroup(
+                    id: "session-\(session.schedulerRecordID)",
+                    reservationUUID: session.reservationUUID,
+                    dayStart: day,
+                    aircraftRegistration: session.aircraftRegistration,
+                    legs: [
+                        CVRScheduledLegItem(
+                            id: session.legUUID ?? session.schedulerRecordID,
+                            sequenceNumber: 1,
+                            departureAirport: session.plannedDepartureAirport,
+                            destinationAirport: session.plannedDestinationAirport,
+                            missionCode: session.missionCode,
+                            scheduledStartTime: session.dateTime(session.scheduledStartTime),
+                            scheduledEndTime: session.dateTime(session.scheduledEndTime),
+                            reservationUUID: session.reservationUUID,
+                            legUUID: session.legUUID,
+                            schedulerRecordID: session.schedulerRecordID,
+                            source: .scheduledSession,
+                            session: session,
+                            status: "scheduled"
+                        )
+                    ]
+                )
+            )
+        }
+
+        let localByReservation = Dictionary(grouping: localLegs.filter { $0.status != "checked_in" }) {
+            $0.reservationUUID
+        }
+        for (reservationUUID, legs) in localByReservation {
+            let ordered = legs.sorted { $0.sequenceNumber < $1.sequenceNumber }
+            guard let first = ordered.first else { continue }
+            if groups.contains(where: { $0.reservationUUID == reservationUUID }) {
+                continue
+            }
+            let day = calendar.startOfDay(for: first.plannedStartAt ?? Date())
+            groups.append(
+                CVRScheduledReservationGroup(
+                    id: "local-\(reservationUUID)",
+                    reservationUUID: reservationUUID,
+                    dayStart: day,
+                    aircraftRegistration: first.tailNumber,
+                    legs: ordered.map { planned in
+                        usedLocalLegIDs.insert(planned.id)
+                        return CVRScheduledLegItem(
+                            id: planned.legUUID,
+                            sequenceNumber: planned.sequenceNumber,
+                            departureAirport: planned.departureAirport,
+                            destinationAirport: planned.destinationAirport,
+                            missionCode: planned.missionCode,
+                            scheduledStartTime: planned.plannedStartAt,
+                            scheduledEndTime: planned.plannedEndAt,
+                            reservationUUID: planned.reservationUUID,
+                            legUUID: planned.legUUID,
+                            schedulerRecordID: planned.schedulerRecordID,
+                            source: .localPlanned,
+                            session: nil,
+                            status: planned.status
+                        )
+                    }
+                )
+            )
+        }
+
+        return groups.sorted {
+            if $0.dayStart == $1.dayStart {
+                return ($0.legs.first?.scheduledStartTime ?? .distantFuture)
+                    < ($1.legs.first?.scheduledStartTime ?? .distantFuture)
+            }
+            return $0.dayStart < $1.dayStart
+        }
     }
 }
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
+require_once __DIR__ . '/CvrOperationalIdentityService.php';
 
 final class FlightScheduleService
 {
@@ -15,6 +16,7 @@ final class FlightScheduleService
     );
 
     private ?CvrOperationalIdentityReadService $identityRead = null;
+    private ?CvrOperationalIdentityService $identityWrite = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -23,6 +25,11 @@ final class FlightScheduleService
     private function identityRead(): CvrOperationalIdentityReadService
     {
         return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
+    }
+
+    private function identityWrite(): CvrOperationalIdentityService
+    {
+        return $this->identityWrite ??= new CvrOperationalIdentityService($this->pdo);
     }
 
     /** @return list<array<string,mixed>> */
@@ -177,7 +184,8 @@ final class FlightScheduleService
                 $start,
                 $end
             );
-            if (is_array($row)) {
+            $isCreate = !is_array($row);
+            if (!$isCreate) {
                 $slotId = (int)$row['id'];
                 $this->pdo->prepare(
                     'UPDATE ipca_flight_schedule_slots
@@ -192,18 +200,49 @@ final class FlightScheduleService
                 ));
                 $this->pdo->prepare('DELETE FROM ipca_flight_schedule_crew WHERE schedule_slot_id = ?')->execute(array($slotId));
             } else {
+                $organizationId = $this->requireOrganizationIdForCreate($values, $missionId);
                 $this->pdo->prepare(
                     'INSERT INTO ipca_flight_schedule_slots
-                     (scheduler_record_id, reservation_type, scheduled_date, scheduled_start_time, scheduled_end_time,
+                     (scheduler_record_id, organization_id, reservation_type, scheduled_date, scheduled_start_time, scheduled_end_time,
                       aircraft_id, mission_id, cohort_id, mission_code, planned_departure_airport,
                       planned_destination_airport, status, notes, created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )->execute(array(
-                    $recordId, $reservationType, $scheduledDate, $start, $end, $aircraftId, $missionId, $cohortId, $missionCode,
+                    $recordId, $organizationId, $reservationType, $scheduledDate, $start, $end, $aircraftId, $missionId, $cohortId, $missionCode,
                     $departure, $destination, $status, substr(trim((string)($values['notes'] ?? '')), 0, 1000),
                     $actorUserId, $actorUserId,
                 ));
                 $slotId = (int)$this->pdo->lastInsertId();
+
+                // Phase 2C: canonical identity for NEW online creates only, same transaction.
+                if ($this->identityWrite()->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE)) {
+                    try {
+                        $this->identityWrite()->createOnlineScheduleReservationIdentity(array(
+                            'organization_id' => $organizationId,
+                            'scheduler_record_id' => $recordId,
+                            'schedule_slot_id' => $slotId,
+                            'reservation_type' => $reservationType,
+                            'status' => $status,
+                            'planned_departure_airport' => $departure,
+                            'planned_destination_airport' => $destination,
+                            'scheduled_start_time' => $start,
+                            'scheduled_end_time' => $end,
+                        ));
+                    } catch (Throwable $canonicalError) {
+                        $this->identityWrite()->logTechnicalDiagnostic('online_schedule_canonical_write_failed', array(
+                            'organization_id' => $organizationId,
+                            'scheduler_record_id' => $recordId,
+                            'schedule_slot_id' => $slotId,
+                            'reservation_type' => $reservationType,
+                            'error_class' => $canonicalError::class,
+                        ));
+                        throw new RuntimeException(
+                            'Unable to create the schedule reservation because operational identity could not be recorded. Please try again.',
+                            0,
+                            $canonicalError
+                        );
+                    }
+                }
             }
             $insertCrew = $this->pdo->prepare(
                 'INSERT INTO ipca_flight_schedule_crew
@@ -223,7 +262,18 @@ final class FlightScheduleService
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
-            throw $e;
+            if ($this->isSafeScheduleUserError($e)) {
+                throw $e;
+            }
+            $this->identityWrite()->logTechnicalDiagnostic('schedule_create_technical_failure', array(
+                'error_class' => $e::class,
+                'scheduler_record_id' => $recordId,
+            ));
+            throw new RuntimeException(
+                'Unable to save the schedule reservation. Please try again.',
+                0,
+                $e
+            );
         }
         return $recordId;
     }
@@ -551,6 +601,103 @@ final class FlightScheduleService
                 throw new RuntimeException('A selected crew member is already reserved during this time.');
             }
         }
+    }
+
+    /**
+     * Resolve organization ownership for a new schedule row from trusted server-side context.
+     * Posted organization_id is an optional consistency assertion only — never authoritative.
+     * Never relies on the database DEFAULT for organization_id.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function requireOrganizationIdForCreate(array $values, ?int $missionId): int
+    {
+        $trusted = $this->resolveTrustedOrganizationId($missionId);
+        if ($trusted < 1) {
+            throw new RuntimeException('Organization context is required to create a schedule reservation.');
+        }
+
+        if (array_key_exists('organization_id', $values) && $values['organization_id'] !== null && $values['organization_id'] !== '') {
+            if (!is_numeric($values['organization_id'])) {
+                throw new RuntimeException('Organization context does not match this schedule reservation.');
+            }
+            $posted = (int)$values['organization_id'];
+            if ($posted < 1 || $posted !== $trusted) {
+                throw new RuntimeException('Organization context does not match this schedule reservation.');
+            }
+        }
+
+        return $trusted;
+    }
+
+    /**
+     * Trusted organization resolution for online schedule creates.
+     * Order: authenticated/session org → explicit mission ownership → unambiguous catalog org.
+     */
+    private function resolveTrustedOrganizationId(?int $missionId): int
+    {
+        $sessionOrg = $this->authenticatedOrganizationId();
+        if ($sessionOrg >= 1) {
+            return $sessionOrg;
+        }
+
+        if ($missionId !== null && $missionId > 0) {
+            $stmt = $this->pdo->prepare('SELECT organization_id FROM ipca_missions WHERE id = ? LIMIT 1');
+            $stmt->execute(array($missionId));
+            $missionOrg = (int)$stmt->fetchColumn();
+            if ($missionOrg >= 1) {
+                return $missionOrg;
+            }
+        }
+
+        try {
+            $statement = $this->pdo->query(
+                'SELECT DISTINCT organization_id
+                   FROM ipca_missions
+                  WHERE organization_id IS NOT NULL
+                    AND organization_id > 0'
+            );
+            $rows = $statement ? $statement->fetchAll(PDO::FETCH_COLUMN) : array();
+            if (is_array($rows) && count($rows) === 1 && (int)$rows[0] >= 1) {
+                return (int)$rows[0];
+            }
+        } catch (Throwable) {
+        }
+
+        return 0;
+    }
+
+    private function authenticatedOrganizationId(): int
+    {
+        if (function_exists('cw_current_organization_id')) {
+            try {
+                $resolved = cw_current_organization_id($this->pdo);
+                if (is_numeric($resolved) && (int)$resolved >= 1) {
+                    return (int)$resolved;
+                }
+            } catch (Throwable) {
+            }
+        }
+        foreach (array('organization_id', 'cw_organization_id') as $sessionKey) {
+            if (!isset($_SESSION[$sessionKey])) {
+                continue;
+            }
+            if (!is_numeric($_SESSION[$sessionKey])) {
+                continue;
+            }
+            $id = (int)$_SESSION[$sessionKey];
+            if ($id >= 1) {
+                return $id;
+            }
+        }
+        return 0;
+    }
+
+    private function isSafeScheduleUserError(Throwable $e): bool
+    {
+        // Preserve intentional scheduling/validation RuntimeExceptions.
+        // PDOException and other technical failures are sanitized for the UI.
+        return $e instanceof RuntimeException && !($e instanceof PDOException);
     }
 
     private function date(string $value): string

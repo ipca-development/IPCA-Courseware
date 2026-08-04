@@ -366,7 +366,9 @@ final class CvrOperationalIdentityBackfillService
             $legUuid = (string)$legs[0]['leg_uuid'];
 
             if ($dryRun) {
-                $out['aliases_created'] += 2 + (CvrOperationalIdentityService::isValidUuid($flightRecordUuid) ? 1 : 0);
+                // Count matches apply path: dispatch_uuid + dispatch_uuid_version + server_dispatch_id
+                // + optional workflow_flight_record_uuid.
+                $out['aliases_created'] += 3 + (CvrOperationalIdentityService::isValidUuid($flightRecordUuid) ? 1 : 0);
                 $out['actions'][] = array(
                     'type' => 'dispatch',
                     'subject_pk' => $dispatchId,

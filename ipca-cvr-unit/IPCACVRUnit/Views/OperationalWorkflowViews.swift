@@ -155,6 +155,7 @@ private struct ScheduledFlightsView: View {
     @EnvironmentObject private var audio: AudioRecorderManager
     @Binding var showAdminUnlock: Bool
     @State private var pendingReplacementSession: CVRScheduledSession?
+    @State private var showLocalMultiLegSheet = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -166,8 +167,17 @@ private struct ScheduledFlightsView: View {
                         statusCard(metrics)
                         scheduleTiles(metrics)
                         scheduleWarning
-                        sessionSection("TODAY", sessions: todaySessions, metrics: metrics)
-                        sessionSection("UPCOMING", sessions: upcomingSessions, metrics: metrics)
+                        if workflow.state.engineSessionContinuityActive {
+                            CVROperationalWarningCard(
+                                title: "ENGINE SESSION CONTINUING",
+                                message: "Select the next leg. Engine Start is not required. Hobbs, Tacho, and fuel carry forward.",
+                                iconName: "flame.fill",
+                                color: CVROperationalPalette.secondaryBlue
+                            )
+                        }
+                        ForEach(daySections, id: \.title) { section in
+                            reservationSection(section.title, groups: section.groups, metrics: metrics)
+                        }
                         actionButtons
                     }
                     .padding(.horizontal, metrics.outerHorizontalPadding)
@@ -181,7 +191,7 @@ private struct ScheduledFlightsView: View {
             }
         }
         .confirmationDialog(
-            "Archive the current workflow?",
+            "Save the current leg before opening another?",
             isPresented: Binding(
                 get: { pendingReplacementSession != nil },
                 set: { if !$0 { pendingReplacementSession = nil } }
@@ -189,7 +199,7 @@ private struct ScheduledFlightsView: View {
             titleVisibility: .visible
         ) {
             if let session = pendingReplacementSession {
-                Button("Archive Current and Open Scheduled Dispatch", role: .destructive) {
+                Button("Open Scheduled Leg", role: .destructive) {
                     pendingReplacementSession = nil
                     openScheduledSession(session)
                 }
@@ -198,7 +208,13 @@ private struct ScheduledFlightsView: View {
                 pendingReplacementSession = nil
             }
         } message: {
-            Text("The existing workflow will remain in Flight History with its pending upload state. The scheduled Dispatch will then open.")
+            Text("Complete Check-In for the current leg when possible. Pending evidence remains available in Log.")
+        }
+        .sheet(isPresented: $showLocalMultiLegSheet) {
+            LocalMultiLegDispatchSheet()
+                .environmentObject(workflow)
+                .environmentObject(settings)
+                .environmentObject(beacon)
         }
     }
 
@@ -208,8 +224,8 @@ private struct ScheduledFlightsView: View {
             subtitle: scheduleStatusSubtitle,
             iconName: sessionsStore.isRefreshing ? "arrow.triangle.2.circlepath" : "calendar.badge.clock",
             color: scheduleStatusColor,
-            value: aircraftSessions.isEmpty ? nil : "\(aircraftSessions.count)",
-            caption: "SCHEDULED FLIGHTS",
+            value: visibleGroups.isEmpty ? nil : "\(visibleGroups.count)",
+            caption: "SCHEDULED RESERVATIONS",
             metrics: metrics
         )
     }
@@ -226,20 +242,20 @@ private struct ScheduledFlightsView: View {
             CVROperationalTile(
                 title: "TODAY",
                 iconName: "calendar",
-                value: "\(todaySessions.count)",
-                color: todaySessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.secondaryBlue,
+                value: "\(todayGroups.count)",
+                color: todayGroups.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.secondaryBlue,
                 metrics: metrics
             )
             CVROperationalTile(
-                title: "UPCOMING",
-                iconName: "calendar.badge.plus",
-                value: "\(upcomingSessions.count)",
-                color: upcomingSessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.secondaryBlue,
+                title: "LEGS",
+                iconName: "point.topleft.down.to.point.bottomright.curvepath",
+                value: "\(visibleGroups.flatMap(\.legs).count)",
+                color: CVROperationalPalette.secondaryBlue,
                 metrics: metrics
             )
             CVROperationalTile(
-                title: "SYNC",
-                iconName: sessionsStore.isRefreshing ? "arrow.triangle.2.circlepath" : "icloud.fill",
+                title: "STATUS",
+                iconName: sessionsStore.isRefreshing ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill",
                 value: sessionsStore.isRefreshing ? "Loading" : "Ready",
                 color: sessionsStore.lastError.isEmpty ? CVROperationalPalette.success : CVROperationalPalette.warning,
                 metrics: metrics
@@ -258,12 +274,12 @@ private struct ScheduledFlightsView: View {
             )
         } else if let error = sessionsStore.lastError.nilIfEmpty {
             CVROperationalWarningCard(
-                title: "SCHEDULE SYNC WARNING",
+                title: "SCHEDULE UPDATE WARNING",
                 message: error,
                 iconName: "icloud.slash.fill",
                 color: CVROperationalPalette.warning
             )
-        } else if aircraftSessions.isEmpty && !sessionsStore.isRefreshing {
+        } else if visibleGroups.isEmpty && !sessionsStore.isRefreshing {
             CVROperationalWarningCard(
                 title: "NO SCHEDULED FLIGHTS",
                 message: "No flights are scheduled for this aircraft. You can still create a local Dispatch.",
@@ -274,9 +290,9 @@ private struct ScheduledFlightsView: View {
     }
 
     @ViewBuilder
-    private func sessionSection(
+    private func reservationSection(
         _ title: String,
-        sessions: [CVRScheduledSession],
+        groups: [CVRScheduledReservationGroup],
         metrics: CVROperationalMetrics
     ) -> some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -285,11 +301,11 @@ private struct ScheduledFlightsView: View {
                 .tracking(1.1)
                 .foregroundStyle(CVROperationalPalette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if sessions.isEmpty {
+            if groups.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "calendar")
                         .foregroundStyle(CVROperationalPalette.standby)
-                    Text("No \(title.lowercased()) flights")
+                    Text("No reservations")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(CVROperationalPalette.textSecondary)
                     Spacer()
@@ -298,61 +314,102 @@ private struct ScheduledFlightsView: View {
                 .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
             } else {
-                ForEach(sessions) { session in
-                    scheduledSessionCard(session, metrics: metrics)
+                ForEach(groups) { group in
+                    reservationCard(group, metrics: metrics)
                 }
             }
         }
     }
 
-    private func scheduledSessionCard(
-        _ session: CVRScheduledSession,
+    private func reservationCard(
+        _ group: CVRScheduledReservationGroup,
         metrics: CVROperationalMetrics
     ) -> some View {
-        let blocked = !workflow.canOpenScheduledSession(
-            session,
-            selectedAircraft: aircraftForSession(session),
-            isAudioRecording: audio.isRecording
-        )
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(group.routeSummary)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(group.legs.count) LEG\(group.legs.count == 1 ? "" : "S")")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            }
+            Text(group.aircraftRegistration)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            ForEach(group.legs) { leg in
+                legRow(leg, metrics: metrics)
+            }
+        }
+        .padding(14)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+
+    private func legRow(_ leg: CVRScheduledLegItem, metrics: CVROperationalMetrics) -> some View {
+        let blocked = isLegBlocked(leg)
         return Button {
+            openLeg(leg)
+        } label: {
+            HStack(spacing: 12) {
+                Text("LEG \(leg.sequenceNumber)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    .frame(width: 48, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(leg.routeLabel)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(leg.missionCode.nilIfEmpty ?? timeRange(leg))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                }
+                Spacer()
+                Image(systemName: blocked ? "lock.fill" : "chevron.right")
+                    .foregroundStyle(blocked ? CVROperationalPalette.warning : CVROperationalPalette.textSecondary)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(blocked || leg.status == "checked_in")
+        .opacity((blocked || leg.status == "checked_in") ? 0.55 : 1)
+    }
+
+    private func isLegBlocked(_ leg: CVRScheduledLegItem) -> Bool {
+        if leg.status == "checked_in" { return true }
+        if let session = leg.session {
+            return !workflow.canOpenScheduledSession(
+                session,
+                selectedAircraft: aircraftForSession(session),
+                isAudioRecording: audio.isRecording
+            )
+        }
+        if workflow.state.engineSessionContinuityActive { return false }
+        return audio.isRecording && workflow.state.activeFlightRecord != nil
+    }
+
+    private func openLeg(_ leg: CVRScheduledLegItem) {
+        if let session = leg.session {
             if workflow.requiresArchivingBeforeScheduledSession(session) {
                 pendingReplacementSession = session
             } else {
                 openScheduledSession(session)
             }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "calendar.badge.checkmark")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(session.missionCode.nilIfEmpty ?? "SCHEDULED FLIGHT")
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(.white)
-                        Spacer()
-                        Text(timeRange(session))
-                            .font(.subheadline.weight(.bold).monospacedDigit())
-                            .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                    }
-                    Text(route(session))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
-                    Text(crewSummary(session))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(CVROperationalPalette.textSecondary)
-                }
-                Image(systemName: blocked ? "lock.fill" : "chevron.right")
-                    .foregroundStyle(blocked ? CVROperationalPalette.warning : CVROperationalPalette.textSecondary)
-            }
-            .padding(14)
-            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+            return
         }
-        .buttonStyle(.plain)
-        .disabled(blocked)
-        .opacity(blocked ? 0.55 : 1)
+        if let planned = workflow.state.plannedLegs.first(where: { $0.legUUID == leg.legUUID }) {
+            workflow.openDispatchFromPlannedLeg(
+                planned,
+                selectedAircraft: settings.selectedAircraft,
+                cvrUnitID: settings.cvrUnitIdentifier,
+                beaconID: beacon.expectedBeaconIdentityHex,
+                isAudioRecording: audio.isRecording,
+                canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
+            )
+        }
     }
 
     private func openScheduledSession(_ session: CVRScheduledSession) {
@@ -361,7 +418,8 @@ private struct ScheduledFlightsView: View {
             selectedAircraft: aircraftForSession(session),
             cvrUnitID: settings.cvrUnitIdentifier,
             beaconID: beacon.expectedBeaconIdentityHex,
-            isAudioRecording: audio.isRecording
+            isAudioRecording: audio.isRecording,
+            canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
         )
     }
 
@@ -405,14 +463,10 @@ private struct ScheduledFlightsView: View {
             } else {
                 CVROperationalActionButton(
                     title: "CREATE LOCAL DISPATCH",
-                    subtitle: "Use when no flight was scheduled",
+                    subtitle: "Single leg or multi-leg reservation",
                     color: CVROperationalPalette.standby
                 ) {
-                    workflow.createOrOpenLocalDispatch(
-                        selectedAircraft: settings.selectedAircraft,
-                        cvrUnitID: settings.cvrUnitIdentifier,
-                        beaconID: beacon.expectedBeaconIdentityHex
-                    )
+                    showLocalMultiLegSheet = true
                 }
             }
         }
@@ -425,7 +479,7 @@ private struct ScheduledFlightsView: View {
         if sessionsStore.isRefreshing {
             return "LOADING SCHEDULE"
         }
-        return aircraftSessions.isEmpty ? "NO FLIGHTS SCHEDULED" : "FLIGHTS AVAILABLE"
+        return visibleGroups.isEmpty ? "NO FLIGHTS SCHEDULED" : "RESERVATIONS AVAILABLE"
     }
 
     private var scheduleStatusSubtitle: String {
@@ -433,12 +487,12 @@ private struct ScheduledFlightsView: View {
             return "CONFIGURE THE CVR UNIT AIRCRAFT"
         }
         if sessionsStore.isRefreshing {
-            return "SYNCING WITH IPCA.TRAINING"
+            return "UPDATING SCHEDULE"
         }
-        if aircraftSessions.isEmpty {
+        if visibleGroups.isEmpty {
             return "LOCAL DISPATCH REMAINS AVAILABLE"
         }
-        return "SELECT A SESSION TO PREPARE DISPATCH"
+        return "SELECT A LEG TO PREPARE DISPATCH"
     }
 
     private var scheduleStatusColor: Color {
@@ -448,7 +502,7 @@ private struct ScheduledFlightsView: View {
         if sessionsStore.isRefreshing {
             return CVROperationalPalette.secondaryBlue
         }
-        return aircraftSessions.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.success
+        return visibleGroups.isEmpty ? CVROperationalPalette.standby : CVROperationalPalette.success
     }
 
     private var aircraftSessions: [CVRScheduledSession] {
@@ -457,8 +511,20 @@ private struct ScheduledFlightsView: View {
         var consumedSchedulerRecordIDs = Set(
             workflow.archives.compactMap { $0.dispatch.schedulerRecordID }
         )
+        var consumedLegUUIDs = Set(
+            workflow.archives.compactMap { $0.dispatch.operationalIdentity?.legUUID }
+        )
+        for planned in workflow.state.plannedLegs where planned.status == "checked_in" {
+            consumedLegUUIDs.insert(planned.legUUID)
+            if let scheduler = planned.schedulerRecordID {
+                consumedSchedulerRecordIDs.insert(scheduler)
+            }
+        }
         if let activeSchedulerRecordID = workflow.state.activeDispatch?.schedulerRecordID {
             consumedSchedulerRecordIDs.insert(activeSchedulerRecordID)
+        }
+        if let activeLeg = workflow.state.activeDispatch?.operationalIdentity?.legUUID {
+            consumedLegUUIDs.insert(activeLeg)
         }
         return sessionsStore.sessions
             .filter {
@@ -467,21 +533,46 @@ private struct ScheduledFlightsView: View {
                         == CVRWorkflowStore.normalizedTail(aircraft.registration))
                     && ($0.dateTime(nil) ?? .distantPast) >= startOfToday
                     && !consumedSchedulerRecordIDs.contains($0.schedulerRecordID)
+                    && ($0.legUUID == nil || !consumedLegUUIDs.contains($0.legUUID!))
             }
             .sorted { ($0.dateTime($0.scheduledStartTime) ?? .distantFuture) < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture) }
     }
 
-    private var todaySessions: [CVRScheduledSession] {
-        aircraftSessions.filter { session in
-            guard let date = session.dateTime(nil) else { return false }
-            return operationalCalendar.isDate(date, inSameDayAs: Date())
+    private var visibleGroups: [CVRScheduledReservationGroup] {
+        let localLegs = workflow.state.plannedLegs.filter { planned in
+            planned.status != "checked_in"
+                && (settings.selectedAircraft == nil
+                    || CVRWorkflowStore.normalizedTail(planned.tailNumber)
+                        == CVRWorkflowStore.normalizedTail(settings.selectedAircraft?.registration ?? ""))
         }
+        return CVRScheduledReservationGrouping.groups(
+            from: aircraftSessions,
+            localLegs: localLegs,
+            calendar: operationalCalendar
+        )
     }
 
-    private var upcomingSessions: [CVRScheduledSession] {
-        aircraftSessions.filter { session in
-            guard let date = session.dateTime(nil) else { return false }
-            return !operationalCalendar.isDate(date, inSameDayAs: Date())
+    private var todayGroups: [CVRScheduledReservationGroup] {
+        visibleGroups.filter { operationalCalendar.isDate($0.dayStart, inSameDayAs: Date()) }
+    }
+
+    private var daySections: [(title: String, groups: [CVRScheduledReservationGroup])] {
+        let grouped = Dictionary(grouping: visibleGroups) { group in
+            operationalCalendar.startOfDay(for: group.dayStart)
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = operationalCalendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = operationalCalendar.timeZone
+        formatter.dateFormat = "EEEE"
+        return grouped.keys.sorted().map { day in
+            let title: String
+            if operationalCalendar.isDate(day, inSameDayAs: Date()) {
+                title = "Today"
+            } else {
+                title = formatter.string(from: day)
+            }
+            return (title, grouped[day] ?? [])
         }
     }
 
@@ -491,21 +582,110 @@ private struct ScheduledFlightsView: View {
         return calendar
     }
 
-    private func timeRange(_ session: CVRScheduledSession) -> String {
-        let start = session.dateTime(session.scheduledStartTime)?.formatted(date: .omitted, time: .shortened) ?? "TBD"
-        let end = session.dateTime(session.scheduledEndTime)?.formatted(date: .omitted, time: .shortened) ?? "TBD"
+    private func timeRange(_ leg: CVRScheduledLegItem) -> String {
+        let start = leg.scheduledStartTime?.formatted(date: .omitted, time: .shortened) ?? "TBD"
+        let end = leg.scheduledEndTime?.formatted(date: .omitted, time: .shortened) ?? "TBD"
         return "\(start)–\(end)"
     }
+}
 
-    private func route(_ session: CVRScheduledSession) -> String {
-        let departure = session.plannedDepartureAirport.nilIfEmpty ?? "TBD"
-        let destination = session.plannedDestinationAirport.nilIfEmpty ?? "TBD"
-        return "\(departure) → \(destination)"
+private struct LocalMultiLegDispatchSheet: View {
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var airportsText = ""
+    @State private var missionCode = ""
+    @State private var createSingleLeg = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("CREATE LOCAL DISPATCH")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    TextField("Mission code (optional)", text: $missionCode)
+                        .textInputAutocapitalization(.characters)
+                        .padding(12)
+                        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                    Text("AIRPORTS IN ORDER")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    TextField("KTRM, KPSP, KBUR, KTRM", text: $airportsText, axis: .vertical)
+                        .lineLimit(3...6)
+                        .textInputAutocapitalization(.characters)
+                        .padding(12)
+                        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                    Text("Type airports in flight order. Example: KTRM, KPSP, KBUR, KTRM creates four legs under one reservation.")
+                        .font(.caption)
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    Toggle("Single-leg Dispatch only", isOn: $createSingleLeg)
+                        .tint(CVROperationalPalette.secondaryBlue)
+                    CVROperationalActionButton(
+                        title: "CREATE DISPATCH",
+                        subtitle: createSingleLeg ? "Open a single local Dispatch" : "Create reservation and open leg 1",
+                        color: CVROperationalPalette.success
+                    ) {
+                        create()
+                    }
+                }
+                .padding(16)
+            }
+            .background(CVROperationalPalette.background.ignoresSafeArea())
+            .navigationTitle("Local Dispatch")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                if airportsText.isEmpty {
+                    airportsText = settings.selectedAircraft?.homeAirport ?? ""
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 
-    private func crewSummary(_ session: CVRScheduledSession) -> String {
-        let names = session.crew.map(\.personName).filter { !$0.isEmpty }
-        return names.isEmpty ? "Crew not assigned" : names.joined(separator: ", ")
+    private func create() {
+        if createSingleLeg {
+            workflow.createOrOpenLocalDispatch(
+                selectedAircraft: settings.selectedAircraft,
+                cvrUnitID: settings.cvrUnitIdentifier,
+                beaconID: beacon.expectedBeaconIdentityHex,
+                canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
+            )
+            dismiss()
+            return
+        }
+        let airports = airportsText
+            .uppercased()
+            .replacingOccurrences(of: "→", with: ",")
+            .replacingOccurrences(of: "->", with: ",")
+            .replacingOccurrences(of: " ", with: ",")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if airports.count < 2 {
+            workflow.createOrOpenLocalDispatch(
+                selectedAircraft: settings.selectedAircraft,
+                cvrUnitID: settings.cvrUnitIdentifier,
+                beaconID: beacon.expectedBeaconIdentityHex,
+                canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
+            )
+        } else {
+            workflow.createLocalMultiLegReservation(
+                airports: airports,
+                selectedAircraft: settings.selectedAircraft,
+                cvrUnitID: settings.cvrUnitIdentifier,
+                beaconID: beacon.expectedBeaconIdentityHex,
+                missionCode: missionCode,
+                canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
+            )
+        }
+        dismiss()
     }
 }
 
@@ -584,37 +764,25 @@ struct DispatchWorkflowView: View {
 
     @ViewBuilder
     private var warningCard: some View {
-        if let failedDispatch = workflow.dispatchUploadFailure() {
-            CVROperationalWarningCard(
-                title: "DISPATCH UPLOAD FAILED",
-                message: failedDispatch.lastError.nilIfEmpty ?? "The server rejected Dispatch upload. Flight data is still stored locally on this device.",
-                iconName: "icloud.slash.fill",
-                color: CVROperationalPalette.critical
-            )
-        } else if workflow.dispatchUploadInProgress() {
-            CVROperationalWarningCard(
-                title: "DISPATCH UPLOAD IN PROGRESS",
-                message: "The Dispatch is stored locally and is being verified by the server.",
-                iconName: "icloud.and.arrow.up.fill",
-                color: CVROperationalPalette.secondaryBlue
-            )
-        } else if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
+        if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
             CVROperationalWarningCard(
                 title: "AIRCRAFT MISMATCH",
-                message: "Dispatch tail \(aircraftTile) does not match enrolled aircraft \(settings.selectedAircraft?.registration ?? "—"). Fix alignment before retrying upload.",
+                message: "Dispatch tail \(aircraftTile) does not match enrolled aircraft \(settings.selectedAircraft?.registration ?? "—"). Correct the aircraft before continuing.",
                 iconName: "airplane.circle.fill",
                 color: CVROperationalPalette.critical
             )
-        } else if let error = workflow.lastError.nilIfEmpty {
-            CVROperationalWarningCard(title: "WORKFLOW STORAGE WARNING", message: error, iconName: "externaldrive.badge.exclamationmark", color: CVROperationalPalette.warning)
+        } else if let error = workflow.lastError.nilIfEmpty,
+                  !error.localizedCaseInsensitiveContains("upload"),
+                  !error.localizedCaseInsensitiveContains("workflow") {
+            CVROperationalWarningCard(title: "STORAGE WARNING", message: error, iconName: "externaldrive.badge.exclamationmark", color: CVROperationalPalette.warning)
         } else if settings.selectedAircraft == nil {
             CVROperationalWarningCard(title: "AIRCRAFT CONFIGURATION REQUIRED", message: "Assign this CVR Unit to its aircraft before Dispatch.", iconName: "lock.trianglebadge.exclamationmark", color: CVROperationalPalette.critical)
         } else if workflow.state.activeDispatch == nil {
-            CVROperationalWarningCard(title: "NO ACTIVE DISPATCH", message: "Create or recover a dispatch before recorder verification.", iconName: "exclamationmark.triangle.fill", color: CVROperationalPalette.standby)
+            CVROperationalWarningCard(title: "NO ACTIVE DISPATCH", message: "Create or open a Dispatch for this leg.", iconName: "exclamationmark.triangle.fill", color: CVROperationalPalette.standby)
         } else if !workflow.dispatchMissingItems.isEmpty {
             CVROperationalWarningCard(title: workflow.dispatchMissingItems.first ?? "DISPATCH INCOMPLETE", message: "\(workflow.dispatchMissingItems.count) item(s) require attention.", iconName: "checklist.unchecked", color: CVROperationalPalette.warning)
         } else {
-            CVROperationalWarningCard(title: "READY FOR VERIFICATION", message: "Dispatch data and individual crew consents are stored locally.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
+            CVROperationalWarningCard(title: "READY TO CONFIRM", message: "Dispatch is stored on this device. Confirm to open Recorder.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
         }
     }
 
@@ -645,58 +813,13 @@ struct DispatchWorkflowView: View {
 
     private var actionButtons: some View {
         VStack(spacing: 8) {
-            if workflow.dispatchUploadFailure() != nil || workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
-                if workflow.canRepairFailedDispatchUpload {
-                    CVROperationalActionButton(
-                        title: "EDIT DISPATCH DETAILS",
-                        subtitle: "Adjust meters, fuel, oil, or crew",
-                        color: CVROperationalPalette.secondaryBlue
-                    ) {
-                        isEditingDispatch = true
-                    }
-                }
-                if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
-                    CVROperationalActionButton(
-                        title: "FIX AIRCRAFT & RETRY UPLOAD",
-                        subtitle: settings.selectedAircraft?.registration ?? "Select enrolled aircraft in Admin",
-                        color: CVROperationalPalette.secondaryBlue
-                    ) {
-                        _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
-                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-                    }
-                } else {
-                    CVROperationalActionButton(title: "RETRY DISPATCH UPLOAD", subtitle: "Resend failed Dispatch metadata", color: CVROperationalPalette.warning) {
-                        workflow.requeueFailedUploads(componentTypes: ["dispatch_metadata"])
-                        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
-                    }
-                }
-                if !workflow.failedActiveUploadComponents().isEmpty {
-                    CVROperationalActionButton(title: "RETRY ALL FAILED UPLOADS", subtitle: "Dispatch, events, closure, Garmin", color: CVROperationalPalette.warning) {
-                        workflow.requeueFailedUploads()
-                        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
-                    }
-                }
-                CVROperationalActionButton(title: "EXPORT RECOVERY JSON", subtitle: "Share local flight evidence backup", color: CVROperationalPalette.standby) {
-                    do {
-                        recoveryExportURL = try workflow.activeWorkflowExportURL()
-                        recoveryExportError = ""
-                    } catch {
-                        recoveryExportURL = nil
-                        recoveryExportError = error.localizedDescription
-                    }
-                }
-                if let recoveryExportURL {
-                    ShareLink(item: recoveryExportURL) {
-                        Label("Share Recovery Backup", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(CVROperationalPalette.secondaryBlue)
-                }
-                if !recoveryExportError.isEmpty {
-                    Text(recoveryExportError)
-                        .font(.caption)
-                        .foregroundStyle(CVROperationalPalette.critical)
+            if workflow.dispatchTailMismatch(enrolledRegistration: settings.selectedAircraft?.registration) {
+                CVROperationalActionButton(
+                    title: "FIX AIRCRAFT ALIGNMENT",
+                    subtitle: settings.selectedAircraft?.registration ?? "Select enrolled aircraft in Admin",
+                    color: CVROperationalPalette.secondaryBlue
+                ) {
+                    _ = workflow.repairDispatchAircraftAlignment(selectedAircraft: settings.selectedAircraft)
                 }
             }
             if workflow.state.activeDispatch == nil {
@@ -709,39 +832,24 @@ struct DispatchWorkflowView: View {
                         workflow.createOrOpenLocalDispatch(
                             selectedAircraft: settings.selectedAircraft,
                             cvrUnitID: settings.cvrUnitIdentifier,
-                            beaconID: beacon.expectedBeaconIdentityHex
+                            beaconID: beacon.expectedBeaconIdentityHex,
+                            canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled
                         )
                         isEditingDispatch = true
                     }
                 }
             } else {
-                if workflow.isDispatchLocked && workflow.dispatchUploadVerified() {
-                    CVROperationalActionButton(title: "Dispatch Confirmed", subtitle: "Flight Record Created", color: CVROperationalPalette.success) {}
-                } else if workflow.isDispatchLocked && workflow.dispatchUploadInProgress() {
-                    CVROperationalActionButton(title: "Uploading Dispatch", subtitle: "Waiting for server verification", color: CVROperationalPalette.secondaryBlue) {}
-                } else if !workflow.isDispatchLocked {
-                    CVROperationalActionButton(title: "Edit Dispatch", subtitle: "Crew / meters / oil", color: CVROperationalPalette.secondaryBlue) {
+                if workflow.isDispatchLocked {
+                    CVROperationalActionButton(title: "Dispatch Confirmed", subtitle: "Open Recorder, then In-Flight", color: CVROperationalPalette.success) {}
+                } else {
+                    CVROperationalActionButton(title: "Edit Dispatch", subtitle: "Mission / crew / meters / fuel / oil", color: CVROperationalPalette.secondaryBlue) {
                         isEditingDispatch = true
                     }
-                    consentButtons
                     if canConfirmDispatch {
-                        CVROperationalActionButton(title: "Confirm Dispatch", subtitle: "Create Flight Record", color: CVROperationalPalette.success) {
+                        CVROperationalActionButton(title: "Confirm Dispatch", subtitle: "Quick Verification — saves on this device", color: CVROperationalPalette.success) {
                             workflow.verifyDispatchAndCreateFlightRecord()
                             uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var consentButtons: some View {
-        if let dispatch = workflow.state.activeDispatch, !dispatch.crew.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(Array(dispatch.crew.prefix(2))) { assignment in
-                    CVROperationalActionButton(title: "CONSENT", subtitle: assignment.personName.uppercased(), color: consentColor(for: assignment)) {
-                        workflow.recordConsent(for: assignment, accepted: true, appVersion: appVersion, deviceID: UIDevice.current.identifierForVendor?.uuidString ?? "local-device")
                     }
                 }
             }
@@ -759,7 +867,7 @@ struct DispatchWorkflowView: View {
         case .dispatchIncomplete:
             return "REQUIRED ITEMS ARE MISSING"
         case .consentRequired:
-            return "INDIVIDUAL CREW CONSENT REQUIRED"
+            return "COMPLETE REQUIRED DISPATCH ITEMS"
         case .tailNumberConflict:
             return "AIRCRAFT DOES NOT MATCH CVR UNIT"
         case .readyForVerification:
@@ -1057,8 +1165,9 @@ struct InFlightWorkflowView: View {
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var gps: GPSLocationManager
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @Binding var showAdminUnlock: Bool
-    @State private var isShowingShutdownVerification = false
+    @State private var isShowingCheckIn = false
     @State private var exerciseConfirmed = false
     @State private var trainingRemarkConfirmed = false
 
@@ -1093,7 +1202,7 @@ struct InFlightWorkflowView: View {
                                             color: operationCounts.displayTakeoffs > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
                                             metrics: metrics,
                                             minimumDuration: 2,
-                                            isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                            isEnabled: engineRunning && !hasLegBoundaryEvent
                                         ) {
                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                             workflow.recordManualTakeoffAdjustment(gpsSample: gps.latestSample)
@@ -1107,7 +1216,7 @@ struct InFlightWorkflowView: View {
                                             color: operationCounts.displayLandings > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
                                             metrics: metrics,
                                             minimumDuration: 2,
-                                            isEnabled: hasEngineStartEvent && !hasEngineShutdownEvent
+                                            isEnabled: engineRunning && !hasLegBoundaryEvent
                                         ) {
                                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                             workflow.recordManualLandingAdjustment(gpsSample: gps.latestSample)
@@ -1125,12 +1234,22 @@ struct InFlightWorkflowView: View {
                 }
             }
         }
-        .sheet(isPresented: $isShowingShutdownVerification) {
-            ShutdownVerificationView()
+        .onAppear {
+            workflow.synthesizeEngineContinuityIfNeeded(gpsSample: gps.latestSample)
+            Task {
+                if workflow.state.operationalSession?.pendingSoftStartRecording == true
+                    || workflow.state.engineSessionContinuityActive {
+                    await coordinator.softStartRecordingIfAvionicsOn()
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingCheckIn) {
+            CheckInView()
                 .environmentObject(workflow)
                 .environmentObject(settings)
                 .environmentObject(uploadManager)
                 .environmentObject(gps)
+                .environmentObject(coordinator)
                 .presentationDetents([.large])
         }
     }
@@ -1143,12 +1262,29 @@ struct InFlightWorkflowView: View {
         offBlockEvent != nil
     }
 
+    private var engineRunning: Bool {
+        hasEngineStartEvent || workflow.state.engineSessionContinuityActive
+    }
+
+    private var hasTransientStopEvent: Bool {
+        event("transient_stop_on_block") != nil
+    }
+
     private var hasEngineShutdownEvent: Bool {
         onBlockEvent != nil
     }
 
+    private var hasLegBoundaryEvent: Bool {
+        hasEngineShutdownEvent || hasTransientStopEvent
+    }
+
     private var hasShutdownVerificationEvent: Bool {
         event("shutdown_verification_completed") != nil
+    }
+
+    private var awaitingAvionicsOff: Bool {
+        workflow.state.activeFlightRecord?.status == .awaitingAvionicsOff
+            || workflow.state.operationalSession?.awaitingAvionicsOffConfirmation == true
     }
 
     private var offBlockEvent: CVRFlightEventRecord? {
@@ -1167,44 +1303,83 @@ struct InFlightWorkflowView: View {
     }
 
     private var inFlightTitle: String {
-        if hasEngineShutdownEvent { return "ON BLOCK RECORDED" }
-        if hasEngineStartEvent { return "OFF BLOCK ACTIVE" }
+        if awaitingAvionicsOff { return "AWAITING AVIONICS OFF" }
+        if hasTransientStopEvent { return "TRANSIENT STOP RECORDED" }
+        if hasEngineShutdownEvent { return "ENGINE SHUTDOWN RECORDED" }
+        if hasEngineStartEvent { return "ENGINE RUNNING" }
+        if workflow.state.engineSessionContinuityActive { return "ENGINE CONTINUITY" }
         return avionicsReady ? "READY FOR ENGINE START" : "STANDING BY"
     }
 
     private var inFlightSubtitle: String {
-        if hasEngineShutdownEvent { return "SHUTDOWN VERIFICATION REQUIRED" }
-        if hasEngineStartEvent { return "GPS AIRBORNE FLIGHT TIME" }
-        return avionicsReady ? "PRESS AND HOLD ENGINE START" : "WAITING FOR AVIONICS POWER"
+        if awaitingAvionicsOff { return "TURN AVIONICS OFF WHEN READY" }
+        if hasTransientStopEvent { return "COMPLETE CHECK-IN FOR THIS LEG" }
+        if hasEngineShutdownEvent { return "COMPLETE CHECK-IN, THEN AVIONICS OFF" }
+        if hasEngineStartEvent { return "FLIGHT TIME" }
+        if workflow.state.engineSessionContinuityActive { return "NO ENGINE START — CONTINUE THIS LEG" }
+        return avionicsReady ? "HOLD ENGINE START 3 SECONDS" : "WAITING FOR AVIONICS POWER"
     }
 
     private var inFlightColor: Color {
-        if hasEngineShutdownEvent { return CVROperationalPalette.success }
-        if hasEngineStartEvent { return CVROperationalPalette.success }
+        if awaitingAvionicsOff { return CVROperationalPalette.warning }
+        if hasTransientStopEvent || hasEngineShutdownEvent { return CVROperationalPalette.success }
+        if hasEngineStartEvent || workflow.state.engineSessionContinuityActive { return CVROperationalPalette.success }
         return avionicsReady ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby
     }
 
     private func inFlightValue(now: Date) -> String? {
-        guard hasEngineStartEvent else { return nil }
+        guard engineRunning else { return nil }
         return elapsedText(seconds: gpsAirborneSeconds(now: now))
     }
 
     @ViewBuilder
     private var inFlightControlPanel: some View {
-        if hasEngineShutdownEvent {
+        if awaitingAvionicsOff {
+            CVROperationalWarningCard(
+                title: "CHECK-IN SAVED",
+                message: "Turn avionics OFF to finalize the recording and return to Schedule.",
+                iconName: "powerplug.fill",
+                color: CVROperationalPalette.warning
+            )
+        } else if hasTransientStopEvent {
             VStack(spacing: 8) {
-                CVROperationalWarningCard(title: hasShutdownVerificationEvent ? "FLIGHT ENDED" : "ON BLOCK RECORDED", message: hasShutdownVerificationEvent ? "Ending Hobbs and Tacho are stored with the audio-recorded flight. Garmin CSV can be attached later from Log." : "Enter Ending Hobbs and Tacho to close this flight.", iconName: "checkmark.seal.fill", color: CVROperationalPalette.success)
-                if !hasShutdownVerificationEvent {
-                    CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.secondaryBlue) {
-                        isShowingShutdownVerification = true
-                    }
-                } else if workflow.canEditFlightClosure {
-                    CVROperationalActionButton(title: "EDIT ENDING METERS", subtitle: "Fix Hobbs or Tacho before upload", color: CVROperationalPalette.warning) {
-                        isShowingShutdownVerification = true
+                CVROperationalWarningCard(
+                    title: "TRANSIENT STOP",
+                    message: "Engine may keep running. Complete Check-In, then open the next leg from Schedule.",
+                    iconName: "airplane.arrival",
+                    color: CVROperationalPalette.secondaryBlue
+                )
+                CVROperationalActionButton(
+                    title: hasShutdownVerificationEvent ? "EDIT CHECK-IN" : "CHECK-IN",
+                    subtitle: "Tacho, Hobbs, Fuel, Destination, Takeoffs, Landings",
+                    color: CVROperationalPalette.secondaryBlue
+                ) {
+                    workflow.beginTransientStopCheckIn()
+                    isShowingCheckIn = true
+                }
+            }
+        } else if hasEngineShutdownEvent {
+            VStack(spacing: 8) {
+                CVROperationalWarningCard(
+                    title: hasShutdownVerificationEvent ? "CHECK-IN COMPLETE" : "ENGINE SHUTDOWN RECORDED",
+                    message: hasShutdownVerificationEvent
+                        ? "Turn avionics OFF when ready. Recording finalizes automatically."
+                        : "Complete Check-In now, then turn avionics OFF.",
+                    iconName: "checkmark.seal.fill",
+                    color: CVROperationalPalette.success
+                )
+                if !hasShutdownVerificationEvent || workflow.canEditFlightClosure {
+                    CVROperationalActionButton(
+                        title: hasShutdownVerificationEvent ? "EDIT CHECK-IN" : "CHECK-IN",
+                        subtitle: "Tacho, Hobbs, Fuel, Destination, Takeoffs, Landings",
+                        color: CVROperationalPalette.secondaryBlue
+                    ) {
+                        workflow.beginEngineShutdownCheckIn()
+                        isShowingCheckIn = true
                     }
                 }
             }
-        } else if hasEngineStartEvent {
+        } else if engineRunning {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     CVROperationalActionButton(title: "EXERCISE START", subtitle: "Mark training item", color: CVROperationalPalette.secondaryBlue, isConfirmed: exerciseConfirmed) {
@@ -1223,18 +1398,37 @@ struct InFlightWorkflowView: View {
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
+                CVRHoldActionButton(title: "TRANSIENT STOP", subtitle: "Hold 3 seconds — end leg, keep engine running", color: CVROperationalPalette.secondaryBlue) {
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    workflow.recordTransientStopOnBlock(gpsSample: gps.latestSample)
+                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    Task {
+                        await coordinator.finalizeRecordingForLegBoundary(reason: "Transient stop leg boundary.")
+                        workflow.beginTransientStopCheckIn()
+                        isShowingCheckIn = true
+                    }
+                }
                 CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordEngineShutdownOnBlock(gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    workflow.beginEngineShutdownCheckIn()
+                    isShowingCheckIn = true
                 }
             }
-        } else if avionicsReady {
+        } else if avionicsReady && workflow.needsEngineStart {
             CVRHoldActionButton(title: "ENGINE START", subtitle: "Hold 3 seconds for OFF Block", color: CVROperationalPalette.success) {
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 workflow.recordEngineStartOffBlock(gpsSample: gps.latestSample)
                 uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
+        } else if workflow.state.engineSessionContinuityActive {
+            CVROperationalWarningCard(
+                title: "CONTINUE THIS LEG",
+                message: "Engine is already running from the previous leg. No Engine Start. Recording starts with avionics ON.",
+                iconName: "flame.fill",
+                color: CVROperationalPalette.secondaryBlue
+            )
         } else {
             CVROperationalWarningCard(title: "WAITING FOR AVIONICS POWER", message: "Engine Start will appear when the paired beacon reports avionics power.", iconName: "timer", color: CVROperationalPalette.standby)
         }
@@ -1269,7 +1463,7 @@ struct InFlightWorkflowView: View {
                     total += max(0, event.timestampUTC.timeIntervalSince(start))
                     sessionStart = nil
                 }
-            case "engine_shutdown_on_block":
+            case "engine_shutdown_on_block", "transient_stop_on_block":
                 if let start = sessionStart {
                     total += max(0, event.timestampUTC.timeIntervalSince(start))
                     sessionStart = nil
@@ -1278,7 +1472,7 @@ struct InFlightWorkflowView: View {
                 break
             }
         }
-        if let sessionStart, !hasEngineShutdownEvent {
+        if let sessionStart, !hasLegBoundaryEvent {
             total += max(0, now.timeIntervalSince(sessionStart))
         }
         return total
@@ -1300,6 +1494,7 @@ struct InFlightWorkflowView: View {
         }
     }
 }
+
 
 private struct CVRHoldActionButton: View {
     let title: String
@@ -1369,7 +1564,7 @@ private struct CVRHoldActionButton: View {
     }
 }
 
-private struct ShutdownVerificationView: View {
+private struct CheckInView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var uploadManager: UploadManager
@@ -1378,174 +1573,223 @@ private struct ShutdownVerificationView: View {
     var repairExistingClosureUpload = false
     @State private var endingHobbs = ""
     @State private var endingTacho = ""
+    @State private var fuelRemaining = ""
+    @State private var destination = ""
     @State private var verifiedTakeoffs = 0
     @State private var verifiedLandings = 0
-    @State private var maintenanceRemark = ""
+    @State private var comments = ""
+    @State private var showSavedConfirmation = false
     @FocusState private var focusedField: NumericField?
 
     private enum NumericField: Hashable {
         case hobbs
         case tacho
+        case fuel
+        case destination
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    section("ENDING METERS") {
-                        HStack(spacing: 8) {
-                            numericTextField("Ending Hobbs", text: $endingHobbs, field: .hobbs)
-                            numericTextField("Ending Tacho", text: $endingTacho, field: .tacho)
+                    Text(modeTitle)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                    section("METERS") {
+                        HStack(spacing: 10) {
+                            largeMeterField("TACHO", text: $endingTacho, field: .tacho)
+                            largeMeterField("HOBBS", text: $endingHobbs, field: .hobbs)
+                        }
+                        Text("Estimates until verified. Tacho ≈ start + Hobbs increment × 0.70")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
+                    }
+                    section("FUEL REMAINING") {
+                        numericField("Fuel Remaining", text: $fuelRemaining, field: .fuel)
+                    }
+                    section("DESTINATION") {
+                        TextField("Destination ICAO", text: $destination)
+                            .textInputAutocapitalization(.characters)
+                            .focused($focusedField, equals: .destination)
+                            .padding(12)
+                            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    section("OPERATIONS") {
+                        HStack(spacing: 12) {
+                            operationStepper("TAKEOFFS", value: $verifiedTakeoffs)
+                            operationStepper("LANDINGS", value: $verifiedLandings)
                         }
                     }
-
-                    section("AUDIO FLIGHT CLOSURE") {
-                        Text("Enter the final aircraft meters to end this dispatched audio-recorded flight. Garmin CSV data is optional now and can be attached later from the Log page.")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(CVROperationalPalette.textSecondary)
+                    section("COMMENTS") {
+                        TextField("Comments", text: $comments, axis: .vertical)
+                            .lineLimit(3...6)
+                            .padding(12)
+                            .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    if !workflow.lastError.isEmpty {
+                        Text(workflow.lastError)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(CVROperationalPalette.critical)
+                    }
+                    CVROperationalActionButton(
+                        title: "SAVE CHECK-IN",
+                        subtitle: modeSubtitle,
+                        color: CVROperationalPalette.success
+                    ) {
+                        save()
                     }
                 }
                 .padding(16)
             }
             .background(CVROperationalPalette.background.ignoresSafeArea())
-            .navigationTitle(repairExistingClosureUpload ? "Fix Ending Meters" : "Shutdown Verification")
+            .navigationTitle("Check-In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if save() {
-                            if workflow.finishEndedFlightLocally() {
-                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-                                dismiss()
-                            }
-                        }
-                    }
-                    .disabled(!canSave)
-                }
+            }
+            .onAppear(perform: prefill)
+            .alert("Leg stored safely on this device.", isPresented: $showSavedConfirmation) {
+                Button("Continue") { dismiss() }
+            } message: {
+                Text("This leg is complete on the iPhone. You can continue the lesson.")
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear(perform: load)
     }
 
-    private var canSave: Bool {
-        Double(endingHobbs) != nil && Double(endingTacho) != nil
+    private var modeTitle: String {
+        switch workflow.pendingCheckInMode {
+        case .transientStop: return "TRANSIENT STOP CHECK-IN"
+        case .engineShutdown: return "ENGINE SHUTDOWN CHECK-IN"
+        case .none: return "CHECK-IN"
+        }
     }
 
-    private var detectedTakeoffs: Int {
-        guard let flightRecord = workflow.state.activeFlightRecord else { return 0 }
-        return workflow.operationCounts(for: flightRecord.id).displayTakeoffs
+    private var modeSubtitle: String {
+        switch workflow.pendingCheckInMode {
+        case .transientStop: return "Store this leg, then return to Schedule"
+        case .engineShutdown: return "Store this leg, then wait for avionics OFF"
+        case .none: return "Verify meters and operations"
+        }
     }
 
-    private var detectedLandings: Int {
-        guard let flightRecord = workflow.state.activeFlightRecord else { return 0 }
-        return workflow.operationCounts(for: flightRecord.id).displayLandings
+    private func prefill() {
+        let flight = workflow.state.activeFlightRecord
+        let dispatch = workflow.state.activeDispatch
+        if let hobbs = flight?.endingHobbs {
+            endingHobbs = String(format: "%.1f", hobbs)
+        } else if let estimated = workflow.estimatedCheckInHobbs() {
+            endingHobbs = String(format: "%.1f", estimated)
+        } else if let start = dispatch?.startingHobbs {
+            endingHobbs = String(format: "%.1f", start)
+        }
+        if let tacho = flight?.endingTacho {
+            endingTacho = String(format: "%.1f", tacho)
+        } else if let estimated = workflow.estimatedCheckInTacho() {
+            endingTacho = String(format: "%.1f", estimated)
+        } else if let start = dispatch?.startingTacho {
+            endingTacho = String(format: "%.1f", start)
+        }
+        fuelRemaining = flight?.fuelRemaining
+            ?? dispatch?.fuelOnboard
+            ?? ""
+        destination = flight?.verifiedDestinationAirport
+            ?? dispatch?.plannedDestinationAirport
+            ?? ""
+        if let flight {
+            let counts = workflow.operationCounts(for: flight.id)
+            verifiedTakeoffs = flight.verifiedTakeoffCount ?? counts.displayTakeoffs
+            verifiedLandings = flight.verifiedLandingCount ?? counts.displayLandings
+        }
+        comments = flight?.checkInComments ?? flight?.maintenanceRemark ?? ""
     }
 
-    private func operationStepper(title: String, value: Binding<Int>) -> some View {
+    private func save() {
+        let hobbs = Double(endingHobbs.replacingOccurrences(of: ",", with: "."))
+        let tacho = Double(endingTacho.replacingOccurrences(of: ",", with: "."))
+        let saved = workflow.saveCheckInValues(
+            endingHobbs: hobbs,
+            endingTacho: tacho,
+            fuelRemaining: fuelRemaining,
+            verifiedDestinationAirport: destination,
+            verifiedTakeoffCount: verifiedTakeoffs,
+            verifiedLandingCount: verifiedLandings,
+            comments: comments,
+            gpsSample: gps.latestSample,
+            repairExistingClosureUpload: repairExistingClosureUpload
+        )
+        guard saved else { return }
+        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+        showSavedConfirmation = true
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(CVROperationalPalette.textSecondary)
-            HStack(spacing: 10) {
-                Button {
-                    value.wrappedValue = max(0, value.wrappedValue - 1)
-                } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title2)
+            content()
+        }
+    }
+
+    private func largeMeterField(_ title: String, text: Binding<String>, field: NumericField) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .tracking(1.0)
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            TextField(title, text: text)
+                .keyboardType(.decimalPad)
+                .focused($focusedField, equals: field)
+                .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                .padding(.vertical, 14)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func numericField(_ title: String, text: Binding<String>, field: NumericField) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            TextField(title, text: text)
+                .keyboardType(.decimalPad)
+                .focused($focusedField, equals: field)
+                .padding(12)
+                .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func operationStepper(_ title: String, value: Binding<Int>) -> some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            HStack {
+                Button { value.wrappedValue = max(0, value.wrappedValue - 1) } label: {
+                    Image(systemName: "minus.circle.fill").font(.title2)
                 }
-                .buttonStyle(.plain)
                 Text("\(value.wrappedValue)")
-                    .font(.title2.weight(.bold))
+                    .font(.title2.weight(.bold).monospacedDigit())
                     .frame(minWidth: 36)
-                Button {
-                    value.wrappedValue += 1
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
+                Button { value.wrappedValue += 1 } label: {
+                    Image(systemName: "plus.circle.fill").font(.title2)
                 }
-                .buttonStyle(.plain)
             }
             .foregroundStyle(CVROperationalPalette.secondaryBlue)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(12)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
     }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(CVROperationalPalette.secondaryBlue)
-            content()
-        }
-        .padding(14)
-        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
-    }
-
-    private func numericTextField(_ placeholder: String, text: Binding<String>, field: NumericField) -> some View {
-        HStack(spacing: 6) {
-            TextField(placeholder, text: text)
-                .keyboardType(.decimalPad)
-                .focused($focusedField, equals: field)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(CVROperationalPalette.textPrimary)
-            if focusedField == field {
-                Button {
-                    focusedField = nil
-                } label: {
-                    Text("DONE")
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.8)
-                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(10)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
-    }
-
-    private func load() {
-        guard let flightRecord = workflow.state.activeFlightRecord else { return }
-        endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
-        endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingTacho.map { String(format: "%.1f", $0) } ?? ""
-        verifiedTakeoffs = flightRecord.verifiedTakeoffCount ?? workflow.operationCounts(for: flightRecord.id).displayTakeoffs
-        verifiedLandings = flightRecord.verifiedLandingCount ?? workflow.operationCounts(for: flightRecord.id).displayLandings
-        maintenanceRemark = flightRecord.maintenanceRemark ?? ""
-    }
-
-    private func save() -> Bool {
-        let saved: Bool
-        if repairExistingClosureUpload || workflow.closureUploadFailure() != nil {
-            saved = workflow.saveFlightClosureValues(
-                endingHobbs: Double(endingHobbs),
-                endingTacho: Double(endingTacho),
-                verifiedTakeoffCount: verifiedTakeoffs,
-                verifiedLandingCount: verifiedLandings,
-                maintenanceRemark: maintenanceRemark,
-                gpsSample: gps.latestSample,
-                repairExistingClosureUpload: true
-            )
-        } else {
-            saved = workflow.recordShutdownVerification(
-                endingHobbs: Double(endingHobbs),
-                endingTacho: Double(endingTacho),
-                verifiedTakeoffCount: verifiedTakeoffs,
-                verifiedLandingCount: verifiedLandings,
-                maintenanceRemark: maintenanceRemark,
-                gpsSample: gps.latestSample
-            )
-        }
-        return saved
-    }
-
 }
+
 
 struct GarminWorkflowView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
@@ -1616,7 +1860,7 @@ struct GarminWorkflowView: View {
             }
         }
         .sheet(isPresented: $isShowingClosureEditor) {
-            ShutdownVerificationView(repairExistingClosureUpload: true)
+            CheckInView(repairExistingClosureUpload: true)
                 .environmentObject(workflow)
                 .environmentObject(settings)
                 .environmentObject(uploadManager)
@@ -2060,7 +2304,7 @@ private struct FlightLogView: View {
                     VStack(spacing: metrics.spacing) {
                         CVROperationalStatusCard(
                             title: "AIRCRAFT FLIGHT LOG",
-                            subtitle: "DISPATCHED FLIGHTS AND GARMIN STATUS",
+                            subtitle: "ONE ROW PER LEG — DISPATCH, AUDIO, TRANSCRIPT",
                             iconName: "list.bullet.clipboard",
                             color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.success,
                             value: "\(displayEntries.count)",
@@ -2076,7 +2320,7 @@ private struct FlightLogView: View {
                                 metrics: metrics
                             )
                             CVROperationalTile(
-                                title: "CSV MISSING",
+                                title: "PENDING",
                                 iconName: "exclamationmark.triangle.fill",
                                 value: "\(missingCount)",
                                 color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.standby,
@@ -2112,10 +2356,10 @@ private struct FlightLogView: View {
                         }
                         if activeFlightIsClosed {
                             CVROperationalActionButton(
-                                title: activeWorkflowVerified ? "NEXT FLIGHT" : "UPLOAD FLIGHT RECORD",
+                                title: activeWorkflowVerified ? "RETURN TO SCHEDULE" : "RETRY PENDING ITEMS",
                                 subtitle: activeWorkflowVerified
-                                    ? "Archive this flight; Garmin CSV may still be added later"
-                                    : "Send Dispatch, audio events, and ending meters",
+                                    ? "This leg is complete on the device"
+                                    : "Send remaining Dispatch and Check-In data when connected",
                                 color: activeWorkflowVerified
                                     ? CVROperationalPalette.success
                                     : CVROperationalPalette.secondaryBlue
@@ -2128,15 +2372,6 @@ private struct FlightLogView: View {
                                     uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                                 }
                             }
-                        }
-                        CVROperationalActionButton(
-                            title: "IMPORT GARMIN CSV",
-                            subtitle: "Choose a CSV, then assign it to a dispatched flight",
-                            color: CVROperationalPalette.secondaryBlue
-                        ) {
-                            isDirectGarminUpload = false
-                            directImportTarget = nil
-                            isShowingFileImporter = true
                         }
                         CVROperationalActionButton(
                             title: flightLogs.isRefreshing ? "REFRESHING LOG" : "REFRESH FLIGHT LOG",
@@ -2245,19 +2480,19 @@ private struct FlightLogView: View {
             }
             HStack(spacing: 8) {
                 logStatusValue(
-                    "SERVER",
+                    "DISPATCH",
                     value: uploadStatusText(entry),
                     color: uploadStatusColor(entry)
+                )
+                logStatusValue(
+                    "AUDIO",
+                    value: audioStatusText(entry),
+                    color: audioStatusColor(entry)
                 )
                 logStatusValue(
                     "TRANSCRIPT",
                     value: transcriptStatusText(entry),
                     color: transcriptStatusColor(entry)
-                )
-                logStatusValue(
-                    "GARMIN CSV",
-                    value: entry.hasGarminCSV ? "UPLOADED" : "MISSING",
-                    color: entry.hasGarminCSV ? CVROperationalPalette.success : CVROperationalPalette.warning
                 )
             }
             HStack(spacing: 8) {
@@ -2279,21 +2514,11 @@ private struct FlightLogView: View {
                     .lineLimit(3)
             }
             HStack(spacing: 8) {
-                if !entry.hasGarminCSV {
-                    Button {
-                        isDirectGarminUpload = true
-                        directImportTarget = entry
-                        isShowingFileImporter = true
-                    } label: {
-                        Label("ADD CSV", systemImage: "paperclip")
-                    }
-                    .foregroundStyle(CVROperationalPalette.warning)
-                }
                 if logNeedsRetry(entry) {
                     Button {
                         retryLogUpload(entry)
                     } label: {
-                        Label("RE-UPLOAD", systemImage: "arrow.clockwise.icloud.fill")
+                        Label("RETRY", systemImage: "arrow.clockwise")
                     }
                     .foregroundStyle(CVROperationalPalette.critical)
                 }
@@ -2370,6 +2595,24 @@ private struct FlightLogView: View {
         }
     }
 
+    private func audioStatusText(_ entry: CVRFlightLogEntry) -> String {
+        switch entry.audioUploadStatus?.lowercased() {
+        case "uploaded", "complete": return "UPLOADED"
+        case "failed": return "FAILED"
+        case "uploading": return "UPLOADING"
+        default: return "PENDING"
+        }
+    }
+
+    private func audioStatusColor(_ entry: CVRFlightLogEntry) -> Color {
+        switch entry.audioUploadStatus?.lowercased() {
+        case "uploaded", "complete": return CVROperationalPalette.success
+        case "failed": return CVROperationalPalette.critical
+        case "uploading": return CVROperationalPalette.secondaryBlue
+        default: return CVROperationalPalette.standby
+        }
+    }
+
     private func transcriptStatusText(_ entry: CVRFlightLogEntry) -> String {
         switch entry.transcriptStatus?.lowercased() {
         case "ready": return "READY"
@@ -2390,16 +2633,17 @@ private struct FlightLogView: View {
 
     private func overallLogStatus(_ entry: CVRFlightLogEntry) -> (title: String, icon: String, color: Color) {
         if entry.serverUploadStatus?.lowercased() == "failed"
+            || entry.audioUploadStatus?.lowercased() == "failed"
             || entry.transcriptStatus?.lowercased() == "failed" {
-            return ("UPLOAD FAILED", "exclamationmark.octagon.fill", CVROperationalPalette.critical)
+            return ("FAILED", "exclamationmark.octagon.fill", CVROperationalPalette.critical)
         }
         if entry.serverUploadStatus?.lowercased() == "complete",
-           entry.transcriptStatus?.lowercased() == "ready",
-           entry.hasGarminCSV {
+           (entry.audioUploadStatus?.lowercased() == "uploaded" || entry.audioUploadStatus?.lowercased() == "complete"),
+           entry.transcriptStatus?.lowercased() == "ready" {
             return ("COMPLETE", "checkmark.seal.fill", CVROperationalPalette.success)
         }
         if entry.serverUploadStatus?.lowercased() == "complete" {
-            return ("SERVER UPLOADED", "checkmark.icloud.fill", CVROperationalPalette.secondaryBlue)
+            return ("DISPATCH UPLOADED", "checkmark.icloud.fill", CVROperationalPalette.secondaryBlue)
         }
         return ("INCOMPLETE", "exclamationmark.triangle.fill", CVROperationalPalette.warning)
     }
@@ -2753,11 +2997,17 @@ private struct FlightLogView: View {
         } else {
             nil
         }
-        let calculatedArrival: Date? = if let departure,
-                                          let totalHobbs {
-            departure.timestampLocal.addingTimeInterval(totalHobbs * 3600)
+        let calculatedArrival: Date? = if let stored = flightRecord.calculatedArrivalAt {
+            stored
+        } else if let departure,
+                  let startHobbs = dispatch.startingHobbs,
+                  let endHobbs = flightRecord.endingHobbs {
+            departure.timestampLocal.addingTimeInterval(max(0, endHobbs - startHobbs) * 3600)
         } else {
             arrival?.timestampLocal
+        }
+        let crewDisplay = dispatch.crew.map { assignment in
+            "\(assignment.personName) (\(assignment.role.label))"
         }
         let relevantComponents = components.filter { $0.flightRecordID == flightRecord.id }
         let failedComponent = relevantComponents.first {
@@ -2801,12 +3051,14 @@ private struct FlightLogView: View {
             flightRecordID: flightRecord.id,
             dispatchUUID: dispatch.id,
             schedulerRecordID: dispatch.schedulerRecordID,
+            reservationUUID: dispatch.operationalIdentity?.reservationUUID,
+            legUUID: dispatch.operationalIdentity?.legUUID,
             aircraftRegistration: dispatch.tailNumber,
             scheduledDate: Self.logDateFormatter.string(from: dispatch.scheduledDate),
-            crewNames: dispatch.crew.map(\.personName),
+            crewNames: crewDisplay.isEmpty ? dispatch.crew.map(\.personName) : crewDisplay,
             departureAirport: dispatch.plannedDepartureAirport,
             departureTime: departure.map { ISO8601DateFormatter().string(from: $0.timestampLocal) },
-            arrivalAirport: dispatch.plannedDestinationAirport,
+            arrivalAirport: flightRecord.verifiedDestinationAirport ?? dispatch.plannedDestinationAirport,
             arrivalTime: calculatedArrival.map { ISO8601DateFormatter().string(from: $0) },
             startingHobbs: dispatch.startingHobbs,
             startingTacho: dispatch.startingTacho,
@@ -2836,7 +3088,14 @@ private struct FlightLogView: View {
     }
 
     private var completeCount: Int {
-        displayEntries.filter(\.hasGarminCSV).count
+        displayEntries.filter {
+            $0.serverUploadStatus?.lowercased() == "complete"
+                && ($0.audioUploadStatus?.lowercased() == "uploaded" || $0.audioUploadStatus?.lowercased() == "complete")
+        }.count
+    }
+
+    private var missingCount: Int {
+        displayEntries.count - completeCount
     }
 
     private var activeFlightIsClosed: Bool {
@@ -2848,10 +3107,6 @@ private struct FlightLogView: View {
         guard let flightRecordID = workflow.state.activeFlightRecord?.id else { return false }
         let components = workflow.state.uploadComponents.filter { $0.flightRecordID == flightRecordID }
         return !components.isEmpty && components.allSatisfy { $0.state == .serverVerified }
-    }
-
-    private var missingCount: Int {
-        displayEntries.count - completeCount
     }
 
     private func displayDate(_ value: String) -> String {

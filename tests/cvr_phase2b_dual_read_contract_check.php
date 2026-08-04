@@ -234,6 +234,8 @@ $checks['wiring is dual-read only'] =
     && str_contains($intakeSource, 'projectLegIdentity')
     && str_contains($readSource, 'IDENTITY_SOURCE_CANONICAL_ALIAS')
     && !str_contains($scheduleSource, 'createReservation(')
+    && str_contains($scheduleSource, 'createOnlineScheduleReservationIdentity')
+    && str_contains($scheduleSource, 'FLAG_CANONICAL_WRITE')
     && !str_contains($flightLogSource, 'createAlias(')
     && !str_contains($intakeSource, 'quarantine(');
 
@@ -249,10 +251,10 @@ $pdo->exec("INSERT INTO system_policy_values (policy_key, value_text, is_active)
 $reader = new CvrOperationalIdentityReadService($pdo, $identity);
 
 $scheduleHit = $reader->projectScheduleIdentity(7, $schedulerId, null);
-$checks['verified schedule alias returns reservation_uuid'] =
+$checks['verified schedule alias returns reservation_uuid and single-leg leg_uuid'] =
     is_array($scheduleHit)
     && $scheduleHit['reservation_uuid'] === $reservationUuid
-    && $scheduleHit['leg_uuid'] === null
+    && $scheduleHit['leg_uuid'] === $legUuid
     && $scheduleHit['identity_source'] === 'canonical_alias';
 
 $dispatchHit = $reader->projectLegIdentity(7, $dispatchUuid, null, null);
@@ -383,8 +385,9 @@ $scheduleOn = new FlightScheduleService($pdo);
 $refOn = new ReflectionClass($scheduleOn);
 $methodOn = $refOn->getMethod('payload');
 $onPayload = $methodOn->invoke($scheduleOn, $row, array());
-$checks['schedule payload exposes reservation_uuid when flag on'] =
+$checks['schedule payload exposes reservation_uuid and leg_uuid when flag on'] =
     ($onPayload['reservation_uuid'] ?? null) === $reservationUuid
+    && ($onPayload['leg_uuid'] ?? null) === $legUuid
     && ($onPayload['identity_source'] ?? null) === 'canonical_alias'
     && ($onPayload['scheduler_record_id'] ?? null) === $schedulerId;
 

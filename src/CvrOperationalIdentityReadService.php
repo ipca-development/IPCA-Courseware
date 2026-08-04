@@ -113,7 +113,44 @@ final class CvrOperationalIdentityReadService
                 ));
                 return $this->projection(null, null, self::IDENTITY_SOURCE_CANONICAL_CONFLICT);
             }
-            return $this->projection(array_key_first($targets), null, self::IDENTITY_SOURCE_CANONICAL_ALIAS);
+            $reservationUuid = (string)array_key_first($targets);
+            $reservation = $this->identity->findReservationByUuid($reservationUuid);
+            if ($reservation === null || (int)($reservation['organization_id'] ?? 0) !== $organizationId) {
+                $this->logIntegrityDiagnostic('schedule_reservation_missing_or_org_mismatch', array(
+                    'organization_id' => $organizationId,
+                    'scheduler_record_id' => $schedulerRecordId,
+                    'reservation_uuid' => $reservationUuid,
+                ));
+                return $this->projection(null, null, self::IDENTITY_SOURCE_CANONICAL_CONFLICT);
+            }
+
+            $activityDomain = (string)($reservation['activity_domain'] ?? '');
+            if ($activityDomain !== 'flight') {
+                return $this->projection($reservationUuid, null, self::IDENTITY_SOURCE_CANONICAL_ALIAS);
+            }
+
+            $legs = $this->identity->listLegsForReservation($reservationUuid);
+            $orgLegs = array();
+            foreach ($legs as $leg) {
+                if ((int)($leg['organization_id'] ?? 0) === $organizationId) {
+                    $orgLegs[] = $leg;
+                }
+            }
+            if (count($orgLegs) === 1) {
+                return $this->projection(
+                    $reservationUuid,
+                    (string)$orgLegs[0]['leg_uuid'],
+                    self::IDENTITY_SOURCE_CANONICAL_ALIAS
+                );
+            }
+
+            $this->logIntegrityDiagnostic('schedule_flight_leg_count_unexpected', array(
+                'organization_id' => $organizationId,
+                'scheduler_record_id' => $schedulerRecordId,
+                'reservation_uuid' => $reservationUuid,
+                'leg_count' => count($orgLegs),
+            ));
+            return $this->projection(null, null, self::IDENTITY_SOURCE_CANONICAL_CONFLICT);
         } catch (Throwable $e) {
             $this->logIntegrityDiagnostic('schedule_dual_read_unavailable', array(
                 'organization_id' => $organizationId,
