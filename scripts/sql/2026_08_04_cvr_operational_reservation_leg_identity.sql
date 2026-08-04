@@ -123,14 +123,15 @@ CREATE TABLE IF NOT EXISTS ipca_operational_identity_aliases (
   KEY idx_op_identity_aliases_leg (organization_id, leg_uuid),
   KEY idx_op_identity_aliases_reservation (organization_id, reservation_uuid),
   KEY idx_op_identity_aliases_target (organization_id, target_type, alias_type),
+  -- ON UPDATE RESTRICT required: MySQL rejects CHECK on FK columns that use CASCADE.
   CONSTRAINT fk_op_identity_aliases_reservation
     FOREIGN KEY (reservation_uuid)
       REFERENCES ipca_operational_reservations(reservation_uuid)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT fk_op_identity_aliases_leg
     FOREIGN KEY (leg_uuid)
       REFERENCES ipca_operational_reservation_legs(leg_uuid)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT chk_op_identity_aliases_target_type CHECK (
     target_type IN ('reservation','leg')
   ),

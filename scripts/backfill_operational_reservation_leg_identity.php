@@ -52,6 +52,8 @@ require_once $root . '/src/db.php';
 require_once $root . '/src/time.php';
 require_once $root . '/src/CvrOperationalIdentityBackfillService.php';
 
+$pdo = cw_db();
+
 $apply = false;
 $organizationId = null;
 $limit = 500;
