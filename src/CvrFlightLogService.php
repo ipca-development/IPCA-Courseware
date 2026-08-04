@@ -2,11 +2,19 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
+require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 
 final class CvrFlightLogService
 {
+    private ?CvrOperationalIdentityReadService $identityRead = null;
+
     public function __construct(private PDO $pdo)
     {
+    }
+
+    private function identityRead(): CvrOperationalIdentityReadService
+    {
+        return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
     }
 
     /**
@@ -32,6 +40,8 @@ final class CvrFlightLogService
                 d.workflow_flight_record_uuid,
                 d.dispatch_uuid,
                 d.scheduler_record_id,
+                d.current_version AS dispatch_version,
+                d.organization_id AS dispatch_organization_id,
                 d.aircraft_registration,
                 d.crew_json AS dispatch_crew_json,
                 adjustment.crew_json AS adjustment_crew_json,
@@ -219,7 +229,7 @@ final class CvrFlightLogService
                 : ($hasClosure && $hasRecorderVerification && $audioUploadStatus === 'uploaded'
                     ? 'complete'
                     : ($serverUploadProgress > 25 ? 'partial' : 'pending'));
-            $logs[] = array(
+            $entry = array(
                 'flight_record_uuid' => (string)$row['workflow_flight_record_uuid'],
                 'dispatch_uuid' => (string)$row['dispatch_uuid'],
                 'scheduler_record_id' => $row['scheduler_record_id'] !== null
@@ -259,6 +269,15 @@ final class CvrFlightLogService
                 'landing_count' => max(0, (int)($row['landing_count'] ?? 0)),
                 'server_component_count' => max(0, (int)($row['server_component_count'] ?? 0)),
             );
+            $rowOrg = (int)($row['dispatch_organization_id'] ?? 0);
+            $projectionOrg = $rowOrg > 0 ? $rowOrg : $organizationId;
+            $projection = $this->identityRead()->projectLegIdentity(
+                $projectionOrg,
+                (string)$row['dispatch_uuid'],
+                isset($row['dispatch_version']) ? (string)$row['dispatch_version'] : null,
+                (string)$row['workflow_flight_record_uuid']
+            );
+            $logs[] = $this->identityRead()->mergeProjection($entry, $projection);
         }
         return $logs;
     }

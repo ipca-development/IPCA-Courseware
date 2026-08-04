@@ -369,6 +369,7 @@ $checks['dual-read falls back when flag off'] =
 
 $pdo->exec("INSERT INTO system_policy_values (policy_key, value_text, is_active) VALUES
   ('operational_identity_dual_read_enabled', '1', 1)");
+$reader = new CvrOperationalIdentityReadService($pdo, $identity);
 $dualOn = $reader->preferReservationForSchedulerRecordId(7, '11111111-1111-4111-8111-111111111111');
 $checks['dual-read prefers verified canonical when enabled'] =
     $dualOn['resolved'] === true
@@ -451,9 +452,10 @@ $checks['docs present'] =
     && str_contains($docs, 'operational_identity_backfill_enabled')
     && str_contains($docs, 'DETERMINISTIC_BACKFILL');
 
-$checks['no intake/UI wiring in Phase 2A services'] =
+$checks['no intake write wiring in Phase 2A identity services'] =
     !str_contains($identitySource, 'CvrDispatchIntakeService')
     && !str_contains($backfillSource, 'FlightScheduleService')
+    && !str_contains($backfillSource, 'dispatch_sync.php')
     && !str_contains($readSource, 'dispatch_sync.php');
 
 $failed = array();

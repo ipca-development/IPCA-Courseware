@@ -84,6 +84,22 @@ Resolution audit: `resolved_by_user_id`, `resolution_notes`, `updated_at_utc`, `
 
 Rollback = disable flags. Do not DROP tables or delete register/quarantine rows.
 
+## Phase 2B dual-read
+
+When `operational_identity_dual_read_enabled` is on, read projections may add:
+
+- `reservation_uuid`
+- `leg_uuid`
+- `identity_source`: `canonical_alias` | `legacy_fallback` | `canonical_conflict` | `canonical_unavailable`
+
+Wired read paths:
+
+- `FlightScheduleService::payload` → schedule / `scheduled_sessions`
+- `CvrFlightLogService::forDeviceAircraft` → `flight_logs`
+- `CvrDataIntakeReadService::dispatchRows` → admin intake
+
+Rules: verified/`DETERMINISTIC_BACKFILL` aliases only; org-scoped; conflicts and identity failures fall back to legacy without mutation; flag off omits the additive fields entirely.
+
 ## Backfill CLI
 
 ```bash

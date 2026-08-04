@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
+require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 
 final class FlightScheduleService
 {
@@ -13,8 +14,15 @@ final class FlightScheduleService
         'other' => 'Other',
     );
 
+    private ?CvrOperationalIdentityReadService $identityRead = null;
+
     public function __construct(private PDO $pdo)
     {
+    }
+
+    private function identityRead(): CvrOperationalIdentityReadService
+    {
+        return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
     }
 
     /** @return list<array<string,mixed>> */
@@ -432,7 +440,7 @@ final class FlightScheduleService
         $hasClosure = (bool)($row['has_closure'] ?? false);
         $status = $hasClosure ? 'completed' : (string)$row['status'];
         $editable = $status === 'scheduled' && !$hasDispatch;
-        return array(
+        $payload = array(
             'scheduler_record_id' => (string)$row['scheduler_record_id'],
             'reservation_type' => (string)($row['reservation_type'] ?? 'flight_training'),
             'reservation_type_label' => self::RESERVATION_TYPES[(string)($row['reservation_type'] ?? '')] ?? 'Other',
@@ -474,6 +482,16 @@ final class FlightScheduleService
             'notes' => (string)$row['notes'],
             'updated_at' => $this->isoPrecise((string)($row['updated_at'] ?? '')),
         );
+
+        // Phase 2B dual-read: additive only when flag enabled; never mutates legacy rows.
+        $organizationId = (int)($row['organization_id'] ?? 0);
+        $slotId = isset($row['id']) ? (string)$row['id'] : null;
+        $projection = $this->identityRead()->projectScheduleIdentity(
+            $organizationId,
+            (string)$row['scheduler_record_id'],
+            $slotId
+        );
+        return $this->identityRead()->mergeProjection($payload, $projection);
     }
 
     /** @param list<int> $crewUserIds */

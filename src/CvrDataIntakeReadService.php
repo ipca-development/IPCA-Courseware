@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
+
 final class CvrDataIntakeReadService
 {
     /** @var array<string,bool> */
@@ -9,8 +11,15 @@ final class CvrDataIntakeReadService
     /** @var array<string,array<string,bool>> */
     private array $columnCache = array();
 
+    private ?CvrOperationalIdentityReadService $identityRead = null;
+
     public function __construct(private PDO $pdo)
     {
+    }
+
+    private function identityRead(): CvrOperationalIdentityReadService
+    {
+        return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
     }
 
     /**
@@ -47,6 +56,8 @@ final class CvrDataIntakeReadService
             $this->prefixedColumnExpression($columns, $tableAlias, array('crew_json', 'crew'), 'crew_json', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('error_message', 'last_error'), 'error_message'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('workflow_flight_record_uuid', 'flight_record_uuid'), 'workflow_flight_record_uuid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('scheduler_record_id'), 'scheduler_record_id', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('organization_id'), 'organization_id', '0'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
         );
         if ($this->tableExists('ipca_cvr_flight_events')
@@ -78,9 +89,22 @@ final class CvrDataIntakeReadService
             . ' ORDER BY ' . $tableAlias . '.' . $this->quoteIdentifier($orderColumn) . ' DESC'
             . ' LIMIT ' . $this->normalizeLimit($limit);
 
+        $rows = $this->fetchAll($sql);
+        $projected = array();
+        foreach ($rows as $row) {
+            $organizationId = (int)($row['organization_id'] ?? 0);
+            $projection = $this->identityRead()->projectLegIdentity(
+                $organizationId,
+                isset($row['dispatch_uuid']) ? (string)$row['dispatch_uuid'] : null,
+                isset($row['dispatch_version']) ? (string)$row['dispatch_version'] : null,
+                isset($row['workflow_flight_record_uuid']) ? (string)$row['workflow_flight_record_uuid'] : null
+            );
+            $projected[] = $this->identityRead()->mergeProjection($row, $projection);
+        }
+
         return array(
             'available' => true,
-            'rows' => $this->fetchAll($sql),
+            'rows' => $projected,
             'message' => '',
         );
     }
